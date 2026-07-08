@@ -29,7 +29,7 @@ type InstanceReporter struct {
 	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
 	antSwitchHandler    *AntSwitchHandler          // For getting antenna switch information
 	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
-	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
+	adminHandler        *AdminHandler              // For reporting enabled addon proxy names (live, authoritative)
 	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
 	pskRank             *PSKRankFetcher            // For getting PSKReporter rank data
 	gpsdoMonitor        *GPSDOMonitor              // For reporting GPSDO operational status
@@ -167,12 +167,13 @@ func (ir *InstanceReporter) SetFrequencyReferenceMonitor(monitor *FrequencyRefer
 	ir.freqRefMonitor = monitor
 }
 
-// SetAddonsConfig sets the addon proxies config for reporting enabled addon names
-// This must be called after addons are loaded (after NewInstanceReporter)
-func (ir *InstanceReporter) SetAddonsConfig(cfg *AddonProxiesConfig) {
+// SetAdminHandler wires the AdminHandler so the instance reporter can always read
+// the live, authoritative addon proxy list via GetEnabledPublicAddonNames().
+// This must be called after the AdminHandler is initialised (after NewInstanceReporter).
+func (ir *InstanceReporter) SetAdminHandler(ah *AdminHandler) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
-	ir.addonsConfig = cfg
+	ir.adminHandler = ah
 }
 
 // SetMultiDecoder sets the multi-decoder for WSPR SSB phone predictions
@@ -344,23 +345,18 @@ func (ir *InstanceReporter) getSSBPredictions() *WSPRSummaryResult {
 	return computeWSPRSummaryByBand(md.spotsLogger, 250, 60)
 }
 
-// getEnabledAddonNames returns the names of enabled addon proxies that are publicly accessible
-// (enabled and not require_admin). Thread-safe.
+// getEnabledAddonNames returns the names of enabled addon proxies that are publicly
+// accessible (enabled and not require_admin). Delegates to AdminHandler so it always
+// reflects live add/update/delete operations without pointer-divergence issues.
 func (ir *InstanceReporter) getEnabledAddonNames() []string {
 	ir.mu.RLock()
-	cfg := ir.addonsConfig
+	ah := ir.adminHandler
 	ir.mu.RUnlock()
 
-	names := []string{}
-	if cfg == nil {
-		return names
+	if ah == nil {
+		return []string{}
 	}
-	for _, p := range cfg.Proxies {
-		if p.Enabled && !p.RequireAdmin {
-			names = append(names, p.Name)
-		}
-	}
-	return names
+	return ah.GetEnabledPublicAddonNames()
 }
 
 // getChatUserCount returns the current number of active chat users (thread-safe)

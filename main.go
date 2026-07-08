@@ -2201,11 +2201,6 @@ func main() {
 		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
 	}
 
-	// Set the addons config in instance reporter for reporting enabled addon names
-	if instanceReporter != nil {
-		instanceReporter.SetAddonsConfig(addonsConfig)
-	}
-
 	// Set the multi-decoder in instance reporter for WSPR SSB phone predictions
 	if instanceReporter != nil && multiDecoder != nil {
 		instanceReporter.SetMultiDecoder(multiDecoder)
@@ -2303,6 +2298,11 @@ func main() {
 		notifManager.SetCWSkimmerCallsign(cwskimmerConfig.Callsign)
 	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
+	// Wire admin handler into instance reporter so addon proxy names are always read
+	// from the live, authoritative source (avoids pointer-divergence after admin UI edits).
+	if instanceReporter != nil {
+		instanceReporter.SetAdminHandler(adminHandler)
+	}
 	// Wire admin handler so the /monitor Telegram bot command can report
 	// the health of all enabled subsystems (mirrors the admin monitor tab).
 	notifManager.SetAdminHandler(adminHandler)

@@ -335,6 +335,7 @@ class RadioClient:
         self.sample_rate = 12000  # Default, will be updated from server
         self.ws = None  # WebSocket connection reference for sending messages
         self.server_description = {}  # Server description from /api/description
+        self.server_addons = []  # Addon list from /api/description ('addons' key)
         self.countries = []  # Country list from /api/cty/countries
         self.bypassed = False  # Connection bypassed status from /connection endpoint (deprecated)
         self.allowed_iq_modes = []  # List of allowed IQ modes from /connection endpoint
@@ -1962,6 +1963,7 @@ class RadioClient:
         if description:
             # Store description data for GUI access
             self.server_description = description
+            self.server_addons = description.get('addons', [])
             receiver_name = description.get('receiver', {}).get('name', '')
             if receiver_name:
                 self._log(f"Receiver: {receiver_name}")

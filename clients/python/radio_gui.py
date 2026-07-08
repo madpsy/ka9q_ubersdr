@@ -149,6 +149,14 @@ except ImportError:
     DXCLUSTER_WS_AVAILABLE = False
     print("Warning: DX cluster WebSocket not available (missing dependencies)")
 
+# Import DX Cluster terminal window
+try:
+    from dxcluster_terminal import DXClusterTerminalWindow
+    DXCLUSTER_TERMINAL_AVAILABLE = True
+except ImportError:
+    DXCLUSTER_TERMINAL_AVAILABLE = False
+    print("Warning: DX Cluster terminal not available (missing dependencies)")
+
 # Check if NR2 is available
 try:
     from nr2 import create_nr2_processor
@@ -2437,6 +2445,14 @@ class RadioGUI:
             self.s_meter_btn = ttk.Button(button_frame_row2, text="S-Meter", width=8,
                                          command=self.open_s_meter_window)
             self.s_meter_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # DX Cluster terminal button (conditionally shown when 'dxcluster' in addons)
+            if DXCLUSTER_TERMINAL_AVAILABLE:
+                self.dxcluster_terminal_btn = ttk.Button(button_frame_row2, text="DX Cluster", width=10,
+                                                         command=self.open_dxcluster_terminal_window)
+                # Don't pack yet — shown after connection if 'dxcluster' in addons
+            else:
+                self.dxcluster_terminal_btn = None
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
@@ -7250,6 +7266,46 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open rotator status: {e}")
             self.log_status(f"ERROR: Failed to open rotator status - {e}")
 
+    def open_dxcluster_terminal_window(self):
+        """Open the DX Cluster terminal window (connects to /addon/dxcluster/api/terminal)."""
+        # Raise existing window if already open
+        if hasattr(self, '_dxcluster_terminal') and self._dxcluster_terminal and self._dxcluster_terminal.is_open():
+            self._dxcluster_terminal.lift()
+            return
+
+        if not self.connected or not self.client:
+            from tkinter import messagebox
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        if not DXCLUSTER_TERMINAL_AVAILABLE:
+            from tkinter import messagebox
+            messagebox.showerror("Not Available", "DX Cluster terminal requires the websocket-client library.\n\nInstall with: pip install websocket-client")
+            return
+
+        # Build WebSocket URL: ws[s]://host:port/addon/dxcluster/api/terminal
+        hostname = self.server_var.get().strip()
+        port = self.port_var.get().strip()
+        use_tls = self.tls_var.get()
+
+        if '://' in hostname:
+            # Full URL provided — convert scheme and append path
+            ws_url = hostname.rstrip('/')
+            ws_url = ws_url.replace('http://', 'ws://').replace('https://', 'wss://')
+            # Strip any existing path so we can append the addon path cleanly
+            parts = ws_url.split('://', 1)
+            if '/' in parts[1]:
+                parts[1] = parts[1].split('/', 1)[0]
+            ws_url = '://'.join(parts)
+        else:
+            protocol = 'wss' if use_tls else 'ws'
+            ws_url = f"{protocol}://{hostname}:{port}"
+
+        ws_url = ws_url.rstrip('/') + '/addon/dxcluster/api/terminal'
+
+        self._dxcluster_terminal = DXClusterTerminalWindow(self.root, ws_url)
+        self.log_status(f"DX Cluster terminal opened ({ws_url})")
+
     def open_snr_history_window(self):
         """Open a separate SNR history display window."""
         # Don't open multiple windows
@@ -8826,6 +8882,8 @@ class RadioGUI:
             self.digital_spots_btn.pack_forget()
         if self.cw_spots_btn:
             self.cw_spots_btn.pack_forget()
+        if hasattr(self, 'dxcluster_terminal_btn') and self.dxcluster_terminal_btn:
+            self.dxcluster_terminal_btn.pack_forget()
 
         # Hide lookup button
         if hasattr(self, 'lookup_btn') and self.lookup_btn:
@@ -9203,6 +9261,15 @@ class RadioGUI:
                                     self.log_status("Rotator control available on this server")
                                 elif self.rotator_btn:
                                     self.rotator_btn.pack_forget()
+
+                                # Pack DX Cluster terminal button if addon is enabled
+                                addons = desc.get('addons', [])
+                                if hasattr(self, 'dxcluster_terminal_btn') and self.dxcluster_terminal_btn:
+                                    if 'dxcluster' in addons:
+                                        self.dxcluster_terminal_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                        self.log_status("DX Cluster terminal available on this server")
+                                    else:
+                                        self.dxcluster_terminal_btn.pack_forget()
 
                                 # Pack lookup button if server has lookup service enabled
                                 if desc.get('lookup_service', False):

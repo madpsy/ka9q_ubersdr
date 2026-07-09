@@ -31,13 +31,20 @@ import re
 # For PyInstaller: Add the temporary directory to DLL search path
 # This ensures opuslib can find opus.dll when running from frozen executable
 if getattr(sys, 'frozen', False):
-    # Running in PyInstaller bundle
-    bundle_dir = sys._MEIPASS
-    # Add bundle directory to DLL search path (Windows)
-    if hasattr(os, 'add_dll_directory'):
-        os.add_dll_directory(bundle_dir)
-    # Also add to PATH for older Python versions
-    os.environ['PATH'] = bundle_dir + os.pathsep + os.environ.get('PATH', '')
+    # Running in PyInstaller bundle. Search both the onefile extraction dir
+    # (where a DLL bundled via the .spec ends up) and the directory holding
+    # the .exe itself (where a user might manually drop opus.dll, per the
+    # error message below).
+    dll_dirs = [sys._MEIPASS, os.path.dirname(sys.executable)]
+    for dll_dir in dll_dirs:
+        if hasattr(os, 'add_dll_directory'):
+            try:
+                os.add_dll_directory(dll_dir)
+            except (OSError, FileNotFoundError):
+                pass
+    # Also add to PATH since opuslib locates the DLL via
+    # ctypes.util.find_library(), which only scans PATH directories.
+    os.environ['PATH'] = os.pathsep.join(dll_dirs) + os.pathsep + os.environ.get('PATH', '')
 
 # Import Opus decoder (optional)
 # Note: opuslib tries to load the native DLL during import, so we need to catch

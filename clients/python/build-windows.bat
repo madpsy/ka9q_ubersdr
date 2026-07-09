@@ -43,8 +43,27 @@ if not errorlevel 1 (
     goto :compiler_ok
 )
 
-:: Search for vcvarsall.bat in common VS / Build Tools locations
+:: Search for vcvarsall.bat, preferring vswhere.exe (version-independent)
+:: since VS install folders are no longer always named by year (e.g. "18"
+:: for VS 2026), then falling back to a hardcoded search of known
+:: year-based locations for older/nonstandard setups.
 set "VCVARSALL="
+
+for %%W in (
+    "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+    "%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
+) do (
+    if exist %%W (
+        set "PATH=%%~dpW;%PATH%"
+        for /f "usebackq tokens=*" %%I in (`%%W -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+            set "CANDIDATE=%%I\VC\Auxiliary\Build\vcvarsall.bat"
+            if exist "!CANDIDATE!" (
+                set "VCVARSALL=!CANDIDATE!"
+                goto :found_vcvarsall
+            )
+        )
+    )
+)
 
 for %%Y in (2022 2019 2017) do (
     for %%E in (Enterprise Professional Community BuildTools) do (

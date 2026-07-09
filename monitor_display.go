@@ -1256,7 +1256,7 @@ func (s monitorSlide) slideLabel() string {
 //
 // On error, the JSON payload that was attempted is logged alongside the error
 // to aid diagnosis of firmware validation failures.
-func sendSlide(client *gudriver.Client, slide monitorSlide) error {
+func sendSlide(client *gudriver.Client, slide monitorSlide) (gudriver.DisplayCommand, error) {
 	transition := slide.transition
 	if transition == "" {
 		transition = gudriver.TransitionCut
@@ -1281,7 +1281,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 			},
 		}
 		_, err := client.Display(cmd)
-		return err
+		return cmd, err
 	}
 
 	// ── Dual-segment layout (band conditions with both tiers) ─────────────────
@@ -1323,7 +1323,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 			},
 		}
 		_, err := client.Display(cmd)
-		return err
+		return cmd, err
 	}
 
 	// ── Standard two-line layout ──────────────────────────────────────────────
@@ -1379,7 +1379,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 	}
 
 	_, err := client.Display(cmd)
-	return err
+	return cmd, err
 }
 
 // ─── MonitorDisplay ───────────────────────────────────────────────────────────
@@ -1530,11 +1530,13 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 		return
 	}
 
-	if err := sendSlide(md.client, slide); err != nil {
+	if cmd, err := sendSlide(md.client, slide); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.topLine, err)
+		payload, _ := json.Marshal(cmd)
+		log.Printf("[MonitorDisplay] Failed to send slide %q: %v\n  payload: %s",
+			slide.slideLabel(), err, payload)
 	}
 
 	// Wait for this slide's display duration before advancing to the next.
@@ -1559,7 +1561,7 @@ func (md *MonitorDisplay) runClockSlide(ctx context.Context) {
 
 	sendClock := func() {
 		slide := buildTimeSlide(md.sessions, md.maxSessions)
-		if err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {
+		if _, err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {
 			log.Printf("[MonitorDisplay] Clock slide send error: %v", err)
 		}
 	}

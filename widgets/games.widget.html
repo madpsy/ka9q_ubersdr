@@ -567,6 +567,37 @@ html.is-mobile #sdr-games-widget { display: none !important; }
    `#sdr-games-widget button { background: …!important }` rule. */
 #sdr-games-widget .sdr-cq-opt.correct { background: rgba(46, 204, 113, 0.45) !important; border-color: #2ecc71 !important; color: #fff !important; }
 #sdr-games-widget .sdr-cq-opt.wrong   { background: rgba(231, 76, 60, 0.45) !important;  border-color: #e74c3c !important; color: #fff !important; }
+
+/* QRZ info card — shown after a correct answer if lookup data is available */
+#sdr-cq-qrz {
+  display: none;
+  margin-top: 6px;
+  background: rgba(20, 30, 48, 0.75);
+  border: 1px solid rgba(52, 152, 219, 0.4);
+  border-radius: 5px;
+  padding: 5px 7px;
+}
+#sdr-cq-qrz.visible { display: block; }
+#sdr-cq-qrz-name {
+  font-size: 10px;
+  font-weight: bold;
+  color: #ecf0f1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#sdr-cq-qrz-name:empty { display: none; }
+#sdr-cq-qrz-qth {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #95a5a6;
+}
+#sdr-cq-qrz-grid {
+  color: #7f8c8d;
+  font-size: 9px;
+}
 </style>
 
 <div id="sdr-games-widget">
@@ -705,6 +736,12 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     <div class="sdr-game-status" id="sdr-cq-status">Guess the country</div>
     <div id="sdr-cq-call">…</div>
     <div id="sdr-cq-options"></div>
+    <!-- QRZ info card: shown after a correct answer when lookup data is available -->
+    <div id="sdr-cq-qrz">
+      <div id="sdr-cq-qrz-name"></div>
+      <div id="sdr-cq-qrz-qth"></div>
+      <div id="sdr-cq-qrz-grid"></div>
+    </div>
     <div class="sdr-game-footer">
       <span class="sdr-game-score" id="sdr-cq-score">Streak:0 Best:0</span>
       <button class="sdr-game-btn close" id="sdr-cq-close-btn" title="Hide widget">Close</button>
@@ -2093,8 +2130,16 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     const scoreEl   = document.getElementById('sdr-cq-score');
 
     let countries = null, countriesLoading = false;
-    let busy = false, answered = false, currentCountry = '';
+    let busy = false, answered = false, currentCountry = '', currentCallsign = '', currentCTY = null;
     let streak = 0, best = 0;
+
+    // US callsign district → state/region label
+    const US_DISTRICT = {
+      '0': 'Central US', '1': 'New England', '2': 'NY/NJ',
+      '3': 'Mid-Atlantic', '4': 'Southeast', '5': 'South-Central',
+      '6': 'California', '7': 'Pacific Northwest', '8': 'Great Lakes',
+      '9': 'Upper Midwest',
+    };
     let autoNext = null;   // timer that advances to the next round after an answer
 
     const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -2194,12 +2239,15 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       return fetch(url).then(resp => {
         if (!resp.ok && resp.status !== 404) return null;     // 503 etc → leave uncached, retry later
         return resp.json().then(d => {
-          const country = (d && d.success && d.data && d.data.country)
-                          ? String(d.data.country).trim() : '';
-          const code    = (d && d.success && d.data && d.data.country_code)
-                          ? String(d.data.country_code).trim() : '';
-          myCache.set(cs, country ? { country, code } : null);
-          return country ? { country, code } : null;
+          const data    = d && d.success && d.data;
+          const country = data ? String(data.country || '').trim() : '';
+          const code    = data ? String(data.country_code || '').trim() : '';
+          const cq_zone = data ? (data.cq_zone || 0) : 0;
+          const continent = data ? String(data.continent || '').trim() : '';
+          const itu_zone  = data ? (data.itu_zone || 0) : 0;
+          const result = country ? { country, code, cq_zone, continent, itu_zone } : null;
+          myCache.set(cs, result);
+          return result;
         });
       }).catch(() => null);                                    // network error → leave uncached
     }
@@ -2241,11 +2289,77 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       }
     }
 
+    const infoEl     = document.getElementById('sdr-cq-qrz');
+    const infoNameEl = document.getElementById('sdr-cq-qrz-name');
+    const infoQthEl  = document.getElementById('sdr-cq-qrz-qth');
+    const infoGridEl = document.getElementById('sdr-cq-qrz-grid');
+
+    function clearInfo() {
+      infoEl.classList.remove('visible');
+      infoNameEl.textContent = '';
+      infoQthEl.textContent  = '';
+      infoGridEl.textContent = '';
+    }
+
+    // Derive a US state/region label from the callsign district digit.
+    function usStateFromCallsign(cs) {
+      const m = cs.match(/[A-Z]+(\d)/);
+      return m ? (US_DISTRICT[m[1]] || '') : '';
+    }
+
+    // Show CTY-based info (always available, no auth needed).
+    function renderCTYInfo(cty, cs) {
+      if (!cty) return;
+      // Name line: left blank until QRZ enriches it (hidden when empty via CSS)
+      infoNameEl.textContent = '';
+      // QTH line: US district region or continent
+      let qthLine = '';
+      if (cty.code === 'US' || cty.country === 'United States') {
+        const state = usStateFromCallsign(cs);
+        qthLine = state || cty.continent || '';
+      } else {
+        qthLine = cty.continent || '';
+      }
+      infoQthEl.textContent = qthLine;
+      // Grid/zone line: CQ zone
+      infoGridEl.textContent = cty.cq_zone ? 'CQ zone ' + cty.cq_zone : '';
+      infoEl.classList.add('visible');
+    }
+
+    // Overlay QRZ operator name on top of the CTY card (if lookup succeeds).
+    function renderQRZName(data) {
+      const name = [data.fname, data.name].filter(Boolean).join(' ').trim();
+      if (name) infoNameEl.textContent = name;
+      // Also show QTH from QRZ if available (more specific than continent).
+      const qth = [data.addr2, data.country].filter(Boolean).join(', ').trim();
+      if (qth) infoQthEl.textContent = qth;
+      if (data.grid) infoGridEl.textContent = 'Grid: ' + data.grid;
+    }
+
+    // Try to fetch QRZ data and overlay it on the already-visible CTY card.
+    function tryEnrichWithQRZ(cs) {
+      if (!window._lookupServiceEnabled) return;
+      // Check cache first.
+      if (window._callsignLookupCache && window._callsignLookupCache.has(cs)) {
+        const cached = window._callsignLookupCache.get(cs);
+        if (cached && cached.data) renderQRZName(cached.data);
+        return;
+      }
+      // Use shared fetch (handles UUID + rate limiting + audio-session auth).
+      if (window._fetchCallsignForMediaSession) {
+        window._fetchCallsignForMediaSession(cs).then(function() {
+          const cached = window._callsignLookupCache && window._callsignLookupCache.get(cs);
+          if (cached && cached.data) renderQRZName(cached.data);
+        });
+      }
+    }
+
     async function newRound() {
       if (busy) return;
       clearTimeout(autoNext); autoNext = null;
       busy = true;
       answered = false;
+      clearInfo();
       optionsEl.innerHTML = '';
       callEl.textContent = '…';
       statusEl.textContent = 'Finding a callsign…';
@@ -2262,7 +2376,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       const limit = Math.min(MAX_ATTEMPTS, calls.length);
       for (let i = 0; i < limit; i++) {
         const result = await lookupCountry(calls[i]);
-        if (result) { found = { cs: calls[i], country: result.country, code: result.code }; break; }
+        if (result) { found = { cs: calls[i], country: result.country, code: result.code, cty: result }; break; }
         if (!isActive()) { busy = false; return; }   // user navigated away
         await sleep(1000);                            // failed/not-found → try next
         if (!isActive()) { busy = false; return; }
@@ -2277,7 +2391,9 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
       recent.push(found.cs);
       if (recent.length > RECENT_MAX) recent.shift();
-      currentCountry = found.country;
+      currentCountry  = found.country;
+      currentCallsign = found.cs;
+      currentCTY      = found.cty || null;
       callEl.textContent = found.cs;
       buildOptions(found.country, found.code);
       statusEl.textContent = 'Which country?';
@@ -2299,6 +2415,8 @@ html.is-mobile #sdr-games-widget { display: none !important; }
         streak++;
         if (streak > best) best = streak;
         statusEl.textContent = 'Correct! ✓';
+        renderCTYInfo(currentCTY, currentCallsign);
+        tryEnrichWithQRZ(currentCallsign);
       } else {
         streak = 0;
         statusEl.textContent = 'Nope — ' + currentCountry;

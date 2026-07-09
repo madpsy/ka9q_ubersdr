@@ -97,6 +97,27 @@ function populateFormFields() {
     document.getElementById('useTunnel').checked = useTunnelDefaultValue;
     document.getElementById('createDomain').checked = createDomainValue;
 
+    // Reconcile instance.host with the current callsign.
+    // If the operator changed their callsign outside the wizard (e.g. via admin.html or
+    // hand-editing config.yaml) the saved instance.host may still carry the old callsign
+    // prefix.  Whenever a managed-host mode (tunnel or create_domain) is active we
+    // recompute the hostname from the current callsign so that running the wizard is
+    // sufficient to fix any drift — no need to touch the raw config.
+    if (useTunnelDefaultValue || createDomainValue) {
+        const currentCallsign = (adminCallsign || '').toLowerCase();
+        if (currentCallsign) {
+            if (useTunnelDefaultValue) {
+                let tunnelHost = 'tunnel.ubersdr.org';
+                if (ir.tunnel_server_host) {
+                    tunnelHost = ir.tunnel_server_host;
+                }
+                document.getElementById('instanceHost').value = currentCallsign + '.' + tunnelHost;
+            } else {
+                document.getElementById('instanceHost').value = currentCallsign + '.instance.ubersdr.org';
+            }
+        }
+    }
+
     // Update domain preview with callsign from config
     // This must happen BEFORE toggleManualConnectionFields which might trigger handleCreateDomainToggle or handleUseTunnelToggle
     updateDomainPreview();

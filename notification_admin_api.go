@@ -387,6 +387,9 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		GalacticUnicornBrightness         float64 `json:"galactic_unicorn_brightness,omitempty"`
 		GalacticUnicornTimeoutSeconds     int     `json:"galactic_unicorn_timeout_seconds,omitempty"`
 		GalacticUnicornInsecureSkipVerify bool    `json:"galactic_unicorn_insecure_skip_verify,omitempty"`
+		GalacticUnicornSoundsEnabled      bool    `json:"galactic_unicorn_sounds_enabled,omitempty"`
+		GalacticUnicornSound              string  `json:"galactic_unicorn_sound,omitempty"`
+		GalacticUnicornSoundVolume        float64 `json:"galactic_unicorn_sound_volume,omitempty"`
 	}
 	channels := make(map[string]redactedChannel, len(cfg.Channels))
 	for name, ch := range cfg.Channels {
@@ -431,6 +434,9 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			GalacticUnicornBrightness:         ch.GalacticUnicornBrightness,
 			GalacticUnicornTimeoutSeconds:     ch.GalacticUnicornTimeoutSeconds,
 			GalacticUnicornInsecureSkipVerify: ch.GalacticUnicornInsecureSkipVerify,
+			GalacticUnicornSoundsEnabled:      ch.GalacticUnicornSoundsEnabled,
+			GalacticUnicornSound:              ch.GalacticUnicornSound,
+			GalacticUnicornSoundVolume:        ch.GalacticUnicornSoundVolume,
 		}
 	}
 

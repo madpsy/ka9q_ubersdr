@@ -352,7 +352,7 @@ func (ml *MetricsLogger) CleanupOldFiles() error {
 // LoadRecentMetrics reads recent metrics from JSON Lines files and populates in-memory metrics
 // Reads files from the last 24 hours to restore state after a restart
 func (ml *MetricsLogger) LoadRecentMetrics(dm *DigitalDecodeMetrics) error {
-	if !ml.enabled {
+	if !ml.enabled || dm == nil {
 		return nil
 	}
 
@@ -449,7 +449,7 @@ func (ml *MetricsLogger) loadMetricsFromFile(filePath string, dm *DigitalDecodeM
 
 		// Restore execution time data points
 		// We'll add data points at the snapshot timestamp with the recorded values
-		if snapshot.ExecutionTime.Last1Min.Avg > 0 {
+		if dm != nil && snapshot.ExecutionTime.Last1Min.Avg > 0 {
 			// Create a synthetic execution time entry
 			execTime := time.Duration(snapshot.ExecutionTime.Last1Min.Avg * float64(time.Second))
 			dm.RecordExecutionTime(snapshot.Mode, snapshot.Band, execTime)

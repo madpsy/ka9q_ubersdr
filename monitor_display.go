@@ -1286,41 +1286,38 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) (gudriver.DisplayCom
 
 	// ── Dual-segment layout (band conditions with both tiers) ─────────────────
 	if len(slide.topSegments) > 0 {
-		bottomLine := gudriver.DisplayLine{
+		topLine := gudriver.DisplayLine{
+			Segments:    slide.topSegments,
 			Size:        1,
 			Effect:      gudriver.EffectAuto,
-			Y:           "bottom",
+			Y:           "top",
 			ScrollSpeed: monitorScrollSpeed,
 			ScrollPause: monitorScrollPause,
-			ScrollLoop:  true,
+			ScrollLoop:  false,
 			ScrollStart: gudriver.ScrollStartLeft,
 		}
+		lines := []gudriver.DisplayLine{topLine}
 		if len(slide.valueSegments) > 0 {
-			bottomLine.Segments = slide.valueSegments
-		} else {
-			// Firmware requires either 'text' or 'segments' on every line.
-			// When only one row of bands fits (≤3 qualifying bands), the bottom
-			// line has no content — send a blank string so the firmware accepts it.
-			bottomLine.Text = " "
+			// Only include the bottom line when there is content for it.
+			// SanitizeText strips whitespace so a blank Text sentinel would be
+			// omitted by omitempty, causing a firmware 422 validation error.
+			lines = append(lines, gudriver.DisplayLine{
+				Segments:    slide.valueSegments,
+				Size:        1,
+				Effect:      gudriver.EffectAuto,
+				Y:           "bottom",
+				ScrollSpeed: monitorScrollSpeed,
+				ScrollPause: monitorScrollPause,
+				ScrollLoop:  true,
+				ScrollStart: gudriver.ScrollStartLeft,
+			})
 		}
 		cmd := gudriver.DisplayCommand{
 			ID:         monitorMessageID,
 			Priority:   monitorPriority,
 			Duration:   gudriver.DurationForever(),
 			Transition: transition,
-			Lines: []gudriver.DisplayLine{
-				{
-					Segments:    slide.topSegments,
-					Size:        1,
-					Effect:      gudriver.EffectAuto,
-					Y:           "top",
-					ScrollSpeed: monitorScrollSpeed,
-					ScrollPause: monitorScrollPause,
-					ScrollLoop:  false,
-					ScrollStart: gudriver.ScrollStartLeft,
-				},
-				bottomLine,
-			},
+			Lines:      lines,
 		}
 		_, err := client.Display(cmd)
 		return cmd, err
@@ -1339,14 +1336,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) (gudriver.DisplayCom
 	if len(slide.valueSegments) > 0 {
 		bottomLine.Segments = slide.valueSegments
 	} else {
-		// Firmware requires 'text' or 'segments'; omitempty on Text means an
-		// empty string would be omitted from JSON and trigger a 422. Use a
-		// space as a safe blank when value is empty.
-		if slide.value == "" {
-			bottomLine.Text = " "
-		} else {
-			bottomLine.Text = slide.value
-		}
+		bottomLine.Text = slide.value
 		bottomLine.Color = slide.valueColor
 	}
 
@@ -1361,12 +1351,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) (gudriver.DisplayCom
 	if len(slide.topLineSegs) > 0 {
 		topLine.Segments = slide.topLineSegs
 	} else {
-		// Same guard: omitempty means "" would be omitted → firmware 422.
-		if slide.topLine == "" {
-			topLine.Text = " "
-		} else {
-			topLine.Text = slide.topLine
-		}
+		topLine.Text = slide.topLine
 		topLine.Color = slide.topColor
 	}
 

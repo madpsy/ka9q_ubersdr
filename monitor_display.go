@@ -978,9 +978,10 @@ func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, se
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("CHAT", "lime", sessions, maxSessions),
-		valueSegments: segs,
-		transition:    gudriver.TransitionFade,
+		topLineSegs:     formatTopLineSegs("CHAT", "lime", sessions, maxSessions),
+		valueSegments:   segs,
+		transition:      gudriver.TransitionFade,
+		displayDuration: 6 * time.Second,
 	}
 }
 

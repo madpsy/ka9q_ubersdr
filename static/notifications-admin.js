@@ -608,6 +608,7 @@ async function loadConfig() {
                 max_per_minute:       sr.max_per_minute != null ? sr.max_per_minute : 0,
                 template:             sr.template || '',
                 templates:            sr.templates || {},
+                galactic_unicorn_overrides: sr.galactic_unicorn_overrides || {},
             };
         });
 
@@ -818,6 +819,17 @@ async function saveConfig(alertContainer) {
                 if (rule.templates[c]) t[c] = rule.templates[c];
             });
             if (Object.keys(t).length > 0) r.templates = t;
+        }
+        if (rule.galactic_unicorn_overrides && Object.keys(rule.galactic_unicorn_overrides).length > 0) {
+            // Only keep overrides for channels the rule actually targets and
+            // that have at least one real value set.
+            const go = {};
+            (rule.channels || []).forEach(function(c) {
+                if (hasAnyOverrideValue(rule.galactic_unicorn_overrides[c])) {
+                    go[c] = rule.galactic_unicorn_overrides[c];
+                }
+            });
+            if (Object.keys(go).length > 0) r.galactic_unicorn_overrides = go;
         }
         payload.rules.push(r);
     });

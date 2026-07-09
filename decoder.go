@@ -162,7 +162,11 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		log.Printf("Metrics JSON Lines logging enabled: %s (interval: %v)", config.MetricsLogDataDir, writeInterval)
 
 		// Load recent metrics from files to restore state after restart
-		if err := logger.LoadRecentMetrics(prometheusMetrics.digitalMetrics); err != nil {
+		var digitalMetrics *DigitalDecodeMetrics
+		if prometheusMetrics != nil {
+			digitalMetrics = prometheusMetrics.digitalMetrics
+		}
+		if err := logger.LoadRecentMetrics(digitalMetrics); err != nil {
 			log.Printf("Warning: failed to load recent metrics from files: %v", err)
 		}
 
@@ -761,14 +765,18 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			// Write metrics immediately if this was the first decode (after all decodes are recorded)
 			if shouldWriteNow {
 				log.Printf("First decode detected - writing initial metrics snapshot")
-				if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+				var dm *DigitalDecodeMetrics
+				if md.prometheusMetrics != nil {
+					dm = md.prometheusMetrics.digitalMetrics
+				}
+				if err := md.metricsLogger.WriteMetrics(dm); err != nil {
 					log.Printf("Warning: Failed to write initial metrics: %v", err)
 				}
 			}
 		}
 
 		// Record execution time metric only if we successfully got one
-		if err == nil && md.prometheusMetrics != nil {
+		if err == nil && md.prometheusMetrics != nil && md.prometheusMetrics.digitalMetrics != nil {
 			md.prometheusMetrics.digitalMetrics.RecordExecutionTime(band.Config.Mode.String(), band.Config.Name, execTime)
 		}
 	}()
@@ -882,14 +890,22 @@ func (md *MultiDecoder) metricsWriteLoop() {
 		select {
 		case <-md.stopChan:
 			// Write final metrics before stopping
-			if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+			var dm *DigitalDecodeMetrics
+			if md.prometheusMetrics != nil {
+				dm = md.prometheusMetrics.digitalMetrics
+			}
+			if err := md.metricsLogger.WriteMetrics(dm); err != nil {
 				log.Printf("Warning: Failed to write final metrics: %v", err)
 			}
 			return
 
 		case <-ticker.C:
 			// Write metrics snapshot
-			if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+			var dm *DigitalDecodeMetrics
+			if md.prometheusMetrics != nil {
+				dm = md.prometheusMetrics.digitalMetrics
+			}
+			if err := md.metricsLogger.WriteMetrics(dm); err != nil {
 				log.Printf("Warning: Failed to write metrics: %v", err)
 			}
 

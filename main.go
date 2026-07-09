@@ -2229,7 +2229,7 @@ func main() {
 	}
 
 	rbnFetcher.SetStatsLogger(statsLogger)
-	if prometheusMetrics.mqttPublisher != nil {
+	if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
 		rbnFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
 		prometheusMetrics.mqttPublisher.SetSessionManager(sessions)
 		if freqRefMonitor != nil {
@@ -2267,14 +2267,14 @@ func main() {
 
 	wsprRankFetcher := NewWSPRRankFetcher()
 	wsprRankFetcher.SetStatsLogger(statsLogger)
-	if prometheusMetrics.mqttPublisher != nil {
+	if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
 		wsprRankFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
 	}
 	wsprRankFetcher.Start()
 	defer wsprRankFetcher.Stop()
 	pskRankFetcher := NewPSKRankFetcher()
 	pskRankFetcher.SetStatsLogger(statsLogger)
-	if prometheusMetrics.mqttPublisher != nil {
+	if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
 		pskRankFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
 	}
 	pskRankFetcher.Start()
@@ -2297,7 +2297,11 @@ func main() {
 	if cwskimmerConfig != nil {
 		notifManager.SetCWSkimmerCallsign(cwskimmerConfig.Callsign)
 	}
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
+	var adminMQTTPublisher *MQTTPublisher
+	if prometheusMetrics != nil {
+		adminMQTTPublisher = prometheusMetrics.mqttPublisher
+	}
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, adminMQTTPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
 	// Wire admin handler into instance reporter so addon proxy names are always read
 	// from the live, authoritative source (avoids pointer-divergence after admin UI edits).
 	if instanceReporter != nil {
@@ -2309,7 +2313,7 @@ func main() {
 	notifManager.SetNotifManagerOnListeners()
 	// Wire MQTT publisher into notification manager so dispatches and health
 	// stats are published to MQTT when both systems are enabled.
-	if prometheusMetrics.mqttPublisher != nil {
+	if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
 		notifManager.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
 	}
 	// Wire notif manager into admin handler so restartServer() can publish

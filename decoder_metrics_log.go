@@ -118,7 +118,7 @@ func (ml *MetricsLogger) ShouldWrite() bool {
 
 // WriteMetrics writes current metrics snapshot for all active mode/band combinations
 func (ml *MetricsLogger) WriteMetrics(dm *DigitalDecodeMetrics) error {
-	if !ml.enabled {
+	if !ml.enabled || dm == nil {
 		return nil
 	}
 

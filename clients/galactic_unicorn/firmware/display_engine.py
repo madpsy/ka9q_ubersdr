@@ -450,6 +450,8 @@ class DisplayEngine:
         self._queue = DisplayQueue()
         self._active = None          # Currently displayed DisplayMessage
         self._active_brightness = None  # Saved brightness override
+        self._last_message = None    # Most recent message ever set (for /status)
+        self._auto_brightness = False  # Set True by main.py when auto mode is active
 
         self._rainbow_phase = 0.0    # Advances each frame for rainbow effect
         self._frame_time = 0.0       # yield to scheduler each frame; rate controlled by ticks_ms
@@ -467,6 +469,7 @@ class DisplayEngine:
 
     def set_message(self, msg):
         """Install a new DisplayMessage. Interrupts active if higher priority."""
+        self._last_message = msg
         if self._active is None:
             self._start_message(msg)
             return {"queued": False}
@@ -492,12 +495,31 @@ class DisplayEngine:
         return {"queued": True, "queue_depth": len(self._queue), "added": added}
 
     def set_brightness(self, value):
-        """Set global brightness (0.0–1.0)."""
+        """Set global brightness (0.0–1.0).
+
+        Always applies immediately to the hardware, even if a per-message
+        brightness override is currently active.  When auto-brightness is
+        enabled this is called continuously by auto_brightness_loop(); the
+        per-message override is suppressed in that case (see auto_brightness).
+        """
         self._brightness = max(0.0, min(1.0, value))
         self._gu.set_brightness(self._brightness)
+        # If a per-message brightness override was active, clear it so the
+        # new value sticks and isn't restored to the old value on message end.
+        if self._active_brightness is not None:
+            self._active_brightness = None
 
     def get_brightness(self):
         return self._brightness
+
+    @property
+    def auto_brightness(self):
+        """True when auto-brightness mode is active (set by main.py)."""
+        return self._auto_brightness
+
+    @auto_brightness.setter
+    def auto_brightness(self, value):
+        self._auto_brightness = bool(value)
 
     def clear(self):
         """Blank display and clear queue."""
@@ -515,8 +537,13 @@ class DisplayEngine:
             return True
         return self._queue.cancel(msg_id)
 
-    def status(self):
-        """Return a dict describing current state."""
+    def status(self, light=None):
+        """Return a dict describing current state.
+
+        Args:
+            light: Optional raw light-sensor reading (int 0–4095) from the
+                   caller (main.py), included as ``light_sensor`` when provided.
+        """
         active_info = None
         if self._active:
             elapsed = 0.0
@@ -528,13 +555,32 @@ class DisplayEngine:
                 "duration": self._active.duration if self._active.duration is not None else "forever",
                 "elapsed": round(elapsed, 1),
             }
-        return {
+
+        last_msg_info = None
+        if self._last_message is not None:
+            m = self._last_message
+            last_msg_info = {
+                "id": m.id,
+                "priority": m.priority,
+                "duration": m.duration if m.duration is not None else "forever",
+                "lines": [
+                    {"text": ln.text, "color": str(ln.color), "size": ln.size,
+                     "effect": ln.effect}
+                    for ln in m.lines
+                ],
+            }
+
+        result = {
             "ok": True,
             "brightness": self._brightness,
             "active": active_info,
             "queue_depth": len(self._queue),
             "queue": self._queue.snapshot(),
+            "last_message": last_msg_info,
         }
+        if light is not None:
+            result["light_sensor"] = light
+        return result
 
     # ------------------------------------------------------------------
     # Main render loop (run as asyncio task)
@@ -551,14 +597,15 @@ class DisplayEngine:
         last_render_ms = time.ticks_ms()
         last_ms = time.ticks_ms()
         while True:
-            # Always yield first so HTTP/button tasks get CPU time
-            await asyncio.sleep(0)
-
             now_ms = time.ticks_ms()
 
             # Only render if enough time has passed since last frame
             elapsed_since_render = time.ticks_diff(now_ms, last_render_ms)
             if elapsed_since_render < self._min_frame_ms:
+                # Yield to other tasks (HTTP, buttons, sound) while waiting for next frame.
+                # Use sleep_ms(1) rather than sleep(0) so the TCP accept loop and other
+                # tasks get guaranteed scheduler time between display frames.
+                await asyncio.sleep_ms(1)
                 continue
 
             dt = time.ticks_diff(now_ms, last_ms) / 1000.0
@@ -595,6 +642,11 @@ class DisplayEngine:
             except Exception as e:
                 print(f"Render error: {e}")
 
+            # Yield after rendering so HTTP/button/sound tasks can run.
+            # gu.update() is a synchronous C call that may take several ms;
+            # yielding here ensures other tasks are not starved.
+            await asyncio.sleep_ms(1)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -612,8 +664,11 @@ class DisplayEngine:
             line.scroll_pause_start = now_ms
             line.text_width = 0  # will be measured on first render
 
-        # Apply brightness override
-        if msg.brightness is not None:
+        # Apply per-message brightness override — but only when auto-brightness
+        # is NOT active.  When the user has selected AUTO mode, the light sensor
+        # controls brightness continuously and per-message overrides are ignored
+        # so the display always reflects the ambient light level.
+        if msg.brightness is not None and not self._auto_brightness:
             self._active_brightness = self._brightness
             self._gu.set_brightness(msg.brightness)
         elif self._active_brightness is not None:

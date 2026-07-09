@@ -47,19 +47,21 @@ done
 
 # Default: copy all firmware files (not config.py — that has credentials)
 if [[ ${#FILES[@]} -eq 0 ]]; then
-    FILES=("display_engine.py" "main.py")
+    FILES=("display_engine.py" "sound_engine.py" "main.py")
 fi
 
 # ── Check mpremote ───────────────────────────────────────────────────────────
-MPREMOTE=""
+# Store mpremote as an array so it expands correctly whether it's a bare
+# command ("mpremote") or a module invocation ("python3" "-m" "mpremote").
+MPREMOTE=()
 if command -v mpremote &>/dev/null; then
-    MPREMOTE="mpremote"
+    MPREMOTE=(mpremote)
 elif python3 -m mpremote version &>/dev/null 2>&1; then
-    MPREMOTE="python3 -m mpremote"
+    MPREMOTE=(python3 -m mpremote)
 else
     echo "→ mpremote not found. Installing…"
     python3 -m pip install --quiet mpremote
-    MPREMOTE="python3 -m mpremote"
+    MPREMOTE=(python3 -m mpremote)
 fi
 
 # ── Auto-detect port ─────────────────────────────────────────────────────────
@@ -90,7 +92,7 @@ for file in "${FILES[@]}"; do
         exit 1
     fi
     echo "  → $file"
-    $MPREMOTE connect "$PORT" cp "$local_path" ":$file"
+    "${MPREMOTE[@]}" connect "$PORT" cp "$local_path" ":$file"
 done
 echo "✓ Files copied"
 
@@ -99,10 +101,10 @@ if [[ "$MONITOR" -eq 1 ]]; then
     echo ""
     echo "● Opening serial monitor (Ctrl+] or Ctrl+X to exit)"
     echo ""
-    exec $MPREMOTE connect "$PORT" repl
+    exec "${MPREMOTE[@]}" connect "$PORT" repl
 elif [[ "$NO_RESET" -eq 0 ]]; then
     echo "→ Resetting Pico W…"
-    $MPREMOTE connect "$PORT" reset
+    "${MPREMOTE[@]}" connect "$PORT" reset
     echo "✓ Done — device is rebooting"
 else
     echo "→ Skipping reset (--no-reset)"

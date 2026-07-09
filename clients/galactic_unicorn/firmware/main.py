@@ -29,6 +29,7 @@ from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
 
 import config
 from display_engine import DisplayEngine, DisplayMessage
+from sound_engine import SoundEngine, SoundRequest
 
 # ---------------------------------------------------------------------------
 # Hardware initialisation
@@ -38,9 +39,9 @@ gu = GalacticUnicorn()
 graphics = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
 engine = DisplayEngine(gu, graphics, brightness=config.DEFAULT_BRIGHTNESS)
 
-# Initialise hardware volume from config (0.0–1.0).
-_default_volume = getattr(config, "DEFAULT_VOLUME", 0.5)
-gu.set_volume(_default_volume)
+# Initialise sound engine — manages its own async task and volume state.
+_default_volume = getattr(config, "DEFAULT_VOLUME", 0.3)
+sound = SoundEngine(gu, volume=_default_volume)
 
 # ---------------------------------------------------------------------------
 # Global state (set during boot, used by button handlers)
@@ -49,9 +50,16 @@ gu.set_volume(_default_volume)
 _wlan = None          # network.WLAN object — set in connect_wifi()
 _device_ip = None     # IP string or "0.0.0.0" — set in main()
 
-# Auto-brightness: tracks when the user last manually adjusted brightness so
-# auto-brightness can pause and then resume after a configurable delay.
-_manual_brightness_at = None   # ticks_ms() of last manual change, or None
+# Auto-brightness state
+# _auto_brightness_enabled: True when the user has selected auto mode via button D.
+# _manual_brightness_at: ticks_ms() of the last manual brightness change, used to
+#   suppress auto-brightness updates briefly after a manual adjustment (LUX buttons).
+# Default: auto-brightness ON at boot (can be overridden by AUTO_BRIGHTNESS_DEFAULT=False in config.py)
+_auto_brightness_enabled = bool(getattr(config, "AUTO_BRIGHTNESS_DEFAULT", True))
+_manual_brightness_at = None      # ticks_ms() of last manual change, or None
+
+# Sync engine flag with initial state
+engine.auto_brightness = _auto_brightness_enabled
 
 # ---------------------------------------------------------------------------
 # Boot animation helpers (synchronous — asyncio not running yet)
@@ -306,18 +314,54 @@ def handle_control(raw):
         return http_response(200, "OK", {"ok": True, "cmd": "clear"})
 
     elif cmd == "brightness":
+        global _auto_brightness_enabled
+        auto = raw.get("auto")
         value = raw.get("value")
+
+        # Handle auto mode toggle
+        if auto is not None:
+            if auto is True or auto == 1:
+                _auto_brightness_enabled = True
+                engine.auto_brightness = True
+                return http_response(200, "OK", {
+                    "ok": True, "cmd": "brightness", "auto_brightness": True
+                })
+            else:
+                _auto_brightness_enabled = False
+                engine.auto_brightness = False
+                # If a value was also provided, apply it immediately
+                if value is not None:
+                    value = float(value)
+                    if not (0.0 <= value <= 1.0):
+                        return http_response(422, "Unprocessable Entity",
+                                             {"ok": False, "error": "out_of_range",
+                                              "message": f"'value' must be 0.0–1.0, got {value}"})
+                    engine.set_brightness(value)
+                    return http_response(200, "OK", {
+                        "ok": True, "cmd": "brightness",
+                        "auto_brightness": False, "brightness": value
+                    })
+                return http_response(200, "OK", {
+                    "ok": True, "cmd": "brightness", "auto_brightness": False
+                })
+
+        # Manual brightness value (no auto field)
         if value is None or not isinstance(value, (int, float)):
             return http_response(422, "Unprocessable Entity",
                                  {"ok": False, "error": "missing_field",
-                                  "message": "'value' (number 0.0–1.0) is required for brightness command"})
+                                  "message": "brightness command requires 'value' (0.0–1.0) or 'auto' (true/false)"})
         value = float(value)
         if not (0.0 <= value <= 1.0):
             return http_response(422, "Unprocessable Entity",
                                  {"ok": False, "error": "out_of_range",
                                   "message": f"'value' must be 0.0–1.0, got {value}"})
+        _auto_brightness_enabled = False
+        engine.auto_brightness = False
         engine.set_brightness(value)
-        return http_response(200, "OK", {"ok": True, "brightness": value})
+        return http_response(200, "OK", {
+            "ok": True, "cmd": "brightness",
+            "auto_brightness": False, "brightness": value
+        })
 
     elif cmd == "cancel":
         msg_id = raw.get("id")
@@ -333,7 +377,14 @@ def handle_control(raw):
         return http_response(200, "OK", {"ok": True, "cmd": "cancel_all"})
 
     elif cmd == "status":
-        status = engine.status()
+        try:
+            light = gu.light()
+        except Exception:
+            light = None
+        status = engine.status(light=light)
+        status["sound"] = sound.status()
+        status["auto_brightness"] = _auto_brightness_enabled
+        status["network"] = _network_info()
         return http_response(200, "OK", status)
 
     else:
@@ -344,38 +395,99 @@ def handle_control(raw):
 
 
 def handle_brightness_post(body_bytes):
-    """Handle POST /brightness — convenience endpoint."""
+    """Handle POST /brightness — convenience endpoint.
+
+    Accepts the same fields as the brightness control command:
+      {"value": 0.5}           — set manual brightness
+      {"auto": true}           — enable auto-brightness
+      {"auto": false}          — disable auto-brightness
+      {"auto": false, "value": 0.5} — disable auto and set value
+    """
     try:
         raw = json.loads(body_bytes.decode("utf-8"))
     except Exception:
         return http_response(400, "Bad Request",
                              {"ok": False, "error": "invalid_json",
                               "message": "Request body must be JSON"})
-    value = raw.get("value")
-    if value is None:
-        return http_response(422, "Unprocessable Entity",
-                             {"ok": False, "error": "missing_field",
-                              "message": "'value' is required"})
-    value = float(value)
-    if not (0.0 <= value <= 1.0):
-        return http_response(422, "Unprocessable Entity",
-                             {"ok": False, "error": "out_of_range",
-                              "message": f"'value' must be 0.0–1.0, got {value}"})
-    engine.set_brightness(value)
-    return http_response(200, "OK", {"ok": True, "brightness": value})
+    # Delegate to the shared brightness handler
+    raw["cmd"] = "brightness"
+    return handle_control(raw)
+
+
+def _network_info():
+    """Return a dict with IP, subnet, gateway, DNS and SSID from the WLAN object."""
+    info = {}
+    try:
+        if _wlan is not None and _wlan.isconnected():
+            ip, subnet, gateway, dns = _wlan.ifconfig()
+            info["ip"]      = ip
+            info["subnet"]  = subnet
+            info["gateway"] = gateway
+            info["dns"]     = dns
+            info["ssid"]    = _wlan.config("ssid")
+            info["connected"] = True
+        else:
+            info["connected"] = False
+    except Exception:
+        info["connected"] = False
+    return info
 
 
 def handle_status_get():
-    """Handle GET /status."""
-    status = engine.status()
+    """Handle GET /status — includes light sensor reading, last message, sound, network and auto-brightness state."""
+    try:
+        light = gu.light()
+    except Exception:
+        light = None
+    status = engine.status(light=light)
+    status["sound"] = sound.status()
+    status["auto_brightness"] = _auto_brightness_enabled
+    status["network"] = _network_info()
     return http_response(200, "OK", status)
+
+
+def handle_sound_post(body_bytes):
+    """Handle POST /sound — parse and enqueue a sound request."""
+    if not body_bytes:
+        return http_response(400, "Bad Request",
+                             {"ok": False, "error": "empty_body",
+                              "message": "Request body is empty"})
+    try:
+        raw = json.loads(body_bytes.decode("utf-8"))
+    except Exception as e:
+        return http_response(400, "Bad Request",
+                             {"ok": False, "error": "invalid_json",
+                              "message": f"JSON parse error: {e}"})
+
+    try:
+        req = SoundRequest(raw)
+    except ValueError as e:
+        return http_response(422, "Unprocessable Entity",
+                             {"ok": False, "error": "validation_error",
+                              "message": str(e)})
+    except Exception as e:
+        return http_response(400, "Bad Request",
+                             {"ok": False, "error": "parse_error",
+                              "message": str(e)})
+
+    sound.play(req)
+    gc.collect()
+    return http_response(200, "OK", {
+        "ok": True,
+        "pattern": req.pattern,
+        "repeats": req.repeats,
+        "notes": len(req.notes),
+        "volume": req.volume if req.volume is not None else sound.get_volume(),
+        "sound_queue_depth": len(sound._queue),
+    })
 
 
 def handle_not_found(path):
     return http_response(404, "Not Found",
                          {"ok": False, "error": "not_found",
                           "message": f"No endpoint at {path}. "
-                                     f"Available: POST /display, GET /status, POST /brightness"})
+                                     f"Available: POST /display, GET /status, "
+                                     f"POST /brightness, POST /sound"})
 
 
 def handle_method_not_allowed(method, path):
@@ -441,6 +553,12 @@ async def handle_client(reader, writer):
             elif path == "/brightness" or path == "/brightness/":
                 if method == "POST":
                     response = handle_brightness_post(body)
+                else:
+                    response = handle_method_not_allowed(method, path)
+
+            elif path == "/sound" or path == "/sound/":
+                if method == "POST":
+                    response = handle_sound_post(body)
                 else:
                     response = handle_method_not_allowed(method, path)
 
@@ -565,26 +683,35 @@ def _btn_clear():
 def _mark_manual_brightness():
     """Record that the user just manually adjusted brightness.
 
-    Auto-brightness will pause for AUTO_BRIGHTNESS_RESUME_S seconds before
-    resuming.  Call this from any code path that changes brightness in response
-    to a button press.
+    Disables auto-brightness mode and records the time so that any
+    auto-brightness coroutine can detect the change.
     """
-    global _manual_brightness_at
+    global _manual_brightness_at, _auto_brightness_enabled
+    _auto_brightness_enabled = False
+    engine.auto_brightness = False
     _manual_brightness_at = time.ticks_ms()
 
 
-def _show_brightness_feedback(new_br, source="BTN"):
-    """Show a brief brightness percentage on the display and log to console."""
-    label = f"{int(round(new_br * 100))}%"
+def _show_brightness_feedback(new_br, source="BTN", label_override=None):
+    """Show a brief brightness label on the display and log to console.
+
+    Args:
+        new_br:         Current brightness value (0.0–1.0).
+        source:         Log prefix string.
+        label_override: If provided, show this string instead of the percentage
+                        (e.g. "AUTO" when entering auto-brightness mode).
+    """
+    label = label_override if label_override is not None else f"{int(round(new_br * 100))}%"
+    color = "cyan" if label_override else "amber"
     raw = {
         "type": "display",
         "id": "btn-brightness",
         "priority": _cfg("BTN_BRIGHTNESS_PRIORITY", 8),
-        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.0),
+        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.5),
         "transition": "cut",
         "lines": [{
             "text": label,
-            "color": "amber",
+            "color": color,
             "size": 1,
             "effect": "static",
             "align": "center",
@@ -626,21 +753,38 @@ def _show_volume_feedback(new_vol, source="VOL"):
 
 
 def _btn_step_brightness():
-    """Button D — step brightness up by BRIGHTNESS_STEP, wrapping after max.
+    """Button D — step brightness up, with AUTO mode inserted after BRIGHTNESS_MAX.
 
-    Each press (or hold-repeat) increments the global brightness by BRIGHTNESS_STEP
-    (default 10%).  After reaching BRIGHTNESS_MAX the next step wraps back to
-    BRIGHTNESS_MIN so the user can cycle through the full range without needing
-    the LUX buttons.
+    Cycle:  MIN → ... → MAX → AUTO → MIN → ...
+
+    - Pressing D while in AUTO mode exits auto and wraps back to BRIGHTNESS_MIN.
+    - Pressing LUX+/- while in AUTO mode also exits auto (handled in button_handler).
     """
-    step    = _cfg("BRIGHTNESS_STEP", 0.1)
-    br_min  = _cfg("BRIGHTNESS_MIN",  0.05)
-    br_max  = _cfg("BRIGHTNESS_MAX",  1.0)
+    global _auto_brightness_enabled
+
+    step   = _cfg("BRIGHTNESS_STEP", 0.1)
+    br_min = _cfg("BRIGHTNESS_MIN",  0.05)
+    br_max = _cfg("BRIGHTNESS_MAX",  1.0)
+
+    if _auto_brightness_enabled:
+        # Currently in AUTO — exit and wrap to minimum
+        _auto_brightness_enabled = False
+        engine.set_brightness(br_min)
+        _mark_manual_brightness()
+        _show_brightness_feedback(br_min, "BTN D")
+        return
 
     current = engine.get_brightness()
     new_br  = round(current + step, 2)
-    if new_br > br_max + 0.001:   # overshoot → wrap to minimum
-        new_br = br_min
+
+    if new_br > br_max + 0.001:
+        # Reached top — enter AUTO mode instead of wrapping immediately
+        _auto_brightness_enabled = True
+        engine.auto_brightness = True
+        _manual_brightness_at = None  # allow auto loop to run immediately
+        print("[BTN D] Auto-brightness ON")
+        _show_brightness_feedback(current, "BTN D", label_override="AUTO")
+        return
 
     engine.set_brightness(new_br)
     _mark_manual_brightness()
@@ -710,42 +854,42 @@ async def button_handler():
     while True:
         try:
             if _has_lux:
-                # --- LUX + — brightness up, no wrap ---
+                # --- LUX + — brightness up, no wrap; exits AUTO mode if active ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
                 if pressed and not _held["lux_up"]:
                     new_br = round(min(_cfg("BRIGHTNESS_MAX", 1.0),
                                        engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1)), 2)
                     engine.set_brightness(new_br)
-                    _mark_manual_brightness()
+                    _mark_manual_brightness()   # also clears _auto_brightness_enabled
                     _show_brightness_feedback(new_br, "LUX+")
                 _held["lux_up"] = pressed
 
-                # --- LUX - — brightness down, no wrap ---
+                # --- LUX - — brightness down, no wrap; exits AUTO mode if active ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
                 if pressed and not _held["lux_dn"]:
                     new_br = round(max(_cfg("BRIGHTNESS_MIN", 0.05),
                                        engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1)), 2)
                     engine.set_brightness(new_br)
-                    _mark_manual_brightness()
+                    _mark_manual_brightness()   # also clears _auto_brightness_enabled
                     _show_brightness_feedback(new_br, "LUX-")
                 _held["lux_dn"] = pressed
 
             if _has_vol:
-                # --- VOL + — increase hardware volume ---
+                # --- VOL + — increase sound engine volume ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_UP)
                 if pressed and not _held["vol_up"]:
                     new_vol = round(min(_cfg("VOLUME_MAX", 1.0),
-                                        gu.get_volume() + _cfg("VOLUME_STEP", 0.1)), 2)
-                    gu.set_volume(new_vol)
+                                        sound.get_volume() + _cfg("VOLUME_STEP", 0.1)), 2)
+                    sound.set_volume(new_vol)
                     _show_volume_feedback(new_vol, "VOL+")
                 _held["vol_up"] = pressed
 
-                # --- VOL - — decrease hardware volume ---
+                # --- VOL - — decrease sound engine volume ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_DOWN)
                 if pressed and not _held["vol_dn"]:
                     new_vol = round(max(_cfg("VOLUME_MIN", 0.0),
-                                        gu.get_volume() - _cfg("VOLUME_STEP", 0.1)), 2)
-                    gu.set_volume(new_vol)
+                                        sound.get_volume() - _cfg("VOLUME_STEP", 0.1)), 2)
+                    sound.set_volume(new_vol)
                     _show_volume_feedback(new_vol, "VOL-")
                 _held["vol_dn"] = pressed
 
@@ -898,6 +1042,158 @@ def install_idle_display():
 
 
 # ---------------------------------------------------------------------------
+# Auto-brightness loop
+# ---------------------------------------------------------------------------
+
+async def auto_brightness_loop():
+    """Continuously adjust display brightness based on the ambient light sensor.
+
+    Only active when _auto_brightness_enabled is True.  Reads gu.light() every
+    AUTO_BRIGHTNESS_INTERVAL_S seconds and maps the raw sensor value (0–4095)
+    to a brightness in [BRIGHTNESS_MIN, BRIGHTNESS_MAX].
+
+    Heuristics to prevent constant micro-adjustments:
+
+    1. EMA smoothing — exponential moving average damps rapid sensor fluctuations.
+       Controlled by AUTO_BRIGHTNESS_SMOOTHING (default 0.2).
+
+    2. Dead-band — brightness is only written to the display if the smoothed value
+       has changed by at least AUTO_BRIGHTNESS_DEADBAND (default 0.02 = 2%) from
+       the last written value.  Sensor noise within this band is ignored entirely.
+
+    3. Stability window — the smoothed value must remain within the dead-band for
+       AUTO_BRIGHTNESS_STABLE_READS consecutive reads before a change is applied.
+       This prevents reacting to a single bright flash or shadow passing over the
+       sensor.  Default 2 reads (i.e. 2 × INTERVAL_S of stability required).
+
+    4. Min write interval — even if all other conditions are met, brightness is
+       not written more often than AUTO_BRIGHTNESS_MIN_WRITE_S seconds (default
+       5.0).  This prevents the display from flickering during gradual transitions.
+
+    Config keys (all optional, with defaults):
+        AUTO_BRIGHTNESS_INTERVAL_S    float  1.0      Seconds between sensor reads
+        AUTO_BRIGHTNESS_SMOOTHING     float  0.2      EMA factor (0=frozen, 1=instant)
+        AUTO_BRIGHTNESS_CURVE         str    "sqrt"   "linear" or "sqrt"
+        AUTO_BRIGHTNESS_DEADBAND      float  0.02     Min change to trigger a write (0–1)
+        AUTO_BRIGHTNESS_STABLE_READS  int    2        Consecutive stable reads before write
+        AUTO_BRIGHTNESS_MIN_WRITE_S   float  2.0      Min seconds between brightness writes
+        BRIGHTNESS_MIN                float  0.05     Lower bound
+        BRIGHTNESS_MAX                float  1.0      Upper bound
+
+    Polls the flag every 100 ms so manual button presses are noticed quickly.
+    """
+    POLL_MS = 100   # ms between flag checks / loop ticks
+
+    _smoothed_br    = None   # EMA state; None until first reading
+    _last_read_ms   = None   # ticks_ms() of last sensor read
+    _last_write_ms  = None   # ticks_ms() of last brightness write
+    _last_written   = None   # brightness value last written to engine
+    _stable_count   = 0      # consecutive reads within dead-band of _pending_br
+    _pending_br     = None   # candidate brightness waiting for stability confirmation
+
+    while True:
+        await asyncio.sleep(POLL_MS / 1000.0)
+
+        if not _auto_brightness_enabled:
+            # Reset all state so next enable starts fresh
+            _smoothed_br   = None
+            _last_read_ms  = None
+            _last_write_ms = None
+            _last_written  = None
+            _stable_count  = 0
+            _pending_br    = None
+            continue
+
+        # --- Rate-limit sensor reads ---
+        interval_ms = int(_cfg("AUTO_BRIGHTNESS_INTERVAL_S", 1.0) * 1000)
+        now_ms = time.ticks_ms()
+        if _last_read_ms is not None:
+            if time.ticks_diff(now_ms, _last_read_ms) < interval_ms:
+                continue   # not time for next read yet
+        _last_read_ms = now_ms
+
+        # --- Read sensor ---
+        try:
+            raw = gu.light()   # 0–4095
+        except Exception:
+            continue
+
+        br_min = _cfg("BRIGHTNESS_MIN", 0.15)
+        br_max = _cfg("BRIGHTNESS_MAX", 1.0)
+        curve  = _cfg("AUTO_BRIGHTNESS_CURVE", "linear")
+
+        # Clamp sensor reading to the configured ambient range, then normalise
+        # to 0.0–1.0.  The full 0–4095 ADC range is rarely used in practice;
+        # configuring SENSOR_MIN/MAX to match the actual environment gives a
+        # much more useful brightness response.
+        # Defaults tuned for a typical indoor shack: ~30 (dark) to ~130 (bright).
+        s_min = _cfg("AUTO_BRIGHTNESS_SENSOR_MIN", 30)    # dark room / covered
+        s_max = _cfg("AUTO_BRIGHTNESS_SENSOR_MAX", 130)   # bright room
+        span  = s_max - s_min
+        if span <= 0:
+            span = 1   # guard against misconfiguration
+        norm = max(0.0, min(1.0, (raw - s_min) / span))
+
+        # Apply curve — sqrt compresses highlights, feels more perceptually linear
+        if curve == "sqrt":
+            import math
+            norm = math.sqrt(norm)
+
+        # Map to configured brightness range
+        target_br = br_min + norm * (br_max - br_min)
+        target_br = round(max(br_min, min(br_max, target_br)), 3)
+
+        # --- Heuristic 1: EMA smoothing ---
+        alpha = _cfg("AUTO_BRIGHTNESS_SMOOTHING", 0.2)
+        if _smoothed_br is None:
+            _smoothed_br = target_br   # seed EMA from first reading
+            _pending_br  = target_br
+        else:
+            _smoothed_br = _smoothed_br + alpha * (target_br - _smoothed_br)
+
+        candidate = round(_smoothed_br, 3)
+
+        # --- Heuristic 2: Dead-band ---
+        # Skip dead-band on the very first write (no previous reference) so that
+        # auto-brightness takes effect immediately when enabled rather than waiting
+        # for a change relative to an unknown baseline.
+        deadband = _cfg("AUTO_BRIGHTNESS_DEADBAND", 0.02)
+        if _last_written is not None and abs(candidate - _last_written) < deadband:
+            # Within dead-band of last written value — reset stability and skip
+            _stable_count = 0
+            _pending_br   = None
+            continue
+
+        # --- Heuristic 3: Stability window ---
+        stable_needed = int(_cfg("AUTO_BRIGHTNESS_STABLE_READS", 2))
+        if _pending_br is None or abs(candidate - _pending_br) >= deadband:
+            # New candidate outside dead-band of previous pending — restart counter
+            _pending_br   = candidate
+            _stable_count = 1
+        else:
+            _stable_count += 1
+
+        if _stable_count < stable_needed:
+            continue   # not stable enough yet
+
+        # --- Heuristic 4: Min write interval ---
+        # Default 2.0 s — prevents rapid flickering during gradual transitions
+        # while still being responsive enough to feel immediate on large changes.
+        min_write_ms = int(_cfg("AUTO_BRIGHTNESS_MIN_WRITE_S", 2.0) * 1000)
+        if _last_write_ms is not None:
+            if time.ticks_diff(now_ms, _last_write_ms) < min_write_ms:
+                continue   # too soon since last write
+
+        # All heuristics passed — apply the brightness change
+        engine.set_brightness(candidate)
+        _last_written  = candidate
+        _last_write_ms = now_ms
+        _stable_count  = 0
+        _pending_br    = None
+        print(f"[AUTO-BR] light={raw} → brightness={candidate:.3f}")
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -929,12 +1225,23 @@ async def main():
     )
 
     print(f"Ready. POST JSON to http://{_device_ip}:{config.HTTP_PORT}/display")
-    print("Buttons: A=IP  B=WiFi  C=Clear  D=Step brightness (hold to repeat)  LUX+/-=Brightness")
+    print(f"Sound:  POST JSON to http://{_device_ip}:{config.HTTP_PORT}/sound")
+    print("Buttons: A=IP  B=WiFi  C=Clear  D=Step brightness/AUTO (hold to repeat)  LUX+/-=Brightness  VOL+/-=Volume")
 
-    # Run all tasks concurrently
+    # Enqueue startup chime — plays as soon as sound.run() initialises the synth channel.
+    # Use "success" if Wi-Fi connected, "warning" if not.
+    try:
+        startup_pattern = "success" if _device_ip != "0.0.0.0" else "warning"
+        sound.play(SoundRequest({"pattern": startup_pattern}))
+    except Exception as e:
+        print(f"[startup] Could not enqueue startup sound: {e}")
+
+    # Run all tasks concurrently — display, sound, buttons, auto-brightness, and HTTP are independent
     await asyncio.gather(
         engine.run(),
+        sound.run(),
         button_handler(),
+        auto_brightness_loop(),
         server.wait_closed(),
     )
 

@@ -1,6 +1,6 @@
 # UberSDR — Galactic Unicorn Display Client
 
-Displays UberSDR notification events on a **Pimoroni Galactic Unicorn** LED matrix display (53×11 RGB LEDs, Raspberry Pi Pico W).
+Displays UberSDR notification events on a **Pimoroni Galactic Unicorn** LED matrix display (53×11 RGB LEDs, Raspberry Pi Pico W). Also supports alert sounds via the built-in speaker and automatic brightness control via the ambient light sensor.
 
 ```
 ┌─────────────────────────────────────────────────────┐  53 px wide
@@ -84,12 +84,13 @@ Hold **BOOTSEL** while plugging in USB, then drag the `.uf2` file onto the `RPI-
 
 #### 2. Copy firmware files to the Pico W
 
-Copy all three files from [`firmware/`](firmware/) to the root of the Pico W filesystem using [Thonny](https://thonny.org/) or `mpremote`:
+Copy all four files from [`firmware/`](firmware/) to the root of the Pico W filesystem using [Thonny](https://thonny.org/) or `mpremote`:
 
 ```
 firmware/
 ├── config.py         ← edit this first
 ├── display_engine.py
+├── sound_engine.py
 └── main.py
 ```
 
@@ -97,6 +98,7 @@ Using `mpremote`:
 ```bash
 mpremote cp firmware/config.py :config.py
 mpremote cp firmware/display_engine.py :display_engine.py
+mpremote cp firmware/sound_engine.py :sound_engine.py
 mpremote cp firmware/main.py :main.py
 ```
 
@@ -205,9 +207,18 @@ Special values: `rainbow` (animated HSV cycle), `gradient:orange:red` (left-to-r
 
 ## HTTP API (Direct Use)
 
-You can also POST display commands directly to the Pico W without going through UberSDR's notification system. See [`DISPLAY_PROTOCOL.md`](DISPLAY_PROTOCOL.md) for the full specification.
+You can POST display and sound commands directly to the Pico W without going through UberSDR's notification system. See [`DISPLAY_PROTOCOL.md`](DISPLAY_PROTOCOL.md) for the full specification.
 
-### Quick examples
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/display` | Send a display message or control command |
+| `POST` | `/sound` | Play an alert sound (non-blocking) |
+| `POST` | `/brightness` | Set brightness (`{"value":0.5}`) or toggle auto mode (`{"auto":true/false}`) |
+| `GET` | `/status` | Query device state (display, sound, light sensor, auto-brightness) |
+
+### Display examples
 
 **Static centred text:**
 ```bash
@@ -268,6 +279,118 @@ curl -X POST http://192.168.1.42/display \
 curl -s http://192.168.1.42/status | python3 -m json.tool
 ```
 
+The status response includes display queue, active message, light sensor reading, sound state, and whether auto-brightness is active:
+```json
+{
+  "ok": true,
+  "brightness": 0.5,
+  "light_sensor": 1842,
+  "auto_brightness": false,
+  "active": {"id": "spot-001", "priority": 5, "duration": 10.0, "elapsed": 3.1},
+  "queue_depth": 0,
+  "queue": [],
+  "last_message": {"id": "spot-001", "priority": 5, "duration": 10.0, "lines": [...]},
+  "sound": {"playing": false, "volume": 0.5, "queue_depth": 0}
+}
+```
+
+### Sound examples
+
+Sound playback is **fully non-blocking** — the display continues rendering while audio plays. You can fire a sound and a display request back-to-back and both execute concurrently.
+
+**Simple beep:**
+```bash
+curl -X POST http://192.168.1.42/sound \
+  -H "Content-Type: application/json" \
+  -d '{"pattern": "beep"}'
+```
+
+**DX alert — loud, repeated:**
+```bash
+curl -X POST http://192.168.1.42/sound \
+  -H "Content-Type: application/json" \
+  -d '{"pattern": "dx", "volume": 0.9, "repeats": 2, "gap": 0.3}'
+```
+
+**Single tone:**
+```bash
+curl -X POST http://192.168.1.42/sound \
+  -H "Content-Type: application/json" \
+  -d '{"pattern": "tone", "frequency": 1000, "duration": 0.5}'
+```
+
+**Custom melody:**
+```bash
+curl -X POST http://192.168.1.42/sound \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pattern": "custom",
+    "volume": 0.7,
+    "notes": [
+      {"freq": 523, "duration": 0.1},
+      {"freq": 659, "duration": 0.1},
+      {"freq": 784, "duration": 0.1},
+      {"freq": 1047, "duration": 0.2}
+    ]
+  }'
+```
+
+**Alert + display simultaneously:**
+```bash
+# Fire both — they run concurrently
+curl -X POST http://192.168.1.42/sound -H "Content-Type: application/json" \
+  -d '{"pattern": "alarm", "repeats": 3}'
+curl -X POST http://192.168.1.42/display -H "Content-Type: application/json" \
+  -d '{"type":"display","priority":9,"lines":[{"text":"HIGH NOISE","color":"red","effect":"blink"}]}'
+```
+
+#### Named sound patterns
+
+**Semantic alerts** — use these for application events:
+
+| Pattern | Character | Use for |
+|---------|-----------|---------|
+| `alert` | Rising perfect 4th (C5→F5) — bright, clean | Generic attention / new event |
+| `warning` | Minor-3rd drop + return — tense | Caution, degraded state |
+| `error` | Descending tritone — clearly negative | Failure, fault condition |
+| `recovery` | Ascending major triad (C5→E5→G5) — bright | Resolved, back to normal |
+| `success` | Rising G4→B4→G5 — bright high finish | Task complete, positive outcome |
+| `critical` | Rapid C6/G5 alternation (6 pulses) — urgent | Critical fault, immediate action |
+
+**Utility beeps:**
+
+| Pattern | Description |
+|---------|-------------|
+| `beep` | Single beep (880 Hz) |
+| `beep_low` | Single beep (440 Hz) |
+| `beep_high` | Single short beep (1175 Hz) |
+| `double_beep` | Two quick beeps |
+| `triple_beep` | Three quick beeps |
+
+**Informational / ambient:**
+
+| Pattern | Description |
+|---------|-------------|
+| `notify` | Soft rising C5→G5 — new notification |
+| `tick` | Very short click — subtle UI feedback |
+| `chime` | Rising C→E→G arpeggio — pleasant |
+| `alarm` | Rapid 4-pulse — urgent but not harsh |
+
+**Radio / ham specific:**
+
+| Pattern | Description |
+|---------|-------------|
+| `spot` | Quick rising E5→A5 — new DX spot |
+| `dx` | Three-note rising E5→G5→C6 — DX alert |
+| `qso` | Two-tone C5→E5 — QSO event |
+
+**Raw / custom:**
+
+| Pattern | Description |
+|---------|-------------|
+| `tone` | Raw continuous tone (`frequency` Hz, `duration` s) |
+| `custom` | Custom sequence via `notes` array |
+
 ---
 
 ## Hardware Button Behaviour
@@ -279,17 +402,71 @@ All buttons are active at all times — they work regardless of what is currentl
 | **A** | Show the device IP address (cyan if connected, red if not) | `BTN_IP_PRIORITY`, `BTN_IP_DURATION`, `BTN_IP_COLOR` |
 | **B** | Show Wi-Fi SSID (top line) + `WiFi OK` / `No WiFi` (bottom line) | `BTN_WIFI_PRIORITY`, `BTN_WIFI_DURATION` |
 | **C** | Clear the display queue and restore the idle display | — |
-| **D** | Toggle between dim (`BTN_DIM_BRIGHTNESS`) and full brightness | `BTN_DIM_BRIGHTNESS`, `BTN_BRIGHTNESS_PRIORITY`, `BTN_BRIGHTNESS_DURATION` |
-| **Brightness ▲** | Increase brightness by `BRIGHTNESS_STEP` | `BRIGHTNESS_STEP`, `BRIGHTNESS_MAX` |
-| **Brightness ▼** | Decrease brightness by `BRIGHTNESS_STEP` | `BRIGHTNESS_STEP`, `BRIGHTNESS_MIN` |
+| **D** | Step brightness up by `BRIGHTNESS_STEP`; after max enters **AUTO** mode; press again to exit AUTO and wrap to min. Hold for auto-repeat. | `BRIGHTNESS_STEP`, `BRIGHTNESS_MIN`, `BRIGHTNESS_MAX`, `BTN_D_HOLD_DELAY_MS`, `BTN_D_REPEAT_MS` |
+| **LUX ▲** | Increase brightness by `BRIGHTNESS_STEP` (exits AUTO mode if active) | `BRIGHTNESS_STEP`, `BRIGHTNESS_MAX` |
+| **LUX ▼** | Decrease brightness by `BRIGHTNESS_STEP` (exits AUTO mode if active) | `BRIGHTNESS_STEP`, `BRIGHTNESS_MIN` |
+| **VOL ▲** | Increase speaker volume by `VOLUME_STEP` | `VOLUME_STEP`, `VOLUME_MAX` |
+| **VOL ▼** | Decrease speaker volume by `VOLUME_STEP` | `VOLUME_STEP`, `VOLUME_MIN` |
+
+### Auto-brightness mode
+
+Pressing button D past `BRIGHTNESS_MAX` enters **AUTO** mode — the display shows `AUTO` in cyan and the firmware begins reading the ambient light sensor (`gu.light()`) to set brightness automatically.
+
+The brightness cycle is:
+```
+MIN → +10% → ... → MAX → AUTO → MIN → ...
+```
+
+Pressing **D** again or any **LUX** button exits AUTO mode immediately and returns to manual control.
+
+Auto-brightness can also be enabled/disabled via HTTP:
+
+```bash
+# Enable auto-brightness
+curl -X POST http://<ip>/brightness -H "Content-Type: application/json" -d '{"auto": true}'
+
+# Disable and set a specific level
+curl -X POST http://<ip>/brightness -H "Content-Type: application/json" -d '{"auto": false, "value": 0.5}'
+```
+
+> **Note:** When auto-brightness is active, any `brightness` field in a display message is **ignored** — the light sensor always wins. This ensures the display always reflects ambient conditions regardless of what content is being shown. Per-message brightness overrides only apply when auto mode is off.
+
+Four heuristics prevent constant micro-adjustments from sensor noise:
+
+| Heuristic | Config key | Default | Effect |
+|-----------|-----------|---------|--------|
+| EMA smoothing | `AUTO_BRIGHTNESS_SMOOTHING` | `0.2` | Damps rapid fluctuations before any decision |
+| Dead-band | `AUTO_BRIGHTNESS_DEADBAND` | `0.02` | Ignores changes < 2% from last written value |
+| Stability window | `AUTO_BRIGHTNESS_STABLE_READS` | `2` | Requires 2 consecutive reads outside dead-band |
+| Min write interval | `AUTO_BRIGHTNESS_MIN_WRITE_S` | `2.0` | Enforces ≥ 2 s between brightness writes |
+
+```python
+# config.py — auto-brightness
+AUTO_BRIGHTNESS_INTERVAL_S   = 1.0      # Seconds between sensor reads
+AUTO_BRIGHTNESS_SMOOTHING    = 0.2      # EMA factor (lower = smoother)
+AUTO_BRIGHTNESS_CURVE        = "linear" # "linear" or "sqrt"
+AUTO_BRIGHTNESS_DEADBAND     = 0.02     # Min change to act on (2%)
+AUTO_BRIGHTNESS_STABLE_READS = 2        # Reads required before committing
+AUTO_BRIGHTNESS_MIN_WRITE_S  = 2.0      # Min seconds between writes
+
+# Sensor calibration — match to your environment (check GET /status → light_sensor)
+# Typical indoor shack: dark/covered ~30, bright room ~130
+AUTO_BRIGHTNESS_SENSOR_MIN   = 30       # Raw sensor value → BRIGHTNESS_MIN
+AUTO_BRIGHTNESS_SENSOR_MAX   = 130      # Raw sensor value → BRIGHTNESS_MAX
+```
 
 ### Button configuration (`config.py`)
 
 ```python
-# Brightness rocker
+# Brightness step (shared by LUX buttons and button D)
 BRIGHTNESS_STEP = 0.1       # Change per press
-BRIGHTNESS_MIN  = 0.05      # Floor (never fully off via rocker)
-BRIGHTNESS_MAX  = 1.0       # Ceiling via rocker
+BRIGHTNESS_MIN  = 0.15      # Floor in auto mode (never fully off)
+BRIGHTNESS_MAX  = 1.0       # Ceiling
+
+# Volume step (VOL buttons)
+VOLUME_STEP = 0.1
+VOLUME_MIN  = 0.0
+VOLUME_MAX  = 1.0
 
 # Button A — show IP address
 BTN_IP_PRIORITY = 8         # Interrupts most content (0–10)
@@ -300,10 +477,11 @@ BTN_IP_COLOR    = "cyan"    # Colour when connected; red when disconnected
 BTN_WIFI_PRIORITY = 8
 BTN_WIFI_DURATION = 5.0
 
-# Button D — dim / full brightness toggle
-BTN_DIM_BRIGHTNESS       = 0.1   # Brightness in "dim" state
+# Button D — brightness step / AUTO
 BTN_BRIGHTNESS_PRIORITY  = 8
 BTN_BRIGHTNESS_DURATION  = 1.5   # How long the label stays on screen
+BTN_D_HOLD_DELAY_MS      = 500   # ms before auto-repeat begins
+BTN_D_REPEAT_MS          = 300   # ms between auto-repeat steps
 ```
 
 ---
@@ -341,7 +519,7 @@ BTN_BRIGHTNESS_DURATION  = 1.5   # How long the label stays on screen
 ```
 clients/galactic_unicorn/
 ├── README.md                  ← this file
-├── DISPLAY_PROTOCOL.md        ← full JSON protocol specification
+├── DISPLAY_PROTOCOL.md        ← full JSON protocol specification (display + sound)
 ├── flash.py                   ← automated firmware flasher (Python 3)
 ├── flash.sh                   ← shell wrapper for flash.py (Linux/macOS)
 └── firmware/
@@ -350,7 +528,9 @@ clients/galactic_unicorn/
     ├── config.py              ← GENERATED by flash.py — contains Wi-Fi credentials,
     │                             gitignored, never committed
     ├── display_engine.py      ← rendering engine (colour, layout, effects, queue)
-    └── main.py                ← HTTP server, boot animation, button handler
+    ├── sound_engine.py        ← async sound sequencer (named patterns, custom notes)
+    └── main.py                ← HTTP server, boot animation, button handler,
+                                  auto-brightness loop
 ```
 
 Go source files in the UberSDR server root:

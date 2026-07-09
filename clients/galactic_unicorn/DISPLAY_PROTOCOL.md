@@ -1,8 +1,8 @@
 # Galactic Unicorn Display Protocol Specification
 
-**Version:** 1.0  
-**Target Hardware:** Pimoroni Galactic Unicorn (53×11 RGB LED matrix, Raspberry Pi Pico W)  
-**Transport:** HTTP POST to `http://<pico-ip>/display` with `Content-Type: application/json`
+**Version:** 1.1
+**Target Hardware:** Pimoroni Galactic Unicorn (53×11 RGB LED matrix, Raspberry Pi Pico W)
+**Transport:** HTTP POST to `http://<pico-ip>/display` or `http://<pico-ip>/sound` with `Content-Type: application/json`
 
 ---
 
@@ -18,9 +18,10 @@
 8. [Priority & Queue](#8-priority--queue)
 9. [Control Commands](#9-control-commands)
 10. [HTTP API Endpoints](#10-http-api-endpoints)
-11. [Error Responses](#11-error-responses)
-12. [Complete Examples](#12-complete-examples)
-13. [Field Reference Summary](#13-field-reference-summary)
+11. [Sound Endpoint](#11-sound-endpoint)
+12. [Error Responses](#12-error-responses)
+13. [Complete Examples](#13-complete-examples)
+14. [Field Reference Summary](#14-field-reference-summary)
 
 ---
 
@@ -356,19 +357,33 @@ Immediately blanks the display and clears the entire queue.
 
 ### 9.2 `brightness`
 
-Sets the global display brightness. Persists until changed again or the device reboots.
+Sets the global display brightness or toggles auto-brightness mode. Persists until changed again or the device reboots.
 
+**Manual brightness:**
 ```json
-{
-  "type": "control",
-  "cmd": "brightness",
-  "value": 0.4
-}
+{ "type": "control", "cmd": "brightness", "value": 0.4 }
+```
+
+**Enable auto-brightness** (light sensor controls brightness continuously):
+```json
+{ "type": "control", "cmd": "brightness", "auto": true }
+```
+
+**Disable auto-brightness and set a specific level:**
+```json
+{ "type": "control", "cmd": "brightness", "auto": false, "value": 0.5 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `value` | number 0.0–1.0 | Yes | New global brightness level. |
+| `value` | number 0.0–1.0 | No* | Manual brightness level. Required when `auto` is absent or `false`. |
+| `auto` | boolean | No* | `true` = enable light-sensor auto-brightness; `false` = disable it. |
+
+\* At least one of `value` or `auto` must be provided.
+
+When `auto` is `true`, the light sensor continuously adjusts brightness within `[BRIGHTNESS_MIN, BRIGHTNESS_MAX]`. Per-message brightness overrides are ignored while auto mode is active. Auto mode can also be activated by pressing hardware button D past maximum brightness.
+
+The `POST /brightness` convenience endpoint accepts the same fields (without `type`/`cmd`).
 
 ### 9.3 `cancel`
 
@@ -478,7 +493,134 @@ Convenience endpoint — equivalent to sending a `brightness` control command.
 
 ---
 
-## 11. Error Responses
+## 11. Sound Endpoint
+
+### `POST /sound`
+
+Play an alert sound on the built-in speaker. Sound playback is **fully non-blocking** — the display engine and HTTP server continue operating normally while audio plays. You can send a display request immediately after a sound request and both will execute concurrently.
+
+**Request headers:**
+```
+Content-Type: application/json
+```
+
+### 11.1 Sound Request Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `pattern` | string | No | `"beep"` | Named pattern or `"tone"` / `"custom"`. See [Named Patterns](#112-named-patterns). |
+| `volume` | number 0.0–1.0 | No | engine volume | Override volume for this request only. Does not change the global volume. |
+| `repeats` | integer 1–20 | No | `1` | How many times to repeat the pattern. |
+| `gap` | number ≥ 0 | No | `0.1` | Seconds of silence between repeats. |
+| `frequency` | integer > 0 | For `"tone"` | `880` | Tone frequency in Hz. Only used when `pattern` is `"tone"`. |
+| `duration` | number > 0 | For `"tone"` | `0.2` | Duration in seconds. Only used when `pattern` is `"tone"`. |
+| `notes` | array | For `"custom"` | — | Array of Note Objects. Only used when `pattern` is `"custom"`. |
+
+### 11.2 Named Patterns
+
+#### Semantic alerts (use these for application events)
+
+| Pattern | Interval / character | Use for |
+|---------|----------------------|---------|
+| `"alert"` | Rising perfect 4th (C5→F5) — bright, clean | Generic attention / new event |
+| `"warning"` | Minor-3rd drop + return (A5→F#5→A5) — tense | Caution, degraded state |
+| `"error"` | Descending tritone (B4→F#4) — clearly negative | Failure, fault condition |
+| `"recovery"` | Ascending major triad (C5→E5→G5) — bright | Resolved, back to normal |
+| `"success"` | Rising G4→B4→G5 — bright high finish | Task complete, positive outcome |
+| `"critical"` | Rapid C6/G5 alternation (6 pulses) — urgent | Critical fault, immediate action needed |
+
+#### Utility beeps
+
+| Pattern | Description |
+|---------|-------------|
+| `"beep"` | Single beep at 880 Hz |
+| `"beep_low"` | Single beep at 440 Hz |
+| `"beep_high"` | Single short beep at 1175 Hz |
+| `"double_beep"` | Two quick beeps |
+| `"triple_beep"` | Three quick beeps |
+
+#### Informational / ambient
+
+| Pattern | Description |
+|---------|-------------|
+| `"notify"` | Soft rising C5→G5 (perfect 5th) — new notification |
+| `"tick"` | Very short click — subtle UI feedback |
+| `"chime"` | Rising C→E→G arpeggio — pleasant, non-urgent |
+| `"alarm"` | Rapid 4-pulse — urgent but less harsh than `critical` |
+
+#### Radio / ham specific
+
+| Pattern | Description |
+|---------|-------------|
+| `"spot"` | Quick rising E5→A5 — new DX spot |
+| `"dx"` | Three-note rising E5→G5→C6 — DX alert |
+| `"qso"` | Two-tone C5→E5 — QSO event |
+
+#### Raw / custom
+
+| Pattern | Description |
+|---------|-------------|
+| `"tone"` | Raw continuous tone at `frequency` Hz for `duration` seconds |
+| `"custom"` | Custom sequence defined by `notes` array |
+
+### 11.3 Note Object (for `"custom"` pattern)
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `freq` | integer ≥ 0 | Yes | — | Frequency in Hz. `0` = silence (gap). |
+| `duration` | number > 0 | Yes | — | Duration of this note in seconds. |
+| `volume` | number 0.0–1.0 | No | request volume | Per-note volume override. |
+
+Maximum 64 notes per custom sequence.
+
+### 11.4 Volume Control
+
+The global sound volume is set at boot from `config.DEFAULT_VOLUME` (default 0.3). It can be changed:
+
+- **VOL+ / VOL- hardware buttons** — adjust by `VOLUME_STEP` (default 10%) per press
+- **`volume` field on any sound request** — per-request override (does not change global volume)
+
+The current volume is reported in `GET /status` under `sound.volume`.
+
+### 11.5 Sound Response
+
+**Success (200 OK):**
+```json
+{
+  "ok": true,
+  "pattern": "double_beep",
+  "repeats": 1,
+  "notes": 3,
+  "volume": 0.8,
+  "sound_queue_depth": 0
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `pattern` | The pattern name that was enqueued |
+| `repeats` | Number of repeats requested |
+| `notes` | Total number of notes in the sequence |
+| `volume` | Effective volume for this request |
+| `sound_queue_depth` | Number of sound requests still waiting to play |
+
+### 11.6 Sound in GET /status
+
+`GET /status` now includes a `"sound"` object:
+
+```json
+{
+  "sound": {
+    "playing": true,
+    "volume": 0.5,
+    "queue_depth": 2
+  }
+}
+```
+
+---
+
+## 12. Error Responses
 
 All errors return a non-200 HTTP status code and a JSON body.
 
@@ -522,9 +664,53 @@ Returned when the queue is full and the incoming message has the lowest priority
 
 ---
 
-## 12. Complete Examples
+## 13. Complete Examples
 
-### 12.1 Permanent Frequency Display
+### 13.0 Sound Examples
+
+#### Simple beep alert
+```json
+POST /sound
+{"pattern": "beep"}
+```
+
+#### DX spot alert — loud, repeated
+```json
+POST /sound
+{"pattern": "dx", "volume": 0.9, "repeats": 2, "gap": 0.3}
+```
+
+#### Single tone
+```json
+POST /sound
+{"pattern": "tone", "frequency": 1000, "duration": 0.5, "volume": 0.6}
+```
+
+#### Custom melody
+```json
+POST /sound
+{
+  "pattern": "custom",
+  "volume": 0.7,
+  "notes": [
+    {"freq": 523, "duration": 0.1},
+    {"freq": 659, "duration": 0.1},
+    {"freq": 784, "duration": 0.1},
+    {"freq": 1047, "duration": 0.2}
+  ]
+}
+```
+
+#### Alert + display simultaneously (send both requests back-to-back)
+```
+POST /sound  {"pattern": "alarm", "repeats": 3}
+POST /display {"type": "display", "priority": 9, "lines": [{"text": "HIGH NOISE", "color": "red", "effect": "blink"}]}
+```
+Both execute concurrently — the alarm plays while the display shows the alert.
+
+---
+
+### 13.1 Permanent Frequency Display
 
 A low-priority, permanent display showing the current frequency. Sent once on startup; updated by re-sending with the same `id`.
 
@@ -549,7 +735,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.2 CW Spot — Scrolling, Expires After 10 Seconds
+### 13.2 CW Spot — Scrolling, Expires After 10 Seconds
 
 ```json
 {
@@ -575,7 +761,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.3 Two-Line: Static Frequency + Scrolling Spot
+### 13.3 Two-Line: Static Frequency + Scrolling Spot
 
 ```json
 {
@@ -615,7 +801,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.4 Chat Message — Cyan Scroll, 8 Seconds
+### 13.4 Chat Message — Cyan Scroll, 8 Seconds
 
 ```json
 {
@@ -640,7 +826,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.5 Two-Line: Two Independent Scrolling Spots
+### 13.5 Two-Line: Two Independent Scrolling Spots
 
 ```json
 {
@@ -673,7 +859,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.6 High-Priority Alert — Blinking Red
+### 13.6 High-Priority Alert — Blinking Red
 
 ```json
 {
@@ -700,7 +886,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.7 Two-Line: Right-Aligned Callsign + Left-Aligned Frequency
+### 13.7 Two-Line: Right-Aligned Callsign + Left-Aligned Frequency
 
 ```json
 {
@@ -739,7 +925,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.8 Rainbow Scrolling Screensaver
+### 13.8 Rainbow Scrolling Screensaver
 
 ```json
 {
@@ -764,7 +950,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.9 Gradient Text — Static, Centred
+### 13.9 Gradient Text — Static, Centred
 
 ```json
 {
@@ -787,7 +973,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.10 Pulsing Noise Floor Reading
+### 13.10 Pulsing Noise Floor Reading
 
 ```json
 {
@@ -812,7 +998,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.11 Control: Set Brightness
+### 13.11 Control: Set Brightness
 
 ```json
 {
@@ -824,7 +1010,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.12 Control: Cancel a Specific Message
+### 13.12 Control: Cancel a Specific Message
 
 ```json
 {
@@ -836,7 +1022,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-### 12.13 Control: Clear Everything
+### 13.13 Control: Clear Everything
 
 ```json
 {
@@ -847,7 +1033,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 
 ---
 
-## 13. Field Reference Summary
+## 14. Field Reference Summary
 
 ### Display Message Top-Level Fields
 
@@ -898,3 +1084,23 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 | `type` | `"control"` | **Yes** | Must be `"control"` |
 | `cmd` | string | **Yes** | `"clear"`, `"brightness"`, `"cancel"`, `"cancel_all"`, `"status"` |
 | `value` | number | For `brightness` | `0.0` – `1.0` |
+
+### Sound Request Fields (`POST /sound`)
+
+| Field | Type | Required | Default | Valid Values |
+|-------|------|----------|---------|-------------|
+| `pattern` | string | No | `"beep"` | Any named pattern, `"tone"`, `"custom"` |
+| `volume` | number \| null | No | engine volume | `0.0` – `1.0` |
+| `repeats` | integer | No | `1` | `1` – `20` |
+| `gap` | number | No | `0.1` | `>= 0.0` |
+| `frequency` | integer | For `"tone"` | `880` | `> 0` Hz |
+| `duration` | number | For `"tone"` | `0.2` | `> 0.0` seconds |
+| `notes` | array | For `"custom"` | — | Array of Note Objects (max 64) |
+
+### Note Object Fields (inside `notes` array)
+
+| Field | Type | Required | Default | Valid Values |
+|-------|------|----------|---------|-------------|
+| `freq` | integer | **Yes** | — | `>= 0` Hz (`0` = silence) |
+| `duration` | number | **Yes** | — | `> 0.0` seconds |
+| `volume` | number \| null | No | request volume | `0.0` – `1.0` |

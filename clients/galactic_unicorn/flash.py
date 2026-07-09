@@ -97,7 +97,7 @@ BOOTSEL_DRIVE_NAMES = ["RPI-RP2", "RPI-RP2 "]
 # Files to copy to the Pico W (in order).
 # config.py is NOT in this list — it is generated from credentials at flash time
 # and written to a temp file, never persisted in the repo.
-FIRMWARE_FILES = ["display_engine.py", "main.py"]
+FIRMWARE_FILES = ["display_engine.py", "sound_engine.py", "main.py"]
 
 # ---------------------------------------------------------------------------
 # Colour output helpers
@@ -477,8 +477,29 @@ IDLE_ALIGN = "center"
 # Hardware button behaviour
 # ---------------------------------------------------------------------------
 BRIGHTNESS_STEP = 0.1
-BRIGHTNESS_MIN = 0.05
+BRIGHTNESS_MIN = 0.15       # Minimum brightness in auto mode
 BRIGHTNESS_MAX = 1.0
+
+# Volume (VOL +/- buttons)
+DEFAULT_VOLUME = 0.3
+VOLUME_STEP = 0.1
+VOLUME_MIN = 0.0
+VOLUME_MAX = 1.0
+
+# ---------------------------------------------------------------------------
+# Auto-brightness (light sensor → display brightness)
+# Button D cycle: MIN → ... → MAX → AUTO → MIN → ...
+# Pressing LUX+/- or D again exits AUTO mode.
+# ---------------------------------------------------------------------------
+AUTO_BRIGHTNESS_DEFAULT      = True     # True = auto-brightness on at boot
+AUTO_BRIGHTNESS_INTERVAL_S   = 1.0      # Seconds between sensor reads
+AUTO_BRIGHTNESS_SMOOTHING    = 0.2      # EMA factor (lower = smoother)
+AUTO_BRIGHTNESS_CURVE        = "linear" # "linear" or "sqrt"
+AUTO_BRIGHTNESS_DEADBAND     = 0.02     # Min change to act on (2%)
+AUTO_BRIGHTNESS_STABLE_READS = 2        # Consecutive reads required before writing
+AUTO_BRIGHTNESS_MIN_WRITE_S  = 2.0      # Min seconds between brightness writes
+AUTO_BRIGHTNESS_SENSOR_MIN   = 30       # Raw sensor value → BRIGHTNESS_MIN (dark room)
+AUTO_BRIGHTNESS_SENSOR_MAX   = 130      # Raw sensor value → BRIGHTNESS_MAX (bright room)
 
 # ---------------------------------------------------------------------------
 # Network timeouts
@@ -797,6 +818,7 @@ def main():
         err("")
         err("Try running manually:")
         err(f"  python3 -m mpremote connect {port or 'auto'} cp firmware/display_engine.py :display_engine.py")
+        err(f"  python3 -m mpremote connect {port or 'auto'} cp firmware/sound_engine.py :sound_engine.py")
         err(f"  python3 -m mpremote connect {port or 'auto'} cp firmware/main.py :main.py")
         err(f"  python3 -m mpremote connect {port or 'auto'} cp /tmp/gu_config_XXXXX.py :config.py")
         err("")

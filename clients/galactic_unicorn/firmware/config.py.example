@@ -17,7 +17,7 @@ HTTP_HOST = "0.0.0.0"  # Listen on all interfaces
 # Display defaults
 # ---------------------------------------------------------------------------
 DEFAULT_BRIGHTNESS = 0.5    # 0.0 (off) – 1.0 (full brightness)
-DEFAULT_VOLUME = 0.5        # 0.0 (silent) – 1.0 (full volume); set at boot
+DEFAULT_VOLUME = 0.3        # 0.0 (silent) – 1.0 (full volume); set at boot
 QUEUE_MAX_SIZE = 16         # Maximum number of queued display messages
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ IDLE_ALIGN = "center"
 
 # Brightness step size and limits (shared by LUX buttons and button D)
 BRIGHTNESS_STEP = 0.1       # How much each press changes brightness (10%)
-BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off)
+BRIGHTNESS_MIN = 0.15       # Minimum brightness in auto mode (never fully off)
 BRIGHTNESS_MAX = 1.0        # Maximum brightness
 
 # Volume step size and limits (VOL +/- buttons)
@@ -85,6 +85,41 @@ BTN_BRIGHTNESS_PRIORITY = 8    # Priority of the brief brightness-confirmation m
 BTN_BRIGHTNESS_DURATION = 1.0  # Seconds to show the brightness percentage label
 BTN_D_HOLD_DELAY_MS = 500      # ms held before auto-repeat begins
 BTN_D_REPEAT_MS = 300          # ms between each auto-repeat step while held
+
+# ---------------------------------------------------------------------------
+# Auto-brightness (light sensor → display brightness)
+#
+# Activated by pressing button D past BRIGHTNESS_MAX — the cycle becomes:
+#   MIN → ... → MAX → AUTO → MIN → ...
+# Pressing LUX+/- or D again exits AUTO mode.
+#
+# Four heuristics prevent constant micro-adjustments from sensor noise:
+#   1. EMA smoothing     — damps rapid fluctuations before any decision is made
+#   2. Dead-band         — ignores changes smaller than DEADBAND (e.g. 2%)
+#   3. Stability window  — requires STABLE_READS consecutive reads outside the
+#                          dead-band before committing a change
+#   4. Min write interval— enforces a minimum gap between actual brightness writes
+# ---------------------------------------------------------------------------
+AUTO_BRIGHTNESS_DEFAULT      = True     # True = auto-brightness on at boot; False = manual
+AUTO_BRIGHTNESS_INTERVAL_S   = 1.0      # Seconds between light sensor reads
+AUTO_BRIGHTNESS_SMOOTHING    = 0.2    # EMA factor: 0.0 = frozen, 1.0 = instant
+                                      # Lower = slower, smoother transitions
+AUTO_BRIGHTNESS_CURVE        = "linear" # "linear" or "sqrt"
+                                        # "linear" gives direct proportional mapping
+AUTO_BRIGHTNESS_DEADBAND     = 0.02   # Min brightness change to act on (0.0–1.0)
+                                      # 0.02 = ignore changes smaller than 2%
+AUTO_BRIGHTNESS_STABLE_READS = 2      # Consecutive reads required before writing
+                                      # Prevents reacting to a single flash/shadow
+AUTO_BRIGHTNESS_MIN_WRITE_S  = 2.0    # Min seconds between brightness writes
+                                      # Prevents flickering during gradual changes
+#
+# Sensor calibration — set these to the raw gu.light() values observed in
+# your darkest and brightest ambient conditions.  Check GET /status for the
+# current light_sensor reading.  The full brightness range maps across this
+# window; readings outside it are clamped.
+#   Typical indoor shack: dark/covered ~30, bright room ~130
+AUTO_BRIGHTNESS_SENSOR_MIN   = 30     # Raw sensor value → BRIGHTNESS_MIN
+AUTO_BRIGHTNESS_SENSOR_MAX   = 130    # Raw sensor value → BRIGHTNESS_MAX
 
 # ---------------------------------------------------------------------------
 # Network timeouts

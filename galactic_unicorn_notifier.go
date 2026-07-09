@@ -72,20 +72,31 @@ func (g *GalacticUnicornChannel) Type() string { return "galactic_unicorn" }
 // The message string (rendered by the notification template) becomes the
 // text of the first line.  All display parameters come from the channel config.
 func (g *GalacticUnicornChannel) Send(message string) (ChannelResponse, error) {
-	return g.sendWithRetry(message, 2)
+	return g.sendWithRetry(message, GalacticUnicornOverride{}, 2)
 }
 
-func (g *GalacticUnicornChannel) sendWithRetry(message string, attemptsLeft int) (ChannelResponse, error) {
-	resp, err := g.doSend(message)
+// SendWithOverride delivers message as a display command to the Galactic
+// Unicorn, applying override on top of the channel's own configuration: any
+// non-empty/non-zero field in override replaces the corresponding channel
+// config value for this send only. This lets a notification rule display
+// differently (e.g. a distinct colour or effect) on the same physical device
+// without duplicating channels. Implements the notification manager's
+// optional overrideSender interface (see notification_manager.go).
+func (g *GalacticUnicornChannel) SendWithOverride(message string, override GalacticUnicornOverride) (ChannelResponse, error) {
+	return g.sendWithRetry(message, override, 2)
+}
+
+func (g *GalacticUnicornChannel) sendWithRetry(message string, override GalacticUnicornOverride, attemptsLeft int) (ChannelResponse, error) {
+	resp, err := g.doSend(message, override)
 	if err != nil && gudriver.IsTransientError(err) && attemptsLeft > 1 {
 		log.Printf("[GalacticUnicorn:%s] send error (retrying): %v", g.name, err)
 		time.Sleep(2 * time.Second)
-		return g.sendWithRetry(message, attemptsLeft-1)
+		return g.sendWithRetry(message, override, attemptsLeft-1)
 	}
 	return resp, err
 }
 
-func (g *GalacticUnicornChannel) doSend(message string) (ChannelResponse, error) {
+func (g *GalacticUnicornChannel) doSend(message string, override GalacticUnicornOverride) (ChannelResponse, error) {
 	cfg := g.cfg
 
 	// Resolve model — informational only; firmware auto-detects display dimensions.
@@ -99,53 +110,90 @@ func (g *GalacticUnicornChannel) doSend(message string) (ChannelResponse, error)
 		return ChannelResponse{}, fmt.Errorf("galactic_unicorn: galactic_unicorn_url is not configured")
 	}
 
-	// ── Resolve display parameters with defaults ──────────────────────────────
+	// ── Resolve display parameters: rule override → channel config → built-in default ──
 
-	color := cfg.GalacticUnicornColor
+	color := override.Color
+	if color == "" {
+		color = cfg.GalacticUnicornColor
+	}
 	if color == "" {
 		color = "white"
 	}
 
-	size := cfg.GalacticUnicornSize
+	size := override.Size
+	if size == 0 {
+		size = cfg.GalacticUnicornSize
+	}
 	if size < 1 || size > 3 {
 		size = 1
 	}
 
-	effect := cfg.GalacticUnicornEffect
+	effect := override.Effect
+	if effect == "" {
+		effect = cfg.GalacticUnicornEffect
+	}
 	if effect == "" {
 		effect = gudriver.EffectAuto
 	}
 
-	align := cfg.GalacticUnicornAlign
+	align := override.Align
+	if align == "" {
+		align = cfg.GalacticUnicornAlign
+	}
 	if align == "" {
 		align = gudriver.AlignLeft
 	}
 
-	scrollSpeed := cfg.GalacticUnicornScrollSpeed
+	scrollSpeed := override.ScrollSpeed
+	if scrollSpeed == 0 {
+		scrollSpeed = cfg.GalacticUnicornScrollSpeed
+	}
 	if scrollSpeed <= 0 {
 		scrollSpeed = 40
 	}
 
-	scrollPause := cfg.GalacticUnicornScrollPause
+	scrollPause := override.ScrollPause
+	if scrollPause == 0 {
+		scrollPause = cfg.GalacticUnicornScrollPause
+	}
 	if scrollPause <= 0 {
 		scrollPause = 1.0
 	}
 
-	priority := cfg.GalacticUnicornPriority
+	priority := override.Priority
+	if priority == 0 {
+		priority = cfg.GalacticUnicornPriority
+	}
 	if priority < 0 || priority > 10 {
 		priority = 5
 	}
 
-	duration := gudriver.DurationSeconds(cfg.GalacticUnicornDuration)
+	durationSeconds := override.Duration
+	if durationSeconds == 0 {
+		durationSeconds = cfg.GalacticUnicornDuration
+	}
+	duration := gudriver.DurationSeconds(durationSeconds)
 
-	transition := cfg.GalacticUnicornTransition
+	transition := override.Transition
+	if transition == "" {
+		transition = cfg.GalacticUnicornTransition
+	}
 	if transition == "" {
 		transition = gudriver.TransitionCut
 	}
 
+	bgColor := override.BgColor
+	if bgColor == "" {
+		bgColor = cfg.GalacticUnicornBgColor
+	}
+
+	brightness := override.Brightness
+	if brightness == 0 {
+		brightness = cfg.GalacticUnicornBrightness
+	}
 	var brightnessPtr *float64
-	if cfg.GalacticUnicornBrightness > 0.0 {
-		b := cfg.GalacticUnicornBrightness
+	if brightness > 0.0 {
+		b := brightness
 		brightnessPtr = &b
 	}
 
@@ -156,7 +204,7 @@ func (g *GalacticUnicornChannel) doSend(message string) (ChannelResponse, error)
 		Duration:   duration,
 		Transition: transition,
 		Brightness: brightnessPtr,
-		BgColor:    cfg.GalacticUnicornBgColor,
+		BgColor:    bgColor,
 		Lines: []gudriver.DisplayLine{
 			{
 				Text:        message,

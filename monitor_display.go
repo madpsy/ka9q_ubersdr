@@ -940,8 +940,52 @@ func buildNetworkSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 	}
 }
 
+// buildChatSlide returns a slide showing the number of active live-chat users.
+// Returns nil when dxWsHandler is nil, chat is disabled, or no one is currently
+// in chat — the card is simply omitted from the rotation in that case.
+//
+// Top line:  "CHAT" in lime + session user count (capacity colour)
+// Bottom line segments:
+//
+//	"N"        lime/amber/red — active chat user count, colour-coded against
+//	                            the configured chat max_users (lime = plenty of
+//	                            room, amber ≥75% full, red at/over the limit;
+//	                            plain lime when no max is configured)
+//	" in chat" cyan           — label, matching the cyan used for chat
+//	                            usernames/messages elsewhere in the protocol
+func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if dxWsHandler == nil {
+		return nil
+	}
+	chatUsers := dxWsHandler.GetChatUserCount()
+	if chatUsers <= 0 {
+		return nil
+	}
+
+	countColor := "lime"
+	if maxChatUsers > 0 {
+		switch {
+		case chatUsers >= maxChatUsers:
+			countColor = "red"
+		case chatUsers >= maxChatUsers*3/4:
+			countColor = "amber"
+		}
+	}
+
+	segs := []gudriver.Segment{
+		{Text: fmt.Sprintf("%d", chatUsers), Color: countColor},
+		{Text: " in chat", Color: "cyan"},
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("CHAT", "lime", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor, dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int) []monitorSlide {
 	var slides []monitorSlide
 
 	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
@@ -1003,7 +1047,12 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 13. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 13. Live chat user count (optional — omitted when chat disabled or empty)
+	if s := buildChatSlide(dxWsHandler, maxChatUsers, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 14. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
@@ -1309,9 +1358,11 @@ type MonitorDisplay struct {
 	cwCallsign   string               // CW skimmer callsign for RBN lookup (may be empty)
 	callsign     string               // receiver callsign for PSK/WSPR rank lookup
 	maxSessions  int
-	rotctl       *RotctlAPIHandler // nil if rotator not enabled
-	antSwitch    *AntSwitchHandler // nil if antenna switch not enabled
-	gpsdoMonitor *GPSDOMonitor     // nil if GPSDO not enabled
+	rotctl       *RotctlAPIHandler          // nil if rotator not enabled
+	antSwitch    *AntSwitchHandler          // nil if antenna switch not enabled
+	gpsdoMonitor *GPSDOMonitor              // nil if GPSDO not enabled
+	dxWsHandler  *DXClusterWebSocketHandler // nil if chat not wired
+	maxChatUsers int                        // configured chat.max_users (0 = unlimited)
 	cancel       context.CancelFunc
 }
 
@@ -1326,7 +1377,9 @@ type MonitorDisplay struct {
 // callsign is the receiver callsign used for PSK/WSPR rank lookups (e.g. config.Decoder.ReceiverCallsign).
 // rotctl and antSwitch may be nil — their slides are omitted when not wired.
 // gpsdoMonitor may be nil — GPSDO slide is omitted when not wired or device absent.
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, weather *WeatherService, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor) *MonitorDisplay {
+// dxWsHandler may be nil — the chat user-count slide is omitted when not wired, chat is
+// disabled, or no one is currently in chat.
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, weather *WeatherService, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor, dxWsHandler *DXClusterWebSocketHandler) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -1366,6 +1419,8 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		rotctl:       rotctl,
 		antSwitch:    antSwitch,
 		gpsdoMonitor: gpsdoMonitor,
+		dxWsHandler:  dxWsHandler,
+		maxChatUsers: cfg.Chat.MaxUsers,
 	}
 }
 
@@ -1415,7 +1470,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch, md.gpsdoMonitor)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch, md.gpsdoMonitor, md.dxWsHandler, md.maxChatUsers)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():

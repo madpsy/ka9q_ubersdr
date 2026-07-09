@@ -2200,6 +2200,37 @@ function webhookFieldsHTML(ch, isEdit) {
         '</details>';
 }
 
+// colorFieldHTML renders a paired text input + native colour-swatch button for
+// Galactic Unicorn colour fields. The text input accepts any value the display
+// protocol supports (named colour, hex, "rainbow", "gradient:c1:c2"); the swatch
+// button only ever writes a hex value back into the text field when the user
+// picks a colour — it never overwrites a non-hex value on its own.
+// `id` is the text input's element id; the swatch input gets id + "Picker".
+function colorFieldHTML(id, value, placeholder) {
+    var v = value || '';
+    var hexMatch = /^#[0-9a-fA-F]{6}$/.test(v);
+    var swatchValue = hexMatch ? v : '#ffffff';
+    return '<div style="display:flex;gap:6px;align-items:center">' +
+        '<input type="text" id="' + id + '" value="' + escHtml(v) + '" placeholder="' + escHtml(placeholder || '') + '" style="flex:1">' +
+        '<input type="color" id="' + id + 'Picker" value="' + swatchValue + '" title="Pick a colour" ' +
+            'style="width:36px;height:32px;padding:0;border:1px solid #ccc;border-radius:4px;cursor:pointer;flex-shrink:0">' +
+        '</div>';
+}
+
+// wireColorPicker connects a swatch <input type="color"> to its paired text
+// input so picking a colour writes the hex value into the text field. Typing
+// directly into the text field (named colours, rainbow, gradient:…) is left
+// untouched — the swatch never reads from the text field except to seed its
+// own initial value at render time.
+function wireColorPicker(id) {
+    var picker = el(id + 'Picker');
+    var text = el(id);
+    if (!picker || !text) return;
+    picker.addEventListener('input', function() {
+        text.value = this.value;
+    });
+}
+
 function galacticUnicornFieldsHTML(ch, isEdit) {
     var models = [['galactic','Galactic Unicorn — 53×11'],['stellar','Stellar Unicorn — 16×16'],['cosmic','Cosmic Unicorn — 32×32']];
     var modelOptions = models.map(function(m) {
@@ -2236,9 +2267,9 @@ function galacticUnicornFieldsHTML(ch, isEdit) {
         '</div>' +
         '<div class="form-row">' +
             '<div class="form-group">' +
-                '<label>Text Colour</label>' +
-                '<input type="text" id="chGUColor" value="' + escHtml(ch.galactic_unicorn_color || 'white') + '" placeholder="white">' +
-                '<div class="form-hint">Named colour, hex <code>#FF8000</code>, <code>rainbow</code>, or <code>gradient:orange:red</code>.</div>' +
+                '<label>Default Text Colour</label>' +
+                colorFieldHTML('chGUColor', ch.galactic_unicorn_color || 'white', 'white') +
+                '<div class="form-hint">Named colour, hex <code>#FF8000</code>, <code>rainbow</code>, or <code>gradient:orange:red</code>. Used unless a rule sets its own colour for this channel.</div>' +
             '</div>' +
             '<div class="form-group">' +
                 '<label>Font Size</label>' +
@@ -2287,9 +2318,9 @@ function galacticUnicornFieldsHTML(ch, isEdit) {
                 '<select id="chGUTransition">' + transitionOptions + '</select>' +
             '</div>' +
             '<div class="form-group">' +
-                '<label>Background Colour</label>' +
-                '<input type="text" id="chGUBgColor" value="' + escHtml(ch.galactic_unicorn_bg_color || '') + '" placeholder="(black)">' +
-                '<div class="form-hint">Leave blank for black background.</div>' +
+                '<label>Default Background Colour</label>' +
+                colorFieldHTML('chGUBgColor', ch.galactic_unicorn_bg_color || '', '(black)') +
+                '<div class="form-hint">Leave blank for black background. Used unless a rule sets its own background for this channel.</div>' +
             '</div>' +
         '</div>' +
         '<div class="form-row">' +
@@ -2473,6 +2504,8 @@ function showChannelForm(editName) {
         } else if (type === 'galactic_unicorn') {
             el('chTypeFields').innerHTML = galacticUnicornFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('galactic_unicorn');
+            wireColorPicker('chGUColor');
+            wireColorPicker('chGUBgColor');
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');
@@ -2902,6 +2935,10 @@ function renderRules() {
         const overrideBadge = overrideCount > 0
             ? '<span class="badge badge-yellow" title="Per-channel template overrides">' + overrideCount + ' channel template' + (overrideCount !== 1 ? 's' : '') + '</span>'
             : '';
+        const guOverrideCount = rule.galactic_unicorn_overrides ? Object.keys(rule.galactic_unicorn_overrides).length : 0;
+        const guOverrideBadge = guOverrideCount > 0
+            ? '<span class="badge badge-yellow" title="Per-channel Galactic Unicorn display overrides">&#x1F984; ' + guOverrideCount + ' custom</span>'
+            : '';
         const dedupBadge = (Array.isArray(rule.dedup_by) && rule.dedup_by.length > 0)
             ? '<span class="badge badge-purple" title="Notify once per ' + escHtml(rule.dedup_by.join(', ')) +
                 (rule.dedup_window_minutes ? ' every ' + rule.dedup_window_minutes + ' min' : ' (until restart)') + '">' +
@@ -2930,6 +2967,7 @@ function renderRules() {
                         ruleCapBadge +
                         templateBadge +
                         overrideBadge +
+                        guOverrideBadge +
                         statsBadges +
                     '</div>' +
                 '</div>' +
@@ -2979,6 +3017,13 @@ function showRuleForm(editIdx) {
     };
     // Working copy of per-channel template overrides, preserved across re-renders.
     const workingTemplates = Object.assign({}, rule.templates || {});
+    // Working copy of per-channel Galactic Unicorn display overrides, preserved
+    // across re-renders. Deep-copied per channel so editing one entry's fields
+    // in the modal doesn't mutate the original rule object until Save Rule.
+    const workingGalacticOverrides = {};
+    Object.keys(rule.galactic_unicorn_overrides || {}).forEach(function(chName) {
+        workingGalacticOverrides[chName] = Object.assign({}, rule.galactic_unicorn_overrides[chName]);
+    });
 
     const eventOptions = EVENT_TYPES.map(function(et) {
         return '<option value="' + et + '"' + (rule.event === et ? ' selected' : '') + '>' + eventLabel(et) + '</option>';
@@ -3015,6 +3060,7 @@ function showRuleForm(editIdx) {
                 (Object.keys(localConfig.channels).length === 0
                     ? '<p style="font-size:0.875rem;color:#888">No channels configured. Add a channel first.</p>'
                     : '<div class="checkbox-group" id="ruleChannels">' + channelCheckboxes + '</div>') +
+                '<div id="galacticOverridesSection"></div>' +
             '</div>' +
             '<div class="config-section" id="filterSection">' +
                 '<div class="config-section-title">Filters <span style="font-weight:400;font-size:0.8rem;color:#888">(all optional — leave blank to match everything)</span></div>' +
@@ -3058,6 +3104,7 @@ function showRuleForm(editIdx) {
     renderDedupFields(rule.event, rule.dedup_by, rule.dedup_window_minutes);
     renderTemplateFields(rule.event);
     renderChannelTemplateOverrides(workingTemplates);
+    renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides);
 
     // Wire up the "Customise" overlay button if present
     var btnCustomise = el('btnCustomiseTemplate');
@@ -3085,6 +3132,7 @@ function showRuleForm(editIdx) {
         cb.addEventListener('change', function() {
             captureChannelTemplateOverrides(workingTemplates);
             renderChannelTemplateOverrides(workingTemplates);
+            renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides);
         });
     });
 
@@ -3121,6 +3169,15 @@ function showRuleForm(editIdx) {
             if (workingTemplates[c]) templates[c] = workingTemplates[c];
         });
 
+        // Collect per-channel Galactic Unicorn display overrides for the
+        // channels still selected (and still of type galactic_unicorn).
+        const galacticOverrides = {};
+        galacticChannelsChecked().forEach(function(c) {
+            if (hasAnyOverrideValue(workingGalacticOverrides[c])) {
+                galacticOverrides[c] = workingGalacticOverrides[c];
+            }
+        });
+
         const ruleMaxPerMin = parseInt(el('ruleMaxPerMinute').value, 10);
         const newRule = {
             name:                 name,
@@ -3133,6 +3190,7 @@ function showRuleForm(editIdx) {
             max_per_minute:       isNaN(ruleMaxPerMin) ? 0 : Math.max(0, ruleMaxPerMin),
             template:             template,
             templates:            templates,
+            galactic_unicorn_overrides: galacticOverrides,
         };
 
         if (isEdit) {
@@ -3191,6 +3249,235 @@ function renderChannelTemplateOverrides(workingTemplates) {
         '</details>';
     });
     container.innerHTML = html;
+}
+
+// galacticChannelsChecked returns the list of currently-checked channel names
+// whose configured type is galactic_unicorn. Used to show/hide the per-rule
+// Galactic Unicorn override section live, with no extra API round-trip —
+// channel type is already available in localConfig.channels.
+function galacticChannelsChecked() {
+    const names = [];
+    document.querySelectorAll('.rule-channel-cb:checked').forEach(function(cb) {
+        const chCfg = localConfig.channels[cb.value];
+        if (chCfg && chCfg.type === 'galactic_unicorn') names.push(cb.value);
+    });
+    return names;
+}
+
+// hasAnyOverrideValue mirrors the Go GalacticUnicornOverride.hasAnyValue() —
+// true if any field of the override object is set to a non-empty/non-zero value.
+function hasAnyOverrideValue(ov) {
+    if (!ov) return false;
+    return !!(ov.color || ov.bg_color || ov.size || ov.effect || ov.align ||
+        ov.scroll_speed || ov.scroll_pause || ov.transition || ov.priority || ov.duration || ov.brightness);
+}
+
+// renderGalacticOverridesSection draws one summary row per currently-checked
+// galactic_unicorn channel with a Default/Custom badge and an Edit button that
+// opens the override modal for that channel. Renders nothing (section absent)
+// when no checked channel is a galactic_unicorn type — non-Unicorn rules never
+// see this section.
+function renderGalacticOverridesSection(galacticNames, workingOverrides) {
+    const container = el('galacticOverridesSection');
+    if (!container) return;
+
+    if (galacticNames.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '<div class="config-section-title" style="margin-top:14px">&#x1F984; Galactic Unicorn Colour ' +
+        '<span style="font-weight:400;font-size:0.8rem;color:#888">(optional — per-channel display overrides for this rule)</span></div>';
+    galacticNames.forEach(function(name) {
+        const ov = workingOverrides[name];
+        const isCustom = hasAnyOverrideValue(ov);
+        html += '<div class="gu-override-row">' +
+            '<span class="gu-override-name">' + escHtml(name) + '</span>' +
+            '<span>' +
+                (isCustom ? '<span class="badge badge-yellow">Custom</span>' : '<span class="badge badge-grey">Default</span>') +
+                ' <button type="button" class="btn btn-secondary btn-sm gu-edit-btn" data-channel="' + escHtml(name) + '" style="margin-left:8px">Edit</button>' +
+            '</span>' +
+        '</div>';
+    });
+    container.innerHTML = html;
+
+    container.querySelectorAll('.gu-edit-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            openGalacticOverrideModal(btn.dataset.channel, workingOverrides);
+        });
+    });
+}
+
+// openGalacticOverrideModal shows a modal dialog for editing the Galactic
+// Unicorn display overrides for one channel on the current rule. This keeps
+// the rule form itself compact even though the Unicorn protocol exposes many
+// display options (colour, size, effect, alignment, scroll, transition,
+// priority, duration). workingOverrides is mutated in place on Save; the
+// caller's summary row is re-rendered immediately afterward.
+function openGalacticOverrideModal(chName, workingOverrides) {
+    const existing = document.getElementById('guOverrideModalOverlay');
+    if (existing) existing.remove();
+
+    const ov = workingOverrides[chName] || {};
+    const isCustom = hasAnyOverrideValue(ov);
+    const chCfg = localConfig.channels[chName] || {};
+
+    const effects = [['auto','Auto'],['static','Static'],['scroll','Scroll'],['blink','Blink'],['pulse','Pulse']];
+    const effectOptions = ('<option value="">(channel default: ' + escHtml(chCfg.galactic_unicorn_effect || 'auto') + ')</option>') +
+        effects.map(function(e) { return '<option value="' + e[0] + '"' + (ov.effect === e[0] ? ' selected' : '') + '>' + escHtml(e[1]) + '</option>'; }).join('');
+
+    const aligns = [['left','Left'],['center','Center'],['right','Right']];
+    const alignOptions = ('<option value="">(channel default: ' + escHtml(chCfg.galactic_unicorn_align || 'left') + ')</option>') +
+        aligns.map(function(a) { return '<option value="' + a[0] + '"' + (ov.align === a[0] ? ' selected' : '') + '>' + escHtml(a[1]) + '</option>'; }).join('');
+
+    const transitions = [['cut','Cut'],['fade','Fade'],['wipe_left','Wipe Left'],['wipe_right','Wipe Right']];
+    const transitionOptions = ('<option value="">(channel default: ' + escHtml(chCfg.galactic_unicorn_transition || 'cut') + ')</option>') +
+        transitions.map(function(t) { return '<option value="' + t[0] + '"' + (ov.transition === t[0] ? ' selected' : '') + '>' + escHtml(t[1]) + '</option>'; }).join('');
+
+    const sizes = ['', '1', '2', '3'];
+    const sizeOptions = sizes.map(function(s) {
+        const label = s === '' ? '(channel default: ' + (chCfg.galactic_unicorn_size || 1) + ')' :
+            (s + (s==='1'?' (5px — small)':s==='2'?' (7px — medium)':' (11px — large)'));
+        return '<option value="' + s + '"' + (String(ov.size || '') === s ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'guOverrideModalOverlay';
+    overlay.className = 'gu-modal-overlay';
+    overlay.innerHTML =
+        '<div class="gu-modal-content">' +
+            '<div class="gu-modal-title">&#x1F984; Galactic Unicorn Colour — ' + escHtml(chName) + '</div>' +
+            '<div class="gu-modal-subtitle">Choose whether this rule uses the channel\'s own display settings, or a custom look just for this rule.</div>' +
+            '<div class="gu-mode-toggle">' +
+                '<label id="guModeDefaultLabel" class="' + (!isCustom ? 'active' : '') + '">' +
+                    '<input type="radio" name="guMode" id="guModeDefault" value="default"' + (!isCustom ? ' checked' : '') + '> Use channel default' +
+                '</label>' +
+                '<label id="guModeCustomLabel" class="' + (isCustom ? 'active' : '') + '">' +
+                    '<input type="radio" name="guMode" id="guModeCustom" value="custom"' + (isCustom ? ' checked' : '') + '> Custom for this rule' +
+                '</label>' +
+            '</div>' +
+            '<div class="gu-modal-fields' + (isCustom ? ' active' : '') + '" id="guModalFields">' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Text Colour</label>' +
+                        colorFieldHTML('guOvColor', ov.color || '', 'channel default: ' + (chCfg.galactic_unicorn_color || 'white')) +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>Background Colour</label>' +
+                        colorFieldHTML('guOvBgColor', ov.bg_color || '', 'channel default: ' + (chCfg.galactic_unicorn_bg_color || '(black)')) +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Font Size</label>' +
+                        '<select id="guOvSize">' + sizeOptions + '</select>' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>Effect</label>' +
+                        '<select id="guOvEffect">' + effectOptions + '</select>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Alignment</label>' +
+                        '<select id="guOvAlign">' + alignOptions + '</select>' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>Transition</label>' +
+                        '<select id="guOvTransition">' + transitionOptions + '</select>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Scroll Speed <span style="font-weight:400;color:#888">(px/s)</span></label>' +
+                        '<input type="number" id="guOvScrollSpeed" value="' + (ov.scroll_speed || '') + '" min="1" max="200" placeholder="channel default">' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>Scroll Pause <span style="font-weight:400;color:#888">(s)</span></label>' +
+                        '<input type="number" id="guOvScrollPause" value="' + (ov.scroll_pause || '') + '" min="0" max="30" step="0.1" placeholder="channel default">' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Priority <span style="font-weight:400;color:#888">(0–10)</span></label>' +
+                        '<input type="number" id="guOvPriority" value="' + (ov.priority || '') + '" min="0" max="10" placeholder="channel default">' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>Duration <span style="font-weight:400;color:#888">(s)</span></label>' +
+                        '<input type="number" id="guOvDuration" value="' + (ov.duration || '') + '" min="0" step="0.5" placeholder="channel default">' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>Brightness Override <span style="font-weight:400;color:#888">(0.0–1.0)</span></label>' +
+                        '<input type="number" id="guOvBrightness" value="' + (ov.brightness || '') + '" min="0" max="1" step="0.05" placeholder="channel default">' +
+                        '<div class="form-hint">Leave blank to use the channel\'s brightness setting.</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="gu-modal-actions">' +
+                '<button type="button" class="btn" id="guModalSave">Save</button>' +
+                '<button type="button" class="btn btn-secondary" id="guModalCancel">Cancel</button>' +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    wireColorPicker('guOvColor');
+    wireColorPicker('guOvBgColor');
+
+    const fieldsEl = document.getElementById('guModalFields');
+    const defaultLabel = document.getElementById('guModeDefaultLabel');
+    const customLabel = document.getElementById('guModeCustomLabel');
+
+    function syncModeUI() {
+        const custom = document.getElementById('guModeCustom').checked;
+        if (fieldsEl) fieldsEl.classList.toggle('active', custom);
+        if (defaultLabel) defaultLabel.classList.toggle('active', !custom);
+        if (customLabel) customLabel.classList.toggle('active', custom);
+    }
+    document.getElementById('guModeDefault').addEventListener('change', syncModeUI);
+    document.getElementById('guModeCustom').addEventListener('change', syncModeUI);
+
+    function closeModal() {
+        overlay.remove();
+    }
+
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeModal();
+    });
+
+    document.getElementById('guModalCancel').addEventListener('click', closeModal);
+
+    document.getElementById('guModalSave').addEventListener('click', function() {
+        const useCustom = document.getElementById('guModeCustom').checked;
+        if (!useCustom) {
+            delete workingOverrides[chName];
+        } else {
+            const newOv = {
+                color:        document.getElementById('guOvColor').value.trim(),
+                bg_color:     document.getElementById('guOvBgColor').value.trim(),
+                size:         parseInt(document.getElementById('guOvSize').value, 10) || 0,
+                effect:       document.getElementById('guOvEffect').value,
+                align:        document.getElementById('guOvAlign').value,
+                transition:   document.getElementById('guOvTransition').value,
+                scroll_speed: parseInt(document.getElementById('guOvScrollSpeed').value, 10) || 0,
+                scroll_pause: parseFloat(document.getElementById('guOvScrollPause').value) || 0,
+                priority:     parseInt(document.getElementById('guOvPriority').value, 10) || 0,
+                duration:     parseFloat(document.getElementById('guOvDuration').value) || 0,
+                brightness:   parseFloat(document.getElementById('guOvBrightness').value) || 0,
+            };
+            // Only keep the override if at least one field is actually set —
+            // an all-blank "custom" entry is functionally identical to "default".
+            if (hasAnyOverrideValue(newOv)) {
+                workingOverrides[chName] = newOv;
+            } else {
+                delete workingOverrides[chName];
+            }
+        }
+        closeModal();
+        renderGalacticOverridesSection(galacticChannelsChecked(), workingOverrides);
+    });
 }
 
 function renderFilterFields(eventType, currentFilters) {

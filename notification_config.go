@@ -261,6 +261,17 @@ type NotificationRule struct {
 	// that receive the rendered message when this rule fires.
 	Channels []string `yaml:"channels" json:"channels"`
 
+	// GalacticUnicornOverrides holds optional per-channel display-parameter
+	// overrides for galactic_unicorn channels, keyed by channel name. When a
+	// galactic_unicorn channel listed in Channels has an entry here, any
+	// non-empty/non-nil field of that entry overrides the channel's own
+	// configured value for messages sent by this rule; fields left blank/nil
+	// fall back to the channel's own configuration. This lets one rule display
+	// differently (e.g. red for a rare-DX rule, blue for a routine one) on the
+	// same physical Unicorn display without duplicating channels.
+	// Ignored for channel types other than galactic_unicorn.
+	GalacticUnicornOverrides map[string]GalacticUnicornOverride `yaml:"galactic_unicorn_overrides,omitempty" json:"galactic_unicorn_overrides,omitempty"`
+
 	// DedupBy turns a high-volume spot rule into a "notify once per new X" rule.
 	// Each entry names a dimension of the event (see dedupKeysForEvent); the rule
 	// fires only the first time a given combination of those values is seen within
@@ -278,6 +289,51 @@ type NotificationRule struct {
 	// this rule may send across all its channels per minute, using a sliding
 	// window. 0 = unlimited (no cap).
 	MaxPerMinute int `yaml:"max_per_minute,omitempty" json:"max_per_minute,omitempty"`
+}
+
+// GalacticUnicornOverride holds a rule-level, per-channel set of display
+// parameter overrides for a galactic_unicorn channel. Every field is a
+// pointer or has an empty-string zero value so "not set" (use the channel's
+// own configured value) can be distinguished from "explicitly set to zero /
+// empty". All fields mirror their NotificationChannelConfig counterparts —
+// see the Galactic Unicorn section of NotificationChannelConfig for the
+// accepted value formats and ranges.
+type GalacticUnicornOverride struct {
+	// Color overrides GalacticUnicornColor. Empty = use the channel's colour.
+	Color string `yaml:"color,omitempty" json:"color,omitempty"`
+	// BgColor overrides GalacticUnicornBgColor. Empty = use the channel's background.
+	BgColor string `yaml:"bg_color,omitempty" json:"bg_color,omitempty"`
+	// Size overrides GalacticUnicornSize (1-3). 0 = use the channel's size.
+	Size int `yaml:"size,omitempty" json:"size,omitempty"`
+	// Effect overrides GalacticUnicornEffect. Empty = use the channel's effect.
+	Effect string `yaml:"effect,omitempty" json:"effect,omitempty"`
+	// Align overrides GalacticUnicornAlign. Empty = use the channel's alignment.
+	Align string `yaml:"align,omitempty" json:"align,omitempty"`
+	// ScrollSpeed overrides GalacticUnicornScrollSpeed (1-200). 0 = use the channel's speed.
+	ScrollSpeed int `yaml:"scroll_speed,omitempty" json:"scroll_speed,omitempty"`
+	// ScrollPause overrides GalacticUnicornScrollPause. 0 = use the channel's pause.
+	ScrollPause float64 `yaml:"scroll_pause,omitempty" json:"scroll_pause,omitempty"`
+	// Transition overrides GalacticUnicornTransition. Empty = use the channel's transition.
+	Transition string `yaml:"transition,omitempty" json:"transition,omitempty"`
+	// Priority overrides GalacticUnicornPriority (0-10). 0 = use the channel's priority.
+	// NOTE: since 0 is also a legitimate priority value, setting the override to 0
+	// is indistinguishable from "not set" and will use the channel's own priority.
+	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`
+	// Duration overrides GalacticUnicornDuration in seconds. 0 = use the channel's duration.
+	Duration float64 `yaml:"duration,omitempty" json:"duration,omitempty"`
+	// Brightness overrides GalacticUnicornBrightness (0.0-1.0) for this rule's
+	// messages only. 0.0 = use the channel's own brightness override (or the
+	// device's current brightness if the channel doesn't set one either).
+	Brightness float64 `yaml:"brightness,omitempty" json:"brightness,omitempty"`
+}
+
+// hasAnyValue reports whether any field of the override is set. Used to skip
+// storing/using empty override entries so an empty entry behaves identically
+// to a missing one.
+func (o GalacticUnicornOverride) hasAnyValue() bool {
+	return o.Color != "" || o.BgColor != "" || o.Size != 0 || o.Effect != "" ||
+		o.Align != "" || o.ScrollSpeed != 0 || o.ScrollPause != 0 ||
+		o.Transition != "" || o.Priority != 0 || o.Duration != 0 || o.Brightness != 0
 }
 
 // highVolumeSpotEvents are the event types that fire many times per minute, for
@@ -658,6 +714,28 @@ func (cfg *NotificationsConfig) Validate() []string {
 			}
 		}
 
+		// Per-channel Galactic Unicorn overrides must target a channel the rule
+		// sends to, and that channel must actually be of type galactic_unicorn —
+		// otherwise the override is dead config.
+		for chName, ov := range rule.GalacticUnicornOverrides {
+			inRule := false
+			for _, c := range rule.Channels {
+				if c == chName {
+					inRule = true
+					break
+				}
+			}
+			if !inRule {
+				issues = append(issues, fmt.Sprintf("%s: galactic_unicorn_overrides entry for channel %q which is not in the rule's channels", label, chName))
+				continue
+			}
+			if chCfg, ok := cfg.Channels[chName]; ok && chCfg.Type != "galactic_unicorn" {
+				issues = append(issues, fmt.Sprintf("%s: galactic_unicorn_overrides entry for channel %q which is not a galactic_unicorn channel (type %q)", label, chName, chCfg.Type))
+				continue
+			}
+			issues = append(issues, validateGalacticUnicornOverride(label, chName, ov)...)
+		}
+
 		// High-volume spot events (cw_spot, dx_spot, digital_decode) fire many
 		// times per minute. A rule with no selective filter and no deduplication
 		// would notify on every spot — hundreds per minute. Require one or the
@@ -931,6 +1009,60 @@ func validateGalacticUnicornChannel(name string, ch NotificationChannelConfig) [
 
 	if ch.GalacticUnicornTimeoutSeconds != 0 && (ch.GalacticUnicornTimeoutSeconds < 1 || ch.GalacticUnicornTimeoutSeconds > 30) {
 		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_timeout_seconds must be 1–30 (got %d)", name, ch.GalacticUnicornTimeoutSeconds))
+	}
+
+	return issues
+}
+
+// validateGalacticUnicornOverride checks a single rule-level per-channel
+// Galactic Unicorn override for obviously invalid values. Zero/empty fields
+// are always valid (they mean "use the channel's own value") — only
+// explicitly-set values are range/vocabulary checked, mirroring
+// validateGalacticUnicornChannel's "0/empty = default" convention.
+func validateGalacticUnicornOverride(ruleLabel, chName string, ov GalacticUnicornOverride) []string {
+	var issues []string
+	prefix := fmt.Sprintf("%s: galactic_unicorn_overrides[%q]", ruleLabel, chName)
+
+	if ov.Size != 0 && (ov.Size < 1 || ov.Size > 3) {
+		issues = append(issues, fmt.Sprintf("%s: size must be 1, 2, or 3 (got %d)", prefix, ov.Size))
+	}
+
+	switch ov.Effect {
+	case "", "auto", "static", "scroll", "blink", "pulse":
+	default:
+		issues = append(issues, fmt.Sprintf("%s: effect must be auto, static, scroll, blink, or pulse (got %q)", prefix, ov.Effect))
+	}
+
+	switch ov.Align {
+	case "", "left", "center", "right":
+	default:
+		issues = append(issues, fmt.Sprintf("%s: align must be left, center, or right (got %q)", prefix, ov.Align))
+	}
+
+	switch ov.Transition {
+	case "", "cut", "fade", "wipe_left", "wipe_right":
+	default:
+		issues = append(issues, fmt.Sprintf("%s: transition must be cut, fade, wipe_left, or wipe_right (got %q)", prefix, ov.Transition))
+	}
+
+	if ov.Priority != 0 && (ov.Priority < 0 || ov.Priority > 10) {
+		issues = append(issues, fmt.Sprintf("%s: priority must be 0–10 (got %d)", prefix, ov.Priority))
+	}
+
+	if ov.ScrollSpeed != 0 && (ov.ScrollSpeed < 1 || ov.ScrollSpeed > 200) {
+		issues = append(issues, fmt.Sprintf("%s: scroll_speed must be 1–200 (got %d)", prefix, ov.ScrollSpeed))
+	}
+
+	if ov.Duration < 0 {
+		issues = append(issues, fmt.Sprintf("%s: duration cannot be negative", prefix))
+	}
+
+	if ov.ScrollPause < 0 {
+		issues = append(issues, fmt.Sprintf("%s: scroll_pause cannot be negative", prefix))
+	}
+
+	if ov.Brightness != 0 && (ov.Brightness < 0.0 || ov.Brightness > 1.0) {
+		issues = append(issues, fmt.Sprintf("%s: brightness must be 0.0–1.0 (got %g)", prefix, ov.Brightness))
 	}
 
 	return issues

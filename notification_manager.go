@@ -36,6 +36,16 @@ type NotificationChannel interface {
 	Type() string
 }
 
+// galacticUnicornOverrideSender is an optional interface implemented only by
+// GalacticUnicornChannel. When a rule has a non-empty GalacticUnicornOverride
+// for a given channel, Publish uses SendWithOverride instead of Send so the
+// rule's display-parameter overrides (colour, size, effect, etc.) are applied
+// for that send only, without altering the channel's own configuration.
+// Other channel types do not implement this interface and are unaffected.
+type galacticUnicornOverrideSender interface {
+	SendWithOverride(message string, override GalacticUnicornOverride) (ChannelResponse, error)
+}
+
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
 // rateLimitKey uniquely identifies a (rule, subject) pair for rate limiting.
@@ -923,7 +933,19 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				continue
 			}
 
-			chResp, sendErr := ch.Send(msg)
+			// Use the rule's Galactic Unicorn override for this channel, if any
+			// non-empty override is configured and the channel supports it.
+			var chResp ChannelResponse
+			var sendErr error
+			if ov, ok := rule.GalacticUnicornOverrides[chName]; ok && ov.hasAnyValue() {
+				if os, ok := ch.(galacticUnicornOverrideSender); ok {
+					chResp, sendErr = os.SendWithOverride(msg, ov)
+				} else {
+					chResp, sendErr = ch.Send(msg)
+				}
+			} else {
+				chResp, sendErr = ch.Send(msg)
+			}
 			if sendErr != nil {
 				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, sendErr)
 				errMsg := fmt.Sprintf("channel %s: %v", chName, sendErr)

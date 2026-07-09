@@ -1,17 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-
-# Bundle opus.dll into the frozen executable so opuslib can find it at
-# runtime via sys._MEIPASS (see the PyInstaller frozen-path handling in
-# radio_client.py). Without this, opuslib's ctypes.util.find_library('opus')
-# has nothing on PATH to find and Opus decoding silently disables itself.
-opus_binaries = [('opus.dll', '.')] if os.path.exists('opus.dll') else []
 
 a = Analysis(
     ['radio_client.py'],
     pathex=[],
-    binaries=opus_binaries,
+    binaries=[],
     datas=[],
     hiddenimports=['PIL._tkinter_finder'],
     hookspath=[],

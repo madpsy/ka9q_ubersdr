@@ -437,30 +437,32 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 	// Build rule list — include filters and template so the UI can round-trip
 	// them without loss. No sensitive data in rules.
 	type ruleView struct {
-		Name               string                `json:"name"`
-		Enabled            bool                  `json:"enabled"`
-		Event              NotificationEventType `json:"event"`
-		Channels           []string              `json:"channels"`
-		Filters            NotificationFilter    `json:"filters"`
-		DedupBy            []string              `json:"dedup_by,omitempty"`
-		DedupWindowMinutes int                   `json:"dedup_window_minutes,omitempty"`
-		MaxPerMinute       int                   `json:"max_per_minute,omitempty"`
-		Template           string                `json:"template"`
-		Templates          map[string]string     `json:"templates,omitempty"`
+		Name                     string                             `json:"name"`
+		Enabled                  bool                               `json:"enabled"`
+		Event                    NotificationEventType              `json:"event"`
+		Channels                 []string                           `json:"channels"`
+		Filters                  NotificationFilter                 `json:"filters"`
+		DedupBy                  []string                           `json:"dedup_by,omitempty"`
+		DedupWindowMinutes       int                                `json:"dedup_window_minutes,omitempty"`
+		MaxPerMinute             int                                `json:"max_per_minute,omitempty"`
+		Template                 string                             `json:"template"`
+		Templates                map[string]string                  `json:"templates,omitempty"`
+		GalacticUnicornOverrides map[string]GalacticUnicornOverride `json:"galactic_unicorn_overrides,omitempty"`
 	}
 	rules := make([]ruleView, 0, len(cfg.Rules))
 	for _, r := range cfg.Rules {
 		rules = append(rules, ruleView{
-			Name:               r.Name,
-			Enabled:            r.IsEnabled(),
-			Event:              r.Event,
-			Channels:           r.Channels,
-			Filters:            r.Filter,
-			DedupBy:            r.DedupBy,
-			DedupWindowMinutes: r.DedupWindowMinutes,
-			MaxPerMinute:       r.MaxPerMinute,
-			Template:           r.Template,
-			Templates:          r.Templates,
+			Name:                     r.Name,
+			Enabled:                  r.IsEnabled(),
+			Event:                    r.Event,
+			Channels:                 r.Channels,
+			Filters:                  r.Filter,
+			DedupBy:                  r.DedupBy,
+			DedupWindowMinutes:       r.DedupWindowMinutes,
+			MaxPerMinute:             r.MaxPerMinute,
+			Template:                 r.Template,
+			Templates:                r.Templates,
+			GalacticUnicornOverrides: r.GalacticUnicornOverrides,
 		})
 	}
 

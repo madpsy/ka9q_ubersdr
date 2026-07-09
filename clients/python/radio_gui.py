@@ -566,6 +566,8 @@ class RadioGUI:
                 # Load DX cluster settings
                 self._dxcluster_callsign = data.get('dxcluster_callsign', '')
                 self._dxcluster_autoconnect = data.get('dxcluster_autoconnect', False)
+                self._dxcluster_telnet_enabled = data.get('dxcluster_telnet_enabled', False)
+                self._dxcluster_telnet_port = data.get('dxcluster_telnet_port', '7300')
 
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
@@ -622,6 +624,8 @@ class RadioGUI:
                 'open_windows': sorted(getattr(self, '_open_windows', set())),
                 'dxcluster_callsign': getattr(self, '_dxcluster_callsign', ''),
                 'dxcluster_autoconnect': getattr(self, '_dxcluster_autoconnect', False),
+                'dxcluster_telnet_enabled': getattr(self, '_dxcluster_telnet_enabled', False),
+                'dxcluster_telnet_port': getattr(self, '_dxcluster_telnet_port', '7300'),
             }
 
             with open(self.config_file, 'w') as f:

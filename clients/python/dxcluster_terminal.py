@@ -80,30 +80,38 @@ class DXClusterTerminalWindow:
         self._telnet_clients_lock = threading.Lock()
 
         # Load persisted settings before building the window
-        saved_callsign, saved_autoconnect = self._load_settings()
+        saved_callsign, saved_autoconnect, saved_telnet_enabled, saved_telnet_port = self._load_settings()
 
-        self._build_window(saved_callsign, saved_autoconnect)
+        self._build_window(saved_callsign, saved_autoconnect, saved_telnet_enabled, saved_telnet_port)
 
         # Auto-connect if both callsign and auto-connect flag are set
         if saved_autoconnect and saved_callsign:
             self.window.after(200, self._connect)
 
+        # Auto-start telnet listener if it was enabled last time
+        if saved_telnet_enabled:
+            self.window.after(300, self._start_telnet_server)
+
     # ── Settings persistence ───────────────────────────────────────────────
 
     def _load_settings(self):
-        """Return (callsign, autoconnect) from radio_gui's saved settings."""
+        """Return (callsign, autoconnect, telnet_enabled, telnet_port) from radio_gui's saved settings."""
         if not self.radio_gui:
-            return '', False
+            return '', False, False, '7300'
         callsign = getattr(self.radio_gui, '_dxcluster_callsign', '') or ''
         autoconnect = getattr(self.radio_gui, '_dxcluster_autoconnect', False)
-        return callsign, bool(autoconnect)
+        telnet_enabled = getattr(self.radio_gui, '_dxcluster_telnet_enabled', False)
+        telnet_port = getattr(self.radio_gui, '_dxcluster_telnet_port', '7300') or '7300'
+        return callsign, bool(autoconnect), bool(telnet_enabled), str(telnet_port)
 
     def _save_settings(self):
-        """Persist current callsign and auto-connect flag to radio_gui's settings file."""
+        """Persist callsign, auto-connect flag, and telnet settings to radio_gui's settings file."""
         if not self.radio_gui:
             return
         self.radio_gui._dxcluster_callsign = self._callsign_var.get().strip().upper()
         self.radio_gui._dxcluster_autoconnect = self._autoconnect_var.get()
+        self.radio_gui._dxcluster_telnet_enabled = self._telnet_enabled_var.get()
+        self.radio_gui._dxcluster_telnet_port = self._telnet_port_var.get().strip()
         # Piggyback on the existing save mechanism
         try:
             self.radio_gui.save_servers()
@@ -112,7 +120,8 @@ class DXClusterTerminalWindow:
 
     # ── Window construction ────────────────────────────────────────────────
 
-    def _build_window(self, saved_callsign: str = '', saved_autoconnect: bool = False):
+    def _build_window(self, saved_callsign: str = '', saved_autoconnect: bool = False,
+                      saved_telnet_enabled: bool = False, saved_telnet_port: str = '7300'):
         self.window = tk.Toplevel(self.parent)
         self.window.title("📡 DX Cluster Terminal")
         self.window.geometry("800x580")
@@ -149,7 +158,7 @@ class DXClusterTerminalWindow:
         telnet_row = ttk.Frame(self.window, padding=(8, 4))
         telnet_row.pack(side=tk.TOP, fill=tk.X)
 
-        self._telnet_enabled_var = tk.BooleanVar(value=False)
+        self._telnet_enabled_var = tk.BooleanVar(value=saved_telnet_enabled)
         self._telnet_check = ttk.Checkbutton(
             telnet_row, text="Telnet",
             variable=self._telnet_enabled_var,
@@ -158,11 +167,13 @@ class DXClusterTerminalWindow:
         self._telnet_check.pack(side=tk.LEFT)
 
         ttk.Label(telnet_row, text="Port:").pack(side=tk.LEFT, padx=(10, 4))
-        self._telnet_port_var = tk.StringVar(value="7300")
+        self._telnet_port_var = tk.StringVar(value=saved_telnet_port)
         self._telnet_port_entry = ttk.Entry(
             telnet_row, textvariable=self._telnet_port_var, width=6
         )
         self._telnet_port_entry.pack(side=tk.LEFT)
+        # Save settings whenever the port value changes
+        self._telnet_port_var.trace_add('write', lambda *_: self._save_settings())
 
         self._telnet_status_var = tk.StringVar(value="")
         self._telnet_status_lbl = ttk.Label(
@@ -497,6 +508,7 @@ class DXClusterTerminalWindow:
 
     def _on_telnet_toggle(self):
         """Called when the Local Telnet Listener checkbox is toggled."""
+        self._save_settings()
         if self._telnet_enabled_var.get():
             self._start_telnet_server()
         else:

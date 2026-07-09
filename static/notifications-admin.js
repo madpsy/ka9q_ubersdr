@@ -2250,6 +2250,33 @@ function wireColorPicker(id) {
     });
 }
 
+// previewGUSoundButton calls the server-side sound preview endpoint and gives
+// the button a brief loading state while the request is in flight.
+// body must be either {channel, sound} or {url, sound} (+ optional volume).
+// alertContainer is the element to show error alerts in (may be null).
+function previewGUSoundButton(btn, body, alertContainer) {
+    btn.disabled = true;
+    var origText = btn.innerHTML;
+    btn.innerHTML = '&#x23F3;';
+    apiFetch('/admin/notifications/galactic-unicorn-sound-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+        if (!data.ok && alertContainer) {
+            showAlert(alertContainer, 'error', '&#x1F50A; Sound preview failed: ' + escHtml(data.error || 'unknown error'), false);
+        }
+    }).catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+        if (err.message !== 'Redirecting to login' && alertContainer) {
+            showAlert(alertContainer, 'error', '&#x1F50A; Sound preview error: ' + escHtml(err.message), false);
+        }
+    });
+}
+
 function galacticUnicornFieldsHTML(ch, isEdit) {
     var models = [['galactic','Galactic Unicorn — 53×11'],['stellar','Stellar Unicorn — 16×16'],['cosmic','Cosmic Unicorn — 32×32']];
     var modelOptions = models.map(function(m) {
@@ -2372,12 +2399,15 @@ function galacticUnicornFieldsHTML(ch, isEdit) {
         '<div class="form-row">' +
             '<div class="form-group">' +
                 '<label>Default Sound Pattern</label>' +
-                '<select id="chGUSound">' +
-                    '<option value=""' + (!ch.galactic_unicorn_sound ? ' selected' : '') + '>(none — silent by default)</option>' +
-                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
-                        return '<option value="' + p + '"' + (ch.galactic_unicorn_sound === p ? ' selected' : '') + '>' + p + '</option>';
-                    }).join('') +
-                '</select>' +
+                '<div style="display:flex;gap:6px;align-items:center">' +
+                    '<select id="chGUSound" style="flex:1">' +
+                        '<option value=""' + (!ch.galactic_unicorn_sound ? ' selected' : '') + '>(none — silent by default)</option>' +
+                        ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                            return '<option value="' + p + '"' + (ch.galactic_unicorn_sound === p ? ' selected' : '') + '>' + p + '</option>';
+                        }).join('') +
+                    '</select>' +
+                    '<button type="button" id="btnPreviewGUSound" class="btn btn-sm btn-secondary" title="Play this sound on the device now" style="white-space:nowrap;flex-shrink:0">&#x1F50A; Preview</button>' +
+                '</div>' +
                 '<div class="form-hint">Played when a notification fires on this channel. Rules can override this per-channel.</div>' +
             '</div>' +
             '<div class="form-group">' +
@@ -2550,6 +2580,23 @@ function showChannelForm(editName) {
             renderChannelTypeInfo('galactic_unicorn');
             wireColorPicker('chGUColor');
             wireColorPicker('chGUBgColor');
+            // Wire up the 🔊 Preview button for the Default Sound Pattern dropdown.
+            var btnPreviewGUSound = el('btnPreviewGUSound');
+            if (btnPreviewGUSound) {
+                btnPreviewGUSound.addEventListener('click', function() {
+                    var sound = el('chGUSound').value;
+                    if (!sound) {
+                        showAlert(el('channelsAlerts'), 'error', 'Select a sound pattern first.', true);
+                        return;
+                    }
+                    // Use the saved channel name when editing; fall back to the URL
+                    // typed in the form when creating a new (unsaved) channel.
+                    var body = isEdit
+                        ? { channel: editName, sound: sound }
+                        : { url: (el('chGUUrl') ? el('chGUUrl').value.trim() : ''), sound: sound };
+                    previewGUSoundButton(btnPreviewGUSound, body, el('channelsAlerts'));
+                });
+            }
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');
@@ -3472,12 +3519,15 @@ function openGalacticOverrideModal(chName, workingOverrides, eventType) {
                     ? '<div class="form-row">' +
                         '<div class="form-group">' +
                             '<label>Sound Pattern</label>' +
-                            '<select id="guOvSound">' +
-                                '<option value=""' + (!ov.sound ? ' selected' : '') + '>(channel default: ' + escHtml(chCfg.galactic_unicorn_sound || 'none') + ')</option>' +
-                                ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
-                                    return '<option value="' + p + '"' + (ov.sound === p ? ' selected' : '') + '>' + p + '</option>';
-                                }).join('') +
-                            '</select>' +
+                            '<div style="display:flex;gap:6px;align-items:center">' +
+                                '<select id="guOvSound" style="flex:1">' +
+                                    '<option value=""' + (!ov.sound ? ' selected' : '') + '>(channel default: ' + escHtml(chCfg.galactic_unicorn_sound || 'none') + ')</option>' +
+                                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                        return '<option value="' + p + '"' + (ov.sound === p ? ' selected' : '') + '>' + p + '</option>';
+                                    }).join('') +
+                                '</select>' +
+                                '<button type="button" id="btnPreviewGuOvSound" class="btn btn-sm btn-secondary" title="Play this sound on the device now" style="white-space:nowrap;flex-shrink:0">&#x1F50A; Preview</button>' +
+                            '</div>' +
                             '<div class="form-hint">Overrides the channel\'s default sound for this rule only.</div>' +
                         '</div>' +
                         '<div class="form-group">' +
@@ -3490,22 +3540,28 @@ function openGalacticOverrideModal(chName, workingOverrides, eventType) {
                         ? '<div class="form-row">' +
                             '<div class="form-group">' +
                                 '<label>&#x26A0;&#xFE0F; Sound when Unhealthy</label>' +
-                                '<select id="guOvSoundUnhealthy">' +
-                                    '<option value=""' + (!ov.sound_unhealthy ? ' selected' : '') + '>(use rule sound above)</option>' +
-                                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
-                                        return '<option value="' + p + '"' + (ov.sound_unhealthy === p ? ' selected' : '') + '>' + p + '</option>';
-                                    }).join('') +
-                                '</select>' +
+                                '<div style="display:flex;gap:6px;align-items:center">' +
+                                    '<select id="guOvSoundUnhealthy" style="flex:1">' +
+                                        '<option value=""' + (!ov.sound_unhealthy ? ' selected' : '') + '>(use rule sound above)</option>' +
+                                        ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                            return '<option value="' + p + '"' + (ov.sound_unhealthy === p ? ' selected' : '') + '>' + p + '</option>';
+                                        }).join('') +
+                                    '</select>' +
+                                    '<button type="button" id="btnPreviewGuOvSoundUnhealthy" class="btn btn-sm btn-secondary" title="Play this sound on the device now" style="white-space:nowrap;flex-shrink:0">&#x1F50A; Preview</button>' +
+                                '</div>' +
                                 '<div class="form-hint">Played when a component transitions to unhealthy.</div>' +
                             '</div>' +
                             '<div class="form-group">' +
                                 '<label>&#x2705; Sound when Recovery</label>' +
-                                '<select id="guOvSoundRecovery">' +
-                                    '<option value=""' + (!ov.sound_recovery ? ' selected' : '') + '>(use rule sound above)</option>' +
-                                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
-                                        return '<option value="' + p + '"' + (ov.sound_recovery === p ? ' selected' : '') + '>' + p + '</option>';
-                                    }).join('') +
-                                '</select>' +
+                                '<div style="display:flex;gap:6px;align-items:center">' +
+                                    '<select id="guOvSoundRecovery" style="flex:1">' +
+                                        '<option value=""' + (!ov.sound_recovery ? ' selected' : '') + '>(use rule sound above)</option>' +
+                                        ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                            return '<option value="' + p + '"' + (ov.sound_recovery === p ? ' selected' : '') + '>' + p + '</option>';
+                                        }).join('') +
+                                    '</select>' +
+                                    '<button type="button" id="btnPreviewGuOvSoundRecovery" class="btn btn-sm btn-secondary" title="Play this sound on the device now" style="white-space:nowrap;flex-shrink:0">&#x1F50A; Preview</button>' +
+                                '</div>' +
                                 '<div class="form-hint">Played when a component recovers to healthy.</div>' +
                             '</div>' +
                         '</div>'
@@ -3523,6 +3579,32 @@ function openGalacticOverrideModal(chName, workingOverrides, eventType) {
 
     wireColorPicker('guOvColor');
     wireColorPicker('guOvBgColor');
+
+    // Wire up 🔊 Preview buttons for sound dropdowns (only present when sounds are enabled).
+    var btnPreviewGuOvSound = document.getElementById('btnPreviewGuOvSound');
+    if (btnPreviewGuOvSound) {
+        btnPreviewGuOvSound.addEventListener('click', function() {
+            var sound = document.getElementById('guOvSound').value;
+            if (!sound) return;
+            previewGUSoundButton(btnPreviewGuOvSound, { channel: chName, sound: sound }, null);
+        });
+    }
+    var btnPreviewGuOvSoundUnhealthy = document.getElementById('btnPreviewGuOvSoundUnhealthy');
+    if (btnPreviewGuOvSoundUnhealthy) {
+        btnPreviewGuOvSoundUnhealthy.addEventListener('click', function() {
+            var sound = document.getElementById('guOvSoundUnhealthy').value;
+            if (!sound) return;
+            previewGUSoundButton(btnPreviewGuOvSoundUnhealthy, { channel: chName, sound: sound }, null);
+        });
+    }
+    var btnPreviewGuOvSoundRecovery = document.getElementById('btnPreviewGuOvSoundRecovery');
+    if (btnPreviewGuOvSoundRecovery) {
+        btnPreviewGuOvSoundRecovery.addEventListener('click', function() {
+            var sound = document.getElementById('guOvSoundRecovery').value;
+            if (!sound) return;
+            previewGUSoundButton(btnPreviewGuOvSoundRecovery, { channel: chName, sound: sound }, null);
+        });
+    }
 
     const fieldsEl = document.getElementById('guModalFields');
     const defaultLabel = document.getElementById('guModeDefaultLabel');

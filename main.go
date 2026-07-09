@@ -2786,6 +2786,9 @@ func main() {
 	http.HandleFunc("/admin/notifications/telegram-available-commands", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleTelegramAvailableCommands(w, r)
 	}))
+	http.HandleFunc("/admin/notifications/galactic-unicorn-sound-preview", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleGalacticUnicornSoundPreview(w, r, notifManager)
+	}))
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
 	}))

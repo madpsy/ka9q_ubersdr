@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/cwsl/ka9q_ubersdr/gudriver"
 )
 
 // handleNotificationsHealth returns the current health and statistics of the
@@ -1578,6 +1580,112 @@ func handleTelegramAvailableCommands(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 		"ok":       true,
 		"commands": cmds,
+	})
+}
+
+// handleGalacticUnicornSoundPreview plays a named sound pattern on a Galactic
+// Unicorn device immediately, without sending a display notification.
+//
+// POST /admin/notifications/galactic-unicorn-sound-preview
+//
+// Two modes (mirrors handleNotificationsTest):
+//
+//  1. Named channel (already saved in config):
+//     {"channel": "shack_display", "sound": "alert"}
+//     {"channel": "shack_display", "sound": "alert", "volume": 0.8}
+//
+//  2. Ad-hoc URL (channel not yet saved — form still open):
+//     {"url": "http://192.168.1.42", "sound": "alert"}
+//     {"url": "http://192.168.1.42", "sound": "alert", "volume": 0.8}
+//
+// Response:
+//
+//	{"ok": true,  "duration_ms": 42}
+//	{"ok": false, "error": "gudriver: POST http://…/sound: dial tcp …"}
+func handleGalacticUnicornSoundPreview(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "POST required"}) //nolint:errcheck
+		return
+	}
+
+	var req struct {
+		// Mode 1 — named channel
+		Channel string `json:"channel"`
+		// Mode 2 — ad-hoc URL
+		URL                string `json:"url"`
+		InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+		// Common
+		Sound  string  `json:"sound"`
+		Volume float64 `json:"volume"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON body"}) //nolint:errcheck
+		return
+	}
+
+	if req.Sound == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "sound is required"}) //nolint:errcheck
+		return
+	}
+
+	// Resolve device URL and TLS settings from either the named channel or the
+	// ad-hoc URL supplied directly from the form.
+	deviceURL := req.URL
+	insecure := req.InsecureSkipVerify
+	timeoutSec := 5
+
+	if req.Channel != "" && nm != nil && nm.cfg != nil {
+		if chCfg, ok := nm.cfg.Channels[req.Channel]; ok && chCfg.Type == "galactic_unicorn" {
+			deviceURL = chCfg.GalacticUnicornURL
+			insecure = chCfg.GalacticUnicornInsecureSkipVerify
+			if chCfg.GalacticUnicornTimeoutSeconds > 0 {
+				timeoutSec = chCfg.GalacticUnicornTimeoutSeconds
+			}
+		}
+	}
+
+	if deviceURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "device URL is required (provide channel name or url)"}) //nolint:errcheck
+		return
+	}
+
+	// Build a gudriver client and play the sound.
+	start := time.Now()
+
+	opts := []gudriver.Option{
+		gudriver.WithTimeout(time.Duration(timeoutSec) * time.Second),
+		gudriver.WithUserAgent("UberSDR/" + Version),
+	}
+	if insecure {
+		opts = append(opts, gudriver.WithInsecureSkipVerify())
+	}
+	client := gudriver.NewClient(deviceURL, opts...)
+
+	_, err := client.Sound(gudriver.SoundCommand{
+		Pattern: req.Sound,
+		Volume:  req.Volume,
+	})
+
+	durationMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ok":          false,
+			"error":       err.Error(),
+			"duration_ms": durationMs,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"ok":          true,
+		"duration_ms": durationMs,
 	})
 }
 

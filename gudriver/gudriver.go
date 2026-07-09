@@ -201,6 +201,22 @@ func (c ControlCommand) MarshalJSON() ([]byte, error) {
 	}{Type: "control", Alias: Alias(c)})
 }
 
+// SoundCommand is the body for POST /sound.
+// Pattern selects a named preset; Volume overrides the device default (0 = use device default).
+type SoundCommand struct {
+	// Pattern is the named sound preset, e.g. "alert", "warning", "error",
+	// "recovery", "success", "critical". Required.
+	Pattern string `json:"pattern"`
+
+	// Volume overrides the device's current volume for this sound only.
+	// 0.0 means "use the device's current volume setting".
+	// Valid range when non-zero: 0.01–1.0.
+	Volume float64 `json:"volume,omitempty"`
+
+	// Repeat is the number of times to play the pattern. 0 or 1 = once.
+	Repeat int `json:"repeat,omitempty"`
+}
+
 // ─── Response ─────────────────────────────────────────────────────────────────
 
 // Response is the parsed body returned by the Pico W on success.
@@ -311,13 +327,24 @@ func (c *Client) CancelMessage(id string) (Response, error) {
 	return c.Control(ControlCommand{Cmd: "cancel", ID: id})
 }
 
+// Sound sends a sound command to POST /sound on the device.
+// The device plays the named pattern immediately (non-blocking on the device side).
+// Volume 0 means "use the device's current volume setting".
+func (c *Client) Sound(cmd SoundCommand) (Response, error) {
+	return c.postTo("/sound", cmd)
+}
+
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 func (c *Client) post(payload interface{}) (Response, error) {
+	return c.postTo("/display", payload)
+}
+
+func (c *Client) postTo(path string, payload interface{}) (Response, error) {
 	if c.baseURL == "" {
 		return Response{}, fmt.Errorf("gudriver: baseURL is empty")
 	}
-	endpoint := c.baseURL + "/display"
+	endpoint := c.baseURL + path
 
 	body, err := json.Marshal(payload)
 	if err != nil {

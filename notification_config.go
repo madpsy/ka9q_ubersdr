@@ -219,6 +219,22 @@ type NotificationChannelConfig struct {
 	// GalacticUnicornInsecureSkipVerify disables TLS certificate verification.
 	// Only for self-signed certificates on private LANs.
 	GalacticUnicornInsecureSkipVerify bool `yaml:"galactic_unicorn_insecure_skip_verify,omitempty" json:"galactic_unicorn_insecure_skip_verify,omitempty"`
+
+	// ── Sound (Galactic Unicorn) ──────────────────────────────────────────────
+	// GalacticUnicornSoundsEnabled is the master switch for sound delivery on
+	// this channel. When false (the default), no sound commands are ever sent
+	// to the device even if a rule specifies a sound pattern. Set to true to
+	// allow rules to trigger sounds on this channel.
+	GalacticUnicornSoundsEnabled bool `yaml:"galactic_unicorn_sounds_enabled,omitempty" json:"galactic_unicorn_sounds_enabled,omitempty"`
+	// GalacticUnicornSound is the default named sound pattern to play when a
+	// notification is sent on this channel. Empty = no sound by default.
+	// Rules can override this per-channel via GalacticUnicornOverride.Sound.
+	// Valid values: "alert", "warning", "error", "recovery", "success", "critical",
+	// "beep", "double_beep", "long_beep", "tick", "chime", "ping".
+	GalacticUnicornSound string `yaml:"galactic_unicorn_sound,omitempty" json:"galactic_unicorn_sound,omitempty"`
+	// GalacticUnicornSoundVolume is the volume for sounds sent on this channel
+	// (0.0–1.0). 0.0 means "use the device's current volume setting".
+	GalacticUnicornSoundVolume float64 `yaml:"galactic_unicorn_sound_volume,omitempty" json:"galactic_unicorn_sound_volume,omitempty"`
 }
 
 // NotificationRule maps an event type to a filter, a template, and one or
@@ -325,6 +341,27 @@ type GalacticUnicornOverride struct {
 	// messages only. 0.0 = use the channel's own brightness override (or the
 	// device's current brightness if the channel doesn't set one either).
 	Brightness float64 `yaml:"brightness,omitempty" json:"brightness,omitempty"`
+	// Sound overrides GalacticUnicornSound for this rule's messages only.
+	// Empty = use the channel's own sound setting (which may itself be empty = no sound).
+	// Valid values: "alert", "warning", "error", "recovery", "success", "critical",
+	// "beep", "double_beep", "long_beep", "tick", "chime", "ping".
+	Sound string `yaml:"sound,omitempty" json:"sound,omitempty"`
+	// SoundVolume overrides GalacticUnicornSoundVolume (0.0–1.0) for this rule's
+	// messages only. 0.0 = use the channel's own volume setting.
+	SoundVolume float64 `yaml:"sound_volume,omitempty" json:"sound_volume,omitempty"`
+
+	// ── system_monitor event-specific sound overrides ─────────────────────────
+	// These are only meaningful when the rule's event type is "system_monitor".
+	// When the event fires, the notifier checks whether it is an unhealthy or
+	// recovery transition and picks the appropriate sound, falling back to Sound
+	// if the specific field is empty, and then to the channel default.
+	//
+	// SoundUnhealthy is the sound to play when a component transitions to unhealthy.
+	// Empty = fall back to Sound (then channel default).
+	SoundUnhealthy string `yaml:"sound_unhealthy,omitempty" json:"sound_unhealthy,omitempty"`
+	// SoundRecovery is the sound to play when a component transitions back to healthy.
+	// Empty = fall back to Sound (then channel default).
+	SoundRecovery string `yaml:"sound_recovery,omitempty" json:"sound_recovery,omitempty"`
 }
 
 // hasAnyValue reports whether any field of the override is set. Used to skip
@@ -333,7 +370,24 @@ type GalacticUnicornOverride struct {
 func (o GalacticUnicornOverride) hasAnyValue() bool {
 	return o.Color != "" || o.BgColor != "" || o.Size != 0 || o.Effect != "" ||
 		o.Align != "" || o.ScrollSpeed != 0 || o.ScrollPause != 0 ||
-		o.Transition != "" || o.Priority != 0 || o.Duration != 0 || o.Brightness != 0
+		o.Transition != "" || o.Priority != 0 || o.Duration != 0 || o.Brightness != 0 ||
+		o.Sound != "" || o.SoundVolume != 0 || o.SoundUnhealthy != "" || o.SoundRecovery != ""
+}
+
+// ResolvedSound returns the sound pattern to play for this override given the
+// event context. For system_monitor events, SoundUnhealthy / SoundRecovery
+// take precedence over Sound. For all other events, Sound is returned directly.
+// Returns "" if no sound is configured in this override.
+func (o GalacticUnicornOverride) ResolvedSound(evt NotificationEvent) string {
+	if sme, ok := evt.(SystemMonitorEvent); ok {
+		if sme.Healthy && o.SoundRecovery != "" {
+			return o.SoundRecovery
+		}
+		if !sme.Healthy && o.SoundUnhealthy != "" {
+			return o.SoundUnhealthy
+		}
+	}
+	return o.Sound
 }
 
 // highVolumeSpotEvents are the event types that fire many times per minute, for
@@ -1011,7 +1065,25 @@ func validateGalacticUnicornChannel(name string, ch NotificationChannelConfig) [
 		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_timeout_seconds must be 1–30 (got %d)", name, ch.GalacticUnicornTimeoutSeconds))
 	}
 
+	if ch.GalacticUnicornSound != "" && !isValidSoundPattern(ch.GalacticUnicornSound) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_sound %q is not a recognised pattern", name, ch.GalacticUnicornSound))
+	}
+
+	if ch.GalacticUnicornSoundVolume != 0 && (ch.GalacticUnicornSoundVolume < 0.0 || ch.GalacticUnicornSoundVolume > 1.0) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_sound_volume must be 0.0–1.0 (got %g)", name, ch.GalacticUnicornSoundVolume))
+	}
+
 	return issues
+}
+
+// isValidSoundPattern reports whether s is a recognised named sound pattern.
+func isValidSoundPattern(s string) bool {
+	switch s {
+	case "alert", "warning", "error", "recovery", "success", "critical",
+		"beep", "double_beep", "long_beep", "tick", "chime", "ping":
+		return true
+	}
+	return false
 }
 
 // validateGalacticUnicornOverride checks a single rule-level per-channel
@@ -1063,6 +1135,22 @@ func validateGalacticUnicornOverride(ruleLabel, chName string, ov GalacticUnicor
 
 	if ov.Brightness != 0 && (ov.Brightness < 0.0 || ov.Brightness > 1.0) {
 		issues = append(issues, fmt.Sprintf("%s: brightness must be 0.0–1.0 (got %g)", prefix, ov.Brightness))
+	}
+
+	if ov.Sound != "" && !isValidSoundPattern(ov.Sound) {
+		issues = append(issues, fmt.Sprintf("%s: sound %q is not a recognised pattern", prefix, ov.Sound))
+	}
+
+	if ov.SoundVolume != 0 && (ov.SoundVolume < 0.0 || ov.SoundVolume > 1.0) {
+		issues = append(issues, fmt.Sprintf("%s: sound_volume must be 0.0–1.0 (got %g)", prefix, ov.SoundVolume))
+	}
+
+	if ov.SoundUnhealthy != "" && !isValidSoundPattern(ov.SoundUnhealthy) {
+		issues = append(issues, fmt.Sprintf("%s: sound_unhealthy %q is not a recognised pattern", prefix, ov.SoundUnhealthy))
+	}
+
+	if ov.SoundRecovery != "" && !isValidSoundPattern(ov.SoundRecovery) {
+		issues = append(issues, fmt.Sprintf("%s: sound_recovery %q is not a recognised pattern", prefix, ov.SoundRecovery))
 	}
 
 	return issues

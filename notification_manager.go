@@ -935,9 +935,17 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 
 			// Use the rule's Galactic Unicorn override for this channel, if any
 			// non-empty override is configured and the channel supports it.
+			// Before dispatching, resolve any event-specific sound fields
+			// (e.g. SoundUnhealthy / SoundRecovery for system_monitor events)
+			// into the override's Sound field so the notifier sees a single
+			// resolved pattern without needing to know the event type.
 			var chResp ChannelResponse
 			var sendErr error
 			if ov, ok := rule.GalacticUnicornOverrides[chName]; ok && ov.hasAnyValue() {
+				// Resolve event-specific sound into the generic Sound field.
+				if resolved := ov.ResolvedSound(evt); resolved != ov.Sound {
+					ov.Sound = resolved
+				}
 				if os, ok := ch.(galacticUnicornOverrideSender); ok {
 					chResp, sendErr = os.SendWithOverride(msg, ov)
 				} else {

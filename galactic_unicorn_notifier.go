@@ -110,6 +110,33 @@ func (g *GalacticUnicornChannel) doSend(message string, override GalacticUnicorn
 		return ChannelResponse{}, fmt.Errorf("galactic_unicorn: galactic_unicorn_url is not configured")
 	}
 
+	// ── Sound: send before display when the channel master switch is on ───────
+	//
+	// Resolution order: rule override → channel config → no sound.
+	// The channel's GalacticUnicornSoundsEnabled flag is the master gate —
+	// even if a rule specifies a sound, it is silently skipped when the
+	// channel has sounds disabled.
+	if cfg.GalacticUnicornSoundsEnabled {
+		soundPattern := override.Sound
+		if soundPattern == "" {
+			soundPattern = cfg.GalacticUnicornSound
+		}
+		if soundPattern != "" {
+			soundVolume := override.SoundVolume
+			if soundVolume == 0 {
+				soundVolume = cfg.GalacticUnicornSoundVolume
+			}
+			soundCmd := gudriver.SoundCommand{
+				Pattern: soundPattern,
+				Volume:  soundVolume,
+			}
+			if _, err := g.client.Sound(soundCmd); err != nil {
+				// Sound failure is non-fatal — log and continue to display.
+				log.Printf("[GalacticUnicorn:%s] sound error (non-fatal): %v", g.name, err)
+			}
+		}
+	}
+
 	// ── Resolve display parameters: rule override → channel config → built-in default ──
 
 	color := override.Color

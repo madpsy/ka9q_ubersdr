@@ -591,6 +591,10 @@ async function loadConfig() {
                 galactic_unicorn_brightness:         ch.galactic_unicorn_brightness         || 0,
                 galactic_unicorn_timeout_seconds:    ch.galactic_unicorn_timeout_seconds    || 5,
                 galactic_unicorn_insecure_skip_verify: !!ch.galactic_unicorn_insecure_skip_verify,
+                // Galactic Unicorn sound
+                galactic_unicorn_sounds_enabled:     !!ch.galactic_unicorn_sounds_enabled,
+                galactic_unicorn_sound:              ch.galactic_unicorn_sound              || '',
+                galactic_unicorn_sound_volume:       ch.galactic_unicorn_sound_volume       || 0,
             };
         }
         localConfig.channels = merged;
@@ -774,6 +778,9 @@ async function saveConfig(alertContainer) {
                 galactic_unicorn_brightness:        Number(ch.galactic_unicorn_brightness) || 0,
                 galactic_unicorn_timeout_seconds:   Number(ch.galactic_unicorn_timeout_seconds) || 5,
                 galactic_unicorn_insecure_skip_verify: !!ch.galactic_unicorn_insecure_skip_verify,
+                galactic_unicorn_sounds_enabled:    !!ch.galactic_unicorn_sounds_enabled,
+                galactic_unicorn_sound:             ch.galactic_unicorn_sound             || '',
+                galactic_unicorn_sound_volume:      Number(ch.galactic_unicorn_sound_volume) || 0,
                 rate_limit_minutes:                 ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
                 max_per_minute:                     ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
@@ -2353,6 +2360,31 @@ function galacticUnicornFieldsHTML(ch, isEdit) {
                 'Skip TLS certificate verification' +
             '</label>' +
             '<div class="form-hint">Only for self-signed certificates on private LANs.</div>' +
+        '</div>' +
+        '<div class="config-section-title" style="margin-top:16px;padding-top:12px;border-top:1px solid #e8e8e8">&#x1F50A; Sound Alerts</div>' +
+        '<div class="form-group">' +
+            '<label class="checkbox-item">' +
+                '<input type="checkbox" id="chGUSoundsEnabled"' + (ch.galactic_unicorn_sounds_enabled ? ' checked' : '') + '> ' +
+                'Enable sound alerts on this channel' +
+            '</label>' +
+            '<div class="form-hint">Master switch — rules can only trigger sounds when this is enabled. Disable to silence all sounds on this device regardless of rule settings.</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Default Sound Pattern</label>' +
+                '<select id="chGUSound">' +
+                    '<option value=""' + (!ch.galactic_unicorn_sound ? ' selected' : '') + '>(none — silent by default)</option>' +
+                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                        return '<option value="' + p + '"' + (ch.galactic_unicorn_sound === p ? ' selected' : '') + '>' + p + '</option>';
+                    }).join('') +
+                '</select>' +
+                '<div class="form-hint">Played when a notification fires on this channel. Rules can override this per-channel.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Default Sound Volume <span style="font-weight:400;color:#888">(0.0–1.0)</span></label>' +
+                '<input type="number" id="chGUSoundVolume" value="' + (ch.galactic_unicorn_sound_volume || 0) + '" min="0" max="1" step="0.05">' +
+                '<div class="form-hint">0.0 = use the device\'s current volume setting.</div>' +
+            '</div>' +
         '</div>';
 }
 
@@ -2772,6 +2804,9 @@ function showChannelForm(editName) {
                 galactic_unicorn_brightness:        parseFloat(el('chGUBrightness').value) || 0,
                 galactic_unicorn_timeout_seconds:   guTimeout,
                 galactic_unicorn_insecure_skip_verify: el('chGUInsecure').checked,
+                galactic_unicorn_sounds_enabled:    el('chGUSoundsEnabled').checked,
+                galactic_unicorn_sound:             el('chGUSound').value,
+                galactic_unicorn_sound_volume:      parseFloat(el('chGUSoundVolume').value) || 0,
                 rate_limit_minutes:                 rate,
                 max_per_minute:                     maxPerMinFinal,
             };
@@ -3116,7 +3151,7 @@ function showRuleForm(editIdx) {
     renderDedupFields(rule.event, rule.dedup_by, rule.dedup_window_minutes);
     renderTemplateFields(rule.event);
     renderChannelTemplateOverrides(workingTemplates);
-    renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides);
+    renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides, rule.event);
 
     // Wire up the "Customise" overlay button if present
     var btnCustomise = el('btnCustomiseTemplate');
@@ -3131,11 +3166,15 @@ function showRuleForm(editIdx) {
 
     container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-    // Re-render filters, dedup and template reference when event type changes
+    // Re-render filters, dedup, template reference and galactic overrides section
+    // when event type changes (the overrides section must know the new event type
+    // so that system_monitor-specific sound fields appear/disappear correctly).
     el('ruleEvent').addEventListener('change', function() {
-        renderFilterFields(el('ruleEvent').value, {});
-        renderDedupFields(el('ruleEvent').value, [], 0);
-        renderTemplateFields(el('ruleEvent').value);
+        const newEventType = el('ruleEvent').value;
+        renderFilterFields(newEventType, {});
+        renderDedupFields(newEventType, [], 0);
+        renderTemplateFields(newEventType);
+        renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides, newEventType);
     });
 
     // When the selected channels change, refresh the per-channel override boxes,
@@ -3144,7 +3183,7 @@ function showRuleForm(editIdx) {
         cb.addEventListener('change', function() {
             captureChannelTemplateOverrides(workingTemplates);
             renderChannelTemplateOverrides(workingTemplates);
-            renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides);
+            renderGalacticOverridesSection(galacticChannelsChecked(), workingGalacticOverrides, el('ruleEvent').value);
         });
     });
 
@@ -3281,7 +3320,8 @@ function galacticChannelsChecked() {
 function hasAnyOverrideValue(ov) {
     if (!ov) return false;
     return !!(ov.color || ov.bg_color || ov.size || ov.effect || ov.align ||
-        ov.scroll_speed || ov.scroll_pause || ov.transition || ov.priority || ov.duration || ov.brightness);
+        ov.scroll_speed || ov.scroll_pause || ov.transition || ov.priority || ov.duration || ov.brightness ||
+        ov.sound || ov.sound_volume || ov.sound_unhealthy || ov.sound_recovery);
 }
 
 // renderGalacticOverridesSection draws one summary row per currently-checked
@@ -3289,7 +3329,7 @@ function hasAnyOverrideValue(ov) {
 // opens the override modal for that channel. Renders nothing (section absent)
 // when no checked channel is a galactic_unicorn type — non-Unicorn rules never
 // see this section.
-function renderGalacticOverridesSection(galacticNames, workingOverrides) {
+function renderGalacticOverridesSection(galacticNames, workingOverrides, eventType) {
     const container = el('galacticOverridesSection');
     if (!container) return;
 
@@ -3315,7 +3355,7 @@ function renderGalacticOverridesSection(galacticNames, workingOverrides) {
 
     container.querySelectorAll('.gu-edit-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
-            openGalacticOverrideModal(btn.dataset.channel, workingOverrides);
+            openGalacticOverrideModal(btn.dataset.channel, workingOverrides, eventType);
         });
     });
 }
@@ -3326,7 +3366,9 @@ function renderGalacticOverridesSection(galacticNames, workingOverrides) {
 // display options (colour, size, effect, alignment, scroll, transition,
 // priority, duration). workingOverrides is mutated in place on Save; the
 // caller's summary row is re-rendered immediately afterward.
-function openGalacticOverrideModal(chName, workingOverrides) {
+// eventType is the rule's event type string (e.g. "system_monitor") — used to
+// conditionally show the unhealthy/recovery sound override fields.
+function openGalacticOverrideModal(chName, workingOverrides, eventType) {
     const existing = document.getElementById('guOverrideModalOverlay');
     if (existing) existing.remove();
 
@@ -3426,6 +3468,50 @@ function openGalacticOverrideModal(chName, workingOverrides) {
                         '<div class="form-hint">Leave blank to use the channel\'s brightness setting.</div>' +
                     '</div>' +
                 '</div>' +
+                (chCfg.galactic_unicorn_sounds_enabled
+                    ? '<div class="form-row">' +
+                        '<div class="form-group">' +
+                            '<label>Sound Pattern</label>' +
+                            '<select id="guOvSound">' +
+                                '<option value=""' + (!ov.sound ? ' selected' : '') + '>(channel default: ' + escHtml(chCfg.galactic_unicorn_sound || 'none') + ')</option>' +
+                                ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                    return '<option value="' + p + '"' + (ov.sound === p ? ' selected' : '') + '>' + p + '</option>';
+                                }).join('') +
+                            '</select>' +
+                            '<div class="form-hint">Overrides the channel\'s default sound for this rule only.</div>' +
+                        '</div>' +
+                        '<div class="form-group">' +
+                            '<label>Sound Volume <span style="font-weight:400;color:#888">(0.0–1.0)</span></label>' +
+                            '<input type="number" id="guOvSoundVolume" value="' + (ov.sound_volume || '') + '" min="0" max="1" step="0.05" placeholder="channel default">' +
+                            '<div class="form-hint">0 = use channel\'s volume setting.</div>' +
+                        '</div>' +
+                    '</div>' +
+                    (eventType === 'system_monitor'
+                        ? '<div class="form-row">' +
+                            '<div class="form-group">' +
+                                '<label>&#x26A0;&#xFE0F; Sound when Unhealthy</label>' +
+                                '<select id="guOvSoundUnhealthy">' +
+                                    '<option value=""' + (!ov.sound_unhealthy ? ' selected' : '') + '>(use rule sound above)</option>' +
+                                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                        return '<option value="' + p + '"' + (ov.sound_unhealthy === p ? ' selected' : '') + '>' + p + '</option>';
+                                    }).join('') +
+                                '</select>' +
+                                '<div class="form-hint">Played when a component transitions to unhealthy.</div>' +
+                            '</div>' +
+                            '<div class="form-group">' +
+                                '<label>&#x2705; Sound when Recovery</label>' +
+                                '<select id="guOvSoundRecovery">' +
+                                    '<option value=""' + (!ov.sound_recovery ? ' selected' : '') + '>(use rule sound above)</option>' +
+                                    ['alert','warning','error','recovery','success','critical','beep','double_beep','long_beep','tick','chime','ping'].map(function(p) {
+                                        return '<option value="' + p + '"' + (ov.sound_recovery === p ? ' selected' : '') + '>' + p + '</option>';
+                                    }).join('') +
+                                '</select>' +
+                                '<div class="form-hint">Played when a component recovers to healthy.</div>' +
+                            '</div>' +
+                        '</div>'
+                        : '')
+                    : '<div class="form-hint" style="color:#888;font-style:italic;margin-top:4px">&#x1F507; Sound alerts are disabled on this channel. Enable them in the channel settings to configure per-rule sounds.</div>'
+                ) +
             '</div>' +
             '<div class="gu-modal-actions">' +
                 '<button type="button" class="btn" id="guModalSave">Save</button>' +
@@ -3478,6 +3564,10 @@ function openGalacticOverrideModal(chName, workingOverrides) {
                 priority:     parseInt(document.getElementById('guOvPriority').value, 10) || 0,
                 duration:     parseFloat(document.getElementById('guOvDuration').value) || 0,
                 brightness:   parseFloat(document.getElementById('guOvBrightness').value) || 0,
+                sound:          (document.getElementById('guOvSound') ? document.getElementById('guOvSound').value : ''),
+                sound_volume:   (document.getElementById('guOvSoundVolume') ? parseFloat(document.getElementById('guOvSoundVolume').value) || 0 : 0),
+                sound_unhealthy:(document.getElementById('guOvSoundUnhealthy') ? document.getElementById('guOvSoundUnhealthy').value : ''),
+                sound_recovery: (document.getElementById('guOvSoundRecovery') ? document.getElementById('guOvSoundRecovery').value : ''),
             };
             // Only keep the override if at least one field is actually set —
             // an all-blank "custom" entry is functionally identical to "default".
@@ -3488,7 +3578,7 @@ function openGalacticOverrideModal(chName, workingOverrides) {
             }
         }
         closeModal();
-        renderGalacticOverridesSection(galacticChannelsChecked(), workingOverrides);
+        renderGalacticOverridesSection(galacticChannelsChecked(), workingOverrides, eventType);
     });
 }
 

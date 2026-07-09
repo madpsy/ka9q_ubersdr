@@ -228,9 +228,11 @@ type NotificationChannelConfig struct {
 	GalacticUnicornSoundsEnabled bool `yaml:"galactic_unicorn_sounds_enabled,omitempty" json:"galactic_unicorn_sounds_enabled,omitempty"`
 	// GalacticUnicornSound is the default named sound pattern to play when a
 	// notification is sent on this channel. Empty = no sound by default.
+	// Valid patterns: alert, warning, error, recovery, success, critical,
+	// beep, beep_low, beep_high, double_beep, triple_beep, tick, notify,
+	// chime, alarm, spot, dx, qso, tone, custom.
 	// Rules can override this per-channel via GalacticUnicornOverride.Sound.
 	// Valid values: "alert", "warning", "error", "recovery", "success", "critical",
-	// "beep", "double_beep", "long_beep", "tick", "chime", "ping".
 	GalacticUnicornSound string `yaml:"galactic_unicorn_sound,omitempty" json:"galactic_unicorn_sound,omitempty"`
 	// GalacticUnicornSoundVolume is the volume for sounds sent on this channel
 	// (0.0–1.0). 0.0 means "use the device's current volume setting".

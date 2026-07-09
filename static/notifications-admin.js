@@ -3581,36 +3581,31 @@ function openGalacticOverrideModal(chName, workingOverrides, eventType) {
     wireColorPicker('guOvBgColor');
 
     // Wire up 🔊 Preview buttons for sound dropdowns (only present when sounds are enabled).
-    // When the override select is on "(channel default: X)" its value is "" — fall back to the
-    // channel's saved default sound so the preview still works.
-    var channelDefaultSound = chCfg.galactic_unicorn_sound || '';
+    // When an override select is on "(channel default)" its value is "" — send sound:"" and let
+    // the server resolve the channel's saved default. For unhealthy/recovery, also send the
+    // rule-level override value so the server can use it as a secondary fallback.
     var btnPreviewGuOvSound = document.getElementById('btnPreviewGuOvSound');
     if (btnPreviewGuOvSound) {
         btnPreviewGuOvSound.addEventListener('click', function() {
-            var sound = document.getElementById('guOvSound').value || channelDefaultSound;
-            if (!sound) return;
-            previewGUSoundButton(btnPreviewGuOvSound, { channel: chName, sound: sound }, null);
+            // sound:"" → server falls back to channel's saved galactic_unicorn_sound
+            previewGUSoundButton(btnPreviewGuOvSound, { channel: chName, sound: document.getElementById('guOvSound').value }, null);
         });
     }
     var btnPreviewGuOvSoundUnhealthy = document.getElementById('btnPreviewGuOvSoundUnhealthy');
     if (btnPreviewGuOvSoundUnhealthy) {
         btnPreviewGuOvSoundUnhealthy.addEventListener('click', function() {
-            // "(use rule sound above)" → fall back to the rule sound override, then channel default
+            // Use unhealthy override if set, otherwise fall back to rule sound (server resolves channel default if both empty)
             var sound = document.getElementById('guOvSoundUnhealthy').value ||
-                        document.getElementById('guOvSound').value ||
-                        channelDefaultSound;
-            if (!sound) return;
+                        document.getElementById('guOvSound').value;
             previewGUSoundButton(btnPreviewGuOvSoundUnhealthy, { channel: chName, sound: sound }, null);
         });
     }
     var btnPreviewGuOvSoundRecovery = document.getElementById('btnPreviewGuOvSoundRecovery');
     if (btnPreviewGuOvSoundRecovery) {
         btnPreviewGuOvSoundRecovery.addEventListener('click', function() {
-            // "(use rule sound above)" → fall back to the rule sound override, then channel default
+            // Use recovery override if set, otherwise fall back to rule sound (server resolves channel default if both empty)
             var sound = document.getElementById('guOvSoundRecovery').value ||
-                        document.getElementById('guOvSound').value ||
-                        channelDefaultSound;
-            if (!sound) return;
+                        document.getElementById('guOvSound').value;
             previewGUSoundButton(btnPreviewGuOvSoundRecovery, { channel: chName, sound: sound }, null);
         });
     }

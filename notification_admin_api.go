@@ -1627,12 +1627,6 @@ func handleGalacticUnicornSoundPreview(w http.ResponseWriter, r *http.Request, n
 		return
 	}
 
-	if req.Sound == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "sound is required"}) //nolint:errcheck
-		return
-	}
-
 	// Resolve device URL and TLS settings from either the named channel or the
 	// ad-hoc URL supplied directly from the form.
 	deviceURL := req.URL
@@ -1646,7 +1640,17 @@ func handleGalacticUnicornSoundPreview(w http.ResponseWriter, r *http.Request, n
 			if chCfg.GalacticUnicornTimeoutSeconds > 0 {
 				timeoutSec = chCfg.GalacticUnicornTimeoutSeconds
 			}
+			// If no sound was specified, fall back to the channel's configured default.
+			if req.Sound == "" {
+				req.Sound = chCfg.GalacticUnicornSound
+			}
 		}
+	}
+
+	if req.Sound == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "sound is required (select a pattern or configure a channel default)"}) //nolint:errcheck
+		return
 	}
 
 	if deviceURL == "" {

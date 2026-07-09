@@ -858,9 +858,11 @@ func main() {
 		log.Printf("Load history tracker started")
 	}
 
-	// Initialize Prometheus metrics if enabled (must be before multi-decoder)
+	// Initialize Prometheus metrics if enabled (must be before multi-decoder).
+	// Also initialize when MQTT is enabled so publishAllMetrics has registered
+	// gauges to gather from even when the /metrics HTTP endpoint is disabled.
 	var prometheusMetrics *PrometheusMetrics
-	if config.Prometheus.Enabled {
+	if config.Prometheus.Enabled || config.MQTT.Enabled {
 		prometheusMetrics = NewPrometheusMetrics()
 		// Initialize system metrics
 		prometheusMetrics.InitializeSystemMetrics()
@@ -1323,7 +1325,7 @@ func main() {
 	if config.Decoder.Enabled {
 		receiverLocator = config.Decoder.ReceiverLocator
 	}
-	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat, &config.Admin)
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, mqttPublisher, receiverLocator, config.Chat, &config.Admin)
 
 	// Initialize FreeDV Reporter activity monitor (view-only connection to qso.freedv.org)
 	if config.FreeDVReporter.Enabled {

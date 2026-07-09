@@ -1230,6 +1230,22 @@ func buildBandConditionsSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 
 // ─── Display sender ───────────────────────────────────────────────────────────
 
+// slideLabel returns a human-readable identifier for a slide, used in log messages.
+// It extracts the first segment text from whichever label field is populated,
+// falling back to slide.topLine (which is usually empty for modern slides).
+func (s monitorSlide) slideLabel() string {
+	if len(s.topLineSegs) > 0 {
+		return strings.TrimSpace(s.topLineSegs[0].Text)
+	}
+	if len(s.topSegments) > 0 {
+		return strings.TrimSpace(s.topSegments[0].Text)
+	}
+	if s.topLine != "" {
+		return s.topLine
+	}
+	return "(unknown)"
+}
+
 // sendSlide pushes a single slide to the display.
 // The transition defaults to TransitionCut (instantaneous) unless slide.transition
 // is set explicitly — use TransitionFade for slide-to-slide transitions.
@@ -1237,6 +1253,9 @@ func buildBandConditionsSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 // All slides use duration="forever": the Go server controls timing by sending
 // the next slide before the current one would expire, eliminating the blank-screen
 // gap that occurs when the firmware auto-expires a timed message.
+//
+// On error, the JSON payload that was attempted is logged alongside the error
+// to aid diagnosis of firmware validation failures.
 func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 	transition := slide.transition
 	if transition == "" {
@@ -1267,6 +1286,23 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 
 	// ── Dual-segment layout (band conditions with both tiers) ─────────────────
 	if len(slide.topSegments) > 0 {
+		bottomLine := gudriver.DisplayLine{
+			Size:        1,
+			Effect:      gudriver.EffectAuto,
+			Y:           "bottom",
+			ScrollSpeed: monitorScrollSpeed,
+			ScrollPause: monitorScrollPause,
+			ScrollLoop:  true,
+			ScrollStart: gudriver.ScrollStartLeft,
+		}
+		if len(slide.valueSegments) > 0 {
+			bottomLine.Segments = slide.valueSegments
+		} else {
+			// Firmware requires either 'text' or 'segments' on every line.
+			// When only one row of bands fits (≤3 qualifying bands), the bottom
+			// line has no content — send a blank string so the firmware accepts it.
+			bottomLine.Text = " "
+		}
 		cmd := gudriver.DisplayCommand{
 			ID:         monitorMessageID,
 			Priority:   monitorPriority,
@@ -1283,16 +1319,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 					ScrollLoop:  false,
 					ScrollStart: gudriver.ScrollStartLeft,
 				},
-				{
-					Segments:    slide.valueSegments,
-					Size:        1,
-					Effect:      gudriver.EffectAuto,
-					Y:           "bottom",
-					ScrollSpeed: monitorScrollSpeed,
-					ScrollPause: monitorScrollPause,
-					ScrollLoop:  true,
-					ScrollStart: gudriver.ScrollStartLeft,
-				},
+				bottomLine,
 			},
 		}
 		_, err := client.Display(cmd)
@@ -1312,7 +1339,14 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 	if len(slide.valueSegments) > 0 {
 		bottomLine.Segments = slide.valueSegments
 	} else {
-		bottomLine.Text = slide.value
+		// Firmware requires 'text' or 'segments'; omitempty on Text means an
+		// empty string would be omitted from JSON and trigger a 422. Use a
+		// space as a safe blank when value is empty.
+		if slide.value == "" {
+			bottomLine.Text = " "
+		} else {
+			bottomLine.Text = slide.value
+		}
 		bottomLine.Color = slide.valueColor
 	}
 
@@ -1327,7 +1361,12 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 	if len(slide.topLineSegs) > 0 {
 		topLine.Segments = slide.topLineSegs
 	} else {
-		topLine.Text = slide.topLine
+		// Same guard: omitempty means "" would be omitted → firmware 422.
+		if slide.topLine == "" {
+			topLine.Text = " "
+		} else {
+			topLine.Text = slide.topLine
+		}
 		topLine.Color = slide.topColor
 	}
 

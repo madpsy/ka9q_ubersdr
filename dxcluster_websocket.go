@@ -44,6 +44,7 @@ type DXClusterWebSocketHandler struct {
 	sessions          *SessionManager
 	ipBanManager      *IPBanManager
 	prometheusMetrics *PrometheusMetrics
+	mqttPublisher     *MQTTPublisher
 	upgrader          websocket.Upgrader
 
 	// Digital spot deduplication
@@ -91,13 +92,14 @@ type DXClusterWebSocketHandler struct {
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
-func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string, chatConfig ChatConfig, adminConfig *AdminConfig) *DXClusterWebSocketHandler {
+func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, mqttPublisher *MQTTPublisher, receiverLocator string, chatConfig ChatConfig, adminConfig *AdminConfig) *DXClusterWebSocketHandler {
 	handler := &DXClusterWebSocketHandler{
 		clients:           make(map[*websocket.Conn]*sync.Mutex),
 		dxCluster:         dxCluster,
 		sessions:          sessions,
 		ipBanManager:      ipBanManager,
 		prometheusMetrics: prometheusMetrics,
+		mqttPublisher:     mqttPublisher,
 		digitalSpotCache:  make(map[digitalSpotKey]time.Time),
 		digitalSpotBuffer: make([]map[string]interface{}, 0, 100),
 		maxDigitalSpots:   100,
@@ -126,12 +128,6 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		if err != nil {
 			log.Printf("Chat: Failed to initialize logger: %v", err)
 			chatLogger = nil // Continue without logging
-		}
-
-		// Get MQTT publisher from PrometheusMetrics if available
-		var mqttPublisher *MQTTPublisher
-		if prometheusMetrics != nil {
-			mqttPublisher = prometheusMetrics.mqttPublisher
 		}
 
 		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher, adminConfig, chatConfig, ipBanManager)
@@ -631,10 +627,10 @@ func (h *DXClusterWebSocketHandler) broadcastSpot(spot DXSpot) {
 	// Record spot in Prometheus (by band)
 	if h.prometheusMetrics != nil {
 		h.prometheusMetrics.RecordDXSpot(spot.Band)
-		// Publish to MQTT if enabled
-		if h.prometheusMetrics.mqttPublisher != nil {
-			go h.prometheusMetrics.mqttPublisher.PublishDXSpot(spot)
-		}
+	}
+	// Publish to MQTT if enabled
+	if h.mqttPublisher != nil {
+		go h.mqttPublisher.PublishDXSpot(spot)
 	}
 
 	message := map[string]interface{}{

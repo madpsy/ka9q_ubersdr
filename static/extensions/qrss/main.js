@@ -6,6 +6,11 @@
 //
 // Design mirrors QrssPiG (github.com/hb9fxx/qrsspig): Hann window, overlapping
 // FFT, 10·log10 power → colour map → one column per FFT.
+//
+// Wrapped in an IIFE: extension scripts share the global scope, so top-level
+// names here (e.g. FFT) must not leak or they collide with core scripts.
+(function () {
+'use strict';
 
 // ─── Colour maps ────────────────────────────────────────────────────────────
 // Each map is a list of [pos, r, g, b] control points, interpolated into a
@@ -864,3 +869,5 @@ if (window.decoderManager) {
 } else {
     console.error('QRSS: decoderManager not available');
 }
+
+})();

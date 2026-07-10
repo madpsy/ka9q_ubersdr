@@ -167,6 +167,12 @@ class QRSSExtension extends DecoderExtension {
         this.floorEMA = -110;      // running noise-floor estimate for auto-contrast
         this.margins = { l: 62, r: 56, t: 24, b: 22 };
         this.lastColTime = 0;
+
+        // Display magnifier: a normalised sub-rectangle of the waterfall content
+        // that is scaled to fill the plot area. x: 0=oldest(left)…1=newest(right);
+        // y: 0=top(highest freq)…1=bottom. Full view = {0,0,1,1}.
+        this.view = { x0: 0, y0: 0, x1: 1, y1: 1 };
+        this._dragging = false;
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -206,12 +212,15 @@ class QRSSExtension extends DecoderExtension {
         this._resizeObserver = new ResizeObserver(() => this._resizeCanvas());
         this._resizeObserver.observe(this.canvas.parentElement);
 
-        this.canvas.addEventListener('mousemove', (e) => this._onHover(e));
+        // Magnifier: scroll = zoom, drag = pan, double-click = reset to fit.
+        this.canvas.addEventListener('mousedown', (e) => this._onDragStart(e));
+        this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
+        this.canvas.addEventListener('mouseup', () => this._onDragEnd());
         this.canvas.addEventListener('mouseleave', () => {
+            this._onDragEnd();
             const h = document.getElementById('qrss-hover'); if (h) h.hidden = true;
         });
-        // Click to zoom-centre on a frequency; double-click resets to full view.
-        this.canvas.addEventListener('click', (e) => this._onClickCenter(e));
+        this.canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
         this.canvas.addEventListener('dblclick', (e) => { e.preventDefault(); this._resetView(); });
     }
 
@@ -691,8 +700,14 @@ class QRSSExtension extends DecoderExtension {
         ctx.fillStyle = '#0a0e14';
         ctx.fillRect(0, 0, W, Hc);
 
-        // Waterfall
-        if (this.wf) ctx.drawImage(this.wf, m.l, m.t, this.innerW, this.innerH);
+        // Waterfall — draw the magnifier's sub-rectangle scaled to fill the plot
+        if (this.wf) {
+            const v = this.view, ww = this.wf.width, wh = this.wf.height;
+            const sx = v.x0 * ww, sy = v.y0 * wh;
+            const sw = (v.x1 - v.x0) * ww, sh = (v.y1 - v.y0) * wh;
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(this.wf, sx, sy, sw, sh, m.l, m.t, this.innerW, this.innerH);
+        }
         ctx.strokeStyle = '#2a3340';
         ctx.strokeRect(m.l + 0.5, m.t + 0.5, this.innerW, this.innerH);
 
@@ -703,20 +718,25 @@ class QRSSExtension extends DecoderExtension {
     }
 
     // Frequency axis labelled in absolute RF: dial + audio (fc + FFT offset).
+    // Reflects the magnifier's visible frequency sub-range.
     _drawFreqAxis(ctx) {
-        const m = this.margins, H = this.innerH;
+        const m = this.margins, H = this.innerH, v = this.view;
         const decSR = this.decSR || this.config.span;
-        const audioLo = this.fc - decSR / 2, audioHi = this.fc + decSR / 2;
+        const fullHi = this.fc + decSR / 2;
+        // Visible band (y0 top = highest freq)
+        const visHi = fullHi - v.y0 * decSR;
+        const visLo = fullHi - v.y1 * decSR;
+        const visRange = visHi - visLo;
         ctx.fillStyle = '#8aa0b8';
         ctx.font = '10px -apple-system, Segoe UI, sans-serif';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        const step = this._niceStep(decSR, 6);
+        const step = this._niceStep(visRange, 6);
         const decimals = Math.max(1, Math.min(3, Math.ceil(Math.log10(1000 / step))));
-        const first = Math.ceil(audioLo / step) * step;
-        if (decSR > 0 && isFinite(decSR) && step > 0) {
-            for (let fa = first; fa <= audioHi + 0.001; fa += step) {
-                const y = m.t + H * (1 - (fa - audioLo) / decSR);
+        const first = Math.ceil(visLo / step) * step;
+        if (visRange > 0 && isFinite(visRange) && step > 0) {
+            for (let fa = first; fa <= visHi + 0.001; fa += step) {
+                const y = m.t + H * (1 - (fa - visLo) / visRange);
                 ctx.strokeStyle = 'rgba(255,255,255,0.06)';
                 ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(m.l + this.innerW, y); ctx.stroke();
                 const rfk = (this.dialFreq + fa) / 1000;   // kHz
@@ -732,17 +752,22 @@ class QRSSExtension extends DecoderExtension {
     }
 
     _drawTimeAxis(ctx) {
-        const m = this.margins, W = this.innerW;
+        const m = this.margins, W = this.innerW, v = this.view;
         const secPerCol = this.hop / (this.decSR || 1);
         const total = secPerCol * W;
+        // Visible time span (x1 right = newest → smallest age)
+        const agoLeft = total * (1 - v.x0);   // oldest visible (left edge)
+        const agoRight = total * (1 - v.x1);  // newest visible (right edge)
+        const visRange = agoLeft - agoRight;
         ctx.fillStyle = '#8aa0b8';
         ctx.font = '10px -apple-system, Segoe UI, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        const step = this._niceStep(total, 6);
-        if (total > 0 && isFinite(total) && step > 0) {
-            for (let s = 0; s <= total + 1; s += step) {
-                const x = m.l + W * (1 - s / total);
+        const step = this._niceStep(visRange, 6);
+        if (visRange > 0 && isFinite(visRange) && step > 0) {
+            const first = Math.ceil(agoRight / step) * step;
+            for (let s = first; s <= agoLeft + 0.001; s += step) {
+                const x = m.l + W * (1 - (s - agoRight) / visRange);
                 ctx.fillText('-' + this._fmtShort(s), x, m.t + this.innerH + 4);
             }
         }
@@ -797,46 +822,105 @@ class QRSSExtension extends DecoderExtension {
 
     _onHover(e) {
         if (!this.decSR) return;
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        const m = this.margins;
-        if (x < m.l || x > m.l + this.innerW || y < m.t || y > m.t + this.innerH) {
-            const h = document.getElementById('qrss-hover'); if (h) h.hidden = true; return;
-        }
-        const audio = this._yToAudio(y);
-        const secPerCol = this.hop / this.decSR;
-        const ago = secPerCol * this.innerW * (1 - (x - m.l) / this.innerW);
-        const rf = this.dialFreq + audio;
+        const p = this._pos(e);
         const h = document.getElementById('qrss-hover');
+        if (!p) { if (h) h.hidden = true; return; }
+        const { audio, ago } = this._pointToFreqTime(p.x, p.y);
+        const rf = this.dialFreq + audio;
         if (h) {
             h.hidden = false;
-            h.style.left = Math.min(x + 12, this.cssW - 130) + 'px';
-            h.style.top = (y + 12) + 'px';
+            h.style.left = Math.min(p.x + 12, this.cssW - 130) + 'px';
+            h.style.top = (p.y + 12) + 'px';
             h.innerHTML = `${(rf / 1e6).toFixed(5)} MHz<br>${audio.toFixed(1)} Hz · -${this._fmtShort(ago)}`;
         }
     }
 
-    // Canvas y (device-independent px) → audio frequency in the current view.
-    _yToAudio(y) {
-        const m = this.margins, decSR = this.decSR || this.config.span;
-        const frac = 1 - (y - m.t) / this.innerH;   // 0 bottom … 1 top
-        return (this.fc - decSR / 2) + frac * decSR;
+    // Pointer position within the plot area (device-independent px), or null.
+    _pos(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top, m = this.margins;
+        if (x < m.l || x > m.l + this.innerW || y < m.t || y > m.t + this.innerH) return null;
+        return { x, y };
     }
 
-    _onClickCenter(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        const m = this.margins;
-        if (x < m.l || x > m.l + this.innerW || y < m.t || y > m.t + this.innerH) return;
-        this.config.centerHz = Math.max(0, Math.min((this.inSR || 48000) / 2, this._yToAudio(y)));
-        this.clearWaterfall();          // frequency range changed — old columns no longer align
-        this._restartIfRunning();
+    // Plot pixel → audio frequency + age, through the magnifier view transform.
+    _pointToFreqTime(x, y) {
+        const m = this.margins, v = this.view, decSR = this.decSR || this.config.span;
+        const px = (x - m.l) / this.innerW, py = (y - m.t) / this.innerH;
+        const cxn = v.x0 + px * (v.x1 - v.x0);   // content time  (0=oldest, 1=newest)
+        const cyn = v.y0 + py * (v.y1 - v.y0);   // content freq  (0=top/high, 1=bottom/low)
+        const audio = (this.fc + decSR / 2) - cyn * decSR;
+        const secPerCol = this.hop / (decSR || 1);
+        const ago = secPerCol * this.innerW * (1 - cxn);
+        return { audio, ago };
+    }
+
+    // ── Magnifier: zoom + pan the displayed waterfall (no re-tuning) ───────────
+    _onWheel(e) {
+        const p = this._pos(e);
+        if (!p) return;
+        e.preventDefault();
+        // Normalise delta across wheel modes (line/page) and pixel (trackpad).
+        let d = e.deltaY;
+        if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= this.innerH;
+        d = Math.max(-100, Math.min(100, d));
+        if (!d) return;
+        const f = Math.exp(d * 0.003);            // >1 zoom out, <1 zoom in
+        const px = (p.x - this.margins.l) / this.innerW;
+        const py = (p.y - this.margins.t) / this.innerH;
+        this._zoomView(f, px, py);
+        this._redraw();
+    }
+
+    _zoomView(f, px, py) {
+        const v = this.view, minW = 0.02;         // up to ~50× magnification
+        let wx = v.x1 - v.x0, wy = v.y1 - v.y0;
+        const cx = v.x0 + px * wx, cy = v.y0 + py * wy;   // content point under cursor
+        wx = Math.min(1, Math.max(minW, wx * f));
+        wy = Math.min(1, Math.max(minW, wy * f));
+        const x0 = Math.min(1 - wx, Math.max(0, cx - px * wx));
+        const y0 = Math.min(1 - wy, Math.max(0, cy - py * wy));
+        this.view = { x0, y0, x1: x0 + wx, y1: y0 + wy };
+    }
+
+    _onDragStart(e) {
+        const p = this._pos(e);
+        if (!p) return;
+        this._dragging = true;
+        this._dragLast = p;
+        this.canvas.style.cursor = 'grabbing';
+    }
+
+    _onDragEnd() {
+        if (!this._dragging) return;
+        this._dragging = false;
+        if (this.canvas) this.canvas.style.cursor = 'crosshair';
+    }
+
+    _onMouseMove(e) {
+        if (this._dragging) {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const dxn = (x - this._dragLast.x) / this.innerW * (this.view.x1 - this.view.x0);
+            const dyn = (y - this._dragLast.y) / this.innerH * (this.view.y1 - this.view.y0);
+            this._dragLast = { x, y };
+            this._panView(-dxn, -dyn);            // grab-scroll: content follows the cursor
+            this._redraw();
+        } else {
+            this._onHover(e);
+        }
+    }
+
+    _panView(dxn, dyn) {
+        const v = this.view, wx = v.x1 - v.x0, wy = v.y1 - v.y0;
+        const x0 = Math.min(1 - wx, Math.max(0, v.x0 + dxn));
+        const y0 = Math.min(1 - wy, Math.max(0, v.y0 + dyn));
+        this.view = { x0, y0, x1: x0 + wx, y1: y0 + wy };
     }
 
     _resetView() {
-        this.config.centerHz = null;    // back to [0, span]
-        this.clearWaterfall();
-        this._restartIfRunning();
+        this.view = { x0: 0, y0: 0, x1: 1, y1: 1 };
+        this._redraw();
     }
 
     // Widen the receiver passband (never narrows) so the requested view is
@@ -850,6 +934,7 @@ class QRSSExtension extends DecoderExtension {
 
     clearWaterfall() {
         this.dbHistory = [];
+        this.view = { x0: 0, y0: 0, x1: 1, y1: 1 };   // content remapped — reset magnifier
         if (this.wfCtx) { this.wfCtx.fillStyle = '#000'; this.wfCtx.fillRect(0, 0, this.innerW, this.innerH); }
         this._redraw();
     }

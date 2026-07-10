@@ -25,10 +25,10 @@
     },
     "fftSize": {
       "type": "number",
-      "default": 16384,
-      "min": 4096,
-      "max": 131072,
-      "description": "FFT size — larger gives finer frequency resolution (slower)"
+      "default": 4096,
+      "min": 2048,
+      "max": 8192,
+      "description": "FFT size — larger gives finer frequency resolution (slower to fill)"
     },
     "secPerPixel": {
       "type": "number",

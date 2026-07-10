@@ -126,7 +126,7 @@ class QRSSExtension extends DecoderExtension {
         this.config = {
             span: 3000,            // displayed bandwidth (Hz) — the zoom width
             centerHz: null,        // audio centre frequency; null → span/2 (view [0, span])
-            fftSize: 16384,
+            fftSize: 4096,
             secPerPixel: 1.0,      // waterfall time resolution (seconds per column)
             windowSec: 0,          // 0 = Auto (Speed-driven); >0 locks total on-screen time
             colormap: 'qrss',
@@ -281,7 +281,7 @@ class QRSSExtension extends DecoderExtension {
         const spanSel = document.getElementById('qrss-span');
         if (spanSel) { spanSel.value = String(this.config.span); spanSel.addEventListener('change', (e) => { this.config.span = parseInt(e.target.value); this.clearWaterfall(); this._restartIfRunning(); }); }
         const fftSel = document.getElementById('qrss-fft');
-        if (fftSel) { fftSel.value = String(this.config.fftSize); fftSel.addEventListener('change', (e) => { this.config.fftSize = parseInt(e.target.value); this._restartIfRunning(); }); }
+        if (fftSel) { fftSel.value = String(this.config.fftSize); fftSel.addEventListener('change', (e) => { this.config.fftSize = parseInt(e.target.value); this._changeResolution(); }); }
         const spdSel = document.getElementById('qrss-speed');
         if (spdSel) {
             spdSel.value = String(this.config.secPerPixel);
@@ -507,14 +507,19 @@ class QRSSExtension extends DecoderExtension {
         this.running = true;
         this.paused = false;
         this.lastColTime = performance.now();
-        this._setStatus('Running', 'ok');
         this._toggleButtons(true);
+        this._updateFillStatus();
+        // While integrating a large FFT the first line takes N/decSR seconds;
+        // show a live countdown so it's clearly working, not frozen.
+        clearInterval(this._statusTimer);
+        this._statusTimer = setInterval(() => this._updateFillStatus(), 250);
     }
 
     stop() {
         if (!this.running && !this.workletNode) { this._toggleButtons(false); return; }
         this.running = false;
         this.paused = false;
+        clearInterval(this._statusTimer);
         try {
             if (this.workletNode) {
                 this.workletNode.port.postMessage({ command: 'stop' });
@@ -526,6 +531,52 @@ class QRSSExtension extends DecoderExtension {
         this.workletNode = null; this.sinkNode = null;
         this._setStatus('Stopped', 'idle');
         this._toggleButtons(false);
+    }
+
+    // Status while the FFT buffer fills (fine/ultra/extreme need many seconds).
+    _updateFillStatus() {
+        if (!this.running || this.paused) return;
+        const N = this.config.fftSize;
+        if (this.totalIn < N) {
+            const remain = Math.max(0, Math.ceil((N - this.totalIn) / (this.decSR || 1)));
+            this._setStatus('Filling ' + remain + 's', 'idle');
+        } else {
+            this._setStatus('Running', 'ok');
+        }
+    }
+
+    // Change FFT size without tearing down the receiver: rebuild the FFT/ring on
+    // the main thread and carry over the samples already captured, so we don't
+    // restart the (multi-second) integration from scratch.
+    _changeResolution() {
+        this._updateDerived();
+        this._buildBinMap();
+        if (this.running) this._rebuildFFT();
+        this._redraw();
+        this._updateFillStatus();
+    }
+
+    _rebuildFFT() {
+        const N = this.config.fftSize;
+        const newI = new Float32Array(N), newQ = new Float32Array(N);
+        // Carry over the most recent samples we already have (chronological order)
+        let carried = 0;
+        if (this.ringI && this.totalIn > 0) {
+            const oldN = this.ringI.length;
+            const n = Math.min(this.totalIn, oldN, N);
+            let idx = ((this.ringPos - n) % oldN + oldN) % oldN;
+            for (let i = 0; i < n; i++) { newI[i] = this.ringI[idx]; newQ[i] = this.ringQ[idx]; idx = idx === oldN - 1 ? 0 : idx + 1; }
+            carried = n;
+        }
+        this.fft = new FFT(N);
+        this.fftRe = new Float32Array(N);
+        this.fftIm = new Float32Array(N);
+        this.hann = new Float32Array(N);
+        for (let i = 0; i < N; i++) this.hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+        this.ringI = newI; this.ringQ = newQ;
+        this.ringPos = carried % N;
+        this.totalIn = carried;
+        this.sinceLast = 0;
     }
 
     // Freeze/unfreeze the waterfall without tearing down capture, so the current

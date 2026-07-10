@@ -244,8 +244,10 @@ class QRSSExtension extends DecoderExtension {
         if (old) this.wfCtx.drawImage(old, 0, 0, this.innerW, this.innerH);
 
         this._buildBinMap();
-        // Refresh derived timing/readouts (holds a locked window across resizes)
-        if (this.decSR) this._updateDerived();
+        // Compute derived timing/frequency values before painting so the axes
+        // render sensibly from the first frame (and holds a locked window across
+        // resizes). Safe to call pre-start — it only reads config + sample rate.
+        this._updateDerived();
         this._redraw();
     }
 
@@ -712,13 +714,15 @@ class QRSSExtension extends DecoderExtension {
         const step = this._niceStep(decSR, 6);
         const decimals = Math.max(1, Math.min(3, Math.ceil(Math.log10(1000 / step))));
         const first = Math.ceil(audioLo / step) * step;
-        for (let fa = first; fa <= audioHi + 0.001; fa += step) {
-            const y = m.t + H * (1 - (fa - audioLo) / decSR);
-            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-            ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(m.l + this.innerW, y); ctx.stroke();
-            const rfk = (this.dialFreq + fa) / 1000;   // kHz
-            ctx.fillStyle = '#8aa0b8';
-            ctx.fillText(rfk.toFixed(decimals), m.l - 6, y);
+        if (decSR > 0 && isFinite(decSR) && step > 0) {
+            for (let fa = first; fa <= audioHi + 0.001; fa += step) {
+                const y = m.t + H * (1 - (fa - audioLo) / decSR);
+                ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+                ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(m.l + this.innerW, y); ctx.stroke();
+                const rfk = (this.dialFreq + fa) / 1000;   // kHz
+                ctx.fillStyle = '#8aa0b8';
+                ctx.fillText(rfk.toFixed(decimals), m.l - 6, y);
+            }
         }
         ctx.save();
         ctx.translate(11, m.t + H / 2); ctx.rotate(-Math.PI / 2);
@@ -736,9 +740,11 @@ class QRSSExtension extends DecoderExtension {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         const step = this._niceStep(total, 6);
-        for (let s = 0; s <= total + 1; s += step) {
-            const x = m.l + W * (1 - s / total);
-            ctx.fillText('-' + this._fmtShort(s), x, m.t + this.innerH + 4);
+        if (total > 0 && isFinite(total) && step > 0) {
+            for (let s = 0; s <= total + 1; s += step) {
+                const x = m.l + W * (1 - s / total);
+                ctx.fillText('-' + this._fmtShort(s), x, m.t + this.innerH + 4);
+            }
         }
         ctx.textAlign = 'right'; ctx.fillStyle = '#5f7488';
         ctx.fillText('now', m.l + W, m.t + this.innerH + 4);
@@ -775,6 +781,7 @@ class QRSSExtension extends DecoderExtension {
     }
 
     _niceStep(range, targetTicks) {
+        if (!(range > 0) || !isFinite(range)) return 1;   // guard: never 0/NaN (would hang tick loops)
         const raw = range / targetTicks;
         const mag = Math.pow(10, Math.floor(Math.log10(raw)));
         const n = raw / mag;

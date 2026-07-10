@@ -1,0 +1,72 @@
+{
+  "name": "qrss",
+  "displayName": "QRSS Grabber",
+  "version": "1.0.0",
+  "description": "Narrow-band QRSS spectrogram grabber. Renders a high-resolution scrolling waterfall for visually reading very-slow CW (QRSS) and MEPT beacons well below the noise floor.",
+  "author": "UberSDR",
+  "type": "visualizer",
+  "icon": "🐌",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html",
+    "scripts": []
+  },
+  "settings": {
+    "span": {
+      "type": "number",
+      "default": 3000,
+      "min": 100,
+      "max": 6000,
+      "description": "Displayed bandwidth in Hz (zoom width around the click-selected centre)"
+    },
+    "fftSize": {
+      "type": "number",
+      "default": 16384,
+      "min": 4096,
+      "max": 131072,
+      "description": "FFT size — larger gives finer frequency resolution (slower)"
+    },
+    "secPerPixel": {
+      "type": "number",
+      "default": 1.0,
+      "min": 0.05,
+      "max": 30,
+      "description": "Waterfall time resolution in seconds per column (total window = this × width)"
+    },
+    "windowSec": {
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 7200,
+      "description": "Fixed total on-screen time in seconds; 0 = Auto (derived from Speed × width)"
+    },
+    "colormap": {
+      "type": "string",
+      "default": "qrss",
+      "description": "Colour palette (qrss, viridis, inferno, afmhot, grayscale)"
+    },
+    "dbMin": {
+      "type": "number",
+      "default": -110,
+      "min": -160,
+      "max": 0,
+      "description": "Lower dB limit (black point)"
+    },
+    "dbMax": {
+      "type": "number",
+      "default": -60,
+      "min": -160,
+      "max": 0,
+      "description": "Upper dB limit (peak colour)"
+    },
+    "autoContrast": {
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically track the noise floor for the dB range"
+    }
+  }
+}

@@ -1,0 +1,155 @@
+/* QRSS Grabber Extension — dark theme, matches UberSDR extension styling */
+
+.qrss-container {
+    padding: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.qrss-container select,
+.qrss-container button { font-family: inherit; }
+
+/* Band bar */
+.qrss-bandbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: #161b22;
+    border: 1px solid #232b36;
+    border-radius: 8px;
+}
+.qrss-select {
+    padding: 6px 10px;
+    background: #0d1117;
+    color: #e6edf3;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 12px;
+}
+.qrss-select:focus { outline: none; border-color: #4a9eff; }
+.qrss-select:disabled { opacity: .45; cursor: not-allowed; }
+.qrss-select-wide { flex: 1; }
+
+.qrss-dial-readout {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    white-space: nowrap;
+    font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+}
+.qrss-dial-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #6e7d90; }
+.qrss-dial-value { font-size: 16px; font-weight: 600; color: #4a9eff; }
+.qrss-dial-mode {
+    font-size: 10px; font-weight: 600; color: #0d1117; background: #4a9eff;
+    padding: 1px 5px; border-radius: 4px;
+}
+
+/* Status / transport bar */
+.qrss-statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #161b22;
+    border: 1px solid #232b36;
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+.qrss-status-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.qrss-status-right { display: flex; gap: 8px; }
+
+.qrss-badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+}
+.qrss-badge-idle { background: #30363d; color: #adbac7; }
+.qrss-badge-ok   { background: #1f6f3f; color: #d6ffe4; }
+.qrss-badge-err  { background: #8b2b2b; color: #ffd9d9; }
+
+.qrss-stat { display: inline-flex; align-items: baseline; gap: 6px; }
+.qrss-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #6e7d90; }
+.qrss-stat-value { font-size: 12px; font-weight: 600; color: #c9d5e1; font-family: ui-monospace, monospace; }
+
+/* Buttons */
+.qrss-btn {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s, opacity .15s;
+}
+.qrss-btn:disabled { opacity: .4; cursor: not-allowed; }
+.qrss-btn-primary { background: #4a9eff; color: #06121f; }
+.qrss-btn-primary:hover:not(:disabled) { background: #6bb0ff; }
+.qrss-btn-secondary { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+.qrss-btn-secondary:hover:not(:disabled) { background: #2d333b; }
+.qrss-btn-active { background: #b8860b; color: #1a1200; border-color: #d9a520; }
+.qrss-btn-active:hover:not(:disabled) { background: #d9a520; }
+
+/* Controls */
+.qrss-controls {
+    display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+    padding: 10px 12px;
+    background: #161b22;
+    border: 1px solid #232b36;
+    border-radius: 8px;
+}
+.qrss-ctl { display: flex; align-items: center; gap: 8px; }
+.qrss-ctl > label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #8aa0b8; }
+.qrss-ctl-contrast { gap: 10px; margin-left: auto; }
+.qrss-auto-label { display: inline-flex; align-items: center; gap: 6px; text-transform: none; color: #c9d5e1; font-size: 12px; white-space: nowrap; }
+.qrss-range { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 6px; width: 150px; }
+.qrss-range-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #6e7d90; }
+.qrss-range input[type=range] { width: 100%; height: 3px; accent-color: #4a9eff; }
+.qrss-db-readout { font-size: 11px; font-family: ui-monospace, monospace; color: #c9d5e1; min-width: 96px; }
+
+/* Display */
+.qrss-display {
+    position: relative;
+    background: #05080d;
+    border: 1px solid #232b36;
+    border-radius: 8px;
+    overflow: hidden;
+    min-height: 420px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.4);
+}
+.qrss-canvas {
+    display: block;
+    width: 100%;
+    height: 520px;
+}
+.qrss-hover {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(13,17,23,.92);
+    border: 1px solid #30363d;
+    border-radius: 5px;
+    padding: 4px 7px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    color: #e6edf3;
+    line-height: 1.4;
+    white-space: nowrap;
+    z-index: 5;
+}
+
+/* Help */
+.qrss-help {
+    padding: 10px 14px;
+    background: #161b22;
+    border: 1px solid #232b36;
+    border-left: 3px solid #4a9eff;
+    border-radius: 6px;
+}
+.qrss-help p { margin: 0; font-size: 12px; line-height: 1.6; color: #adbac7; }
+.qrss-help strong { color: #4a9eff; }
+
+@media (max-width: 768px) {
+    .qrss-statusbar, .qrss-controls { flex-direction: column; align-items: stretch; }
+    .qrss-status-left, .qrss-status-right { justify-content: space-between; }
+    .qrss-ctl-contrast { margin-left: 0; }
+    .qrss-canvas { height: 380px; }
+}

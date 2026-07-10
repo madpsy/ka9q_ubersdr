@@ -1,0 +1,134 @@
+<div class="qrss-container">
+
+    <!-- Band / dial preset selector -->
+    <div class="qrss-bandbar">
+        <select id="qrss-band-select" class="qrss-select qrss-select-wide" title="Tune to a common QRSS watering hole (USB)">
+            <option value="">— Select QRSS band / dial —</option>
+            <optgroup label="Most active">
+                <option value="10138700">30 m · dial 10.1387 MHz · QRSS ≈ 10.140 MHz</option>
+                <option value="28124600">10 m · dial 28.1246 MHz · QRSS ≈ 28.126 MHz</option>
+                <option value="7038000">40 m · dial 7.0380 MHz · QRSS ≈ 7.0394 MHz</option>
+            </optgroup>
+            <optgroup label="Other HF bands">
+                <option value="14095600">20 m · dial 14.0956 MHz · QRSS ≈ 14.097 MHz</option>
+                <option value="18104600">17 m · dial 18.1046 MHz · QRSS ≈ 18.106 MHz</option>
+                <option value="21094600">15 m · dial 21.0946 MHz · QRSS ≈ 21.096 MHz</option>
+                <option value="3567200">80 m · dial 3.5672 MHz · QRSS ≈ 3.5686 MHz</option>
+                <option value="1841800">160 m · dial 1.8418 MHz · QRSS ≈ 1.8432 MHz</option>
+            </optgroup>
+            <optgroup label="MF / LF">
+                <option value="474200">630 m · dial 474.2 kHz · QRSS ≈ 475.6 kHz</option>
+                <option value="136300">2200 m · dial 136.3 kHz · QRSS ≈ 137.7 kHz</option>
+            </optgroup>
+        </select>
+        <span class="qrss-dial-readout">
+            <span class="qrss-dial-label">Dial</span>
+            <span id="qrss-dial-freq" class="qrss-dial-value">—</span>
+            <span class="qrss-dial-mode">USB</span>
+        </span>
+    </div>
+
+    <!-- Status / transport bar -->
+    <div class="qrss-statusbar">
+        <div class="qrss-status-left">
+            <span id="qrss-status-badge" class="qrss-badge qrss-badge-idle">Idle</span>
+            <span class="qrss-stat"><span class="qrss-stat-label">View</span><span id="qrss-stat-view" class="qrss-stat-value">—</span></span>
+            <span class="qrss-stat"><span class="qrss-stat-label">Res</span><span id="qrss-stat-bin" class="qrss-stat-value">— Hz</span></span>
+            <span class="qrss-stat"><span class="qrss-stat-label">Speed</span><span id="qrss-stat-rate" class="qrss-stat-value">— s/px</span></span>
+            <span class="qrss-stat"><span class="qrss-stat-label">Sweep</span><span id="qrss-stat-sweep" class="qrss-stat-value">—</span></span>
+            <span class="qrss-stat"><span class="qrss-stat-label">RX BW</span><span id="qrss-stat-rxbw" class="qrss-stat-value">—</span></span>
+        </div>
+        <div class="qrss-status-right">
+            <button id="qrss-start-btn" class="qrss-btn qrss-btn-primary">Start</button>
+            <button id="qrss-stop-btn" class="qrss-btn qrss-btn-secondary" disabled>Stop</button>
+            <button id="qrss-pause-btn" class="qrss-btn qrss-btn-secondary" disabled title="Freeze the waterfall so you can inspect and save it">Freeze</button>
+            <button id="qrss-clear-btn" class="qrss-btn qrss-btn-secondary">Clear</button>
+            <button id="qrss-save-btn" class="qrss-btn qrss-btn-secondary" title="Download the current waterfall as a PNG">Save PNG</button>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="qrss-controls">
+        <div class="qrss-ctl">
+            <label for="qrss-span">Span</label>
+            <select id="qrss-span" class="qrss-select" title="Displayed bandwidth (zoom). Click the waterfall to centre it on a signal.">
+                <option value="6000">6 kHz</option>
+                <option value="3000">3 kHz</option>
+                <option value="1500">1.5 kHz</option>
+                <option value="750">750 Hz</option>
+                <option value="375">375 Hz</option>
+                <option value="200">200 Hz</option>
+                <option value="100">100 Hz</option>
+            </select>
+        </div>
+        <div class="qrss-ctl">
+            <label for="qrss-fft">Resolution</label>
+            <select id="qrss-fft" class="qrss-select">
+                <option value="4096">Coarse</option>
+                <option value="8192">Normal</option>
+                <option value="16384">Fine</option>
+                <option value="32768">Very fine</option>
+                <option value="65536">Ultra</option>
+                <option value="131072">Extreme</option>
+            </select>
+        </div>
+        <div class="qrss-ctl">
+            <label for="qrss-speed">Speed</label>
+            <select id="qrss-speed" class="qrss-select" title="Time per pixel column. Disabled while a fixed Window is set.">
+                <option value="0.25">Fast · 0.25 s/px</option>
+                <option value="0.5">0.5 s/px</option>
+                <option value="1">Normal · 1 s/px</option>
+                <option value="2">2 s/px · QRSS-10</option>
+                <option value="3">Slow · 3 s/px</option>
+                <option value="5">5 s/px · QRSS-30</option>
+                <option value="10">10 s/px</option>
+                <option value="15">15 s/px</option>
+                <option value="20">Very slow · 20 s/px · QRSS-60</option>
+            </select>
+        </div>
+        <div class="qrss-ctl">
+            <label for="qrss-window">Window</label>
+            <select id="qrss-window" class="qrss-select" title="Lock the total on-screen time (overrides Speed and holds across resizes)">
+                <option value="0">Auto</option>
+                <option value="300">5 min</option>
+                <option value="600">10 min</option>
+                <option value="1200">20 min</option>
+                <option value="1800">30 min</option>
+                <option value="3600">60 min</option>
+            </select>
+        </div>
+        <div class="qrss-ctl">
+            <label for="qrss-colormap">Palette</label>
+            <select id="qrss-colormap" class="qrss-select">
+                <option value="qrss">QRSS</option>
+                <option value="viridis">Viridis</option>
+                <option value="inferno">Inferno</option>
+                <option value="afmhot">Heat</option>
+                <option value="grayscale">Gray</option>
+            </select>
+        </div>
+        <div class="qrss-ctl qrss-ctl-contrast" title="Contrast: Auto tracks the noise floor; drag a slider for manual control">
+            <label class="qrss-auto-label">
+                <input type="checkbox" id="qrss-auto-contrast" checked>
+                Auto contrast
+            </label>
+            <div class="qrss-range">
+                <span class="qrss-range-tag">Min</span>
+                <input type="range" id="qrss-dbmin" min="-160" max="0" value="-110" step="1" title="Black point (noise floor)">
+                <span class="qrss-range-tag">Max</span>
+                <input type="range" id="qrss-dbmax" min="-160" max="0" value="-60" step="1" title="Peak colour (strong signal)">
+            </div>
+            <span id="qrss-db-readout" class="qrss-db-readout">−110 … −60 dB</span>
+        </div>
+    </div>
+
+    <!-- Waterfall display -->
+    <div class="qrss-display">
+        <canvas id="qrss-canvas" class="qrss-canvas"></canvas>
+        <div id="qrss-hover" class="qrss-hover" hidden></div>
+    </div>
+
+    <div class="qrss-help">
+        <p><strong>QRSS</strong> is extremely slow CW read by eye off the waterfall. Set USB and pick a band above — signals appear as faint horizontal streaks (dots short, dashes long). The most activity is on <strong>30&nbsp;m</strong> within 100&nbsp;Hz of 10.140&nbsp;MHz. Start wide with a large <em>Span</em> to hunt, then <strong>click a signal to zoom-centre on it</strong> and reduce the Span for a close-up; <strong>double-click</strong> to reset. The frequency axis shows real RF (dial + audio). Use <em>Freeze</em> then <em>Save&nbsp;PNG</em> to keep a copy.</p>
+    </div>
+</div>

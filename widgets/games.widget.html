@@ -568,7 +568,19 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 #sdr-games-widget .sdr-cq-opt.correct { background: rgba(46, 204, 113, 0.45) !important; border-color: #2ecc71 !important; color: #fff !important; }
 #sdr-games-widget .sdr-cq-opt.wrong   { background: rgba(231, 76, 60, 0.45) !important;  border-color: #e74c3c !important; color: #fff !important; }
 
-/* QRZ info card — shown after a correct answer if lookup data is available */
+/* Operator photo — shown above options when QRZ photo is available */
+#sdr-cq-photo {
+  display: none;
+  width: 100%;
+  max-height: 80px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 4px;
+  margin-bottom: 5px;
+}
+#sdr-cq-photo.visible { display: block; }
+
+/* Callsign info card — shown after a correct answer (CTY data always; QRZ name if audio session active) */
 #sdr-cq-qrz {
   display: none;
   margin-top: 6px;
@@ -736,7 +748,8 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     <div class="sdr-game-status" id="sdr-cq-status">Guess the country</div>
     <div id="sdr-cq-call">…</div>
     <div id="sdr-cq-options"></div>
-    <!-- QRZ info card: shown after a correct answer when lookup data is available -->
+    <!-- Callsign info card: CTY data always shown; QRZ operator name overlaid if audio session active -->
+    <!-- Operator photo (#sdr-cq-photo) is created dynamically by JS to avoid HTML validator warnings -->
     <div id="sdr-cq-qrz">
       <div id="sdr-cq-qrz-name"></div>
       <div id="sdr-cq-qrz-qth"></div>
@@ -2289,16 +2302,24 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       }
     }
 
-    const infoEl     = document.getElementById('sdr-cq-qrz');
-    const infoNameEl = document.getElementById('sdr-cq-qrz-name');
-    const infoQthEl  = document.getElementById('sdr-cq-qrz-qth');
-    const infoGridEl = document.getElementById('sdr-cq-qrz-grid');
+    const infoEl      = document.getElementById('sdr-cq-qrz');
+    const infoNameEl  = document.getElementById('sdr-cq-qrz-name');
+    const infoQthEl   = document.getElementById('sdr-cq-qrz-qth');
+    const infoGridEl  = document.getElementById('sdr-cq-qrz-grid');
+
+    // Create the photo element dynamically (avoids HTML validator warnings about <img> without src).
+    const photoEl = document.createElement('img');
+    photoEl.id  = 'sdr-cq-photo';
+    photoEl.alt = '';
+    optionsEl.parentNode.insertBefore(photoEl, optionsEl);
 
     function clearInfo() {
       infoEl.classList.remove('visible');
       infoNameEl.textContent = '';
       infoQthEl.textContent  = '';
       infoGridEl.textContent = '';
+      photoEl.classList.remove('visible');
+      photoEl.src = '';
     }
 
     // Derive a US state/region label from the callsign district digit.
@@ -2326,14 +2347,19 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       infoEl.classList.add('visible');
     }
 
-    // Overlay QRZ operator name on top of the CTY card (if lookup succeeds).
-    function renderQRZName(data) {
+    // Overlay QRZ operator name/photo on top of the CTY card (if lookup succeeds).
+    function renderQRZName(data, imageUrl) {
       const name = [data.fname, data.name].filter(Boolean).join(' ').trim();
       if (name) infoNameEl.textContent = name;
       // Also show QTH from QRZ if available (more specific than continent).
       const qth = [data.addr2, data.country].filter(Boolean).join(', ').trim();
       if (qth) infoQthEl.textContent = qth;
       if (data.grid) infoGridEl.textContent = 'Grid: ' + data.grid;
+      // Show operator photo above the options if available.
+      if (imageUrl) {
+        photoEl.src = imageUrl;
+        photoEl.classList.add('visible');
+      }
     }
 
     // Try to fetch QRZ data and overlay it on the already-visible CTY card.
@@ -2342,14 +2368,14 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       // Check cache first.
       if (window._callsignLookupCache && window._callsignLookupCache.has(cs)) {
         const cached = window._callsignLookupCache.get(cs);
-        if (cached && cached.data) renderQRZName(cached.data);
+        if (cached && cached.data) renderQRZName(cached.data, cached.imageUrl);
         return;
       }
       // Use shared fetch (handles UUID + rate limiting + audio-session auth).
       if (window._fetchCallsignForMediaSession) {
         window._fetchCallsignForMediaSession(cs).then(function() {
           const cached = window._callsignLookupCache && window._callsignLookupCache.get(cs);
-          if (cached && cached.data) renderQRZName(cached.data);
+          if (cached && cached.data) renderQRZName(cached.data, cached.imageUrl);
         });
       }
     }

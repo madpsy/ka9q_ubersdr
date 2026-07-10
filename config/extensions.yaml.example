@@ -35,6 +35,9 @@ extensions:
   # Sound Modem - Packet Decoder for AFSK/BFSK with IL2P Support
   - soundmodem
 
+  # QRSS Grabber - Narrow-band spectrogram for reading very-slow CW (QRSS) beacons
+  - qrss
+
 # Default extension to load automatically (optional)
 # Set to the slug of an extension from the list above, or leave empty/commented for none
 # default_extension: ""

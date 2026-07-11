@@ -53,7 +53,24 @@
     letter-spacing: 0.5px;
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
+    margin-right: auto;
   }
+
+  #wclk-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #wclk-collapse:hover { color: #fff; }
+
+  #wclk-widget.wclk-collapsed > :not(#wclk-header) { display: none !important; }
+  #wclk-widget.wclk-collapsed #wclk-header { border-bottom: none; }
 
   #wclk-close {
     width: 16px; height: 16px;
@@ -136,6 +153,7 @@
 
 <div id="wclk-widget" style="display:none;">
   <div id="wclk-header">
+    <span id="wclk-collapse" title="Collapse">&#x25BE;</span>
     <span id="wclk-title">World Clocks</span>
     <span id="wclk-close" title="Dismiss">&#x2715;</span>
   </div>
@@ -148,13 +166,15 @@
 
   if (window._isMobile || window.innerWidth <= 768) return;
 
-  var LS_POS_KEY     = 'wclk_widget_pos';
-  var LS_MODE_KEY    = 'wclk_widget_mode';
+  var LS_POS_KEY       = 'wclk_widget_pos';
+  var LS_MODE_KEY      = 'wclk_widget_mode';
+  var LS_COLLAPSED_KEY = 'wclk_widget_collapsed';
   var DRAG_THRESHOLD = 5;
 
-  var widget  = document.getElementById('wclk-widget');
-  var closeEl = document.getElementById('wclk-close');
-  var bodyEl  = document.getElementById('wclk-body');
+  var widget     = document.getElementById('wclk-widget');
+  var collapseEl = document.getElementById('wclk-collapse');
+  var closeEl    = document.getElementById('wclk-close');
+  var bodyEl     = document.getElementById('wclk-body');
 
   var dragState  = null;
   var wasDragged = false;
@@ -346,6 +366,7 @@
 
   // ── Drag ────────────────────────────────────────────────────────────
   widget.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();
@@ -386,6 +407,25 @@
     }
     dragState = null;
     setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Collapse / expand ───────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('wclk-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('wclk-collapsed'), true);
   });
 
   // ── Close ───────────────────────────────────────────────────────────

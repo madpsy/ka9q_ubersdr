@@ -946,6 +946,10 @@ class SpectrumDisplay {
         this.stationIdColor   = '#ffffff'; // default: white
         this.loadStationIdConfig();
 
+        // Local weather line for station ID overlay (fetched from /api/weather, refreshed every 15 min)
+        this._weatherLine = null;
+        this.loadWeatherData();
+
         // Setup filter latency change listener for synchronization
         this.setupFilterLatencyListener();
     }
@@ -990,6 +994,46 @@ class SpectrumDisplay {
         this.stationIdOverlay = cfg.station_id_overlay !== false;
         const col = (cfg.station_id_color || '').trim();
         this.stationIdColor = /^#[0-9a-fA-F]{6}$/.test(col) ? col : '#ffffff';
+    }
+
+    /**
+     * Fetch local weather from /api/weather and cache a one-line summary string in
+     * this._weatherLine for use by drawStationIdOverlay().
+     * Silently does nothing on 404 (weather service not configured) or any error.
+     * Refreshes every 15 minutes to match the server-side cache interval.
+     */
+    async loadWeatherData() {
+        try {
+            const resp = await fetch('/api/weather');
+            if (!resp.ok) {
+                // 404 = weather service not configured; any other error — stay silent
+                this._weatherLine = null;
+                return;
+            }
+            const wd = await resp.json();
+            if (!wd.weather || !wd.weather.length) {
+                this._weatherLine = null;
+                return;
+            }
+            const wxDesc = wd.weather[0].description
+                .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const temp = (wd.main && wd.main.temp !== undefined)
+                ? `\u{1F321}\uFE0F${Math.round(wd.main.temp)}\u00B0C` : '';
+            let wind = '';
+            if (wd.wind && wd.wind.speed !== undefined) {
+                const kmh = Math.round(wd.wind.speed * 3.6);
+                const dir = (wd.wind.deg !== undefined)
+                    ? ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(wd.wind.deg / 45) % 8]
+                    : '';
+                wind = `\u{1F4A8}${kmh}\u00A0km/h${dir ? '\u00A0' + dir : ''}`;
+            }
+            this._weatherLine = [wxDesc, temp, wind].filter(Boolean).join('  ') || null;
+        } catch (_) {
+            this._weatherLine = null;
+        }
+
+        // Schedule next refresh in 15 minutes
+        setTimeout(() => this.loadWeatherData(), 15 * 60 * 1000);
     }
 
     // Setup listener for filter latency changes
@@ -2701,6 +2745,20 @@ class SpectrumDisplay {
             ctx.globalAlpha = 0.75;
             ctx.fillStyle   = col;
             ctx.fillText(antLabel, rightX, antY);
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Line 4: 11px — local weather at 75% opacity (only when /api/weather data is available)
+        if (this._weatherLine) {
+            let wxY = topY + 16;          // base: just below line 1
+            if (location) wxY += 16;
+            if (antLabel) wxY += 16;
+            this._setFont(ctx, '11px sans-serif');
+            ctx.fillStyle   = 'rgba(0,0,0,0.55)';
+            ctx.fillText(this._weatherLine, rightX + 1, wxY + 1);
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle   = col;
+            ctx.fillText(this._weatherLine, rightX, wxY);
             ctx.globalAlpha = 1.0;
         }
 

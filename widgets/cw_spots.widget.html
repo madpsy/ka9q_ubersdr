@@ -63,6 +63,25 @@
     letter-spacing: 0.8px;
     text-transform: uppercase;
     color: rgba(255,255,255,0.55);
+    margin-right: auto;
+  }
+
+  #cw-spot-notification .csn-collapse {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 12px; height: 14px;
+    font-size: 10px; line-height: 1;
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    margin-right: 5px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #cw-spot-notification .csn-collapse:hover { color: #fff; }
+
+  /* Collapsed: keep the header + close button, hide the spot list. */
+  #cw-spot-notification.csn-collapsed .csn-header { margin-bottom: 0; }
+  #cw-spot-notification.csn-collapsed > :not(.csn-header):not(.csn-close) {
+    display: none !important;
   }
 
   #cw-spot-notification .csn-map-btn {
@@ -232,6 +251,7 @@
 <div id="cw-spot-notification">
   <span class="csn-close" id="csn-close" title="Dismiss">&#x2715;</span>
   <div class="csn-header">
+    <span class="csn-collapse" id="csn-collapse" title="Collapse">&#x25BE;</span>
     <span class="csn-title">CW Spots</span>
     <span class="csn-map-btn" id="csn-map-btn" title="Open CW Skimmer Map">Map</span>
   </div>
@@ -247,7 +267,8 @@
   var MAX_SPOTS      = 5;
   var POLL_INTERVAL  = 300;
   var MAX_POLL_TRIES = 200;
-  var LS_POS_KEY     = 'cw_spot_widget_pos';
+  var LS_POS_KEY       = 'cw_spot_widget_pos';
+  var LS_COLLAPSED_KEY = 'cw_spot_widget_collapsed';
   var DRAG_THRESHOLD = 5;
 
   var pulseTimer   = null;
@@ -260,6 +281,7 @@
 
   var notif      = document.getElementById('cw-spot-notification');
   var listEl     = document.getElementById('csn-list');
+  var collapseEl = document.getElementById('csn-collapse');
   var closeEl    = document.getElementById('csn-close');
   var mapBtn     = document.getElementById('csn-map-btn');
   var tooltipEl  = document.getElementById('csn-tooltip');
@@ -292,6 +314,7 @@
   var wasDragged = false;
 
   notif.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target === mapBtn  || mapBtn.contains(e.target))  return;
     if (e.button !== 0) return;
@@ -609,6 +632,25 @@
   closeEl.addEventListener('click', function (e) {
     e.stopPropagation();
     dismiss();
+  });
+
+  // ── Collapse / expand ────────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    notif.classList.toggle('csn-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!notif.classList.contains('csn-collapsed'), true);
   });
 
   mapBtn.addEventListener('click', function (e) {

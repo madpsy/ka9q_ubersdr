@@ -55,6 +55,23 @@
     margin-right: auto;
   }
 
+  #eqw-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #eqw-collapse:hover { color: #fff; }
+
+  #eqw-widget.eqw-collapsed > :not(#eqw-header) { display: none !important; }
+  #eqw-widget.eqw-collapsed #eqw-header { border-bottom: none; }
+  /* When collapsed, hide the space-filling makeup slider so the bar stays tidy. */
+  #eqw-widget.eqw-collapsed #eqw-mg-wrap { display: none !important; }
+
   #eqw-clip {
     font-size: 10px;
     font-weight: bold;
@@ -341,6 +358,7 @@
 
 <div id="eqw-widget" class="eqw-off">
   <div id="eqw-header">
+    <span id="eqw-collapse" title="Collapse">&#x25BE;</span>
     <span id="eqw-title">EQ</span>
     <div id="eqw-mg-wrap">
       <input id="eqw-mg-slider" type="range" min="-12" max="12" step="0.5" value="0" title="Makeup gain (double-click to reset)" />
@@ -370,6 +388,7 @@
   'use strict';
 
   var LS_POS_KEY = 'eqw_widget_pos';
+  var LS_COLLAPSED_KEY = 'eqw_widget_collapsed';
   var DRAG_THRESHOLD = 5;
 
   // Band frequencies must match the host UI's #eq-<freq> sliders (filters.js).
@@ -390,6 +409,7 @@
 
   var widget    = document.getElementById('eqw-widget');
   var header    = document.getElementById('eqw-header');
+  var collapseEl = document.getElementById('eqw-collapse');
   var closeEl   = document.getElementById('eqw-close');
   var powerEl   = document.getElementById('eqw-power');
   var clipEl    = document.getElementById('eqw-clip');
@@ -755,6 +775,7 @@
 
   // ── Drag (from header only) ─────────────────────────────────────────────────
   header.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target === powerEl) return;
     if (e.button !== 0) return;
@@ -802,6 +823,25 @@
     widget.style.display = 'none';
     if (pollId) { clearInterval(pollId); pollId = null; }
     if (fftRafId) { cancelAnimationFrame(fftRafId); fftRafId = null; }
+  });
+
+  // ── Collapse / expand ─────────────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('eqw-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('eqw-collapsed'), true);
   });
 
   // ── Start ───────────────────────────────────────────────────────────────────

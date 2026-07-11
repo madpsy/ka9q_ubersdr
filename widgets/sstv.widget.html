@@ -56,6 +56,27 @@ html.is-mobile #sdr-sstv-widget { display: none !important; }
   flex: 1;
 }
 
+#sdr-sstv-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 1;
+  color: #7f8c8d;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: color 0.15s;
+  user-select: none;
+}
+#sdr-sstv-collapse:hover { color: #ecf0f1; }
+
+#sdr-sstv-widget.sdr-sstv-collapsed > :not(#sdr-sstv-titlebar) {
+  display: none !important;
+}
+#sdr-sstv-widget.sdr-sstv-collapsed #sdr-sstv-titlebar { margin-bottom: 0; }
+
 /* ── Nav arrows + close button group ── */
 #sdr-sstv-nav {
   display: flex;
@@ -218,6 +239,7 @@ html.is-mobile #sdr-sstv-widget { display: none !important; }
 
   <!-- Title bar -->
   <div id="sdr-sstv-titlebar">
+    <span id="sdr-sstv-collapse" title="Collapse">&#x25BE;</span>
     <span id="sdr-sstv-title">📡 Latest SSTV</span>
     <div id="sdr-sstv-nav">
       <button id="sdr-sstv-prev-btn" title="Older image" disabled>&#8592;</button>
@@ -523,6 +545,27 @@ html.is-mobile #sdr-sstv-widget { display: none !important; }
     widget.style.display = 'none';
   });
 
+  // ── Collapse / expand ──────────────────────────────────────────────
+  (function initCollapse() {
+    const LS_COLLAPSED = 'sdr-sstv-widget-collapsed';
+    const collapseEl = document.getElementById('sdr-sstv-collapse');
+    function setCollapsed(state, save) {
+      widget.classList.toggle('sdr-sstv-collapsed', state);
+      collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+      collapseEl.title = state ? 'Expand' : 'Collapse';
+      if (save) {
+        try { localStorage.setItem(LS_COLLAPSED, state ? '1' : '0'); } catch (_) {}
+      }
+    }
+    let init = false;
+    try { init = localStorage.getItem(LS_COLLAPSED) === '1'; } catch (_) {}
+    setCollapsed(init, false);
+    collapseEl.addEventListener('click', e => {
+      e.stopPropagation();
+      setCollapsed(!widget.classList.contains('sdr-sstv-collapsed'), true);
+    });
+  })();
+
   // ── Nav arrow buttons ──────────────────────────────────────────────
   prevBtn.addEventListener('click', () => {
     if (!prevBtn.disabled) navigateTo(currentOffset + 1);
@@ -579,7 +622,7 @@ html.is-mobile #sdr-sstv-widget { display: none !important; }
     }
 
     widget.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, a, img')) return;
+      if (e.target.closest('button, a, img, #sdr-sstv-collapse')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;

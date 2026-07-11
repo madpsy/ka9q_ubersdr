@@ -62,7 +62,24 @@
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
     white-space: nowrap;
+    margin-right: auto;
   }
+
+  #tfm-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #tfm-collapse:hover { color: #fff; }
+
+  #tfm-widget.tfm-collapsed > :not(#tfm-header) { display: none !important; }
+  #tfm-widget.tfm-collapsed #tfm-header { border-bottom: none; }
 
   #tfm-head-actions {
     display: flex;
@@ -158,6 +175,7 @@
 
 <div id="tfm-widget" style="display:none;">
   <div id="tfm-header">
+    <span id="tfm-collapse" title="Collapse">&#x25BE;</span>
     <span id="tfm-title">Top Freq / Mode</span>
     <span id="tfm-head-actions">
       <span id="tfm-reset" title="Clear all counts">&#x21bb;</span>
@@ -178,6 +196,7 @@
   if (window._isMobile || window.innerWidth <= 768) return;
 
   var LS_POS_KEY   = 'top_freqmode_widget_pos';
+  var LS_COLLAPSED_KEY = 'top_freqmode_widget_collapsed';
   var LS_DATA_KEY  = 'top_freqmode_widget_data';
   var DWELL_MS     = 60 * 1000;   // +1 per full minute parked (first point at 1 min)
   var POLL_MS      = 500;         // backstop for mode changes (plain var, no DOM hook)
@@ -187,6 +206,7 @@
 
   var widget   = document.getElementById('tfm-widget');
   var header   = document.getElementById('tfm-header');
+  var collapseEl = document.getElementById('tfm-collapse');
   var closeEl  = document.getElementById('tfm-close');
   var resetEl  = document.getElementById('tfm-reset');
   var listEl   = document.getElementById('tfm-list');
@@ -390,6 +410,25 @@
     if (dwellInterval) { clearInterval(dwellInterval); dwellInterval = null; }
   });
 
+  // ── Collapse / expand ────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('tfm-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('tfm-collapsed'), true);
+  });
+
   // ── Position restore ─────────────────────────────────────────────────
   (function restorePosition() {
     try {
@@ -408,6 +447,7 @@
   var dragState = null, wasDragged = false;
 
   header.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || e.target === resetEl) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();

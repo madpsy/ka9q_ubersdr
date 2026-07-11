@@ -18,7 +18,7 @@
     right: 44px;
     z-index: 9500;
     pointer-events: auto;
-    width: 300px;
+    width: 320px;
     background: rgba(20, 28, 38, 0.55);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -52,6 +52,22 @@
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
   }
+
+  #aviz-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #aviz-collapse:hover { color: #fff; }
+
+  #aviz-widget.aviz-collapsed > :not(#aviz-header) { display: none !important; }
+  #aviz-widget.aviz-collapsed #aviz-header { border-bottom: none; }
 
   #aviz-tabs { display: flex; gap: 4px; margin-left: auto; margin-right: 6px; align-items: center; }
 
@@ -217,6 +233,7 @@
 
 <div id="aviz-widget">
   <div id="aviz-header">
+    <span id="aviz-collapse" title="Collapse">&#x25BE;</span>
     <span id="aviz-title">Audio</span>
     <span id="aviz-tabs">
       <select id="aviz-fft-select" title="FFT Size (shared with main visualiser)">
@@ -250,6 +267,7 @@
   'use strict';
 
   var LS_POS_KEY  = 'aviz_widget_pos';
+  var LS_COLLAPSED_KEY = 'aviz_widget_collapsed';
   var LS_VIEW_KEY = 'aviz_widget_views';
   var DRAG_THRESHOLD = 5;
 
@@ -267,6 +285,7 @@
 
   var widget    = document.getElementById('aviz-widget');
   var header    = document.getElementById('aviz-header');
+  var collapseEl = document.getElementById('aviz-collapse');
   var closeEl   = document.getElementById('aviz-close');
   var tabScope  = document.getElementById('aviz-tab-scope');
   var tabWf     = document.getElementById('aviz-tab-wf');
@@ -383,6 +402,7 @@
 
   // ── Drag (from header only) ────────────────────────────────────────────────
   header.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target.classList.contains('aviz-tab')) return;
     if (e.target === fftSelect || e.target.closest('#aviz-fft-select')) return;
@@ -431,6 +451,25 @@
     dismissed = true;
     widget.style.display = 'none';
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  });
+
+  // ── Collapse / expand ────────────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('aviz-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('aviz-collapsed'), true);
   });
 
   // ── View toggles ───────────────────────────────────────────────────────────

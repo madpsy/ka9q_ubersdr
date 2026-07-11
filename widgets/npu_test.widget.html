@@ -125,7 +125,24 @@
     letter-spacing: 0.5px;
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
+    margin-right: auto;
   }
+
+  #npu-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #npu-collapse:hover { color: #fff; }
+
+  #npu-widget.npu-collapsed > :not(#npu-header) { display: none !important; }
+  #npu-widget.npu-collapsed #npu-header { border-bottom: none; }
 
   #npu-close {
     width: 16px; height: 16px;
@@ -258,6 +275,7 @@
 
 <div id="npu-widget" style="display:none;">
   <div id="npu-header">
+    <span id="npu-collapse" title="Collapse">&#x25BE;</span>
     <span id="npu-title">&#x1F9E0; NPU Test</span>
     <span id="npu-close" title="Dismiss">&#x2715;</span>
   </div>
@@ -309,10 +327,12 @@
   if (window._isMobile || window.innerWidth <= 768) return;
 
   var LOG            = '[npu-test]';
-  var LS_POS_KEY     = 'npu_test_widget_pos';
+  var LS_POS_KEY       = 'npu_test_widget_pos';
+  var LS_COLLAPSED_KEY = 'npu_test_widget_collapsed';
   var DRAG_THRESHOLD = 5;
 
   var widget    = document.getElementById('npu-widget');
+  var collapseEl = document.getElementById('npu-collapse');
   var closeEl   = document.getElementById('npu-close');
   var runBtn    = document.getElementById('npu-run-btn');
   var dragState  = null;
@@ -336,6 +356,7 @@
 
   // Drag
   widget.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target === runBtn  || runBtn.contains(e.target))  return;
     if (e.button !== 0) return;
@@ -387,6 +408,25 @@
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
+  });
+
+  // ── Collapse / expand ───────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('npu-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('npu-collapsed'), true);
   });
 
   // Helpers

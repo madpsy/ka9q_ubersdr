@@ -1,0 +1,896 @@
+<!--
+  DX Cluster Terminal
+  ===================
+  A live DX Cluster web terminal, bridged over WebSocket to the UberSDR
+  DX Cluster add-on's telnet server (`/addon/dxcluster/api/terminal`).
+
+  Enter your callsign once and connect — the callsign is remembered in
+  localStorage and auto-populated (and auto-connected) on subsequent loads.
+  Type DX Spider commands (e.g. `show/dx`, `set/filter band 20m`, `help`) and
+  read the cluster output. Quick-command buttons cover the common queries.
+  Click a spot line to tune the receiver to it — the mode is deduced the
+  same way the desktop client does (WPM→cwu/cwl at the 10 MHz boundary,
+  USB/LSB comment prefixes, digital spots skipped, else SSB band-plan fallback).
+
+  Loads ONLY when /api/description advertises the `dxcluster` add-on
+  (window.instanceDescription.addons contains "dxcluster"); otherwise it stays
+  hidden. Drag the header to reposition; position saved in localStorage.
+-->
+
+<style>
+  #dxc-widget {
+    position: fixed;
+    top: 120px;
+    left: 300px;
+    z-index: 9500;
+    pointer-events: auto;
+    width: 380px;
+    box-sizing: border-box;
+
+    background: rgba(45, 62, 80, 0.94);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(23, 162, 184, 0.6);
+    user-select: none;
+  }
+
+  #dxc-widget.dxc-dragging {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  /* ── Header (drag handle) ── */
+  #dxc-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    cursor: grab;
+  }
+  #dxc-widget.dxc-dragging #dxc-header { cursor: grabbing; }
+
+  #dxc-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #dxc-collapse:hover { color: #fff; }
+
+  #dxc-title {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  #dxc-status {
+    flex: 1 1 auto;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+    color: rgba(255,255,255,0.55);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #dxc-status.dxc-ok    { color: #2ecc71; }
+  #dxc-status.dxc-error { color: #e74c3c; }
+
+  #dxc-disconnect {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+  #dxc-disconnect:hover { background: rgba(231,76,60,0.35); color: #fff; }
+
+  #dxc-openweb {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+  #dxc-openweb:hover { background: rgba(23,162,184,0.4); color: #fff; }
+
+  #dxc-download {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+  #dxc-download:hover { background: rgba(23,162,184,0.4); color: #fff; }
+
+  #dxc-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #dxc-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  /* ── Login row ── */
+  #dxc-login-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 9px;
+  }
+  #dxc-login-row label {
+    font-size: 10px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.75);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  #dxc-callsign {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 3px 6px;
+  }
+  #dxc-callsign:focus { outline: none; border-color: rgba(23,162,184,0.8); }
+  #dxc-connect {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: #fff;
+    background: rgba(23,162,184,0.5);
+    border: 1px solid rgba(23,162,184,0.7);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  #dxc-connect:hover:not(:disabled) { background: rgba(23,162,184,0.75); }
+  #dxc-connect:disabled { opacity: 0.5; cursor: default; }
+
+  /* ── Output ── */
+  #dxc-output {
+    height: 220px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 6px 9px;
+    margin: 0;
+    background: rgba(0,0,0,0.38);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 11px;
+    line-height: 1.35;
+    color: rgba(255,255,255,0.9);
+    user-select: text;
+    cursor: text;
+  }
+  #dxc-output .dxc-echo { color: #58c0ff; font-weight: bold; }
+  #dxc-output .dxc-line { min-height: 1.35em; }
+  /* Tunable spot lines: pointer + hover highlight so it's clear a
+     click will do something. */
+  #dxc-output .dxc-spot { cursor: pointer; border-radius: 2px; }
+  #dxc-output .dxc-spot:hover {
+    background: rgba(23,162,184,0.28);
+    box-shadow: inset 0 0 0 1px rgba(23,162,184,0.45);
+  }
+  #dxc-output::-webkit-scrollbar { width: 8px; }
+  #dxc-output::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2); border-radius: 4px;
+  }
+
+  /* ── Quick commands ── */
+  #dxc-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 9px 0;
+  }
+  .dxc-qbtn {
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.8);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+  .dxc-qbtn:hover { background: rgba(23,162,184,0.35); color: #fff; }
+
+  /* ── Input row ── */
+  #dxc-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 20px 8px 9px;
+  }
+  #dxc-prompt {
+    color: rgba(23,162,184,0.9);
+    font-weight: bold;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  #dxc-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: inherit;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 3px 6px;
+  }
+  #dxc-input:focus { outline: none; border-color: rgba(23,162,184,0.8); }
+  #dxc-send {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(23,162,184,0.5);
+    border: 1px solid rgba(23,162,184,0.7);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  #dxc-send:hover { background: rgba(23,162,184,0.75); }
+
+  /* ── Resize handle ── */
+  #dxc-resize {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 15px;
+    height: 15px;
+    z-index: 4;
+    cursor: nwse-resize;
+    border-bottom-right-radius: 6px;
+    background: repeating-linear-gradient(
+      135deg,
+      transparent 0, transparent 2px,
+      rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 3px
+    );
+  }
+  #dxc-resize:hover {
+    background: repeating-linear-gradient(
+      135deg,
+      transparent 0, transparent 2px,
+      rgba(23,162,184,0.9) 2px, rgba(23,162,184,0.9) 3px
+    );
+  }
+
+  /* ── Collapsed: title bar only, minimal width ── */
+  #dxc-widget.dxc-collapsed { width: auto !important; min-width: 0; }
+  #dxc-widget.dxc-collapsed #dxc-header { border-bottom: none; }
+  #dxc-widget.dxc-collapsed #dxc-status,
+  #dxc-widget.dxc-collapsed #dxc-disconnect,
+  #dxc-widget.dxc-collapsed #dxc-openweb,
+  #dxc-widget.dxc-collapsed #dxc-download,
+  #dxc-widget.dxc-collapsed #dxc-login-row,
+  #dxc-widget.dxc-collapsed #dxc-output,
+  #dxc-widget.dxc-collapsed #dxc-quick,
+  #dxc-widget.dxc-collapsed #dxc-input-row,
+  #dxc-widget.dxc-collapsed #dxc-resize {
+    display: none !important;
+  }
+
+  @media (max-width: 768px) {
+    #dxc-widget { display: none !important; }
+  }
+  html.is-mobile #dxc-widget { display: none !important; }
+</style>
+
+<div id="dxc-widget" style="display:none;">
+  <div id="dxc-header">
+    <span id="dxc-collapse" title="Collapse">&#x25BE;</span>
+    <span id="dxc-title">DX Cluster</span>
+    <span id="dxc-status">Not connected</span>
+    <button id="dxc-disconnect" title="Disconnect session" style="display:none;">Disconnect</button>
+    <button id="dxc-openweb" title="Open the full DX Cluster web UI in a new tab">Open Web</button>
+    <button id="dxc-download" title="Download the desktop client">Client &#x2B07;&#xFE0F;</button>
+    <span id="dxc-close" title="Dismiss">&#x2715;</span>
+  </div>
+
+  <div id="dxc-login-row">
+    <label for="dxc-callsign">Call</label>
+    <input id="dxc-callsign" type="text" maxlength="12" autocomplete="off"
+           spellcheck="false" placeholder="e.g. G1TLH">
+    <button id="dxc-connect">Connect</button>
+  </div>
+
+  <div id="dxc-output"></div>
+
+  <div id="dxc-quick" style="display:none;">
+    <button class="dxc-qbtn" data-cmd="show/dx">sh/dx</button>
+    <button class="dxc-qbtn" data-cmd="show/dx 10">last 10</button>
+    <button class="dxc-qbtn" data-cmd="show/filter">filters</button>
+    <button class="dxc-qbtn" data-cmd="show/status">status</button>
+    <button class="dxc-qbtn" data-cmd="show/time">time</button>
+    <button class="dxc-qbtn" data-cmd="help">help</button>
+  </div>
+
+  <div id="dxc-input-row" style="display:none;">
+    <span id="dxc-prompt">&gt;</span>
+    <input id="dxc-input" type="text" maxlength="512" autocomplete="off"
+           spellcheck="false" placeholder="Type a command and press Enter…">
+    <button id="dxc-send">Send</button>
+  </div>
+
+  <div id="dxc-resize" title="Drag to resize"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var LS_POS_KEY       = 'dxc_widget_pos';
+  var LS_SIZE_KEY      = 'dxc_widget_size';
+  var LS_COLLAPSED_KEY = 'dxc_widget_collapsed';
+  var LS_CALLSIGN_KEY  = 'dxc_widget_callsign';
+  var DRAG_THRESHOLD  = 5;
+  var SCROLLBACK_LIMIT = 2000;
+  var MIN_WIDTH   = 280;
+  var MIN_OUTPUT_H = 90;
+  var WS_PATH = '/addon/dxcluster/api/terminal';
+
+  var widget      = document.getElementById('dxc-widget');
+  var header      = document.getElementById('dxc-header');
+  var collapseEl  = document.getElementById('dxc-collapse');
+  var closeEl     = document.getElementById('dxc-close');
+  var statusEl    = document.getElementById('dxc-status');
+  var disconnectEl = document.getElementById('dxc-disconnect');
+  var openWebEl   = document.getElementById('dxc-openweb');
+  var downloadEl  = document.getElementById('dxc-download');
+  var loginRow    = document.getElementById('dxc-login-row');
+  var callsignEl  = document.getElementById('dxc-callsign');
+  var connectEl   = document.getElementById('dxc-connect');
+  var outputEl    = document.getElementById('dxc-output');
+  var quickEl     = document.getElementById('dxc-quick');
+  var inputRow    = document.getElementById('dxc-input-row');
+  var inputEl     = document.getElementById('dxc-input');
+  var sendEl      = document.getElementById('dxc-send');
+  var resizeEl    = document.getElementById('dxc-resize');
+
+  var dismissed   = false;
+  var ws          = null;
+  var connected   = false;
+  var callsignSent = false;
+  var pendingCallsign = '';
+  var pendingLine = null;   // DOM element for the in-progress (unterminated) line
+
+  // ── Position restore ────────────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var saved = localStorage.getItem(LS_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          widget.style.top  = pos.top  + 'px';
+          widget.style.left = pos.left + 'px';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Size restore ────────────────────────────────────────────────────
+  (function restoreSize() {
+    try {
+      var saved = localStorage.getItem(LS_SIZE_KEY);
+      if (saved) {
+        var s = JSON.parse(saved);
+        if (typeof s.width === 'number') {
+          widget.style.width = Math.max(MIN_WIDTH, s.width) + 'px';
+        }
+        if (typeof s.outputHeight === 'number') {
+          outputEl.style.height = Math.max(MIN_OUTPUT_H, s.outputHeight) + 'px';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Callsign restore ────────────────────────────────────────────────
+  (function restoreCallsign() {
+    try {
+      var saved = localStorage.getItem(LS_CALLSIGN_KEY);
+      if (saved && !callsignEl.value.trim()) callsignEl.value = saved;
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Terminal helpers ────────────────────────────────────────────────
+  // Each output line is its own <div class="dxc-line"> so it can be hovered and
+  // clicked as a unit. Server output arrives in arbitrary chunks (not aligned to
+  // line boundaries), so we buffer the current line in `pendingLine` and finalize
+  // it when its terminating newline arrives.
+  function ensureLineEl(isEcho) {
+    if (!pendingLine) {
+      pendingLine = document.createElement('div');
+      pendingLine.className = 'dxc-line' + (isEcho ? ' dxc-echo' : '');
+      outputEl.appendChild(pendingLine);
+    }
+    return pendingLine;
+  }
+
+  // Once a line is complete, tag it as a tunable spot if it parses as one.
+  function finalizeLine(el) {
+    if (el && el.textContent && parseSpotLine(el.textContent)) {
+      el.classList.add('dxc-spot');
+      el.title = 'Click to tune the receiver to this spot';
+    }
+    pendingLine = null;
+  }
+
+  function appendOutput(text, isEcho) {
+    // Decide BEFORE mutating whether the user is pinned to the bottom.
+    var nearBottom =
+      (outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight) < 40;
+
+    var parts = String(text).replace(/\r/g, '').split('\n');
+    for (var i = 0; i < parts.length; i++) {
+      var el = ensureLineEl(isEcho);
+      if (parts[i]) el.appendChild(document.createTextNode(parts[i])); // XSS-safe
+      if (i < parts.length - 1) finalizeLine(el);  // a newline followed this segment
+    }
+
+    while (outputEl.childNodes.length > SCROLLBACK_LIMIT &&
+           outputEl.firstChild !== pendingLine) {
+      outputEl.removeChild(outputEl.firstChild);
+    }
+
+    // Always follow the user's own echoed command; for incoming server lines
+    // only auto-scroll if they were already at/near the bottom, so scrolling
+    // back to read isn't interrupted.
+    if (isEcho || nearBottom) outputEl.scrollTop = outputEl.scrollHeight;
+  }
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls ? cls : '';
+  }
+
+  function setConnected(state) {
+    connected = state;
+    inputRow.style.display     = state ? 'flex' : 'none';
+    quickEl.style.display      = state ? 'flex' : 'none';
+    loginRow.style.display     = state ? 'none' : 'flex';
+    connectEl.disabled         = state;
+    disconnectEl.style.display = state ? '' : 'none';
+    if (state) inputEl.focus();
+  }
+
+  function buildWsUrl() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return proto + '//' + location.host + WS_PATH;
+  }
+
+  // ── Connection ──────────────────────────────────────────────────────
+  function connect() {
+    if (ws) return;
+
+    var callsign = (callsignEl.value || '').trim().toUpperCase();
+    if (!callsign) {
+      setStatus('Enter your callsign', 'dxc-error');
+      callsignEl.focus();
+      return;
+    }
+    // Remember the callsign for next time.
+    try { localStorage.setItem(LS_CALLSIGN_KEY, callsign); } catch (e) { /* ignore */ }
+    pendingCallsign = callsign;
+    callsignSent = false;
+
+    setStatus('Connecting…', '');
+    outputEl.textContent = '';
+    pendingLine = null;
+
+    try {
+      ws = new WebSocket(buildWsUrl());
+    } catch (e) {
+      setStatus('WebSocket error', 'dxc-error');
+      ws = null;
+      return;
+    }
+
+    ws.onopen = function () {
+      setStatus('Connected', 'dxc-ok');
+      setConnected(true);
+    };
+
+    ws.onmessage = function (evt) {
+      var text = evt.data;
+      // Auto-answer the DX Spider callsign prompt.
+      if (!callsignSent && String(text).indexOf('callsign') !== -1) {
+        callsignSent = true;
+        ws.send(pendingCallsign + '\r\n');
+      }
+      appendOutput(text, false);
+    };
+
+    ws.onclose = function (evt) {
+      ws = null;
+      callsignSent = false;
+      setConnected(false);
+      if (evt.wasClean) {
+        setStatus('Disconnected', '');
+      } else {
+        setStatus('Connection lost (' + evt.code + ')', 'dxc-error');
+      }
+    };
+
+    ws.onerror = function () {
+      setStatus('WebSocket error', 'dxc-error');
+    };
+  }
+
+  function disconnect() {
+    if (ws) {
+      try { ws.send('bye\r\n'); } catch (e) { /* ignore */ }
+      try { ws.close(1000, 'user disconnect'); } catch (e) { /* ignore */ }
+      ws = null;
+    }
+    setConnected(false);
+    setStatus('Disconnected', '');
+  }
+
+  function sendCommand(cmd) {
+    if (!ws || !connected) return;
+    appendOutput('> ' + cmd + '\n', true);
+    try { ws.send(cmd + '\r\n'); } catch (e) { /* ignore */ }
+    // Keep focus on the input so the user can type the next command straight away.
+    inputEl.focus();
+  }
+
+  function sendInput() {
+    var line = inputEl.value;
+    if (!line.trim()) return;
+    sendCommand(line);
+    inputEl.value = '';
+  }
+
+  // ── Single-click a spot line to tune ────────────────────────────────
+  // Mirrors the desktop client's audiotune.go: parse the DX cluster line,
+  // deduce the mode from the comment/frequency, then tune the receiver.
+  //   DX de SPOTTER:   14033.0  R6AU           13 dB  23 WPM  CQ   1701Z
+  var SPOT_LINE_RE      = /^DX de \S+\s+([\d.]+)\s+\S+\s{2,}(.+?)\s+\d{4}Z\s*$/;
+  var DIGITAL_COMMENT_RE = /^\S+\s+-?\d+\s+dB/i;
+
+  function modeFromSpot(freqKHz, comment) {
+    var freqHz = freqKHz * 1000;
+    // CW: "WPM" in comment → cwu/cwl by the 10 MHz boundary (IARU convention).
+    if (comment.indexOf('WPM') !== -1) {
+      return freqHz >= 10000000 ? 'cwu' : 'cwl';
+    }
+    // Voice activity: comment starts with USB / LSB.
+    var upper = comment.toUpperCase().replace(/^\s+/, '');
+    if (upper.indexOf('USB') === 0) return 'usb';
+    if (upper.indexOf('LSB') === 0) return 'lsb';
+    // Digital decoder spots ("<MODE> <N> dB") — no tuning.
+    if (DIGITAL_COMMENT_RE.test(comment)) return '';
+    // Fallback: SSB band-plan convention.
+    return freqHz >= 10000000 ? 'usb' : 'lsb';
+  }
+
+  function parseSpotLine(line) {
+    var m = SPOT_LINE_RE.exec(String(line).replace(/[\r\n]+$/, ''));
+    if (!m) return null;
+    var freqKHz = parseFloat(m[1]);
+    if (isNaN(freqKHz)) return null;
+    var mode = modeFromSpot(freqKHz, m[2].trim());
+    if (!mode) return null;                 // digital spot — skip
+    return { hz: Math.round(freqKHz * 1000), mode: mode, khz: m[1] };
+  }
+
+  // Canonical UberSDR tune recipe (input → band buttons → mode → URL →
+  // autoTune → spectrum pan). Every host call is guarded.
+  function tuneTo(hz, mode) {
+    if (typeof hz !== 'number' || isNaN(hz)) return;
+    if (typeof window.setFrequencyInputValue === 'function') {
+      window.setFrequencyInputValue(Math.round(hz));
+    } else {
+      var fi = document.getElementById('frequency');
+      if (fi) fi.value = Math.round(hz);
+    }
+    if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
+    if (mode && typeof window.setMode === 'function') window.setMode(mode, false);
+    if (typeof window.updateURL === 'function') window.updateURL();
+    if (typeof window.autoTune === 'function') window.autoTune();
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () { if (spectrum) spectrum.skipEdgeDetectionTemporary = false; }, 2000);
+      try { spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz })); } catch (e) { /* ignore */ }
+    }
+  }
+
+  // Transient status flash (restores connection status afterwards).
+  var statusFlashTimer = null;
+  function flashStatus(msg) {
+    setStatus(msg, 'dxc-ok');
+    if (statusFlashTimer) clearTimeout(statusFlashTimer);
+    statusFlashTimer = setTimeout(function () {
+      setStatus(connected ? 'Connected' : 'Disconnected', connected ? 'dxc-ok' : '');
+      statusFlashTimer = null;
+    }, 1600);
+  }
+
+  outputEl.addEventListener('click', function (e) {
+    // Don't tune if the user was selecting text within the line.
+    var sel = window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    var lineEl = e.target.closest ? e.target.closest('.dxc-line') : null;
+    if (!lineEl || !outputEl.contains(lineEl)) return;
+    var spot = parseSpotLine(lineEl.textContent);
+    if (!spot) return;
+    tuneTo(spot.hz, spot.mode);
+    flashStatus('Tuned ' + spot.khz + ' ' + spot.mode.toUpperCase());
+  });
+
+  // ── Wiring ──────────────────────────────────────────────────────────
+  connectEl.addEventListener('click', connect);
+  disconnectEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    disconnect();
+  });
+
+  openWebEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    window.open('/addon/dxcluster/', '_blank', 'noopener');
+  });
+
+  downloadEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    // The endpoint responds with a Content-Disposition attachment, so an anchor
+    // click starts the download without navigating away.
+    var a = document.createElement('a');
+    a.href = '/addon/dxcluster/client/download';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  callsignEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') connect();
+  });
+
+  sendEl.addEventListener('click', sendInput);
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      // Stop the host page's global keyboard handlers from seeing Enter and
+      // stealing focus back out of the input after we send.
+      e.preventDefault();
+      e.stopPropagation();
+      sendInput();
+    }
+  });
+
+  quickEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.dxc-qbtn');
+    if (btn) sendCommand(btn.getAttribute('data-cmd'));
+  });
+
+  // ── Collapse / expand ───────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('dxc-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;'; // ▸ collapsed, ▾ expanded
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+
+  // Restore collapsed state (default: expanded).
+  (function restoreCollapsed() {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var nowCollapsed = !widget.classList.contains('dxc-collapsed');
+    setCollapsed(nowCollapsed, true);
+    clampToViewport();
+    // On expand, jump to the bottom so the latest output is visible.
+    if (!nowCollapsed) outputEl.scrollTop = outputEl.scrollHeight;
+  });
+
+  // ── Close ───────────────────────────────────────────────────────────
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dismissed = true;
+    disconnect();
+    widget.style.display = 'none';
+  });
+
+  // ── Drag (header only) ──────────────────────────────────────────────
+  var dragState = null;
+  var wasDragged = false;
+
+  header.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
+    if (e.target === closeEl || closeEl.contains(e.target)) return;
+    if (e.target === disconnectEl || disconnectEl.contains(e.target)) return;
+    if (e.target === openWebEl || openWebEl.contains(e.target)) return;
+    if (e.target === downloadEl || downloadEl.contains(e.target)) return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    dragState = { startX: e.clientX, startY: e.clientY,
+                  origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx*dx + dy*dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('dxc-dragging');
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy,
+                                         window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx,
+                                         window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('dxc-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top,  10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Resize (bottom-right handle) ────────────────────────────────────
+  var resizeState = null;
+
+  resizeEl.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    resizeState = {
+      startX: e.clientX, startY: e.clientY,
+      origW: widget.offsetWidth,
+      origH: outputEl.offsetHeight
+    };
+    widget.classList.add('dxc-dragging');
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!resizeState) return;
+    var dx = e.clientX - resizeState.startX;
+    var dy = e.clientY - resizeState.startY;
+    var maxW = window.innerWidth - widget.getBoundingClientRect().left - 4;
+    var newW = Math.max(MIN_WIDTH, Math.min(resizeState.origW + dx, maxW));
+    var newH = Math.max(MIN_OUTPUT_H, resizeState.origH + dy);
+    widget.style.width    = newW + 'px';
+    outputEl.style.height = newH + 'px';
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!resizeState) return;
+    widget.classList.remove('dxc-dragging');
+    try {
+      localStorage.setItem(LS_SIZE_KEY, JSON.stringify({
+        width: widget.offsetWidth,
+        outputHeight: outputEl.offsetHeight
+      }));
+    } catch (e) { /* ignore */ }
+    resizeState = null;
+  });
+
+  // ── Keep the widget on-screen (e.g. after the window shrank) ────────
+  // Clamps width, output height and position to the current viewport so a
+  // restored size/position from a larger window stays fully visible.
+  function clampToViewport() {
+    if (widget.style.display === 'none') return;
+
+    // Width must fit the viewport.
+    var maxW = window.innerWidth - 8;
+    if (widget.offsetWidth > maxW) {
+      widget.style.width = Math.max(MIN_WIDTH, maxW) + 'px';
+    }
+
+    // If the widget is taller than the viewport, shrink the output area.
+    var rect = widget.getBoundingClientRect();
+    var overflowH = rect.bottom - window.innerHeight;
+    if (overflowH > 0) {
+      outputEl.style.height =
+        Math.max(MIN_OUTPUT_H, outputEl.offsetHeight - overflowH - 4) + 'px';
+    }
+
+    // Pull the widget back inside the viewport if it now hangs off an edge.
+    rect = widget.getBoundingClientRect();
+    var left = Math.max(0, Math.min(rect.left, window.innerWidth  - widget.offsetWidth));
+    var top  = Math.max(0, Math.min(rect.top,  window.innerHeight - widget.offsetHeight));
+    widget.style.left = left + 'px';
+    widget.style.top  = top  + 'px';
+  }
+
+  window.addEventListener('resize', clampToViewport);
+
+  // ── Gate on the dxcluster add-on being present ──────────────────────
+  function hasDxClusterAddon(desc) {
+    var addons = desc && Array.isArray(desc.addons) ? desc.addons : [];
+    return addons.some(function (n) { return String(n).toLowerCase() === 'dxcluster'; });
+  }
+
+  (function waitForDescription() {
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts++;
+      var desc = window.instanceDescription;
+      if (desc) {
+        clearInterval(timer);
+        if (!dismissed && hasDxClusterAddon(desc)) {
+          widget.style.display = '';
+          // Now that it's laid out, make sure it fits the current viewport.
+          clampToViewport();
+          // Auto-connect when we already have a remembered callsign.
+          if (callsignEl.value.trim()) connect();
+        }
+        return;
+      }
+      if (attempts >= 20) { clearInterval(timer); } // give up after ~10 s
+    }, 500);
+  })();
+
+})();
+</script>

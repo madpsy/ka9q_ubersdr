@@ -66,7 +66,31 @@ html.is-mobile #sdr-marker-widget { display: none !important; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
+  margin-right: auto;
 }
+
+#sdr-marker-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 1;
+  color: #7f8c8d;
+  cursor: pointer;
+  /* Titlebar already has gap:12px between items; pull the arrow back so it
+     sits snug against the title instead of a large double gap. */
+  margin-right: -6px;
+  transition: color 0.15s;
+  user-select: none;
+}
+#sdr-marker-collapse:hover { color: #ecf0f1; }
+
+#sdr-marker-widget.sdr-marker-collapsed > :not(#sdr-marker-titlebar) {
+  display: none !important;
+}
+#sdr-marker-widget.sdr-marker-collapsed #sdr-marker-titlebar { margin-bottom: 0; }
 
 #sdr-marker-type-filter {
   background: rgba(44, 62, 80, 0.85) !important;
@@ -217,6 +241,7 @@ html.is-mobile #sdr-marker-widget { display: none !important; }
 <!-- Hidden until a current / prev / next marker exists for the dial freq + mode -->
 <div id="sdr-marker-widget" style="display:none">
   <div id="sdr-marker-titlebar">
+    <span id="sdr-marker-collapse" title="Collapse">&#x25BE;</span>
     <span id="sdr-marker-title">📍 Marker</span>
     <select id="sdr-marker-type-filter" title="Filter prev/next marker types">
       <option value="all">All</option>
@@ -760,6 +785,27 @@ html.is-mobile #sdr-marker-widget { display: none !important; }
     widget.style.display = 'none';
   });
 
+  // ── Collapse / expand ──────────────────────────────────────────────
+  (function initCollapse() {
+    const LS_COLLAPSED = 'sdr-marker-widget-collapsed';
+    const collapseEl = document.getElementById('sdr-marker-collapse');
+    function setCollapsed(state, save) {
+      widget.classList.toggle('sdr-marker-collapsed', state);
+      collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+      collapseEl.title = state ? 'Expand' : 'Collapse';
+      if (save) {
+        try { localStorage.setItem(LS_COLLAPSED, state ? '1' : '0'); } catch (_) {}
+      }
+    }
+    let init = false;
+    try { init = localStorage.getItem(LS_COLLAPSED) === '1'; } catch (_) {}
+    setCollapsed(init, false);
+    collapseEl.addEventListener('click', e => {
+      e.stopPropagation();
+      setCollapsed(!widget.classList.contains('sdr-marker-collapsed'), true);
+    });
+  })();
+
   // ── Drag to reposition ─────────────────────────────────────────────
   (function initDrag() {
     const LS_KEY = 'sdr-marker-widget-pos';
@@ -795,7 +841,7 @@ html.is-mobile #sdr-marker-widget { display: none !important; }
     }
 
     widget.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, select, a, #sdr-marker-name, #sdr-marker-info')) return;
+      if (e.target.closest('button, select, a, #sdr-marker-collapse, #sdr-marker-name, #sdr-marker-info')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;

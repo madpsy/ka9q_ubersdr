@@ -51,7 +51,24 @@
     letter-spacing: 0.5px;
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
+    margin-right: auto;
   }
+
+  #qrz-widget-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #qrz-widget-collapse:hover { color: #fff; }
+
+  #qrz-widget.qrz-collapsed > :not(#qrz-widget-header) { display: none !important; }
+  #qrz-widget.qrz-collapsed #qrz-widget-header { border-bottom: none; }
 
   #qrz-widget-close {
     width: 16px;
@@ -352,6 +369,7 @@
 
 <div id="qrz-widget" style="display:none;">
   <div id="qrz-widget-header">
+    <span id="qrz-widget-collapse" title="Collapse">&#x25BE;</span>
     <span id="qrz-widget-title">Callsign Lookup</span>
     <span id="qrz-widget-close" title="Dismiss">&#x2715;</span>
   </div>
@@ -369,10 +387,12 @@
 (function () {
   'use strict';
 
-  var LS_POS_KEY     = 'qrz_widget_pos';
+  var LS_POS_KEY       = 'qrz_widget_pos';
+  var LS_COLLAPSED_KEY = 'qrz_widget_collapsed';
   var DRAG_THRESHOLD = 5;
 
   var widget    = document.getElementById('qrz-widget');
+  var collapseEl = document.getElementById('qrz-widget-collapse');
   var closeEl   = document.getElementById('qrz-widget-close');
   var inputEl   = document.getElementById('qrz-input');
   var goBtn     = document.getElementById('qrz-go-btn');
@@ -454,6 +474,7 @@
   // ── Drag ────────────────────────────────────────────────────────────────
   widget.addEventListener('mousedown', function (e) {
     // Don't start drag on interactive elements
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target === inputEl || e.target === goBtn) return;
     if (e.button !== 0) return;
@@ -499,6 +520,25 @@
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
+  });
+
+  // ── Collapse / expand ────────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('qrz-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('qrz-collapsed'), true);
   });
 
   // ── Input: auto-uppercase ────────────────────────────────────────────────

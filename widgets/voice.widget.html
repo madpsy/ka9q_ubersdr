@@ -57,6 +57,22 @@
     text-transform: uppercase;
   }
 
+  #va-widget-collapse {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 16px;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    margin-right: 4px;
+    vertical-align: middle;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #va-widget-collapse:hover { color: #fff; }
+
+  #va-widget.va-collapsed > :not(#va-widget-header) { display: none !important; }
+  #va-widget.va-collapsed #va-widget-header { border-bottom: none; }
+
   #va-widget-band {
     font-size: 11px;
     font-weight: bold;
@@ -323,6 +339,7 @@
 <div id="va-widget">
   <div id="va-widget-header">
     <span>
+      <span id="va-widget-collapse" title="Collapse">&#x25BE;</span>
       <span id="va-widget-title">Voice</span>
       <span id="va-widget-band"></span>
     </span>
@@ -375,9 +392,11 @@
   var LS_POS_KEY      = 'va_widget_pos';
   var LS_CONT_KEY     = 'va_widget_continent';
   var LS_COUNTRY_KEY  = 'va_widget_country';
+  var LS_COLLAPSED_KEY = 'va_widget_collapsed';
   var DRAG_THRESHOLD  = 5;
 
   var widget     = document.getElementById('va-widget');
+  var collapseEl = document.getElementById('va-widget-collapse');
   var bandEl     = document.getElementById('va-widget-band');
   var bodyEl     = document.getElementById('va-widget-body');
   var badgesEl   = document.getElementById('va-widget-badges');
@@ -449,6 +468,7 @@
 
   // ── Drag ─────────────────────────────────────────────────────────────────
   widget.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     // Don't start drag from filter inputs
     if (e.target.classList.contains('va-filter-input') ||
@@ -498,6 +518,25 @@
     dismissed = true;
     widget.style.display = 'none';
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  });
+
+  // ── Collapse / expand ───────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('va-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function () {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('va-collapsed'), true);
   });
 
   // ── Clear button visibility helper ──────────────────────────────────────

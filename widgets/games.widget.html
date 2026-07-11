@@ -92,6 +92,27 @@ html.is-mobile #sdr-games-widget { display: none !important; }
   flex: 1;
 }
 
+#sdr-games-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 1;
+  color: #95a5a6;
+  cursor: pointer;
+  margin-right: 2px;
+  transition: color 0.15s;
+  user-select: none;
+}
+#sdr-games-collapse:hover { color: #ecf0f1; }
+
+#sdr-games-widget.sdr-games-collapsed > :not(#sdr-games-titlebar) {
+  display: none !important;
+}
+#sdr-games-widget.sdr-games-collapsed #sdr-games-titlebar { margin-bottom: 0; }
+
 /* ── Game panels ── */
 .sdr-game-panel { display: none; }
 .sdr-game-panel.active { display: block; }
@@ -616,6 +637,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
   <!-- Title bar with nav arrows -->
   <div id="sdr-games-titlebar">
+    <span id="sdr-games-collapse" title="Collapse">&#x25BE;</span>
     <button class="sdr-games-nav" id="sdr-games-prev" title="Previous game">◀</button>
     <span id="sdr-games-title">Noughts &amp; Crosses</span>
     <button class="sdr-games-nav" id="sdr-games-next" title="Next game">▶</button>
@@ -793,6 +815,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     { id: 'sdr-panel-mm',  title: 'Mastermind' },
   ];
   let currentGame = 0;
+  const LS_GAME_KEY = 'sdr-games-widget-game';
 
   const titleEl  = document.getElementById('sdr-games-title');
   const widget   = document.getElementById('sdr-games-widget');
@@ -833,7 +856,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
     widget.addEventListener('pointerdown', e => {
       // Only drag from non-interactive targets
-      if (e.target.closest('button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell, .sdr-su-cell, .sdr-lo-cell, .sdr-mm-sw')) return;
+      if (e.target.closest('#sdr-games-collapse, button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell, .sdr-su-cell, .sdr-lo-cell, .sdr-mm-sw')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;
@@ -880,6 +903,8 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     });
     titleEl.innerHTML = GAMES[idx].title;
     currentGame = idx;
+    // Remember which game the user is on (by id — GAMES order can change).
+    try { localStorage.setItem(LS_GAME_KEY, GAMES[idx].id); } catch (_) {}
   }
 
   document.getElementById('sdr-games-prev').addEventListener('click', () => {
@@ -889,11 +914,43 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     showGame((currentGame + 1) % GAMES.length);
   });
 
+  // Restore the last-played game on load (by id). If it isn't in the rotation
+  // yet (e.g. the Callsign Quiz, added later when it becomes available), we just
+  // stay on the default — panel-ttt is already the active one in the markup.
+  (function restoreGame() {
+    let savedId = null;
+    try { savedId = localStorage.getItem(LS_GAME_KEY); } catch (_) {}
+    if (!savedId) return;
+    const idx = GAMES.findIndex(g => g.id === savedId);
+    if (idx > 0) showGame(idx);
+  })();
+
   // Close buttons
   document.getElementById('sdr-ttt-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
   document.getElementById('sdr-ms-close-btn').addEventListener('click',   () => { widget.style.display = 'none'; });
   document.getElementById('sdr-p15-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
   document.getElementById('sdr-mem-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
+
+  // ── Collapse / expand ──────────────────────────────────────────────
+  (function initCollapse() {
+    const LS_COLLAPSED = 'sdr-games-widget-collapsed';
+    const collapseEl = document.getElementById('sdr-games-collapse');
+    function setCollapsed(state, save) {
+      widget.classList.toggle('sdr-games-collapsed', state);
+      collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+      collapseEl.title = state ? 'Expand' : 'Collapse';
+      if (save) {
+        try { localStorage.setItem(LS_COLLAPSED, state ? '1' : '0'); } catch (_) {}
+      }
+    }
+    let init = false;
+    try { init = localStorage.getItem(LS_COLLAPSED) === '1'; } catch (_) {}
+    setCollapsed(init, false);
+    collapseEl.addEventListener('click', e => {
+      e.stopPropagation();
+      setCollapsed(!widget.classList.contains('sdr-games-collapsed'), true);
+    });
+  })();
 
 
   // ══════════════════════════════════════════════════════════════════

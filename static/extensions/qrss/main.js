@@ -907,12 +907,36 @@ class QRSSExtension extends DecoderExtension {
         if (!p) { if (h) h.hidden = true; return; }
         const { audio, ago } = this._pointToFreqTime(p.x, p.y);
         const rf = this.dialFreq + audio;
+        const db = this._pointToDb(p.x, p.y);
+        const dbStr = db !== null ? ` · ${db.toFixed(1)} dB` : '';
         if (h) {
             h.hidden = false;
             h.style.left = Math.min(p.x + 12, this.cssW - 130) + 'px';
             h.style.top = (p.y + 12) + 'px';
-            h.innerHTML = `${(rf / 1e6).toFixed(5)} MHz<br>${audio.toFixed(1)} Hz · -${this._fmtShort(ago)}`;
+            h.innerHTML = `${(rf / 1e6).toFixed(5)} MHz<br>${audio.toFixed(1)} Hz · -${this._fmtShort(ago)}${dbStr}`;
         }
+    }
+
+    // Look up the raw dB value from dbHistory at the hovered pixel, accounting for the magnifier view.
+    _pointToDb(x, y) {
+        const hist = this.dbHistory;
+        if (!hist || !hist.length || !this.innerW || !this.innerH) return null;
+        const m = this.margins, v = this.view;
+        const px = (x - m.l) / this.innerW;   // 0=left(oldest), 1=right(newest) in screen space
+        const py = (y - m.t) / this.innerH;   // 0=top(high freq), 1=bottom(low freq)
+        // Map through the magnifier view to content coordinates
+        const cxn = v.x0 + px * (v.x1 - v.x0);  // 0=oldest content col, 1=newest
+        const cyn = v.y0 + py * (v.y1 - v.y0);  // 0=top, 1=bottom
+        // dbHistory is right-aligned: hist[hist.length-1] is the newest column (rightmost)
+        // cxn=1 → hist[hist.length-1], cxn=0 → hist[0] (or black if fewer cols than innerW)
+        const colIdx = Math.round(cxn * (this.innerW - 1));  // 0..innerW-1
+        const histStart = this.innerW - hist.length;          // first content column index
+        const hi = colIdx - histStart;                        // index into hist[]
+        if (hi < 0 || hi >= hist.length) return null;
+        const col = hist[hi];
+        if (!col) return null;
+        const rowIdx = Math.min(col.length - 1, Math.max(0, Math.round(cyn * (col.length - 1))));
+        return col[rowIdx];
     }
 
     // Pointer position within the plot area (device-independent px), or null.

@@ -1012,10 +1012,16 @@ func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, se
 func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor, dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, loc *time.Location, startIdx int) []monitorSlide {
 	var slides []monitorSlide
 
-	// Helper: returns true when the slide at position i in the final list should
-	// show local time in the top-right corner instead of the user count.
-	// Odd-indexed slides (relative to the overall rotation) show time; even show users.
-	showTimeFor := func(i int) bool { return (startIdx+i)%2 == 1 }
+	// Helper: returns true when this rotation should show local time in the
+	// top-right corner instead of the user count.  sendNext rebuilds the list
+	// and displays exactly ONE slide per tick (the slide at position startIdx),
+	// then increments startIdx.  So the choice depends only on startIdx's parity,
+	// NOT on the position i within the list: the displayed slide sits at
+	// i == startIdx, so the old (startIdx+i)%2 evaluated to (2*startIdx)%2 == 0
+	// every time — always user count, never time.  Ignoring i makes every slide
+	// in this build agree; since only the startIdx-th is shown, consecutive
+	// on-screen slides alternate correctly as startIdx increments.
+	showTimeFor := func(_ int) bool { return startIdx%2 == 1 }
 
 	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
 	slides = append(slides, buildTimeSlide(sessions, maxSessions, loc, showTimeFor(len(slides))))

@@ -18,14 +18,14 @@
   "settings": {
     "span": {
       "type": "number",
-      "default": 3000,
+      "default": 200,
       "min": 100,
       "max": 6000,
       "description": "Displayed bandwidth in Hz (zoom width around the click-selected centre)"
     },
     "fftSize": {
       "type": "number",
-      "default": 4096,
+      "default": 2048,
       "min": 2048,
       "max": 8192,
       "description": "FFT size — larger gives finer frequency resolution (slower to fill)"

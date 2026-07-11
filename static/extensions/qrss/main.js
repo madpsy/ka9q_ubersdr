@@ -124,9 +124,9 @@ class QRSSExtension extends DecoderExtension {
         super('qrss', { displayName: 'QRSS Grabber', autoTune: false });
 
         this.config = {
-            span: 3000,            // displayed bandwidth (Hz) — the zoom width
+            span: 200,             // displayed bandwidth (Hz) — the zoom width
             centerHz: null,        // audio centre frequency; null → span/2 (view [0, span])
-            fftSize: 4096,
+            fftSize: 2048,
             secPerPixel: 1.0,      // waterfall time resolution (seconds per column)
             windowSec: 0,          // 0 = Auto (Speed-driven); >0 locks total on-screen time
             colormap: 'qrss',

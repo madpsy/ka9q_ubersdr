@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,6 +140,199 @@ type qrzCacheEntry struct {
 }
 
 // ---------------------------------------------------------------------------
+// Hourly API call statistics
+// ---------------------------------------------------------------------------
+
+// qrzHourlyStatsBuckets is the number of hourly buckets retained (24h window).
+const qrzHourlyStatsBuckets = 24
+
+// qrzNetworkErrorStatus is the sentinel "status code" used to record calls
+// that failed at the transport level (DNS/connect/timeout/etc.) and never
+// received an HTTP response at all. Real HTTP status codes are always >=100,
+// so 0 cannot collide with a genuine response code.
+const qrzNetworkErrorStatus = 0
+
+// qrzHourlyBucket holds the stats for a single hour slot in the ring buffer.
+type qrzHourlyBucket struct {
+	hourTag     int64         // absolute unix-hour (unixSeconds/3600) this bucket currently represents
+	totalCalls  int64         // total real outbound QRZ API calls made in this hour
+	statusCodes map[int]int64 // HTTP status code -> count (qrzNetworkErrorStatus for transport failures)
+}
+
+// qrzHourlyStats tracks the number of real outbound QRZ.com API calls made
+// per UTC hour, retaining the last 24 hours, along with a breakdown of the
+// HTTP status codes (or transport errors) received. It is implemented as a
+// simple ring buffer indexed by (unixHour % 24): each slot also remembers
+// which absolute hour it currently represents (hourTag) so that stale data
+// from >24h ago is detected and cleared lazily, without any background
+// sweeper.
+//
+// This intentionally only counts genuine outbound HTTP requests to QRZ —
+// cache hits and singleflight waiters never call record(), so the numbers
+// reflect actual load placed on the QRZ.com API.
+type qrzHourlyStats struct {
+	mu      sync.Mutex
+	buckets [qrzHourlyStatsBuckets]qrzHourlyBucket
+}
+
+// record increments the counters for the current UTC hour, resetting the
+// bucket first if it currently holds data for a different (stale) hour.
+// statusCode should be the actual HTTP response status code, or
+// qrzNetworkErrorStatus if no response was received (transport-level error).
+func (h *qrzHourlyStats) record(statusCode int) {
+	hour := time.Now().Unix() / 3600
+	idx := hour % qrzHourlyStatsBuckets
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	b := &h.buckets[idx]
+	if b.hourTag != hour {
+		b.hourTag = hour
+		b.totalCalls = 0
+		b.statusCodes = make(map[int]int64)
+	}
+	b.totalCalls++
+	b.statusCodes[statusCode]++
+}
+
+// QRZHourlyStat is a single hour's call count and status-code breakdown,
+// returned by Snapshot.
+type QRZHourlyStat struct {
+	HourStart   time.Time        `json:"hour_start"`             // UTC start of the hour
+	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that hour
+	StatusCodes map[string]int64 `json:"status_codes,omitempty"` // HTTP status code (as string) -> count; key "0" = network/transport error
+}
+
+// Snapshot returns the call counts and status-code breakdowns for each of the
+// last 24 hours (oldest first, ending with the current partial hour). Hours
+// with no recorded activity (including hours that predate the process
+// start) are returned with Calls: 0 and no StatusCodes entry.
+func (h *qrzHourlyStats) Snapshot() []QRZHourlyStat {
+	nowHour := time.Now().Unix() / 3600
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	out := make([]QRZHourlyStat, 0, qrzHourlyStatsBuckets)
+	for i := qrzHourlyStatsBuckets - 1; i >= 0; i-- {
+		hour := nowHour - int64(i)
+		idx := hour % qrzHourlyStatsBuckets
+		if idx < 0 {
+			idx += qrzHourlyStatsBuckets
+		}
+		stat := QRZHourlyStat{HourStart: time.Unix(hour*3600, 0).UTC()}
+		b := &h.buckets[idx]
+		if b.hourTag == hour {
+			stat.Calls = b.totalCalls
+			if len(b.statusCodes) > 0 {
+				stat.StatusCodes = make(map[string]int64, len(b.statusCodes))
+				for code, count := range b.statusCodes {
+					stat.StatusCodes[strconv.Itoa(code)] = count
+				}
+			}
+		}
+		out = append(out, stat)
+	}
+	return out
+}
+
+// Total24h returns the sum of calls across all retained hourly buckets.
+func (h *qrzHourlyStats) Total24h() int64 {
+	stats := h.Snapshot()
+	var total int64
+	for _, s := range stats {
+		total += s.Calls
+	}
+	return total
+}
+
+// ---------------------------------------------------------------------------
+// Per-minute API call statistics (current-hour detail)
+// ---------------------------------------------------------------------------
+
+// qrzMinuteStatsBuckets is the number of per-minute buckets retained (60
+// minutes). This is enough to always fully cover "the current hour broken
+// down by minute" regardless of which minute within the hour it currently is.
+const qrzMinuteStatsBuckets = 60
+
+// qrzMinuteBucket holds the stats for a single minute slot in the ring buffer.
+type qrzMinuteBucket struct {
+	minuteTag   int64         // absolute unix-minute (unixSeconds/60) this bucket currently represents
+	totalCalls  int64         // total real outbound QRZ API calls made in this minute
+	statusCodes map[int]int64 // HTTP status code -> count (qrzNetworkErrorStatus for transport failures)
+}
+
+// qrzMinuteStats mirrors qrzHourlyStats but at 1-minute granularity,
+// retaining the last 60 minutes. It is used solely to provide a finer-grained
+// breakdown of the CURRENT hour (see CurrentHourSnapshot); the 24h hourly
+// history is served entirely by qrzHourlyStats.
+type qrzMinuteStats struct {
+	mu      sync.Mutex
+	buckets [qrzMinuteStatsBuckets]qrzMinuteBucket
+}
+
+// record increments the counters for the current UTC minute, resetting the
+// bucket first if it currently holds data for a different (stale) minute.
+func (m *qrzMinuteStats) record(statusCode int) {
+	minute := time.Now().Unix() / 60
+	idx := minute % qrzMinuteStatsBuckets
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b := &m.buckets[idx]
+	if b.minuteTag != minute {
+		b.minuteTag = minute
+		b.totalCalls = 0
+		b.statusCodes = make(map[int]int64)
+	}
+	b.totalCalls++
+	b.statusCodes[statusCode]++
+}
+
+// QRZMinuteStat is a single minute's call count and status-code breakdown,
+// returned by CurrentHourSnapshot.
+type QRZMinuteStat struct {
+	MinuteStart time.Time        `json:"minute_start"`           // UTC start of the minute
+	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that minute
+	StatusCodes map[string]int64 `json:"status_codes,omitempty"` // HTTP status code (as string) -> count; key "0" = network/transport error
+}
+
+// CurrentHourSnapshot returns per-minute call counts for the last 60 minutes
+// (a fixed-width rolling window ending at the current minute), oldest first.
+// Like the hourly Snapshot(), this always pads out to the full 60 entries —
+// minutes with no recorded activity (including minutes that predate the
+// process start) are returned with Calls: 0 and no StatusCodes — so the
+// chart always spans the full 60-minute range rather than growing over time.
+func (m *qrzMinuteStats) CurrentHourSnapshot() []QRZMinuteStat {
+	nowMinute := time.Now().Unix() / 60
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]QRZMinuteStat, 0, qrzMinuteStatsBuckets)
+	for i := qrzMinuteStatsBuckets - 1; i >= 0; i-- {
+		minute := nowMinute - int64(i)
+		idx := minute % qrzMinuteStatsBuckets
+		if idx < 0 {
+			idx += qrzMinuteStatsBuckets
+		}
+		stat := QRZMinuteStat{MinuteStart: time.Unix(minute*60, 0).UTC()}
+		b := &m.buckets[idx]
+		if b.minuteTag == minute {
+			stat.Calls = b.totalCalls
+			if len(b.statusCodes) > 0 {
+				stat.StatusCodes = make(map[string]int64, len(b.statusCodes))
+				for code, count := range b.statusCodes {
+					stat.StatusCodes[strconv.Itoa(code)] = count
+				}
+			}
+		}
+		out = append(out, stat)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
 // QRZService
 // ---------------------------------------------------------------------------
 
@@ -193,6 +387,18 @@ type QRZService struct {
 	// no extra outbound API call will be made for them.
 	inFlightMu sync.RWMutex
 	inFlight   map[string]struct{}
+
+	// apiCallStats tracks the number of real outbound QRZ.com API calls made
+	// per hour, over a rolling 24-hour window. Incremented exactly once per
+	// genuine HTTP request in fetchCallsign — cache hits and singleflight
+	// waiters never touch this. Exposed via the admin lookup-stats API.
+	apiCallStats qrzHourlyStats
+
+	// apiCallMinuteStats tracks the same real outbound QRZ.com API calls at
+	// 1-minute granularity, retaining the last 60 minutes. Used to provide a
+	// finer-grained breakdown of the CURRENT hour in the admin lookup-stats
+	// API. Incremented alongside apiCallStats in fetchCallsign.
+	apiCallMinuteStats qrzMinuteStats
 
 	httpClient *http.Client
 }
@@ -474,6 +680,32 @@ func (s *QRZService) CacheSize() int {
 	return len(s.cache)
 }
 
+// CacheMaxSize returns the configured maximum cache size (0 = unlimited).
+func (s *QRZService) CacheMaxSize() int {
+	return s.cacheMaxSize
+}
+
+// HourlyAPICallStats returns the number of real outbound QRZ.com API calls
+// made in each of the last 24 hours (oldest first), for use by admin/
+// monitoring endpoints that want to display hourly/daily call volume.
+func (s *QRZService) HourlyAPICallStats() []QRZHourlyStat {
+	return s.apiCallStats.Snapshot()
+}
+
+// TotalAPICalls24h returns the total number of real outbound QRZ.com API
+// calls made across the last 24 hours.
+func (s *QRZService) TotalAPICalls24h() int64 {
+	return s.apiCallStats.Total24h()
+}
+
+// CurrentHourMinuteStats returns per-minute call counts (with status-code
+// breakdowns) for the last 60 minutes (a fixed-width window ending at the
+// current minute), for use by admin/monitoring endpoints that want
+// finer-grained detail than the hourly buckets provide.
+func (s *QRZService) CurrentHourMinuteStats() []QRZMinuteStat {
+	return s.apiCallMinuteStats.CurrentHourSnapshot()
+}
+
 // CacheHas returns true if the given (already-normalised) callsign has a
 // valid, non-expired entry in the cache.  It does NOT trigger a network fetch.
 // This is used by the lookup handler to apply a relaxed rate limit when the
@@ -682,6 +914,11 @@ func (s *QRZService) fetchWithRetry(call string) (*QRZCallsign, error) {
 // fetchCallsign performs a single callsign lookup using the provided session key.
 // Returns (callsign, sessionExpired, error).
 // sessionExpired=true means the caller should re-authenticate and retry.
+//
+// This is the single choke point for genuine outbound HTTP requests to the
+// QRZ.com API — every call here (successful or not) is recorded in
+// apiCallStats so that admin/monitoring tooling can report hourly/daily
+// request volume actually placed on QRZ.com.
 func (s *QRZService) fetchCallsign(call, sessionKey string) (*QRZCallsign, bool, error) {
 	params := url.Values{}
 	params.Set("s", sessionKey)
@@ -690,9 +927,15 @@ func (s *QRZService) fetchCallsign(call, sessionKey string) (*QRZCallsign, bool,
 	apiURL := qrzAPIBase + "?" + params.Encode()
 	resp, err := s.httpClient.Get(apiURL)
 	if err != nil {
+		// No HTTP response was received at all (DNS/connect/timeout/etc.) —
+		// record this as a transport-level failure rather than a status code.
+		s.apiCallStats.record(qrzNetworkErrorStatus)
+		s.apiCallMinuteStats.record(qrzNetworkErrorStatus)
 		return nil, false, fmt.Errorf("qrz: lookup request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	s.apiCallStats.record(resp.StatusCode)
+	s.apiCallMinuteStats.record(resp.StatusCode)
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 	if err != nil {

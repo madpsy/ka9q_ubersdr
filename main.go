@@ -2853,6 +2853,9 @@ func main() {
 	http.HandleFunc("/admin/wspr-rank", adminHandler.AuthMiddleware(adminHandler.HandleWSPRRank))
 	http.HandleFunc("/admin/psk-rank", adminHandler.AuthMiddleware(adminHandler.HandlePSKRank))
 	http.HandleFunc("/admin/lookup/test", adminHandler.AuthMiddleware(adminHandler.HandleLookupTest))
+	http.HandleFunc("/admin/lookup/stats", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleLookupStats(w, r, config)
+	}))
 	http.HandleFunc("/admin/dxcluster/test", adminHandler.AuthMiddleware(adminHandler.HandleDXClusterTest))
 
 	// Real-time SSE feeds (admin only)

@@ -517,6 +517,7 @@
         #dspHealthSection,
         #frequencyReferenceSection,
         #systemLoadHistorySection,
+        #lookupStatsSection,
         #ntpHistorySection,
         #monitor-tunnel,
         #monitor-instance-reporter,
@@ -1841,6 +1842,34 @@
                             </div>
                             <div style="height: 250px; position: relative;">
                                 <canvas id="loadHourlyCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- QRZ Callsign Lookup Stats Section (static container for charts; only shown when lookups are enabled) -->
+                    <div id="lookupStatsSection" class="config-section" style="display: none;">
+                        <h3 id="lookupStatsTitle">📇 Callsign Lookup (QRZ)</h3>
+                        <div id="lookupStatsDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <!-- Summary stats will be populated by JavaScript -->
+                        </div>
+
+                        <!-- Per-minute chart - current hour -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                QRZ.com API Calls — Last 60 Minutes (Per Minute)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="lookupStatsMinuteCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Hourly chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                QRZ.com API Calls — Last 24 Hours (Per Hour)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="lookupStatsHourlyCanvas"></canvas>
                             </div>
                         </div>
                     </div>
@@ -16941,6 +16970,8 @@ const tooltipLine2 = timeStr;
         let frontendHourlyChart = null;
         let loadHistoryChart = null;
         let loadHourlyChart = null;
+        let lookupStatsMinuteChart = null;
+        let lookupStatsHourlyChart = null;
         let ntpHistoryChart = null;
         let ntpHourlyChart = null;
 
@@ -18154,6 +18185,202 @@ const tooltipLine2 = timeStr;
             }
         }
 
+        // QRZ Callsign Lookup Stats Monitoring
+        //
+        // Groups individual HTTP status codes into a small set of categories so
+        // the stacked bar charts stay readable regardless of how many distinct
+        // codes QRZ has returned. "0" is the network/transport-error sentinel
+        // used by the backend (see qrzNetworkErrorStatus in qrz_lookup.go).
+        function categorizeLookupStatusCode(codeStr) {
+            const code = parseInt(codeStr, 10);
+            if (code === 0) return 'network_error';
+            if (code >= 200 && code < 300) return 'success';
+            if (code === 429) return 'rate_limited';
+            if (code >= 400 && code < 500) return 'client_error';
+            if (code >= 500) return 'server_error';
+            return 'other';
+        }
+
+        const lookupStatusCategoryMeta = {
+            success:       { label: '2xx OK',            color: '#28a745' },
+            rate_limited:  { label: '429 Rate Limited',   color: '#ff9500' },
+            client_error:  { label: '4xx Client Error',   color: '#dc3545' },
+            server_error:  { label: '5xx Server Error',   color: '#8b0000' },
+            network_error: { label: 'Network Error',      color: '#6c757d' },
+            other:         { label: 'Other',              color: '#667eea' }
+        };
+        const lookupStatusCategoryOrder = ['success', 'rate_limited', 'client_error', 'server_error', 'network_error', 'other'];
+
+        // Builds one dataset per status category from an array of entries that
+        // each have a `status_codes` map (or undefined/null for zero-call buckets).
+        function buildLookupStatusDatasets(entries) {
+            const perCategory = {};
+            lookupStatusCategoryOrder.forEach(cat => { perCategory[cat] = entries.map(() => 0); });
+
+            entries.forEach((entry, i) => {
+                const codes = entry.status_codes || {};
+                Object.keys(codes).forEach(codeStr => {
+                    const cat = categorizeLookupStatusCode(codeStr);
+                    perCategory[cat][i] += codes[codeStr];
+                });
+            });
+
+            return lookupStatusCategoryOrder
+                .filter(cat => perCategory[cat].some(v => v > 0))
+                .map(cat => ({
+                    label: lookupStatusCategoryMeta[cat].label,
+                    data: perCategory[cat],
+                    backgroundColor: lookupStatusCategoryMeta[cat].color,
+                    borderWidth: 0,
+                    stack: 'calls'
+                }));
+        }
+
+        async function loadLookupStats() {
+            try {
+                const response = await authenticatedFetch('/admin/lookup/stats');
+                if (!response || !response.ok) {
+                    console.log('Lookup stats not available');
+                    const section = document.getElementById('lookupStatsSection');
+                    if (section) section.style.display = 'none';
+                    return;
+                }
+
+                const data = await response.json();
+                const section = document.getElementById('lookupStatsSection');
+                if (!section) return;
+
+                if (!data.enabled) {
+                    section.style.display = 'none';
+                    return;
+                }
+                section.style.display = 'block';
+
+                // Summary display
+                const displayDiv = document.getElementById('lookupStatsDisplay');
+                if (displayDiv) {
+                    const providerLabel = data.provider ? data.provider.toUpperCase() : 'Unknown';
+                    const cacheMax = data.cache_max_size > 0 ? data.cache_max_size : '∞';
+                    const cachePct = data.cache_max_size > 0
+                        ? Math.round((data.cache_size / data.cache_max_size) * 100)
+                        : null;
+                    displayDiv.innerHTML = `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: #667eea;">${data.total_24h}</div>
+                                <div style="font-size: 12px; color: #666;">API Calls (24h)</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: #667eea;">${providerLabel}</div>
+                                <div style="font-size: 12px; color: #666;">Provider</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: #28a745;">${data.cache_size}</div>
+                                <div style="font-size: 12px; color: #666;">Cached Callsigns${cacheMax !== '∞' ? ` / ${cacheMax}` : ''}</div>
+                            </div>
+                            ${cachePct !== null ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: ${cachePct >= 90 ? '#dc3545' : cachePct >= 70 ? '#ff8c00' : '#28a745'};">${cachePct}%</div>
+                                <div style="font-size: 12px; color: #666;">Cache Utilisation</div>
+                            </div>` : ''}
+                        </div>
+                    `;
+                }
+
+                // Per-minute chart (current hour)
+                const minuteEntries = data.current_hour_minutes || [];
+                const minuteCanvas = document.getElementById('lookupStatsMinuteCanvas');
+                if (minuteCanvas && minuteEntries.length > 0) {
+                    const minuteLabels = minuteEntries.map(e => new Date(e.minute_start));
+                    const minuteDatasets = buildLookupStatusDatasets(minuteEntries);
+
+                    if (!lookupStatsMinuteChart) {
+                        const ctx = minuteCanvas.getContext('2d');
+                        lookupStatsMinuteChart = new Chart(ctx, {
+                            type: 'bar',
+                            data: { labels: minuteLabels, datasets: minuteDatasets },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                animation: false,
+                                plugins: {
+                                    legend: { display: true, position: 'top' },
+                                    tooltip: { mode: 'index', intersect: false }
+                                },
+                                scales: {
+                                    x: {
+                                        type: 'time',
+                                        time: { unit: 'minute', displayFormats: { minute: 'HH:mm' }, tooltipFormat: 'HH:mm' },
+                                        stacked: true,
+                                        ticks: { source: 'data' },
+                                        bounds: 'data',
+                                        title: { display: true, text: 'Time' }
+                                    },
+                                    y: {
+                                        stacked: true,
+                                        beginAtZero: true,
+                                        title: { display: true, text: 'API Calls' },
+                                        ticks: { precision: 0 }
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        lookupStatsMinuteChart.data.labels = minuteLabels;
+                        lookupStatsMinuteChart.data.datasets = minuteDatasets;
+                        lookupStatsMinuteChart.update('none');
+                    }
+                }
+
+                // Hourly chart (last 24 hours)
+                const hourlyEntries = data.hourly || [];
+                const hourlyCanvas = document.getElementById('lookupStatsHourlyCanvas');
+                if (hourlyCanvas && hourlyEntries.length > 0) {
+                    const hourlyLabels = hourlyEntries.map(e => new Date(e.hour_start));
+                    const hourlyDatasets = buildLookupStatusDatasets(hourlyEntries);
+
+                    if (!lookupStatsHourlyChart) {
+                        const ctx = hourlyCanvas.getContext('2d');
+                        lookupStatsHourlyChart = new Chart(ctx, {
+                            type: 'bar',
+                            data: { labels: hourlyLabels, datasets: hourlyDatasets },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                animation: false,
+                                plugins: {
+                                    legend: { display: true, position: 'top' },
+                                    tooltip: { mode: 'index', intersect: false }
+                                },
+                                scales: {
+                                    x: {
+                                        type: 'time',
+                                        time: { unit: 'hour', displayFormats: { hour: 'HH:mm' }, tooltipFormat: 'MMM d, HH:mm' },
+                                        stacked: true,
+                                        ticks: { source: 'data' },
+                                        bounds: 'data',
+                                        title: { display: true, text: 'Time' }
+                                    },
+                                    y: {
+                                        stacked: true,
+                                        beginAtZero: true,
+                                        title: { display: true, text: 'API Calls' },
+                                        ticks: { precision: 0 }
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        lookupStatsHourlyChart.data.labels = hourlyLabels;
+                        lookupStatsHourlyChart.data.datasets = hourlyDatasets;
+                        lookupStatsHourlyChart.update('none');
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading lookup stats:', error);
+            }
+        }
+
         // Frequency Reference Monitoring
         let refHistoryChart = null;
         let refHourlyChart = null;
@@ -18960,6 +19187,10 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
+                // Load QRZ callsign lookup stats (independent of system_load health fetch below;
+                // hides itself if lookups are not enabled)
+                await loadLookupStats();
+
                 // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch, DSP, version and notifications health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
@@ -19717,6 +19948,7 @@ const tooltipLine2 = timeStr;
                 { id: 'dspHealthSection',          label: 'DSP' },
                 { id: 'frequencyReferenceSection', label: 'Freq Reference' },
                 { id: 'systemLoadHistorySection',  label: 'System Load' },
+                { id: 'lookupStatsSection',        label: 'Lookup Stats' },
                 { id: 'gpsdoHealthSection',        label: 'GPSDO' },
                 { id: 'ntpHistorySection',         label: 'NTP' },
                 { id: 'monitor-software-version',  label: 'Software Version' },

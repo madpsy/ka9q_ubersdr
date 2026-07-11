@@ -2691,7 +2691,8 @@ class SpectrumDisplay {
      * Draw the station ID overlay in the top-right corner of the spectrum line graph.
      * Line 1 (bold 13px): "<callsign> - <name>"  or just callsign or just name
      * Line 2 (11px, 75% opacity): location
-     * Line 3 (11px, 75% opacity): active antenna name (only when ant_switch enabled)
+     * Line 3 (11px, 75% opacity): local weather (only when /api/weather data is available)
+     * Line 4 (11px, 75% opacity): active antenna name (only when ant_switch enabled)
      * Text colour comes from this.stationIdColor (set by loadStationIdConfig()).
      * A 1 px black drop-shadow is always added for legibility over any background.
      * Data comes from window.instanceDescription.receiver (populated by fetchSiteDescription()).
@@ -2725,40 +2726,41 @@ class SpectrumDisplay {
         ctx.fillStyle = col;
         ctx.fillText(line1, rightX, topY);
 
+        // Track Y position for subsequent optional lines (each is 16px apart)
+        let nextY = topY + 16;
+
         // Line 2: 11px — location at 75% opacity
         if (location) {
             this._setFont(ctx, '11px sans-serif');
             ctx.fillStyle   = 'rgba(0,0,0,0.55)';
-            ctx.fillText(location, rightX + 1, topY + 17);
+            ctx.fillText(location, rightX + 1, nextY + 1);
             ctx.globalAlpha = 0.75;
             ctx.fillStyle   = col;
-            ctx.fillText(location, rightX, topY + 16);
+            ctx.fillText(location, rightX, nextY);
             ctx.globalAlpha = 1.0;
+            nextY += 16;
         }
 
-        // Line 3: 11px — active antenna name at 75% opacity (ant_switch enabled only)
-        if (antLabel) {
-            const antY = location ? topY + 32 : topY + 16;
-            this._setFont(ctx, '11px sans-serif');
-            ctx.fillStyle   = 'rgba(0,0,0,0.55)';
-            ctx.fillText(antLabel, rightX + 1, antY + 1);
-            ctx.globalAlpha = 0.75;
-            ctx.fillStyle   = col;
-            ctx.fillText(antLabel, rightX, antY);
-            ctx.globalAlpha = 1.0;
-        }
-
-        // Line 4: 11px — local weather at 75% opacity (only when /api/weather data is available)
+        // Line 3: 11px — local weather at 75% opacity (only when /api/weather data is available)
         if (this._weatherLine) {
-            let wxY = topY + 16;          // base: just below line 1
-            if (location) wxY += 16;
-            if (antLabel) wxY += 16;
             this._setFont(ctx, '11px sans-serif');
             ctx.fillStyle   = 'rgba(0,0,0,0.55)';
-            ctx.fillText(this._weatherLine, rightX + 1, wxY + 1);
+            ctx.fillText(this._weatherLine, rightX + 1, nextY + 1);
             ctx.globalAlpha = 0.75;
             ctx.fillStyle   = col;
-            ctx.fillText(this._weatherLine, rightX, wxY);
+            ctx.fillText(this._weatherLine, rightX, nextY);
+            ctx.globalAlpha = 1.0;
+            nextY += 16;
+        }
+
+        // Line 4: 11px — active antenna name at 75% opacity (ant_switch enabled only)
+        if (antLabel) {
+            this._setFont(ctx, '11px sans-serif');
+            ctx.fillStyle   = 'rgba(0,0,0,0.55)';
+            ctx.fillText(antLabel, rightX + 1, nextY + 1);
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle   = col;
+            ctx.fillText(antLabel, rightX, nextY);
             ctx.globalAlpha = 1.0;
         }
 

@@ -100,19 +100,24 @@
         <div class="qrss-ctl">
             <label for="qrss-colormap">Palette</label>
             <select id="qrss-colormap" class="qrss-select">
+                <option value="grayscale">Gray</option>
                 <option value="qrss">QRSS</option>
                 <option value="viridis">Viridis</option>
                 <option value="inferno">Inferno</option>
                 <option value="afmhot">Heat</option>
-                <option value="grayscale">Gray</option>
             </select>
         </div>
-        <div class="qrss-ctl qrss-ctl-contrast" title="Contrast: Auto tracks the noise floor; drag a slider for manual control">
+        <div class="qrss-ctl qrss-ctl-contrast" title="Contrast: Auto tracks the noise floor; use the level dropdown to adjust sensitivity, or uncheck for manual slider control">
             <label class="qrss-auto-label">
                 <input type="checkbox" id="qrss-auto-contrast" checked>
                 Auto contrast
             </label>
-            <div class="qrss-range">
+            <select id="qrss-auto-level" class="qrss-select" title="Auto contrast sensitivity — High makes signals pop; Low is gentler on busy bands">
+                <option value="high">High</option>
+                <option value="med">Med</option>
+                <option value="low">Low</option>
+            </select>
+            <div class="qrss-range" hidden>
                 <span class="qrss-range-tag">Min</span>
                 <input type="range" id="qrss-dbmin" min="-160" max="0" value="-110" step="1" title="Black point (noise floor)">
                 <span class="qrss-range-tag">Max</span>

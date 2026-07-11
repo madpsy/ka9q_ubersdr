@@ -129,12 +129,13 @@ class QRSSExtension extends DecoderExtension {
             fftSize: 2048,
             secPerPixel: 1.0,      // waterfall time resolution (seconds per column)
             windowSec: 0,          // 0 = Auto (Speed-driven); >0 locks total on-screen time
-            colormap: 'qrss',
+            colormap: 'grayscale',
             dbMin: -110,
             dbMax: -60,
             autoContrast: true,
-            autoFloorOffset: -4,   // black point relative to tracked noise floor (dB)
-            autoSpan: 50           // dynamic range above the black point (dB)
+            autoLevel: 'high',     // 'low' | 'med' | 'high' — auto contrast sensitivity
+            autoFloorOffset: 0,    // black point at the tracked noise floor (dB)
+            autoSpan: 15           // dynamic range above the black point (dB); set by autoLevel
         };
 
         // DSP state
@@ -162,7 +163,7 @@ class QRSSExtension extends DecoderExtension {
         this.ctx = null;
         this.wf = null;            // offscreen waterfall pixel buffer
         this.wfCtx = null;
-        this.colLUT = buildColorLUT('qrss');
+        this.colLUT = buildColorLUT('grayscale');
         this.binMap = null;        // per-pixel [binLo, binHi] mapping
         this.floorEMA = -110;      // running noise-floor estimate for auto-contrast
         this.margins = { l: 62, r: 56, t: 24, b: 22 };
@@ -311,10 +312,25 @@ class QRSSExtension extends DecoderExtension {
 
         const auto = bind('qrss-auto-contrast', 'change', (e) => {
             this.config.autoContrast = e.target.checked;
+            if (e.target.checked) {
+                // Returning to auto: restore span from the current level setting
+                this.config.autoSpan = this._levelToSpan(this.config.autoLevel);
+            }
             this._syncDbUI();
             // Leaving auto on keeps the tracked range; the next column re-balances.
         });
         if (auto) auto.checked = this.config.autoContrast;
+
+        // Auto contrast level dropdown (High / Med / Low)
+        const levelSel = document.getElementById('qrss-auto-level');
+        if (levelSel) {
+            levelSel.value = this.config.autoLevel;
+            levelSel.addEventListener('change', (e) => {
+                this.config.autoLevel = e.target.value;
+                this.config.autoSpan = this._levelToSpan(e.target.value);
+            });
+        }
+
         const dbMin = document.getElementById('qrss-dbmin');
         const dbMax = document.getElementById('qrss-dbmax');
         const onDb = () => {
@@ -337,8 +353,21 @@ class QRSSExtension extends DecoderExtension {
     _syncDbUI() {
         const r = document.getElementById('qrss-db-readout');
         if (r) r.textContent = `${this.config.dbMin} … ${this.config.dbMax} dB`.replace(/-/g, '−');
+        const levelSel = document.getElementById('qrss-auto-level');
         const box = document.querySelector('.qrss-range');
-        if (box) box.style.opacity = this.config.autoContrast ? 0.4 : 1;
+        if (this.config.autoContrast) {
+            // Auto mode: show level dropdown, hide manual sliders
+            if (levelSel) levelSel.hidden = false;
+            if (box) box.hidden = true;
+        } else {
+            // Manual mode: hide level dropdown, show sliders
+            if (levelSel) levelSel.hidden = true;
+            if (box) { box.hidden = false; box.style.opacity = 1; }
+        }
+    }
+
+    _levelToSpan(level) {
+        return level === 'low' ? 40 : level === 'med' ? 25 : 15;  // high=15, med=25, low=40
     }
 
     _tuneBand(dialHz) {

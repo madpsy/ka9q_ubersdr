@@ -46,7 +46,7 @@
     },
     "colormap": {
       "type": "string",
-      "default": "qrss",
+      "default": "grayscale",
       "description": "Colour palette (qrss, viridis, inferno, afmhot, grayscale)"
     },
     "dbMin": {

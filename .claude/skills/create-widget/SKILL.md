@@ -11,10 +11,11 @@ description: Create a widget for the UberSDR web SDR interface — a self-contai
 > and a `<script>` block — these are injected verbatim into the host page, which
 > already provides the full document shell.
 
-> **Three things every widget MUST have, no exceptions:**
+> **Four things every widget MUST have, no exceptions:**
 > 1. A **visible ✕ close button** in the header — users must always be able to dismiss a widget
-> 2. **Mobile hiding** — CSS `@media` + `html.is-mobile` + JS guard
-> 3. **Drag-to-reposition** with `localStorage` persistence
+> 2. A **collapse/expand arrow** to the **left of the title** — collapses the widget to just its title bar; the collapsed/expanded state is persisted to `localStorage`
+> 3. **Mobile hiding** — CSS `@media` + `html.is-mobile` + JS guard
+> 4. **Drag-to-reposition** with `localStorage` persistence
 
 > **ALWAYS start by reading the reference widgets in `widgets/`.**
 > Before writing any new widget, **read at least one or two existing widgets in
@@ -78,10 +79,11 @@ might ask for:
 - *"A live readout of the callsign currently being looked up."* — listens on
   the `callsign_lookup_complete` event bus.
 
-Whatever the request, every widget still obeys the three non-negotiables (close
-button, mobile hiding, drag-to-reposition) and any user preference it exposes
-(display mode, units, selected items, …) should be persisted to `localStorage`
-under its own `<slug>_widget_*` key so it survives a reload.
+Whatever the request, every widget still obeys the four non-negotiables (close
+button, collapse arrow, mobile hiding, drag-to-reposition) and any user
+preference it exposes (display mode, units, selected items, collapsed state, …)
+should be persisted to `localStorage` under its own `<slug>_widget_*` key so it
+survives a reload.
 
 ---
 
@@ -428,6 +430,130 @@ Check `dismissed` everywhere the widget could become visible again:
 // In event listeners, polls, service-availability callbacks, etc.:
 if (dismissed) return;
 widget.style.display = '';
+```
+
+---
+
+## Collapse / expand arrow (mandatory)
+
+**Every widget must have a collapse/expand arrow immediately to the LEFT of the
+title.** Clicking it collapses the widget down to just its title bar (hiding the
+body); clicking again restores it. This is separate from the ✕ close button:
+collapse **hides the body but keeps the widget alive** (no disconnect, no
+`dismissed` flag, background work keeps running), whereas close dismisses it.
+
+The collapsed/expanded state is a **user preference and MUST be persisted** to
+`localStorage` under the widget's own `<slug>_widget_collapsed` key, and
+**restored on load** so the widget reopens in the state the user left it.
+
+### Arrow glyphs
+
+Use the two triangle glyphs, swapped by state (do **not** rotate one with CSS —
+just change the character):
+
+- Expanded → `&#x25BE;` (▾, pointing down)
+- Collapsed → `&#x25B8;` (▸, pointing right)
+
+### Markup — arrow is the FIRST child of the header, before the title
+
+```html
+<div id="myw-header">
+  <span id="myw-collapse" title="Collapse">&#x25BE;</span>
+  <span id="myw-title">My Widget</span>
+  <span id="myw-close" title="Dismiss">&#x2715;</span>
+</div>
+```
+
+### CSS — arrow style + collapsed-state rule
+
+```css
+#myw-collapse {
+  width: 14px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-right: 6px;
+  transition: color 0.15s;
+  user-select: none;
+}
+#myw-collapse:hover { color: #fff; }
+
+/* Collapse to the title bar: hide every direct child of the root except the
+   header. This keeps the header (and the ✕ inside it) visible. */
+#myw-widget.myw-collapsed > :not(#myw-header) { display: none !important; }
+#myw-widget.myw-collapsed #myw-header { border-bottom: none; }
+```
+
+> **Keeping the arrow next to the title.** If the header uses
+> `justify-content: space-between`, adding the arrow as a third flex item pushes
+> the title to the centre. Give the **title** `margin-right: auto` so the
+> arrow + title hug the left and the close/controls stay on the right. If the
+> header already has a `gap`, don't add a big `margin-right` on the arrow too or
+> you get a double gap (see `marker.widget.html`, which uses a negative margin
+> to compensate).
+>
+> **Close button outside the header?** A few widgets (e.g. `cw_spots`) put the
+> ✕ as a sibling of the header, not inside it. Then exempt it as well:
+> `#root.collapsed > :not(#header):not(#close) { display:none !important; }`.
+>
+> **Body isn't a direct child?** The `> :not(#header)` rule only hides direct
+> children of the root. That's the normal case (header + body sections are
+> siblings). If a control lives *inside* the header and should hide when
+> collapsed (e.g. a space-filling slider), hide it with its own rule.
+
+### JS — toggle, persist, restore, and skip in the drag handler
+
+```js
+var LS_COLLAPSED_KEY = 'myw_widget_collapsed';
+var collapseEl = document.getElementById('myw-collapse');
+
+function setCollapsed(state, save) {
+  widget.classList.toggle('myw-collapsed', state);
+  collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;'; // ▸ collapsed, ▾ expanded
+  collapseEl.title = state ? 'Expand' : 'Collapse';
+  if (save) {
+    try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+  }
+}
+
+// Restore saved state on load (default: expanded). Do this even while the
+// widget is display:none — the class is applied and takes effect on reveal.
+(function restoreCollapsed() {
+  var state = false;
+  try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+  setCollapsed(state, false);
+})();
+
+collapseEl.addEventListener('click', function (e) {
+  e.stopPropagation();               // don't start a drag
+  setCollapsed(!widget.classList.contains('myw-collapsed'), true);
+});
+```
+
+Add the arrow to the drag-start guard exactly like the close button, so clicking
+it never begins a drag:
+
+```js
+// mousedown-based drag:
+if (e.target === collapseEl || collapseEl.contains(e.target)) return;
+
+// pointerdown + closest()-based drag (marker/sstv/games):
+if (e.target.closest('#myw-collapse, button, select, …')) return;
+```
+
+If the widget scrolls its body (e.g. a log/output pane), **jump to the bottom on
+expand** so the latest content is visible — remove the class first so the body is
+laid out and measurable:
+
+```js
+collapseEl.addEventListener('click', function (e) {
+  e.stopPropagation();
+  var nowCollapsed = !widget.classList.contains('myw-collapsed');
+  setCollapsed(nowCollapsed, true);
+  if (!nowCollapsed) outputEl.scrollTop = outputEl.scrollHeight;
+});
 ```
 
 ---
@@ -1103,6 +1229,7 @@ Before showing interactive controls, check `window.instanceDescription`:
 
 **Non-negotiable (widget will be rejected without these):**
 - [ ] **✕ Close button** in the header — `dismissed` flag checked everywhere the widget could reappear
+- [ ] **Collapse/expand arrow** left of the title — collapses to the title bar; state persisted to `<slug>_widget_collapsed` and restored on load; excluded from the drag-start guard
 - [ ] **Mobile hiding** — `@media (max-width: 768px)` + `html.is-mobile` CSS + JS guard
 - [ ] **Drag-to-reposition** — `mousedown`/`mousemove`/`mouseup` + `localStorage` persistence
 
@@ -1210,7 +1337,21 @@ Use this as a starting point for a new widget:
     letter-spacing: 0.5px;
     color: rgba(255,255,255,0.85);
     text-transform: uppercase;
+    margin-right: auto;   /* keeps the collapse arrow + title on the left */
   }
+
+  #myw-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #myw-collapse:hover { color: #fff; }
 
   #myw-close {
     width: 16px; height: 16px;
@@ -1228,6 +1369,10 @@ Use this as a starting point for a new widget:
     padding: 6px 9px 7px;
   }
 
+  /* Collapsed: title bar only. */
+  #myw-widget.myw-collapsed > :not(#myw-header) { display: none !important; }
+  #myw-widget.myw-collapsed #myw-header { border-bottom: none; }
+
   @media (max-width: 768px) {
     #myw-widget { display: none !important; }
   }
@@ -1236,6 +1381,7 @@ Use this as a starting point for a new widget:
 
 <div id="myw-widget" style="display:none;">
   <div id="myw-header">
+    <span id="myw-collapse" title="Collapse">&#x25BE;</span>
     <span id="myw-title">My Widget</span>
     <span id="myw-close" title="Dismiss">&#x2715;</span>
   </div>
@@ -1250,11 +1396,13 @@ Use this as a starting point for a new widget:
 
   if (window._isMobile || window.innerWidth <= 768) return;
 
-  var LS_POS_KEY     = 'myw_widget_pos';
-  var DRAG_THRESHOLD = 5;
+  var LS_POS_KEY       = 'myw_widget_pos';
+  var LS_COLLAPSED_KEY = 'myw_widget_collapsed';
+  var DRAG_THRESHOLD   = 5;
 
-  var widget   = document.getElementById('myw-widget');
-  var closeEl  = document.getElementById('myw-close');
+  var widget     = document.getElementById('myw-widget');
+  var collapseEl = document.getElementById('myw-collapse');
+  var closeEl    = document.getElementById('myw-close');
   var dragState  = null;
   var wasDragged = false;
   var dismissed  = false;
@@ -1275,6 +1423,7 @@ Use this as a starting point for a new widget:
 
   // ── Drag ────────────────────────────────────────────────────────────
   widget.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl || collapseEl.contains(e.target)) return;
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();
@@ -1322,6 +1471,25 @@ Use this as a starting point for a new widget:
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
+  });
+
+  // ── Collapse / expand (state persisted + restored) ──────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('myw-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;'; // ▸ collapsed, ▾ expanded
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function restoreCollapsed() {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('myw-collapsed'), true);
   });
 
   // ── Show widget ─────────────────────────────────────────────────────

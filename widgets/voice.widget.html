@@ -284,6 +284,52 @@
   .va-tt-fields { display: flex; flex-direction: column; gap: 1px; }
   .va-tt-value  { color: #fff; font-weight: bold; white-space: normal; word-break: break-word; }
 
+  /* ── Pagination ─────────────────────────────────────────────────────────── */
+  #va-widget-pagination {
+    display: none; /* shown via JS when more than one page */
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 4px 8px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+
+  #va-widget-pagination.va-pg-visible {
+    display: flex;
+  }
+
+  .va-pg-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 11px;
+    line-height: 1;
+    color: rgba(255,255,255,0.8);
+    cursor: pointer;
+    border-radius: 3px;
+    user-select: none;
+    transition: color 0.12s, background 0.12s;
+  }
+
+  .va-pg-btn:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.15);
+  }
+
+  .va-pg-btn.va-pg-disabled {
+    color: rgba(255,255,255,0.25);
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .va-pg-info {
+    font-size: 10px;
+    font-weight: normal;
+    color: rgba(255,255,255,0.7);
+  }
+
   /* ── Country badges ─────────────────────────────────────────────────────── */
   #va-widget-badges {
     display: block;
@@ -366,6 +412,11 @@
   <div id="va-widget-body">
     <div id="va-widget-empty">Waiting for band…</div>
   </div>
+  <div id="va-widget-pagination">
+    <span class="va-pg-btn" id="va-pg-prev" title="Previous page">&#x25C0;</span>
+    <span class="va-pg-info" id="va-pg-info"></span>
+    <span class="va-pg-btn" id="va-pg-next" title="Next page">&#x25B6;</span>
+  </div>
   <div id="va-widget-badges"></div>
 </div>
 <div id="va-row-tooltip"></div>
@@ -394,6 +445,7 @@
   var LS_COUNTRY_KEY  = 'va_widget_country';
   var LS_COLLAPSED_KEY = 'va_widget_collapsed';
   var DRAG_THRESHOLD  = 5;
+  var PAGE_SIZE       = 15;
 
   var widget     = document.getElementById('va-widget');
   var collapseEl = document.getElementById('va-widget-collapse');
@@ -402,6 +454,12 @@
   var badgesEl   = document.getElementById('va-widget-badges');
   var tooltipEl  = document.getElementById('va-row-tooltip');
   var closeEl    = document.getElementById('va-widget-close');
+
+  // Pagination elements
+  var paginationEl = document.getElementById('va-widget-pagination');
+  var pgPrevEl     = document.getElementById('va-pg-prev');
+  var pgNextEl     = document.getElementById('va-pg-next');
+  var pgInfoEl     = document.getElementById('va-pg-info');
 
   // Filter elements
   var contInput    = document.getElementById('va-cont-input');
@@ -665,6 +723,7 @@
     // Rebuild country options filtered to this continent
     rebuildCountryOptions();
     try { localStorage.setItem(LS_CONT_KEY, value); } catch (e) {}
+    currentPage = 0; // reset pagination when filter changes
     // Re-render current data
     if (currentBand) renderCurrent();
   });
@@ -680,6 +739,7 @@
       if (value) localStorage.setItem(LS_COUNTRY_KEY, value);
       else localStorage.removeItem(LS_COUNTRY_KEY);
     } catch (e) {}
+    currentPage = 0; // reset pagination when filter changes
     if (currentBand) renderCurrent();
   });
 
@@ -721,6 +781,7 @@
   // ── Current activities cache (for re-render on filter change) ────────────
   var lastActivities = [];
   var lastBand = '';
+  var currentPage = 0; // 0-based page index, reset when filters/band change
 
   function renderCurrent() {
     renderData(lastActivities, lastBand);
@@ -746,6 +807,7 @@
     if (band !== currentBand) {
       currentBand = band;
       bandEl.textContent = band;
+      currentPage = 0; // reset pagination when band changes
     }
 
     if (state.error) {
@@ -827,6 +889,7 @@
           countryInput.value = country;
           updateClearBtn(countryInput, countryClear);
           try { localStorage.setItem(LS_COUNTRY_KEY, country); } catch (e2) {}
+          currentPage = 0; // reset pagination when filter changes
           renderCurrent();
         }
       });
@@ -856,6 +919,7 @@
         ? 'No activity on ' + band
         : 'No matches for filter';
       bodyEl.innerHTML = '<div id="va-widget-empty">' + msg + '</div>';
+      paginationEl.classList.remove('va-pg-visible');
       return;
     }
 
@@ -864,7 +928,24 @@
       return (b.signal_above_noise || 0) - (a.signal_above_noise || 0);
     });
 
-    var rows = filtered.map(function (act) {
+    // ── Pagination ──────────────────────────────────────────────────────────
+    var totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
+    if (currentPage < 0) currentPage = 0;
+
+    var pageStart = currentPage * PAGE_SIZE;
+    var pageItems = filtered.slice(pageStart, pageStart + PAGE_SIZE);
+
+    if (totalPages > 1) {
+      paginationEl.classList.add('va-pg-visible');
+      pgInfoEl.textContent = (currentPage + 1) + ' / ' + totalPages;
+      pgPrevEl.classList.toggle('va-pg-disabled', currentPage === 0);
+      pgNextEl.classList.toggle('va-pg-disabled', currentPage >= totalPages - 1);
+    } else {
+      paginationEl.classList.remove('va-pg-visible');
+    }
+
+    var rows = pageItems.map(function (act) {
       var hz   = act.estimated_dial_freq || act.start_freq;
       var freq = (hz / 1e6).toFixed(3);
       var mode = (act.mode || 'LSB').toUpperCase();

@@ -1286,6 +1286,7 @@ int main (int argc, char *argv[])
         {"receivers",  required_argument, 0, 'n'},
         {"device",     required_argument, 0, 'd'},
         {"wideband",   no_argument,       0, 'w'},
+        {"debug",      no_argument,       0, 'v'},
         {"discover",   no_argument,       0, 'D'},
         {"callsign",   required_argument, 0, 'c'},
         {"help",       no_argument,       0, 'h'},
@@ -1293,7 +1294,7 @@ int main (int argc, char *argv[])
     };
 
     int opt_index = 0;
-    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:wDc:h", long_options, &opt_index)) != -1) {
+    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:wvDc:h", long_options, &opt_index)) != -1) {
         switch(CmdOption) {
         case 'h':
             printf("Usage: %s [options]\n\n", basename(argv[0]));
@@ -1308,6 +1309,7 @@ int main (int argc, char *argv[])
             printf("  --receivers N      Number of receiver slices (default %d, max %d)\n", MAX_RCVRS, MAX_RCVRS);
             printf("  --device N         Device type: 1=Hermes, 6=HermesLite (default 6)\n");
             printf("  --wideband         Enable wideband data (default disabled)\n");
+            printf("  --debug            Log per-DDC frequency requests from the client\n");
             printf("\n");
             printf("Examples:\n");
             printf("  %s --url http://localhost:8080 --interface eth0\n", basename(argv[0]));
@@ -1335,6 +1337,9 @@ int main (int argc, char *argv[])
             break;
         case 'w':
             mcb.wideband = 1;
+            break;
+        case 'v':
+            mcb.debug = 1;
             break;
         case 'D':
             do_discover = 1;
@@ -1788,7 +1793,8 @@ void *highprio_thread(void *data)
 
             if (freq != rxfreq[i]) {
                 mcb.rcb[i].new_freq = rxfreq[i] = freq;
-                //t_print("HP: DDC%d freq: %lu\n", i, freq);
+                if (mcb.debug)
+                    t_print("HP: DDC%d freq: %lu\n", i, freq);
             }
         }
 

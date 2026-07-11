@@ -131,6 +131,17 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     setupEventHandlers() {
+        // Guard against duplicate bindings: the extension panel's content
+        // container persists across open/close cycles (only its innerHTML
+        // is replaced via renderTemplate()), so without this guard every
+        // re-activation of the panel would stack another set of listeners
+        // on the same DOM node — causing e.g. the map button to open one
+        // new tab per accumulated listener on a single click.
+        if (this.handlersSetup) {
+            console.log('Digital Spots: Event handlers already setup, skipping');
+            return;
+        }
+
         console.log('Digital Spots: Setting up event handlers');
 
         const container = this.getContentElement();
@@ -138,6 +149,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             console.error('Digital Spots: Container element not found');
             return;
         }
+
+        this.handlersSetup = true;
 
         container.addEventListener('change', (e) => {
             if (e.target.id === 'digital-spots-age-filter') {
@@ -194,7 +207,10 @@ class DigitalSpotsExtension extends DecoderExtension {
             if (e.target.id === 'digital-spots-clear') {
                 this.clearSpots();
             } else if (e.target.id === 'digital-spots-map-btn') {
-                window.open('/digitalspots_map.html', '_blank');
+                // Reuse a single named window so repeated clicks focus the
+                // existing tab instead of opening a new one each time.
+                window.open('/digitalspots_map.html', 'digitalspots_map',
+                    'width=1200,height=800,menubar=no,toolbar=no,location=no,status=no');
             }
         });
 

@@ -83,6 +83,7 @@ struct main_cb {
     int nsamps_packet;
 
     int wideband;
+    int debug;
     int num_rxs;
     int device_type;            /* 1=Hermes, 6=HermesLite (default 6) */
     char interface[15];

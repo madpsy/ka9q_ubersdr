@@ -354,7 +354,7 @@ class QRSSExtension extends DecoderExtension {
         const r = document.getElementById('qrss-db-readout');
         if (r) r.textContent = `${this.config.dbMin} … ${this.config.dbMax} dB`.replace(/-/g, '−');
         const levelSel = document.getElementById('qrss-auto-level');
-        const box = document.querySelector('.qrss-range');
+        const box = document.getElementById('qrss-range');
         if (this.config.autoContrast) {
             // Auto mode: show level dropdown, hide manual sliders
             if (levelSel) levelSel.classList.remove('qrss-hidden');

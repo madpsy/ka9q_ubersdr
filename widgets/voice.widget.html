@@ -531,6 +531,8 @@
     // Don't start drag from filter inputs
     if (e.target.classList.contains('va-filter-input') ||
         e.target.classList.contains('va-filter-option')) return;
+    // Don't start drag from pagination controls
+    if (e.target.classList.contains('va-pg-btn')) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();
     dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
@@ -595,6 +597,23 @@
   collapseEl.addEventListener('click', function (e) {
     e.stopPropagation();
     setCollapsed(!widget.classList.contains('va-collapsed'), true);
+  });
+
+  // ── Pagination navigation ────────────────────────────────────────────────
+  pgPrevEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (wasDragged) return;
+    if (pgPrevEl.classList.contains('va-pg-disabled')) return;
+    currentPage--;
+    renderCurrent();
+  });
+
+  pgNextEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (wasDragged) return;
+    if (pgNextEl.classList.contains('va-pg-disabled')) return;
+    currentPage++;
+    renderCurrent();
   });
 
   // ── Clear button visibility helper ──────────────────────────────────────

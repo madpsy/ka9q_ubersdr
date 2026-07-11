@@ -265,18 +265,14 @@ class BandConditionsMonitor {
 
     async loadWeather() {
         try {
-            const response = await fetch('/api/weather');
-            if (response.status === 404) {
-                // No weather data available yet — silently ignore
-                this.weatherData = null;
-                return;
+            // Reuse the shared promise set by app.js to avoid a duplicate HTTP
+            // request that would exhaust the per-IP rate limiter on /api/weather.
+            if (!window.weatherPromise) {
+                window.weatherPromise = fetch('/api/weather')
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(() => null);
             }
-            if (!response.ok) {
-                console.error('Failed to load weather data:', response.status);
-                this.weatherData = null;
-                return;
-            }
-            this.weatherData = await response.json();
+            this.weatherData = await window.weatherPromise;
         } catch (error) {
             console.error('Error loading weather:', error);
             this.weatherData = null;

@@ -3551,6 +3551,15 @@ async function fetchSiteDescription() {
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {
+
+                    // Kick off the weather fetch immediately (shared promise so spectrum-display.js
+                    // and bandconditions.js can reuse the same response without a second request).
+                    if (!window.weatherPromise) {
+                        window.weatherPromise = fetch('/api/weather')
+                            .then(r => r.ok ? r.json() : null)
+                            .catch(() => null);
+                    }
+
                     const lat = data.receiver.gps.lat;
                     const lon = data.receiver.gps.lon;
                     const name = data.receiver.name || 'Receiver';
@@ -3724,9 +3733,8 @@ async function fetchSiteDescription() {
 
                     // Add local weather row above location line (if available)
                     try {
-                        const wxResp = await fetch('/api/weather');
-                        if (wxResp.ok) {
-                            const wd = await wxResp.json();
+                        const wd = await window.weatherPromise;
+                        if (wd) {
                             if (wd.weather && wd.weather.length > 0) {
                                 const iconCode = wd.weather[0].icon;
                                 const wxDesc = wd.weather[0].description

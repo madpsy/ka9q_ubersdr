@@ -997,20 +997,30 @@ class SpectrumDisplay {
     }
 
     /**
-     * Fetch local weather from /api/weather and cache a one-line summary string in
-     * this._weatherLine for use by drawStationIdOverlay().
+     * Fetch local weather and cache a one-line summary string in this._weatherLine
+     * for use by drawStationIdOverlay().
+     * Reads from window.weatherPromise (set by app.js) to avoid a duplicate HTTP
+     * request that would exhaust the per-IP rate limiter.  Falls back to a direct
+     * fetch only when the global is not yet available.
      * Silently does nothing on 404 (weather service not configured) or any error.
      * Refreshes every 15 minutes to match the server-side cache interval.
      */
     async loadWeatherData() {
         try {
-            const resp = await fetch('/api/weather');
-            if (!resp.ok) {
-                // 404 = weather service not configured; any other error — stay silent
+            let wd;
+            if (window.weatherPromise) {
+                wd = await window.weatherPromise;
+            } else {
+                // Fallback: set the shared promise so subsequent callers reuse it too
+                window.weatherPromise = fetch('/api/weather')
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(() => null);
+                wd = await window.weatherPromise;
+            }
+            if (!wd) {
                 this._weatherLine = null;
                 return;
             }
-            const wd = await resp.json();
             if (!wd.weather || !wd.weather.length) {
                 this._weatherLine = null;
                 return;
@@ -1032,8 +1042,13 @@ class SpectrumDisplay {
             this._weatherLine = null;
         }
 
-        // Schedule next refresh in 15 minutes
-        setTimeout(() => this.loadWeatherData(), 15 * 60 * 1000);
+        // Schedule next refresh in 15 minutes.
+        // Reset the shared promise so the next call triggers a fresh fetch
+        // (all consumers will then await the new promise).
+        setTimeout(() => {
+            window.weatherPromise = null;
+            this.loadWeatherData();
+        }, 15 * 60 * 1000);
     }
 
     // Setup listener for filter latency changes

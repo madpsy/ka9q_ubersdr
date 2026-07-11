@@ -357,12 +357,12 @@ class QRSSExtension extends DecoderExtension {
         const box = document.querySelector('.qrss-range');
         if (this.config.autoContrast) {
             // Auto mode: show level dropdown, hide manual sliders
-            if (levelSel) levelSel.hidden = false;
-            if (box) box.hidden = true;
+            if (levelSel) levelSel.classList.remove('qrss-hidden');
+            if (box) box.classList.add('qrss-hidden');
         } else {
             // Manual mode: hide level dropdown, show sliders
-            if (levelSel) levelSel.hidden = true;
-            if (box) { box.hidden = false; box.style.opacity = 1; }
+            if (levelSel) levelSel.classList.add('qrss-hidden');
+            if (box) box.classList.remove('qrss-hidden');
         }
     }
 

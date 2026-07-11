@@ -102,6 +102,7 @@
 .qrss-ctl-contrast { gap: 10px; margin-left: auto; }
 .qrss-auto-label { display: inline-flex; align-items: center; gap: 6px; text-transform: none; color: #c9d5e1; font-size: 12px; white-space: nowrap; }
 .qrss-range { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 6px; width: 150px; }
+.qrss-hidden { display: none !important; }
 .qrss-range-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #6e7d90; }
 .qrss-range input[type=range] { width: 100%; height: 3px; accent-color: #4a9eff; }
 .qrss-db-readout { font-size: 11px; font-family: ui-monospace, monospace; color: #c9d5e1; min-width: 96px; }

@@ -5160,6 +5160,76 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         continue;
                     }
 
+                    // Special handling for admin.timezone — show an IANA timezone picker
+                    // fetched from /admin/timezones, with DST-aware current offsets.
+                    if (fullPath === 'admin.timezone') {
+                        const tzHint = document.createElement('small');
+                        tzHint.textContent = 'IANA timezone name. Daylight saving time is handled automatically. Select from the list or type a name directly (e.g. "Europe/London").';
+                        tzHint.style.cssText = 'display:block;margin-bottom:6px;color:#666;font-style:italic;';
+                        field.appendChild(tzHint);
+
+                        // Timezone picker dropdown — populated async from /admin/timezones
+                        const tzPicker = document.createElement('select');
+                        tzPicker.style.cssText = 'width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;font-size:13px;margin-bottom:8px;background:#fff;';
+
+                        // Placeholder while loading
+                        const loadingOpt = document.createElement('option');
+                        loadingOpt.value = '';
+                        loadingOpt.textContent = 'Loading timezones…';
+                        tzPicker.appendChild(loadingOpt);
+                        tzPicker.disabled = true;
+
+                        // Fetch timezone list from server (includes current DST-adjusted offsets)
+                        fetch('/admin/timezones')
+                            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+                            .then(zones => {
+                                tzPicker.innerHTML = '';
+                                // Placeholder
+                                const placeholder = document.createElement('option');
+                                placeholder.value = '';
+                                placeholder.textContent = '— Select timezone —';
+                                tzPicker.appendChild(placeholder);
+
+                                zones.forEach(tz => {
+                                    const opt = document.createElement('option');
+                                    opt.value = tz.name;
+                                    opt.textContent = `${tz.offset_string}  ${tz.name}`;
+                                    tzPicker.appendChild(opt);
+                                });
+
+                                tzPicker.disabled = false;
+                            })
+                            .catch(err => {
+                                tzPicker.innerHTML = '';
+                                const errOpt = document.createElement('option');
+                                errOpt.value = '';
+                                errOpt.textContent = 'Failed to load timezones';
+                                tzPicker.appendChild(errOpt);
+                                console.warn('Failed to load /admin/timezones:', err);
+                            });
+
+                        // When picker changes, update the text input and config value
+                        tzPicker.addEventListener('change', (e) => {
+                            if (e.target.value === '') return;
+                            input.value = e.target.value;
+                            updateConfigValue(fullPath, e.target.value);
+                        });
+
+                        field.appendChild(tzPicker);
+
+                        // Text input shows/edits the raw IANA name directly
+                        input.dataset.path = fullPath;
+                        input.addEventListener('change', (e) => {
+                            updateConfigValue(e.target.dataset.path, e.target.value);
+                            // Sync picker to matching zone if present
+                            const matchingOpt = Array.from(tzPicker.options).find(o => o.value === e.target.value);
+                            tzPicker.value = matchingOpt ? matchingOpt.value : '';
+                        });
+                        field.appendChild(input);
+                        container.appendChild(field);
+                        continue;
+                    }
+
                     input.dataset.path = fullPath;
                     input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
                     // custom_head_html and custom_body_html are already appended inside cm-lined-wrapper

@@ -25,7 +25,7 @@
         setupEventListeners();
         updateUI();
         initializeMap();
-        loadExistingConfig(); // Load config after map is initialized
+        loadExistingConfig(); // Load config after map is initialized (also populates timezone dropdown)
         fetchUserIP(); // Fetch user's IP address for admin restrictions
         
         // Auto-fill callsign fields when main callsign is entered
@@ -94,6 +94,37 @@
         // Admin IP restriction radio buttons - check for lockout warning
         document.getElementById('adminAllowLAN').addEventListener('change', checkAdminLockoutWarning);
         document.getElementById('adminAllowAll').addEventListener('change', checkAdminLockoutWarning);
+    }
+
+    async function loadTimezoneDropdown(preselect) {
+        const sel = document.getElementById('timezone');
+        if (!sel) return;
+        try {
+            const resp = await fetch('/admin/timezones');
+            if (!resp.ok) throw new Error('Failed to fetch timezones');
+            const zones = await resp.json();
+            sel.innerHTML = '';
+            // Blank placeholder
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Select timezone…';
+            sel.appendChild(placeholder);
+            zones.forEach(function(tz) {
+                const opt = document.createElement('option');
+                opt.value = tz.name;
+                opt.textContent = tz.offset_string + '  ' + tz.name;
+                sel.appendChild(opt);
+            });
+            // Pre-select the configured timezone if provided
+            if (preselect) {
+                sel.value = preselect;
+                // If the value wasn't found in the list, fall back to placeholder
+                if (sel.value !== preselect) sel.value = '';
+            }
+        } catch (e) {
+            sel.innerHTML = '<option value="">Could not load timezones</option>';
+            console.error('Timezone load error:', e);
+        }
     }
 
     function setupEventListeners() {
@@ -461,6 +492,8 @@
                     setFieldValue('longitude', config.admin.gps?.lon);
                     setFieldValue('asl', config.admin.asl);
                     setFieldValue('antenna', config.admin.antenna);
+                    // Populate timezone dropdown and pre-select the configured value
+                    loadTimezoneDropdown(config.admin.timezone || 'UTC');
 
                     // Update map with loaded coordinates
                     if (config.admin.gps?.lat && config.admin.gps?.lon && map && marker) {
@@ -568,6 +601,8 @@
             }
         } catch (error) {
             console.log('Could not load existing config (this is normal for first-time setup)');
+            // Still populate the timezone dropdown even if no config exists yet
+            loadTimezoneDropdown();
         }
     }
 
@@ -605,6 +640,7 @@
                     email: formData.email,
                     description: formData.description || '',
                     location: formData.location,
+                    timezone: formData.timezone || 'UTC',
                     antenna: formData.antenna,
                     gps: {
                         lat: parseFloat(formData.latitude),

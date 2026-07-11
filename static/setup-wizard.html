@@ -466,6 +466,14 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="timezone">Timezone</label>
+                    <select id="timezone" name="timezone" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff;">
+                        <option value="">Loading timezones…</option>
+                    </select>
+                    <div class="help-text">Server local time — daylight saving time is handled automatically</div>
+                </div>
+
+                <div class="form-group">
                     <label for="location">Location *</label>
                     <input type="text" id="location" name="location" required placeholder="e.g., Boston, MA, USA">
                     <div class="help-text">City, state/province, country</div>

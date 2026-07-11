@@ -101,6 +101,7 @@ type InstanceReport struct {
 	StartupReport              bool                     `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                     `json:"notify_instance_disconnected"` // Notify when instance disconnects
 	NotifyInstanceStartup      bool                     `json:"notify_instance_startup"`      // Notify on instance startup
+	Timezone                   string                   `json:"timezone"`                     // IANA timezone name e.g. "Europe/London"
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -769,6 +770,7 @@ func (ir *InstanceReporter) sendReport() error {
 		EnabledWidgets:             ir.config.Server.EnabledWidgets,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected != nil && *ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
+		Timezone:                   ir.config.Admin.Timezone,
 	}
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
 		report.SSBPredictions = ssbResult.Predictions
@@ -1164,6 +1166,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected != nil && *ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
+		Timezone:                   ir.config.Admin.Timezone,
 	}
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
 		report.SSBPredictions = ssbResult.Predictions
@@ -1578,6 +1581,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected != nil && *config.InstanceReporting.NotifyInstanceDisconnected,
 			NotifyInstanceStartup:      config.InstanceReporting.NotifyInstanceStartup,
 			Frontend:                   buildStartupFrontendInfo(frontendHistory),
+			Timezone:                   config.Admin.Timezone,
 		}
 
 		jsonData, err := json.Marshal(report)

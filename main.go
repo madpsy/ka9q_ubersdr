@@ -24,6 +24,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone database so DST works in Docker containers without OS tzdata
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
@@ -2837,6 +2838,7 @@ func main() {
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
 	http.HandleFunc("/admin/http-logs", adminHandler.AuthMiddleware(handleHTTPLogsAPI))
 	http.HandleFunc("/admin/mcp-logs", adminHandler.AuthMiddleware(handleMCPLogsAPI))
+	http.HandleFunc("/admin/timezones", adminHandler.AuthMiddleware(handleTimezones))
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
@@ -4216,11 +4218,13 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 				"gps_enabled":  config.Admin.GPS.GPSEnabled,
 				"tdoa_enabled": config.Admin.GPS.TDOAEnabled,
 			},
-			"asl":            config.Admin.ASL,
-			"location":       config.Admin.Location,
-			"antenna":        config.Admin.Antenna,
-			"snr_0_30_mhz":   int(snr_0_30),   // SNR for 0-30 MHz (dynamic range in dB, whole number)
-			"snr_1_8_30_mhz": int(snr_1_8_30), // SNR for 1.8-30 MHz HF bands (dynamic range in dB, whole number)
+			"asl":             config.Admin.ASL,
+			"location":        config.Admin.Location,
+			"timezone_offset": config.Admin.TimezoneOffsetMinutes(), // DST-adjusted current offset in minutes
+			"timezone":        config.Admin.Timezone,                // IANA name e.g. "Europe/London"
+			"antenna":         config.Admin.Antenna,
+			"snr_0_30_mhz":    int(snr_0_30),   // SNR for 0-30 MHz (dynamic range in dB, whole number)
+			"snr_1_8_30_mhz":  int(snr_1_8_30), // SNR for 1.8-30 MHz HF bands (dynamic range in dB, whole number)
 		},
 		"max_clients":          config.Server.MaxSessions,
 		"available_clients":    availableClients,
@@ -6493,4 +6497,183 @@ func (w *drmExtensionWrapper) CrashChan() <-chan error {
 		return cr.CrashChan()
 	}
 	return nil
+}
+
+// handleTimezones returns a JSON array of all IANA timezone names with their
+// current UTC offset (DST-adjusted) for use in the admin timezone picker.
+// GET /admin/timezones
+// Response: [{"name":"Europe/London","offset_minutes":60,"offset_string":"UTC+01:00"}, ...]
+func handleTimezones(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Comprehensive list of inhabited IANA timezone names.
+	// time/tzdata is imported (blank import) so these all resolve without OS tzdata.
+	allZones := []string{
+		"UTC",
+		"Africa/Abidjan", "Africa/Accra", "Africa/Addis_Ababa", "Africa/Algiers",
+		"Africa/Asmara", "Africa/Bamako", "Africa/Bangui", "Africa/Banjul",
+		"Africa/Bissau", "Africa/Blantyre", "Africa/Brazzaville", "Africa/Bujumbura",
+		"Africa/Cairo", "Africa/Casablanca", "Africa/Ceuta", "Africa/Conakry",
+		"Africa/Dakar", "Africa/Dar_es_Salaam", "Africa/Djibouti", "Africa/Douala",
+		"Africa/El_Aaiun", "Africa/Freetown", "Africa/Gaborone", "Africa/Harare",
+		"Africa/Johannesburg", "Africa/Juba", "Africa/Kampala", "Africa/Khartoum",
+		"Africa/Kigali", "Africa/Kinshasa", "Africa/Lagos", "Africa/Libreville",
+		"Africa/Lome", "Africa/Luanda", "Africa/Lubumbashi", "Africa/Lusaka",
+		"Africa/Malabo", "Africa/Maputo", "Africa/Maseru", "Africa/Mbabane",
+		"Africa/Mogadishu", "Africa/Monrovia", "Africa/Nairobi", "Africa/Ndjamena",
+		"Africa/Niamey", "Africa/Nouakchott", "Africa/Ouagadougou", "Africa/Porto-Novo",
+		"Africa/Sao_Tome", "Africa/Tripoli", "Africa/Tunis", "Africa/Windhoek",
+		"America/Adak", "America/Anchorage", "America/Anguilla", "America/Antigua",
+		"America/Araguaina", "America/Argentina/Buenos_Aires", "America/Argentina/Catamarca",
+		"America/Argentina/Cordoba", "America/Argentina/Jujuy", "America/Argentina/La_Rioja",
+		"America/Argentina/Mendoza", "America/Argentina/Rio_Gallegos", "America/Argentina/Salta",
+		"America/Argentina/San_Juan", "America/Argentina/San_Luis", "America/Argentina/Tucuman",
+		"America/Argentina/Ushuaia", "America/Aruba", "America/Asuncion", "America/Atikokan",
+		"America/Bahia", "America/Bahia_Banderas", "America/Barbados", "America/Belem",
+		"America/Belize", "America/Blanc-Sablon", "America/Boa_Vista", "America/Bogota",
+		"America/Boise", "America/Cambridge_Bay", "America/Campo_Grande", "America/Cancun",
+		"America/Caracas", "America/Cayenne", "America/Cayman", "America/Chicago",
+		"America/Chihuahua", "America/Costa_Rica", "America/Creston", "America/Cuiaba",
+		"America/Curacao", "America/Danmarkshavn", "America/Dawson", "America/Dawson_Creek",
+		"America/Denver", "America/Detroit", "America/Dominica", "America/Edmonton",
+		"America/Eirunepe", "America/El_Salvador", "America/Fortaleza", "America/Glace_Bay",
+		"America/Godthab", "America/Goose_Bay", "America/Grand_Turk", "America/Grenada",
+		"America/Guadeloupe", "America/Guatemala", "America/Guayaquil", "America/Guyana",
+		"America/Halifax", "America/Havana", "America/Hermosillo", "America/Indiana/Indianapolis",
+		"America/Indiana/Knox", "America/Indiana/Marengo", "America/Indiana/Petersburg",
+		"America/Indiana/Tell_City", "America/Indiana/Vevay", "America/Indiana/Vincennes",
+		"America/Indiana/Winamac", "America/Inuvik", "America/Iqaluit", "America/Jamaica",
+		"America/Juneau", "America/Kentucky/Louisville", "America/Kentucky/Monticello",
+		"America/Kralendijk", "America/La_Paz", "America/Lima", "America/Los_Angeles",
+		"America/Lower_Princes", "America/Maceio", "America/Managua", "America/Manaus",
+		"America/Marigot", "America/Martinique", "America/Matamoros", "America/Mazatlan",
+		"America/Menominee", "America/Merida", "America/Metlakatla", "America/Mexico_City",
+		"America/Miquelon", "America/Moncton", "America/Monterrey", "America/Montevideo",
+		"America/Montserrat", "America/Nassau", "America/New_York", "America/Nipigon",
+		"America/Nome", "America/Noronha", "America/North_Dakota/Beulah",
+		"America/North_Dakota/Center", "America/North_Dakota/New_Salem",
+		"America/Nuuk", "America/Ojinaga", "America/Panama", "America/Pangnirtung",
+		"America/Paramaribo", "America/Phoenix", "America/Port-au-Prince",
+		"America/Port_of_Spain", "America/Porto_Velho", "America/Puerto_Rico",
+		"America/Punta_Arenas", "America/Rainy_River", "America/Rankin_Inlet",
+		"America/Recife", "America/Regina", "America/Resolute", "America/Rio_Branco",
+		"America/Santarem", "America/Santiago", "America/Santo_Domingo",
+		"America/Sao_Paulo", "America/Scoresbysund", "America/Sitka",
+		"America/St_Barthelemy", "America/St_Johns", "America/St_Kitts",
+		"America/St_Lucia", "America/St_Thomas", "America/St_Vincent",
+		"America/Swift_Current", "America/Tegucigalpa", "America/Thule",
+		"America/Thunder_Bay", "America/Tijuana", "America/Toronto",
+		"America/Tortola", "America/Vancouver", "America/Whitehorse",
+		"America/Winnipeg", "America/Yakutat", "America/Yellowknife",
+		"Antarctica/Casey", "Antarctica/Davis", "Antarctica/DumontDUrville",
+		"Antarctica/Macquarie", "Antarctica/Mawson", "Antarctica/McMurdo",
+		"Antarctica/Palmer", "Antarctica/Rothera", "Antarctica/Syowa",
+		"Antarctica/Troll", "Antarctica/Vostok",
+		"Arctic/Longyearbyen",
+		"Asia/Aden", "Asia/Almaty", "Asia/Amman", "Asia/Anadyr", "Asia/Aqtau",
+		"Asia/Aqtobe", "Asia/Ashgabat", "Asia/Atyrau", "Asia/Baghdad",
+		"Asia/Bahrain", "Asia/Baku", "Asia/Bangkok", "Asia/Barnaul",
+		"Asia/Beirut", "Asia/Bishkek", "Asia/Brunei", "Asia/Chita",
+		"Asia/Choibalsan", "Asia/Colombo", "Asia/Damascus", "Asia/Dhaka",
+		"Asia/Dili", "Asia/Dubai", "Asia/Dushanbe", "Asia/Famagusta",
+		"Asia/Gaza", "Asia/Hebron", "Asia/Ho_Chi_Minh", "Asia/Hong_Kong",
+		"Asia/Hovd", "Asia/Irkutsk", "Asia/Jakarta", "Asia/Jayapura",
+		"Asia/Jerusalem", "Asia/Kabul", "Asia/Kamchatka", "Asia/Karachi",
+		"Asia/Kathmandu", "Asia/Khandyga", "Asia/Kolkata", "Asia/Krasnoyarsk",
+		"Asia/Kuala_Lumpur", "Asia/Kuching", "Asia/Kuwait", "Asia/Macau",
+		"Asia/Magadan", "Asia/Makassar", "Asia/Manila", "Asia/Muscat",
+		"Asia/Nicosia", "Asia/Novokuznetsk", "Asia/Novosibirsk", "Asia/Omsk",
+		"Asia/Oral", "Asia/Phnom_Penh", "Asia/Pontianak", "Asia/Pyongyang",
+		"Asia/Qatar", "Asia/Qostanay", "Asia/Qyzylorda", "Asia/Riyadh",
+		"Asia/Sakhalin", "Asia/Samarkand", "Asia/Seoul", "Asia/Shanghai",
+		"Asia/Singapore", "Asia/Srednekolymsk", "Asia/Taipei", "Asia/Tashkent",
+		"Asia/Tbilisi", "Asia/Tehran", "Asia/Thimphu", "Asia/Tokyo",
+		"Asia/Tomsk", "Asia/Ulaanbaatar", "Asia/Urumqi", "Asia/Ust-Nera",
+		"Asia/Vientiane", "Asia/Vladivostok", "Asia/Yakutsk", "Asia/Yangon",
+		"Asia/Yekaterinburg", "Asia/Yerevan",
+		"Atlantic/Azores", "Atlantic/Bermuda", "Atlantic/Canary",
+		"Atlantic/Cape_Verde", "Atlantic/Faroe", "Atlantic/Madeira",
+		"Atlantic/Reykjavik", "Atlantic/South_Georgia", "Atlantic/St_Helena",
+		"Atlantic/Stanley",
+		"Australia/Adelaide", "Australia/Brisbane", "Australia/Broken_Hill",
+		"Australia/Darwin", "Australia/Eucla", "Australia/Hobart",
+		"Australia/Lindeman", "Australia/Lord_Howe", "Australia/Melbourne",
+		"Australia/Perth", "Australia/Sydney",
+		"Europe/Amsterdam", "Europe/Andorra", "Europe/Astrakhan",
+		"Europe/Athens", "Europe/Belgrade", "Europe/Berlin", "Europe/Bratislava",
+		"Europe/Brussels", "Europe/Bucharest", "Europe/Budapest", "Europe/Busingen",
+		"Europe/Chisinau", "Europe/Copenhagen", "Europe/Dublin", "Europe/Gibraltar",
+		"Europe/Guernsey", "Europe/Helsinki", "Europe/Isle_of_Man", "Europe/Istanbul",
+		"Europe/Jersey", "Europe/Kaliningrad", "Europe/Kiev", "Europe/Kirov",
+		"Europe/Lisbon", "Europe/Ljubljana", "Europe/London", "Europe/Luxembourg",
+		"Europe/Madrid", "Europe/Malta", "Europe/Mariehamn", "Europe/Minsk",
+		"Europe/Monaco", "Europe/Moscow", "Europe/Nicosia", "Europe/Oslo",
+		"Europe/Paris", "Europe/Podgorica", "Europe/Prague", "Europe/Riga",
+		"Europe/Rome", "Europe/Samara", "Europe/San_Marino", "Europe/Sarajevo",
+		"Europe/Saratov", "Europe/Simferopol", "Europe/Skopje", "Europe/Sofia",
+		"Europe/Stockholm", "Europe/Tallinn", "Europe/Tirane", "Europe/Ulyanovsk",
+		"Europe/Uzhgorod", "Europe/Vaduz", "Europe/Vatican", "Europe/Vienna",
+		"Europe/Vilnius", "Europe/Volgograd", "Europe/Warsaw", "Europe/Zagreb",
+		"Europe/Zaporozhye", "Europe/Zurich",
+		"Indian/Antananarivo", "Indian/Chagos", "Indian/Christmas",
+		"Indian/Cocos", "Indian/Comoro", "Indian/Kerguelen", "Indian/Mahe",
+		"Indian/Maldives", "Indian/Mauritius", "Indian/Mayotte", "Indian/Reunion",
+		"Pacific/Apia", "Pacific/Auckland", "Pacific/Bougainville",
+		"Pacific/Chatham", "Pacific/Chuuk", "Pacific/Easter", "Pacific/Efate",
+		"Pacific/Enderbury", "Pacific/Fakaofo", "Pacific/Fiji", "Pacific/Funafuti",
+		"Pacific/Galapagos", "Pacific/Gambier", "Pacific/Guadalcanal",
+		"Pacific/Guam", "Pacific/Honolulu", "Pacific/Kiritimati", "Pacific/Kosrae",
+		"Pacific/Kwajalein", "Pacific/Majuro", "Pacific/Marquesas",
+		"Pacific/Midway", "Pacific/Nauru", "Pacific/Niue", "Pacific/Norfolk",
+		"Pacific/Noumea", "Pacific/Pago_Pago", "Pacific/Palau", "Pacific/Pitcairn",
+		"Pacific/Pohnpei", "Pacific/Port_Moresby", "Pacific/Rarotonga",
+		"Pacific/Saipan", "Pacific/Tahiti", "Pacific/Tarawa", "Pacific/Tongatapu",
+		"Pacific/Wake", "Pacific/Wallis",
+	}
+
+	type tzEntry struct {
+		Name          string `json:"name"`
+		OffsetMinutes int    `json:"offset_minutes"`
+		OffsetString  string `json:"offset_string"`
+	}
+
+	now := time.Now()
+	entries := make([]tzEntry, 0, len(allZones))
+	for _, name := range allZones {
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			continue // skip any that fail (shouldn't happen with time/tzdata)
+		}
+		_, offsetSecs := now.In(loc).Zone()
+		offsetMins := offsetSecs / 60
+		sign := "+"
+		absMins := offsetMins
+		if absMins < 0 {
+			sign = "-"
+			absMins = -absMins
+		}
+		offsetStr := fmt.Sprintf("UTC%s%02d:%02d", sign, absMins/60, absMins%60)
+		entries = append(entries, tzEntry{
+			Name:          name,
+			OffsetMinutes: offsetMins,
+			OffsetString:  offsetStr,
+		})
+	}
+
+	// Sort by offset then name for a logical dropdown order
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].OffsetMinutes != entries[j].OffsetMinutes {
+			return entries[i].OffsetMinutes < entries[j].OffsetMinutes
+		}
+		return entries[i].Name < entries[j].Name
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		log.Printf("handleTimezones: failed to encode response: %v", err)
+	}
 }

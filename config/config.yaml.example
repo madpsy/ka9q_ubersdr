@@ -27,6 +27,12 @@ admin:
   asl: 30
   # Location description
   location: "London, England, UK"
+  # IANA timezone name for the server's local time display
+  # Daylight saving time is handled automatically — no manual updates needed.
+  # See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for valid names.
+  # Examples: "Europe/London", "America/New_York", "Asia/Kolkata", "Australia/Sydney"
+  # Default: "UTC"
+  timezone: "UTC"
   # Antenna description (displayed in KiwiSDR client and status page)
   antenna: "Multi-band HF antenna"
 

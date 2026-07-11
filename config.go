@@ -262,6 +262,7 @@ type AdminConfig struct {
 	GPS                  GPSConfig `yaml:"gps"`
 	ASL                  int       `yaml:"asl"` // Altitude above sea level in meters
 	Location             string    `yaml:"location"`
+	Timezone             string    `yaml:"timezone"`               // IANA timezone name e.g. "Europe/London" (default: "UTC")
 	Antenna              string    `yaml:"antenna"`                // Antenna description
 	DefaultFrequency     uint64    `yaml:"default_frequency"`      // Default tuning frequency in Hz for new visitors (0 = use built-in default of 14175000)
 	DefaultMode          string    `yaml:"default_mode"`           // Default demodulation mode for new visitors (empty = use built-in default of "usb")
@@ -803,6 +804,14 @@ func LoadConfig(filename string) (*Config, error) {
 	if *config.Server.SSBAgcDefaults.ThresholdDb > 0.0 {
 		v := float32(0.0)
 		config.Server.SSBAgcDefaults.ThresholdDb = &v
+	}
+
+	// Default and validate admin timezone (IANA name)
+	if config.Admin.Timezone == "" {
+		config.Admin.Timezone = "UTC"
+	}
+	if _, err := time.LoadLocation(config.Admin.Timezone); err != nil {
+		return nil, fmt.Errorf("admin.timezone %q is not a valid IANA timezone name: %w", config.Admin.Timezone, err)
 	}
 
 	// Parse admin allowed IPs/CIDRs
@@ -1869,6 +1878,23 @@ func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
 // hardcodedAdminAllowedIPs are always permitted regardless of the configured allowed_ips list.
 // These are internal infrastructure addresses that must never be locked out.
 // 172.20.0.1 is the Docker host gateway used by internal infrastructure containers.
+// TimezoneLocation returns the *time.Location for the configured IANA timezone.
+// Falls back to UTC if the name is invalid (should not happen after LoadConfig validation).
+func (ac *AdminConfig) TimezoneLocation() *time.Location {
+	loc, err := time.LoadLocation(ac.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// TimezoneOffsetMinutes returns the current UTC offset in minutes for the configured
+// timezone, correctly adjusted for daylight saving time at the current moment.
+func (ac *AdminConfig) TimezoneOffsetMinutes() int {
+	_, offsetSecs := time.Now().In(ac.TimezoneLocation()).Zone()
+	return offsetSecs / 60
+}
+
 var hardcodedAdminAllowedIPs = []string{
 	"172.20.0.1",
 }

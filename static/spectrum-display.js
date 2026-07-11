@@ -2707,6 +2707,19 @@ class SpectrumDisplay {
         const location  = (receiver.location || '').trim();
         const antLabel  = (window.activeAntennaLabel || '').trim();
 
+        // Append UTC offset to location line if timezone_offset is configured
+        // e.g. "London (UTC +1h)" or "Mumbai (UTC +5h30m)"
+        const tzOffset = receiver.timezone_offset;
+        let tzSuffix = '';
+        if (typeof tzOffset === 'number') {
+            const sign = tzOffset >= 0 ? '+' : '-';
+            const abs  = Math.abs(tzOffset);
+            const h    = Math.floor(abs / 60);
+            const m    = abs % 60;
+            tzSuffix   = m > 0 ? ` (UTC ${sign}${h}h${m}m)` : ` (UTC ${sign}${h}h)`;
+        }
+        const locationLine = location ? location + tzSuffix : tzSuffix.trim();
+
         // Nothing to show if both callsign and name are absent
         if (!callsign && !name) return;
 
@@ -2729,14 +2742,14 @@ class SpectrumDisplay {
         // Track Y position for subsequent optional lines (each is 16px apart)
         let nextY = topY + 16;
 
-        // Line 2: 11px — location at 75% opacity
-        if (location) {
+        // Line 2: 11px — location (+ UTC offset) at 75% opacity
+        if (locationLine) {
             this._setFont(ctx, '11px sans-serif');
             ctx.fillStyle   = 'rgba(0,0,0,0.55)';
-            ctx.fillText(location, rightX + 1, nextY + 1);
+            ctx.fillText(locationLine, rightX + 1, nextY + 1);
             ctx.globalAlpha = 0.75;
             ctx.fillStyle   = col;
-            ctx.fillText(location, rightX, nextY);
+            ctx.fillText(locationLine, rightX, nextY);
             ctx.globalAlpha = 1.0;
             nextY += 16;
         }

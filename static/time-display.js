@@ -5,6 +5,14 @@
 let sessionStartTime = null;
 let sessionMaxTime = null; // in seconds, 0 means unlimited
 
+// Format a Date as HH:MM:SS using its UTC fields (so we can apply our own offset)
+function _fmtHHMMSS(date) {
+    const h = String(date.getUTCHours()).padStart(2, '0');
+    const m = String(date.getUTCMinutes()).padStart(2, '0');
+    const s = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
 function updateTimeDisplay() {
     const utcTimeEl = document.getElementById('utc-time');
     const localTimeEl = document.getElementById('local-time');
@@ -16,17 +24,26 @@ function updateTimeDisplay() {
 
     // Format UTC time as HH:MM:SS using ISO string (same logic as bandconditions.js)
     const utcTime = now.toISOString().substr(11, 8) + ' UTC';
-
-    // Format local time as HH:MM:SS using toLocaleTimeString for accuracy
-    const localTime = now.toLocaleTimeString('en-GB', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    }) + ' Local';
-
     utcTimeEl.textContent = utcTime;
-    localTimeEl.textContent = localTime;
+
+    // Server local time: read timezone_offset (minutes) from the globally cached
+    // window.instanceDescription (populated by fetchSiteDescription() in app.js).
+    // Read lazily on every tick so we pick it up as soon as it becomes available
+    // without needing a separate fetch or polling loop.
+    const tzOffset = window.instanceDescription?.receiver?.timezone_offset;
+    if (typeof tzOffset === 'number') {
+        // Shift UTC epoch by the server's configured offset
+        const serverDate = new Date(now.getTime() + tzOffset * 60 * 1000);
+        localTimeEl.textContent = _fmtHHMMSS(serverDate) + ' Local';
+    } else {
+        // Fallback to client local time until instanceDescription is populated
+        localTimeEl.textContent = now.toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }) + ' Local';
+    }
 
     // Update session countdown
     updateSessionCountdown(sessionTimeEl);

@@ -79,6 +79,12 @@ const (
 	// monitorBandsPerLine is the number of band labels that fit on one line
 	// without scrolling.  "80 40 30" = 8 chars × 6 px = 48 px ≤ 53 px.
 	monitorBandsPerLine = 3
+
+	// monitorBandsPerLineMax is the maximum number of band labels allowed on
+	// the bottom line of a page when doing so avoids creating an extra slide.
+	// The bottom line uses EffectAuto so it will scroll if the content is wider
+	// than the display — this is acceptable to avoid a wasteful extra slide.
+	monitorBandsPerLineMax = 4
 )
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
@@ -142,9 +148,23 @@ func userCountColor(sessions *SessionManager, maxSessions int) string {
 
 // formatTopLineSegs builds the top status line as coloured segments:
 // the label is rendered in labelColor, the padding in labelColor (invisible),
-// and the "N/MAX" user count in a capacity-based colour (lime/amber/red).
-func formatTopLineSegs(label, labelColor string, sessions *SessionManager, maxSessions int) []gudriver.Segment {
-	right := userCountStr(sessions, maxSessions)
+// and the right side in a capacity-based colour (lime/amber/red).
+//
+// When showTime is true the right side shows the local time (HH:MM) in cyan
+// instead of the user count — used to alternate between the two per slide.
+func formatTopLineSegs(label, labelColor string, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) []gudriver.Segment {
+	var right, rightColor string
+	if showTime {
+		if loc == nil {
+			loc = time.UTC
+		}
+		right = time.Now().In(loc).Format("15:04")
+		rightColor = "cyan"
+	} else {
+		right = userCountStr(sessions, maxSessions)
+		rightColor = userCountColor(sessions, maxSessions)
+	}
+
 	total := monitorTopLineWidth
 	maxLabel := total - len(right) - 1
 	if maxLabel < 0 {
@@ -157,10 +177,9 @@ func formatTopLineSegs(label, labelColor string, sessions *SessionManager, maxSe
 	if pad < 0 {
 		pad = 0
 	}
-	countColor := userCountColor(sessions, maxSessions)
 	return []gudriver.Segment{
 		{Text: label + strings.Repeat(" ", pad), Color: labelColor},
-		{Text: right, Color: countColor},
+		{Text: right, Color: rightColor},
 	}
 }
 
@@ -178,8 +197,9 @@ type monitorSlide struct {
 	valueSegments []gudriver.Segment // when non-nil, used instead of value+valueColor
 
 	// Single-line layout (clock):
-	singleLine bool // when true, render only value centred on the full display
-	isClock    bool // when true, re-sent every second with the current time
+	singleLine    bool // when true, render only value centred on the full display
+	isClock       bool // when true, re-sent every second with the current time
+	clockShowTime bool // when isClock is true: whether top-right shows local time (true) or user count (false)
 
 	// transition is the display transition for this slide.
 	// Defaults to TransitionCut (instantaneous) when empty.
@@ -192,7 +212,7 @@ type monitorSlide struct {
 }
 
 // buildUsersSlide returns a slide showing current / max user counts.
-func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
+func buildUsersSlide(sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) monitorSlide {
 	regular := sessions.GetNonBypassedUserCount()
 	bypassed := sessions.GetBypassedUserCount()
 	free := maxSessions - regular
@@ -228,7 +248,7 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	}
 
 	return monitorSlide{
-		topLineSegs:   formatTopLineSegs("USER", "cyan", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("USER", "cyan", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -237,13 +257,14 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 // buildTimeSlide returns a clock slide: top line "UTC" label + user count,
 // bottom line HH:MM:SS in cyan.  Marked isClock=true so the sequencer
 // refreshes it every second.
-func buildTimeSlide(sessions *SessionManager, maxSessions int) monitorSlide {
+func buildTimeSlide(sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) monitorSlide {
 	now := time.Now().UTC()
 	return monitorSlide{
-		topLineSegs: formatTopLineSegs("UTC", "cyan", sessions, maxSessions),
-		value:       now.Format("15:04:05"),
-		valueColor:  "cyan",
-		isClock:     true,
+		topLineSegs:   formatTopLineSegs("UTC", "cyan", sessions, maxSessions, loc, showTime),
+		value:         now.Format("15:04:05"),
+		valueColor:    "cyan",
+		isClock:       true,
+		clockShowTime: showTime,
 	}
 }
 
@@ -266,7 +287,7 @@ func loadColor(load float64, cores int) string {
 // buildLoadSlide returns a slide showing load averages, colour-coded per value.
 // Bottom line uses segments: 15m, 5m, 1m values in their own status colours,
 // then core count in white — all compact with no redundant labels.
-func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
+func buildLoadSlide(sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) monitorSlide {
 	data := getSystemLoad()
 
 	load15, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_15min"]), 64)
@@ -285,7 +306,7 @@ func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	}
 
 	return monitorSlide{
-		topLineSegs:   formatTopLineSegs("LOAD", "amber", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("LOAD", "amber", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -294,7 +315,7 @@ func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 // buildCPUTempSlide returns a slide showing CPU temperature, colour-coded.
 // Returns nil if temperature is not available.
 // Bottom line uses segments: temperature value in status colour, threshold in white.
-func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildCPUTempSlide(sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	data := getSystemLoad()
 
 	avail, _ := data["cpu_temp_available"].(bool)
@@ -316,7 +337,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("CPU", "orange", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("CPU", "orange", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -324,7 +345,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 
 // buildPSKSlide returns a slide showing PSKReporter rank for the given callsign.
 // Returns nil when no data is available or the callsign is not ranked.
-func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if psk == nil || callsign == "" {
 		return nil
 	}
@@ -369,7 +390,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("PSKR", "purple", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("PSKR", "purple", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -385,7 +406,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 //	"#12 today"    white  — today's rank + label
 //	" (450)"       blue   — today's unique count
 //	" (2h ago)"    blue   — data age
-func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if wspr == nil || callsign == "" {
 		return nil
 	}
@@ -455,7 +476,7 @@ func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionMan
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("WSPR", "magenta", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("WSPR", "magenta", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -477,7 +498,7 @@ func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionMan
 //
 // Skew colour: lime if |ppm| < 1.0, amber if < 3.0, red if ≥ 3.0.
 // PPM is derived from CorrectionFactor: ppm = (CorrectionFactor - 1) × 1e6.
-func buildRBNSlide(rbnStore *RBNDataStore, cwCallsign, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildRBNSlide(rbnStore *RBNDataStore, cwCallsign, callsign string, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if rbnStore == nil {
 		return nil
 	}
@@ -566,7 +587,7 @@ func buildRBNSlide(rbnStore *RBNDataStore, cwCallsign, callsign string, sessions
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("RBN", "yellow", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("RBN", "yellow", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -597,7 +618,7 @@ func propQualityColor(quality string) string {
 //	"K:5"         white          — K-index
 //	" A:3"        white          — A-index
 //	" Flux:142"   white          — Solar flux (rounded to integer)
-func buildSpaceWeatherSlide(swm *SpaceWeatherMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildSpaceWeatherSlide(swm *SpaceWeatherMonitor, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if swm == nil {
 		return nil
 	}
@@ -621,7 +642,7 @@ func buildSpaceWeatherSlide(swm *SpaceWeatherMonitor, sessions *SessionManager, 
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("SPCE", "blue", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("SPCE", "blue", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -679,7 +700,7 @@ func weatherTempColor(tempC float64) string {
 //
 // Top line:  "WTHR" (green) + user count (capacity colour)
 // Bottom:    Condition  Temp°C  H:humidity%  W:wind km/h
-func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if ws == nil {
 		return nil
 	}
@@ -708,7 +729,7 @@ func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("WTHR", "green", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("WTHR", "green", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -733,7 +754,7 @@ func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions
 //	"27MHz"     lime if FrequencyHz == 27 000 000, red otherwise
 //	"  Sats:"   white  — only when GPS telemetry available
 //	"N"         white  — SatsUsed
-func buildGPSDOSlide(gpsdoMonitor *GPSDOMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildGPSDOSlide(gpsdoMonitor *GPSDOMonitor, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if gpsdoMonitor == nil {
 		return nil
 	}
@@ -783,7 +804,7 @@ func buildGPSDOSlide(gpsdoMonitor *GPSDOMonitor, sessions *SessionManager, maxSe
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("GPSD", "cyan", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("GPSD", "cyan", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -811,7 +832,7 @@ func netKbpsFormat(kbps int) string {
 //
 // Sessions are grouped by user_session_id (fallback: client_ip), matching the
 // admin sessions tab Network Summary panel logic exactly.
-func buildNetworkSlide(sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildNetworkSlide(sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if sessions == nil {
 		return nil
 	}
@@ -934,7 +955,7 @@ func buildNetworkSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("NET", "blue", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("NET", "blue", sessions, maxSessions, loc, showTime),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -953,7 +974,7 @@ func buildNetworkSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 //	                            plain lime when no max is configured)
 //	" in chat" cyan           — label, matching the cyan used for chat
 //	                            usernames/messages elsewhere in the protocol
-func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if dxWsHandler == nil {
 		return nil
 	}
@@ -978,7 +999,7 @@ func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, se
 	}
 
 	return &monitorSlide{
-		topLineSegs:     formatTopLineSegs("CHAT", "lime", sessions, maxSessions),
+		topLineSegs:     formatTopLineSegs("CHAT", "lime", sessions, maxSessions, loc, showTime),
 		valueSegments:   segs,
 		transition:      gudriver.TransitionFade,
 		displayDuration: 6 * time.Second,
@@ -986,70 +1007,77 @@ func buildChatSlide(dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, se
 }
 
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor, dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int) []monitorSlide {
+// startIdx is the current slide index at the start of this rotation — used to
+// alternate the top-right corner between user count and local time per slide.
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor, dxWsHandler *DXClusterWebSocketHandler, maxChatUsers int, loc *time.Location, startIdx int) []monitorSlide {
 	var slides []monitorSlide
 
+	// Helper: returns true when the slide at position i in the final list should
+	// show local time in the top-right corner instead of the user count.
+	// Odd-indexed slides (relative to the overall rotation) show time; even show users.
+	showTimeFor := func(i int) bool { return (startIdx+i)%2 == 1 }
+
 	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
-	slides = append(slides, buildTimeSlide(sessions, maxSessions))
+	slides = append(slides, buildTimeSlide(sessions, maxSessions, loc, showTimeFor(len(slides))))
 
 	// 2. Users
-	slides = append(slides, buildUsersSlide(sessions, maxSessions))
+	slides = append(slides, buildUsersSlide(sessions, maxSessions, loc, showTimeFor(len(slides))))
 
 	// 3. Load average
-	slides = append(slides, buildLoadSlide(sessions, maxSessions))
+	slides = append(slides, buildLoadSlide(sessions, maxSessions, loc, showTimeFor(len(slides))))
 
 	// 4. CPU temperature (optional — omitted if not available)
-	if s := buildCPUTempSlide(sessions, maxSessions); s != nil {
+	if s := buildCPUTempSlide(sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 5. Network throughput (Total + Public)
-	if s := buildNetworkSlide(sessions, maxSessions); s != nil {
+	if s := buildNetworkSlide(sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 6. GPSDO status (optional — omitted when monitor not wired, container unreachable, or device absent)
-	if s := buildGPSDOSlide(gpsdoMonitor, sessions, maxSessions); s != nil {
+	if s := buildGPSDOSlide(gpsdoMonitor, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 7. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
-	if s := buildPSKSlide(psk, callsign, sessions, maxSessions); s != nil {
+	if s := buildPSKSlide(psk, callsign, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 7. WSPR Live rank (optional — omitted if fetcher not wired or callsign not ranked)
-	if s := buildWSPRSlide(wspr, callsign, sessions, maxSessions); s != nil {
+	if s := buildWSPRSlide(wspr, callsign, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 8. RBN skimmer rank and frequency skew (optional — omitted if store not wired or callsign not found)
-	if s := buildRBNSlide(rbnStore, cwCallsign, callsign, sessions, maxSessions); s != nil {
+	if s := buildRBNSlide(rbnStore, cwCallsign, callsign, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 9. Space weather (optional — omitted when monitor not wired or no data available)
-	if s := buildSpaceWeatherSlide(swm, sessions, maxSessions); s != nil {
+	if s := buildSpaceWeatherSlide(swm, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 10. Local weather (optional — omitted when WeatherService not wired or no data cached)
-	if s := buildWeatherSlide(weather, sessions, maxSessions); s != nil {
+	if s := buildWeatherSlide(weather, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 11. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
-	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
+	if s := buildRotatorSlide(rotctl, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 12. Antenna switch active port (optional — omitted when ant switch not enabled)
-	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
+	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 13. Live chat user count (optional — omitted when chat disabled or empty)
-	if s := buildChatSlide(dxWsHandler, maxChatUsers, sessions, maxSessions); s != nil {
+	if s := buildChatSlide(dxWsHandler, maxChatUsers, sessions, maxSessions, loc, showTimeFor(len(slides))); s != nil {
 		slides = append(slides, *s)
 	}
 
@@ -1063,7 +1091,7 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 // Returns nil when rotctl is nil or not connected.
 // The azimuth value is white when stopped, amber when moving.
 // Duration is 6s (short — the value rarely needs long display time).
-func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if rotctl == nil {
 		return nil
 	}
@@ -1082,7 +1110,7 @@ func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSe
 	}
 
 	return &monitorSlide{
-		topLineSegs:     formatTopLineSegs("ROT", "gold", sessions, maxSessions),
+		topLineSegs:     formatTopLineSegs("ROT", "gold", sessions, maxSessions, loc, showTime),
 		valueSegments:   []gudriver.Segment{{Text: fmt.Sprintf("%d°", az), Color: azColor}},
 		transition:      gudriver.TransitionFade,
 		displayDuration: 6 * time.Second,
@@ -1092,7 +1120,7 @@ func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSe
 // buildAntSwitchSlide returns a slide showing the active antenna switch port label.
 // Returns nil when antSwitch is nil.
 // Duration is 6s.
-func buildAntSwitchSlide(antSwitch *AntSwitchHandler, sessions *SessionManager, maxSessions int) *monitorSlide {
+func buildAntSwitchSlide(antSwitch *AntSwitchHandler, sessions *SessionManager, maxSessions int, loc *time.Location, showTime bool) *monitorSlide {
 	if antSwitch == nil {
 		return nil
 	}
@@ -1113,7 +1141,7 @@ func buildAntSwitchSlide(antSwitch *AntSwitchHandler, sessions *SessionManager, 
 	}
 
 	return &monitorSlide{
-		topLineSegs:     formatTopLineSegs("ANT", "pink", sessions, maxSessions),
+		topLineSegs:     formatTopLineSegs("ANT", "pink", sessions, maxSessions, loc, showTime),
 		valueSegments:   segs,
 		transition:      gudriver.TransitionFade,
 		displayDuration: 6 * time.Second,
@@ -1191,30 +1219,44 @@ func buildBandConditionsSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 		return nil
 	}
 
-	// Pack entries into pages: monitorBandsPerLine per line, 2 lines per page.
-	bandsPerPage := monitorBandsPerLine * 2
+	// Pack entries into pages: monitorBandsPerLine per top line, up to
+	// monitorBandsPerLineMax per bottom line.  When the overflow after a full
+	// page would fit on the bottom line of that page (i.e. ≤ monitorBandsPerLineMax
+	// entries remain), absorb them rather than emitting a wasteful extra slide.
 	var slides []monitorSlide
-	for pageStart := 0; pageStart < len(entries); pageStart += bandsPerPage {
-		pageEnd := pageStart + bandsPerPage
-		if pageEnd > len(entries) {
-			pageEnd = len(entries)
+	i := 0
+	for i < len(entries) {
+		// Top line: always monitorBandsPerLine bands (or fewer at end).
+		topEnd := i + monitorBandsPerLine
+		if topEnd > len(entries) {
+			topEnd = len(entries)
 		}
-		page := entries[pageStart:pageEnd]
+		topPage := entries[i:topEnd]
 
-		// Split page into top and bottom lines.
-		splitAt := monitorBandsPerLine
-		if splitAt > len(page) {
-			splitAt = len(page)
+		// Bottom line: start after the top line.
+		botStart := topEnd
+		botEnd := botStart + monitorBandsPerLine
+
+		// If extending the bottom line to monitorBandsPerLineMax would absorb
+		// all remaining entries (avoiding an extra slide), allow it.
+		remaining := len(entries) - botStart
+		if remaining > monitorBandsPerLine && remaining <= monitorBandsPerLineMax {
+			botEnd = botStart + remaining
 		}
-		topSegs := make([]gudriver.Segment, splitAt)
-		for i, e := range page[:splitAt] {
-			topSegs[i] = gudriver.Segment{Text: e.label, Color: e.color}
+		if botEnd > len(entries) {
+			botEnd = len(entries)
+		}
+
+		topSegs := make([]gudriver.Segment, len(topPage))
+		for j, e := range topPage {
+			topSegs[j] = gudriver.Segment{Text: e.label, Color: e.color}
 		}
 		var botSegs []gudriver.Segment
-		if len(page) > splitAt {
-			botSegs = make([]gudriver.Segment, len(page)-splitAt)
-			for i, e := range page[splitAt:] {
-				botSegs[i] = gudriver.Segment{Text: e.label, Color: e.color}
+		if botStart < len(entries) {
+			botPage := entries[botStart:botEnd]
+			botSegs = make([]gudriver.Segment, len(botPage))
+			for j, e := range botPage {
+				botSegs[j] = gudriver.Segment{Text: e.label, Color: e.color}
 			}
 		}
 
@@ -1224,6 +1266,7 @@ func buildBandConditionsSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 			transition:      gudriver.TransitionFade,
 			displayDuration: monitorBandSlideDuration,
 		})
+		i = botEnd
 	}
 	return slides
 }
@@ -1383,6 +1426,7 @@ type MonitorDisplay struct {
 	cwCallsign   string               // CW skimmer callsign for RBN lookup (may be empty)
 	callsign     string               // receiver callsign for PSK/WSPR rank lookup
 	maxSessions  int
+	loc          *time.Location             // server local timezone for top-right time display
 	rotctl       *RotctlAPIHandler          // nil if rotator not enabled
 	antSwitch    *AntSwitchHandler          // nil if antenna switch not enabled
 	gpsdoMonitor *GPSDOMonitor              // nil if GPSDO not enabled
@@ -1441,6 +1485,7 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		cwCallsign:   cwCallsign,
 		callsign:     callsign,
 		maxSessions:  maxSessions,
+		loc:          cfg.Admin.TimezoneLocation(),
 		rotctl:       rotctl,
 		antSwitch:    antSwitch,
 		gpsdoMonitor: gpsdoMonitor,
@@ -1495,7 +1540,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch, md.gpsdoMonitor, md.dxWsHandler, md.maxChatUsers)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch, md.gpsdoMonitor, md.dxWsHandler, md.maxChatUsers, md.loc, *idx)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():
@@ -1511,7 +1556,7 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 	*idx = (*idx + 1) % len(slides)
 
 	if slide.isClock {
-		md.runClockSlide(ctx)
+		md.runClockSlide(ctx, slide.clockShowTime)
 		return
 	}
 
@@ -1539,13 +1584,15 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 
 // runClockSlide shows the UTC clock for monitorSlideDuration, updating every
 // second so the seconds digit ticks in real time.
-func (md *MonitorDisplay) runClockSlide(ctx context.Context) {
+// showTime controls whether the top-right corner shows local time (true) or
+// user count (false) — passed through from the slide that triggered this call.
+func (md *MonitorDisplay) runClockSlide(ctx context.Context, showTime bool) {
 	deadline := time.Now().Add(monitorSlideDuration)
 	ticker := time.NewTicker(monitorClockUpdateInterval)
 	defer ticker.Stop()
 
 	sendClock := func() {
-		slide := buildTimeSlide(md.sessions, md.maxSessions)
+		slide := buildTimeSlide(md.sessions, md.maxSessions, md.loc, showTime)
 		if _, err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {
 			log.Printf("[MonitorDisplay] Clock slide send error: %v", err)
 		}

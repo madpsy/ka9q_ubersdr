@@ -292,7 +292,9 @@
         </div>
 
         <!-- Full-band Spectrum Display -->
-        <div class="spectrum-display-panel">
+        <div class="spectrum-display-panel" style="position:relative;">
+            <!-- Blue dot shown when browser extension is detected — sits top-right of spectrum panel -->
+            <span id="extension-detected-dot" class="extension-detected-dot" title="Browser Extension Detected" style="display:none;" aria-label="Browser Extension Detected"></span>
             <div class="spectrum-display-container">
                 <canvas id="spectrum-line-graph-canvas" style="display: none;"></canvas>
                 <canvas id="spectrum-display-canvas"></canvas>
@@ -543,15 +545,13 @@
                 <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Select Band...</option>
                 </select>
-                <div style="display: flex; gap: 5px; margin-top: 5px; position: relative;">
+                <div style="display: flex; gap: 5px; margin-top: 5px;">
                     <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
                         <option value="">📡 Server Bookmarks...</option>
                     </select>
                     <select id="local-bookmark-selector" onchange="selectLocalBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
                         <option value="">⭐ My Bookmarks...</option>
                     </select>
-                    <!-- Blue dot shown when browser extension is detected -->
-                    <span id="extension-detected-dot" class="extension-detected-dot" title="Browser Extension Detected" style="display:none;" aria-label="Browser Extension Detected"></span>
                 </div>
                 <div id="extensions-row" style="display: flex; gap: 5px; margin-top: 5px;">
                     <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 100%;">

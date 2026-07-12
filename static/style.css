@@ -5590,7 +5590,7 @@ input[type="range"]::-moz-range-thumb {
 /* ── Browser Extension Detected Indicator ────────────────────────────────────
    A small pulsing blue dot shown in two places when the UberSDR browser
    extension (Chrome or Firefox) is detected on the page:
-     1. .extension-detected-dot  — bookmark bar area (absolutely positioned)
+     1. .extension-detected-dot  — top-right of .spectrum-display-panel
      2. .extension-detected-dot-inline — inline next to the 🖥️ in the overlay
    Both share the same pulse animation. */
 
@@ -5600,11 +5600,12 @@ input[type="range"]::-moz-range-thumb {
     100% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
 }
 
-/* Bookmark-area dot: absolutely positioned top-right of the bookmark row */
+/* Spectrum-panel dot: absolutely positioned top-right of .spectrum-display-panel
+   (which has position:relative set inline in index.html). Scrolls with the page. */
 .extension-detected-dot {
     position: absolute;
-    top: -5px;
-    right: -5px;
+    top: 8px;
+    right: 8px;
     width: 9px;
     height: 9px;
     border-radius: 50%;
@@ -5612,8 +5613,8 @@ input[type="range"]::-moz-range-thumb {
     border: 1.5px solid rgba(255, 255, 255, 0.6);
     animation: extension-dot-pulse 2s ease-in-out infinite;
     cursor: default;
-    z-index: 10;
-    flex-shrink: 0;
+    z-index: 99999;
+    pointer-events: auto;
 }
 
 /* Inline dot: sits next to text in the overlay location line */

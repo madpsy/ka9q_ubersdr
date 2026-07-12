@@ -17172,7 +17172,7 @@ function initControlsDock() {
 // when the Chrome/Firefox UberSDR Bridge extension is confirmed active.
 //
 // Here we react to that event to show the two blue dot indicators:
-//   1. #extension-detected-dot  — in the bookmark row (always in the DOM, hidden by default)
+//   1. #extension-detected-dot  — top-right of .spectrum-display-panel (always in DOM, hidden by default)
 //   2. .extension-detected-dot-inline — appended to #overlay-location-line if present
 //
 // The overlay location line check handles the race where the extension activates

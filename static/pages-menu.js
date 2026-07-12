@@ -35,7 +35,7 @@
     background: var(--panel-mid, #34495e);
     color: var(--text-light, #ecf0f1);
     border: none;
-    border-bottom-right-radius: 6px;
+    border-radius: 0 0 4px 0;
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;

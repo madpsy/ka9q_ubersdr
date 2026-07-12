@@ -44,11 +44,6 @@
       "group": "Digital Decoders",
       "files": [
         {
-          "path": "static/decoder_feed.html",
-          "name": "Digital Decoder Feed",
-          "description": "Live feed of decoded digital mode spots (FT8, WSPR, etc.) from the on-board multi-band decoders."
-        },
-        {
           "path": "static/decoder_spots_history.html",
           "name": "Decoder Spots History",
           "description": "Searchable and filterable history of all digital mode spots decoded by the system, with map and table views."
@@ -83,11 +78,6 @@
     {
       "group": "CW Skimmer",
       "files": [
-        {
-          "path": "static/cwskimmer_feed.html",
-          "name": "CW Skimmer Feed",
-          "description": "Live feed of CW (Morse code) spots decoded by the integrated CW skimmer, with callsign, frequency, and speed."
-        },
         {
           "path": "static/cwskimmer_map.html",
           "name": "CW Skimmer Map",

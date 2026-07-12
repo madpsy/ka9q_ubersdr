@@ -5588,10 +5588,11 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ── Browser Extension Detected Indicator ────────────────────────────────────
-   A favicon icon shown top-right of .spectrum-display-panel when the UberSDR
-   browser extension (Chrome or Firefox) is detected on the page. */
+   A favicon icon shown top-right of .container when the UberSDR browser
+   extension (Chrome or Firefox) is detected on the page. */
 
-/* Absolutely positioned inside .spectrum-display-panel (position:relative).
+/* Absolutely positioned inside .container (position:relative; width:100%).
+   z-index:9500 — above .spectrum-frequency-overlay (9000), below .audio-start-overlay (10000).
    Scrolls with the page. */
 .extension-detected-dot {
     position: absolute;
@@ -5604,7 +5605,7 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 0;
     animation: none;
     cursor: default;
-    z-index: 9000;
+    z-index: 9500;
     pointer-events: auto;
     opacity: 0.85;
 }

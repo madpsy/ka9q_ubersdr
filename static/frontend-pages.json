@@ -4,17 +4,17 @@
       "group": "Propagation Conditions",
       "files": [
         {
-          "path": "static/bandconditions.html",
+          "path": "bandconditions.html",
           "name": "Band Conditions",
           "description": "Displays current HF band propagation conditions, including solar indices and band-by-band status summaries."
         },
         {
-          "path": "static/spaceweather_history.html",
+          "path": "spaceweather_history.html",
           "name": "Space Weather History",
           "description": "Historical charts of space weather data including solar flux, A-index, K-index, and other propagation-relevant metrics over time."
         },
         {
-          "path": "static/ncdxf_beacons.html",
+          "path": "ncdxf_beacons.html",
           "name": "NCDXF/IARU Beacon Tracker",
           "depends_on": "cw_skimmer",
           "description": "Tracks and displays the NCDXF/IARU international beacon network, showing which beacons are currently transmitting and on which bands."
@@ -26,17 +26,17 @@
       "depends_on": "noise_floor",
       "files": [
         {
-          "path": "static/noisefloor.html",
+          "path": "noisefloor.html",
           "name": "Noise Floor Monitor",
           "description": "Real-time and historical noise floor monitoring per band, helping identify interference trends and RFI sources."
         },
         {
-          "path": "static/noisefloor_aggregate.html",
+          "path": "noisefloor_aggregate.html",
           "name": "Noise Floor Aggregate Analysis",
           "description": "Aggregated noise floor analysis across multiple bands and time periods, useful for long-term interference assessment."
         },
         {
-          "path": "static/spectrogram.html",
+          "path": "spectrogram.html",
           "name": "Wideband Spectrogram",
           "description": "Full 0–30 MHz wideband spectrogram viewer showing real-time signal activity across the entire HF spectrum."
         }
@@ -47,32 +47,32 @@
       "depends_on": "digital_decodes",
       "files": [
         {
-          "path": "static/decoder_spots_history.html",
+          "path": "decoder_spots_history.html",
           "name": "Decoder Spots History",
           "description": "Searchable and filterable history of all digital mode spots decoded by the system, with map and table views."
         },
         {
-          "path": "static/decoder_spots_analytics.html",
+          "path": "decoder_spots_analytics.html",
           "name": "Decoder Spots Analytics",
           "description": "Analytics and charts for decoded digital spots, showing trends by band, mode, and time of day."
         },
         {
-          "path": "static/decode_metrics.html",
+          "path": "decode_metrics.html",
           "name": "Decode Metrics",
           "description": "Detailed performance metrics for each decoder instance, including decode counts, error rates, and resource usage."
         },
         {
-          "path": "static/decode_rates.html",
+          "path": "decode_rates.html",
           "name": "Decode Rates",
           "description": "Real-time activity charts showing decode rates per band and mode, giving a live view of decoder throughput."
         },
         {
-          "path": "static/digitalspots_map.html",
+          "path": "digitalspots_map.html",
           "name": "Digital Spots Map",
           "description": "Interactive world map plotting decoded digital mode spots, showing propagation paths from decoded callsigns."
         },
         {
-          "path": "static/pskreporter_analytics.html",
+          "path": "pskreporter_analytics.html",
           "name": "PSKReporter Analytics",
           "description": "Analytics dashboard for spots submitted to PSKReporter, showing reception reports and propagation statistics."
         }
@@ -83,22 +83,22 @@
       "depends_on": "cw_skimmer",
       "files": [
         {
-          "path": "static/cwskimmer_map.html",
+          "path": "cwskimmer_map.html",
           "name": "CW Skimmer Map",
           "description": "Interactive map displaying CW spots from the skimmer, visualising propagation paths to decoded stations."
         },
         {
-          "path": "static/cw_spots_history.html",
+          "path": "cw_spots_history.html",
           "name": "CW Spots History",
           "description": "Historical log of CW spots with filtering by callsign, band, and time range, with map and table views."
         },
         {
-          "path": "static/cw_spots_analytics.html",
+          "path": "cw_spots_analytics.html",
           "name": "CW Spots Analytics",
           "description": "Charts and analytics for CW skimmer spots, showing activity trends by band, time, and callsign prefix."
         },
         {
-          "path": "static/cw_metrics.html",
+          "path": "cw_metrics.html",
           "name": "CW Metrics",
           "description": "Performance metrics for the CW skimmer, including decode counts, speed distribution, and band activity."
         }
@@ -108,13 +108,13 @@
       "group": "Hardware Control",
       "files": [
         {
-          "path": "static/rotator.html",
+          "path": "rotator.html",
           "name": "Rotator Control",
           "depends_on": "rotator",
           "description": "Antenna rotator control interface with compass display, target bearing input, and real-time position feedback."
         },
         {
-          "path": "static/switch.html",
+          "path": "switch.html",
           "name": "Antenna Switch Control",
           "depends_on": "ant_switch",
           "description": "Control panel for managing antenna switch positions, allowing selection between multiple antennas or ports."
@@ -125,19 +125,114 @@
       "group": "Statistics & Admin",
       "files": [
         {
-          "path": "static/session_stats.html",
+          "path": "session_stats.html",
           "name": "Session Statistics",
           "description": "Statistics about active and historical listener sessions, including connection counts, duration, and geographic distribution."
         },
         {
-          "path": "static/stats_history.html",
+          "path": "stats_history.html",
           "name": "Stats History",
           "description": "Historical charts of system-wide statistics such as listener counts, bandwidth usage, and decode activity over time."
         },
         {
-          "path": "static/admin.html",
+          "path": "admin.html",
           "name": "Admin Configuration",
           "description": "Full administrative control panel for configuring all aspects of the UberSDR instance, including radio settings, users, decoders, and system options."
+        }
+      ]
+    },
+    {
+      "group": "Clients",
+      "subgroups": [
+        {
+          "name": "Desktop Client",
+          "files": [
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/radio_client-windows-amd64.exe",
+              "name": "Windows Download",
+              "description": "Download the Desktop Client for Windows (amd64)."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/radio_client-linux-amd64",
+              "name": "Linux Download",
+              "description": "Download the Desktop Client for Linux (amd64)."
+            }
+          ]
+        },
+        {
+          "name": "Minimal Audio Client",
+          "files": [
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/ubersdr-audio-windows-amd64.exe",
+              "name": "Windows Download",
+              "description": "Download the Minimal Audio client for Windows (amd64)."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/ubersdr-audio-linux-amd64",
+              "name": "Linux Download",
+              "description": "Download the Minimal Audio client for Linux (amd64)."
+            }
+          ]
+        },
+        {
+          "name": "IQ Recorder",
+          "files": [
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/iq_recorder-windows-amd64.exe",
+              "name": "Windows Download",
+              "description": "Download the IQ Recorder client for Windows (amd64)."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/latest/download/iq_recorder-linux-amd64",
+              "name": "Linux Download",
+              "description": "Download the IQ Recorder client for Linux (amd64)."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Browser Extensions",
+      "files": [
+        {
+          "path": "https://chromewebstore.google.com/detail/ubersdr-bridge/lpljgdehjhiojmpibmonpgjlmjfbkpae",
+          "name": "Chrome Extension",
+          "description": "Install the UberSDR Bridge extension for Google Chrome."
+        },
+        {
+          "path": "https://addons.mozilla.org/en-GB/firefox/addon/ubersdr-bridge/",
+          "name": "Firefox Extension",
+          "description": "Install the UberSDR Bridge add-on for Mozilla Firefox."
+        }
+      ]
+    },
+    {
+      "group": "UberSDR",
+      "files": [
+        {
+          "path": "https://ubersdr.org",
+          "name": "Main Website",
+          "description": "The official UberSDR website with documentation, news, and resources."
+        },
+        {
+          "path": "https://ubersdr.org/#build-your-own",
+          "name": "Build Your Own",
+          "description": "Guide to building your own UberSDR instance."
+        },
+        {
+          "path": "https://instances.ubersdr.org/",
+          "name": "Other Instances",
+          "description": "Browse a directory of publicly available UberSDR instances around the world."
+        },
+        {
+          "path": "https://instances.ubersdr.org/multi_monitor.html",
+          "name": "Smart Listen",
+          "description": "Monitor multiple UberSDR instances simultaneously with Smart Listen."
+        },
+        {
+          "path": "https://spinthedial.live/",
+          "name": "Spin The Dial",
+          "description": "Randomly tune across UberSDR instances with Spin The Dial."
         }
       ]
     },
@@ -145,7 +240,7 @@
       "group": "Fun",
       "files": [
         {
-          "path": "static/oldradio/index.html",
+          "path": "oldradio/index.html",
           "name": "Old Radio Skin",
           "description": "Alternative retro-styled radio interface skin with skeuomorphic controls, supporting Grundig and UK CB radio themes."
         }

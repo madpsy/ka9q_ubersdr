@@ -114,6 +114,44 @@
     padding: 4px 0;
 }
 
+/* Subgroup row inside level 2 — acts like a group row but smaller */
+.pages-menu-subgroup-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    color: var(--text-light, #ecf0f1);
+    cursor: default;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.1s;
+    gap: 8px;
+}
+
+.pages-menu-subgroup-row:hover {
+    background: var(--panel-mid, #34495e);
+}
+
+.pages-menu-subgroup-row:hover > .pages-menu-submenu-l3 {
+    display: block;
+}
+
+/* Level 3 — sub-submenu */
+.pages-menu-submenu-l3 {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 100%;
+    min-width: 200px;
+    background: var(--panel-dark, #2c3e50);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0 8px 8px 8px;
+    box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.5);
+    padding: 4px 0;
+}
+
 .pages-menu-link {
     display: block;
     padding: 6px 14px;
@@ -169,9 +207,29 @@
             );
         }
 
-        // Helper: build and append a group row with its submenu
-        function addGroupRow(groupName, links) {
-            // links: array of { url, label, tooltip }
+        // Helper: build a link element
+        function buildLink({ url, label: text, tooltip, external }) {
+            const link = document.createElement('a');
+            link.className   = 'pages-menu-link';
+            link.href        = url;
+            if (tooltip) link.title = tooltip;
+            link.setAttribute('role', 'menuitem');
+            link.textContent = text;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (external) {
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                } else {
+                    openPopup(url);
+                }
+            });
+            return link;
+        }
+
+        // Helper: build and append a group row with its level-2 submenu.
+        // links:     array of { url, label, tooltip, external } — direct page links
+        // subgroups: array of { name, links[] }                 — nested subgroup rows
+        function addGroupRow(groupName, links, subgroups) {
             const row = document.createElement('div');
             row.className = 'pages-menu-group-row';
             row.setAttribute('role', 'menuitem');
@@ -188,18 +246,33 @@
             submenu.className = 'pages-menu-submenu';
             submenu.setAttribute('role', 'menu');
 
-            links.forEach(({ url, label: text, tooltip }) => {
-                const link = document.createElement('a');
-                link.className   = 'pages-menu-link';
-                link.href        = url;
-                if (tooltip) link.title = tooltip;
-                link.setAttribute('role', 'menuitem');
-                link.textContent = text;
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    openPopup(url);
-                });
-                submenu.appendChild(link);
+            // Direct links
+            (links || []).forEach(item => submenu.appendChild(buildLink(item)));
+
+            // Subgroup rows (level 3)
+            (subgroups || []).forEach(sg => {
+                const sgRow = document.createElement('div');
+                sgRow.className = 'pages-menu-subgroup-row';
+                sgRow.setAttribute('role', 'menuitem');
+                sgRow.setAttribute('aria-haspopup', 'true');
+
+                const sgLabel = document.createElement('span');
+                sgLabel.textContent = sg.name;
+
+                const sgArrow = document.createElement('span');
+                sgArrow.className   = 'pages-menu-group-arrow';
+                sgArrow.textContent = '›';
+
+                const sgSubmenu = document.createElement('div');
+                sgSubmenu.className = 'pages-menu-submenu-l3';
+                sgSubmenu.setAttribute('role', 'menu');
+
+                (sg.links || []).forEach(item => sgSubmenu.appendChild(buildLink(item)));
+
+                sgRow.appendChild(sgLabel);
+                sgRow.appendChild(sgArrow);
+                sgRow.appendChild(sgSubmenu);
+                submenu.appendChild(sgRow);
             });
 
             row.appendChild(label);
@@ -226,19 +299,34 @@
             // Skip the whole group if its depends_on is not met
             if (!isEnabled(group.depends_on)) return;
 
+            // Helper: map a file entry to a link descriptor
+            function fileToLink(file) {
+                const isExt = /^https?:\/\//.test(file.path);
+                return {
+                    url:      isExt ? file.path : '/' + file.path.replace(/^\//, ''),
+                    label:    file.name,
+                    tooltip:  file.description || '',
+                    external: isExt,
+                };
+            }
+
             // Filter individual files by their own depends_on
             const links = (group.files || [])
                 .filter(file => isEnabled(file.depends_on))
-                .map(file => ({
-                    url:     '/' + file.path.replace(/^static\//, ''),
-                    label:   file.name,
-                    tooltip: file.description || '',
-                }));
+                .map(fileToLink);
 
-            // Skip the group if all items were filtered out
-            if (links.length === 0) return;
+            // Build subgroups (each subgroup's files are also mapped)
+            const subgroups = (group.subgroups || []).map(sg => ({
+                name:  sg.name,
+                links: (sg.files || [])
+                    .filter(file => isEnabled(file.depends_on))
+                    .map(fileToLink),
+            })).filter(sg => sg.links.length > 0);
 
-            addGroupRow(group.group, links);
+            // Skip the group if there's nothing to show
+            if (links.length === 0 && subgroups.length === 0) return;
+
+            addGroupRow(group.group, links, subgroups);
         });
 
         // Dynamic Add-ons group from window.apiDescription

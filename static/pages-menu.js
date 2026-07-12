@@ -266,6 +266,10 @@
             dropdown.classList.contains('is-open') ? closeMenu() : openMenu();
         });
 
+        // Open on hover over the button or wrapper; close when mouse leaves both
+        wrapper.addEventListener('mouseenter', openMenu);
+        wrapper.addEventListener('mouseleave', closeMenu);
+
         document.addEventListener('click', (e) => {
             if (!wrapper.contains(e.target)) closeMenu();
         });

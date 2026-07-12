@@ -16,6 +16,7 @@
         {
           "path": "static/ncdxf_beacons.html",
           "name": "NCDXF/IARU Beacon Tracker",
+          "depends_on": "cw_skimmer",
           "description": "Tracks and displays the NCDXF/IARU international beacon network, showing which beacons are currently transmitting and on which bands."
         }
       ]

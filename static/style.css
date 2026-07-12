@@ -5595,7 +5595,7 @@ input[type="range"]::-moz-range-thumb {
    Scrolls with the page. */
 .extension-detected-dot {
     position: absolute;
-    top: 8px;
+    top: 11px;
     right: 8px;
     width: 18px;
     height: 18px;

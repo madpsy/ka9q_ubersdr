@@ -32,7 +32,7 @@
 #pages-menu-btn {
     display: block;
     padding: 5px 10px;
-    background: var(--panel-mid, #34495e);
+    background: rgba(52, 73, 94, 0.7);
     color: var(--text-light, #ecf0f1);
     border: none;
     border-radius: 0 0 4px 0;

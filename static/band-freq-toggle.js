@@ -118,9 +118,7 @@ function setupFrequencyDigitInteraction() {
 function changeFrequencyByStep(step, increment) {
     // Disable edge detection FIRST, before any frequency changes
     if (window.spectrumDisplay) {
-        console.log('Setting skipEdgeDetectionTemporary = true');
         window.spectrumDisplay.skipEdgeDetectionTemporary = true;
-        console.log('skipEdgeDetectionTemporary is now:', window.spectrumDisplay.skipEdgeDetectionTemporary);
     }
 
     const freqInput = document.getElementById('frequency');

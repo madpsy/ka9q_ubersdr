@@ -7768,8 +7768,12 @@ function formatFrequency(hz) {
 function log(message, type = 'info') {
     const logEl = document.getElementById('log');
     if (!logEl) {
-        // Log to console if log element doesn't exist
-        console.log(`[${type}] ${message}`);
+        // No activity-log element on this page — only surface errors on the
+        // console; informational entries ([info] Tuning to..., Status:...) fire
+        // on every tune/status change and would just be console spam.
+        if (type === 'error') {
+            console.error(message);
+        }
         return;
     }
 
@@ -12629,13 +12633,11 @@ function selectBandFromDropdown(value) {
 function updateBandSelector() {
     const selector = document.getElementById('band-selector');
     if (!selector || !window.amateurBands || window.amateurBands.length === 0) {
-        console.log('updateBandSelector: selector or bands not available');
         return;
     }
 
     const freqInput = document.getElementById('frequency');
     if (!freqInput) {
-        console.log('updateBandSelector: frequency input not found');
         return;
     }
 
@@ -12645,7 +12647,6 @@ function updateBandSelector() {
         // Fallback: parse the display value intelligently based on magnitude
         const displayValue = parseFloat(freqInput.value);
         if (isNaN(displayValue)) {
-            console.log('updateBandSelector: invalid frequency');
             selector.value = '';
             return;
         }
@@ -12660,14 +12661,12 @@ function updateBandSelector() {
         }
     }
 
-    console.log('updateBandSelector: checking frequency', currentFreq);
 
     // Find which band contains the current frequency
     let matchingBand = null;
     for (let band of window.amateurBands) {
         if (currentFreq >= band.start && currentFreq <= band.end) {
             matchingBand = band;
-            console.log('updateBandSelector: found matching band', band.label);
             break;
         }
     }
@@ -12685,7 +12684,6 @@ function updateBandSelector() {
                     if (optionData.label === matchingBand.label &&
                         optionData.start === matchingBand.start &&
                         optionData.end === matchingBand.end) {
-                        console.log('updateBandSelector: setting selector to', optionData.label);
                         selector.value = option.value;
                         foundOption = true;
                         break;
@@ -12697,12 +12695,10 @@ function updateBandSelector() {
         }
 
         if (!foundOption) {
-            console.log('updateBandSelector: no matching option found in dropdown');
             selector.value = '';
         }
     } else {
         // No matching band, reset to default
-        console.log('updateBandSelector: no matching band for frequency', currentFreq);
         selector.value = '';
     }
 }
@@ -14659,7 +14655,6 @@ function updateCATSyncState() {
     if (freqChanged || modeChanged) {
         try {
             if (typeof w.injection_environment_changed === 'function') {
-                console.debug('[CAT sync] injection_environment_changed', { freqChanged, modeChanged, frequency, mode: currentMode });
                 w.injection_environment_changed({ freq: freqChanged, mode: modeChanged });
             }
         } catch (e) {

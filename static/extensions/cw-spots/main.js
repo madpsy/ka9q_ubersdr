@@ -983,24 +983,19 @@ class CWSpotsExtension extends DecoderExtension {
 
     updateBandFilterFromFrequency() {
         const currentFreq = this.radio.getFrequency();
-        console.log('CW Spots: updateBandFilterFromFrequency - currentFreq:', currentFreq);
 
         if (!currentFreq) {
-            console.log('CW Spots: No current frequency');
             return;
         }
 
         const band = this.radio.getFrequencyBand(currentFreq);
-        console.log('CW Spots: Detected band:', band, 'for frequency:', currentFreq);
 
         if (!band) {
-            console.log('CW Spots: No band detected for frequency');
             return;
         }
 
         const bandFilter = document.getElementById('cw-spots-band-filter');
         if (!bandFilter) {
-            console.log('CW Spots: Band filter element not found');
             return;
         }
 
@@ -1008,7 +1003,6 @@ class CWSpotsExtension extends DecoderExtension {
             option => option.value === band
         );
 
-        console.log('CW Spots: Band option found:', !!bandOption, 'Current filter:', this.bandFilter, 'New band:', band);
 
         if (bandOption) {
             // Always update dropdown value to match internal state
@@ -1023,17 +1017,11 @@ class CWSpotsExtension extends DecoderExtension {
                 this.updateBadges(); // Update badges immediately
                 this.filterAndRenderSpots();
                 this.refreshGraphWindow(); // Sync graph window with new band
-                console.log(`CW Spots: Auto-updated band filter to ${band}`);
-            } else {
-                console.log('CW Spots: Band filter already set to', band, '- dropdown synced');
             }
-        } else {
-            console.log('CW Spots: Band', band, 'not found in dropdown options');
         }
     }
 
     onFrequencyChanged(frequency) {
-        console.log('CW Spots: onFrequencyChanged called with frequency:', frequency);
         this.updateBandFilterFromFrequency();
     }
 
@@ -1041,7 +1029,6 @@ class CWSpotsExtension extends DecoderExtension {
         this.frequencyPollInterval = setInterval(() => {
             const currentFreq = this.radio.getFrequency();
             if (currentFreq !== this.lastPolledFrequency) {
-                console.log('CW Spots: Frequency changed via polling:', this.lastPolledFrequency, '->', currentFreq);
                 this.lastPolledFrequency = currentFreq;
                 this.updateBandFilterFromFrequency();
                 // Update tuned indicators when radio frequency changes externally

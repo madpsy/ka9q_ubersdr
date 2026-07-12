@@ -218,7 +218,6 @@ class ChatUI {
 
         // Define event handlers and store references
         this.radioEventHandlers.frequency_changed = (data) => {
-            console.log('[ChatUI] Frequency changed event:', data.frequency);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ frequency: data.frequency });

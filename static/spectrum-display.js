@@ -5535,7 +5535,6 @@ class SpectrumDisplay {
                 !this.skipNextPan &&
                 this.edgeTuneEnabled) {
 
-                console.log(`Frequency changed to ${(this.currentTunedFreq/1e6).toFixed(3)} MHz - panning spectrum to follow`);
 
                 // Set flag to prevent sync monitoring from interfering during pan
                 this.skipNextPan = true;

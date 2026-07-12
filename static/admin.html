@@ -9302,6 +9302,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 customLinksData    = data.custom  || { groups: [] };
                 if (!Array.isArray(customLinksData.groups)) customLinksData.groups = [];
 
+                // Merge any duplicate group entries (can arise from hand-edited files
+                // or old example data) so the UI always has a clean single entry per group.
+                normaliseCustomLinks();
+
                 customLinksLastSaved = JSON.stringify(customLinksData);
                 customLinksLoaded = true;
 
@@ -9706,11 +9710,53 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         }
 
         /**
+         * Merge duplicate group entries in customLinksData so there is at most one
+         * entry per group name. Duplicates arise when the on-disk file was hand-edited
+         * or initialised from an old example that had multiple entries for the same group.
+         */
+        function normaliseCustomLinks() {
+            const merged = [];
+            const seen = {};
+            for (const cg of customLinksData.groups) {
+                if (seen[cg.group] === undefined) {
+                    seen[cg.group] = merged.length;
+                    merged.push({ group: cg.group });
+                    if (cg.depends_on) merged[seen[cg.group]].depends_on = cg.depends_on;
+                }
+                const target = merged[seen[cg.group]];
+                // Merge files
+                if (cg.files && cg.files.length > 0) {
+                    if (!target.files) target.files = [];
+                    target.files.push(...cg.files);
+                }
+                // Merge subgroups by name
+                if (cg.subgroups && cg.subgroups.length > 0) {
+                    if (!target.subgroups) target.subgroups = [];
+                    for (const csg of cg.subgroups) {
+                        const existing = target.subgroups.find(s => s.name === csg.name);
+                        if (existing) {
+                            if (csg.files) {
+                                if (!existing.files) existing.files = [];
+                                existing.files.push(...csg.files);
+                            }
+                        } else {
+                            target.subgroups.push({ name: csg.name, files: csg.files || [] });
+                        }
+                    }
+                }
+            }
+            customLinksData.groups = merged;
+        }
+
+        /**
          * Delete a custom link by group name, optional subgroup name, and file index.
+         * Searches ALL group entries with the matching name (handles legacy duplicates).
          */
         function customLinksDeleteLink(groupName, subgroupName, fileIndex) {
-            // Find or create the custom group entry
-            let cg = customLinksData.groups.find(g => g.group === groupName);
+            // Normalise first to ensure no duplicates before operating
+            normaliseCustomLinks();
+
+            const cg = customLinksData.groups.find(g => g.group === groupName);
             if (!cg) return;
 
             if (subgroupName === null) {

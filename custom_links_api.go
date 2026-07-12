@@ -213,13 +213,19 @@ func (ah *AdminHandler) handlePutCustomLinks(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Validate: each group must have a non-empty name.
+	// Validate: each group must have a non-empty name, and group names must be unique.
 	// Each file entry must have non-empty path and name.
+	seenGroups := make(map[string]bool, len(body.Groups))
 	for gi, g := range body.Groups {
 		if g.Group == "" {
 			http.Error(w, "groups["+itoa(gi)+"]: group name must not be empty", http.StatusBadRequest)
 			return
 		}
+		if seenGroups[g.Group] {
+			http.Error(w, "groups["+itoa(gi)+"]: duplicate group name '"+g.Group+"' — each group name must appear only once", http.StatusBadRequest)
+			return
+		}
+		seenGroups[g.Group] = true
 		for fi, f := range g.Files {
 			if f.Path == "" {
 				http.Error(w, "groups["+itoa(gi)+"].files["+itoa(fi)+"]: path must not be empty", http.StatusBadRequest)

@@ -42,106 +42,33 @@
     "                     name, files are injected into that subgroup.",
     "  files (optional) — array of link entries (same fields as above).",
     "",
-    "Remove the '_comment' key before using this file, or leave it — it is ignored",
-    "by the server."
+    "EXAMPLES (add to the groups array below to activate):",
+    "",
+    "  Inject a link into an existing built-in group:",
+    "  { \"group\": \"Propagation Conditions\", \"files\": [",
+    "      { \"path\": \"https://prop.example.com/\", \"name\": \"My Propagation Tool\",",
+    "        \"description\": \"Custom propagation analysis tool.\" }",
+    "  ]}",
+    "",
+    "  Create a brand-new group:",
+    "  { \"group\": \"My Station\", \"files\": [",
+    "      { \"path\": \"https://www.qrz.com/db/M0XYZ\", \"name\": \"QRZ Page\" },",
+    "      { \"path\": \"https://hamlog.example.com/\", \"name\": \"Log Book\" }",
+    "  ]}",
+    "",
+    "  New group with a depends_on (only shown when CW Skimmer is enabled):",
+    "  { \"group\": \"Local Resources\", \"depends_on\": \"cw_skimmer\", \"files\": [",
+    "      { \"path\": \"https://cluster.example.com/\", \"name\": \"Local DX Cluster\" }",
+    "  ]}",
+    "",
+    "  Inject a new subgroup into an existing built-in group:",
+    "  { \"group\": \"Clients\", \"subgroups\": [",
+    "      { \"name\": \"My Tools\", \"files\": [",
+    "          { \"path\": \"https://mytool.example.com/\", \"name\": \"My Custom Tool\" }",
+    "      ]}",
+    "  ]}",
+    "",
+    "The '_comment' key is ignored by the server."
   ],
-  "groups": [
-    {
-      "_comment": "Example 1: inject a link INTO an existing built-in group.",
-      "group": "Propagation Conditions",
-      "files": [
-        {
-          "path": "https://prop.example.com/",
-          "name": "My Propagation Tool",
-          "description": "Custom propagation analysis tool for this station."
-        }
-      ]
-    },
-    {
-      "_comment": "Example 2: inject a new subgroup into an existing built-in group.",
-      "group": "Clients",
-      "subgroups": [
-        {
-          "name": "My Tools",
-          "files": [
-            {
-              "path": "https://mytool.example.com/",
-              "name": "My Custom Tool",
-              "description": "A custom tool specific to this station."
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "_comment": "Example 3: inject a link into an existing built-in subgroup by matching its name.",
-      "group": "Clients",
-      "subgroups": [
-        {
-          "name": "Desktop Client",
-          "files": [
-            {
-              "path": "https://example.com/my-client.exe",
-              "name": "My Custom Client",
-              "description": "A custom desktop client build."
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "_comment": "Example 4: create a brand-new group (name does not match any built-in group).",
-      "group": "My Station",
-      "files": [
-        {
-          "path": "https://www.qrz.com/db/M0XYZ",
-          "name": "QRZ Page",
-          "description": "My QRZ.com operator page."
-        },
-        {
-          "path": "https://www.hamlog.example.com/",
-          "name": "Log Book",
-          "description": "Online log book for this station."
-        }
-      ]
-    },
-    {
-      "_comment": "Example 5: new group with a depends_on — only shown when CW Skimmer is enabled.",
-      "group": "Local Resources",
-      "depends_on": "cw_skimmer",
-      "files": [
-        {
-          "path": "https://cluster.example.com/",
-          "name": "Local DX Cluster",
-          "description": "Regional DX cluster for this station."
-        }
-      ]
-    },
-    {
-      "_comment": "Example 6: new group with subgroups.",
-      "group": "Downloads",
-      "subgroups": [
-        {
-          "name": "Software",
-          "files": [
-            {
-              "path": "https://example.com/software.zip",
-              "name": "My Software",
-              "description": "Custom software download."
-            }
-          ]
-        },
-        {
-          "name": "Documentation",
-          "files": [
-            {
-              "path": "https://docs.example.com/",
-              "name": "Station Docs",
-              "description": "Documentation for this station's setup."
-            }
-          ]
-        }
-      ]
-    }
-  ]
+  "groups": []
 }

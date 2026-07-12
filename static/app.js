@@ -4085,7 +4085,6 @@ async function fetchAndDisplayStats() {
 }
 
 function displayActiveChannels(channels) {
-    console.log('[displayActiveChannels] Called with channels:', channels);
     const listEl = document.getElementById('active-channels-list');
     if (!listEl) return;
 
@@ -4099,18 +4098,15 @@ function displayActiveChannels(channels) {
 
     // Store channels globally for spectrum display markers
     window.activeChannels = channels || [];
-    console.log('[displayActiveChannels] Stored window.activeChannels:', window.activeChannels);
     
     // Invalidate spectrum display marker cache to force redraw with new chat user markers
     if (window.spectrumDisplay && window.spectrumDisplay.invalidateMarkerCache) {
         window.spectrumDisplay.invalidateMarkerCache();
-        console.log('[displayActiveChannels] Invalidated spectrum marker cache');
     }
 
     // Update chat UI total user count if chat UI is available
     if (window.chatUI && window.chatUI.updateTotalUserCount) {
         window.chatUI.updateTotalUserCount(channels.length);
-        console.log('[displayActiveChannels] Updated chat UI total user count');
     }
 
     // Update channels map popup if it's open

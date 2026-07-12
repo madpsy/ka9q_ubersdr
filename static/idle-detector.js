@@ -272,31 +272,16 @@ class IdleDetector {
             if (window.ws && window.ws.readyState === WebSocket.OPEN) {
                 window.ws.send(JSON.stringify({ type: 'ping' }));
                 heartbeatsSent++;
-            } else if (window.ws) {
-                console.log(`Audio WebSocket not open (state: ${window.ws.readyState})`);
             }
 
             // Send heartbeat to spectrum WebSocket
             if (window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
                 window.spectrumDisplay.ws.send(JSON.stringify({ type: 'ping' }));
                 heartbeatsSent++;
-            } else {
-                if (!window.spectrumDisplay) {
-                    console.log('Spectrum display not initialized');
-                } else if (!window.spectrumDisplay.ws) {
-                    console.log('Spectrum WebSocket not created');
-                } else {
-                    console.log(`Spectrum WebSocket not open (state: ${window.spectrumDisplay.ws.readyState})`);
-                }
             }
 
             if (heartbeatsSent > 0) {
                 this.lastHeartbeatTime = now;
-                if (timeSinceLastActivity >= 30000) {
-                    console.log(`Heartbeat sent to ${heartbeatsSent} channel(s) - user returned after ${Math.floor(timeSinceLastActivity/1000)}s idle`);
-                } else {
-                    console.log(`Heartbeat sent to ${heartbeatsSent} channel(s) - user active`);
-                }
             }
         }
 

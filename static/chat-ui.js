@@ -2609,7 +2609,6 @@ class ChatUI {
         const totalCountEl = document.getElementById('chat-total-user-count');
         if (totalCountEl) {
             totalCountEl.textContent = totalCount;
-            console.log('[ChatUI] Updated total user count to:', totalCount);
         }
     }
 

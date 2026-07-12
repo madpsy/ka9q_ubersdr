@@ -113,6 +113,16 @@ type LookupServicesConfig struct {
 	// Default: 1000
 	CacheMaxSize int `yaml:"cache_max_size"`
 
+	// ImageCacheMaxSize is the maximum number of proxied QRZ profile images to
+	// hold on disk (/dev/shm) and in memory at once. This is independent of
+	// CacheMaxSize (the callsign cache) since images are much larger than a
+	// callsign record; a smaller limit keeps /dev/shm usage bounded even when
+	// the callsign cache holds many more entries.
+	// When the limit is reached, expired entries are evicted first; if still over
+	// the limit, the entries closest to expiry are removed to make room.
+	// Default: 100
+	ImageCacheMaxSize int `yaml:"image_cache_max_size"`
+
 	// TrustedContainers lists Docker container names permitted to call
 	// /api/lookup WITHOUT a session UUID.  Intended for server-side addons
 	// (e.g. the dxcluster addon) that enrich spots with QRZ data.  Each named
@@ -2190,6 +2200,9 @@ func (lsc *LookupServicesConfig) applyDefaults() {
 	}
 	if lsc.CacheMaxSize == 0 {
 		lsc.CacheMaxSize = 1000 // Default 1000 cached callsigns
+	}
+	if lsc.ImageCacheMaxSize == 0 {
+		lsc.ImageCacheMaxSize = 100 // Default 100 cached profile images
 	}
 	// Default trusted container is the dxcluster addon. A nil slice means the
 	// key was absent from YAML → apply the default; an explicit empty list

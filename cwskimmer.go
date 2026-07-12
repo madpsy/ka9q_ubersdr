@@ -688,10 +688,13 @@ func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
 		return fmt.Errorf("PSKReporter not initialized")
 	}
 
-	// Convert CWSkimmerSpot to DecodeInfo for PSKReporter
+	// Convert CWSkimmerSpot to DecodeInfo for PSKReporter.
+	// Use the QRZ grid square if enrichSpot() populated one; empty string is
+	// safe — the PSKReporter pipeline already handles the no-locator case and
+	// will never suppress a spot just because the grid is absent.
 	decode := &DecodeInfo{
 		Callsign:  spot.DXCall,
-		Locator:   "", // CW/RTTY spots don't have locators
+		Locator:   spot.Grid, // QRZ grid if available, "" otherwise — both are safe
 		SNR:       spot.SNR,
 		Frequency: uint64(spot.Frequency),
 		Timestamp: spot.Time,

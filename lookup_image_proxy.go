@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,12 @@ type ImageProxyService struct {
 	// byURL maps source URL → entry (used to deduplicate registrations)
 	byURL map[string]*imageCacheEntry
 
+	// cacheMaxSize is the maximum number of entries to hold at once
+	// (0 = unlimited). This is independent of the QRZ callsign cache size —
+	// images are much larger than a callsign record, so a smaller cap keeps
+	// /dev/shm usage bounded even when many more callsigns are cached.
+	cacheMaxSize int
+
 	// sf deduplicates concurrent background fetches for the same source URL.
 	sf singleflight.Group
 
@@ -69,11 +76,14 @@ var globalImageProxy *ImageProxyService
 
 // NewImageProxyService creates a new ImageProxyService and starts the
 // background cleanup goroutine.
-func NewImageProxyService() *ImageProxyService {
+// cacheMaxSize is the maximum number of proxied images to retain at once;
+// pass 0 to disable the limit (not recommended for public instances).
+func NewImageProxyService(cacheMaxSize int) *ImageProxyService {
 	s := &ImageProxyService{
-		byUUID:      make(map[string]*imageCacheEntry),
-		byURL:       make(map[string]*imageCacheEntry),
-		rateLimiter: NewImageProxyRateLimiter(),
+		byUUID:       make(map[string]*imageCacheEntry),
+		byURL:        make(map[string]*imageCacheEntry),
+		cacheMaxSize: cacheMaxSize,
+		rateLimiter:  NewImageProxyRateLimiter(),
 		httpClient: &http.Client{
 			Timeout: 7 * time.Second,
 		},
@@ -87,10 +97,19 @@ func NewImageProxyService() *ImageProxyService {
 
 // Register ensures an image entry exists for srcURL and returns the UUID path
 // that the browser should use to retrieve the image.  If an entry already
-// exists (same source URL, not yet expired) the existing UUID is returned.
-// The actual image fetch happens in the background; the caller does not block.
+// exists (same source URL, not yet expired, and its file is still present on
+// disk) the existing UUID is returned.  The actual image fetch happens in the
+// background; the caller does not block.
 //
 // Returns "" if srcURL is empty or from a disallowed host.
+//
+// IMPORTANT: the image cache has its own size cap (independent of the QRZ
+// callsign cache — see cacheMaxSize), so an entry's /dev/shm file can be
+// evicted while the callsign itself is still cached and its in-memory
+// imageCacheEntry (and TTL) has not yet expired. If that happens here, we
+// already know srcURL from the caller (it came straight from the cached
+// QRZCallsign) so we transparently discard the stale entry and kick off a
+// fresh fetch — no QRZ XML API call is needed.
 func (s *ImageProxyService) Register(srcURL string) string {
 	if srcURL == "" {
 		return ""
@@ -100,10 +119,27 @@ func (s *ImageProxyService) Register(srcURL string) string {
 	}
 
 	s.mu.Lock()
-	// Return existing non-expired entry for this URL.
+	// Reuse an existing non-expired entry for this URL, provided its file
+	// is still on disk (or its fetch is still in flight).
 	if entry, ok := s.byURL[srcURL]; ok && time.Now().Before(entry.expiresAt) {
-		s.mu.Unlock()
-		return "/api/lookup/image/" + entry.imageUUID
+		select {
+		case <-entry.ready:
+			// Fetch has completed. Verify the file is still present on disk —
+			// it may have been evicted independently of this map entry (e.g.
+			// by the image cache size cap) even though the TTL hasn't expired.
+			if entry.err == nil && s.fileExists(entry.imageUUID) {
+				s.mu.Unlock()
+				return "/api/lookup/image/" + entry.imageUUID
+			}
+			// Stale/missing on disk — remove the dead entry and fall through
+			// to create + fetch a fresh one below (same srcURL, no XML call).
+			delete(s.byUUID, entry.imageUUID)
+			delete(s.byURL, srcURL)
+		default:
+			// Fetch still in flight — safe to hand out as-is.
+			s.mu.Unlock()
+			return "/api/lookup/image/" + entry.imageUUID
+		}
 	}
 
 	// Create a new entry.
@@ -116,6 +152,7 @@ func (s *ImageProxyService) Register(srcURL string) string {
 	}
 	s.byUUID[imgUUID] = entry
 	s.byURL[srcURL] = entry
+	s.enforceCacheLimitLocked()
 	s.mu.Unlock()
 
 	// Fetch in the background; singleflight deduplicates concurrent calls
@@ -128,6 +165,73 @@ func (s *ImageProxyService) Register(srcURL string) string {
 	}()
 
 	return "/api/lookup/image/" + imgUUID
+}
+
+// fileExists reports whether a non-empty file for the given image UUID is
+// currently present in imageProxyDir.
+func (s *ImageProxyService) fileExists(imgUUID string) bool {
+	info, err := os.Stat(filepath.Join(imageProxyDir, imgUUID))
+	return err == nil && info.Size() > 0
+}
+
+// enforceCacheLimitLocked evicts entries once the configured cacheMaxSize is
+// exceeded (0 = unlimited). Expired entries are evicted first; if still over
+// the limit, entries closest to expiry are removed next. Must be called with
+// s.mu held (write lock).
+func (s *ImageProxyService) enforceCacheLimitLocked() {
+	if s.cacheMaxSize <= 0 || len(s.byUUID) <= s.cacheMaxSize {
+		return
+	}
+
+	// Phase 1: evict all expired entries.
+	now := time.Now()
+	for imgUUID, entry := range s.byUUID {
+		if now.After(entry.expiresAt) {
+			delete(s.byUUID, imgUUID)
+			delete(s.byURL, entry.srcURL)
+			_ = os.Remove(filepath.Join(imageProxyDir, imgUUID))
+		}
+	}
+	if len(s.byUUID) <= s.cacheMaxSize {
+		return
+	}
+
+	// Phase 2: still over limit — evict the entries closest to expiry
+	// (least remaining value) until we're back under the cap.
+	type kv struct {
+		uuid      string
+		expiresAt time.Time
+	}
+	entries := make([]kv, 0, len(s.byUUID))
+	for imgUUID, entry := range s.byUUID {
+		entries = append(entries, kv{imgUUID, entry.expiresAt})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].expiresAt.Before(entries[j].expiresAt)
+	})
+	for _, e := range entries {
+		if len(s.byUUID) <= s.cacheMaxSize {
+			break
+		}
+		if entry, ok := s.byUUID[e.uuid]; ok {
+			delete(s.byUUID, e.uuid)
+			delete(s.byURL, entry.srcURL)
+			_ = os.Remove(filepath.Join(imageProxyDir, e.uuid))
+		}
+	}
+}
+
+// CacheSize returns the number of entries currently tracked by the image
+// proxy cache.
+func (s *ImageProxyService) CacheSize() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.byUUID)
+}
+
+// CacheMaxSize returns the configured maximum image cache size (0 = unlimited).
+func (s *ImageProxyService) CacheMaxSize() int {
+	return s.cacheMaxSize
 }
 
 // fetchAndStore downloads the image from entry.srcURL and writes it to
@@ -196,6 +300,11 @@ func (s *ImageProxyService) fetchAndStore(entry *imageCacheEntry) {
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		entry.err = fmt.Errorf("image-proxy: writing to %s: %w", path, err)
 		log.Printf("[image-proxy] write error: %v", err)
+		// os.WriteFile creates (and truncates) the file before writing, so a
+		// failure part-way (e.g. /dev/shm full) can leave a zero-byte or
+		// partial file behind.  Remove it so it isn't picked up as a valid
+		// cached image on a later run and doesn't waste space until the sweep.
+		_ = os.Remove(path)
 		return
 	}
 }

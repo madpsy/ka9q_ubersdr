@@ -157,6 +157,7 @@ type qrzHourlyBucket struct {
 	hourTag     int64         // absolute unix-hour (unixSeconds/3600) this bucket currently represents
 	totalCalls  int64         // total real outbound QRZ API calls made in this hour
 	statusCodes map[int]int64 // HTTP status code -> count (qrzNetworkErrorStatus for transport failures)
+	cacheHits   int64         // number of Lookup() calls served from cache (no outbound HTTP request)
 }
 
 // qrzHourlyStats tracks the number of real outbound QRZ.com API calls made
@@ -190,16 +191,37 @@ func (h *qrzHourlyStats) record(statusCode int) {
 		b.hourTag = hour
 		b.totalCalls = 0
 		b.statusCodes = make(map[int]int64)
+		b.cacheHits = 0
 	}
 	b.totalCalls++
 	b.statusCodes[statusCode]++
+}
+
+// recordHit increments the cache-hit counter for the current UTC hour,
+// resetting the bucket first if it currently holds data for a different
+// (stale) hour.  Called from Lookup() whenever cacheGet() returns true.
+func (h *qrzHourlyStats) recordHit() {
+	hour := time.Now().Unix() / 3600
+	idx := hour % qrzHourlyStatsBuckets
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	b := &h.buckets[idx]
+	if b.hourTag != hour {
+		b.hourTag = hour
+		b.totalCalls = 0
+		b.statusCodes = make(map[int]int64)
+		b.cacheHits = 0
+	}
+	b.cacheHits++
 }
 
 // QRZHourlyStat is a single hour's call count and status-code breakdown,
 // returned by Snapshot.
 type QRZHourlyStat struct {
 	HourStart   time.Time        `json:"hour_start"`             // UTC start of the hour
-	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that hour
+	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that hour (cache misses that hit the network)
+	CacheHits   int64            `json:"cache_hits"`             // number of Lookup() calls served from cache in that hour
 	StatusCodes map[string]int64 `json:"status_codes,omitempty"` // HTTP status code (as string) -> count; key "0" = network/transport error
 }
 
@@ -224,6 +246,7 @@ func (h *qrzHourlyStats) Snapshot() []QRZHourlyStat {
 		b := &h.buckets[idx]
 		if b.hourTag == hour {
 			stat.Calls = b.totalCalls
+			stat.CacheHits = b.cacheHits
 			if len(b.statusCodes) > 0 {
 				stat.StatusCodes = make(map[string]int64, len(b.statusCodes))
 				for code, count := range b.statusCodes {
@@ -246,6 +269,16 @@ func (h *qrzHourlyStats) Total24h() int64 {
 	return total
 }
 
+// TotalHits24h returns the sum of cache hits across all retained hourly buckets.
+func (h *qrzHourlyStats) TotalHits24h() int64 {
+	stats := h.Snapshot()
+	var total int64
+	for _, s := range stats {
+		total += s.CacheHits
+	}
+	return total
+}
+
 // ---------------------------------------------------------------------------
 // Per-minute API call statistics (current-hour detail)
 // ---------------------------------------------------------------------------
@@ -260,6 +293,7 @@ type qrzMinuteBucket struct {
 	minuteTag   int64         // absolute unix-minute (unixSeconds/60) this bucket currently represents
 	totalCalls  int64         // total real outbound QRZ API calls made in this minute
 	statusCodes map[int]int64 // HTTP status code -> count (qrzNetworkErrorStatus for transport failures)
+	cacheHits   int64         // number of Lookup() calls served from cache in this minute
 }
 
 // qrzMinuteStats mirrors qrzHourlyStats but at 1-minute granularity,
@@ -284,16 +318,37 @@ func (m *qrzMinuteStats) record(statusCode int) {
 		b.minuteTag = minute
 		b.totalCalls = 0
 		b.statusCodes = make(map[int]int64)
+		b.cacheHits = 0
 	}
 	b.totalCalls++
 	b.statusCodes[statusCode]++
+}
+
+// recordHit increments the cache-hit counter for the current UTC minute,
+// resetting the bucket first if it currently holds data for a different
+// (stale) minute.  Called from Lookup() whenever cacheGet() returns true.
+func (m *qrzMinuteStats) recordHit() {
+	minute := time.Now().Unix() / 60
+	idx := minute % qrzMinuteStatsBuckets
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b := &m.buckets[idx]
+	if b.minuteTag != minute {
+		b.minuteTag = minute
+		b.totalCalls = 0
+		b.statusCodes = make(map[int]int64)
+		b.cacheHits = 0
+	}
+	b.cacheHits++
 }
 
 // QRZMinuteStat is a single minute's call count and status-code breakdown,
 // returned by CurrentHourSnapshot.
 type QRZMinuteStat struct {
 	MinuteStart time.Time        `json:"minute_start"`           // UTC start of the minute
-	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that minute
+	Calls       int64            `json:"calls"`                  // number of real QRZ API calls made in that minute (cache misses that hit the network)
+	CacheHits   int64            `json:"cache_hits"`             // number of Lookup() calls served from cache in that minute
 	StatusCodes map[string]int64 `json:"status_codes,omitempty"` // HTTP status code (as string) -> count; key "0" = network/transport error
 }
 
@@ -320,6 +375,7 @@ func (m *qrzMinuteStats) CurrentHourSnapshot() []QRZMinuteStat {
 		b := &m.buckets[idx]
 		if b.minuteTag == minute {
 			stat.Calls = b.totalCalls
+			stat.CacheHits = b.cacheHits
 			if len(b.statusCodes) > 0 {
 				stat.StatusCodes = make(map[string]int64, len(b.statusCodes))
 				for code, count := range b.statusCodes {
@@ -519,6 +575,8 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	// cacheGet returns (result, true) on hit (result may be nil = cached not-found),
 	// and (nil, false) on miss.
 	if cs, hit := s.cacheGet(call); hit {
+		s.apiCallStats.recordHit()
+		s.apiCallMinuteStats.recordHit()
 		return cs, nil
 	}
 
@@ -695,6 +753,25 @@ func (s *QRZService) HourlyAPICallStats() []QRZHourlyStat {
 // TotalAPICalls24h returns the total number of real outbound QRZ.com API
 // calls made across the last 24 hours.
 func (s *QRZService) TotalAPICalls24h() int64 {
+	return s.apiCallStats.Total24h()
+}
+
+// TotalCacheHits24h returns the total number of Lookup() calls served from
+// cache (no outbound HTTP request) across the last 24 hours.
+func (s *QRZService) TotalCacheHits24h() int64 {
+	return s.apiCallStats.TotalHits24h()
+}
+
+// TotalCacheMisses24h returns the total number of Lookup() calls that were
+// NOT served from cache (i.e. went to singleflight/network) across the last
+// 24 hours.  This equals TotalAPICalls24h() plus any singleflight waiters
+// that shared a result without making their own HTTP request.
+//
+// Note: the current implementation counts only genuine outbound HTTP requests
+// (via apiCallStats) as "misses" for simplicity — singleflight waiters are
+// not separately tracked.  For the purposes of the hit/miss ratio card this
+// is a reasonable approximation.
+func (s *QRZService) TotalCacheMisses24h() int64 {
 	return s.apiCallStats.Total24h()
 }
 

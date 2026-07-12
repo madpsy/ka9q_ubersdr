@@ -630,8 +630,8 @@ func main() {
 			} else {
 				globalQRZService = NewQRZService(config.LookupServices.QRZ, config.LookupServices.CacheMaxSize)
 				log.Printf("QRZ lookup service initialised (provider: qrz, user: %s)", config.LookupServices.QRZ.Username)
-				globalImageProxy = NewImageProxyService()
-				log.Printf("Image proxy service initialised (storage: %s)", imageProxyDir)
+				globalImageProxy = NewImageProxyService(config.LookupServices.ImageCacheMaxSize)
+				log.Printf("Image proxy service initialised (storage: %s, max images: %d)", imageProxyDir, config.LookupServices.ImageCacheMaxSize)
 				// When the QRZ cache evicts a callsign entry (expiry or size cap),
 				// also evict the associated proxied image from /dev/shm.
 				globalQRZService.SetEvictCallback(func(cs *QRZCallsign) {

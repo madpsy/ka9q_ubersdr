@@ -18213,6 +18213,7 @@ const tooltipLine2 = timeStr;
 
         // Builds one dataset per status category from an array of entries that
         // each have a `status_codes` map (or undefined/null for zero-call buckets).
+        // All datasets share stack: 'api_calls' so they stack together as one bar group.
         function buildLookupStatusDatasets(entries) {
             const perCategory = {};
             lookupStatusCategoryOrder.forEach(cat => { perCategory[cat] = entries.map(() => 0); });
@@ -18232,8 +18233,37 @@ const tooltipLine2 = timeStr;
                     data: perCategory[cat],
                     backgroundColor: lookupStatusCategoryMeta[cat].color,
                     borderWidth: 0,
-                    stack: 'calls'
+                    stack: 'api_calls'
                 }));
+        }
+
+        // Builds two datasets (Cache Hit + Cache Miss) from an array of entries
+        // that each have `cache_hits` and `calls` fields.  Both share
+        // stack: 'cache' so they form a second stacked bar group alongside the
+        // API-call bar group produced by buildLookupStatusDatasets().
+        // Returns an empty array when there is no hit/miss data at all (e.g.
+        // the service has just started and no lookups have been made yet).
+        function buildLookupCacheDatasets(entries) {
+            const hits   = entries.map(e => e.cache_hits || 0);
+            const misses = entries.map(e => e.calls      || 0);
+            const anyData = hits.some(v => v > 0) || misses.some(v => v > 0);
+            if (!anyData) return [];
+            return [
+                {
+                    label: 'Cache Hit',
+                    data: hits,
+                    backgroundColor: 'rgba(40,167,69,0.55)',
+                    borderWidth: 0,
+                    stack: 'cache'
+                },
+                {
+                    label: 'Cache Miss',
+                    data: misses,
+                    backgroundColor: 'rgba(220,53,69,0.45)',
+                    borderWidth: 0,
+                    stack: 'cache'
+                }
+            ];
         }
 
         async function loadLookupStats() {
@@ -18264,6 +18294,19 @@ const tooltipLine2 = timeStr;
                     const cachePct = data.cache_max_size > 0
                         ? Math.round((data.cache_size / data.cache_max_size) * 100)
                         : null;
+                    const imgCacheMax = data.image_cache_max_size > 0 ? data.image_cache_max_size : '∞';
+                    const imgCachePct = data.image_cache_max_size > 0
+                        ? Math.round((data.image_cache_size / data.image_cache_max_size) * 100)
+                        : null;
+                    // Hit/miss ratio card
+                    const totalHits   = data.cache_hits_24h   || 0;
+                    const totalMisses = data.cache_misses_24h || 0;
+                    const totalLookups = totalHits + totalMisses;
+                    const hitRatioPct = totalLookups > 0 ? Math.round((totalHits / totalLookups) * 100) : null;
+                    const hitRatioColor = hitRatioPct === null ? '#666'
+                        : hitRatioPct >= 80 ? '#28a745'
+                        : hitRatioPct >= 50 ? '#ff8c00'
+                        : '#dc3545';
                     displayDiv.innerHTML = `
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
                             <div style="text-align: center;">
@@ -18283,6 +18326,20 @@ const tooltipLine2 = timeStr;
                                 <div style="font-size: 28px; font-weight: bold; color: ${cachePct >= 90 ? '#dc3545' : cachePct >= 70 ? '#ff8c00' : '#28a745'};">${cachePct}%</div>
                                 <div style="font-size: 12px; color: #666;">Cache Utilisation</div>
                             </div>` : ''}
+                            ${hitRatioPct !== null ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: ${hitRatioColor};">${hitRatioPct}%</div>
+                                <div style="font-size: 12px; color: #666;">Hit Rate (24h)</div>
+                            </div>` : ''}
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: #17a2b8;">${data.image_cache_size}</div>
+                                <div style="font-size: 12px; color: #666;">Cached Images${imgCacheMax !== '∞' ? ` / ${imgCacheMax}` : ''}</div>
+                            </div>
+                            ${imgCachePct !== null ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: ${imgCachePct >= 90 ? '#dc3545' : imgCachePct >= 70 ? '#ff8c00' : '#28a745'};">${imgCachePct}%</div>
+                                <div style="font-size: 12px; color: #666;">Image Cache Utilisation</div>
+                            </div>` : ''}
                         </div>
                     `;
                 }
@@ -18292,7 +18349,10 @@ const tooltipLine2 = timeStr;
                 const minuteCanvas = document.getElementById('lookupStatsMinuteCanvas');
                 if (minuteCanvas && minuteEntries.length > 0) {
                     const minuteLabels = minuteEntries.map(e => new Date(e.minute_start));
-                    const minuteDatasets = buildLookupStatusDatasets(minuteEntries);
+                    const minuteDatasets = [
+                        ...buildLookupStatusDatasets(minuteEntries),
+                        ...buildLookupCacheDatasets(minuteEntries)
+                    ];
 
                     if (!lookupStatsMinuteChart) {
                         const ctx = minuteCanvas.getContext('2d');
@@ -18319,7 +18379,7 @@ const tooltipLine2 = timeStr;
                                     y: {
                                         stacked: true,
                                         beginAtZero: true,
-                                        title: { display: true, text: 'API Calls' },
+                                        title: { display: true, text: 'Lookups' },
                                         ticks: { precision: 0 }
                                     }
                                 }
@@ -18337,7 +18397,10 @@ const tooltipLine2 = timeStr;
                 const hourlyCanvas = document.getElementById('lookupStatsHourlyCanvas');
                 if (hourlyCanvas && hourlyEntries.length > 0) {
                     const hourlyLabels = hourlyEntries.map(e => new Date(e.hour_start));
-                    const hourlyDatasets = buildLookupStatusDatasets(hourlyEntries);
+                    const hourlyDatasets = [
+                        ...buildLookupStatusDatasets(hourlyEntries),
+                        ...buildLookupCacheDatasets(hourlyEntries)
+                    ];
 
                     if (!lookupStatsHourlyChart) {
                         const ctx = hourlyCanvas.getContext('2d');
@@ -18364,7 +18427,7 @@ const tooltipLine2 = timeStr;
                                     y: {
                                         stacked: true,
                                         beginAtZero: true,
-                                        title: { display: true, text: 'API Calls' },
+                                        title: { display: true, text: 'Lookups' },
                                         ticks: { precision: 0 }
                                     }
                                 }
@@ -19748,7 +19811,7 @@ const tooltipLine2 = timeStr;
 
                     if (hasNotificationsIssues) {
                         const li = document.createElement('li');
-                        const errCount = data.notifications.stats ? data.notifications.stats.TotalErrors : 0;
+                        const errCount = data.notifications.stats ? data.notifications.stats.total_errors : 0;
                         const isCritical = data.notifications.status === 'critical';
                         li.innerHTML = '<strong>Notifications:</strong> ' + (isCritical ? '🚨 Critical — ' : '⚠️ ') + errCount + ' delivery error' + (errCount !== 1 ? 's' : '') + ' since server start';
                         issuesList.appendChild(li);
@@ -20091,12 +20154,12 @@ const tooltipLine2 = timeStr;
             const channels = data.channels || [];
             const totalRules = data.total_rules || 0;
             const enabledRules = data.enabled_rules || 0;
-            const totalSent = stats.TotalSent || 0;
-            const totalErrors = stats.TotalErrors || 0;
-            const totalRateLimited = stats.TotalRateLimited || 0;
-            const byRule = stats.ByRule || {};
-            const byRuleErrors = stats.ByRuleErrors || {};
-            const byRuleRateLimited = stats.ByRuleRateLimited || {};
+            const totalSent = stats.total_sent || 0;
+            const totalErrors = stats.total_errors || 0;
+            const totalRateLimited = stats.total_rate_limited || 0;
+            const byRule = stats.by_rule || {};
+            const byRuleErrors = stats.by_rule_errors || {};
+            const byRuleRateLimited = stats.by_rule_rate_limited || {};
 
             // Use backend-computed status (ok / warning / critical)
             const overallStatus = data.status || (totalErrors > 0 ? 'warning' : 'ok');

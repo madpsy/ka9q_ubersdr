@@ -5588,46 +5588,26 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ── Browser Extension Detected Indicator ────────────────────────────────────
-   A small pulsing blue dot shown in two places when the UberSDR browser
-   extension (Chrome or Firefox) is detected on the page:
-     1. .extension-detected-dot  — top-right of .spectrum-display-panel
-     2. .extension-detected-dot-inline — inline next to the 🖥️ in the overlay
-   Both share the same pulse animation. */
+   A favicon icon shown top-right of .spectrum-display-panel when the UberSDR
+   browser extension (Chrome or Firefox) is detected on the page. */
 
-@keyframes extension-dot-pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
-    70%  { box-shadow: 0 0 0 5px rgba(52, 152, 219, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
-}
-
-/* Spectrum-panel dot: absolutely positioned top-right of .spectrum-display-panel
-   (which has position:relative set inline in index.html). Scrolls with the page. */
+/* Absolutely positioned inside .spectrum-display-panel (position:relative).
+   Scrolls with the page. */
 .extension-detected-dot {
     position: absolute;
-    top: 8px;
+    top: 14px;
     right: 8px;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #3498db;
-    border: 1.5px solid rgba(255, 255, 255, 0.6);
-    animation: extension-dot-pulse 2s ease-in-out infinite;
+    width: 20px;
+    height: 20px;
+    background: transparent url('/images/favicon-32x32.png') center / contain no-repeat;
+    border: none;
+    border-radius: 0;
+    animation: none;
     cursor: default;
     z-index: 99999;
     pointer-events: auto;
+    opacity: 0.85;
 }
-
-/* Inline dot: sits next to text in the overlay location line */
-.extension-detected-dot-inline {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #3498db;
-    border: 1.5px solid rgba(255, 255, 255, 0.5);
-    animation: extension-dot-pulse 2s ease-in-out infinite;
-    cursor: default;
-    vertical-align: middle;
-    margin-left: 4px;
-    flex-shrink: 0;
+.extension-detected-dot:hover {
+    opacity: 1;
 }

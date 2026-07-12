@@ -3780,30 +3780,12 @@ async function fetchSiteDescription() {
 
                     // Add user location info or nothing if not available
                     if (userLocationText) {
-                        const locationInfo = document.createElement('div');
-                        locationInfo.id = 'overlay-location-line';
+                        const locationInfo = document.createElement('p');
                         locationInfo.style.marginTop = '5px';
                         locationInfo.style.fontSize = '12px';
                         locationInfo.style.textAlign = 'center';
                         locationInfo.style.color = '#ecf0f1';
-                        locationInfo.style.display = 'flex';
-                        locationInfo.style.alignItems = 'center';
-                        locationInfo.style.justifyContent = 'center';
-                        locationInfo.style.gap = '0';
-
-                        const locationText = document.createElement('span');
-                        locationText.textContent = userLocationText;
-                        locationInfo.appendChild(locationText);
-
-                        // If extension already detected, append the inline dot immediately
-                        if (window.uberSDRBridgeDetected) {
-                            const dot = document.createElement('span');
-                            dot.className = 'extension-detected-dot-inline';
-                            dot.title = 'Browser Extension Detected';
-                            dot.setAttribute('aria-label', 'Browser Extension Detected');
-                            locationInfo.appendChild(dot);
-                        }
-
+                        locationInfo.textContent = userLocationText;
                         descriptionEl.appendChild(locationInfo);
                     }
                 }
@@ -17181,20 +17163,10 @@ function initControlsDock() {
 
 (function () {
     function showExtensionDots() {
-        // 1. Bookmark-area dot
+        // Spectrum-panel favicon icon
         const bookmarkDot = document.getElementById('extension-detected-dot');
         if (bookmarkDot) {
             bookmarkDot.style.display = '';
-        }
-
-        // 2. Overlay location line inline dot (only add if not already there)
-        const locationLine = document.getElementById('overlay-location-line');
-        if (locationLine && !locationLine.querySelector('.extension-detected-dot-inline')) {
-            const dot = document.createElement('span');
-            dot.className = 'extension-detected-dot-inline';
-            dot.title = 'Browser Extension Detected';
-            dot.setAttribute('aria-label', 'Browser Extension Detected');
-            locationLine.appendChild(dot);
         }
     }
 

@@ -209,17 +209,35 @@
         }
 
         // Static groups from frontend-pages.json
+        // Skip groups (or individual items) whose depends_on key is falsy in apiDescription
+        const apiDesc = window.apiDescription || {};
+
+        function isEnabled(key) {
+            if (!key) return true;
+            const val = apiDesc[key];
+            return !!val && !(Array.isArray(val) && val.length === 0);
+        }
+
         (data.groups || []).forEach(group => {
-            const links = (group.files || []).map(file => ({
-                url:     '/' + file.path.replace(/^static\//, ''),
-                label:   file.name,
-                tooltip: file.description || '',
-            }));
+            // Skip the whole group if its depends_on is not met
+            if (!isEnabled(group.depends_on)) return;
+
+            // Filter individual files by their own depends_on
+            const links = (group.files || [])
+                .filter(file => isEnabled(file.depends_on))
+                .map(file => ({
+                    url:     '/' + file.path.replace(/^static\//, ''),
+                    label:   file.name,
+                    tooltip: file.description || '',
+                }));
+
+            // Skip the group if all items were filtered out
+            if (links.length === 0) return;
+
             addGroupRow(group.group, links);
         });
 
         // Dynamic Add-ons group from window.apiDescription
-        const apiDesc = window.apiDescription;
         if (apiDesc && Array.isArray(apiDesc.addons) && apiDesc.addons.length > 0) {
             const addonLinks = apiDesc.addons.map(name => ({
                 url:   `/addon/${name}/`,

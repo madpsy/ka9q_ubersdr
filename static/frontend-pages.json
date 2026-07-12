@@ -22,6 +22,7 @@
     },
     {
       "group": "Noise Floor",
+      "depends_on": "noise_floor",
       "files": [
         {
           "path": "static/noisefloor.html",
@@ -42,6 +43,7 @@
     },
     {
       "group": "Digital Decoders",
+      "depends_on": "digital_decodes",
       "files": [
         {
           "path": "static/decoder_spots_history.html",
@@ -77,6 +79,7 @@
     },
     {
       "group": "CW Skimmer",
+      "depends_on": "cw_skimmer",
       "files": [
         {
           "path": "static/cwskimmer_map.html",
@@ -106,11 +109,13 @@
         {
           "path": "static/rotator.html",
           "name": "Rotator Control",
+          "depends_on": "rotator",
           "description": "Antenna rotator control interface with compass display, target bearing input, and real-time position feedback."
         },
         {
           "path": "static/switch.html",
           "name": "Antenna Switch Control",
+          "depends_on": "ant_switch",
           "description": "Control panel for managing antenna switch positions, allowing selection between multiple antennas or ports."
         }
       ]

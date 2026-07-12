@@ -2435,7 +2435,6 @@ class ChatUI {
      * Update active users list
      */
     updateActiveUsers(data) {
-        console.log('[ChatUI] Received active users update:', data);
 
         document.getElementById('chat-user-count').textContent = data.count;
 
@@ -2483,7 +2482,6 @@ class ChatUI {
         });
 
         const userItems = sortedUsers.map(u => {
-            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx, 'idle_minutes:', u.idle_minutes, 'country_code:', u.country_code);
 
             // Check if this is our own user
             const isOurUser = u.username === ourUsername;
@@ -2582,7 +2580,6 @@ class ChatUI {
      * Update the stored activeUsers array with the new data
      */
     updateSingleUser(userData) {
-        console.log('[ChatUI] User update received for:', userData.username);
         // Update the user in the activeUsers array
         const userIndex = this.chat.activeUsers.findIndex(u => u.username === userData.username);
         if (userIndex >= 0) {

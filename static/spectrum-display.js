@@ -6888,6 +6888,5 @@ class SpectrumDisplay {
             this.drawTunedFrequencyCursor();
         }
 
-        console.log(`[setWaterfallHeight] waterfall=${newH}px, full=${this.fullHeight}px, splitMode=${lineGraphVisible}`);
     }
 }

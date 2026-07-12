@@ -189,7 +189,6 @@ class UberSDRChat {
      * Handle incoming chat messages
      */
     handleChatMessage(msg) {
-        console.log('[Chat] Received message type:', msg.type, 'data:', msg.data);
 
         switch(msg.type) {
             case 'chat_message':
@@ -220,7 +219,6 @@ class UberSDRChat {
                 break;
                 
             case 'chat_user_update':
-                console.log('[Chat] Received user update:', msg.data);
                 this.emit('user_update', msg.data);
                 break;
                 
@@ -619,16 +617,13 @@ class UberSDRChat {
      * Always reads fresh values from app.js globals to ensure accuracy
      */
     sendFrequencyMode() {
-        console.log('[Chat] sendFrequencyMode called, username:', this.username);
 
         if (!this.username) {
-            console.log('[Chat] No username set, skipping send');
             // Don't send if not joined chat
             return false;
         }
 
         const ws = this.getWebSocket();
-        console.log('[Chat] WebSocket state:', ws ? ws.readyState : 'no ws', 'OPEN=', WebSocket.OPEN);
 
         if (ws && ws.readyState === WebSocket.OPEN) {
             // Always read fresh values from app.js globals to ensure we send current state
@@ -662,7 +657,6 @@ class UberSDRChat {
                 payload.zoom_bw = currentZoomBW;
             }
 
-            console.log('[Chat] Sending frequency/mode update:', payload);
             ws.send(JSON.stringify(payload));
 
             // Update last sent values
@@ -676,7 +670,6 @@ class UberSDRChat {
         } else {
             // Don't emit error for frequency/mode updates - they're debounced and will retry
             // This prevents spamming "WebSocket not connected" errors during reconnection
-            console.log('[Chat] WebSocket not ready for frequency/mode update, will retry on next change');
             return false;
         }
     }

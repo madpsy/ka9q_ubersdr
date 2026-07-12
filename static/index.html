@@ -58,6 +58,9 @@
         location.replace(location.pathname + '?' + params.toString() + location.hash);
     })();
     </script>
+    <!-- Browser extension detector — must load early so window.uberSDRBridgeDetected
+         is defined before any other script reads it. Plain (non-module) script. -->
+    <script src="browser-extension-detector.js"></script>
     <!-- Opus decoder for handling Opus-compressed audio -->
     <script src="opus-decoder.min.js"></script>
     <!-- JSZip for creating ZIP files -->
@@ -540,13 +543,15 @@
                 <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Select Band...</option>
                 </select>
-                <div style="display: flex; gap: 5px; margin-top: 5px;">
+                <div style="display: flex; gap: 5px; margin-top: 5px; position: relative;">
                     <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
                         <option value="">📡 Server Bookmarks...</option>
                     </select>
                     <select id="local-bookmark-selector" onchange="selectLocalBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
                         <option value="">⭐ My Bookmarks...</option>
                     </select>
+                    <!-- Blue dot shown when browser extension is detected -->
+                    <span id="extension-detected-dot" class="extension-detected-dot" title="Browser Extension Detected" style="display:none;" aria-label="Browser Extension Detected"></span>
                 </div>
                 <div id="extensions-row" style="display: flex; gap: 5px; margin-top: 5px;">
                     <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 100%;">

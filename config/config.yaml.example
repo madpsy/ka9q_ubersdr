@@ -2044,11 +2044,11 @@ lookup_services:
   # Set to 0 to disable rate limiting (not recommended for public instances).
   rate_limit_per_minute: 10
 
-  # Maximum number of callsign results to hold in memory (default: 1000)
+  # Maximum number of callsign results to hold in memory (default: 2500)
   # When the limit is reached, expired entries are evicted first; if still over
   # the limit, entries closest to expiry are removed to make room.
   # Set to 0 to disable the limit (not recommended for public instances).
-  cache_max_size: 1000
+  cache_max_size: 2500
 
   # Maximum number of proxied QRZ profile images to hold on disk (/dev/shm)
   # and in memory at once (default: 100).

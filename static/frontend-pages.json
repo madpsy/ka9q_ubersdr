@@ -1,0 +1,159 @@
+{
+  "groups": [
+    {
+      "group": "Propagation & Band Conditions",
+      "files": [
+        {
+          "path": "static/bandconditions.html",
+          "name": "Band Conditions",
+          "description": "Displays current HF band propagation conditions, including solar indices and band-by-band status summaries."
+        },
+        {
+          "path": "static/spaceweather_history.html",
+          "name": "Space Weather History",
+          "description": "Historical charts of space weather data including solar flux, A-index, K-index, and other propagation-relevant metrics over time."
+        },
+        {
+          "path": "static/ncdxf_beacons.html",
+          "name": "NCDXF/IARU Beacon Tracker",
+          "description": "Tracks and displays the NCDXF/IARU international beacon network, showing which beacons are currently transmitting and on which bands."
+        }
+      ]
+    },
+    {
+      "group": "Noise Floor",
+      "files": [
+        {
+          "path": "static/noisefloor.html",
+          "name": "Noise Floor Monitor",
+          "description": "Real-time and historical noise floor monitoring per band, helping identify interference trends and RFI sources."
+        },
+        {
+          "path": "static/noisefloor_aggregate.html",
+          "name": "Noise Floor Aggregate Analysis",
+          "description": "Aggregated noise floor analysis across multiple bands and time periods, useful for long-term interference assessment."
+        },
+        {
+          "path": "static/spectrogram.html",
+          "name": "Wideband Spectrogram",
+          "description": "Full 0–30 MHz wideband spectrogram viewer showing real-time signal activity across the entire HF spectrum."
+        }
+      ]
+    },
+    {
+      "group": "Digital Decoders",
+      "files": [
+        {
+          "path": "static/decoder_feed.html",
+          "name": "Digital Decoder Feed",
+          "description": "Live feed of decoded digital mode spots (FT8, WSPR, etc.) from the on-board multi-band decoders."
+        },
+        {
+          "path": "static/decoder_spots_history.html",
+          "name": "Decoder Spots History",
+          "description": "Searchable and filterable history of all digital mode spots decoded by the system, with map and table views."
+        },
+        {
+          "path": "static/decoder_spots_analytics.html",
+          "name": "Decoder Spots Analytics",
+          "description": "Analytics and charts for decoded digital spots, showing trends by band, mode, and time of day."
+        },
+        {
+          "path": "static/decode_metrics.html",
+          "name": "Decode Metrics",
+          "description": "Detailed performance metrics for each decoder instance, including decode counts, error rates, and resource usage."
+        },
+        {
+          "path": "static/decode_rates.html",
+          "name": "Decode Rates",
+          "description": "Real-time activity charts showing decode rates per band and mode, giving a live view of decoder throughput."
+        },
+        {
+          "path": "static/digitalspots_map.html",
+          "name": "Digital Spots Map",
+          "description": "Interactive world map plotting decoded digital mode spots, showing propagation paths from decoded callsigns."
+        },
+        {
+          "path": "static/pskreporter_analytics.html",
+          "name": "PSKReporter Analytics",
+          "description": "Analytics dashboard for spots submitted to PSKReporter, showing reception reports and propagation statistics."
+        }
+      ]
+    },
+    {
+      "group": "CW Skimmer",
+      "files": [
+        {
+          "path": "static/cwskimmer_feed.html",
+          "name": "CW Skimmer Feed",
+          "description": "Live feed of CW (Morse code) spots decoded by the integrated CW skimmer, with callsign, frequency, and speed."
+        },
+        {
+          "path": "static/cwskimmer_map.html",
+          "name": "CW Skimmer Map",
+          "description": "Interactive map displaying CW spots from the skimmer, visualising propagation paths to decoded stations."
+        },
+        {
+          "path": "static/cw_spots_history.html",
+          "name": "CW Spots History",
+          "description": "Historical log of CW spots with filtering by callsign, band, and time range, with map and table views."
+        },
+        {
+          "path": "static/cw_spots_analytics.html",
+          "name": "CW Spots Analytics",
+          "description": "Charts and analytics for CW skimmer spots, showing activity trends by band, time, and callsign prefix."
+        },
+        {
+          "path": "static/cw_metrics.html",
+          "name": "CW Metrics",
+          "description": "Performance metrics for the CW skimmer, including decode counts, speed distribution, and band activity."
+        }
+      ]
+    },
+    {
+      "group": "Hardware Control",
+      "files": [
+        {
+          "path": "static/rotator.html",
+          "name": "Rotator Control",
+          "description": "Antenna rotator control interface with compass display, target bearing input, and real-time position feedback."
+        },
+        {
+          "path": "static/switch.html",
+          "name": "Antenna Switch Control",
+          "description": "Control panel for managing antenna switch positions, allowing selection between multiple antennas or ports."
+        }
+      ]
+    },
+    {
+      "group": "Statistics & Admin",
+      "files": [
+        {
+          "path": "static/session_stats.html",
+          "name": "Session Statistics",
+          "description": "Statistics about active and historical listener sessions, including connection counts, duration, and geographic distribution."
+        },
+        {
+          "path": "static/stats_history.html",
+          "name": "Stats History",
+          "description": "Historical charts of system-wide statistics such as listener counts, bandwidth usage, and decode activity over time."
+        },
+        {
+          "path": "static/admin.html",
+          "name": "Admin Configuration",
+          "description": "Full administrative control panel for configuring all aspects of the UberSDR instance, including radio settings, users, decoders, and system options."
+        }
+      ]
+    },
+    {
+      "group": "Fun",
+      "files": [
+        {
+          "path": "static/oldradio/index.html",
+          "name": "Old Radio Skin",
+          "description": "Alternative retro-styled radio interface skin with skeuomorphic controls, supporting Grundig and UK CB radio themes."
+        }
+      ]
+    }
+  ]
+}

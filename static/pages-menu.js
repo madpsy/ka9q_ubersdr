@@ -12,7 +12,7 @@
 (function () {
     'use strict';
 
-    const PAGES_JSON  = '/frontend-pages.json';
+    const PAGES_JSON  = '/api/pages-menu';
     const POPUP_W     = 1200;
     const POPUP_H     = 800;
 

@@ -2426,6 +2426,9 @@ func main() {
 	http.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
 		handleUIConfig(w, r, config, *configDir)
 	})
+	http.HandleFunc("/api/pages-menu", func(w http.ResponseWriter, r *http.Request) {
+		handlePagesMenu(w, r, *configDir)
+	})
 	http.HandleFunc("/api/spectrum-bg-image", func(w http.ResponseWriter, r *http.Request) {
 		adminHandler.HandleSpectrumBgImagePublic(w, r)
 	})
@@ -2748,6 +2751,7 @@ func main() {
 	http.HandleFunc("/admin/ui-config-export", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigExport))
 	http.HandleFunc("/admin/ui-config-import", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigImport))
 	http.HandleFunc("/admin/spectrum-bg-image", adminHandler.AuthMiddleware(adminHandler.HandleSpectrumBgImage))
+	http.HandleFunc("/admin/custom-links", adminHandler.AuthMiddleware(adminHandler.HandleCustomLinks))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))

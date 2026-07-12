@@ -2546,6 +2546,36 @@
                         <p>Loading UI configuration...</p>
                     </div>
 
+                    <!-- ── Custom Menu Links ────────────────────────────────────────── -->
+                    <div id="customLinksSection" style="margin-top: 32px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                        <h3 style="margin: 0 0 6px 0; color: #333; font-size: 16px;">🔗 Custom Menu Links</h3>
+                        <p style="margin: 0 0 12px 0; color: #555; font-size: 13px;">
+                            Add your own links to the <strong>Links</strong> menu visible to all users.
+                            You can inject links into any existing built-in group, add links to existing subgroups,
+                            or create entirely new groups. Built-in links are shown in grey and cannot be edited here.
+                        </p>
+                        <div class="alert alert-info" style="margin-bottom: 16px; font-size: 13px;">
+                            ✅ <strong>No server restart required.</strong> Changes take effect immediately after saving.
+                        </div>
+
+                        <div id="customLinksLoading" style="text-align:center; padding: 20px; color: #888;">
+                            <div class="spinner"></div>
+                            <p>Loading links…</p>
+                        </div>
+
+                        <div id="customLinksEditor" style="display:none;">
+                            <!-- Merged view rendered here by JS -->
+                            <div id="customLinksGroupList"></div>
+
+                            <div style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                                <button class="btn" onclick="customLinksAddNewGroup()" style="font-size: 13px; padding: 7px 14px;">+ Add New Group</button>
+                                <button class="btn" id="customLinksSaveBtn" onclick="customLinksSave()" style="font-size: 13px; padding: 7px 14px; background: linear-gradient(135deg,#667eea,#764ba2); color:#fff; border:none;">💾 Save Custom Links</button>
+                                <span id="customLinksUnsaved" style="display:none; color:#e67e22; font-size:12px; font-weight:600;">● Unsaved changes</span>
+                                <span id="customLinksSaveStatus" style="font-size:12px; color:#27ae60; display:none;"></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- ── Widgets ──────────────────────────────────────────────────── -->
                     <div id="widgetsSection" style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
                         <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
@@ -4094,6 +4124,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 document.getElementById('uiTab').classList.add('active');
                 document.getElementById('uiButtons').style.display = 'flex';
                 loadAdminUIConfig();
+                loadCustomLinks();
                 switchWidgetSubTab('browse');
             } else if (tab === 'proxy') {
                 activateTabBtn('proxy');
@@ -9222,6 +9253,870 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             } catch (e) {
                 inner.innerHTML = '<span style="color:#c00;font-size:13px;">⚠️ ' + e.message + '</span>';
+            }
+        }
+
+        // ── Custom Menu Links ─────────────────────────────────────────────────────
+
+        // Known depends_on feature keys (for the hint dropdown in the UI)
+        const CUSTOM_LINKS_DEPENDS_ON_KEYS = [
+            'cw_skimmer', 'noise_floor', 'digital_decodes', 'rotator', 'ant_switch'
+        ];
+
+        // State: the custom groups currently being edited (loaded from /admin/custom-links)
+        let customLinksData = { groups: [] };
+        // The last-saved snapshot (JSON string) — used to detect unsaved changes
+        let customLinksLastSaved = '';
+        // The built-in pages data (loaded from /frontend-pages.json) — read-only reference
+        let customLinksBuiltin = { groups: [] };
+        // Whether the editor has been loaded at least once this session
+        let customLinksLoaded = false;
+
+        /**
+         * Load both the built-in pages and the custom links, then render the editor.
+         * Idempotent — only fetches once per page load; subsequent tab visits re-render
+         * from the in-memory state unless a save has occurred.
+         */
+        async function loadCustomLinks() {
+            if (customLinksLoaded) {
+                // Re-render from current in-memory state (preserves unsaved edits)
+                customLinksRender();
+                return;
+            }
+
+            const loading = document.getElementById('customLinksLoading');
+            const editor  = document.getElementById('customLinksEditor');
+            if (loading) loading.style.display = 'block';
+            if (editor)  editor.style.display  = 'none';
+
+            try {
+                // Fetch both in parallel
+                const [builtinResp, customResp] = await Promise.all([
+                    fetch('/frontend-pages.json'),
+                    authenticatedFetch('/admin/custom-links'),
+                ]);
+
+                if (!builtinResp.ok) throw new Error('Failed to load frontend-pages.json');
+                if (!customResp)     throw new Error('Auth failed');
+                if (!customResp.ok)  throw new Error('Failed to load custom-links');
+
+                customLinksBuiltin = await builtinResp.json();
+                customLinksData    = await customResp.json();
+                if (!Array.isArray(customLinksData.groups)) customLinksData.groups = [];
+
+                customLinksLastSaved = JSON.stringify(customLinksData);
+                customLinksLoaded = true;
+
+                if (loading) loading.style.display = 'none';
+                if (editor)  editor.style.display  = 'block';
+                customLinksRender();
+            } catch (err) {
+                if (loading) loading.innerHTML = `<p style="color:#c0392b;">Error loading custom links: ${err.message}</p>`;
+                console.error('[custom-links]', err);
+            }
+        }
+
+        /**
+         * Mark the editor as having unsaved changes.
+         */
+        function customLinksDirty() {
+            const unsaved = document.getElementById('customLinksUnsaved');
+            const status  = document.getElementById('customLinksSaveStatus');
+            if (unsaved) unsaved.style.display = 'inline';
+            if (status)  status.style.display  = 'none';
+        }
+
+        /**
+         * Render the full merged view: built-in groups (read-only) followed by
+         * any new groups that don't match a built-in name.
+         *
+         * For each built-in group we show its built-in links greyed out, then
+         * any custom files/subgroups that have been added to it.
+         */
+        function customLinksRender() {
+            const container = document.getElementById('customLinksGroupList');
+            if (!container) return;
+            container.innerHTML = '';
+
+            // Build a map of custom groups by name for quick lookup
+            const customByName = {};
+            for (const cg of customLinksData.groups) {
+                customByName[cg.group] = cg;
+            }
+
+            // ── Built-in groups (read-only shell + editable additions) ──
+            for (const bg of (customLinksBuiltin.groups || [])) {
+                const cg = customByName[bg.group] || null; // matching custom entry, if any
+                container.appendChild(customLinksRenderBuiltinGroup(bg, cg));
+            }
+
+            // ── New custom-only groups (no matching built-in) ──
+            const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
+            for (const cg of customLinksData.groups) {
+                if (!builtinNames.has(cg.group)) {
+                    container.appendChild(customLinksRenderCustomGroup(cg));
+                }
+            }
+        }
+
+        /**
+         * Render a built-in group card with its read-only links and any custom additions.
+         */
+        function customLinksRenderBuiltinGroup(bg, cg) {
+            const card = document.createElement('div');
+            card.style.cssText = 'margin-bottom:12px; border:1px solid #dee2e6; border-radius:6px; overflow:hidden;';
+
+            // Header
+            const header = document.createElement('div');
+            header.style.cssText = 'background:#e9ecef; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px;';
+            const headerLeft = document.createElement('div');
+            headerLeft.style.cssText = 'display:flex; align-items:center; gap:8px;';
+            const lockIcon = document.createElement('span');
+            lockIcon.textContent = '🔒';
+            lockIcon.title = 'Built-in group — cannot be renamed or deleted';
+            lockIcon.style.cssText = 'font-size:12px; opacity:0.6;';
+            const groupName = document.createElement('strong');
+            groupName.textContent = bg.group;
+            groupName.style.cssText = 'font-size:13px; color:#495057;';
+            headerLeft.appendChild(lockIcon);
+            headerLeft.appendChild(groupName);
+            if (bg.depends_on) {
+                const dep = document.createElement('span');
+                dep.textContent = `requires: ${bg.depends_on}`;
+                dep.style.cssText = 'font-size:11px; color:#888; font-style:italic;';
+                headerLeft.appendChild(dep);
+            }
+            header.appendChild(headerLeft);
+            card.appendChild(header);
+
+            const body = document.createElement('div');
+            body.style.cssText = 'padding:8px 12px;';
+
+            // Built-in direct files (read-only)
+            for (const f of (bg.files || [])) {
+                body.appendChild(customLinksRenderReadonlyLink(f));
+            }
+
+            // Built-in subgroups (read-only shell + editable additions)
+            for (const bsg of (bg.subgroups || [])) {
+                const csg = cg ? (cg.subgroups || []).find(s => s.name === bsg.name) : null;
+                body.appendChild(customLinksRenderBuiltinSubgroup(bg.group, bsg, csg));
+            }
+
+            // Custom direct files added to this built-in group
+            if (cg) {
+                for (let fi = 0; fi < (cg.files || []).length; fi++) {
+                    body.appendChild(customLinksRenderCustomLink(bg.group, null, fi, cg.files[fi]));
+                }
+            }
+
+            // Custom subgroups added to this built-in group (new subgroups only)
+            if (cg) {
+                const builtinSgNames = new Set((bg.subgroups || []).map(s => s.name));
+                for (let si = 0; si < (cg.subgroups || []).length; si++) {
+                    const csg = cg.subgroups[si];
+                    if (!builtinSgNames.has(csg.name)) {
+                        body.appendChild(customLinksRenderCustomSubgroup(bg.group, si, csg));
+                    }
+                }
+            }
+
+            // Add link / add subgroup buttons
+            const addRow = document.createElement('div');
+            addRow.style.cssText = 'margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;';
+            const addLinkBtn = document.createElement('button');
+            addLinkBtn.className = 'btn btn-secondary';
+            addLinkBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
+            addLinkBtn.textContent = '+ Add Link';
+            addLinkBtn.onclick = () => customLinksShowAddLinkForm(bg.group, null, addRow);
+            const addSgBtn = document.createElement('button');
+            addSgBtn.className = 'btn btn-secondary';
+            addSgBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
+            addSgBtn.textContent = '+ Add Subgroup';
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(bg.group, addRow);
+            addRow.appendChild(addLinkBtn);
+            addRow.appendChild(addSgBtn);
+            body.appendChild(addRow);
+
+            card.appendChild(body);
+            return card;
+        }
+
+        /**
+         * Render a built-in subgroup row with its read-only links and any custom additions.
+         */
+        function customLinksRenderBuiltinSubgroup(groupName, bsg, csg) {
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'margin:6px 0 6px 16px; border-left:3px solid #dee2e6; padding-left:10px;';
+
+            const sgHeader = document.createElement('div');
+            sgHeader.style.cssText = 'display:flex; align-items:center; gap:6px; margin-bottom:4px;';
+            const sgIcon = document.createElement('span');
+            sgIcon.textContent = '📁';
+            sgIcon.style.fontSize = '12px';
+            const sgName = document.createElement('strong');
+            sgName.textContent = bsg.name;
+            sgName.style.cssText = 'font-size:12px; color:#6c757d;';
+            const sgLock = document.createElement('span');
+            sgLock.textContent = '🔒';
+            sgLock.style.cssText = 'font-size:10px; opacity:0.5;';
+            sgHeader.appendChild(sgIcon);
+            sgHeader.appendChild(sgName);
+            sgHeader.appendChild(sgLock);
+            wrap.appendChild(sgHeader);
+
+            // Built-in links in this subgroup (read-only)
+            for (const f of (bsg.files || [])) {
+                wrap.appendChild(customLinksRenderReadonlyLink(f));
+            }
+
+            // Custom links added to this built-in subgroup
+            if (csg) {
+                for (let fi = 0; fi < (csg.files || []).length; fi++) {
+                    wrap.appendChild(customLinksRenderCustomLink(groupName, bsg.name, fi, csg.files[fi]));
+                }
+            }
+
+            // Add link button for this subgroup
+            const addRow = document.createElement('div');
+            addRow.style.cssText = 'margin-top:4px;';
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn btn-secondary';
+            addBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
+            addBtn.textContent = '+ Add Link to Subgroup';
+            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, bsg.name, addRow);
+            addRow.appendChild(addBtn);
+            wrap.appendChild(addRow);
+
+            return wrap;
+        }
+
+        /**
+         * Render a fully custom group card (not matching any built-in group).
+         */
+        function customLinksRenderCustomGroup(cg) {
+            const card = document.createElement('div');
+            card.style.cssText = 'margin-bottom:12px; border:1px solid #b8daff; border-radius:6px; overflow:hidden; background:#f0f7ff;';
+
+            // Header
+            const header = document.createElement('div');
+            header.style.cssText = 'background:#cce5ff; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px;';
+            const headerLeft = document.createElement('div');
+            headerLeft.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;';
+            const editIcon = document.createElement('span');
+            editIcon.textContent = '✏️';
+            editIcon.style.fontSize = '12px';
+            const groupName = document.createElement('strong');
+            groupName.textContent = cg.group;
+            groupName.style.cssText = 'font-size:13px; color:#004085;';
+            headerLeft.appendChild(editIcon);
+            headerLeft.appendChild(groupName);
+            if (cg.depends_on) {
+                const dep = document.createElement('span');
+                dep.textContent = `requires: ${cg.depends_on}`;
+                dep.style.cssText = 'font-size:11px; color:#555; font-style:italic;';
+                headerLeft.appendChild(dep);
+            }
+            header.appendChild(headerLeft);
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
+            delBtn.textContent = '✕ Delete Group';
+            delBtn.onclick = () => {
+                const hasContent = (cg.files && cg.files.length > 0) || (cg.subgroups && cg.subgroups.length > 0);
+                if (hasContent && !confirm(`Delete group "${cg.group}" and all its links?`)) return;
+                customLinksData.groups = customLinksData.groups.filter(g => g.group !== cg.group);
+                customLinksDirty();
+                customLinksRender();
+            };
+            header.appendChild(delBtn);
+            card.appendChild(header);
+
+            const body = document.createElement('div');
+            body.style.cssText = 'padding:8px 12px;';
+
+            // Custom direct files
+            for (let fi = 0; fi < (cg.files || []).length; fi++) {
+                body.appendChild(customLinksRenderCustomLink(cg.group, null, fi, cg.files[fi]));
+            }
+
+            // Custom subgroups
+            for (let si = 0; si < (cg.subgroups || []).length; si++) {
+                body.appendChild(customLinksRenderCustomSubgroup(cg.group, si, cg.subgroups[si]));
+            }
+
+            // Add link / add subgroup buttons
+            const addRow = document.createElement('div');
+            addRow.style.cssText = 'margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;';
+            const addLinkBtn = document.createElement('button');
+            addLinkBtn.className = 'btn btn-secondary';
+            addLinkBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
+            addLinkBtn.textContent = '+ Add Link';
+            addLinkBtn.onclick = () => customLinksShowAddLinkForm(cg.group, null, addRow);
+            const addSgBtn = document.createElement('button');
+            addSgBtn.className = 'btn btn-secondary';
+            addSgBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
+            addSgBtn.textContent = '+ Add Subgroup';
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(cg.group, addRow);
+            addRow.appendChild(addLinkBtn);
+            addRow.appendChild(addSgBtn);
+            body.appendChild(addRow);
+
+            card.appendChild(body);
+            return card;
+        }
+
+        /**
+         * Render a custom subgroup inside a group (either built-in or custom group).
+         */
+        function customLinksRenderCustomSubgroup(groupName, sgIndex, csg) {
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'margin:6px 0 6px 16px; border-left:3px solid #b8daff; padding-left:10px;';
+
+            const sgHeader = document.createElement('div');
+            sgHeader.style.cssText = 'display:flex; align-items:center; gap:6px; margin-bottom:4px; justify-content:space-between;';
+            const sgLeft = document.createElement('div');
+            sgLeft.style.cssText = 'display:flex; align-items:center; gap:6px;';
+            const sgIcon = document.createElement('span');
+            sgIcon.textContent = '📁';
+            sgIcon.style.fontSize = '12px';
+            const sgName = document.createElement('strong');
+            sgName.textContent = csg.name;
+            sgName.style.cssText = 'font-size:12px; color:#004085;';
+            const editBadge = document.createElement('span');
+            editBadge.textContent = '✏️';
+            editBadge.style.fontSize = '10px';
+            sgLeft.appendChild(sgIcon);
+            sgLeft.appendChild(sgName);
+            sgLeft.appendChild(editBadge);
+            sgHeader.appendChild(sgLeft);
+
+            const delSgBtn = document.createElement('button');
+            delSgBtn.className = 'btn btn-danger';
+            delSgBtn.style.cssText = 'font-size:10px; padding:2px 6px;';
+            delSgBtn.textContent = '✕';
+            delSgBtn.title = `Delete subgroup "${csg.name}"`;
+            delSgBtn.onclick = () => {
+                if (!confirm(`Delete subgroup "${csg.name}" and all its links?`)) return;
+                const cg = customLinksData.groups.find(g => g.group === groupName);
+                if (cg && cg.subgroups) {
+                    cg.subgroups.splice(sgIndex, 1);
+                    if (cg.subgroups.length === 0) delete cg.subgroups;
+                }
+                customLinksDirty();
+                customLinksRender();
+            };
+            sgHeader.appendChild(delSgBtn);
+            wrap.appendChild(sgHeader);
+
+            // Links in this custom subgroup
+            for (let fi = 0; fi < (csg.files || []).length; fi++) {
+                wrap.appendChild(customLinksRenderCustomLink(groupName, csg.name, fi, csg.files[fi]));
+            }
+
+            // Add link button
+            const addRow = document.createElement('div');
+            addRow.style.cssText = 'margin-top:4px;';
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn btn-secondary';
+            addBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
+            addBtn.textContent = '+ Add Link to Subgroup';
+            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, csg.name, addRow);
+            addRow.appendChild(addBtn);
+            wrap.appendChild(addRow);
+
+            return wrap;
+        }
+
+        /**
+         * Render a read-only (built-in) link row.
+         */
+        function customLinksRenderReadonlyLink(f) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:3px 0; opacity:0.55;';
+            const lock = document.createElement('span');
+            lock.textContent = '🔒';
+            lock.style.fontSize = '10px';
+            const name = document.createElement('span');
+            name.textContent = f.name;
+            name.style.cssText = 'font-size:12px; color:#495057;';
+            const path = document.createElement('span');
+            path.textContent = f.path;
+            path.style.cssText = 'font-size:11px; color:#888; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;';
+            if (f.depends_on) {
+                const dep = document.createElement('span');
+                dep.textContent = `(requires: ${f.depends_on})`;
+                dep.style.cssText = 'font-size:10px; color:#aaa; font-style:italic;';
+                row.appendChild(lock);
+                row.appendChild(name);
+                row.appendChild(path);
+                row.appendChild(dep);
+            } else {
+                row.appendChild(lock);
+                row.appendChild(name);
+                row.appendChild(path);
+            }
+            return row;
+        }
+
+        /**
+         * Render an editable (custom) link row with a delete button.
+         * groupName: the group this link belongs to
+         * subgroupName: null for direct group links, or the subgroup name
+         * fileIndex: index within the files array
+         */
+        function customLinksRenderCustomLink(groupName, subgroupName, fileIndex, f) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:3px 0;';
+            const editIcon = document.createElement('span');
+            editIcon.textContent = '✏️';
+            editIcon.style.fontSize = '10px';
+            const name = document.createElement('span');
+            name.textContent = f.name;
+            name.style.cssText = 'font-size:12px; color:#004085; font-weight:500;';
+            const path = document.createElement('span');
+            path.textContent = f.path;
+            path.style.cssText = 'font-size:11px; color:#555; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;';
+            if (f.description) {
+                path.title = f.description;
+            }
+            if (f.depends_on) {
+                const dep = document.createElement('span');
+                dep.textContent = `(requires: ${f.depends_on})`;
+                dep.style.cssText = 'font-size:10px; color:#888; font-style:italic;';
+                row.appendChild(editIcon);
+                row.appendChild(name);
+                row.appendChild(path);
+                row.appendChild(dep);
+            } else {
+                row.appendChild(editIcon);
+                row.appendChild(name);
+                row.appendChild(path);
+            }
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.style.cssText = 'font-size:10px; padding:2px 6px; margin-left:auto; flex-shrink:0;';
+            delBtn.textContent = '✕';
+            delBtn.title = `Delete "${f.name}"`;
+            delBtn.onclick = () => {
+                customLinksDeleteLink(groupName, subgroupName, fileIndex);
+            };
+            row.appendChild(delBtn);
+            return row;
+        }
+
+        /**
+         * Delete a custom link by group name, optional subgroup name, and file index.
+         */
+        function customLinksDeleteLink(groupName, subgroupName, fileIndex) {
+            // Find or create the custom group entry
+            let cg = customLinksData.groups.find(g => g.group === groupName);
+            if (!cg) return;
+
+            if (subgroupName === null) {
+                // Direct file on the group
+                if (cg.files) {
+                    cg.files.splice(fileIndex, 1);
+                    if (cg.files.length === 0) delete cg.files;
+                }
+            } else {
+                // File inside a subgroup
+                const sgIdx = (cg.subgroups || []).findIndex(s => s.name === subgroupName);
+                if (sgIdx !== -1) {
+                    const sg = cg.subgroups[sgIdx];
+                    if (sg.files) {
+                        sg.files.splice(fileIndex, 1);
+                        if (sg.files.length === 0) delete sg.files;
+                    }
+                    // Remove the subgroup entry entirely if it has no files left
+                    if (!sg.files || sg.files.length === 0) {
+                        cg.subgroups.splice(sgIdx, 1);
+                        if (cg.subgroups.length === 0) delete cg.subgroups;
+                    }
+                }
+            }
+
+            // If the custom group entry is now empty (no files, no subgroups), remove it
+            // only if it's an extension of a built-in group (custom-only groups are kept)
+            const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
+            if (builtinNames.has(groupName)) {
+                const hasFiles = cg.files && cg.files.length > 0;
+                const hasSgs   = cg.subgroups && cg.subgroups.length > 0;
+                if (!hasFiles && !hasSgs) {
+                    customLinksData.groups = customLinksData.groups.filter(g => g.group !== groupName);
+                }
+            }
+
+            customLinksDirty();
+            customLinksRender();
+        }
+
+        /**
+         * Show an inline "Add Link" form below the given anchor element.
+         * groupName: the group to add to
+         * subgroupName: null for direct group link, or the subgroup name
+         * anchor: the DOM element to insert the form after
+         */
+        function customLinksShowAddLinkForm(groupName, subgroupName, anchor) {
+            // Remove any existing inline form
+            const existing = document.getElementById('customLinksInlineForm');
+            if (existing) existing.remove();
+
+            const form = document.createElement('div');
+            form.id = 'customLinksInlineForm';
+            form.style.cssText = 'margin-top:8px; padding:12px; background:#fff; border:1px solid #b8daff; border-radius:6px;';
+
+            const title = document.createElement('p');
+            title.style.cssText = 'margin:0 0 8px 0; font-size:12px; font-weight:600; color:#004085;';
+            title.textContent = subgroupName
+                ? `Add link to subgroup "${subgroupName}" in "${groupName}"`
+                : `Add link to "${groupName}"`;
+            form.appendChild(title);
+
+            function field(labelText, id, placeholder, required) {
+                const wrap = document.createElement('div');
+                wrap.style.cssText = 'margin-bottom:8px;';
+                const lbl = document.createElement('label');
+                lbl.htmlFor = id;
+                lbl.textContent = labelText + (required ? ' *' : '');
+                lbl.style.cssText = 'display:block; font-size:11px; font-weight:600; color:#555; margin-bottom:3px;';
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.id = id;
+                inp.placeholder = placeholder;
+                inp.style.cssText = 'width:100%; max-width:480px; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;';
+                wrap.appendChild(lbl);
+                wrap.appendChild(inp);
+                return wrap;
+            }
+
+            form.appendChild(field('Name', 'clf-name', 'Display name (required)', true));
+            form.appendChild(field('URL / Path', 'clf-path', 'https://... or relative/path.html (required)', true));
+            form.appendChild(field('Description', 'clf-desc', 'Tooltip text (optional)', false));
+
+            // depends_on with datalist
+            const depWrap = document.createElement('div');
+            depWrap.style.cssText = 'margin-bottom:8px;';
+            const depLbl = document.createElement('label');
+            depLbl.htmlFor = 'clf-depends';
+            depLbl.textContent = 'Requires feature (optional)';
+            depLbl.style.cssText = 'display:block; font-size:11px; font-weight:600; color:#555; margin-bottom:3px;';
+            const depInp = document.createElement('input');
+            depInp.type = 'text';
+            depInp.id = 'clf-depends';
+            depInp.placeholder = 'e.g. cw_skimmer';
+            depInp.setAttribute('list', 'clf-depends-list');
+            depInp.style.cssText = 'width:100%; max-width:480px; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;';
+            const depList = document.createElement('datalist');
+            depList.id = 'clf-depends-list';
+            for (const k of CUSTOM_LINKS_DEPENDS_ON_KEYS) {
+                const opt = document.createElement('option');
+                opt.value = k;
+                depList.appendChild(opt);
+            }
+            depWrap.appendChild(depLbl);
+            depWrap.appendChild(depInp);
+            depWrap.appendChild(depList);
+            form.appendChild(depWrap);
+
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex; gap:8px;';
+
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn';
+            addBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            addBtn.textContent = 'Add Link';
+            addBtn.onclick = () => {
+                const name = document.getElementById('clf-name').value.trim();
+                const path = document.getElementById('clf-path').value.trim();
+                const desc = document.getElementById('clf-desc').value.trim();
+                const dep  = document.getElementById('clf-depends').value.trim();
+                if (!name) { alert('Name is required.'); return; }
+                if (!path) { alert('URL / Path is required.'); return; }
+
+                const entry = { path, name };
+                if (desc) entry.description = desc;
+                if (dep)  entry.depends_on  = dep;
+
+                customLinksAddLink(groupName, subgroupName, entry);
+                form.remove();
+            };
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-secondary';
+            cancelBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => form.remove();
+
+            btnRow.appendChild(addBtn);
+            btnRow.appendChild(cancelBtn);
+            form.appendChild(btnRow);
+
+            anchor.parentNode.insertBefore(form, anchor.nextSibling);
+            document.getElementById('clf-name').focus();
+        }
+
+        /**
+         * Add a link entry to the in-memory state and re-render.
+         */
+        function customLinksAddLink(groupName, subgroupName, entry) {
+            // Find or create the custom group entry
+            let cg = customLinksData.groups.find(g => g.group === groupName);
+            if (!cg) {
+                cg = { group: groupName };
+                customLinksData.groups.push(cg);
+            }
+
+            if (subgroupName === null) {
+                if (!cg.files) cg.files = [];
+                cg.files.push(entry);
+            } else {
+                if (!cg.subgroups) cg.subgroups = [];
+                let sg = cg.subgroups.find(s => s.name === subgroupName);
+                if (!sg) {
+                    sg = { name: subgroupName, files: [] };
+                    cg.subgroups.push(sg);
+                }
+                if (!sg.files) sg.files = [];
+                sg.files.push(entry);
+            }
+
+            customLinksDirty();
+            customLinksRender();
+        }
+
+        /**
+         * Show an inline "Add Subgroup" form below the given anchor element.
+         */
+        function customLinksShowAddSubgroupForm(groupName, anchor) {
+            const existing = document.getElementById('customLinksInlineForm');
+            if (existing) existing.remove();
+
+            const form = document.createElement('div');
+            form.id = 'customLinksInlineForm';
+            form.style.cssText = 'margin-top:8px; padding:12px; background:#fff; border:1px solid #b8daff; border-radius:6px;';
+
+            const title = document.createElement('p');
+            title.style.cssText = 'margin:0 0 8px 0; font-size:12px; font-weight:600; color:#004085;';
+            title.textContent = `Add subgroup to "${groupName}"`;
+            form.appendChild(title);
+
+            const nameWrap = document.createElement('div');
+            nameWrap.style.cssText = 'margin-bottom:8px;';
+            const nameLbl = document.createElement('label');
+            nameLbl.htmlFor = 'clf-sg-name';
+            nameLbl.textContent = 'Subgroup Name *';
+            nameLbl.style.cssText = 'display:block; font-size:11px; font-weight:600; color:#555; margin-bottom:3px;';
+            const nameInp = document.createElement('input');
+            nameInp.type = 'text';
+            nameInp.id = 'clf-sg-name';
+            nameInp.placeholder = 'e.g. My Tools';
+            nameInp.style.cssText = 'width:100%; max-width:480px; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;';
+            nameWrap.appendChild(nameLbl);
+            nameWrap.appendChild(nameInp);
+            form.appendChild(nameWrap);
+
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex; gap:8px;';
+
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn';
+            addBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            addBtn.textContent = 'Add Subgroup';
+            addBtn.onclick = () => {
+                const name = document.getElementById('clf-sg-name').value.trim();
+                if (!name) { alert('Subgroup name is required.'); return; }
+
+                let cg = customLinksData.groups.find(g => g.group === groupName);
+                if (!cg) {
+                    cg = { group: groupName };
+                    customLinksData.groups.push(cg);
+                }
+                if (!cg.subgroups) cg.subgroups = [];
+                // Check for duplicate name in custom data
+                if (cg.subgroups.find(s => s.name === name)) {
+                    alert(`A subgroup named "${name}" already exists in "${groupName}".`);
+                    return;
+                }
+                // Warn if the name matches a built-in subgroup (links will be injected into it)
+                const bg = (customLinksBuiltin.groups || []).find(g => g.group === groupName);
+                const isBuiltinSg = bg && (bg.subgroups || []).some(s => s.name === name);
+                if (isBuiltinSg) {
+                    if (!confirm(`"${name}" is already a built-in subgroup in "${groupName}". Links you add here will be injected into that subgroup. Use the "Add Link to Subgroup" button on the "${name}" row instead for a cleaner workflow.\n\nContinue anyway?`)) return;
+                }
+                cg.subgroups.push({ name, files: [] });
+                customLinksDirty();
+                form.remove();
+                customLinksRender();
+            };
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-secondary';
+            cancelBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => form.remove();
+
+            btnRow.appendChild(addBtn);
+            btnRow.appendChild(cancelBtn);
+            form.appendChild(btnRow);
+
+            anchor.parentNode.insertBefore(form, anchor.nextSibling);
+            document.getElementById('clf-sg-name').focus();
+        }
+
+        /**
+         * Show an inline "Add New Group" form at the bottom of the group list.
+         */
+        function customLinksAddNewGroup() {
+            const existing = document.getElementById('customLinksInlineForm');
+            if (existing) existing.remove();
+
+            const container = document.getElementById('customLinksGroupList');
+            const form = document.createElement('div');
+            form.id = 'customLinksInlineForm';
+            form.style.cssText = 'margin-top:8px; padding:12px; background:#fff; border:1px solid #b8daff; border-radius:6px;';
+
+            const title = document.createElement('p');
+            title.style.cssText = 'margin:0 0 8px 0; font-size:12px; font-weight:600; color:#004085;';
+            title.textContent = 'Add New Group';
+            form.appendChild(title);
+
+            function field(labelText, id, placeholder, required) {
+                const wrap = document.createElement('div');
+                wrap.style.cssText = 'margin-bottom:8px;';
+                const lbl = document.createElement('label');
+                lbl.htmlFor = id;
+                lbl.textContent = labelText + (required ? ' *' : '');
+                lbl.style.cssText = 'display:block; font-size:11px; font-weight:600; color:#555; margin-bottom:3px;';
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.id = id;
+                inp.placeholder = placeholder;
+                inp.style.cssText = 'width:100%; max-width:480px; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;';
+                wrap.appendChild(lbl);
+                wrap.appendChild(inp);
+                return wrap;
+            }
+
+            form.appendChild(field('Group Name', 'clf-grp-name', 'e.g. My Station', true));
+
+            const depWrap = document.createElement('div');
+            depWrap.style.cssText = 'margin-bottom:8px;';
+            const depLbl = document.createElement('label');
+            depLbl.htmlFor = 'clf-grp-depends';
+            depLbl.textContent = 'Requires feature (optional)';
+            depLbl.style.cssText = 'display:block; font-size:11px; font-weight:600; color:#555; margin-bottom:3px;';
+            const depSmall = document.createElement('small');
+            depSmall.textContent = 'Hide this group if the named feature is disabled (e.g. cw_skimmer, noise_floor, rotator, ant_switch, digital_decodes)';
+            depSmall.style.cssText = 'display:block; color:#888; font-size:11px; margin-bottom:3px;';
+            const depInp = document.createElement('input');
+            depInp.type = 'text';
+            depInp.id = 'clf-grp-depends';
+            depInp.placeholder = 'e.g. cw_skimmer';
+            depInp.setAttribute('list', 'clf-grp-depends-list');
+            depInp.style.cssText = 'width:100%; max-width:480px; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;';
+            const depList = document.createElement('datalist');
+            depList.id = 'clf-grp-depends-list';
+            for (const k of CUSTOM_LINKS_DEPENDS_ON_KEYS) {
+                const opt = document.createElement('option');
+                opt.value = k;
+                depList.appendChild(opt);
+            }
+            depWrap.appendChild(depLbl);
+            depWrap.appendChild(depSmall);
+            depWrap.appendChild(depInp);
+            depWrap.appendChild(depList);
+            form.appendChild(depWrap);
+
+            const noteWrap = document.createElement('div');
+            noteWrap.style.cssText = 'margin-bottom:8px; padding:8px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; font-size:11px; color:#856404;';
+            noteWrap.innerHTML = '<strong>Tip:</strong> If the group name matches an existing built-in group (e.g. "Propagation Conditions"), your links will be injected into that group rather than creating a new one.';
+            form.appendChild(noteWrap);
+
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex; gap:8px;';
+
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn';
+            addBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            addBtn.textContent = 'Add Group';
+            addBtn.onclick = () => {
+                const name = document.getElementById('clf-grp-name').value.trim();
+                const dep  = document.getElementById('clf-grp-depends').value.trim();
+                if (!name) { alert('Group name is required.'); return; }
+                // Check for duplicate
+                if (customLinksData.groups.find(g => g.group === name)) {
+                    alert(`A custom entry for "${name}" already exists.`);
+                    return;
+                }
+                const newGroup = { group: name };
+                if (dep) newGroup.depends_on = dep;
+                customLinksData.groups.push(newGroup);
+                customLinksDirty();
+                form.remove();
+                customLinksRender();
+            };
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-secondary';
+            cancelBtn.style.cssText = 'font-size:12px; padding:5px 12px;';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => form.remove();
+
+            btnRow.appendChild(addBtn);
+            btnRow.appendChild(cancelBtn);
+            form.appendChild(btnRow);
+
+            container.appendChild(form);
+            document.getElementById('clf-grp-name').focus();
+        }
+
+        /**
+         * Save the current custom links state to /admin/custom-links (PUT).
+         */
+        async function customLinksSave() {
+            const saveBtn    = document.getElementById('customLinksSaveBtn');
+            const unsaved    = document.getElementById('customLinksUnsaved');
+            const saveStatus = document.getElementById('customLinksSaveStatus');
+
+            if (saveBtn) saveBtn.disabled = true;
+
+            // Remove any empty custom group entries (groups with no files and no subgroups)
+            // that are extensions of built-in groups — they're meaningless to store.
+            const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
+            customLinksData.groups = customLinksData.groups.filter(cg => {
+                if (!builtinNames.has(cg.group)) return true; // keep custom-only groups always
+                const hasFiles = cg.files && cg.files.length > 0;
+                const hasSgs   = cg.subgroups && cg.subgroups.some(sg => sg.files && sg.files.length > 0);
+                return hasFiles || hasSgs;
+            });
+
+            try {
+                const response = await authenticatedFetch('/admin/custom-links', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(customLinksData),
+                });
+                if (!response) throw new Error('Auth failed');
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || 'Save failed');
+                }
+
+                customLinksLastSaved = JSON.stringify(customLinksData);
+                if (unsaved)    unsaved.style.display    = 'none';
+                if (saveStatus) {
+                    saveStatus.textContent = '✓ Saved';
+                    saveStatus.style.display = 'inline';
+                    setTimeout(() => { saveStatus.style.display = 'none'; }, 3000);
+                }
+                customLinksRender();
+            } catch (err) {
+                showAlert('Failed to save custom links: ' + err.message, 'error');
+            } finally {
+                if (saveBtn) saveBtn.disabled = false;
             }
         }
 

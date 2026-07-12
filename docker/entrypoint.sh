@@ -100,6 +100,16 @@ initialize_configs() {
         echo "✓ addons.yaml exists (user-managed, not auto-merged)"
     fi
 
+    # custom-links.json: user-managed (like bookmarks/addons), copy-only on first run.
+    # Merging is not appropriate here — it's a JSON array with no natural merge key,
+    # and the admin UI is the correct tool for managing this file.
+    if [ ! -f "/app/config/custom-links.json" ]; then
+        echo "Initializing custom-links.json from example..."
+        cp /etc/ka9q_ubersdr/custom-links.json.example /app/config/custom-links.json
+    else
+        echo "✓ custom-links.json exists (user-managed, not auto-merged)"
+    fi
+
     if [ ! -f "/app/config/notifications.yaml" ]; then
         echo "Initializing notifications.yaml from example..."
         cp /etc/ka9q_ubersdr/notifications.yaml.example /app/config/notifications.yaml

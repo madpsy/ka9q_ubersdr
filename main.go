@@ -975,7 +975,7 @@ func main() {
 				if data, err := os.ReadFile("/proc/loadavg"); err == nil {
 					fields := strings.Fields(string(data))
 					if len(fields) >= 3 {
-						loadAvg = fmt.Sprintf("%.2s/%.2s/%.2s", fields[0], fields[1], fields[2])
+						loadAvg = fmt.Sprintf("%s/%s/%s", fields[0], fields[1], fields[2])
 					}
 				}
 

@@ -9290,18 +9290,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             if (editor)  editor.style.display  = 'none';
 
             try {
-                // Fetch both in parallel
-                const [builtinResp, customResp] = await Promise.all([
-                    fetch('/frontend-pages.json'),
-                    authenticatedFetch('/admin/custom-links'),
-                ]);
+                // Single authenticated fetch — backend returns both builtin and custom data.
+                // This avoids any direct browser fetch of frontend-pages.json (which is a
+                // backend-only file, not a public web asset).
+                const resp = await authenticatedFetch('/admin/custom-links');
+                if (!resp)    throw new Error('Auth failed');
+                if (!resp.ok) throw new Error('Failed to load custom-links');
 
-                if (!builtinResp.ok) throw new Error('Failed to load frontend-pages.json');
-                if (!customResp)     throw new Error('Auth failed');
-                if (!customResp.ok)  throw new Error('Failed to load custom-links');
-
-                customLinksBuiltin = await builtinResp.json();
-                customLinksData    = await customResp.json();
+                const data = await resp.json();
+                customLinksBuiltin = data.builtin || { groups: [] };
+                customLinksData    = data.custom  || { groups: [] };
                 if (!Array.isArray(customLinksData.groups)) customLinksData.groups = [];
 
                 customLinksLastSaved = JSON.stringify(customLinksData);

@@ -175,17 +175,32 @@ func (ah *AdminHandler) HandleCustomLinks(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// handleGetCustomLinks returns the current custom-links.json.
+// handleGetCustomLinks returns both the built-in pages structure and the current
+// custom-links.json in a single response, so the admin UI can render the merged
+// view without making a separate (unauthenticated) fetch for frontend-pages.json.
+//
+// Response: { "builtin": <PagesData>, "custom": <PagesData> }
 func (ah *AdminHandler) handleGetCustomLinks(w http.ResponseWriter, r *http.Request) {
+	builtin, err := readFrontendPages()
+	if err != nil {
+		log.Printf("admin/custom-links GET: failed to read frontend-pages.json: %v", err)
+		http.Error(w, "Failed to read built-in pages data", http.StatusInternalServerError)
+		return
+	}
+
 	custom, err := readCustomLinks(ah.configDir)
 	if err != nil {
 		log.Printf("admin/custom-links GET: %v", err)
 		http.Error(w, "Failed to read custom-links.json", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
-	if err := json.NewEncoder(w).Encode(custom); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"builtin": builtin,
+		"custom":  custom,
+	}); err != nil {
 		log.Printf("admin/custom-links GET encode: %v", err)
 	}
 }

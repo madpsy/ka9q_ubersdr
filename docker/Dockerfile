@@ -96,6 +96,11 @@ RUN chmod +x /usr/local/bin/ka9q_ubersdr
 # Copy static files (part of the build, not a volume)
 COPY --from=builder /build/static ./static
 
+# Copy frontend-pages.json — read by the backend at runtime to build the merged
+# pages menu. It is NOT served as a public web asset (the /api/pages-menu endpoint
+# merges it with custom-links.json and serves the result).
+COPY --from=builder /build/frontend-pages.json ./frontend-pages.json
+
 # Copy kiwi directory for KiwiSDR web interface
 COPY --from=builder /build/kiwi ./kiwi
 

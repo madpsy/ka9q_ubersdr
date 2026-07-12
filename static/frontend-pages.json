@@ -1,7 +1,7 @@
 {
   "groups": [
     {
-      "group": "Propagation & Band Conditions",
+      "group": "Propagation Conditions",
       "files": [
         {
           "path": "static/bandconditions.html",

@@ -147,7 +147,7 @@
         // Level 1 toggle button
         const btn = document.createElement('button');
         btn.id          = 'pages-menu-btn';
-        btn.textContent = 'Pages ▾';
+        btn.textContent = 'Links ▾';
         btn.setAttribute('aria-haspopup', 'true');
         btn.setAttribute('aria-expanded', 'false');
         btn.setAttribute('aria-controls', 'pages-menu-dropdown');
@@ -157,43 +157,47 @@
         dropdown.id = 'pages-menu-dropdown';
         dropdown.setAttribute('role', 'menu');
 
-        (data.groups || []).forEach(group => {
-            // Group row
+        // Helper: open a URL as a centred popup
+        function openPopup(url) {
+            const left = Math.round((screen.width  - POPUP_W) / 2);
+            const top  = Math.round((screen.height - POPUP_H) / 2);
+            window.open(
+                url,
+                '_blank',
+                `width=${POPUP_W},height=${POPUP_H},left=${left},top=${top},` +
+                'resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no'
+            );
+        }
+
+        // Helper: build and append a group row with its submenu
+        function addGroupRow(groupName, links) {
+            // links: array of { url, label, tooltip }
             const row = document.createElement('div');
             row.className = 'pages-menu-group-row';
             row.setAttribute('role', 'menuitem');
             row.setAttribute('aria-haspopup', 'true');
 
             const label = document.createElement('span');
-            label.textContent = group.group;
+            label.textContent = groupName;
 
             const arrow = document.createElement('span');
             arrow.className   = 'pages-menu-group-arrow';
             arrow.textContent = '›';
 
-            // Level 2 submenu (page links)
             const submenu = document.createElement('div');
             submenu.className = 'pages-menu-submenu';
             submenu.setAttribute('role', 'menu');
 
-            (group.files || []).forEach(file => {
-                const url  = '/' + file.path.replace(/^static\//, '');
+            links.forEach(({ url, label: text, tooltip }) => {
                 const link = document.createElement('a');
                 link.className   = 'pages-menu-link';
                 link.href        = url;
-                link.title       = file.description || '';
+                if (tooltip) link.title = tooltip;
                 link.setAttribute('role', 'menuitem');
-                link.textContent = file.name;
+                link.textContent = text;
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const left = Math.round((screen.width  - POPUP_W) / 2);
-                    const top  = Math.round((screen.height - POPUP_H) / 2);
-                    window.open(
-                        url,
-                        '_blank',
-                        `width=${POPUP_W},height=${POPUP_H},left=${left},top=${top},` +
-                        'resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no'
-                    );
+                    openPopup(url);
                 });
                 submenu.appendChild(link);
             });
@@ -202,21 +206,41 @@
             row.appendChild(arrow);
             row.appendChild(submenu);
             dropdown.appendChild(row);
+        }
+
+        // Static groups from frontend-pages.json
+        (data.groups || []).forEach(group => {
+            const links = (group.files || []).map(file => ({
+                url:     '/' + file.path.replace(/^static\//, ''),
+                label:   file.name,
+                tooltip: file.description || '',
+            }));
+            addGroupRow(group.group, links);
         });
+
+        // Dynamic Add-ons group from window.apiDescription
+        const apiDesc = window.apiDescription;
+        if (apiDesc && Array.isArray(apiDesc.addons) && apiDesc.addons.length > 0) {
+            const addonLinks = apiDesc.addons.map(name => ({
+                url:   `/addon/${name}/`,
+                label: name.toUpperCase(),
+            }));
+            addGroupRow('Add-ons', addonLinks);
+        }
 
         // Toggle open/close
         function openMenu() {
             dropdown.classList.add('is-open');
             btn.classList.add('is-open');
             btn.setAttribute('aria-expanded', 'true');
-            btn.textContent = 'Pages ▴';
+            btn.textContent = 'Links ▴';
         }
 
         function closeMenu() {
             dropdown.classList.remove('is-open');
             btn.classList.remove('is-open');
             btn.setAttribute('aria-expanded', 'false');
-            btn.textContent = 'Pages ▾';
+            btn.textContent = 'Links ▾';
         }
 
         btn.addEventListener('click', (e) => {
@@ -237,11 +261,17 @@
         document.body.appendChild(wrapper);
     }
 
-    function init() {
+    async function init() {
         // Don't show on mobile — window._isMobile is set by app.js
         if (window._isMobile) return;
 
         injectStyles();
+
+        // Ensure window.apiDescription is populated before building the menu
+        // so the Add-ons group can be injected without a separate fetch.
+        if (!window.apiDescription && window.descriptionPromise) {
+            try { await window.descriptionPromise; } catch (_) {}
+        }
 
         fetch(PAGES_JSON)
             .then(r => {

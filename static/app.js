@@ -49,7 +49,7 @@ function showNotification(message, type = 'error', duration = 5000, position = '
     _notificationTimer = setTimeout(() => {
         toast.classList.add('hiding');
         setTimeout(() => {
-            toast.classList.remove('show', 'hiding', type, position);
+            toast.classList.remove(...['show', 'hiding', type, position].filter(Boolean));
             _notificationTimer = null;
         }, 300); // Match animation duration
     }, duration);

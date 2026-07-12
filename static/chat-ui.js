@@ -228,7 +228,6 @@ class ChatUI {
         };
 
         this.radioEventHandlers.mode_changed = (data) => {
-            console.log('[ChatUI] Mode changed event:', data.mode);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ mode: data.mode });
@@ -239,7 +238,6 @@ class ChatUI {
         };
 
         this.radioEventHandlers.bandwidth_changed = (data) => {
-            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });

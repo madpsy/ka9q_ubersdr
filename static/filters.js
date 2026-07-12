@@ -226,7 +226,6 @@ function initializeEqualizer() {
     eqAnalyser = window.audioContext.createAnalyser();
     eqAnalyser.fftSize = 2048;
     eqAnalyser.smoothingTimeConstant = 0;
-    console.log('12-band equalizer initialized');
 }
 
 function toggleEqualizer() {
@@ -790,7 +789,6 @@ function initializeCompressor() {
     compressorAnalyser = window.audioContext.createAnalyser();
     compressorAnalyser.fftSize = 2048;
     compressorAnalyser.smoothingTimeConstant = 0;
-    console.log('Compressor initialized');
 }
 
 function toggleCompressor() {
@@ -1025,7 +1023,6 @@ function initializeSquelch() {
     squelchAnalyser.smoothingTimeConstant = 0.3;
     squelchOpen = true;
     squelchCurrentLevel = -Infinity;
-    console.log('Squelch initialized');
 }
 
 function toggleAudioGate() {
@@ -1412,7 +1409,6 @@ function restoreFilterSettings() {
             // automatically when the audio context is initialized if checkbox is checked
         }
 
-        console.log('✅ Filter settings restored from localStorage');
     } catch (e) {
         console.error('Failed to restore filter settings:', e);
     } finally {

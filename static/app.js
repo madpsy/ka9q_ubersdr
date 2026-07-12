@@ -5464,12 +5464,9 @@ function playAudioBuffer(buffer) {
     // This ensures audio can play even if context was suspended after initial resume
     // Use await to ensure resume completes before scheduling audio
     if (audioContext.state === 'suspended') {
-        console.warn('AudioContext suspended during playback - resuming...');
         // Don't await here as it would block the audio chain
         // Just trigger resume and let it complete asynchronously
-        audioContext.resume().then(() => {
-            console.log('AudioContext resumed during playback - state:', audioContext.state);
-        }).catch(err => {
+        audioContext.resume().catch(err => {
             console.error('Failed to resume AudioContext during playback:', err);
         });
         // Return early to skip this buffer - next buffer will play after resume
@@ -13618,7 +13615,6 @@ async function applyAudioSink() {
         // System Default — tear down the <audio> bridge so audio flows to
         // audioContext.destination as normal.
         _teardownAudioSinkElement();
-        console.log('[AudioSink] System Default — using audioContext.destination');
         return;
     }
 

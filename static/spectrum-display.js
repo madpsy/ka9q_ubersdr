@@ -3378,11 +3378,16 @@ class SpectrumDisplay {
         // Apply client-side prediction offset during dragging
         const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
 
-        // Check if spectrum view has changed (pan/zoom) - regenerate marker cache if needed
-        // Include prediction offset in change detection
-        const viewChanged = this.lastMarkerCenterFreq !== effectiveCenterFreq ||
-                           this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
-                           this.lastMarkerDisplayMode !== this.displayMode;
+        // Check if spectrum view has changed (pan/zoom) - regenerate marker cache if needed.
+        // While dragging, suppress centre-freq change detection: the prediction offset shifts
+        // the cursor and waterfall together, so marker labels don't need to follow at 30fps.
+        // The cache rebuilds exactly once on drag-end when predictedFreqOffset is cleared.
+        const viewChanged = this.isDragging
+            ? (this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
+               this.lastMarkerDisplayMode !== this.displayMode)
+            : (this.lastMarkerCenterFreq !== effectiveCenterFreq ||
+               this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
+               this.lastMarkerDisplayMode !== this.displayMode);
 
         // Also rebuild if signal brackets changed (time-gated, ~2s interval)
         const bracketsChanged = window._signalBracketsChanged === true;

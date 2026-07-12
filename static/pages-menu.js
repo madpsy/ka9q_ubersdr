@@ -215,7 +215,11 @@
         function isEnabled(key) {
             if (!key) return true;
             const val = apiDesc[key];
-            return !!val && !(Array.isArray(val) && val.length === 0);
+            if (!val) return false;
+            if (Array.isArray(val)) return val.length > 0;
+            // For objects (e.g. rotator, ant_switch), check the 'enabled' property if present
+            if (typeof val === 'object' && 'enabled' in val) return !!val.enabled;
+            return true;
         }
 
         (data.groups || []).forEach(group => {

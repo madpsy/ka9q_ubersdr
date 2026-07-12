@@ -5604,7 +5604,7 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 0;
     animation: none;
     cursor: default;
-    z-index: 99999;
+    z-index: 9000;
     pointer-events: auto;
     opacity: 0.85;
 }

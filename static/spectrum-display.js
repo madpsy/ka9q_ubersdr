@@ -863,6 +863,8 @@ class SpectrumDisplay {
         // Client-side prediction for smooth dragging
         this.predictedFreqOffset = 0; // Frequency offset for visual prediction during drag
         this.lastServerCenterFreq = 0; // Track last confirmed center freq from server
+        this._lineGraphDragActive = false; // Line-graph pan drag in progress (mirrors closure state in setupLineGraphMouseHandlers)
+        this._lastMarkerCacheBuildTime = 0; // performance.now() of last marker cache rebuild (throttles rebuilds during drag)
         this.scrollEnabled = false; // Mouse scroll wheel disabled by default
         this.zoomScrollEnabled = true; // Zoom scroll wheel enabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
@@ -2495,11 +2497,10 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.height = '300px';
         }
 
-        // Apply client-side prediction: shift line graph if dragging AND mouse is actually moving
-        // Don't apply shift if just holding button down without movement
-        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
-            this.applyPredictedShiftToLineGraph();
-        }
+        // NOTE: the old applyPredictedShiftToLineGraph() call was removed here — it
+        // copied the whole canvas through a freshly-allocated temp canvas, and its
+        // result was then fully painted over by the black fillRect below, so it was
+        // pure per-frame allocation churn with no visual effect.
 
         const ctx = this.lineGraphCtx;
         const graphHeight = 300;
@@ -3058,16 +3059,12 @@ class SpectrumDisplay {
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
-                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
-                const oldPredictedOffset = this.predictedFreqOffset;
+                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging.
+                // No synchronous draw() here — the 30fps rAF loop in startFrameProcessing()
+                // picks the new offset up on its next tick. Drawing per mousemove event
+                // stacked full redraws on top of the rAF loop and fed a jank spiral in
+                // Firefox (slow frame → queued events → more draws → slower frames).
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
-
-                // Only redraw if the predicted offset actually changed
-                if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
-                    if (this.spectrumData && this.spectrumData.length > 0) {
-                        this.draw();
-                    }
-                }
 
                 // Throttle pan requests
                 const now = Date.now();
@@ -3090,6 +3087,7 @@ class SpectrumDisplay {
 
         this.lineGraphCanvas.addEventListener('mouseleave', () => {
             lineGraphDragging = false;
+            this._lineGraphDragActive = false;
             lineGraphMouseX = -1;
             lineGraphMouseY = -1;
             this.hideTooltip();
@@ -3120,6 +3118,7 @@ class SpectrumDisplay {
             this.lastServerCenterFreq = this.centerFreq; // Track starting server position
             this.predictedFreqOffset = 0; // Reset prediction offset
             lineGraphDragging = true;
+            this._lineGraphDragActive = true;
             lineGraphDragDidMove = false;
             this.lastDragX = lineGraphDragStartX; // Initialize drag position tracking
             this.lastDragY = e.clientY - rect.top;
@@ -3136,6 +3135,7 @@ class SpectrumDisplay {
             // Ignore right-clicks (button 2) - they're handled by contextmenu event
             if (e.button === 2) {
                 lineGraphDragging = false;
+                this._lineGraphDragActive = false;
                 lineGraphDragDidMove = false;
                 return;
             }
@@ -3172,6 +3172,7 @@ class SpectrumDisplay {
             }
 
             lineGraphDragging = false;
+            this._lineGraphDragActive = false;
             lineGraphDragDidMove = false;
             this.predictedFreqOffset = 0; // Clear prediction offset when drag ends
             this.updateLineGraphCursorStyle();
@@ -3391,8 +3392,26 @@ class SpectrumDisplay {
             this.markerCache = null; // force rebuild
         }
 
+        // During an active pan drag the effective center changes every frame, which
+        // would rebuild the marker cache — rasterizing every bookmark/spot label —
+        // at the full frame rate. That rebuild is the dominant per-frame cost while
+        // panning (canvas text is slow, especially in Firefox) and scales with the
+        // number of visible markers. Instead, throttle rebuilds to 4/sec while
+        // dragging and blit the existing cache with a pixel shift between rebuilds.
+        // Markers scrolling in from the edges appear on the next throttled rebuild.
+        const panDragActive = this.isDragging || this._lineGraphDragActive;
+        let dragBlitShiftPx = null;
+        if (viewChanged && panDragActive && this.markerCache &&
+            this.lastMarkerCenterFreq !== null &&
+            this.lastMarkerTotalBandwidth === this.totalBandwidth &&
+            this.lastMarkerDisplayMode === this.displayMode &&
+            (performance.now() - this._lastMarkerCacheBuildTime) < 250) {
+            dragBlitShiftPx = ((effectiveCenterFreq - this.lastMarkerCenterFreq) / this.totalBandwidth)
+                              * this.overlayCanvas.width;
+        }
+
         // Create or update offscreen canvas for marker caching if view changed
-        if (viewChanged || !this.markerCache) {
+        if (dragBlitShiftPx === null && (viewChanged || !this.markerCache)) {
             // Create offscreen canvas for caching markers (bookmarks + DX spots)
             if (!this.markerCache) {
                 this.markerCache = document.createElement('canvas');
@@ -3463,6 +3482,7 @@ class SpectrumDisplay {
             this.lastMarkerCenterFreq = effectiveCenterFreq;
             this.lastMarkerTotalBandwidth = this.totalBandwidth;
             this.lastMarkerDisplayMode = this.displayMode;
+            this._lastMarkerCacheBuildTime = performance.now();
 
             // Cursor content depends on view (x-position changes with pan/zoom), so
             // invalidate the cursor cache whenever the marker cache is rebuilt.
@@ -3474,7 +3494,24 @@ class SpectrumDisplay {
 
         // Draw cached markers (fast - just a bitmap copy)
         if (this.markerCache) {
-            this.overlayCtx.drawImage(this.markerCache, 0, 0);
+            if (dragBlitShiftPx !== null) {
+                // Pan in progress: blit the cache shifted by the panned distance and
+                // fill the exposed edge strip with the bar backgrounds (grey bookmark
+                // strip 0-45px, translucent black frequency scale 45-75px) so no
+                // transparent gap shows through until the next throttled rebuild.
+                const dx = -dragBlitShiftPx;
+                this.overlayCtx.drawImage(this.markerCache, dx, 0);
+                const gapW = Math.min(Math.abs(dx), this.overlayCanvas.width);
+                if (gapW >= 1) {
+                    const gapX = dx > 0 ? 0 : this.overlayCanvas.width - gapW;
+                    this.overlayCtx.fillStyle = '#adb5bd';
+                    this.overlayCtx.fillRect(gapX, 0, gapW, 45);
+                    this.overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    this.overlayCtx.fillRect(gapX, 45, gapW, 30);
+                }
+            } else {
+                this.overlayCtx.drawImage(this.markerCache, 0, 0);
+            }
         }
 
         // Draw tuned frequency cursor on top.
@@ -3730,18 +3767,17 @@ class SpectrumDisplay {
     drawChatUserMarkers() {
         // Check if chat markers are enabled
         if (window.showChatMarkers === false) {
-            console.log('[drawChatUserMarkers] Chat markers disabled by user preference');
             return;
         }
-        
+
         // Draw purple markers for active chat users (excluding self)
         // Get data from stats endpoint (stored in window.activeChannels by app.js)
-        console.log('[drawChatUserMarkers] window.activeChannels:', window.activeChannels);
+        // NOTE: no console.log in this function — it runs on every marker cache
+        // rebuild (every rendered frame while panning), so logging here is a
+        // measurable jank source even with devtools closed.
         if (!window.activeChannels || window.activeChannels.length === 0) {
-            console.log('[drawChatUserMarkers] No active channels data');
             return;
         }
-        console.log('[drawChatUserMarkers] Processing', window.activeChannels.length, 'channels');
 
         // Clear previous chat user marker positions
         if (!window.chatUserMarkerPositions) {
@@ -3759,45 +3795,35 @@ class SpectrumDisplay {
 
         // Iterate through channels (skip index 0 which is the current user)
         window.activeChannels.forEach((channel, index) => {
-            console.log('[drawChatUserMarkers] Channel', index, ':', channel);
-            
             // Skip the first channel (index 0) which is the current user
             if (index === 0) {
-                console.log('[drawChatUserMarkers] Skipping index 0 (current user)');
                 return;
             }
 
             // Skip channels without chat username
             if (!channel.chat_username || channel.chat_username.trim() === '') {
-                console.log('[drawChatUserMarkers] Skipping - no chat username');
                 return;
             }
 
             // Skip channels without frequency data
             if (!channel.frequency) {
-                console.log('[drawChatUserMarkers] Skipping - no frequency');
                 return;
             }
 
             const userFreq = channel.frequency;
-            console.log('[drawChatUserMarkers] User frequency:', userFreq, 'Current tuned:', this.currentTunedFreq);
 
             // Skip if user is at the same frequency as us (within 100 Hz tolerance)
             if (this.currentTunedFreq && Math.abs(userFreq - this.currentTunedFreq) < 100) {
-                console.log('[drawChatUserMarkers] Skipping - same frequency as us');
                 return;
             }
 
             // Check if frequency is within visible range
-            console.log('[drawChatUserMarkers] Visible range:', startFreq, 'to', endFreq);
             if (userFreq < startFreq || userFreq > endFreq) {
-                console.log('[drawChatUserMarkers] Skipping - frequency outside visible range');
                 return;
             }
 
             // Calculate x position
             const x = ((userFreq - startFreq) / (endFreq - startFreq)) * this.overlayCanvas.width;
-            console.log('[drawChatUserMarkers] Drawing marker for', channel.chat_username, 'at x:', x);
 
             // Draw chat username label at top
             const chatLabel = channel.chat_username;
@@ -4550,16 +4576,10 @@ class SpectrumDisplay {
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
-                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
-                const oldPredictedOffset = this.predictedFreqOffset;
+                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging.
+                // No synchronous draw() here — the 30fps rAF loop in startFrameProcessing()
+                // picks the new offset up on its next tick (see line-graph handler note).
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
-
-                // Only redraw if the predicted offset actually changed
-                if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
-                    if (this.spectrumData && this.spectrumData.length > 0) {
-                        this.draw();
-                    }
-                }
 
                 // Throttle pan requests to avoid backend rounding issues
                 const now = Date.now();

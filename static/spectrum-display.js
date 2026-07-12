@@ -5570,7 +5570,6 @@ class SpectrumDisplay {
     // Zoom in - same bins over narrower bandwidth (decrease bin bandwidth)
     // Backend now handles dynamic bin count adjustment for deep zoom levels
     zoomIn() {
-        console.log('[SpectrumDisplay] zoomIn() called');
         if (!this.connected || !this.ws) return;
 
         // Suppress edge detection during zoom transition to prevent
@@ -5603,11 +5602,6 @@ class SpectrumDisplay {
         const maxCenterFreq = 30e6 - halfBandwidth;
         newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
-        const currentTotalBW = this.binBandwidth * this.binCount;
-
-        console.log(`Zoom in: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
-                    `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin, ${this.binCount} bins)`);
-
         // Clear peak hold before zoom to prevent misalignment
         this.peakHoldData = null;
 
@@ -5635,7 +5629,6 @@ class SpectrumDisplay {
 
     // Zoom out - same bins over wider bandwidth (increase bin bandwidth)
     zoomOut() {
-        console.log('[SpectrumDisplay] zoomOut() called');
         if (!this.connected || !this.ws) return;
 
         // Suppress edge detection during zoom transition to prevent
@@ -5677,11 +5670,6 @@ class SpectrumDisplay {
         const minCenterFreq = 0 + halfBandwidth;
         const maxCenterFreq = 30e6 - halfBandwidth;
         newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
-
-        const currentTotalBW = this.binBandwidth * this.binCount;
-
-        console.log(`Zoom out: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
-                    `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin)`);
 
         // Clear peak hold before zoom to prevent misalignment
         this.peakHoldData = null;

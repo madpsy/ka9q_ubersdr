@@ -437,9 +437,7 @@ class RadioAPI {
     }
 
     notifyZoomChange(binBandwidth) {
-        console.log('[RadioAPI] notifyZoomChange called with binBandwidth:', binBandwidth);
         this.emit('zoom_changed', { binBandwidth: binBandwidth });
-        console.log('[RadioAPI] zoom_changed event emitted, listeners:', this.callbacks.get('zoom_changed')?.length || 0);
     }
     
     // === UTILITY METHODS ===

@@ -251,7 +251,6 @@ class ChatUI {
         };
 
         this.radioEventHandlers.zoom_changed = (data) => {
-            console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ zoom_bw: data.binBandwidth });

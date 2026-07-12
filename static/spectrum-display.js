@@ -2094,7 +2094,6 @@ class SpectrumDisplay {
                     (oldTotalBandwidth !== 0 && oldTotalBandwidth !== msg.totalBandwidth) ||
                     (oldBinCount !== 0 && oldBinCount !== msg.binCount)) {
                     this.peakHoldData = null;
-                    console.log('Peak hold cleared BEFORE config update to prevent NaN values');
                 }
 
                 this.centerFreq = msg.centerFreq;
@@ -2134,28 +2133,6 @@ class SpectrumDisplay {
                     window.updateZoomSlider();
                 }
 
-                // Only log config changes if they're significant (not from periodic sync)
-                // Log if this is the first config OR if values actually changed
-                if (!this.lastLoggedConfig ||
-                    this.lastLoggedConfig.centerFreq !== this.centerFreq ||
-                    this.lastLoggedConfig.binBandwidth !== this.binBandwidth ||
-                    this.lastLoggedConfig.binCount !== this.binCount) {
-                    
-                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
-                    console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(1)} Hz (zoom ${this.zoomLevel.toFixed(2)}x)`);
-                    console.log(`  Center: ${(this.centerFreq/1e6).toFixed(3)} MHz`);
-                    console.log(`  Range: ${(startFreq/1e6).toFixed(3)} - ${(endFreq/1e6).toFixed(3)} MHz`);
-                    console.log(`  Total BW: ${(this.totalBandwidth/1e6).toFixed(3)} MHz`);
-                    
-                    // Store for next comparison
-                    this.lastLoggedConfig = {
-                        centerFreq: this.centerFreq,
-                        binBandwidth: this.binBandwidth,
-                        binCount: this.binCount
-                    };
-                }
-
                 // Update cursor style based on new bandwidth
                 this.updateCursorStyle();
 
@@ -2165,11 +2142,6 @@ class SpectrumDisplay {
                 break;
 
             case 'spectrum':
-                // Check if spectrum data frequency mismatches UI state (indicates drift)
-                if (msg.frequency && Math.abs(msg.frequency - this.centerFreq) > 1000) {
-                    console.warn(`⚠️ SPECTRUM MISMATCH: Data=${(msg.frequency/1e6).toFixed(3)} MHz, UI=${(this.centerFreq/1e6).toFixed(3)} MHz, diff=${((msg.frequency - this.centerFreq)/1000).toFixed(1)} kHz`);
-                }
-                
                 // Unwrap FFT bin ordering from radiod
                 // radiod sends: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
                 // We need: [negative freqs, positive freqs] for low-to-high frequency display
@@ -2905,7 +2877,6 @@ class SpectrumDisplay {
             for (let i = 0; i < currentData.length; i++) {
                 this.peakHoldData[i] = currentData[i];
             }
-            console.log(`Peak hold initialized with ${currentData.length} bins`);
             return;
         }
 
@@ -5769,8 +5740,6 @@ class SpectrumDisplay {
     panTo(frequency) {
         if (!this.connected || !this.ws) return;
 
-        console.log(`Pan to: ${(frequency/1e6).toFixed(3)} MHz (binBandwidth: ${this.binBandwidth.toFixed(1)} Hz/bin, binCount: ${this.binCount})`);
-
         // CRITICAL: Do NOT send binBandwidth when panning!
         // The backend's zoom-out restoration logic at user_spectrum_websocket.go:155-163
         // will trigger if binBandwidth > 200 AND binCount < default, causing unwanted zoom out.
@@ -5784,7 +5753,6 @@ class SpectrumDisplay {
             frequency: Math.round(frequency)  // Must be integer for Go's uint64
             // Deliberately NOT sending binBandwidth to avoid triggering zoom-out logic
         };
-        console.log('Sending pan message:', JSON.stringify(panMsg));
         this.ws.send(JSON.stringify(panMsg));
     }
 
@@ -6572,10 +6540,10 @@ class SpectrumDisplay {
             return;
         }
 
-        // CRITICAL FIX: Clear any lingering prediction offset when not dragging
-        // This prevents cursor/spectrum desync from persisting
-        if (!this.isDragging && this.predictedFreqOffset !== 0) {
-            console.log('Sync check: Clearing lingering prediction offset to prevent desync');
+        // CRITICAL FIX: Clear any lingering prediction offset when not dragging.
+        // Must also respect _lineGraphDragActive — line-graph drags don't set
+        // isDragging, and clearing the offset mid-drag fights the pan prediction.
+        if (!this.isDragging && !this._lineGraphDragActive && this.predictedFreqOffset !== 0) {
             this.predictedFreqOffset = 0;
             // Redraw to apply correction immediately
             if (this.spectrumData && this.spectrumData.length > 0) {

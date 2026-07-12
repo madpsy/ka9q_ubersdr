@@ -1146,8 +1146,6 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     updateBadges() {
-        console.log('CW Spots: updateBadges called - bandFilter:', this.bandFilter, 'lastBadgeBand:', this.lastBadgeBand, 'badgeCache:', !!this.badgeCache);
-
         // Use the main page container instead of the extension panel container
         const container = document.getElementById('cw-spots-badges-main');
         if (!container) return;
@@ -2586,18 +2584,13 @@ window.cwSpotsExtensionInstance = cwSpotsExtensionInstance;
 let cwSpotPositions = [];
 window.cwSpotPositions = cwSpotPositions;
 
-let lastCWDebugLog = 0;
 function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
-    const now = Date.now();
-    const shouldLog = (now - lastCWDebugLog) > 5000; // Log once every 5 seconds
-    
+    // NOTE: no console.log in this function — it runs on every marker cache
+    // rebuild (every rendered frame while panning), so logging here is a
+    // measurable jank source even with devtools closed.
     if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
-        if (shouldLog) {
-            console.log('CW Spots: No spectrum display or overlay context');
-            lastCWDebugLog = now;
-        }
         return;
     }
 
@@ -2606,10 +2599,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
     // Only draw if extension exists, is enabled, and has spots
     if (!cwExtension) {
-        if (shouldLog) {
-            console.log('CW Spots: Extension instance not found');
-            lastCWDebugLog = now;
-        }
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
         return;
@@ -2619,18 +2608,9 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     // render even when the extension panel is closed (always-on markers).
 
     if (!cwExtension.spots || cwExtension.spots.length === 0) {
-        if (shouldLog) {
-            console.log('CW Spots: No spots available');
-            lastCWDebugLog = now;
-        }
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
         return;
-    }
-    
-    if (shouldLog) {
-        console.log('CW Spots: enabled=', cwExtension.enabled, 'spots=', cwExtension.spots.length);
-        lastCWDebugLog = now;
     }
 
     // Use the overlay canvas context (same as bookmarks and DX spots)
@@ -2651,11 +2631,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
     // Get filtered spots
     let filteredSpots = cwExtension.spots;
-    
-    if (shouldLog) {
-        console.log('Spectrum range:', (startFreq/1e6).toFixed(3), '-', (endFreq/1e6).toFixed(3), 'MHz');
-        console.log('Filtered spots:', filteredSpots.length);
-    }
 
     // Apply age filter
     if (cwExtension.ageFilter !== null) {
@@ -2878,10 +2853,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
     // Update window reference
     window.cwSpotPositions = cwSpotPositions;
-    
-    if (shouldLog && visibleSpots.length > 0) {
-        console.log('Drew', visibleSpots.length, 'CW spot markers on spectrum with collision detection');
-    }
 }
 
 // Expose function on window for spectrum-display.js access

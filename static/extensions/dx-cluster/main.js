@@ -977,11 +977,10 @@ class DXClusterExtension extends DecoderExtension {
 }
 
 // Draw DX spots on spectrum display (exposed on window for spectrum-display.js access)
-let lastDebugLog = 0;
 function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
-    const now = Date.now();
-    const shouldLog = (now - lastDebugLog) > 5000; // Log once every 5 seconds
-    
+    // NOTE: no console.log in this function — it runs on every marker cache
+    // rebuild (every rendered frame while panning), so logging here is a
+    // measurable jank source even with devtools closed.
     if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
         dxSpotPositions = [];
         window.dxSpotPositions = dxSpotPositions;
@@ -998,11 +997,6 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         dxSpotPositions = [];
         window.dxSpotPositions = dxSpotPositions;
         return;
-    }
-    
-    if (shouldLog) {
-        console.log('DX Spots: enabled=', dxExtension.enabled, 'spots=', dxExtension.spots.length);
-        lastDebugLog = now;
     }
 
     // Use the overlay canvas context (same as bookmarks, but draw at bottom)
@@ -1023,11 +1017,6 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
 
     // Get filtered spots (backend already filters to 0-30 MHz)
     let filteredSpots = dxExtension.spots;
-    
-    if (shouldLog) {
-        console.log('Spectrum range:', (startFreq/1e6).toFixed(3), '-', (endFreq/1e6).toFixed(3), 'MHz');
-        console.log('Filtered spots:', filteredSpots.length);
-    }
 
     // Apply age filter
     if (dxExtension.ageFilter !== null) {
@@ -1215,10 +1204,6 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
 
     // Update window reference
     window.dxSpotPositions = dxSpotPositions;
-    
-    if (shouldLog && visibleSpots.length > 0) {
-        console.log('Drew', visibleSpots.length, 'DX spot markers on spectrum with collision detection');
-    }
 }
 
 // Expose function on window for spectrum-display.js access

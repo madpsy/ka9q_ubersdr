@@ -11180,14 +11180,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     spectrumDisplay.setRate(lineGraphEnabled ? 1 : 3);
                 }
 
-                // Only log config changes that are significant (not from periodic sync)
-                // Check if this is a user-initiated change
+                // Track config changes that are significant (not from periodic sync)
+                // so we can notify zoom changes; deliberately no logging here — this
+                // fires on every server config reply while panning.
                 if (!window.lastLoggedSpectrumConfig ||
                     window.lastLoggedSpectrumConfig.centerFreq !== config.centerFreq ||
                     window.lastLoggedSpectrumConfig.binBandwidth !== config.binBandwidth ||
                     window.lastLoggedSpectrumConfig.binCount !== config.binCount) {
-                    log(`Spectrum: ${config.binCount} bins @ ${config.binBandwidth} Hz, ${formatFrequency(config.centerFreq)}`);
-
                     // Notify zoom change if binBandwidth changed
                     if (window.radioAPI && window.lastLoggedSpectrumConfig &&
                         window.lastLoggedSpectrumConfig.binBandwidth !== config.binBandwidth) {

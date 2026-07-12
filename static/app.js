@@ -12552,16 +12552,12 @@ function selectBandFromDropdown(value) {
 
         // Check if band has a mode field in window.amateurBands
         let mode = null;
-        console.log('selectBandFromDropdown: Looking for band:', bandData.label);
-        console.log('selectBandFromDropdown: Available bands:', window.amateurBands);
 
         if (window.amateurBands && window.amateurBands.length > 0) {
             const fullBandData = window.amateurBands.find(b => b.label === bandData.label);
-            console.log('selectBandFromDropdown: Found band data:', fullBandData);
 
             if (fullBandData && fullBandData.mode) {
                 mode = fullBandData.mode.toLowerCase(); // Ensure lowercase
-                console.log('selectBandFromDropdown: Using band mode:', mode);
                 log(`Using band-specific mode: ${mode.toUpperCase()}`);
             }
         }
@@ -12569,7 +12565,6 @@ function selectBandFromDropdown(value) {
         // If no mode specified in band data, use default based on frequency
         if (!mode) {
             mode = centerFreq < 10000000 ? 'lsb' : 'usb';
-            console.log('selectBandFromDropdown: Using frequency-based mode:', mode);
         }
 
         setMode(mode);

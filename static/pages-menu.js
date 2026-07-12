@@ -24,7 +24,7 @@
     position: absolute;
     top: 0;
     left: 0;
-    z-index: 99999;
+    z-index: 9999;
     font-family: inherit;
     font-size: 13px;
 }

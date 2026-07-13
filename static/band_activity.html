@@ -493,9 +493,10 @@ body {
 }
 
 #conditions-bar .cond-cw-spots {
-    flex: 1 1 100%;
+    flex: 1 1 100%;   /* force onto its own row within .cond-bands flex container */
     border-top: 1px solid #1e1e2e;
-    padding: 6px 12px;
+    padding: 4px 0 2px 0;
+    margin-top: 4px;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -739,9 +740,9 @@ body {
     <div class="cond-body">
         <div class="cond-bands" id="cond-bands">
             <!-- band pills injected by JS -->
-        </div>
-        <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
-            <!-- CW spot badges injected by JS -->
+            <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
+                <!-- CW spot badges injected by JS -->
+            </div>
         </div>
         <div class="cond-right">
             <div class="cond-hardware" id="cond-hardware" style="display:none">

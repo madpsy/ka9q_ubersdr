@@ -434,23 +434,24 @@ class BandPanel {
         const sCtx = this.specCtx;
         sCtx.clearRect(0, 0, w, h);
 
-        // Grid lines + dB axis labels
-        sCtx.strokeStyle = '#1a1a2a';
-        sCtx.lineWidth = 1;
+        // Grid lines every 10 dB (subtle), labelled every 20 dB
         sCtx.font = '10px monospace';
         sCtx.textAlign = 'left';
         sCtx.textBaseline = 'bottom';
         for (let db = Math.ceil(dMin/10)*10; db <= dMax; db += 10) {
             const y = h - ((db - dMin) / dRange) * h;
+            // Minor grid every 10 dB, major every 20 dB
+            const isMajor = (db % 20 === 0);
+            sCtx.strokeStyle = isMajor ? '#222233' : '#161622';
+            sCtx.lineWidth = 1;
             sCtx.beginPath();
             sCtx.moveTo(0, y);
             sCtx.lineTo(w, y);
             sCtx.stroke();
-            // Label — skip the very bottom tick to avoid clipping
-            if (y < h - 2) {
-                const label = `${db} dB`;
+            // Label only on major (20 dB) lines, skip very bottom to avoid clipping
+            if (isMajor && y < h - 2) {
+                const label = `${db}`;
                 const tw = sCtx.measureText(label).width;
-                // Semi-transparent pill behind text
                 sCtx.fillStyle = 'rgba(10,10,15,0.65)';
                 sCtx.fillRect(2, y - 13, tw + 4, 12);
                 sCtx.fillStyle = '#556677';

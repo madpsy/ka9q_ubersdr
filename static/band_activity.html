@@ -155,20 +155,6 @@ body {
 }
 #palette-select:focus { outline: none; border-color: #555; }
 
-/* audio stop button */
-#btn-stop-audio {
-    display: none;
-    padding: 3px 10px;
-    border-radius: 6px;
-    border: 1px solid #e57373;
-    background: #2a1a1a;
-    color: #e57373;
-    font-size: 0.78em;
-    cursor: pointer;
-    white-space: nowrap;
-    animation: audio-pulse 2s ease-in-out infinite;
-}
-#btn-stop-audio:hover { border-color: #ef9a9a; color: #ef9a9a; background: #3a1a1a; }
 @keyframes audio-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(229,115,115,0); }
     50%       { box-shadow: 0 0 6px 2px rgba(229,115,115,0.35); }
@@ -377,7 +363,6 @@ body {
             <option value="night-vision">Night Vision</option>
         </select>
     </div>
-    <button id="btn-stop-audio" title="Stop audio">🔊 <span id="audio-label">--</span> ✕</button>
 </div>
 
 <div id="grid"></div>
@@ -515,17 +500,17 @@ async function startAudioAt(freqHz, bandName) {
     if (r.isPlaying) {
         // Already playing — just retune
         r.changeFrequency(freqHz);
+        _setBandPlayingIndicator(bandName, true);
     } else {
         try {
             await r.startPreview(freqHz);
+            _setBandPlayingIndicator(bandName, true);
         } catch (err) {
             console.error('Audio start failed:', err);
             audioFreqHz = null; audioBandName = null;
-            _updateAudioUI();
             return;
         }
     }
-    _updateAudioUI();
 }
 
 async function stopAudio() {
@@ -533,22 +518,6 @@ async function stopAudio() {
     if (r) await r.stopPreview();
     if (audioBandName) _setBandPlayingIndicator(audioBandName, false);
     audioFreqHz = null; audioBandName = null;
-    _updateAudioUI();
-}
-
-function _updateAudioUI() {
-    const btn   = document.getElementById('btn-stop-audio');
-    const label = document.getElementById('audio-label');
-    if (!btn) return;
-    if (audioFreqHz !== null) {
-        const mhz = (audioFreqHz / 1e6).toFixed(4);
-        label.textContent = `${audioBandName ? audioBandName.toUpperCase() + ' ' : ''}${mhz} MHz`;
-        btn.style.display = 'inline-flex';
-        _setBandPlayingIndicator(audioBandName, true);
-    } else {
-        btn.style.display = 'none';
-        label.textContent = '--';
-    }
 }
 
 function _setBandPlayingIndicator(bandName, playing) {
@@ -1528,9 +1497,6 @@ async function init() {
         // Redraw all panels with the new colour map
         for (const p of Object.values(panels)) p.dirty = true;
     });
-
-    // Stop-audio button
-    document.getElementById('btn-stop-audio').addEventListener('click', () => stopAudio());
 
     // Build initial panels and connect SSE
     rebuildPanels();

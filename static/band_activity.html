@@ -2162,13 +2162,17 @@ function _cwHandleSpot(spot) {
 }
 
 function _startCWSpots() {
-    if (!_cwEnabled || _cwSSE) return;
+    if (_cwSSE) return; // already connected
+    // Attempt connection regardless of _cwEnabled — server returns 503 if disabled,
+    // which onerror handles with a long backoff so we don't hammer a disabled endpoint.
 
     function connect() {
         const es = new EventSource('/api/cwskimmer/stream');
         _cwSSE = es;
+        let gotMessage = false;
 
         es.onmessage = (e) => {
+            gotMessage = true;
             _cwReconnectMs = 5000; // reset backoff on success
             try {
                 const spot = JSON.parse(e.data);
@@ -2176,14 +2180,19 @@ function _startCWSpots() {
             } catch (_) {}
         };
 
+        // heartbeat events keep the connection alive — treat as success
+        es.addEventListener('heartbeat', () => { gotMessage = true; _cwReconnectMs = 5000; });
+
         es.onerror = () => {
             es.close();
             _cwSSE = null;
-            // Exponential backoff, cap at 30 s
+            // If we never got a message, the server may have returned 503 —
+            // use a longer backoff to avoid hammering a disabled endpoint.
+            const delay = gotMessage ? _cwReconnectMs : 30000;
             setTimeout(() => {
                 _cwReconnectMs = Math.min(_cwReconnectMs * 2, 30000);
                 connect();
-            }, _cwReconnectMs);
+            }, delay);
         };
     }
 

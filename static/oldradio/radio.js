@@ -953,11 +953,74 @@ function setupOscilloscope() {
 
     console.log('[setupOscilloscope] speakerGrille:', speakerGrille, 'canvas:', visualiserCanvas, 'audioCtx:', minimalRadio?.audioContext);
 
-    if (!visualiserCanvas || !minimalRadio || !minimalRadio.audioContext) {
-        console.log('Visualiser not available');
+    if (!minimalRadio || !minimalRadio.audioContext) {
+        console.log('Visualiser not available — no audio context');
         return;
     }
 
+    // ── Fallback: legacy oscilloscope canvas (e.g. Grundig) ──────────────────
+    // If this radio has no #visualiser-canvas but does have #oscilloscope-canvas,
+    // wire up the old-style oscilloscope toggle on the speaker grille.
+    if (!visualiserCanvas) {
+        const legacyCanvas = document.getElementById('oscilloscope-canvas');
+        const legacyOverlay = document.getElementById('oscilloscope-overlay');
+        if (legacyCanvas && speakerGrille) {
+            console.log('[setupOscilloscope] using legacy oscilloscope canvas');
+            // Set up analyser for the legacy canvas
+            const legacyAnalyser = minimalRadio.audioContext.createAnalyser();
+            legacyAnalyser.fftSize = 2048;
+            legacyAnalyser.smoothingTimeConstant = 0.8;
+            minimalRadio.addAnalyser(legacyAnalyser);
+
+            // Size the canvas
+            const sizeLegacy = () => {
+                legacyCanvas.width = legacyCanvas.offsetWidth || 300;
+                legacyCanvas.height = legacyCanvas.offsetHeight || 120;
+            };
+            sizeLegacy();
+            window.addEventListener('resize', sizeLegacy);
+
+            const legacyCtx = legacyCanvas.getContext('2d');
+            let legacyVisible = false;
+            let legacyAnimFrame = null;
+
+            const drawLegacy = () => {
+                if (!legacyVisible) { legacyAnimFrame = null; return; }
+                legacyAnimFrame = requestAnimationFrame(drawLegacy);
+                const w = legacyCanvas.width, h = legacyCanvas.height;
+                const buf = new Uint8Array(legacyAnalyser.frequencyBinCount);
+                legacyAnalyser.getByteTimeDomainData(buf);
+                legacyCtx.fillStyle = 'rgba(0,0,0,0.85)';
+                legacyCtx.fillRect(0, 0, w, h);
+                legacyCtx.lineWidth = 2;
+                legacyCtx.strokeStyle = '#ff6b35';
+                legacyCtx.shadowBlur = 8;
+                legacyCtx.shadowColor = '#ff6b35';
+                legacyCtx.beginPath();
+                const slice = w / buf.length;
+                let x = 0;
+                for (let i = 0; i < buf.length; i++) {
+                    const v = ((buf[i] - 128) / 128.0) * 1.5;
+                    const y = h / 2 - Math.max(-1, Math.min(1, v)) * h / 2;
+                    i === 0 ? legacyCtx.moveTo(x, y) : legacyCtx.lineTo(x, y);
+                    x += slice;
+                }
+                legacyCtx.stroke();
+                legacyCtx.shadowBlur = 0;
+            };
+
+            speakerGrille.addEventListener('click', () => {
+                legacyVisible = !legacyVisible;
+                if (legacyOverlay) legacyOverlay.style.opacity = legacyVisible ? '1' : '0';
+                if (legacyVisible && !legacyAnimFrame) drawLegacy();
+            });
+        } else {
+            console.log('[setupOscilloscope] no visualiser or oscilloscope canvas found — skipping');
+        }
+        return;
+    }
+
+    // ── Primary path: CB radio 3-mode visualiser (#visualiser-canvas) ────────
     visualiserCtx = visualiserCanvas.getContext('2d');
 
     const resizeCanvas = () => {

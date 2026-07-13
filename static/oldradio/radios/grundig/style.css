@@ -48,6 +48,21 @@
     transition: opacity 0.3s ease;
 }
 
+/* Oscilloscope overlay — hidden by default, fades in on click */
+.oscilloscope-overlay {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+#oscilloscope-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
 .frequency-readout {
     text-align: center;
     font-size: 36px;

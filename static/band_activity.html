@@ -174,16 +174,25 @@ body {
     50%       { box-shadow: 0 0 6px 2px rgba(229,115,115,0.35); }
 }
 
-/* playing indicator on band header */
-.band-playing {
-    display: inline-block;
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: #e57373;
-    margin-right: 5px;
-    animation: audio-pulse 1.2s ease-in-out infinite;
+/* stop button on band header (shown while audio is playing) */
+.band-stop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    border: 1px solid #e57373;
+    background: #2a1a1a;
+    color: #e57373;
+    font-size: 0.72em;
+    cursor: pointer;
+    white-space: nowrap;
     flex-shrink: 0;
+    margin-right: 6px;
+    animation: audio-pulse 1.2s ease-in-out infinite;
+    line-height: 1.4;
 }
+.band-stop-btn:hover { background: #3a1a1a; border-color: #ef9a9a; color: #ef9a9a; }
 
 /* ── Grid of band panels ── */
 #grid {
@@ -534,7 +543,7 @@ function _updateAudioUI() {
     if (audioFreqHz !== null) {
         const mhz = (audioFreqHz / 1e6).toFixed(4);
         label.textContent = `${audioBandName ? audioBandName.toUpperCase() + ' ' : ''}${mhz} MHz`;
-        btn.style.display = '';
+        btn.style.display = 'inline-flex';
         _setBandPlayingIndicator(audioBandName, true);
     } else {
         btn.style.display = 'none';
@@ -548,15 +557,21 @@ function _setBandPlayingIndicator(bandName, playing) {
     if (!panel) return;
     const header = panel.el.querySelector('.band-header');
     if (!header) return;
-    let dot = header.querySelector('.band-playing');
+    let btn = header.querySelector('.band-stop-btn');
     if (playing) {
-        if (!dot) {
-            dot = document.createElement('span');
-            dot.className = 'band-playing';
-            header.insertBefore(dot, header.firstChild);
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.className = 'band-stop-btn';
+            btn.title = 'Stop audio';
+            btn.textContent = '■ Stop';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                stopAudio();
+            });
+            header.insertBefore(btn, header.firstChild);
         }
     } else {
-        if (dot) dot.remove();
+        if (btn) btn.remove();
     }
 }
 

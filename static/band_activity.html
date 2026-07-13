@@ -68,6 +68,14 @@ body {
 #status-dot.error  { background: #f44336; }
 #status-dot.wait   { background: #ff9800; }
 
+#status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;          /* fill remaining space on the first topbar row */
+    min-width: 0;
+}
+
 #status-text {
     font-size: 0.82em;
     color: #888;
@@ -75,7 +83,7 @@ body {
 }
 
 #utc-clock {
-    margin-left: auto;
+    margin-left: auto;   /* push to far right of the status row */
     font-size: 0.82em;
     color: #7ec8e3;
     font-variant-numeric: tabular-nums;
@@ -381,8 +389,11 @@ body {
         <span id="receiver-name"></span>
         <span id="receiver-location"></span>
     </div>
-    <div id="status-dot" class="wait"></div>
-    <span id="status-text">Connecting…</span>
+    <div id="status-row">
+        <div id="status-dot" class="wait"></div>
+        <span id="status-text">Connecting…</span>
+        <span id="utc-clock"></span>
+    </div>
     <div id="band-pills"></div>
     <button id="btn-all">All</button>
     <button id="btn-none">None</button>
@@ -402,7 +413,6 @@ body {
             <option value="night-vision">Night Vision</option>
         </select>
     </div>
-    <span id="utc-clock"></span>
 </div>
 
 <div id="grid"></div>

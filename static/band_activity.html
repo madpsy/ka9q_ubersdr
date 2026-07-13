@@ -509,15 +509,6 @@ body {
     will-change: transform;
 }
 
-#conditions-bar .cond-ticker-track.scrolling {
-    animation: ticker-scroll linear infinite;
-}
-
-@keyframes ticker-scroll {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-50%); }
-}
-
 .cond-ticker-item {
     display: inline-flex;
     align-items: center;
@@ -2152,6 +2143,37 @@ async function _fetchVoiceActivity() {
     return resp.json();
 }
 
+let _tickerRAF = null;
+let _tickerOffset = 0;
+let _tickerHalfW = 0;
+let _tickerLastTs = null;
+const _TICKER_PX_PER_S = 60; // scroll speed
+
+function _tickerLoop(ts) {
+    const trackEl = document.getElementById('cond-ticker-track');
+    if (!trackEl) { _tickerRAF = null; return; }
+
+    if (_tickerLastTs !== null) {
+        const dt = (ts - _tickerLastTs) / 1000;
+        _tickerOffset += _TICKER_PX_PER_S * dt;
+        if (_tickerHalfW > 0 && _tickerOffset >= _tickerHalfW) {
+            _tickerOffset -= _tickerHalfW;
+        }
+        trackEl.style.transform = `translateX(${-_tickerOffset}px)`;
+    }
+    _tickerLastTs = ts;
+    _tickerRAF = requestAnimationFrame(_tickerLoop);
+}
+
+function _stopTickerLoop() {
+    if (_tickerRAF !== null) {
+        cancelAnimationFrame(_tickerRAF);
+        _tickerRAF = null;
+    }
+    _tickerLastTs = null;
+    _tickerOffset = 0;
+}
+
 function _renderVoiceTicker(data) {
     const tickerEl = document.getElementById('cond-ticker');
     const trackEl  = document.getElementById('cond-ticker-track');
@@ -2170,6 +2192,7 @@ function _renderVoiceTicker(data) {
     items.sort((a, b) => (b.snr || 0) - (a.snr || 0));
 
     if (items.length === 0) {
+        _stopTickerLoop();
         tickerEl.style.display = 'none';
         return;
     }
@@ -2186,7 +2209,6 @@ function _renderVoiceTicker(data) {
 
         const el = document.createElement('span');
         el.className = 'cond-ticker-item';
-
         el.innerHTML =
             `<span class="cond-ticker-band">${_escHtml(band)}</span>` +
             `<span class="cond-ticker-freq">${_escHtml(freqMHz)} MHz ${_escHtml(mode)}</span>` +
@@ -2197,26 +2219,29 @@ function _renderVoiceTicker(data) {
         return el;
     }
 
-    // Build the track: items + duplicate for seamless loop
-    trackEl.classList.remove('scrolling');
-    trackEl.style.animationDuration = '';
+    // Stop any running loop, rebuild DOM
+    _stopTickerLoop();
+    trackEl.style.transform = '';
     trackEl.innerHTML = '';
-
     for (const act of items) trackEl.appendChild(makeItem(act));
     // Duplicate for seamless wrap
     for (const act of items) trackEl.appendChild(makeItem(act));
 
     tickerEl.style.display = '';
 
-    // Measure actual track width after layout, then start animation
-    requestAnimationFrame(() => {
-        // Half the track is one full set of items
-        const halfW = trackEl.scrollWidth / 2;
-        // Speed: ~80 px/s, min 8 s
-        const dur = Math.max(8, halfW / 80);
-        trackEl.style.animationDuration = `${dur}s`;
-        trackEl.classList.add('scrolling');
-    });
+    // Measure half-width after two frames (ensures layout is complete)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        // offsetWidth of each child summed = half the track
+        // Use getBoundingClientRect on first and last child of first half
+        const children = trackEl.children;
+        const half = items.length;
+        if (half === 0 || children.length < half) { _tickerHalfW = 0; return; }
+        const first = children[0].getBoundingClientRect();
+        const last  = children[half - 1].getBoundingClientRect();
+        _tickerHalfW = last.right - first.left;
+        if (_tickerHalfW < 10) { _tickerHalfW = 0; return; }
+        _tickerRAF = requestAnimationFrame(_tickerLoop);
+    }));
 }
 
 async function _refreshVoiceTicker() {

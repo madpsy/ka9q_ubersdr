@@ -74,6 +74,15 @@ body {
     white-space: nowrap;
 }
 
+#utc-clock {
+    margin-left: auto;
+    font-size: 0.82em;
+    color: #7ec8e3;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+}
+
 /* band selector pills — always on their own row when the topbar wraps */
 #band-pills {
     display: flex;
@@ -393,6 +402,7 @@ body {
             <option value="night-vision">Night Vision</option>
         </select>
     </div>
+    <span id="utc-clock"></span>
 </div>
 
 <div id="grid"></div>
@@ -1526,6 +1536,14 @@ function connectSSE() {
 // Update the status text once per second from a timer — decoupled from data events
 // so the "Live" indicator doesn't flicker when connectSSE() is called mid-stream.
 function _updateStatusText() {
+    // Always tick the UTC clock regardless of connection state
+    const now = new Date();
+    const hh = String(now.getUTCHours()).padStart(2, '0');
+    const mm = String(now.getUTCMinutes()).padStart(2, '0');
+    const ss = String(now.getUTCSeconds()).padStart(2, '0');
+    const clockEl = document.getElementById('utc-clock');
+    if (clockEl) clockEl.textContent = `${hh}:${mm}:${ss} UTC`;
+
     if (!sse || sse.readyState === EventSource.CLOSED) return; // error path handles its own text
     if (sse.readyState === EventSource.CONNECTING) {
         setStatus('wait', 'Connecting…');
@@ -1539,6 +1557,7 @@ function _updateStatusText() {
 let _statusTimer = null;
 function _startStatusTimer() {
     if (_statusTimer !== null) return;
+    _updateStatusText(); // tick immediately so clock shows at once
     _statusTimer = setInterval(_updateStatusText, 1000);
 }
 

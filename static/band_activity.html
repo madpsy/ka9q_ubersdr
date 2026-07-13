@@ -423,8 +423,10 @@ body {
 #conditions-bar .cond-right {
     display: flex;
     flex-direction: row;
-    flex-shrink: 0;
     flex-wrap: nowrap;   /* never stack on mobile */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
 }
 
 /* ── Band SNR section ── */
@@ -464,14 +466,14 @@ body {
 
 /* ── Space weather section ── */
 #conditions-bar .cond-sw {
-    flex: 0 0 auto;
-    padding: 10px 14px;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     justify-content: center;
-    min-width: 180px;
 }
 
 .cond-sw-row {
@@ -483,8 +485,8 @@ body {
 
 .cond-sw-label {
     color: #666;
-    min-width: 80px;
-    flex-shrink: 0;
+    min-width: 60px;
+    flex-shrink: 1;
 }
 
 .cond-sw-value {
@@ -522,13 +524,14 @@ body {
 
 /* ── Local weather section ── */
 #conditions-bar .cond-weather {
-    flex: 0 0 auto;
-    padding: 10px 14px;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-width: 0;
+    gap: 8px;
+    overflow: hidden;
 }
 
 .cond-wx-icon {
@@ -550,18 +553,20 @@ body {
     font-weight: 600;
     color: #ccc;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .cond-wx-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 4px;
 }
 
 .cond-wx-chip {
     font-size: 0.72em;
     color: #999;
-    white-space: nowrap;
+    white-space: nowrap;   /* keep each chip on one line but chips wrap between each other */
 }
 .cond-wx-chip strong {
     color: #ccc;

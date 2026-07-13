@@ -265,21 +265,44 @@ body {
 
 /* frequency axis */
 .freq-axis {
-    height: 16px;
+    height: 18px;
     background: #0d0d14;
     position: relative;
     font-size: 0.65em;
     color: #555;
     border-top: 1px solid #1a1a24;
+    overflow: visible;
 }
 
 .freq-label {
     position: absolute;
     transform: translateX(-50%);
-    top: 2px;
+    top: 4px;
     white-space: nowrap;
-    color: #ffffff;
+    color: #888;
+    font-size: 0.9em;
 }
+/* tick mark above each label */
+.freq-label::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -4px;
+    transform: translateX(-50%);
+    width: 1px;
+    height: 3px;
+    background: #444;
+}
+/* first label: left-align so it doesn't clip */
+.freq-label.first {
+    transform: none;
+}
+.freq-label.first::before { left: 0; transform: none; }
+/* last label: right-align so it doesn't clip */
+.freq-label.last {
+    transform: translateX(-100%);
+}
+.freq-label.last::before { left: 100%; transform: translateX(-100%); }
 
 /* zoom indicator badge shown in top-right of spectrum when zoomed */
 .zoom-badge {
@@ -685,7 +708,10 @@ class BandPanel {
             const hz   = startHz + frac * spanHz;
             const mhz  = (hz / 1e6).toFixed(3);
             const lbl  = document.createElement('span');
-            lbl.className = 'freq-label';
+            let cls = 'freq-label';
+            if (i === 0)     cls += ' first';
+            if (i === steps) cls += ' last';
+            lbl.className = cls;
             lbl.style.left = `${frac * 100}%`;
             lbl.textContent = mhz;
             axis.appendChild(lbl);

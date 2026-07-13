@@ -507,6 +507,54 @@ body {
 #conditions-bar .cond-forecast span {
     color: #888;
 }
+
+/* ── Local weather section ── */
+#conditions-bar .cond-weather {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    border-left: 1px solid #1e1e2e;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.cond-wx-icon {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    object-fit: contain;
+}
+
+.cond-wx-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.cond-wx-desc {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: #ccc;
+    white-space: nowrap;
+}
+
+.cond-wx-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.cond-wx-chip {
+    font-size: 0.72em;
+    color: #999;
+    white-space: nowrap;
+}
+.cond-wx-chip strong {
+    color: #ccc;
+    font-weight: 600;
+}
 </style>
 </head>
 <body>
@@ -549,12 +597,15 @@ body {
 
 <div id="conditions-bar" style="display:none">
     <div class="cond-header">
-        <span class="cond-title">📊 Band Conditions</span>
+        <span class="cond-title">Conditions</span>
         <span class="cond-updated" id="cond-updated"></span>
     </div>
     <div class="cond-body">
         <div class="cond-bands" id="cond-bands">
             <!-- band pills injected by JS -->
+        </div>
+        <div class="cond-weather" id="cond-weather" style="display:none">
+            <!-- local weather injected by JS -->
         </div>
         <div class="cond-sw" id="cond-sw" style="display:none">
             <!-- space weather rows injected by JS -->
@@ -1922,6 +1973,12 @@ async function _fetchSpaceWeather() {
     return resp.json();
 }
 
+async function _fetchWeather() {
+    const resp = await fetch('/api/weather');
+    if (!resp.ok) throw new Error(`weather HTTP ${resp.status}`);
+    return resp.json();
+}
+
 function _escHtml(str) {
     return String(str)
         .replace(/&/g,'&amp;')
@@ -1930,7 +1987,12 @@ function _escHtml(str) {
         .replace(/"/g,'&quot;');
 }
 
-function _renderConditions(bandStates, sw) {
+function _windDir(deg) {
+    if (deg === null || deg === undefined) return '';
+    return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
+}
+
+function _renderConditions(bandStates, sw, wx) {
     const bar = document.getElementById('conditions-bar');
     if (!bar) return;
 
@@ -1939,10 +2001,12 @@ function _renderConditions(bandStates, sw) {
     if (bandsEl) {
         bandsEl.innerHTML = '';
         const bands = allBands.length > 0 ? allBands : _COND_BANDS_FALLBACK;
+        let anyBand = false;
         for (const band of bands) {
-            const st = bandStates[band];
+            const st = bandStates ? bandStates[band] : null;
             if (!st) continue;
-            const cls    = st.status;   // 'excellent'|'good'|'fair'|'poor'|'unknown'
+            anyBand = true;
+            const cls    = st.status;
             const snrTxt = st.snr !== null ? st.snr.toFixed(1) : '—';
             const pill   = document.createElement('div');
             pill.className = `cond-band-pill ${cls}`;
@@ -1952,44 +2016,115 @@ function _renderConditions(bandStates, sw) {
                 `<span class="cpill-snr">${snrTxt}</span>`;
             bandsEl.appendChild(pill);
         }
+        if (!anyBand) {
+            bandsEl.innerHTML = '<span style="color:#555;font-size:0.8em">Band data unavailable</span>';
+        }
+    }
+
+    // ── Local weather ──
+    const wxEl = document.getElementById('cond-weather');
+    if (wxEl) {
+        if (wx && wx.weather && wx.weather.length > 0) {
+            wxEl.style.display = '';
+            wxEl.innerHTML = '';
+
+            const iconCode  = wx.weather[0].icon;
+            const desc      = wx.weather[0].description
+                .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const tempC     = wx.main?.temp     !== undefined ? Math.round(wx.main.temp)       : null;
+            const feelsLike = wx.main?.feels_like !== undefined ? Math.round(wx.main.feels_like) : null;
+            const humidity  = wx.main?.humidity  !== undefined ? wx.main.humidity               : null;
+            const pressure  = wx.main?.pressure  !== undefined ? wx.main.pressure               : null;
+            const windMs    = wx.wind?.speed     !== undefined ? wx.wind.speed                  : null;
+            const windKmh   = windMs !== null ? Math.round(windMs * 3.6) : null;
+            const windDeg   = wx.wind?.deg       !== undefined ? wx.wind.deg                    : null;
+            const gustMs    = wx.wind?.gust      !== undefined ? wx.wind.gust                   : null;
+            const gustKmh   = gustMs !== null ? Math.round(gustMs * 3.6) : null;
+
+            const img = document.createElement('img');
+            img.className = 'cond-wx-icon';
+            img.src = `/weather/${iconCode}_t.png`;
+            img.alt = desc;
+            img.onerror = () => img.style.display = 'none';
+            wxEl.appendChild(img);
+
+            const info = document.createElement('div');
+            info.className = 'cond-wx-info';
+
+            const descEl = document.createElement('div');
+            descEl.className = 'cond-wx-desc';
+            descEl.textContent = desc;
+            info.appendChild(descEl);
+
+            const chips = document.createElement('div');
+            chips.className = 'cond-wx-chips';
+
+            const addChip = (icon, val, title) => {
+                if (val === null || val === undefined) return;
+                const c = document.createElement('span');
+                c.className = 'cond-wx-chip';
+                c.title = title || '';
+                c.innerHTML = `${icon} <strong>${val}</strong>`;
+                chips.appendChild(c);
+            };
+
+            if (tempC !== null) {
+                const tip = feelsLike !== null ? `Feels like ${feelsLike}°C` : 'Temperature';
+                addChip('🌡️', `${tempC}°C`, tip);
+            }
+            if (humidity !== null) addChip('💧', `${humidity}%`, 'Relative humidity');
+            if (pressure !== null) addChip('🔵', `${pressure} hPa`, 'Atmospheric pressure');
+            if (windKmh !== null) {
+                const dir = _windDir(windDeg);
+                const gust = gustKmh !== null ? ` (gusts ${gustKmh})` : '';
+                addChip('💨', `${windKmh} km/h${dir ? ' ' + dir : ''}${gust}`, 'Wind speed');
+            }
+
+            info.appendChild(chips);
+            wxEl.appendChild(info);
+        } else {
+            wxEl.style.display = 'none';
+        }
     }
 
     // ── Space weather ──
     const swEl = document.getElementById('cond-sw');
-    if (swEl && sw) {
-        swEl.innerHTML = '';
-        swEl.style.display = '';
+    if (swEl) {
+        if (sw) {
+            swEl.innerHTML = '';
+            swEl.style.display = '';
 
-        const solarFlux = sw.solar_flux      !== undefined ? Math.round(sw.solar_flux)   : null;
-        const kIndex    = sw.k_index         !== undefined ? sw.k_index                  : null;
-        const aIndex    = sw.a_index         !== undefined ? sw.a_index                  : null;
-        const bz        = sw.solar_wind_bz   !== undefined ? sw.solar_wind_bz.toFixed(1) : null;
-        const propQual  = sw.propagation_quality || null;
-        const kStatus   = sw.k_index_status  || null;
+            const solarFlux = sw.solar_flux      !== undefined ? Math.round(sw.solar_flux)   : null;
+            const kIndex    = sw.k_index         !== undefined ? sw.k_index                  : null;
+            const aIndex    = sw.a_index         !== undefined ? sw.a_index                  : null;
+            const bz        = sw.solar_wind_bz   !== undefined ? sw.solar_wind_bz.toFixed(1) : null;
+            const propQual  = sw.propagation_quality || null;
+            const kStatus   = sw.k_index_status  || null;
 
-        const rows = [
-            { label: 'Solar Flux',    value: solarFlux !== null ? `${solarFlux} SFU` : '—' },
-            { label: 'K-Index',       value: kIndex    !== null ? `${kIndex}${kStatus ? ' · ' + kStatus : ''}` : '—' },
-            { label: 'A-Index',       value: aIndex    !== null ? `${aIndex}` : '—' },
-            { label: 'Solar Wind Bz', value: bz        !== null ? `${bz} nT` : '—' },
-        ];
+            const rows = [
+                { label: 'Solar Flux',    value: solarFlux !== null ? `${solarFlux} SFU` : '—' },
+                { label: 'K-Index',       value: kIndex    !== null ? `${kIndex}${kStatus ? ' · ' + kStatus : ''}` : '—' },
+                { label: 'A-Index',       value: aIndex    !== null ? `${aIndex}` : '—' },
+                { label: 'Solar Wind Bz', value: bz        !== null ? `${bz} nT` : '—' },
+            ];
 
-        for (const row of rows) {
-            const div = document.createElement('div');
-            div.className = 'cond-sw-row';
-            div.innerHTML = `<span class="cond-sw-label">${row.label}</span><span class="cond-sw-value">${row.value}</span>`;
-            swEl.appendChild(div);
+            for (const row of rows) {
+                const div = document.createElement('div');
+                div.className = 'cond-sw-row';
+                div.innerHTML = `<span class="cond-sw-label">${row.label}</span><span class="cond-sw-value">${row.value}</span>`;
+                swEl.appendChild(div);
+            }
+
+            if (propQual) {
+                const div = document.createElement('div');
+                div.className = 'cond-sw-row';
+                const cls = _swPropClass(propQual);
+                div.innerHTML = `<span class="cond-sw-label">Propagation</span><span class="cond-sw-badge ${cls}">${_escHtml(propQual)}</span>`;
+                swEl.appendChild(div);
+            }
+        } else {
+            swEl.style.display = 'none';
         }
-
-        if (propQual) {
-            const div = document.createElement('div');
-            div.className = 'cond-sw-row';
-            const cls = _swPropClass(propQual);
-            div.innerHTML = `<span class="cond-sw-label">Propagation</span><span class="cond-sw-badge ${cls}">${_escHtml(propQual)}</span>`;
-            swEl.appendChild(div);
-        }
-    } else if (swEl) {
-        swEl.style.display = 'none';
     }
 
     // ── Forecast strip ──
@@ -2018,13 +2153,15 @@ function _renderConditions(bandStates, sw) {
 
 async function _refreshConditions() {
     try {
-        const [bandResult, swResult] = await Promise.allSettled([
+        const [bandResult, swResult, wxResult] = await Promise.allSettled([
             _fetchBandConditions(),
-            _fetchSpaceWeather()
+            _fetchSpaceWeather(),
+            _fetchWeather()
         ]);
-        const bs     = bandResult.status === 'fulfilled' ? bandResult.value : {};
+        const bs     = bandResult.status === 'fulfilled' ? bandResult.value : null;
         const swData = swResult.status   === 'fulfilled' ? swResult.value   : null;
-        _renderConditions(bs, swData);
+        const wxData = wxResult.status   === 'fulfilled' ? wxResult.value   : null;
+        _renderConditions(bs, swData, wxData);
     } catch (err) {
         console.warn('[conditions] refresh error:', err);
     }

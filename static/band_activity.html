@@ -407,9 +407,17 @@ body {
     align-items: flex-start;
 }
 
+/* ── Left column: band pills with CW spots filling the space below ── */
+#conditions-bar .cond-left {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: stretch;   /* match the right panel's height so spots can fill the gap */
+    display: flex;
+    flex-direction: column;
+}
+
 /* ── Band SNR section ── */
 #conditions-bar .cond-bands {
-    flex: 1 1 auto;
     padding: 10px 12px;
     display: flex;
     flex-wrap: wrap;
@@ -493,12 +501,20 @@ body {
 }
 
 #conditions-bar .cond-cw-spots {
+    /* Badges must not contribute to the left column's intrinsic width,
+       or adding badges pushes .cond-right onto a new row. */
+    contain: inline-size;
+    /* Fill only the leftover height under the pills — never grow the bar. */
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
     border-top: 1px solid #1e1e2e;
-    padding: 4px 12px 2px;
+    padding: 4px 12px 6px;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
     align-items: flex-start;
+    align-content: flex-start;
 }
 
 .cond-cw-badge {
@@ -736,8 +752,13 @@ body {
 
 <div id="conditions-bar" style="display:none">
     <div class="cond-body">
-        <div class="cond-bands" id="cond-bands">
-            <!-- band pills injected by JS -->
+        <div class="cond-left">
+            <div class="cond-bands" id="cond-bands">
+                <!-- band pills injected by JS -->
+            </div>
+            <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
+                <!-- CW spot badges injected by JS -->
+            </div>
         </div>
         <div class="cond-right">
             <div class="cond-hardware" id="cond-hardware" style="display:none">
@@ -750,9 +771,6 @@ body {
                 <!-- space weather rows injected by JS -->
             </div>
         </div>
-    </div>
-    <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
-        <!-- CW spot badges injected by JS -->
     </div>
     <div class="cond-ticker" id="cond-ticker" style="display:none">
         <div class="cond-ticker-track" id="cond-ticker-track"></div>
@@ -2131,6 +2149,13 @@ function _renderCWSpots() {
     const shown = _cwRecentSpots.slice(0, _CW_MAX_DISPLAY);
     for (const spot of shown) el.appendChild(_cwMakeBadge(spot));
     el.style.display = 'flex'; // must override inline style="display:none"
+    // Newest render first, so drop trailing (oldest) badges until they all
+    // fit the fixed height available under the band pills.
+    while (el.lastElementChild && el.scrollHeight > el.clientHeight) {
+        el.removeChild(el.lastElementChild);
+    }
+    // No room for even one badge — hide the strip entirely.
+    if (!el.firstElementChild) el.style.display = 'none';
 }
 
 function _cwHandleSpot(spot) {

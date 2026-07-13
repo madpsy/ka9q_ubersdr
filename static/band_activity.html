@@ -338,6 +338,12 @@ class BandPanel {
             document.getElementById('tooltip').style.display = 'none';
         });
 
+        // Tooltip on waterfall hover (shows frequency + dB at cursor X)
+        this.wfCanvas.addEventListener('mousemove', e => this._onWfHover(e));
+        this.wfCanvas.addEventListener('mouseleave', () => {
+            document.getElementById('tooltip').style.display = 'none';
+        });
+
         // Build frequency axis labels
         this._buildAxis();
     }
@@ -549,6 +555,47 @@ class BandPanel {
         tip.style.top  = `${e.clientY - 20}px`;
     }
 
+    _onWfHover(e) {
+        if (!this.bins) return;
+        const rect = this.wfCanvas.getBoundingClientRect();
+        const fracX = (e.clientX - rect.left) / rect.width;
+        const fracY = (e.clientY - rect.top)  / rect.height;
+
+        // X → frequency
+        const binIdx = Math.round(fracX * (this.bins.length - 1));
+        if (binIdx < 0 || binIdx >= this.bins.length) return;
+        const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
+        const mhz = (hz / 1e6).toFixed(4);
+
+        // Y → age: row 0 (top) = newest, row maxRows-1 (bottom) = oldest
+        // Each row represents one SSE tick (~1 s).
+        const rowIdx = Math.round(fracY * (this.maxRows - 1));
+        const ageSec = rowIdx; // approx seconds ago
+        const ageStr = ageSec === 0 ? 'now'
+                     : ageSec === 1 ? '1 s ago'
+                     : `${ageSec} s ago`;
+
+        // dB from the stored waterfall row at that age (if available)
+        const rows = this.waterfallRows;
+        const nRows = rows.length;
+        // waterfallRows[nRows-1] = newest (top), waterfallRows[0] = oldest
+        const rowDataIdx = nRows - 1 - rowIdx;
+        let dbStr = '--';
+        if (rowDataIdx >= 0 && rowDataIdx < nRows) {
+            const wfW = this.wfCanvas.width;
+            const pxIdx = Math.round(fracX * (wfW - 1));
+            const norm = rows[rowDataIdx][Math.min(pxIdx, wfW - 1)] / 255;
+            const db = dbMin + norm * (dbMax - dbMin);
+            dbStr = db.toFixed(1) + ' dBFS';
+        }
+
+        const tip = document.getElementById('tooltip');
+        tip.textContent = `${mhz} MHz  ${dbStr}  (${ageStr})`;
+        tip.style.display = 'block';
+        tip.style.left = `${e.clientX + 12}px`;
+        tip.style.top  = `${e.clientY - 20}px`;
+    }
+
     destroy() {
         if (this.animFrame) cancelAnimationFrame(this.animFrame);
         if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el);
@@ -619,10 +666,20 @@ function rebuildPanels() {
         }
     }
 
-    // Add panels for newly selected bands (in frequency order)
+    // Add panels for newly selected bands
     for (const name of allBands) {
         if (activeBands.has(name) && !panels[name]) {
             panels[name] = new BandPanel(name, bandMeta[name]);
+        }
+    }
+
+    // Re-order DOM nodes in the grid to match allBands frequency order.
+    // appendChild moves an existing node to the end, so iterating allBands
+    // in order produces the correct final sequence regardless of prior order.
+    const grid = document.getElementById('grid');
+    for (const name of allBands) {
+        if (panels[name] && panels[name].el) {
+            grid.appendChild(panels[name].el);
         }
     }
 
@@ -699,12 +756,13 @@ async function init() {
         return;
     }
 
-    // Build metadata map and ordered list
+    // Build metadata map and ordered list, sorted by start frequency (lowest first)
     allBands = [];
     for (const b of cfg.bands) {
         bandMeta[b.name] = b;
         allBands.push(b.name);
     }
+    allBands.sort((a, b) => bandMeta[a].start - bandMeta[b].start);
 
     // Load saved preferences (which bands were active, dB range)
     loadPrefs();

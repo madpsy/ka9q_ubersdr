@@ -493,12 +493,8 @@ body {
 }
 
 #conditions-bar .cond-cw-spots {
-    flex: 1 1 100%;   /* force onto its own row within .cond-bands flex container */
-    width: 100%;      /* explicit width so flex: 1 1 100% definitely fills the row */
-    align-self: flex-start;
     border-top: 1px solid #1e1e2e;
-    padding: 4px 0 2px 0;
-    margin-top: 4px;
+    padding: 4px 12px 2px;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -742,9 +738,6 @@ body {
     <div class="cond-body">
         <div class="cond-bands" id="cond-bands">
             <!-- band pills injected by JS -->
-            <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
-                <!-- CW spot badges injected by JS -->
-            </div>
         </div>
         <div class="cond-right">
             <div class="cond-hardware" id="cond-hardware" style="display:none">
@@ -757,6 +750,9 @@ body {
                 <!-- space weather rows injected by JS -->
             </div>
         </div>
+    </div>
+    <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
+        <!-- CW spot badges injected by JS -->
     </div>
     <div class="cond-ticker" id="cond-ticker" style="display:none">
         <div class="cond-ticker-track" id="cond-ticker-track"></div>
@@ -2624,9 +2620,6 @@ function _renderConditions(bandStates, sw, wx) {
     // ── Band pills ──
     const bandsEl = document.getElementById('cond-bands');
     if (bandsEl) {
-        // Detach the CW spots container before wiping — it lives inside
-        // #cond-bands and must survive the pill redraw.
-        const cwSpotsEl = document.getElementById('cond-cw-spots');
         bandsEl.innerHTML = '';
         const bands = allBands.length > 0 ? allBands : _COND_BANDS_FALLBACK;
         let anyBand = false;
@@ -2647,7 +2640,6 @@ function _renderConditions(bandStates, sw, wx) {
         if (!anyBand) {
             bandsEl.innerHTML = '<span style="color:#555;font-size:0.8em">Band data unavailable</span>';
         }
-        if (cwSpotsEl) bandsEl.appendChild(cwSpotsEl);
     }
 
     // ── Local weather ──

@@ -1062,15 +1062,16 @@ function drawVisualiser() {
         visualiserCtx.shadowBlur = 0;
 
     } else {
-        // ── Oscilloscope (orange/amber theme) ────────────────────────────
+        // ── Oscilloscope (green theme, matches CB aesthetic) ─────────────
         const bufferLength = visualiserAnalyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         visualiserAnalyser.getByteTimeDomainData(dataArray);
 
-        visualiserCtx.fillStyle = '#0a0805';
+        visualiserCtx.fillStyle = '#000';
         visualiserCtx.fillRect(0, 0, width, height);
 
-        visualiserCtx.strokeStyle = 'rgba(212, 165, 116, 0.15)';
+        // Grid lines
+        visualiserCtx.strokeStyle = 'rgba(0, 255, 0, 0.08)';
         visualiserCtx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
             const y = (height / 4) * i;
@@ -1088,20 +1089,19 @@ function drawVisualiser() {
         }
 
         visualiserCtx.lineWidth = 2;
-        visualiserCtx.strokeStyle = '#ff6b35';
-        visualiserCtx.shadowBlur = 10;
-        visualiserCtx.shadowColor = '#ff6b35';
+        visualiserCtx.strokeStyle = '#00ff00';
+        visualiserCtx.shadowBlur = 8;
+        visualiserCtx.shadowColor = '#00ff00';
         visualiserCtx.beginPath();
 
+        // Use 128 as DC midpoint (standard for getByteTimeDomainData)
+        // gain of 1.5 gives a natural waveform without clipping
         const sliceWidth = width / bufferLength;
         let x = 0;
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
-        const dcOffset = sum / bufferLength;
-        const gain = 5.0;
+        const gain = 1.5;
 
         for (let i = 0; i < bufferLength; i++) {
-            const v = ((dataArray[i] - dcOffset) / 128.0) * gain;
+            const v = ((dataArray[i] - 128) / 128.0) * gain;
             const clampedV = Math.max(-1, Math.min(1, v));
             const y = height / 2 - (clampedV * height / 2);
             if (i === 0) visualiserCtx.moveTo(x, y);

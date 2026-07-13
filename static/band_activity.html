@@ -498,7 +498,7 @@ body {
 }
 
 #conditions-bar .cond-ticker-track {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0;
     white-space: nowrap;
@@ -507,6 +507,9 @@ body {
     left: 0;
     height: 100%;
     will-change: transform;
+}
+
+#conditions-bar .cond-ticker-track.scrolling {
     animation: ticker-scroll linear infinite;
 }
 
@@ -2195,21 +2198,25 @@ function _renderVoiceTicker(data) {
     }
 
     // Build the track: items + duplicate for seamless loop
+    trackEl.classList.remove('scrolling');
+    trackEl.style.animationDuration = '';
     trackEl.innerHTML = '';
-    const frag1 = document.createDocumentFragment();
-    const frag2 = document.createDocumentFragment();
-    for (const act of items) {
-        frag1.appendChild(makeItem(act));
-        frag2.appendChild(makeItem(act));
-    }
-    trackEl.appendChild(frag1);
-    trackEl.appendChild(frag2);
 
-    // Set animation duration based on item count (≈6 s per item, min 10 s)
-    const dur = Math.max(10, items.length * 6);
-    trackEl.style.animationDuration = `${dur}s`;
+    for (const act of items) trackEl.appendChild(makeItem(act));
+    // Duplicate for seamless wrap
+    for (const act of items) trackEl.appendChild(makeItem(act));
 
     tickerEl.style.display = '';
+
+    // Measure actual track width after layout, then start animation
+    requestAnimationFrame(() => {
+        // Half the track is one full set of items
+        const halfW = trackEl.scrollWidth / 2;
+        // Speed: ~80 px/s, min 8 s
+        const dur = Math.max(8, halfW / 80);
+        trackEl.style.animationDuration = `${dur}s`;
+        trackEl.classList.add('scrolling');
+    });
 }
 
 async function _refreshVoiceTicker() {
@@ -2553,17 +2560,6 @@ function _renderConditions(bandStates, sw, wx) {
         }
     }
 
-    // ── Forecast strip ──
-    const forecastEl = document.getElementById('cond-forecast');
-    if (forecastEl) {
-        const forecast = sw?.forecast?.summary || sw?.forecast?.text || null;
-        if (forecast) {
-            forecastEl.style.display = '';
-            forecastEl.innerHTML = `<span>Forecast: </span>${_escHtml(forecast)}`;
-        } else {
-            forecastEl.style.display = 'none';
-        }
-    }
 
 
     bar.style.display = '';

@@ -30,7 +30,29 @@ body {
     font-weight: 600;
     color: #7ec8e3;
     white-space: nowrap;
-    margin-right: 8px;
+    margin-right: 4px;
+}
+
+#receiver-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8em;
+    white-space: nowrap;
+    overflow: hidden;
+}
+#receiver-callsign {
+    font-weight: 700;
+    color: #a0d8a0;
+}
+#receiver-name {
+    color: #aaa;
+}
+#receiver-location {
+    color: #777;
+}
+#receiver-sep {
+    color: #444;
 }
 
 #status-dot {
@@ -255,6 +277,12 @@ body {
 
 <div id="topbar">
     <h1>📡 Band Activity</h1>
+    <div id="receiver-info">
+        <span id="receiver-callsign"></span>
+        <span id="receiver-sep" style="display:none">·</span>
+        <span id="receiver-name"></span>
+        <span id="receiver-location"></span>
+    </div>
     <div id="status-dot" class="wait"></div>
     <span id="status-text">Connecting…</span>
     <div id="band-pills"></div>
@@ -898,6 +926,32 @@ function setStatus(state, text) {
 // ── Initialisation ────────────────────────────────────────────────────────────
 async function init() {
     setStatus('wait', 'Loading band config…');
+
+    // Fetch receiver description (callsign / name / location) — best-effort, non-fatal
+    try {
+        const descResp = await fetch('/api/description');
+        if (descResp.ok) {
+            const desc = await descResp.json();
+            const rx = desc.receiver || {};
+            const callsign = (rx.callsign || '').trim();
+            const name     = (rx.name     || '').trim();
+            const location = (rx.location || '').trim();
+
+            if (callsign) {
+                document.getElementById('receiver-callsign').textContent = callsign;
+            }
+            if (name) {
+                document.getElementById('receiver-name').textContent = name;
+            }
+            if (location) {
+                document.getElementById('receiver-location').textContent = location ? `· ${location}` : '';
+            }
+            // Show separator only when there's something to separate
+            if (callsign && (name || location)) {
+                document.getElementById('receiver-sep').style.display = '';
+            }
+        }
+    } catch(_) { /* non-fatal — receiver info is cosmetic */ }
 
     let cfg;
     try {

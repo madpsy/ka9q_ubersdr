@@ -46,15 +46,13 @@ body {
 #receiver-callsign {
     font-weight: 700;
     color: #a0d8a0;
+    font-size: 0.85em;   /* slightly smaller than the h1 title */
 }
 #receiver-name {
     color: #aaa;
 }
 #receiver-location {
     color: #777;
-}
-#receiver-sep {
-    color: #444;
 }
 
 #status-dot {
@@ -382,10 +380,8 @@ body {
 <body>
 
 <div id="topbar">
-    <h1>📡 Band Activity</h1>
+    <h1>📡 Band Activity <span id="receiver-callsign"></span></h1>
     <div id="receiver-info">
-        <span id="receiver-callsign"></span>
-        <span id="receiver-sep" style="display:none">·</span>
         <span id="receiver-name"></span>
         <span id="receiver-location"></span>
     </div>
@@ -1724,9 +1720,6 @@ async function init() {
                 document.getElementById('receiver-location').textContent = location ? `· ${location}` : '';
             }
             // Show separator only when there's something to separate
-            if (callsign && (name || location)) {
-                document.getElementById('receiver-sep').style.display = '';
-            }
         }
     } catch(_) { /* non-fatal — receiver info is cosmetic */ }
 

@@ -489,9 +489,10 @@ async function startAudioAt(freqHz, bandName) {
     const r = _getRadio();
     if (!r) { console.warn('MinimalRadio not available'); return; }
 
-    // Remove playing indicator from previous band
+    // Remove playing indicator from previous band and force its redraw
     if (audioBandName && audioBandName !== bandName) {
         _setBandPlayingIndicator(audioBandName, false);
+        if (panels[audioBandName]) panels[audioBandName].dirty = true;
     }
 
     audioFreqHz   = freqHz;
@@ -511,13 +512,18 @@ async function startAudioAt(freqHz, bandName) {
             return;
         }
     }
+    // Force immediate redraw so cursor appears right away
+    if (panels[bandName]) panels[bandName].dirty = true;
 }
 
 async function stopAudio() {
     const r = _getRadio();
+    const prevBand = audioBandName;
     if (r) await r.stopPreview();
-    if (audioBandName) _setBandPlayingIndicator(audioBandName, false);
+    if (prevBand) _setBandPlayingIndicator(prevBand, false);
     audioFreqHz = null; audioBandName = null;
+    // Force redraw to remove cursor
+    if (prevBand && panels[prevBand]) panels[prevBand].dirty = true;
 }
 
 function _setBandPlayingIndicator(bandName, playing) {
@@ -1064,6 +1070,54 @@ class BandPanel {
             }
         }
         wfCtx.putImageData(imgData, 0, 0);
+
+        // ── Audio cursor overlay ──────────────────────────────────────────────
+        // Draw carrier line + bandwidth shading on both canvases when this band
+        // is the one currently being listened to.
+        if (audioBandName === this.name && audioFreqHz !== null && radio && radio.isPlaying) {
+            this._drawAudioCursor(sCtx, w, h, binStart, zn, n);
+            this._drawAudioCursor(wfCtx, wfW, wfH, binStart, zn, n);
+        }
+    }
+
+    // Draw carrier line + bandwidth shading on a canvas context.
+    // binStart/zn/n describe the current zoom window.
+    _drawAudioCursor(ctx, cw, ch, binStart, zn, n) {
+        const bw        = this.meta.bin_bandwidth;          // Hz per bin
+        const bandStart = this.meta.start;                  // Hz at bin 0
+
+        // Carrier position as canvas-fraction
+        const carrierBin  = (audioFreqHz - bandStart) / bw;
+        const carrierFrac = (carrierBin - binStart) / (zn - 1);
+        if (carrierFrac < -0.05 || carrierFrac > 1.05) return; // off-screen
+
+        const cx = carrierFrac * cw;
+
+        // Bandwidth edges (Hz offsets from carrier, from MinimalRadio)
+        const bwLow  = radio.bandwidthLow  ?? -2850;   // Hz offset (negative = below carrier)
+        const bwHigh = radio.bandwidthHigh ??  2850;
+
+        const lowBin  = carrierBin + bwLow  / bw;
+        const highBin = carrierBin + bwHigh / bw;
+        const x1 = Math.max(0, ((lowBin  - binStart) / (zn - 1)) * cw);
+        const x2 = Math.min(cw, ((highBin - binStart) / (zn - 1)) * cw);
+
+        // Bandwidth shading
+        if (x2 > x1) {
+            ctx.fillStyle = 'rgba(229,115,115,0.13)';
+            ctx.fillRect(x1, 0, x2 - x1, ch);
+        }
+
+        // Carrier line
+        ctx.save();
+        ctx.strokeStyle = '#e57373';
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, ch);
+        ctx.stroke();
+        ctx.restore();
     }
 
     _onSpecHover(e) {

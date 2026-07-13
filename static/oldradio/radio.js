@@ -32,7 +32,7 @@ let currentFrequency = 1000000;
 let currentVolume = 0.25;
 let currentSquelch = 0; // Squelch level 0-1 (0 = off, 1 = max)
 let dialRotation = 0;
-let volumeRotation = 231;
+let volumeRotation = 0.25 * 330; // matches default currentVolume
 let squelchRotation = 0; // Squelch knob starts at 0 (off)
 let tuneTimeout = null;
 let lastTuneTime = 0;

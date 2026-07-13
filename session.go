@@ -21,6 +21,11 @@ import (
 // sessions before radiod silently drops them.
 const maxRadiodChannels = 2000
 
+// fmSquelchEnabled controls whether set_squelch commands are forwarded to radiod
+// for FM/NFM sessions.  Set to true to re-enable once the FM squelch feature is
+// fully implemented and tested.  When false, UpdateSquelch is a no-op for fm/nfm.
+const fmSquelchEnabled = false
+
 // radiodController is the interface that SessionManager uses to talk to radiod.
 // *RadiodController satisfies this interface; tests can inject a stub.
 type radiodController interface {
@@ -1511,6 +1516,13 @@ func (sm *SessionManager) UpdateSquelch(sessionID string, squelchOpen, squelchCl
 
 	if session.IsSpectrum {
 		return fmt.Errorf("cannot update squelch on spectrum session")
+	}
+
+	// FM/NFM squelch is managed by radiod presets; suppress all squelch commands
+	// for these modes until the feature is ready.  Flip fmSquelchEnabled (top of
+	// this file) to true to re-enable.
+	if !fmSquelchEnabled && (session.Mode == "fm" || session.Mode == "nfm") {
+		return nil
 	}
 
 	// Update last active time

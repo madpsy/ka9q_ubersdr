@@ -940,6 +940,8 @@ function setupOscilloscope() {
     const speakerGrille = document.getElementById('speaker-grille');
     visualiserCanvas = document.getElementById('visualiser-canvas');
 
+    console.log('[setupOscilloscope] speakerGrille:', speakerGrille, 'canvas:', visualiserCanvas, 'audioCtx:', minimalRadio?.audioContext);
+
     if (!visualiserCanvas || !minimalRadio || !minimalRadio.audioContext) {
         console.log('Visualiser not available');
         return;
@@ -968,7 +970,9 @@ function setupOscilloscope() {
     drawVisualiser();
 
     if (speakerGrille) {
+        console.log('[setupOscilloscope] attaching click handler to speaker-grille');
         speakerGrille.addEventListener('click', () => {
+            console.log('[visualiser] click! mode was', visualiserMode);
             visualiserMode = (visualiserMode + 1) % 3;
             _applyVisualiserMode();
             if (visualiserMode !== 2) {
@@ -980,6 +984,8 @@ function setupOscilloscope() {
                 drawVisualiser();
             }
         });
+    } else {
+        console.warn('[setupOscilloscope] speaker-grille element NOT FOUND in DOM');
     }
 }
 

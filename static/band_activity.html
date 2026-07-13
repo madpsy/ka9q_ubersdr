@@ -375,6 +375,138 @@ body {
     color: #555;
     font-size: 1em;
 }
+
+/* ── Band Conditions bar ── */
+#conditions-bar {
+    margin: 10px;
+    background: #111118;
+    border: 1px solid #1e1e2e;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#conditions-bar .cond-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: #16161f;
+    border-bottom: 1px solid #1e1e2e;
+    font-size: 0.8em;
+    color: #888;
+}
+
+#conditions-bar .cond-title {
+    font-weight: 600;
+    color: #7ec8e3;
+    font-size: 1em;
+    letter-spacing: 0.02em;
+}
+
+#conditions-bar .cond-updated {
+    font-size: 0.85em;
+    color: #555;
+    font-variant-numeric: tabular-nums;
+}
+
+#conditions-bar .cond-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+/* ── Band SNR section ── */
+#conditions-bar .cond-bands {
+    flex: 1 1 auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+}
+
+.cond-band-pill {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 9px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    font-size: 0.72em;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    cursor: default;
+    transition: opacity 0.2s;
+}
+.cond-band-pill .cpill-name { font-size: 1em; letter-spacing: 0.03em; }
+.cond-band-pill .cpill-snr  { font-size: 0.82em; font-weight: 400; opacity: 0.8; font-variant-numeric: tabular-nums; }
+
+/* status colours */
+.cond-band-pill.excellent { background: rgba(76,175,80,0.18);  border-color: rgba(76,175,80,0.5);  color: #81c784; }
+.cond-band-pill.good      { background: rgba(139,195,74,0.18); border-color: rgba(139,195,74,0.5); color: #aed581; }
+.cond-band-pill.fair      { background: rgba(255,152,0,0.18);  border-color: rgba(255,152,0,0.5);  color: #ffb74d; }
+.cond-band-pill.poor      { background: rgba(244,67,54,0.15);  border-color: rgba(244,67,54,0.4);  color: #e57373; }
+.cond-band-pill.unknown   { background: rgba(80,80,80,0.18);   border-color: rgba(80,80,80,0.4);   color: #777; }
+
+/* ── Space weather section ── */
+#conditions-bar .cond-sw {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    border-left: 1px solid #1e1e2e;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    justify-content: center;
+    min-width: 180px;
+}
+
+.cond-sw-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78em;
+}
+
+.cond-sw-label {
+    color: #666;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.cond-sw-value {
+    color: #ccc;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.cond-sw-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 8px;
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.cond-sw-badge.excellent { background: rgba(76,175,80,0.22);  color: #81c784; border: 1px solid rgba(76,175,80,0.4); }
+.cond-sw-badge.good      { background: rgba(139,195,74,0.22); color: #aed581; border: 1px solid rgba(139,195,74,0.4); }
+.cond-sw-badge.fair      { background: rgba(255,152,0,0.22);  color: #ffb74d; border: 1px solid rgba(255,152,0,0.4); }
+.cond-sw-badge.poor      { background: rgba(244,67,54,0.18);  color: #e57373; border: 1px solid rgba(244,67,54,0.4); }
+.cond-sw-badge.unknown   { background: rgba(80,80,80,0.18);   color: #777;    border: 1px solid rgba(80,80,80,0.4); }
+
+/* ── Forecast strip ── */
+#conditions-bar .cond-forecast {
+    flex: 1 1 100%;
+    padding: 6px 12px 8px;
+    border-top: 1px solid #1e1e2e;
+    font-size: 0.75em;
+    color: #666;
+    display: none;   /* shown only when forecast text is available */
+}
+#conditions-bar .cond-forecast span {
+    color: #888;
+}
 </style>
 </head>
 <body>
@@ -414,6 +546,22 @@ body {
 <div id="grid"></div>
 <div id="no-data">No bands selected — use the pills above to choose bands.</div>
 <div id="tooltip"></div>
+
+<div id="conditions-bar" style="display:none">
+    <div class="cond-header">
+        <span class="cond-title">📊 Band Conditions</span>
+        <span class="cond-updated" id="cond-updated"></span>
+    </div>
+    <div class="cond-body">
+        <div class="cond-bands" id="cond-bands">
+            <!-- band pills injected by JS -->
+        </div>
+        <div class="cond-sw" id="cond-sw" style="display:none">
+            <!-- space weather rows injected by JS -->
+        </div>
+    </div>
+    <div class="cond-forecast" id="cond-forecast"></div>
+</div>
 
 <script>
 'use strict';
@@ -1701,6 +1849,193 @@ function _touchLastEvent() {
     _lastEventTime = Date.now();
 }
 
+// ── Band Conditions panel ─────────────────────────────────────────────────────
+// Fetches per-band FT8 SNR (last 10 min) and NOAA space weather every 5 minutes.
+
+const _COND_BANDS_FALLBACK = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
+let _condTimer = null;
+
+function _snrStatus(snr) {
+    if (snr === null || snr === undefined) return 'unknown';
+    if (snr < 6)  return 'poor';
+    if (snr < 20) return 'fair';
+    if (snr < 30) return 'good';
+    return 'excellent';
+}
+
+function _swPropClass(quality) {
+    if (!quality) return 'unknown';
+    const q = quality.toLowerCase();
+    if (q.includes('excell')) return 'excellent';
+    if (q.includes('good'))   return 'good';
+    if (q.includes('fair'))   return 'fair';
+    if (q.includes('poor') || q.includes('bad')) return 'poor';
+    return 'unknown';
+}
+
+async function _fetchBandConditions() {
+    const now  = new Date();
+    const from = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+    const to   = now.toISOString();
+
+    // Use only bands that are actually configured on this server
+    const bands = allBands.length > 0 ? allBands : _COND_BANDS_FALLBACK;
+
+    const body = {
+        primary: { from, to },
+        bands,
+        fields: ['ft8_snr'],
+        interval: 'minute'
+    };
+
+    const resp = await fetch('/api/noisefloor/aggregate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`aggregate HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Process: average ft8_snr over the window per band
+    const states = {};
+    const primary = data.primary || {};
+    for (const band of bands) {
+        const pts = primary[band];
+        if (!pts || pts.length === 0) {
+            states[band] = { status: 'unknown', snr: null };
+            continue;
+        }
+        let sum = 0, n = 0;
+        for (const pt of pts) {
+            const v = pt.values?.ft8_snr;
+            if (v !== null && v !== undefined) { sum += v; n++; }
+        }
+        const snr = n > 0 ? sum / n : null;
+        states[band] = { status: _snrStatus(snr), snr };
+    }
+    return states;
+}
+
+async function _fetchSpaceWeather() {
+    const resp = await fetch('/api/spaceweather');
+    if (!resp.ok) throw new Error(`spaceweather HTTP ${resp.status}`);
+    return resp.json();
+}
+
+function _escHtml(str) {
+    return String(str)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+}
+
+function _renderConditions(bandStates, sw) {
+    const bar = document.getElementById('conditions-bar');
+    if (!bar) return;
+
+    // ── Band pills ──
+    const bandsEl = document.getElementById('cond-bands');
+    if (bandsEl) {
+        bandsEl.innerHTML = '';
+        const bands = allBands.length > 0 ? allBands : _COND_BANDS_FALLBACK;
+        for (const band of bands) {
+            const st = bandStates[band];
+            if (!st) continue;
+            const cls    = st.status;   // 'excellent'|'good'|'fair'|'poor'|'unknown'
+            const snrTxt = st.snr !== null ? st.snr.toFixed(1) : '—';
+            const pill   = document.createElement('div');
+            pill.className = `cond-band-pill ${cls}`;
+            pill.title = `${band.toUpperCase()} · FT8 SNR ${snrTxt} dB (10-min avg)`;
+            pill.innerHTML =
+                `<span class="cpill-name">${band.toUpperCase()}</span>` +
+                `<span class="cpill-snr">${snrTxt}</span>`;
+            bandsEl.appendChild(pill);
+        }
+    }
+
+    // ── Space weather ──
+    const swEl = document.getElementById('cond-sw');
+    if (swEl && sw) {
+        swEl.innerHTML = '';
+        swEl.style.display = '';
+
+        const solarFlux = sw.solar_flux      !== undefined ? Math.round(sw.solar_flux)   : null;
+        const kIndex    = sw.k_index         !== undefined ? sw.k_index                  : null;
+        const aIndex    = sw.a_index         !== undefined ? sw.a_index                  : null;
+        const bz        = sw.solar_wind_bz   !== undefined ? sw.solar_wind_bz.toFixed(1) : null;
+        const propQual  = sw.propagation_quality || null;
+        const kStatus   = sw.k_index_status  || null;
+
+        const rows = [
+            { label: 'Solar Flux',    value: solarFlux !== null ? `${solarFlux} SFU` : '—' },
+            { label: 'K-Index',       value: kIndex    !== null ? `${kIndex}${kStatus ? ' · ' + kStatus : ''}` : '—' },
+            { label: 'A-Index',       value: aIndex    !== null ? `${aIndex}` : '—' },
+            { label: 'Solar Wind Bz', value: bz        !== null ? `${bz} nT` : '—' },
+        ];
+
+        for (const row of rows) {
+            const div = document.createElement('div');
+            div.className = 'cond-sw-row';
+            div.innerHTML = `<span class="cond-sw-label">${row.label}</span><span class="cond-sw-value">${row.value}</span>`;
+            swEl.appendChild(div);
+        }
+
+        if (propQual) {
+            const div = document.createElement('div');
+            div.className = 'cond-sw-row';
+            const cls = _swPropClass(propQual);
+            div.innerHTML = `<span class="cond-sw-label">Propagation</span><span class="cond-sw-badge ${cls}">${_escHtml(propQual)}</span>`;
+            swEl.appendChild(div);
+        }
+    } else if (swEl) {
+        swEl.style.display = 'none';
+    }
+
+    // ── Forecast strip ──
+    const forecastEl = document.getElementById('cond-forecast');
+    if (forecastEl) {
+        const forecast = sw?.forecast?.summary || sw?.forecast?.text || null;
+        if (forecast) {
+            forecastEl.style.display = '';
+            forecastEl.innerHTML = `<span>Forecast: </span>${_escHtml(forecast)}`;
+        } else {
+            forecastEl.style.display = 'none';
+        }
+    }
+
+    // ── Updated timestamp ──
+    const updEl = document.getElementById('cond-updated');
+    if (updEl) {
+        const now = new Date();
+        const hh = String(now.getUTCHours()).padStart(2,'0');
+        const mm = String(now.getUTCMinutes()).padStart(2,'0');
+        updEl.textContent = `Updated ${hh}:${mm} UTC`;
+    }
+
+    bar.style.display = '';
+}
+
+async function _refreshConditions() {
+    try {
+        const [bandResult, swResult] = await Promise.allSettled([
+            _fetchBandConditions(),
+            _fetchSpaceWeather()
+        ]);
+        const bs     = bandResult.status === 'fulfilled' ? bandResult.value : {};
+        const swData = swResult.status   === 'fulfilled' ? swResult.value   : null;
+        _renderConditions(bs, swData);
+    } catch (err) {
+        console.warn('[conditions] refresh error:', err);
+    }
+}
+
+function _startConditionsTimer() {
+    if (_condTimer !== null) return;
+    _refreshConditions();                              // immediate first fetch
+    _condTimer = setInterval(_refreshConditions, 5 * 60 * 1000); // every 5 min
+}
+
 function _startWatchdog() {
     if (_watchdogTimer !== null) return;
     _watchdogTimer = setInterval(() => {
@@ -1850,6 +2185,8 @@ async function init() {
     _startWatchdog();
     // Start 1s status text timer (decoupled from data events so it never flickers)
     _startStatusTimer();
+    // Start band conditions + space weather panel (refreshes every 5 min)
+    _startConditionsTimer();
 }
 
 init();

@@ -494,7 +494,7 @@ body {
     overflow: hidden;
     height: 26px;
     position: relative;
-    display: none;   /* shown only when there is voice activity */
+    /* visibility toggled via JS: style.display = 'block' / 'none' */
 }
 
 #conditions-bar .cond-ticker-track {
@@ -712,7 +712,7 @@ body {
             </div>
         </div>
     </div>
-    <div class="cond-ticker" id="cond-ticker">
+    <div class="cond-ticker" id="cond-ticker" style="display:none">
         <div class="cond-ticker-track" id="cond-ticker-track"></div>
     </div>
 </div>
@@ -2177,13 +2177,11 @@ function _stopTickerLoop() {
 function _renderVoiceTicker(data) {
     const tickerEl = document.getElementById('cond-ticker');
     const trackEl  = document.getElementById('cond-ticker-track');
-    console.log('[ticker] _renderVoiceTicker called, tickerEl=', tickerEl, 'trackEl=', trackEl);
     if (!tickerEl || !trackEl) return;
 
     // Flatten all activities across all bands into a sorted list
     const items = [];
     const bands = data?.bands || {};
-    console.log('[ticker] bands keys:', Object.keys(bands), 'total_activities:', data?.total_activities);
     for (const [band, activities] of Object.entries(bands)) {
         for (const act of activities) {
             items.push({ band, ...act });
@@ -2192,7 +2190,6 @@ function _renderVoiceTicker(data) {
 
     // Sort by SNR descending so strongest signals lead
     items.sort((a, b) => (b.snr || 0) - (a.snr || 0));
-    console.log('[ticker] items count:', items.length);
 
     if (items.length === 0) {
         _stopTickerLoop();
@@ -2200,7 +2197,7 @@ function _renderVoiceTicker(data) {
         return;
     }
 
-    // Build item HTML
+    // Build item element
     function makeItem(act) {
         const freqMHz = ((act.estimated_dial_freq || act.center_freq) / 1e6).toFixed(3);
         const band    = act.band.toUpperCase();
@@ -2230,22 +2227,22 @@ function _renderVoiceTicker(data) {
     // Duplicate for seamless wrap
     for (const act of items) trackEl.appendChild(makeItem(act));
 
-    console.log('[ticker] tickerEl display before show:', tickerEl.style.display);
-    tickerEl.style.display = '';
-    console.log('[ticker] tickerEl display after show:', tickerEl.style.display, 'offsetHeight:', tickerEl.offsetHeight, 'parent display:', tickerEl.parentElement?.style?.display);
+    // Show ticker — must use 'block' to override the inline style.display='none'
+    tickerEl.style.display = 'block';
 
-    // Measure half-width after two frames (ensures layout is complete)
+    // Measure half-width after two frames (ensures layout is complete).
+    // Use offsetWidth sum since the track is position:absolute (getBoundingClientRect
+    // can return 0 if the element was recently made visible).
     requestAnimationFrame(() => requestAnimationFrame(() => {
         const children = trackEl.children;
         const half = items.length;
-        console.log('[ticker] rAF: children.length=', children.length, 'half=', half);
-        if (half === 0 || children.length < half) { _tickerHalfW = 0; console.log('[ticker] early return: not enough children'); return; }
-        const first = children[0].getBoundingClientRect();
-        const last  = children[half - 1].getBoundingClientRect();
-        _tickerHalfW = last.right - first.left;
-        console.log('[ticker] first.left=', first.left, 'last.right=', last.right, 'halfW=', _tickerHalfW);
-        if (_tickerHalfW < 10) { _tickerHalfW = 0; console.log('[ticker] halfW too small, not starting'); return; }
-        console.log('[ticker] starting RAF loop, halfW=', _tickerHalfW);
+        if (half === 0 || children.length < half) { _tickerHalfW = 0; return; }
+        let w = 0;
+        for (let i = 0; i < half; i++) w += children[i].offsetWidth;
+        _tickerHalfW = w;
+        if (_tickerHalfW < 10) { _tickerHalfW = 0; return; }
+        _tickerOffset = 0;
+        _tickerLastTs = null;
         _tickerRAF = requestAnimationFrame(_tickerLoop);
     }));
 }

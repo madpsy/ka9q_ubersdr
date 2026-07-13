@@ -937,7 +937,7 @@ function updateSignalLED() {
 
 // Setup Visualiser (spectrum / oscilloscope / grille cycling)
 function setupOscilloscope() {
-    const speakerGrille = document.getElementById('audio-start-button');
+    const speakerGrille = document.getElementById('speaker-grille');
     visualiserCanvas = document.getElementById('visualiser-canvas');
 
     if (!visualiserCanvas || !minimalRadio || !minimalRadio.audioContext) {
@@ -960,12 +960,8 @@ function setupOscilloscope() {
     visualiserAnalyser.smoothingTimeConstant = 0.75;
     minimalRadio.addAnalyser(visualiserAnalyser);
 
-    // Remove the audio-start click handler now that audio is running —
-    // the grille click will cycle visualiser modes instead.
-    if (speakerGrille && audioStartHandler) {
-        speakerGrille.removeEventListener('click', audioStartHandler);
-        audioStartHandler = null;
-    }
+    // audioStartHandler is on the overlay button (#audio-start-button in index.html),
+    // not on the speaker grille — no need to remove it here.
 
     // Default: spectrum mode (mode 0) — canvas visible, no grille class
     _applyVisualiserMode();
@@ -988,7 +984,7 @@ function setupOscilloscope() {
 }
 
 function _applyVisualiserMode() {
-    const grille = document.getElementById('audio-start-button');
+    const grille = document.getElementById('speaker-grille');
     if (!grille) return;
     if (visualiserMode === 2) {
         // Grille: show grille pattern, hide canvas

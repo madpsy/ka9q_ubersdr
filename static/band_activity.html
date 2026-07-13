@@ -419,6 +419,14 @@ body {
     gap: 0;
 }
 
+/* ── Right panel: weather + space weather always side-by-side ── */
+#conditions-bar .cond-right {
+    display: flex;
+    flex-direction: row;
+    flex-shrink: 0;
+    flex-wrap: nowrap;   /* never stack on mobile */
+}
+
 /* ── Band SNR section ── */
 #conditions-bar .cond-bands {
     flex: 1 1 auto;
@@ -608,11 +616,13 @@ body {
         <div class="cond-bands" id="cond-bands">
             <!-- band pills injected by JS -->
         </div>
-        <div class="cond-weather" id="cond-weather" style="display:none">
-            <!-- local weather injected by JS -->
-        </div>
-        <div class="cond-sw" id="cond-sw" style="display:none">
-            <!-- space weather rows injected by JS -->
+        <div class="cond-right">
+            <div class="cond-weather" id="cond-weather" style="display:none">
+                <!-- local weather injected by JS -->
+            </div>
+            <div class="cond-sw" id="cond-sw" style="display:none">
+                <!-- space weather rows injected by JS -->
+            </div>
         </div>
     </div>
     <div class="cond-forecast" id="cond-forecast"></div>

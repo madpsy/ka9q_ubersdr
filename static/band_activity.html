@@ -1185,24 +1185,38 @@ class BandPanel {
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
         // Draw tick marks at fixed time intervals using stored row timestamps.
-        // Positions are computed relative to the newest row so they don't jump.
+        // Positions are interpolated between adjacent rows so ticks glide smoothly
+        // rather than jumping by one row-height each time a new row arrives.
         if (nRows > 1 && this.waterfallTimes.length === nRows) {
             const tickStep = 10; // seconds between ticks
-            const t0 = this.waterfallTimes[nRows - 1]; // newest row timestamp (top)
+            const t0 = this.waterfallTimes[nRows - 1]; // newest row timestamp (top of waterfall)
             wfCtx.save();
             wfCtx.font         = '9px monospace';
             wfCtx.textBaseline = 'middle';
             wfCtx.textAlign    = 'left';
 
-            // Walk rows from top (newest) to bottom (oldest).
-            // For each tick boundary (10s, 20s, …) find the first row whose age >= that boundary.
-            let nextTick = tickStep; // next boundary to draw (seconds)
+            // Build an array of per-row ages (seconds) relative to t0.
+            // rowAge[r] = age of the row at visual position r (0 = top/newest).
+            const rowAge = new Float64Array(nRows);
             for (let r = 0; r < nRows; r++) {
-                const rowDataIdx = nRows - 1 - r;
-                const ageSec = (t0 - this.waterfallTimes[rowDataIdx]) / 1000;
-                if (ageSec >= nextTick) {
-                    // Y position: centre of this row band
-                    const y = Math.round((r + 0.5) * wfH / nRows);
+                rowAge[r] = (t0 - this.waterfallTimes[nRows - 1 - r]) / 1000;
+            }
+            // rowAge[0] ≈ 0 (newest), rowAge[nRows-1] = oldest
+
+            // For each tick boundary, interpolate the exact Y pixel between the two
+            // adjacent rows that straddle it.  This gives sub-pixel accuracy so the
+            // tick glides smoothly as the waterfall scrolls.
+            const rowH = wfH / nRows; // height of one row in pixels
+            let nextTick = tickStep;
+            for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
+                if (rowAge[r] >= nextTick) {
+                    // Interpolate between row r-1 and row r
+                    const ageA = rowAge[r - 1]; // age at top of row r-1
+                    const ageB = rowAge[r];     // age at top of row r
+                    const frac = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
+                    // Y at top of row r-1 is (r-1)*rowH; top of row r is r*rowH
+                    const y = Math.round((r - 1 + frac) * rowH);
+
                     // Tick line across full width
                     wfCtx.strokeStyle = 'rgba(255,255,255,0.2)';
                     wfCtx.lineWidth   = 1;

@@ -579,7 +579,8 @@ class BandPanel {
         this.name = name;
         this.meta = meta;
         this.bins = null;          // Uint8Array — current decoded state
-        this.waterfallRows = [];   // array of Float32Array (full n bins, normalised 0-1)
+        this.waterfallRows  = [];  // array of Float32Array (full n bins, normalised 0-1)
+        this.waterfallTimes = [];  // array of Date.now() timestamps, parallel to waterfallRows
         this.maxRows = 120;
         this.el = null;
         this.specCanvas = null;
@@ -1153,7 +1154,11 @@ class BandPanel {
             rowData[i] = Math.max(0, Math.min(1, (vals[i] - dMin) / dRange));
         }
         this.waterfallRows.push(rowData);
-        if (this.waterfallRows.length > this.maxRows) this.waterfallRows.shift();
+        this.waterfallTimes.push(Date.now());
+        if (this.waterfallRows.length > this.maxRows) {
+            this.waterfallRows.shift();
+            this.waterfallTimes.shift();
+        }
 
         // Redraw entire waterfall using the zoomed bin slice
         const wfCtx = this.wfCtx;
@@ -1290,17 +1295,19 @@ class BandPanel {
         const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
         const mhz = (hz / 1e6).toFixed(4);
 
-        // Y → age
-        const rowIdx = Math.round(fracY * (this.maxRows - 1));
-        const ageSec = rowIdx;
-        const ageStr = ageSec === 0 ? 'now'
+        // Y → row index within actual stored rows (newest = top = index 0)
+        const rows    = this.waterfallRows;
+        const times   = this.waterfallTimes;
+        const nRows   = rows.length;
+        if (nRows === 0) return;
+        // Map canvas Y fraction → row index 0 (newest) .. nRows-1 (oldest)
+        const rowIdx     = Math.min(nRows - 1, Math.round(fracY * (nRows - 1)));
+        const rowDataIdx = nRows - 1 - rowIdx;
+        // Age: use actual stored timestamp for accuracy
+        const ageSec = Math.round((Date.now() - (times[rowDataIdx] ?? Date.now())) / 1000);
+        const ageStr = ageSec <= 0 ? 'now'
                      : ageSec === 1 ? '1 s ago'
                      : `${ageSec} s ago`;
-
-        // dB from stored waterfall row (Float32Array of normalised values)
-        const rows = this.waterfallRows;
-        const nRows = rows.length;
-        const rowDataIdx = nRows - 1 - rowIdx;
         let dbStr = '--';
         if (rowDataIdx >= 0 && rowDataIdx < nRows) {
             const norm = rows[rowDataIdx][Math.min(binIdx, n - 1)];

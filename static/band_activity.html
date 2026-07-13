@@ -434,21 +434,30 @@ class BandPanel {
         const sCtx = this.specCtx;
         sCtx.clearRect(0, 0, w, h);
 
-        // Grid lines every 10 dB (subtle), labelled every 20 dB
+        // Adaptive grid: target ~4 labelled lines regardless of dRange.
+        // Pick the smallest "nice" step that gives ≤5 labels.
+        const niceSteps = [5, 10, 20, 25, 50, 100];
+        let labelStep = niceSteps[niceSteps.length - 1];
+        for (const s of niceSteps) {
+            if (dRange / s <= 5) { labelStep = s; break; }
+        }
+        // Minor grid at half the label step (but at least 5 dB)
+        const minorStep = Math.max(5, labelStep / 2);
+
         sCtx.font = '10px monospace';
         sCtx.textAlign = 'left';
         sCtx.textBaseline = 'bottom';
-        for (let db = Math.ceil(dMin/10)*10; db <= dMax; db += 10) {
+
+        for (let db = Math.ceil(dMin / minorStep) * minorStep; db <= dMax; db += minorStep) {
             const y = h - ((db - dMin) / dRange) * h;
-            // Minor grid every 10 dB, major every 20 dB
-            const isMajor = (db % 20 === 0);
+            const isMajor = (db % labelStep === 0);
             sCtx.strokeStyle = isMajor ? '#222233' : '#161622';
             sCtx.lineWidth = 1;
             sCtx.beginPath();
             sCtx.moveTo(0, y);
             sCtx.lineTo(w, y);
             sCtx.stroke();
-            // Label only on major (20 dB) lines, skip very bottom to avoid clipping
+            // Label only on major lines, skip very bottom to avoid clipping
             if (isMajor && y < h - 2) {
                 const label = `${db}`;
                 const tw = sCtx.measureText(label).width;

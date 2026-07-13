@@ -229,7 +229,6 @@ class MinimalRadio {
     // Set volume (0.0 to 1.0)
     setVolume(volume) {
         this.currentVolume = Math.max(0, Math.min(1, volume));
-        console.log('Volume set to:', Math.round(this.currentVolume * 100) + '%');
     }
 
     // Set SNR squelch threshold.
@@ -397,7 +396,8 @@ class MinimalRadio {
                 // Keepalive response
                 break;
             default:
-                console.log('Unknown message type:', message.type);
+                // Unhandled message types are silently ignored
+                break;
         }
     }
 

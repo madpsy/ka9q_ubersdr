@@ -691,7 +691,6 @@ function updateVolumeFromKnob() {
     }
 
     throttledUpdateURL();
-    console.log('Volume:', Math.round(currentVolume * 100) + '%');
 }
 
 // Setup Squelch Knob
@@ -777,7 +776,6 @@ function sendSquelchGate(minSnr) {
     _squelchSendTimer = setTimeout(() => {
         if (minimalRadio && minimalRadio.ws && minimalRadio.ws.readyState === WebSocket.OPEN) {
             minimalRadio.ws.send(JSON.stringify({ type: 'set_audio_gate', min_snr: minSnr }));
-            console.log('Squelch gate sent to server: min_snr =', minSnr);
         }
     }, 80);
 }

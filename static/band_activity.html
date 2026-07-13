@@ -227,7 +227,14 @@ body {
 }
 
 .band-stats span { white-space: nowrap; }
-.band-stats .val { color: #ccc; font-weight: 600; }
+.band-stats .val {
+    color: #ccc;
+    font-weight: 600;
+    display: inline-block;
+    min-width: 4.5ch;        /* wide enough for "-102.5" */
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
 
 /* spectrum line canvas */
 .spectrum-canvas {

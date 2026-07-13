@@ -1660,6 +1660,7 @@ async function init() {
 
             if (callsign) {
                 document.getElementById('receiver-callsign').textContent = callsign;
+                document.title = `Band Activity Monitor - ${callsign}`;
             }
             if (name) {
                 document.getElementById('receiver-name').textContent = name;

@@ -132,10 +132,6 @@
     transition: background 0.1s ease;
 }
 
-.signal-bar.active {
-    background: #00ff00;
-    box-shadow: 0 0 5px #00ff00;
-}
 
 /* Center Section - Speaker / Visualiser */
 .speaker-grille {

@@ -845,21 +845,33 @@ function updateFrequencyDisplay() {
     }
 }
 
-// Update signal bars for CB radio
+// Update signal bars for CB radio with sub-bar dimming.
 // Uses vuLevel (0-1) which is already updated by updateSignalLED() from live SNR data.
 // vuLevel 0 = SNR ≤ 30 dB (no bars), vuLevel 1 = SNR ≥ 60 dB (all 8 bars).
+// The leading (partial) bar dims proportionally within its range for an analog feel.
 function updateSignalBars() {
     const NUM_BARS = 8;
-    const activeBars = vuLevel * NUM_BARS;
+    const activeBars = vuLevel * NUM_BARS; // e.g. 3.7 means bars 1-3 full, bar 4 at 70%
 
     for (let i = 1; i <= NUM_BARS; i++) {
         const bar = document.getElementById(`signal-bar-${i}`);
-        if (bar) {
-            if (activeBars >= i) {
-                bar.classList.add('active');
-            } else {
-                bar.classList.remove('active');
-            }
+        if (!bar) continue;
+
+        if (activeBars >= i) {
+            // Fully lit
+            bar.style.background = '#00ff00';
+            bar.style.boxShadow = '0 0 5px #00ff00';
+        } else if (activeBars > i - 1) {
+            // Partially lit — fraction of this bar that's filled
+            const frac = activeBars - (i - 1); // 0..1
+            const g = Math.round(34 + frac * (255 - 34));   // #002200 → #00ff00
+            const glow = Math.round(frac * 5);
+            bar.style.background = `rgb(0,${g},0)`;
+            bar.style.boxShadow = frac > 0.1 ? `0 0 ${glow}px rgb(0,${g},0)` : 'none';
+        } else {
+            // Off
+            bar.style.background = '#002200';
+            bar.style.boxShadow = 'none';
         }
     }
 }

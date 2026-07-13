@@ -811,9 +811,10 @@ class BandPanel {
 
             if (zoomed) {
                 // ── Pan mode: shift zoom window by delta ──────────────────────
+                // Scale delta by zoom span so 1px mouse = 1px content at any zoom level.
                 overlay.style.cursor = 'grabbing';
-                const delta = cur - this._dragLast;
                 const span  = this.zoomEnd - this.zoomStart;
+                const delta = (cur - this._dragLast) * span;
                 let newStart = this.zoomStart - delta;
                 let newEnd   = this.zoomEnd   - delta;
                 if (newStart < 0) { newEnd -= newStart; newStart = 0; }
@@ -930,10 +931,12 @@ class BandPanel {
                 this.dirty = true;
             } else if (e.touches.length === 1 && this._touchPanLast !== null) {
                 // Single-finger pan when zoomed
+                // Scale delta by zoom span so 1px touch = 1px content at any zoom level.
                 e.preventDefault();
-                const rect = stack.getBoundingClientRect();
+                const rect  = stack.getBoundingClientRect();
                 const cur   = (e.touches[0].clientX - rect.left) / rect.width;
-                const delta = cur - this._touchPanLast;
+                const span  = this.zoomEnd - this.zoomStart;
+                const delta = (cur - this._touchPanLast) * span;
                 let newStart = this.zoomStart - delta;
                 let newEnd   = this.zoomEnd   - delta;
                 if (newStart < 0) { newEnd -= newStart; newStart = 0; }

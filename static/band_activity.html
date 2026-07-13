@@ -672,6 +672,18 @@ class BandPanel {
             document.getElementById('tooltip').style.display = 'none';
         });
 
+        // ── Hover crosshair line on overlay ──────────────────────────────────
+        const stackEl = document.getElementById(`stack-${this.name}`);
+        stackEl.addEventListener('mousemove', (e) => {
+            if (this._dragging) return; // don't draw during drag
+            const rect = stackEl.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            this._drawHoverLine(frac);
+        });
+        stackEl.addEventListener('mouseleave', () => {
+            this._clearHoverLine();
+        });
+
         // ── Zoom interaction handlers ────────────────────────────────────────
         this._setupZoomHandlers();
 
@@ -1213,6 +1225,32 @@ class BandPanel {
         ctx.lineTo(cx, ch);
         ctx.stroke();
         ctx.restore();
+    }
+
+    _drawHoverLine(frac) {
+        const ctx = this.overlayCtx;
+        const ow  = this.overlayCanvas.width;
+        const oh  = this.overlayCanvas.height;
+        if (ow === 0 || oh === 0) return;
+        ctx.clearRect(0, 0, ow, oh);
+        const x = frac * ow;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, oh);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    _clearHoverLine() {
+        const ctx = this.overlayCtx;
+        const ow  = this.overlayCanvas.width;
+        const oh  = this.overlayCanvas.height;
+        if (ow === 0 || oh === 0) return;
+        ctx.clearRect(0, 0, ow, oh);
     }
 
     _onSpecHover(e) {

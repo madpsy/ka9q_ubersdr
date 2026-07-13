@@ -335,7 +335,7 @@
                 url:   `/addon/${name}/`,
                 label: name.toUpperCase(),
             }));
-            addGroupRow('Add-ons', addonLinks);
+            addGroupRow('🔌 Add-ons', addonLinks);
         }
 
         // Toggle open/close
@@ -343,14 +343,14 @@
             dropdown.classList.add('is-open');
             btn.classList.add('is-open');
             btn.setAttribute('aria-expanded', 'true');
-            btn.textContent = 'Links ▴';
+            btn.textContent = '🌐 Links ▴';
         }
 
         function closeMenu() {
             dropdown.classList.remove('is-open');
             btn.classList.remove('is-open');
             btn.setAttribute('aria-expanded', 'false');
-            btn.textContent = 'Links ▾';
+            btn.textContent = '🌐 Links ▾';
         }
 
         btn.addEventListener('click', (e) => {

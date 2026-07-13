@@ -149,12 +149,12 @@
           "files": [
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client.exe",
-              "name": "🪟 ⬇️ Windows Download",
+              "name": "⬇️ Windows Download",
               "description": "Download the Desktop Client for Windows (amd64)."
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client",
-              "name": "🐧 ⬇️ Linux Download",
+              "name": "⬇️ Linux Download",
               "description": "Download the Desktop Client for Linux (amd64)."
             }
           ]
@@ -164,12 +164,12 @@
           "files": [
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDRAudio.exe",
-              "name": "🪟 ⬇️ Windows Download",
+              "name": "⬇️ Windows Download",
               "description": "Download the Minimal Audio client for Windows (amd64)."
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDRAudio",
-              "name": "🐧 ⬇️ Linux Download",
+              "name": "⬇️ Linux Download",
               "description": "Download the Minimal Audio client for Linux (amd64)."
             }
           ]
@@ -179,12 +179,12 @@
           "files": [
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/iq_recorder.exe",
-              "name": "🪟 ⬇️ Windows Download",
+              "name": "⬇️ Windows Download",
               "description": "Download the IQ Recorder client for Windows (amd64)."
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/iq_recorder",
-              "name": "🐧 ⬇️ Linux Download",
+              "name": "⬇️ Linux Download",
               "description": "Download the IQ Recorder client for Linux (amd64)."
             }
           ]

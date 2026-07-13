@@ -522,6 +522,56 @@ body {
     color: #888;
 }
 
+/* ── Hardware status section (rotator / ant-switch) ── */
+#conditions-bar .cond-hardware {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 10px;
+    border-left: 1px solid #1e1e2e;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: center;
+}
+
+.cond-hw-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78em;
+}
+
+.cond-hw-label {
+    color: #666;
+    min-width: 52px;
+    flex-shrink: 1;
+}
+
+.cond-hw-value {
+    color: #ccc;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cond-hw-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 8px;
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+.cond-hw-badge.moving  { background: rgba(255,152,0,0.22);  color: #ffb74d; border: 1px solid rgba(255,152,0,0.4); }
+.cond-hw-badge.stopped { background: rgba(80,80,80,0.18);   color: #999;    border: 1px solid rgba(80,80,80,0.4); }
+.cond-hw-badge.grounded{ background: rgba(244,67,54,0.18);  color: #e57373; border: 1px solid rgba(244,67,54,0.4); }
+.cond-hw-badge.active  { background: rgba(76,175,80,0.18);  color: #81c784; border: 1px solid rgba(76,175,80,0.4); }
+
 /* ── Local weather section ── */
 #conditions-bar .cond-weather {
     flex: 1 1 0;
@@ -622,6 +672,9 @@ body {
             <!-- band pills injected by JS -->
         </div>
         <div class="cond-right">
+            <div class="cond-hardware" id="cond-hardware" style="display:none">
+                <!-- rotator / ant-switch status injected by JS -->
+            </div>
             <div class="cond-weather" id="cond-weather" style="display:none">
                 <!-- local weather injected by JS -->
             </div>
@@ -1925,6 +1978,11 @@ function _touchLastEvent() {
 const _COND_BANDS_FALLBACK = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
 let _condTimer = null;
 
+// Hardware status flags — set from /api/description in init()
+let _rotatorEnabled  = false;
+let _antSwitchEnabled = false;
+let _hwTimer = null;   // separate 30 s poll for hardware (changes more often than weather)
+
 function _snrStatus(snr) {
     if (snr === null || snr === undefined) return 'unknown';
     if (snr < 6)  return 'poor';
@@ -1996,6 +2054,140 @@ async function _fetchWeather() {
     const resp = await fetch('/api/weather');
     if (!resp.ok) throw new Error(`weather HTTP ${resp.status}`);
     return resp.json();
+}
+
+// ── Hardware status fetch (rotator + ant-switch) ──────────────────────────────
+async function _fetchHardwareStatus() {
+    const results = await Promise.allSettled([
+        _rotatorEnabled   ? fetch('/api/rotctl/status').then(r => r.ok ? r.json() : null)    : Promise.resolve(null),
+        _antSwitchEnabled ? fetch('/api/ant-switch/status').then(r => r.ok ? r.json() : null) : Promise.resolve(null)
+    ]);
+    return {
+        rot: results[0].status === 'fulfilled' ? results[0].value : null,
+        ant: results[1].status === 'fulfilled' ? results[1].value : null
+    };
+}
+
+function _renderHardware(hw) {
+    const el = document.getElementById('cond-hardware');
+    if (!el) return;
+
+    if (!_rotatorEnabled && !_antSwitchEnabled) {
+        el.style.display = 'none';
+        return;
+    }
+
+    const rot = hw?.rot;
+    const ant = hw?.ant;
+
+    // Nothing useful to show yet
+    if (!rot && !ant) {
+        el.style.display = 'none';
+        return;
+    }
+
+    el.innerHTML = '';
+
+    // ── Rotator row ──
+    if (_rotatorEnabled && rot) {
+        const row = document.createElement('div');
+        row.className = 'cond-hw-row';
+
+        const label = document.createElement('span');
+        label.className = 'cond-hw-label';
+        label.textContent = 'Rotator';
+
+        if (!rot.connected) {
+            const badge = document.createElement('span');
+            badge.className = 'cond-hw-badge stopped';
+            badge.textContent = 'Offline';
+            row.appendChild(label);
+            row.appendChild(badge);
+        } else {
+            const az = typeof rot.position?.azimuth === 'number'
+                ? rot.position.azimuth.toFixed(1) + '°'
+                : '—';
+
+            const badge = document.createElement('span');
+            badge.className = `cond-hw-badge ${rot.moving ? 'moving' : 'stopped'}`;
+
+            // Compass arrow + azimuth
+            const arrow = _azimuthArrow(rot.position?.azimuth);
+            badge.textContent = `${arrow} ${az}`;
+            if (rot.moving) badge.title = 'Rotating…';
+
+            row.appendChild(label);
+            row.appendChild(badge);
+        }
+        el.appendChild(row);
+    }
+
+    // ── Ant-switch row ──
+    if (_antSwitchEnabled && ant) {
+        const row = document.createElement('div');
+        row.className = 'cond-hw-row';
+
+        const label = document.createElement('span');
+        label.className = 'cond-hw-label';
+        label.textContent = 'Antenna';
+
+        const badge = document.createElement('span');
+
+        if (ant.grounded) {
+            badge.className = 'cond-hw-badge grounded';
+            badge.textContent = '⚡ Grounded';
+        } else {
+            const selected = Array.isArray(ant.selected) ? ant.selected : [];
+            const labels   = Array.isArray(ant.antenna_labels) ? ant.antenna_labels : [];
+            if (selected.length === 0) {
+                badge.className = 'cond-hw-badge stopped';
+                badge.textContent = 'None';
+            } else {
+                // Map 1-based antenna numbers to labels
+                const names = selected.map(n => labels[n - 1] || `Ant ${n}`);
+                badge.className = 'cond-hw-badge active';
+                badge.textContent = names.join(', ');
+                badge.title = names.join(', ');
+            }
+        }
+
+        row.appendChild(label);
+        row.appendChild(badge);
+        el.appendChild(row);
+    }
+
+    el.style.display = '';
+}
+
+// Returns a simple Unicode compass arrow for an azimuth in degrees
+function _azimuthArrow(az) {
+    if (az === null || az === undefined) return '↑';
+    const dirs = ['↑','↗','→','↘','↓','↙','←','↖'];
+    return dirs[Math.round(((az % 360) + 360) % 360 / 45) % 8];
+}
+
+async function _refreshHardware() {
+    if (!_rotatorEnabled && !_antSwitchEnabled) return;
+    try {
+        const hw = await _fetchHardwareStatus();
+        _renderHardware(hw);
+        // Adjust body padding in case the bar height changed
+        const bar = document.getElementById('conditions-bar');
+        if (bar && bar.style.display !== 'none') {
+            requestAnimationFrame(() => {
+                document.body.style.paddingBottom = bar.offsetHeight + 'px';
+            });
+        }
+    } catch (err) {
+        console.warn('[conditions] hardware refresh error:', err);
+    }
+}
+
+function _startHardwareTimer() {
+    if (_hwTimer !== null) return;
+    if (!_rotatorEnabled && !_antSwitchEnabled) return;
+    _refreshHardware();                                    // immediate first fetch
+    _hwTimer = setInterval(_refreshHardware, 30_000);     // every 30 s
 }
 
 function _escHtml(str) {
@@ -2226,7 +2418,7 @@ document.addEventListener('visibilitychange', () => {
 async function init() {
     setStatus('wait', 'Loading band config…');
 
-    // Fetch receiver description (callsign / name / location) — best-effort, non-fatal
+    // Fetch receiver description (callsign / name / location / hardware flags) — best-effort, non-fatal
     try {
         const descResp = await fetch('/api/description');
         if (descResp.ok) {
@@ -2246,7 +2438,10 @@ async function init() {
             if (location) {
                 document.getElementById('receiver-location').textContent = location ? `· ${location}` : '';
             }
-            // Show separator only when there's something to separate
+
+            // Detect hardware features for the conditions bar
+            _rotatorEnabled   = !!(desc.rotator?.enabled);
+            _antSwitchEnabled = !!(desc.ant_switch?.enabled);
         }
     } catch(_) { /* non-fatal — receiver info is cosmetic */ }
 
@@ -2347,6 +2542,8 @@ async function init() {
     _startStatusTimer();
     // Start band conditions + space weather panel (refreshes every 5 min)
     _startConditionsTimer();
+    // Start rotator / ant-switch status poll (refreshes every 30 s, only if enabled)
+    _startHardwareTimer();
 }
 
 init();

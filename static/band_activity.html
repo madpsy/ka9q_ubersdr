@@ -2155,7 +2155,7 @@ function _tickerLoop(ts) {
     if (!trackEl) { _tickerRAF = null; return; }
 
     if (_tickerLastTs !== null) {
-        const dt = (ts - _tickerLastTs) / 1000;
+        const dt = Math.min((ts - _tickerLastTs) / 1000, 0.1); // cap dt to avoid jumps
         _tickerOffset += _TICKER_PX_PER_S * dt;
         if (_tickerHalfW > 0 && _tickerOffset >= _tickerHalfW) {
             _tickerOffset -= _tickerHalfW;
@@ -2172,8 +2172,14 @@ function _stopTickerLoop() {
         _tickerRAF = null;
     }
     _tickerLastTs = null;
-    // Note: _tickerOffset is intentionally NOT reset here so a DOM rebuild
-    // during a refresh can preserve the current scroll position.
+    _tickerOffset = 0;
+    _tickerHalfW = 0;
+}
+
+function _startTickerLoop() {
+    if (_tickerRAF !== null) return; // already running
+    _tickerLastTs = null;            // first frame sets the baseline, no jump
+    _tickerRAF = requestAnimationFrame(_tickerLoop);
 }
 
 function _renderVoiceTicker(data) {
@@ -2198,7 +2204,6 @@ function _renderVoiceTicker(data) {
 
     // If no new items, keep whatever is already scrolling — don't hide or reset
     if (items.length === 0) {
-        // Only hide if we never had anything to show
         if (!_tickerHadItems) tickerEl.style.display = 'none';
         return;
     }
@@ -2224,8 +2229,13 @@ function _renderVoiceTicker(data) {
         return el;
     }
 
-    // Pause the loop while rebuilding DOM (preserve offset, don't zero it)
-    _stopTickerLoop();
+    const isFirstRender = _tickerRAF === null;
+
+    // Rebuild DOM. If the loop is already running, keep it running — it will
+    // continue scrolling the old content while we measure the new layout.
+    // We temporarily set _tickerHalfW = 0 so the wrap logic doesn't fire on
+    // stale data during the measurement window.
+    _tickerHalfW = 0;
     trackEl.innerHTML = '';
     for (const act of items) trackEl.appendChild(makeItem(act));
     // Duplicate for seamless wrap
@@ -2234,22 +2244,26 @@ function _renderVoiceTicker(data) {
     // Show ticker — must use 'block' to override the inline style.display='none'
     tickerEl.style.display = 'block';
 
-    // Measure half-width after two frames (ensures layout is complete).
-    // Use offsetWidth sum since the track is position:absolute.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // On first render, start the loop immediately so it begins scrolling.
+    // On subsequent renders, the loop is already running — just re-measure.
+    if (isFirstRender) {
+        _tickerOffset = 0;
+        _startTickerLoop();
+    }
+
+    // Measure half-width after a short delay to ensure layout is complete.
+    // setTimeout is more reliable than double-rAF when the element was just shown.
+    setTimeout(() => {
         const children = trackEl.children;
         const half = items.length;
-        if (half === 0 || children.length < half) { _tickerHalfW = 0; return; }
+        if (half === 0 || children.length < half) return;
         let w = 0;
         for (let i = 0; i < half; i++) w += children[i].offsetWidth;
+        if (w < 10) return;
+        // Clamp current offset into the new range before enabling wrap
+        _tickerOffset = _tickerOffset % w;
         _tickerHalfW = w;
-        if (_tickerHalfW < 10) { _tickerHalfW = 0; return; }
-        // Clamp offset into the new half-width range to avoid a jump
-        if (_tickerHalfW > 0) _tickerOffset = _tickerOffset % _tickerHalfW;
-        // Apply current offset immediately so there's no visual reset
-        trackEl.style.transform = `translateX(${-_tickerOffset}px)`;
-        _tickerRAF = requestAnimationFrame(_tickerLoop);
-    }));
+    }, 100);
 }
 
 async function _refreshVoiceTicker() {

@@ -17,21 +17,22 @@
                     <span class="unit-cb">MHz</span>
                 </div>
                 <div class="signal-bars">
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
-                    <div class="signal-bar"></div>
+                    <div class="signal-bar" id="signal-bar-1"></div>
+                    <div class="signal-bar" id="signal-bar-2"></div>
+                    <div class="signal-bar" id="signal-bar-3"></div>
+                    <div class="signal-bar" id="signal-bar-4"></div>
+                    <div class="signal-bar" id="signal-bar-5"></div>
+                    <div class="signal-bar" id="signal-bar-6"></div>
+                    <div class="signal-bar" id="signal-bar-7"></div>
+                    <div class="signal-bar" id="signal-bar-8"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Center: Speaker -->
+        <!-- Center: Speaker / Visualiser -->
         <div class="speaker-grille" id="audio-start-button">
-            <div class="grille-pattern"></div>
+            <div class="grille-pattern" id="grille-pattern"></div>
+            <canvas id="visualiser-canvas"></canvas>
         </div>
 
         <!-- Right: Controls Section -->

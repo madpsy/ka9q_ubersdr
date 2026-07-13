@@ -47,11 +47,13 @@ let vuLevel = 0;
 let vuAnalyser = null;
 let lastSNRLogTime = 0;
 
-// Oscilloscope
-let oscilloscopeActive = true;
-let oscilloscopeCanvas = null;
-let oscilloscopeCtx = null;
-let oscilloscopeAnalyser = null;
+// Visualiser (spectrum / oscilloscope / grille)
+// Modes: 0 = spectrum bars (default), 1 = oscilloscope, 2 = grille
+let visualiserMode = 0;
+let visualiserCanvas = null;
+let visualiserCtx = null;
+let visualiserAnalyser = null;
+let visualiserAnimFrame = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -832,11 +834,30 @@ function updateFrequencyDisplay() {
 }
 
 // Update signal bars for CB radio
+// SNR range: 30 dB (no bars) → 60 dB (all 8 bars)
 function updateSignalBars() {
-    for (let i = 1; i <= 5; i++) {
+    const SNR_MIN = 30;
+    const SNR_MAX = 60;
+    const NUM_BARS = 8;
+
+    // Get raw SNR if available, otherwise derive from vuLevel (fallback)
+    let snr;
+    if (minimalRadio && minimalRadio.hasSignalQuality && minimalRadio.hasSignalQuality()) {
+        const sq = minimalRadio.getSignalQuality();
+        snr = (sq && sq.snr !== null) ? sq.snr : null;
+    }
+    // Fallback: reverse-map vuLevel back to approximate SNR using same 30-60 range
+    if (snr === null || snr === undefined) {
+        snr = SNR_MIN + vuLevel * (SNR_MAX - SNR_MIN);
+    }
+
+    const fraction = Math.max(0, Math.min(1, (snr - SNR_MIN) / (SNR_MAX - SNR_MIN)));
+    const activeBars = fraction * NUM_BARS;
+
+    for (let i = 1; i <= NUM_BARS; i++) {
         const bar = document.getElementById(`signal-bar-${i}`);
         if (bar) {
-            if (vuLevel * 5 >= i) {
+            if (activeBars >= i) {
                 bar.classList.add('active');
             } else {
                 bar.classList.remove('active');
@@ -875,9 +896,9 @@ function updateSignalLED() {
                 lastSNRLogTime = now;
             }
 
-            // Map SNR to 0-1 range, with 100 dB as full brightness
-            // 0 dB = 0%, 100 dB = 100%
-            const snrPercentage = Math.max(0, Math.min(1, signalQuality.snr / 100));
+            // Map SNR to 0-1 range using 30-60 dB window
+            // 30 dB = 0%, 60 dB = 100%
+            const snrPercentage = Math.max(0, Math.min(1, (signalQuality.snr - 30) / 30));
 
             // Smooth the value
             vuLevel = vuLevel * 0.8 + snrPercentage * 0.2;
@@ -914,121 +935,185 @@ function updateSignalLED() {
     requestAnimationFrame(updateSignalLED);
 }
 
-// Setup Oscilloscope
+// Setup Visualiser (spectrum / oscilloscope / grille cycling)
 function setupOscilloscope() {
-    const speakerGrille = document.getElementById('speaker-grille');
-    const oscilloscopeOverlay = document.getElementById('oscilloscope-overlay');
-    oscilloscopeCanvas = document.getElementById('oscilloscope-canvas');
+    const speakerGrille = document.getElementById('audio-start-button');
+    visualiserCanvas = document.getElementById('visualiser-canvas');
 
-    if (!oscilloscopeCanvas || !minimalRadio || !minimalRadio.audioContext) {
-        console.log('Oscilloscope not available');
+    if (!visualiserCanvas || !minimalRadio || !minimalRadio.audioContext) {
+        console.log('Visualiser not available');
         return;
     }
 
-    oscilloscopeCtx = oscilloscopeCanvas.getContext('2d');
+    visualiserCtx = visualiserCanvas.getContext('2d');
 
     const resizeCanvas = () => {
-        const rect = oscilloscopeCanvas.getBoundingClientRect();
-        oscilloscopeCanvas.width = rect.width;
-        oscilloscopeCanvas.height = rect.height;
+        const rect = visualiserCanvas.getBoundingClientRect();
+        visualiserCanvas.width = rect.width || visualiserCanvas.offsetWidth || 200;
+        visualiserCanvas.height = rect.height || visualiserCanvas.offsetHeight || 100;
     };
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    oscilloscopeAnalyser = minimalRadio.audioContext.createAnalyser();
-    oscilloscopeAnalyser.fftSize = 2048;
-    oscilloscopeAnalyser.smoothingTimeConstant = 0.3;
+    visualiserAnalyser = minimalRadio.audioContext.createAnalyser();
+    visualiserAnalyser.fftSize = 1024;
+    visualiserAnalyser.smoothingTimeConstant = 0.75;
+    minimalRadio.addAnalyser(visualiserAnalyser);
 
-    // Connect analyser to MinimalRadio's audio stream
-    minimalRadio.addAnalyser(oscilloscopeAnalyser);
+    // Remove the audio-start click handler now that audio is running —
+    // the grille click will cycle visualiser modes instead.
+    if (speakerGrille && audioStartHandler) {
+        speakerGrille.removeEventListener('click', audioStartHandler);
+        audioStartHandler = null;
+    }
 
-    oscilloscopeOverlay.classList.add('active');
-    drawOscilloscope();
+    // Default: spectrum mode (mode 0) — canvas visible, no grille class
+    _applyVisualiserMode();
+    drawVisualiser();
 
     if (speakerGrille) {
         speakerGrille.addEventListener('click', () => {
-            oscilloscopeActive = !oscilloscopeActive;
-            if (oscilloscopeActive) {
-                oscilloscopeOverlay.classList.add('active');
-                drawOscilloscope();
-            } else {
-                oscilloscopeOverlay.classList.remove('active');
+            visualiserMode = (visualiserMode + 1) % 3;
+            _applyVisualiserMode();
+            if (visualiserMode !== 2) {
+                // Cancel any stale frame and restart the draw loop
+                if (visualiserAnimFrame) {
+                    cancelAnimationFrame(visualiserAnimFrame);
+                    visualiserAnimFrame = null;
+                }
+                drawVisualiser();
             }
         });
     }
 }
 
-// Draw Oscilloscope
-function drawOscilloscope() {
-    if (!oscilloscopeActive || !oscilloscopeAnalyser) return;
+function _applyVisualiserMode() {
+    const grille = document.getElementById('audio-start-button');
+    if (!grille) return;
+    if (visualiserMode === 2) {
+        // Grille: show grille pattern, hide canvas
+        grille.classList.add('show-grille');
+    } else {
+        // Spectrum or oscilloscope: show canvas
+        grille.classList.remove('show-grille');
+    }
+}
 
-    requestAnimationFrame(drawOscilloscope);
-
-    const bufferLength = oscilloscopeAnalyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    oscilloscopeAnalyser.getByteTimeDomainData(dataArray);
-
-    const width = oscilloscopeCanvas.width;
-    const height = oscilloscopeCanvas.height;
-
-    oscilloscopeCtx.fillStyle = '#0a0805';
-    oscilloscopeCtx.fillRect(0, 0, width, height);
-
-    oscilloscopeCtx.strokeStyle = 'rgba(212, 165, 116, 0.15)';
-    oscilloscopeCtx.lineWidth = 1;
-
-    for (let i = 0; i <= 4; i++) {
-        const y = (height / 4) * i;
-        oscilloscopeCtx.beginPath();
-        oscilloscopeCtx.moveTo(0, y);
-        oscilloscopeCtx.lineTo(width, y);
-        oscilloscopeCtx.stroke();
+// Unified draw loop — draws spectrum (mode 0) or oscilloscope (mode 1)
+function drawVisualiser() {
+    if (visualiserMode === 2 || !visualiserAnalyser || !visualiserCtx) {
+        visualiserAnimFrame = null;
+        return;
     }
 
-    for (let i = 0; i <= 10; i++) {
-        const x = (width / 10) * i;
-        oscilloscopeCtx.beginPath();
-        oscilloscopeCtx.moveTo(x, 0);
-        oscilloscopeCtx.lineTo(x, height);
-        oscilloscopeCtx.stroke();
-    }
+    visualiserAnimFrame = requestAnimationFrame(drawVisualiser);
 
-    oscilloscopeCtx.lineWidth = 2;
-    oscilloscopeCtx.strokeStyle = '#ff6b35';
-    oscilloscopeCtx.shadowBlur = 10;
-    oscilloscopeCtx.shadowColor = '#ff6b35';
+    const width = visualiserCanvas.width;
+    const height = visualiserCanvas.height;
 
-    oscilloscopeCtx.beginPath();
+    if (visualiserMode === 0) {
+        // ── Spectrum bars (green theme) ──────────────────────────────────
+        const bufferLength = visualiserAnalyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        visualiserAnalyser.getByteFrequencyData(dataArray);
 
-    const sliceWidth = width / bufferLength;
-    let x = 0;
+        visualiserCtx.fillStyle = '#000';
+        visualiserCtx.fillRect(0, 0, width, height);
 
-    let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
-    }
-    const dcOffset = sum / bufferLength;
-
-    const gain = 5.0;
-
-    for (let i = 0; i < bufferLength; i++) {
-        const v = ((dataArray[i] - dcOffset) / 128.0) * gain;
-        const clampedV = Math.max(-1, Math.min(1, v));
-        const y = height / 2 - (clampedV * height / 2);
-
-        if (i === 0) {
-            oscilloscopeCtx.moveTo(x, y);
-        } else {
-            oscilloscopeCtx.lineTo(x, y);
+        // Subtle grid lines
+        visualiserCtx.strokeStyle = 'rgba(0, 255, 0, 0.06)';
+        visualiserCtx.lineWidth = 1;
+        for (let i = 1; i <= 3; i++) {
+            const y = (height / 4) * i;
+            visualiserCtx.beginPath();
+            visualiserCtx.moveTo(0, y);
+            visualiserCtx.lineTo(width, y);
+            visualiserCtx.stroke();
         }
 
-        x += sliceWidth;
-    }
+        // Only use the lower ~60% of bins (audio content)
+        const usedBins = Math.floor(bufferLength * 0.6);
+        const barCount = Math.min(usedBins, 48);
+        const barW = width / barCount;
+        const gap = Math.max(1, Math.floor(barW * 0.15));
 
-    oscilloscopeCtx.lineTo(width, height / 2);
-    oscilloscopeCtx.stroke();
-    oscilloscopeCtx.shadowBlur = 0;
+        for (let i = 0; i < barCount; i++) {
+            // Average a small bin range per bar
+            const binStart = Math.floor((i / barCount) * usedBins);
+            const binEnd = Math.floor(((i + 1) / barCount) * usedBins);
+            let sum = 0;
+            for (let b = binStart; b < binEnd; b++) sum += dataArray[b];
+            const avg = sum / Math.max(1, binEnd - binStart);
+
+            const fraction = avg / 255;
+            const barH = fraction * height;
+            const x = i * barW;
+
+            // Colour: dim green → bright green → yellow-green at peaks
+            const g = Math.round(180 + fraction * 75);
+            const r = fraction > 0.75 ? Math.round((fraction - 0.75) * 4 * 200) : 0;
+            visualiserCtx.fillStyle = `rgb(${r},${g},0)`;
+            visualiserCtx.shadowBlur = fraction > 0.5 ? 6 : 0;
+            visualiserCtx.shadowColor = '#00ff00';
+            visualiserCtx.fillRect(x + gap / 2, height - barH, barW - gap, barH);
+        }
+        visualiserCtx.shadowBlur = 0;
+
+    } else {
+        // ── Oscilloscope (orange/amber theme) ────────────────────────────
+        const bufferLength = visualiserAnalyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        visualiserAnalyser.getByteTimeDomainData(dataArray);
+
+        visualiserCtx.fillStyle = '#0a0805';
+        visualiserCtx.fillRect(0, 0, width, height);
+
+        visualiserCtx.strokeStyle = 'rgba(212, 165, 116, 0.15)';
+        visualiserCtx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = (height / 4) * i;
+            visualiserCtx.beginPath();
+            visualiserCtx.moveTo(0, y);
+            visualiserCtx.lineTo(width, y);
+            visualiserCtx.stroke();
+        }
+        for (let i = 0; i <= 10; i++) {
+            const x = (width / 10) * i;
+            visualiserCtx.beginPath();
+            visualiserCtx.moveTo(x, 0);
+            visualiserCtx.lineTo(x, height);
+            visualiserCtx.stroke();
+        }
+
+        visualiserCtx.lineWidth = 2;
+        visualiserCtx.strokeStyle = '#ff6b35';
+        visualiserCtx.shadowBlur = 10;
+        visualiserCtx.shadowColor = '#ff6b35';
+        visualiserCtx.beginPath();
+
+        const sliceWidth = width / bufferLength;
+        let x = 0;
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+        const dcOffset = sum / bufferLength;
+        const gain = 5.0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const v = ((dataArray[i] - dcOffset) / 128.0) * gain;
+            const clampedV = Math.max(-1, Math.min(1, v));
+            const y = height / 2 - (clampedV * height / 2);
+            if (i === 0) visualiserCtx.moveTo(x, y);
+            else visualiserCtx.lineTo(x, y);
+            x += sliceWidth;
+        }
+        visualiserCtx.lineTo(width, height / 2);
+        visualiserCtx.stroke();
+        visualiserCtx.shadowBlur = 0;
+    }
 }
+
+// Stub kept for compatibility — actual draw is now drawVisualiser()
+function drawOscilloscope() {}
 
 // Load settings from URL
 function loadSettingsFromURL() {

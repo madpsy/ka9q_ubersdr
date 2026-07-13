@@ -209,6 +209,17 @@ async function loadRadio(radioId) {
                 // Set flags to prevent processing audio and reconnection
                 isChangingRadio = true;
 
+                // Cancel visualiser animation loop and clear stale references
+                // so drawVisualiser() doesn't crash when the canvas is removed
+                if (visualiserAnimFrame) {
+                    cancelAnimationFrame(visualiserAnimFrame);
+                    visualiserAnimFrame = null;
+                }
+                visualiserCanvas = null;
+                visualiserCtx = null;
+                visualiserAnalyser = null;
+                visualiserMode = 0; // reset to spectrum for next radio load
+
                 // Stop MinimalRadio
                 if (minimalRadio) {
                     await minimalRadio.stopPreview();
@@ -1003,7 +1014,7 @@ function _applyVisualiserMode() {
 
 // Unified draw loop — draws spectrum (mode 0) or oscilloscope (mode 1)
 function drawVisualiser() {
-    if (visualiserMode === 2 || !visualiserAnalyser || !visualiserCtx) {
+    if (visualiserMode === 2 || !visualiserAnalyser || !visualiserCtx || !visualiserCanvas) {
         visualiserAnimFrame = null;
         return;
     }

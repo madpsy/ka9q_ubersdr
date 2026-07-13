@@ -1459,6 +1459,53 @@ class BandPanel {
         document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
         document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
 
+        // ── FT8 frequency highlight ───────────────────────────────────────────
+        // Highlight the 3 kHz FT8 window (dial freq → dial+3 kHz, USB) if configured.
+        const ft8Hz = this.meta.ft8_frequency;
+        if (ft8Hz && ft8Hz > 0) {
+            const bw        = this.meta.bin_bandwidth;
+            const bandStart = this.meta.start;
+
+            // Bin positions for dial and dial+3 kHz
+            const dialBin  = (ft8Hz - bandStart) / bw;
+            const endBin   = (ft8Hz + 3000 - bandStart) / bw;
+
+            // Canvas X positions (clamped to visible area)
+            const x1 = Math.max(0, ((dialBin - binStart) / (zn - 1)) * w);
+            const x2 = Math.min(w, ((endBin  - binStart) / (zn - 1)) * w);
+
+            if (x2 > x1) {
+                // Shaded region
+                sCtx.save();
+                sCtx.fillStyle = 'rgba(76,175,80,0.12)';
+                sCtx.fillRect(x1, 0, x2 - x1, h);
+
+                // Dial frequency vertical line
+                sCtx.strokeStyle = 'rgba(76,175,80,0.6)';
+                sCtx.lineWidth   = 1;
+                sCtx.setLineDash([3, 3]);
+                sCtx.beginPath();
+                sCtx.moveTo(x1, 0);
+                sCtx.lineTo(x1, h);
+                sCtx.stroke();
+                sCtx.setLineDash([]);
+
+                // "FT8" label at top, just right of the dial line
+                sCtx.font         = '9px monospace';
+                sCtx.textBaseline = 'top';
+                sCtx.textAlign    = 'left';
+                const label = 'FT8';
+                const tw    = sCtx.measureText(label).width;
+                const lx    = Math.min(x1 + 3, w - tw - 2);
+                sCtx.fillStyle = 'rgba(0,0,0,0.55)';
+                sCtx.fillRect(lx - 1, 1, tw + 4, 12);
+                sCtx.fillStyle = 'rgba(255,255,255,0.9)';
+                sCtx.fillText(label, lx + 1, 2);
+
+                sCtx.restore();
+            }
+        }
+
         // ── Waterfall ─────────────────────────────────────────────────────────
         const wfW = this.wfCanvas.width;
         const wfH = this.wfCanvas.height;

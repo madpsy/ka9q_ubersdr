@@ -5045,6 +5045,7 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 			"bin_count":        band.BinCount,
 			"bin_bandwidth":    band.BinBandwidth,
 			"total_bandwidth":  float64(band.BinCount) * band.BinBandwidth,
+			"ft8_frequency":    band.FT8Frequency,
 		}
 	}
 

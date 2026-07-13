@@ -175,19 +175,19 @@
     pointer-events: none;
 }
 
-/* Visualiser canvas — fills the speaker area */
+/* Visualiser canvas — fills the speaker area, never intercepts clicks */
 #visualiser-canvas {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     display: block;
+    pointer-events: none;
     transition: opacity 0.2s ease;
 }
 
 .speaker-grille.show-grille #visualiser-canvas {
     opacity: 0;
-    pointer-events: none;
 }
 
 .speaker-grille:not(.show-grille) #visualiser-canvas {

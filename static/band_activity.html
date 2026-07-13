@@ -1225,7 +1225,7 @@ class BandPanel {
                     const y = Math.round((r - 1 + frac) * rowH);
 
                     // Tick line across full width
-                    wfCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+                    wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';
                     wfCtx.lineWidth   = 1;
                     wfCtx.beginPath();
                     wfCtx.moveTo(0, y);
@@ -1234,9 +1234,9 @@ class BandPanel {
                     // Label
                     const label = `${nextTick}s`;
                     const tw = wfCtx.measureText(label).width;
-                    wfCtx.fillStyle = 'rgba(0,0,0,0.5)';
+                    wfCtx.fillStyle = 'rgba(0,0,0,0.65)';
                     wfCtx.fillRect(1, y - 6, tw + 4, 12);
-                    wfCtx.fillStyle = 'rgba(255,255,255,0.55)';
+                    wfCtx.fillStyle = 'rgba(255,255,255,0.9)';
                     wfCtx.fillText(label, 3, y);
                     nextTick += tickStep;
                 }

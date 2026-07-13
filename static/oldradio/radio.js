@@ -845,25 +845,11 @@ function updateFrequencyDisplay() {
 }
 
 // Update signal bars for CB radio
-// SNR range: 30 dB (no bars) → 60 dB (all 8 bars)
+// Uses vuLevel (0-1) which is already updated by updateSignalLED() from live SNR data.
+// vuLevel 0 = SNR ≤ 30 dB (no bars), vuLevel 1 = SNR ≥ 60 dB (all 8 bars).
 function updateSignalBars() {
-    const SNR_MIN = 30;
-    const SNR_MAX = 60;
     const NUM_BARS = 8;
-
-    // Get raw SNR if available, otherwise derive from vuLevel (fallback)
-    let snr;
-    if (minimalRadio && minimalRadio.hasSignalQuality && minimalRadio.hasSignalQuality()) {
-        const sq = minimalRadio.getSignalQuality();
-        snr = (sq && sq.snr !== null) ? sq.snr : null;
-    }
-    // Fallback: reverse-map vuLevel back to approximate SNR using same 30-60 range
-    if (snr === null || snr === undefined) {
-        snr = SNR_MIN + vuLevel * (SNR_MAX - SNR_MIN);
-    }
-
-    const fraction = Math.max(0, Math.min(1, (snr - SNR_MIN) / (SNR_MAX - SNR_MIN)));
-    const activeBars = fraction * NUM_BARS;
+    const activeBars = vuLevel * NUM_BARS;
 
     for (let i = 1; i <= NUM_BARS; i++) {
         const bar = document.getElementById(`signal-bar-${i}`);
@@ -914,6 +900,7 @@ function updateSignalLED() {
             // Smooth the value
             vuLevel = vuLevel * 0.8 + snrPercentage * 0.2;
             updatePowerIndicator(vuLevel);
+            updateSignalBars();
 
             requestAnimationFrame(updateSignalLED);
             return;
@@ -942,6 +929,7 @@ function updateSignalLED() {
 
     vuLevel = vuLevel * 0.8 + rmsPercentage * 0.2;
     updatePowerIndicator(vuLevel);
+    updateSignalBars();
 
     requestAnimationFrame(updateSignalLED);
 }

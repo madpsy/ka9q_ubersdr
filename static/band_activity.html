@@ -434,15 +434,28 @@ class BandPanel {
         const sCtx = this.specCtx;
         sCtx.clearRect(0, 0, w, h);
 
-        // Grid lines
+        // Grid lines + dB axis labels
         sCtx.strokeStyle = '#1a1a2a';
         sCtx.lineWidth = 1;
+        sCtx.font = '10px monospace';
+        sCtx.textAlign = 'left';
+        sCtx.textBaseline = 'bottom';
         for (let db = Math.ceil(dMin/10)*10; db <= dMax; db += 10) {
             const y = h - ((db - dMin) / dRange) * h;
             sCtx.beginPath();
             sCtx.moveTo(0, y);
             sCtx.lineTo(w, y);
             sCtx.stroke();
+            // Label — skip the very bottom tick to avoid clipping
+            if (y < h - 2) {
+                const label = `${db} dB`;
+                const tw = sCtx.measureText(label).width;
+                // Semi-transparent pill behind text
+                sCtx.fillStyle = 'rgba(10,10,15,0.65)';
+                sCtx.fillRect(2, y - 13, tw + 4, 12);
+                sCtx.fillStyle = '#556677';
+                sCtx.fillText(label, 4, y - 2);
+            }
         }
 
         // Spectrum fill + line

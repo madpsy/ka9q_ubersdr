@@ -185,7 +185,7 @@
         // Level 1 toggle button
         const btn = document.createElement('button');
         btn.id          = 'pages-menu-btn';
-        btn.textContent = 'Links ▾';
+        btn.textContent = '🌐 Links ▾';
         btn.setAttribute('aria-haspopup', 'true');
         btn.setAttribute('aria-expanded', 'false');
         btn.setAttribute('aria-controls', 'pages-menu-dropdown');

@@ -1183,6 +1183,44 @@ class BandPanel {
         }
         wfCtx.putImageData(imgData, 0, 0);
 
+        // ── Waterfall time axis (left edge) ───────────────────────────────────
+        // Draw 2-second tick marks using real timestamps stored per row.
+        if (nRows > 1 && this.waterfallTimes.length === nRows) {
+            const now      = Date.now();
+            const tickStep = 2; // seconds between ticks
+            wfCtx.save();
+            wfCtx.font         = '9px monospace';
+            wfCtx.textBaseline = 'middle';
+            wfCtx.textAlign    = 'left';
+
+            let lastTickSec = -1;
+            for (let r = 0; r < nRows; r++) {
+                // r=0 is newest (top); rowDataIdx = nRows-1-r is oldest at bottom
+                const rowDataIdx = nRows - 1 - r;
+                const ageSec = (now - this.waterfallTimes[rowDataIdx]) / 1000;
+                const tickSec = Math.floor(ageSec / tickStep) * tickStep;
+                if (tickSec > 0 && tickSec !== lastTickSec) {
+                    lastTickSec = tickSec;
+                    // Y centre of this row
+                    const y = Math.round(r * wfH / nRows);
+                    // Tick line
+                    wfCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+                    wfCtx.lineWidth   = 1;
+                    wfCtx.beginPath();
+                    wfCtx.moveTo(0, y);
+                    wfCtx.lineTo(wfW, y);
+                    wfCtx.stroke();
+                    // Label
+                    const label = `${tickSec}s`;
+                    wfCtx.fillStyle = 'rgba(0,0,0,0.55)';
+                    wfCtx.fillRect(1, y - 7, wfCtx.measureText(label).width + 4, 13);
+                    wfCtx.fillStyle = 'rgba(255,255,255,0.6)';
+                    wfCtx.fillText(label, 3, y);
+                }
+            }
+            wfCtx.restore();
+        }
+
         // ── Audio cursor overlay ──────────────────────────────────────────────
         // Draw carrier line + bandwidth shading on both canvases when this band
         // is the one currently being listened to.

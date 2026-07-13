@@ -2177,11 +2177,13 @@ function _stopTickerLoop() {
 function _renderVoiceTicker(data) {
     const tickerEl = document.getElementById('cond-ticker');
     const trackEl  = document.getElementById('cond-ticker-track');
+    console.log('[ticker] _renderVoiceTicker called, tickerEl=', tickerEl, 'trackEl=', trackEl);
     if (!tickerEl || !trackEl) return;
 
     // Flatten all activities across all bands into a sorted list
     const items = [];
     const bands = data?.bands || {};
+    console.log('[ticker] bands keys:', Object.keys(bands), 'total_activities:', data?.total_activities);
     for (const [band, activities] of Object.entries(bands)) {
         for (const act of activities) {
             items.push({ band, ...act });
@@ -2190,6 +2192,7 @@ function _renderVoiceTicker(data) {
 
     // Sort by SNR descending so strongest signals lead
     items.sort((a, b) => (b.snr || 0) - (a.snr || 0));
+    console.log('[ticker] items count:', items.length);
 
     if (items.length === 0) {
         _stopTickerLoop();
@@ -2227,19 +2230,22 @@ function _renderVoiceTicker(data) {
     // Duplicate for seamless wrap
     for (const act of items) trackEl.appendChild(makeItem(act));
 
+    console.log('[ticker] tickerEl display before show:', tickerEl.style.display);
     tickerEl.style.display = '';
+    console.log('[ticker] tickerEl display after show:', tickerEl.style.display, 'offsetHeight:', tickerEl.offsetHeight, 'parent display:', tickerEl.parentElement?.style?.display);
 
     // Measure half-width after two frames (ensures layout is complete)
     requestAnimationFrame(() => requestAnimationFrame(() => {
-        // offsetWidth of each child summed = half the track
-        // Use getBoundingClientRect on first and last child of first half
         const children = trackEl.children;
         const half = items.length;
-        if (half === 0 || children.length < half) { _tickerHalfW = 0; return; }
+        console.log('[ticker] rAF: children.length=', children.length, 'half=', half);
+        if (half === 0 || children.length < half) { _tickerHalfW = 0; console.log('[ticker] early return: not enough children'); return; }
         const first = children[0].getBoundingClientRect();
         const last  = children[half - 1].getBoundingClientRect();
         _tickerHalfW = last.right - first.left;
-        if (_tickerHalfW < 10) { _tickerHalfW = 0; return; }
+        console.log('[ticker] first.left=', first.left, 'last.right=', last.right, 'halfW=', _tickerHalfW);
+        if (_tickerHalfW < 10) { _tickerHalfW = 0; console.log('[ticker] halfW too small, not starting'); return; }
+        console.log('[ticker] starting RAF loop, halfW=', _tickerHalfW);
         _tickerRAF = requestAnimationFrame(_tickerLoop);
     }));
 }

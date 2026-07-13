@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Returns true if a radio was loaded, false otherwise
 async function loadAvailableRadios() {
     try {
-        const response = await fetch('radios/radios.json');
+        const response = await fetch('radios/radios.json?v=' + Date.now());
         const data = await response.json();
         availableRadios = data.radios;
 
@@ -145,8 +145,8 @@ async function loadRadio(radioId) {
             return;
         }
 
-        // Load radio configuration
-        const configResponse = await fetch(`${radio.path}/config.json`);
+        // Load radio configuration (cache-busted to always get latest)
+        const configResponse = await fetch(`${radio.path}/config.json?v=` + Date.now());
         currentRadioConfig = await configResponse.json();
 
         // Update global configuration
@@ -157,6 +157,7 @@ async function loadRadio(radioId) {
         currentFrequency = currentRadioConfig.defaultFrequency;
         currentVolume = currentRadioConfig.defaultVolume;
         volumeRotation = currentVolume * 330;
+        console.log('[loadRadio] defaultVolume from config:', currentRadioConfig.defaultVolume, '→ currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
 
         // Load radio template
         const templateResponse = await fetch(`${radio.path}/template.html`);
@@ -328,6 +329,7 @@ async function startRadio() {
 
     // Initialize MinimalRadio with our session ID
     minimalRadio = new MinimalRadio(userSessionID);
+    console.log('[startRadio] calling setVolume with currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
     minimalRadio.setVolume(currentVolume);
 
     // Start audio preview
@@ -1072,11 +1074,12 @@ function loadSettingsFromURL() {
                 volumeKnob.style.transform = `rotate(${volumeRotation}deg)`;
             }
 
-            console.log('Loaded volume from URL:', Math.round(vol * 100) + '%');
+            console.log('[loadSettingsFromURL] vol param:', vol, '→ currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
         }
     } else {
         // No URL parameter, use default from config and update knob position
         volumeRotation = currentVolume * 330;
+        console.log('[loadSettingsFromURL] no vol param, using currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
 
         const volumeKnob = document.getElementById('volume-knob');
         if (volumeKnob) {

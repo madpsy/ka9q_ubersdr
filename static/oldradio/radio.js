@@ -45,7 +45,6 @@ let isChangingRadio = false;
 // Signal LED
 let vuLevel = 0;
 let vuAnalyser = null;
-let lastSNRLogTime = 0;
 
 // Visualiser (spectrum / oscilloscope / grille)
 // Modes: 0 = spectrum bars (default), 1 = oscilloscope, 2 = grille
@@ -801,7 +800,6 @@ function updateSquelchFromKnob() {
         const fraction = clampedRotation / maxRotation; // 0.003 … 1.0
         snrThreshold = SQUELCH_SNR_MIN + 0.5 + fraction * (SQUELCH_SNR_MAX - SQUELCH_SNR_MIN - 0.5);
         snrThreshold = Math.round(snrThreshold * 2) / 2; // round to nearest 0.5 dB
-        console.log('Squelch SNR threshold:', snrThreshold.toFixed(1), 'dB');
     }
 
     // Apply to MinimalRadio client-side gate
@@ -891,13 +889,6 @@ function updateSignalLED() {
     if (minimalRadio.hasSignalQuality && minimalRadio.hasSignalQuality()) {
         const signalQuality = minimalRadio.getSignalQuality();
         if (signalQuality && signalQuality.snr !== null) {
-            // Log SNR every 10 seconds
-            const now = Date.now();
-            if (now - lastSNRLogTime >= 10000) {
-                console.log(`SNR: ${signalQuality.snr.toFixed(2)} dB (basebandPower: ${signalQuality.basebandPower.toFixed(2)} dBFS, noiseDensity: ${signalQuality.noiseDensity.toFixed(2)} dBFS)`);
-                lastSNRLogTime = now;
-            }
-
             // Map SNR to 0-1 range using 30-60 dB window
             // 30 dB = 0%, 60 dB = 100%
             const snrPercentage = Math.max(0, Math.min(1, (signalQuality.snr - 30) / 30));

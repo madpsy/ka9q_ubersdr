@@ -487,6 +487,46 @@ body {
 .cond-sw-badge.poor      { background: rgba(244,67,54,0.18);  color: #e57373; border: 1px solid rgba(244,67,54,0.4); }
 .cond-sw-badge.unknown   { background: rgba(80,80,80,0.18);   color: #777;    border: 1px solid rgba(80,80,80,0.4); }
 
+/* ── CW spots grid ── */
+@media (max-width: 767px) {
+    #cond-cw-spots { display: none !important; }
+}
+
+#conditions-bar .cond-cw-spots {
+    flex: 1 1 100%;
+    border-top: 1px solid #1e1e2e;
+    padding: 6px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: flex-start;
+}
+
+.cond-cw-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 0.70em;
+    white-space: nowrap;
+    width: 130px;
+    border: 1px solid rgba(80,80,80,0.3);
+    background: rgba(40,40,50,0.5);
+    color: #888;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cond-cw-badge.new-country {
+    border-color: rgba(255,152,0,0.55);
+    background: rgba(255,152,0,0.09);
+    color: #ffb74d;
+}
+.cond-cw-badge .ccw-flag  { font-size: 1.1em; line-height: 1; flex-shrink: 0; }
+.cond-cw-badge .ccw-call  { font-weight: 700; letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; }
+.cond-cw-badge .ccw-band  { color: #7ec8e3; font-size: 0.88em; flex-shrink: 0; }
+.cond-cw-badge .ccw-star  { color: #ffb74d; flex-shrink: 0; }
+
 /* ── Voice activity ticker ── */
 #conditions-bar .cond-ticker {
     flex: 1 1 100%;
@@ -699,6 +739,9 @@ body {
     <div class="cond-body">
         <div class="cond-bands" id="cond-bands">
             <!-- band pills injected by JS -->
+        </div>
+        <div class="cond-cw-spots" id="cond-cw-spots" style="display:none">
+            <!-- CW spot badges injected by JS -->
         </div>
         <div class="cond-right">
             <div class="cond-hardware" id="cond-hardware" style="display:none">
@@ -2056,6 +2099,96 @@ function _touchLastEvent() {
 const _COND_BANDS_FALLBACK = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
 let _condTimer = null;
 
+// ── CW Spots (SSE) ───────────────────────────────────────────────────────────
+let _cwEnabled      = false;          // set from /api/description
+let _cwSSE          = null;           // EventSource instance
+let _cwReconnectMs  = 5000;           // backoff: 5 s → 30 s
+let _cwRecentSpots  = [];             // ring buffer, newest first, max 50
+let _cwSeenCountries = new Map();     // band → Set<country_code>
+const _CW_MAX_DISPLAY = 24;
+const _CW_RING_SIZE   = 50;
+
+function _cwMakeBadge(spot) {
+    const el = document.createElement('span');
+    el.className = 'cond-cw-badge' + (spot.isNew ? ' new-country' : '');
+    el.title = `${spot.callsign} on ${spot.band} · ${(spot.frequency / 1e6).toFixed(4)} MHz · ${spot.wpm || '?'} WPM`;
+    const flag = spot.country_code ? iso2ToFlag(spot.country_code) : '';
+    el.innerHTML =
+        (flag ? `<span class="ccw-flag">${flag}</span>` : '') +
+        `<span class="ccw-call">${_escHtml(spot.callsign)}</span>` +
+        `<span class="ccw-band">${_escHtml(spot.band)}</span>` +
+        (spot.isNew ? `<span class="ccw-star">★</span>` : '');
+    return el;
+}
+
+function _renderCWSpots() {
+    const el = document.getElementById('cond-cw-spots');
+    if (!el) return;
+    if (_cwRecentSpots.length === 0) {
+        el.style.display = 'none';
+        return;
+    }
+    el.innerHTML = '';
+    const shown = _cwRecentSpots.slice(0, _CW_MAX_DISPLAY);
+    for (const spot of shown) el.appendChild(_cwMakeBadge(spot));
+    el.style.display = 'flex'; // must override inline style="display:none"
+}
+
+function _cwHandleSpot(spot) {
+    // Determine if this is a new country on this band
+    const band = spot.band || '';
+    const cc   = (spot.country_code || '').toUpperCase();
+    let isNew = false;
+    if (cc) {
+        if (!_cwSeenCountries.has(band)) _cwSeenCountries.set(band, new Set());
+        const seen = _cwSeenCountries.get(band);
+        if (!seen.has(cc)) {
+            seen.add(cc);
+            isNew = true;
+        }
+    }
+    // Prepend to ring buffer
+    _cwRecentSpots.unshift({ ...spot, isNew });
+    if (_cwRecentSpots.length > _CW_RING_SIZE) _cwRecentSpots.length = _CW_RING_SIZE;
+    _renderCWSpots();
+    // Update body padding in case bar grew
+    const bar = document.getElementById('conditions-bar');
+    if (bar && bar.style.display !== 'none') {
+        requestAnimationFrame(() => {
+            document.body.style.paddingBottom = bar.offsetHeight + 'px';
+        });
+    }
+}
+
+function _startCWSpots() {
+    if (!_cwEnabled || _cwSSE) return;
+
+    function connect() {
+        const es = new EventSource('/api/cwskimmer/stream');
+        _cwSSE = es;
+
+        es.onmessage = (e) => {
+            _cwReconnectMs = 5000; // reset backoff on success
+            try {
+                const spot = JSON.parse(e.data);
+                if (spot.type === 'cw_spot') _cwHandleSpot(spot);
+            } catch (_) {}
+        };
+
+        es.onerror = () => {
+            es.close();
+            _cwSSE = null;
+            // Exponential backoff, cap at 30 s
+            setTimeout(() => {
+                _cwReconnectMs = Math.min(_cwReconnectMs * 2, 30000);
+                connect();
+            }, _cwReconnectMs);
+        };
+    }
+
+    connect();
+}
+
 // Hardware status flags — set from /api/description in init()
 let _rotatorEnabled  = false;
 let _antSwitchEnabled = false;
@@ -2692,6 +2825,7 @@ async function init() {
             // Detect hardware features for the conditions bar
             _rotatorEnabled   = !!(desc.rotator?.enabled);
             _antSwitchEnabled = !!(desc.ant_switch?.enabled);
+            _cwEnabled        = !!(desc.cw_skimmer);
         }
     } catch(_) { /* non-fatal — receiver info is cosmetic */ }
 
@@ -2796,6 +2930,8 @@ async function init() {
     _startHardwareTimer();
     // Start voice activity ticker (refreshes every 5 s)
     _startVoiceTickerTimer();
+    // Start CW spots SSE stream (if CW skimmer is enabled)
+    _startCWSpots();
 }
 
 init();

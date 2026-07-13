@@ -26,6 +26,11 @@
       "depends_on": "noise_floor",
       "files": [
         {
+          "path": "band_activity.html",
+          "name": "📡 Band Activity",
+          "description": "Live per-band spectrum display with scrolling waterfall, showing real-time signal activity on each configured HF band."
+        },
+        {
           "path": "noisefloor.html",
           "name": "📉 Noise Floor Monitor",
           "description": "Real-time and historical noise floor monitoring per band, helping identify interference trends and RFI sources."

@@ -2872,10 +2872,12 @@ func main() {
 	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
 	voiceActivitySSELimiter := NewSSEIPLimiter(2)
 	dxClusterSSELimiter := NewSSEIPLimiter(2)
+	noiseFloorSpectrumSSELimiter := NewSSEIPLimiter(2)
 	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter, &config.Server))
 	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
 	http.HandleFunc("/api/voice-activity/stream", HandlePublicVoiceActivityStream(voiceActivitySSEHub, voiceActivitySSELimiter, &config.Server))
 	http.HandleFunc("/api/dxcluster/stream", HandlePublicDXClusterStream(dxClusterSSEHub, dxClusterSSELimiter, &config.Server))
+	http.HandleFunc("/api/noisefloor/spectrum/stream", HandleNoiseFloorSpectrumStream(noiseFloorMonitor, config, noiseFloorSpectrumSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin only)
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))

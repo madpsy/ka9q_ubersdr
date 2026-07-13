@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Band Activity Monitor</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+}
+
+/* ── Top bar ── */
+#topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #111118;
+    border-bottom: 1px solid #222;
+    flex-wrap: wrap;
+}
+
+#topbar h1 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #7ec8e3;
+    white-space: nowrap;
+    margin-right: 8px;
+}
+
+#status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #444;
+    flex-shrink: 0;
+    transition: background 0.4s;
+}
+#status-dot.live   { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+#status-dot.error  { background: #f44336; }
+#status-dot.wait   { background: #ff9800; }
+
+#status-text {
+    font-size: 0.82em;
+    color: #888;
+    white-space: nowrap;
+}
+
+/* band selector pills */
+#band-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.band-pill {
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid #333;
+    background: #1a1a24;
+    color: #aaa;
+    font-size: 0.78em;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.band-pill.active {
+    border-color: #7ec8e3;
+    background: #1a2a34;
+    color: #7ec8e3;
+}
+.band-pill:hover { border-color: #555; }
+
+#btn-all, #btn-none {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #1a1a24;
+    color: #aaa;
+    font-size: 0.78em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#btn-all:hover, #btn-none:hover { border-color: #555; color: #ddd; }
+
+/* dB range controls */
+#range-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8em;
+    color: #888;
+    white-space: nowrap;
+}
+#range-controls input[type=number] {
+    width: 56px;
+    padding: 2px 5px;
+    background: #1a1a24;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 0.9em;
+    text-align: center;
+}
+
+/* ── Grid of band panels ── */
+#grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 10px;
+    padding: 10px;
+}
+
+/* ── Individual band panel ── */
+.band-panel {
+    background: #111118;
+    border: 1px solid #1e1e2e;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.band-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 10px;
+    background: #16161f;
+    border-bottom: 1px solid #1e1e2e;
+    font-size: 0.82em;
+}
+
+.band-name {
+    font-weight: 700;
+    color: #7ec8e3;
+    font-size: 1em;
+}
+
+.band-freq-range {
+    color: #666;
+    font-size: 0.85em;
+}
+
+.band-stats {
+    display: flex;
+    gap: 10px;
+    font-size: 0.78em;
+    color: #888;
+}
+
+.band-stats span { white-space: nowrap; }
+.band-stats .val { color: #ccc; font-weight: 600; }
+
+/* spectrum line canvas */
+.spectrum-canvas {
+    display: block;
+    width: 100%;
+    height: 80px;
+    background: #0a0a0f;
+    cursor: crosshair;
+}
+
+/* waterfall canvas */
+.waterfall-canvas {
+    display: block;
+    width: 100%;
+    height: 120px;
+    background: #000;
+    image-rendering: pixelated;
+}
+
+/* frequency axis */
+.freq-axis {
+    height: 16px;
+    background: #0d0d14;
+    position: relative;
+    font-size: 0.65em;
+    color: #555;
+    border-top: 1px solid #1a1a24;
+}
+
+.freq-label {
+    position: absolute;
+    transform: translateX(-50%);
+    top: 2px;
+    white-space: nowrap;
+}
+
+/* waiting overlay */
+.panel-waiting {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 220px;
+    color: #444;
+    font-size: 0.85em;
+}
+
+/* ── Tooltip ── */
+#tooltip {
+    position: fixed;
+    background: rgba(0,0,0,0.85);
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.75em;
+    color: #ddd;
+    pointer-events: none;
+    display: none;
+    z-index: 100;
+    white-space: nowrap;
+}
+
+/* ── No-data message ── */
+#no-data {
+    display: none;
+    text-align: center;
+    padding: 60px 20px;
+    color: #555;
+    font-size: 1em;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+    <h1>📡 Band Activity</h1>
+    <div id="status-dot" class="wait"></div>
+    <span id="status-text">Connecting…</span>
+    <div id="band-pills"></div>
+    <button id="btn-all">All</button>
+    <button id="btn-none">None</button>
+    <div id="range-controls">
+        <label>dB min <input type="number" id="db-min" value="-130" step="5"></label>
+        <label>max <input type="number" id="db-max" value="-60" step="5"></label>
+    </div>
+</div>
+
+<div id="grid"></div>
+<div id="no-data">No bands selected — use the pills above to choose bands.</div>
+<div id="tooltip"></div>
+
+<script>
+'use strict';
+
+// ── Waterfall colour map (jet-like, dark background) ─────────────────────────
+const CMAP = (() => {
+    const c = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+        let r, g, b;
+        const t = i / 255;
+        if (t < 0.125)      { r = 0;   g = 0;   b = Math.round(128 + t/0.125*127); }
+        else if (t < 0.375) { r = 0;   g = Math.round((t-0.125)/0.25*255); b = 255; }
+        else if (t < 0.625) { r = Math.round((t-0.375)/0.25*255); g = 255; b = Math.round(255-(t-0.375)/0.25*255); }
+        else if (t < 0.875) { r = 255; g = Math.round(255-(t-0.625)/0.25*255); b = 0; }
+        else                { r = Math.round(255-(t-0.875)/0.125*255); g = 0; b = 0; }
+        c[i] = 0xFF000000 | (b << 16) | (g << 8) | r; // ABGR for ImageData
+    }
+    return c;
+})();
+
+// ── Global state ──────────────────────────────────────────────────────────────
+let bandMeta   = {};   // name → {start, end, center_frequency, bin_count, bin_bandwidth}
+let allBands   = [];   // ordered list of band names
+let activeBands = new Set(); // currently selected band names
+let panels     = {};   // name → BandPanel instance
+let sse        = null; // EventSource
+let dbMin      = -130;
+let dbMax      = -60;
+
+// ── BandPanel — one spectrum+waterfall per band ───────────────────────────────
+class BandPanel {
+    constructor(name, meta) {
+        this.name = name;
+        this.meta = meta;
+        this.bins = null;          // Uint8Array — current decoded state
+        this.waterfallRows = [];   // array of Uint8Array (ring buffer, max 120 rows)
+        this.maxRows = 120;
+        this.el = null;
+        this.specCanvas = null;
+        this.specCtx = null;
+        this.wfCanvas = null;
+        this.wfCtx = null;
+        this.wfImageData = null;
+        this.animFrame = null;
+        this.dirty = false;        // true when new data arrived since last draw
+        this._buildDOM();
+        this._startRenderLoop();
+    }
+
+    _buildDOM() {
+        const panel = document.createElement('div');
+        panel.className = 'band-panel';
+        panel.id = `panel-${this.name}`;
+
+        const startMHz = (this.meta.start / 1e6).toFixed(3);
+        const endMHz   = (this.meta.end   / 1e6).toFixed(3);
+
+        panel.innerHTML = `
+            <div class="band-header">
+                <span class="band-name">${this.name.toUpperCase()}</span>
+                <span class="band-freq-range">${startMHz}–${endMHz} MHz</span>
+                <div class="band-stats">
+                    <span>P5: <span class="val" id="stat-p5-${this.name}">--</span> dB</span>
+                    <span>Peak: <span class="val" id="stat-peak-${this.name}">--</span> dB</span>
+                </div>
+            </div>
+            <canvas class="spectrum-canvas" id="spec-${this.name}"></canvas>
+            <canvas class="waterfall-canvas" id="wf-${this.name}"></canvas>
+            <div class="freq-axis" id="axis-${this.name}"></div>
+        `;
+
+        this.el = panel;
+
+        // Append to grid
+        document.getElementById('grid').appendChild(panel);
+
+        // Grab canvas refs after DOM insertion
+        this.specCanvas = document.getElementById(`spec-${this.name}`);
+        this.wfCanvas   = document.getElementById(`wf-${this.name}`);
+        this.specCtx    = this.specCanvas.getContext('2d');
+        this.wfCtx      = this.wfCanvas.getContext('2d');
+
+        // Size canvases to their CSS pixel size
+        this._resize();
+        window.addEventListener('resize', () => this._resize());
+
+        // Tooltip on spectrum hover
+        this.specCanvas.addEventListener('mousemove', e => this._onSpecHover(e));
+        this.specCanvas.addEventListener('mouseleave', () => {
+            document.getElementById('tooltip').style.display = 'none';
+        });
+
+        // Build frequency axis labels
+        this._buildAxis();
+    }
+
+    _resize() {
+        const w = this.specCanvas.offsetWidth;
+        if (w === 0) return;
+        this.specCanvas.width  = w;
+        this.specCanvas.height = this.specCanvas.offsetHeight;
+        this.wfCanvas.width    = w;
+        this.wfCanvas.height   = this.wfCanvas.offsetHeight;
+        this.wfImageData = this.wfCtx.createImageData(w, 1);
+        this.dirty = true;
+    }
+
+    _buildAxis() {
+        const axis = document.getElementById(`axis-${this.name}`);
+        const startHz = this.meta.start;
+        const endHz   = this.meta.end;
+        const spanHz  = endHz - startHz;
+        // Show ~5 labels
+        const steps = 5;
+        for (let i = 0; i <= steps; i++) {
+            const frac = i / steps;
+            const hz   = startHz + frac * spanHz;
+            const mhz  = (hz / 1e6).toFixed(3);
+            const lbl  = document.createElement('span');
+            lbl.className = 'freq-label';
+            lbl.style.left = `${frac * 100}%`;
+            lbl.textContent = mhz;
+            axis.appendChild(lbl);
+        }
+    }
+
+    // Called by SSE decoder with new float32 dBFS array
+    applyFrame(data, flags) {
+        const binCount = this.meta.bin_count;
+
+        if (flags === 0x03) {
+            // Full uint8 frame
+            if (data.length !== binCount) return;
+            if (!this.bins || this.bins.length !== binCount) {
+                this.bins = new Uint8Array(binCount);
+            }
+            this.bins.set(data);
+        } else if (flags === 0x04) {
+            // Delta uint8 frame
+            if (!this.bins) return; // need full frame first
+            // data is a Uint8Array of [idx_lo, idx_hi, val] triples
+            const count = (data[0] | (data[1] << 8));
+            for (let i = 0; i < count; i++) {
+                const off = 2 + i * 3;
+                const idx = data[off] | (data[off+1] << 8);
+                const val = data[off+2];
+                if (idx < this.bins.length) this.bins[idx] = val;
+            }
+        } else {
+            return;
+        }
+
+        this.dirty = true;
+    }
+
+    _startRenderLoop() {
+        const loop = () => {
+            if (this.dirty) {
+                this._draw();
+                this.dirty = false;
+            }
+            this.animFrame = requestAnimationFrame(loop);
+        };
+        this.animFrame = requestAnimationFrame(loop);
+    }
+
+    _draw() {
+        if (!this.bins) return;
+        const w = this.specCanvas.width;
+        const h = this.specCanvas.height;
+        if (w === 0 || h === 0) return;
+
+        const bins = this.bins;
+        const n    = bins.length;
+        const dMin = dbMin;
+        const dMax = dbMax;
+        const dRange = dMax - dMin;
+
+        // ── Spectrum line graph ───────────────────────────────────────────────
+        const sCtx = this.specCtx;
+        sCtx.clearRect(0, 0, w, h);
+
+        // Grid lines
+        sCtx.strokeStyle = '#1a1a2a';
+        sCtx.lineWidth = 1;
+        for (let db = Math.ceil(dMin/10)*10; db <= dMax; db += 10) {
+            const y = h - ((db - dMin) / dRange) * h;
+            sCtx.beginPath();
+            sCtx.moveTo(0, y);
+            sCtx.lineTo(w, y);
+            sCtx.stroke();
+        }
+
+        // Spectrum fill + line
+        sCtx.beginPath();
+        let p5sum = 0, peakVal = -999;
+        const vals = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            vals[i] = bins[i] - 256; // uint8 → dBFS
+        }
+
+        // Compute P5 for stats
+        const sorted = Float32Array.from(vals).sort();
+        const p5 = sorted[Math.floor(n * 0.05)];
+        const peak = sorted[n - 1];
+
+        // Draw
+        for (let i = 0; i < n; i++) {
+            const x = (i / (n - 1)) * w;
+            const db = Math.max(dMin, Math.min(dMax, vals[i]));
+            const y  = h - ((db - dMin) / dRange) * h;
+            if (i === 0) sCtx.moveTo(x, y);
+            else         sCtx.lineTo(x, y);
+        }
+
+        // Fill under line
+        sCtx.lineTo(w, h);
+        sCtx.lineTo(0, h);
+        sCtx.closePath();
+        const grad = sCtx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0,   'rgba(126,200,227,0.35)');
+        grad.addColorStop(1,   'rgba(126,200,227,0.02)');
+        sCtx.fillStyle = grad;
+        sCtx.fill();
+
+        // Line on top
+        sCtx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = (i / (n - 1)) * w;
+            const db = Math.max(dMin, Math.min(dMax, vals[i]));
+            const y  = h - ((db - dMin) / dRange) * h;
+            if (i === 0) sCtx.moveTo(x, y);
+            else         sCtx.lineTo(x, y);
+        }
+        sCtx.strokeStyle = '#7ec8e3';
+        sCtx.lineWidth = 1.2;
+        sCtx.stroke();
+
+        // Update stats
+        document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
+        document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
+
+        // ── Waterfall ─────────────────────────────────────────────────────────
+        // Build one new row from current bins, scaled to canvas width
+        const wfW = this.wfCanvas.width;
+        const wfH = this.wfCanvas.height;
+        if (wfW === 0 || wfH === 0) return;
+
+        const rowData = new Uint8Array(wfW);
+        for (let px = 0; px < wfW; px++) {
+            const binIdx = Math.round((px / (wfW - 1)) * (n - 1));
+            const db = vals[Math.min(binIdx, n-1)];
+            const norm = Math.max(0, Math.min(1, (db - dMin) / dRange));
+            rowData[px] = Math.round(norm * 255);
+        }
+
+        // Push row into ring buffer
+        this.waterfallRows.push(rowData);
+        if (this.waterfallRows.length > this.maxRows) {
+            this.waterfallRows.shift();
+        }
+
+        // Redraw entire waterfall (scroll effect: newest row at top)
+        const wfCtx = this.wfCtx;
+        const rows  = this.waterfallRows;
+        const nRows = rows.length;
+        const rowH  = wfH / this.maxRows; // fractional row height
+
+        // Use putImageData row by row for speed
+        const imgData = wfCtx.createImageData(wfW, wfH);
+        const buf32   = new Uint32Array(imgData.data.buffer);
+
+        for (let r = 0; r < nRows; r++) {
+            // Newest row at top (index nRows-1 → y=0)
+            const srcRow = rows[nRows - 1 - r];
+            const yStart = Math.round(r * wfH / this.maxRows);
+            const yEnd   = Math.round((r + 1) * wfH / this.maxRows);
+            for (let y = yStart; y < yEnd && y < wfH; y++) {
+                const base = y * wfW;
+                for (let x = 0; x < wfW; x++) {
+                    buf32[base + x] = CMAP[srcRow[x]];
+                }
+            }
+        }
+        wfCtx.putImageData(imgData, 0, 0);
+    }
+
+    _onSpecHover(e) {
+        if (!this.bins) return;
+        const rect = this.specCanvas.getBoundingClientRect();
+        const frac = (e.clientX - rect.left) / rect.width;
+        const binIdx = Math.round(frac * (this.bins.length - 1));
+        if (binIdx < 0 || binIdx >= this.bins.length) return;
+        const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
+        const db  = this.bins[binIdx] - 256;
+        const mhz = (hz / 1e6).toFixed(4);
+        const tip = document.getElementById('tooltip');
+        tip.textContent = `${mhz} MHz  ${db.toFixed(1)} dBFS`;
+        tip.style.display = 'block';
+        tip.style.left = `${e.clientX + 12}px`;
+        tip.style.top  = `${e.clientY - 20}px`;
+    }
+
+    destroy() {
+        if (this.animFrame) cancelAnimationFrame(this.animFrame);
+        if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el);
+    }
+}
+
+// ── SSE binary8 decoder ───────────────────────────────────────────────────────
+function decodeSSEEvent(b64data) {
+    // base64 → Uint8Array
+    const bin = atob(b64data);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+
+    if (buf.length < 22) return null;
+    const magic = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
+    if (magic !== 'SPEC') return null;
+
+    const flags = buf[5];
+    // payload starts at offset 22
+    const payload = buf.subarray(22);
+    return { flags, payload };
+}
+
+// ── SSE connection management ─────────────────────────────────────────────────
+function buildSSEUrl() {
+    const params = [...activeBands].map(b => `band=${encodeURIComponent(b)}`).join('&');
+    return `/api/noisefloor/spectrum/stream${params ? '?' + params : ''}`;
+}
+
+function connectSSE() {
+    if (sse) { sse.close(); sse = null; }
+    if (activeBands.size === 0) {
+        setStatus('wait', 'No bands selected');
+        return;
+    }
+
+    setStatus('wait', 'Connecting…');
+    sse = new EventSource(buildSSEUrl());
+
+    sse.addEventListener('spectrum', e => {
+        const band = e.lastEventId;
+        const panel = panels[band];
+        if (!panel) return;
+
+        const decoded = decodeSSEEvent(e.data);
+        if (!decoded) return;
+
+        panel.applyFrame(decoded.payload, decoded.flags);
+        setStatus('live', `Live · ${new Date().toLocaleTimeString()}`);
+    });
+
+    sse.addEventListener('heartbeat', e => {
+        setStatus('live', `Heartbeat · ${new Date().toLocaleTimeString()}`);
+    });
+
+    sse.onerror = () => {
+        setStatus('error', 'Connection lost — retrying…');
+    };
+}
+
+// ── Band selection ────────────────────────────────────────────────────────────
+function rebuildPanels() {
+    // Remove panels for deselected bands
+    for (const name of Object.keys(panels)) {
+        if (!activeBands.has(name)) {
+            panels[name].destroy();
+            delete panels[name];
+        }
+    }
+
+    // Add panels for newly selected bands (in frequency order)
+    for (const name of allBands) {
+        if (activeBands.has(name) && !panels[name]) {
+            panels[name] = new BandPanel(name, bandMeta[name]);
+        }
+    }
+
+    // Show/hide no-data message
+    document.getElementById('no-data').style.display =
+        activeBands.size === 0 ? 'block' : 'none';
+
+    // Reconnect SSE with new band list
+    connectSSE();
+}
+
+function toggleBand(name) {
+    if (activeBands.has(name)) activeBands.delete(name);
+    else                        activeBands.add(name);
+    updatePills();
+    rebuildPanels();
+    savePrefs();
+}
+
+function updatePills() {
+    document.querySelectorAll('.band-pill').forEach(pill => {
+        const name = pill.dataset.band;
+        pill.classList.toggle('active', activeBands.has(name));
+    });
+}
+
+// ── Preferences (localStorage) ────────────────────────────────────────────────
+function savePrefs() {
+    try {
+        localStorage.setItem('bandActivity_active', JSON.stringify([...activeBands]));
+        localStorage.setItem('bandActivity_dbMin', dbMin);
+        localStorage.setItem('bandActivity_dbMax', dbMax);
+    } catch(e) {}
+}
+
+function loadPrefs() {
+    try {
+        const saved = localStorage.getItem('bandActivity_active');
+        if (saved) {
+            const arr = JSON.parse(saved);
+            activeBands = new Set(arr.filter(n => bandMeta[n]));
+        }
+        const sMin = localStorage.getItem('bandActivity_dbMin');
+        const sMax = localStorage.getItem('bandActivity_dbMax');
+        if (sMin) { dbMin = parseFloat(sMin); document.getElementById('db-min').value = dbMin; }
+        if (sMax) { dbMax = parseFloat(sMax); document.getElementById('db-max').value = dbMax; }
+    } catch(e) {}
+}
+
+// ── Status indicator ──────────────────────────────────────────────────────────
+function setStatus(state, text) {
+    const dot  = document.getElementById('status-dot');
+    const span = document.getElementById('status-text');
+    dot.className = state;
+    span.textContent = text;
+}
+
+// ── Initialisation ────────────────────────────────────────────────────────────
+async function init() {
+    setStatus('wait', 'Loading band config…');
+
+    let cfg;
+    try {
+        const resp = await fetch('/api/noisefloor/config');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        cfg = await resp.json();
+    } catch(err) {
+        setStatus('error', `Failed to load config: ${err.message}`);
+        return;
+    }
+
+    if (!cfg.bands || cfg.bands.length === 0) {
+        setStatus('error', 'No bands configured on server');
+        return;
+    }
+
+    // Build metadata map and ordered list
+    allBands = [];
+    for (const b of cfg.bands) {
+        bandMeta[b.name] = b;
+        allBands.push(b.name);
+    }
+
+    // Load saved preferences (which bands were active, dB range)
+    loadPrefs();
+
+    // Default: all bands active if no saved prefs
+    if (activeBands.size === 0) {
+        for (const name of allBands) activeBands.add(name);
+    }
+
+    // Build band pills
+    const pillsEl = document.getElementById('band-pills');
+    for (const name of allBands) {
+        const pill = document.createElement('button');
+        pill.className = 'band-pill' + (activeBands.has(name) ? ' active' : '');
+        pill.dataset.band = name;
+        const meta = bandMeta[name];
+        const bwKHz = Math.round(meta.bin_bandwidth * meta.bin_count / 1000);
+        pill.textContent = name.toUpperCase();
+        pill.title = `${(meta.start/1e6).toFixed(3)}–${(meta.end/1e6).toFixed(3)} MHz · ${meta.bin_count} bins · ${meta.bin_bandwidth} Hz/bin`;
+        pill.addEventListener('click', () => toggleBand(name));
+        pillsEl.appendChild(pill);
+    }
+
+    // All / None buttons
+    document.getElementById('btn-all').addEventListener('click', () => {
+        activeBands = new Set(allBands);
+        updatePills();
+        rebuildPanels();
+        savePrefs();
+    });
+    document.getElementById('btn-none').addEventListener('click', () => {
+        activeBands = new Set();
+        updatePills();
+        rebuildPanels();
+        savePrefs();
+    });
+
+    // dB range controls
+    document.getElementById('db-min').addEventListener('change', e => {
+        dbMin = parseFloat(e.target.value) || -130;
+        savePrefs();
+        // Mark all panels dirty so they redraw with new range
+        for (const p of Object.values(panels)) p.dirty = true;
+    });
+    document.getElementById('db-max').addEventListener('change', e => {
+        dbMax = parseFloat(e.target.value) || -60;
+        savePrefs();
+        for (const p of Object.values(panels)) p.dirty = true;
+    });
+
+    // Build initial panels and connect SSE
+    rebuildPanels();
+}
+
+init();
+</script>
+</body>
+</html>

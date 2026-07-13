@@ -29,7 +29,7 @@ let DIAL_GEAR_RATIO = 10;
 // State
 let minimalRadio = null; // MinimalRadio instance for audio handling
 let currentFrequency = 1000000;
-let currentVolume = 0.7;
+let currentVolume = 0.25;
 let currentSquelch = 0; // Squelch level 0-1 (0 = off, 1 = max)
 let dialRotation = 0;
 let volumeRotation = 231;
@@ -744,21 +744,53 @@ function setupSquelchKnob() {
     });
 }
 
-// Update squelch from knob position
+// SNR squelch constants — mirror the main interface values
+const SQUELCH_SNR_MIN = 24;   // slider far-left = disabled (matches SNR_SQUELCH_OFF_VAL)
+const SQUELCH_SNR_MAX = 80;   // slider far-right = 80 dB threshold
+const SQUELCH_SENTINEL = -999; // sent to server when disabled
+
+// Debounce timer for server-side gate command
+let _squelchSendTimer = null;
+
+// Send set_audio_gate to the server via MinimalRadio's WebSocket
+function sendSquelchGate(minSnr) {
+    if (_squelchSendTimer) clearTimeout(_squelchSendTimer);
+    _squelchSendTimer = setTimeout(() => {
+        if (minimalRadio && minimalRadio.ws && minimalRadio.ws.readyState === WebSocket.OPEN) {
+            minimalRadio.ws.send(JSON.stringify({ type: 'set_audio_gate', min_snr: minSnr }));
+            console.log('Squelch gate sent to server: min_snr =', minSnr);
+        }
+    }, 80);
+}
+
+// Update squelch from knob position — SNR-based gate
+// Knob at 0° → squelch OFF (gate always open)
+// Knob at 1°–330° → SNR threshold mapped linearly from SQUELCH_SNR_MIN+0.5 to SQUELCH_SNR_MAX dB
 function updateSquelchFromKnob() {
     const maxRotation = 330;
     const clampedRotation = Math.min(squelchRotation, maxRotation);
     currentSquelch = clampedRotation / maxRotation;
 
-    const squelchDb = -20 + (currentSquelch * 40);
-    if (currentSquelch === 0) {
-        console.log('Squelch: OFF (always open at', squelchDb.toFixed(1), 'dB)');
+    let snrThreshold;
+    if (clampedRotation === 0) {
+        // Knob fully counter-clockwise → squelch OFF
+        snrThreshold = SQUELCH_SENTINEL;
+        console.log('Squelch: OFF');
     } else {
-        console.log('Squelch:', squelchDb.toFixed(1), 'dB');
+        // Map 1°–330° linearly to SQUELCH_SNR_MIN+0.5 … SQUELCH_SNR_MAX dB
+        const fraction = clampedRotation / maxRotation; // 0.003 … 1.0
+        snrThreshold = SQUELCH_SNR_MIN + 0.5 + fraction * (SQUELCH_SNR_MAX - SQUELCH_SNR_MIN - 0.5);
+        snrThreshold = Math.round(snrThreshold * 2) / 2; // round to nearest 0.5 dB
+        console.log('Squelch SNR threshold:', snrThreshold.toFixed(1), 'dB');
     }
 
-    // Note: MinimalRadio doesn't currently support squelch control
-    // This would need to be added to MinimalRadio if squelch is needed
+    // Apply to MinimalRadio client-side gate
+    if (minimalRadio) {
+        minimalRadio.setSNRSquelch(snrThreshold);
+    }
+
+    // Also send server-side audio gate command
+    sendSquelchGate(snrThreshold);
 }
 
 // Update frequency display

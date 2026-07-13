@@ -24,6 +24,12 @@ class MinimalRadio {
         this.currentMode = 'usb';
         this.currentVolume = 0.5;
         this.isPlaying = false;
+
+        // SNR squelch gate
+        // snrSquelchThreshold: -999 = disabled, otherwise minimum SNR in dB
+        this.snrSquelchThreshold = -999;
+        this._squelchOpen = true;   // current gate state (open = audio passes)
+        this._squelchHysteresis = 2; // dB hysteresis to prevent chatter
         
         // Bandwidth settings (will be adjusted based on mode)
         this.bandwidthLow = 50;
@@ -224,6 +230,42 @@ class MinimalRadio {
     setVolume(volume) {
         this.currentVolume = Math.max(0, Math.min(1, volume));
         console.log('Volume set to:', Math.round(this.currentVolume * 100) + '%');
+    }
+
+    // Set SNR squelch threshold.
+    // threshold: -999 (or any value <= -998) = disabled (gate always open)
+    //            otherwise: minimum SNR in dB required for audio to pass
+    setSNRSquelch(threshold) {
+        this.snrSquelchThreshold = threshold;
+        if (threshold <= -998) {
+            // Gate disabled — always open
+            this._squelchOpen = true;
+        }
+        // Gate state will be re-evaluated on the next audio buffer via _evaluateSquelch()
+    }
+
+    // Evaluate squelch gate against current signal quality.
+    // Returns true if audio should pass (gate open), false if muted.
+    _evaluateSquelch() {
+        const t = this.snrSquelchThreshold;
+        if (t <= -998) return true; // disabled
+
+        const sq = this.signalQuality;
+        if (!sq || sq.snr === null || sq.snr === undefined) return true; // no data → open
+
+        const snr = sq.snr;
+        if (this._squelchOpen) {
+            // Gate is open: close it if SNR drops below threshold
+            if (snr < t) {
+                this._squelchOpen = false;
+            }
+        } else {
+            // Gate is closed: open it if SNR rises above threshold + hysteresis
+            if (snr >= t + this._squelchHysteresis) {
+                this._squelchOpen = true;
+            }
+        }
+        return this._squelchOpen;
     }
     
     // Connect to WebSocket
@@ -625,27 +667,33 @@ class MinimalRadio {
         
         // Reset if buffer is too low (after first few buffers)
         const needsReset = this.audioBufferCount >= 3 && (this.nextPlayTime < currentTime || bufferAhead < 0.05);
+
+        // Evaluate SNR squelch gate — 0 if gated (muted), currentVolume if open
+        const gateOpen = this._evaluateSquelch();
+        const targetVolume = gateOpen ? this.currentVolume : 0;
         
         // Fade in on first buffer
         if (this.audioBufferCount === 0) {
             const FADE_TIME = 0.5;
             const fadeStartTime = Math.max(this.nextPlayTime, currentTime);
             gainNode.gain.setValueAtTime(0, fadeStartTime);
-            gainNode.gain.linearRampToValueAtTime(this.currentVolume, fadeStartTime + FADE_TIME);
+            gainNode.gain.linearRampToValueAtTime(targetVolume, fadeStartTime + FADE_TIME);
         } else if (needsReset) {
             // Quick fade out/in on reset
             const FADE_TIME = 0.01;
-            gainNode.gain.setValueAtTime(this.currentVolume, currentTime);
+            gainNode.gain.setValueAtTime(targetVolume, currentTime);
             gainNode.gain.linearRampToValueAtTime(0, currentTime + FADE_TIME);
             
             this.nextPlayTime = currentTime + FADE_TIME + 0.05;
             gainNode.gain.setValueAtTime(0, this.nextPlayTime);
-            gainNode.gain.linearRampToValueAtTime(this.currentVolume, this.nextPlayTime + FADE_TIME);
+            gainNode.gain.linearRampToValueAtTime(targetVolume, this.nextPlayTime + FADE_TIME);
             
             console.log('Audio buffer reset');
         } else {
-            // Normal playback
-            gainNode.gain.value = this.currentVolume;
+            // Normal playback — apply a short ramp so squelch open/close doesn't click
+            const SQUELCH_RAMP = 0.02;
+            gainNode.gain.setValueAtTime(gainNode.gain.value, currentTime);
+            gainNode.gain.linearRampToValueAtTime(targetVolume, currentTime + SQUELCH_RAMP);
         }
         
         this.audioBufferCount++;

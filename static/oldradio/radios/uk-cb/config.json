@@ -21,7 +21,7 @@
   ],
   "volumeNotches": 11,
   "defaultFrequency": 27781250,
-  "defaultVolume": 0.7,
+  "defaultVolume": 0.25,
   "channels": [
     { "number": 1, "frequency": 27601250 },
     { "number": 2, "frequency": 27611250 },

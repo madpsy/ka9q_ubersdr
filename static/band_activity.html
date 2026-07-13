@@ -638,22 +638,22 @@ class BandPanel {
         spec.addEventListener('wheel', onWheel, { passive: false });
         wf.addEventListener('wheel', onWheel, { passive: false });
 
-        // ── Double-click to reset zoom ────────────────────────────────────────
-        const onDblClick = (e) => {
-            e.preventDefault();
-            this._resetZoom();
-        };
-        spec.addEventListener('dblclick', onDblClick);
-        wf.addEventListener('dblclick', onDblClick);
-
         // ── Drag-to-select on overlay ─────────────────────────────────────────
         // The overlay sits over the full stack; we track drag in spec-fraction space.
         // Drag is initiated on mousedown anywhere in the stack.
         const stack = document.getElementById(`stack-${this.name}`);
 
+        // ── Double-click / double-tap to reset zoom ───────────────────────────
+        // Listen on the stack so it fires regardless of which child was clicked.
+        stack.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            this._resetZoom();
+        });
+
         const onMouseDown = (e) => {
             if (e.button !== 0) return;
-            // Ignore if it's a double-click (handled separately)
+            // Ignore the second click of a double-click — let dblclick handle it
+            if (e.detail >= 2) return;
             const rect = stack.getBoundingClientRect();
             this._dragStart = (e.clientX - rect.left) / rect.width;
             this._dragging  = false;

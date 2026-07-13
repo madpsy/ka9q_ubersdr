@@ -573,8 +573,9 @@ class BandPanel {
         this.zoomStart = 0;        // fraction [0,1] of full bin array
         this.zoomEnd   = 1;
 
-        // ── Drag-to-select state ─────────────────────────────────────────────
+        // ── Drag-to-select / pan state ───────────────────────────────────────
         this._dragStart = null;    // canvas-fraction where drag began
+        this._dragLast  = null;    // canvas-fraction at previous mousemove (for pan delta)
         this._dragging  = false;
 
         // ── Pinch-to-zoom state ──────────────────────────────────────────────
@@ -783,9 +784,11 @@ class BandPanel {
             if (e.detail >= 2) return;
             const rect = stack.getBoundingClientRect();
             this._dragStart = (e.clientX - rect.left) / rect.width;
+            this._dragLast  = this._dragStart;
             this._dragging  = false;
+            const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
             overlay.style.pointerEvents = 'auto';
-            overlay.style.cursor = 'col-resize';
+            overlay.style.cursor = zoomed ? 'grab' : 'col-resize';
         };
 
         const onMouseMove = (e) => {
@@ -796,18 +799,38 @@ class BandPanel {
             if (dist > 0.01) this._dragging = true;
             if (!this._dragging) return;
 
-            // Draw selection rectangle on overlay
-            const oCtx = this.overlayCtx;
-            const ow = overlay.width;
-            const oh = overlay.height;
-            oCtx.clearRect(0, 0, ow, oh);
-            const x1 = Math.min(this._dragStart, cur) * ow;
-            const x2 = Math.max(this._dragStart, cur) * ow;
-            oCtx.fillStyle   = 'rgba(126,200,227,0.12)';
-            oCtx.fillRect(x1, 0, x2 - x1, oh);
-            oCtx.strokeStyle = 'rgba(126,200,227,0.7)';
-            oCtx.lineWidth   = 1;
-            oCtx.strokeRect(x1, 0, x2 - x1, oh);
+            const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
+
+            if (zoomed) {
+                // ── Pan mode: shift zoom window by delta ──────────────────────
+                overlay.style.cursor = 'grabbing';
+                const delta = cur - this._dragLast;
+                const span  = this.zoomEnd - this.zoomStart;
+                let newStart = this.zoomStart - delta;
+                let newEnd   = this.zoomEnd   - delta;
+                if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+                if (newEnd   > 1) { newStart -= (newEnd - 1); newEnd = 1; }
+                this.zoomStart = Math.max(0, newStart);
+                this.zoomEnd   = Math.min(1, newEnd);
+                this._updateAxis();
+                this.dirty = true;
+                // Clear any selection rect
+                this.overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            } else {
+                // ── Zoom-select mode: draw selection rectangle ────────────────
+                const oCtx = this.overlayCtx;
+                const ow = overlay.width;
+                const oh = overlay.height;
+                oCtx.clearRect(0, 0, ow, oh);
+                const x1 = Math.min(this._dragStart, cur) * ow;
+                const x2 = Math.max(this._dragStart, cur) * ow;
+                oCtx.fillStyle   = 'rgba(126,200,227,0.12)';
+                oCtx.fillRect(x1, 0, x2 - x1, oh);
+                oCtx.strokeStyle = 'rgba(126,200,227,0.7)';
+                oCtx.lineWidth   = 1;
+                oCtx.strokeRect(x1, 0, x2 - x1, oh);
+            }
+            this._dragLast = cur;
         };
 
         const onMouseUp = (e) => {
@@ -820,19 +843,24 @@ class BandPanel {
             overlay.style.pointerEvents = 'none';
             overlay.style.cursor = '';
 
+            const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
+
             if (this._dragging && Math.abs(cur - this._dragStart) > 0.01) {
-                // Commit zoom: map drag fractions into absolute bin fractions
-                const span = this.zoomEnd - this.zoomStart;
-                const a = this.zoomStart + Math.min(this._dragStart, cur) * span;
-                const b = this.zoomStart + Math.max(this._dragStart, cur) * span;
-                this.zoomStart = Math.max(0, a);
-                this.zoomEnd   = Math.min(1, b);
-                this._updateAxis();
-                this.dirty = true;
+                if (!zoomed) {
+                    // Commit zoom-to-selection (only at full zoom)
+                    const span = this.zoomEnd - this.zoomStart;
+                    const a = this.zoomStart + Math.min(this._dragStart, cur) * span;
+                    const b = this.zoomStart + Math.max(this._dragStart, cur) * span;
+                    this.zoomStart = Math.max(0, a);
+                    this.zoomEnd   = Math.min(1, b);
+                    this._updateAxis();
+                    this.dirty = true;
+                }
                 // Tell the click handler that this mouseup ended a drag
                 this._lastClickWasDrag = true;
             }
             this._dragStart = null;
+            this._dragLast  = null;
             this._dragging  = false;
         };
 

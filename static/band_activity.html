@@ -550,6 +550,14 @@ body {
 .cond-hw-badge.grounded{ background: rgba(244,67,54,0.18);  color: #e57373; border: 1px solid rgba(244,67,54,0.4); }
 .cond-hw-badge.active  { background: rgba(76,175,80,0.18);  color: #81c784; border: 1px solid rgba(76,175,80,0.4); }
 
+.cond-hw-flags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    font-size: 1em;
+    line-height: 1;
+}
+
 /* ── Local weather section ── */
 #conditions-bar .cond-weather {
     flex: 1 1 0;
@@ -2077,15 +2085,29 @@ async function _fetchWeather() {
     return resp.json();
 }
 
-// ── Hardware status fetch (rotator + ant-switch) ──────────────────────────────
+// ── Flag emoji helper ─────────────────────────────────────────────────────────
+function iso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    const c = code.toUpperCase();
+    const base = 0x1F1E6 - 0x41;
+    try {
+        return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+        return '';
+    }
+}
+
+// ── Hardware + session status fetch ──────────────────────────────────────────
 async function _fetchHardwareStatus() {
     const results = await Promise.allSettled([
         _rotatorEnabled   ? fetch('/api/rotctl/status').then(r => r.ok ? r.json() : null)    : Promise.resolve(null),
-        _antSwitchEnabled ? fetch('/api/ant-switch/status').then(r => r.ok ? r.json() : null) : Promise.resolve(null)
+        _antSwitchEnabled ? fetch('/api/ant-switch/status').then(r => r.ok ? r.json() : null) : Promise.resolve(null),
+        fetch('/stats').then(r => r.ok ? r.json() : null)
     ]);
     return {
-        rot: results[0].status === 'fulfilled' ? results[0].value : null,
-        ant: results[1].status === 'fulfilled' ? results[1].value : null
+        rot:     results[0].status === 'fulfilled' ? results[0].value : null,
+        ant:     results[1].status === 'fulfilled' ? results[1].value : null,
+        session: results[2].status === 'fulfilled' ? results[2].value : null
     };
 }
 
@@ -2093,21 +2115,47 @@ function _renderHardware(hw) {
     const el = document.getElementById('cond-hardware');
     if (!el) return;
 
-    if (!_rotatorEnabled && !_antSwitchEnabled) {
-        el.style.display = 'none';
-        return;
-    }
-
-    const rot = hw?.rot;
-    const ant = hw?.ant;
-
-    // Nothing useful to show yet
-    if (!rot && !ant) {
-        el.style.display = 'none';
-        return;
-    }
-
     el.innerHTML = '';
+
+    const rot     = hw?.rot;
+    const ant     = hw?.ant;
+    const session = hw?.session;
+
+    // ── Session row (always shown) ──
+    {
+        const row = document.createElement('div');
+        row.className = 'cond-hw-row';
+
+        const label = document.createElement('span');
+        label.className = 'cond-hw-label';
+        label.textContent = 'Users';
+
+        const count = session?.active_sessions ?? 0;
+        const val = document.createElement('span');
+        val.className = 'cond-hw-value';
+        val.textContent = count;
+        val.title = `${count} active session${count !== 1 ? 's' : ''}`;
+
+        row.appendChild(label);
+        row.appendChild(val);
+
+        // Unique country flags
+        if (session?.channels && session.channels.length > 0) {
+            const codes = [...new Set(
+                session.channels
+                    .map(c => c.country_code)
+                    .filter(Boolean)
+            )];
+            if (codes.length > 0) {
+                const flagsEl = document.createElement('span');
+                flagsEl.className = 'cond-hw-flags';
+                flagsEl.textContent = codes.map(iso2ToFlag).join('');
+                row.appendChild(flagsEl);
+            }
+        }
+
+        el.appendChild(row);
+    }
 
     // ── Rotator row ──
     if (_rotatorEnabled && rot) {
@@ -2131,8 +2179,6 @@ function _renderHardware(hw) {
 
             const badge = document.createElement('span');
             badge.className = `cond-hw-badge ${rot.moving ? 'moving' : 'stopped'}`;
-
-            // Compass arrow + azimuth
             const arrow = _azimuthArrow(rot.position?.azimuth);
             badge.textContent = `${arrow} ${az}`;
             if (rot.moving) badge.title = 'Rotating…';
@@ -2164,7 +2210,6 @@ function _renderHardware(hw) {
                 badge.className = 'cond-hw-badge stopped';
                 badge.textContent = 'None';
             } else {
-                // Map 1-based antenna numbers to labels
                 const names = selected.map(n => labels[n - 1] || `Ant ${n}`);
                 badge.className = 'cond-hw-badge active';
                 badge.textContent = names.join(', ');
@@ -2188,7 +2233,6 @@ function _azimuthArrow(az) {
 }
 
 async function _refreshHardware() {
-    if (!_rotatorEnabled && !_antSwitchEnabled) return;
     try {
         const hw = await _fetchHardwareStatus();
         _renderHardware(hw);
@@ -2206,7 +2250,6 @@ async function _refreshHardware() {
 
 function _startHardwareTimer() {
     if (_hwTimer !== null) return;
-    if (!_rotatorEnabled && !_antSwitchEnabled) return;
     _refreshHardware();                                   // immediate first fetch
     _hwTimer = setInterval(_refreshHardware, 5_000);     // every 5 s
 }

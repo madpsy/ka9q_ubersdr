@@ -1599,15 +1599,20 @@ func (nfm *NoiseFloorMonitor) GetAvailableDates(includeToday bool) ([]string, er
 	return dates, nil
 }
 
-// GetLatestFFT returns the max-hold FFT data for a specific band over 1 second
-// Uses max hold instead of averaging to preserve transient peaks (e.g., FT8 signals)
+// GetLatestFFT returns the max-hold FFT data for a specific band.
+// The max-hold window matches the background poll period so the window always
+// covers exactly one poll cycle — no stale data, no blending across cycles.
+// Uses max hold instead of averaging to preserve transient peaks (e.g., FT8 signals).
 func (nfm *NoiseFloorMonitor) GetLatestFFT(band string) *BandFFT {
 	nfm.fftMu.RLock()
 	defer nfm.fftMu.RUnlock()
 
 	if buffer, ok := nfm.fftBuffers[band]; ok {
-		// Return 1-second max hold for real-time display (preserves peaks)
-		fft := buffer.GetMaxHoldFFT(1 * time.Second)
+		// Use the configured background poll period as the max-hold window.
+		// This ensures the window covers exactly one poll cycle regardless of
+		// whether background_poll_period_ms is 500, 1000, or any other value.
+		pollWindow := time.Duration(nfm.config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond
+		fft := buffer.GetMaxHoldFFT(pollWindow)
 		if fft == nil && DebugMode {
 			log.Printf("DEBUG: FFT max hold returned nil for band %s (may need more samples)", band)
 		}

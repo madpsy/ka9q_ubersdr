@@ -1020,8 +1020,22 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)
 	}
+	// Clamp to [10, 250] ms — prevents accidental busy-loops or excessively slow user spectrum updates.
+	if config.Spectrum.PollPeriodMs < 10 {
+		config.Spectrum.PollPeriodMs = 10
+	}
+	if config.Spectrum.PollPeriodMs > 250 {
+		config.Spectrum.PollPeriodMs = 250
+	}
 	if config.Spectrum.BackgroundPollPeriodMs == 0 {
 		config.Spectrum.BackgroundPollPeriodMs = 1000 // 1s default for internal background sessions (noisefloor, frequency-reference)
+	}
+	// Clamp to [100, 2000] ms — prevents accidental busy-loops or excessively slow updates.
+	if config.Spectrum.BackgroundPollPeriodMs < 100 {
+		config.Spectrum.BackgroundPollPeriodMs = 100
+	}
+	if config.Spectrum.BackgroundPollPeriodMs > 2000 {
+		config.Spectrum.BackgroundPollPeriodMs = 2000
 	}
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2

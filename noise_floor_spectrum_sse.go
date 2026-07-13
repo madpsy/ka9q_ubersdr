@@ -113,9 +113,8 @@ import (
 	"time"
 )
 
-// nfSpectrumSSEPollInterval is how often the SSE handler polls GetLatestFFT per band.
-// This matches the background poll rate so clients see data as soon as it arrives.
-const nfSpectrumSSEPollInterval = 1 * time.Second
+// The SSE poll interval is derived at runtime from config.Spectrum.BackgroundPollPeriodMs
+// so it always matches the background poll rate — see HandleNoiseFloorSpectrumStream.
 
 // nfSpectrumSSEHeartbeatInterval is how often a heartbeat event is sent to keep
 // NAT sessions alive and give clients a liveness signal.
@@ -396,7 +395,10 @@ func HandleNoiseFloorSpectrumStream(
 		flusher.Flush()
 
 		// ── tickers ───────────────────────────────────────────────────────────
-		pollTicker := time.NewTicker(nfSpectrumSSEPollInterval)
+		// Derive poll interval from config so it always matches the background
+		// poll rate (background_poll_period_ms). config.go clamps this to
+		// [100, 2000] ms so it is always a safe positive value here.
+		pollTicker := time.NewTicker(time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond)
 		defer pollTicker.Stop()
 
 		heartbeatTicker := time.NewTicker(nfSpectrumSSEHeartbeatInterval)

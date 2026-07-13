@@ -50,12 +50,13 @@ body {
     white-space: nowrap;
 }
 
-/* band selector pills */
+/* band selector pills — always on their own row when the topbar wraps */
 #band-pills {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
-    flex: 1;
+    flex: 1 1 100%;   /* grow to fill, but also force a new row when topbar wraps */
+    min-width: 0;
 }
 
 .band-pill {
@@ -191,6 +192,7 @@ body {
     transform: translateX(-50%);
     top: 2px;
     white-space: nowrap;
+    color: #ffffff;
 }
 
 /* waiting overlay */
@@ -274,6 +276,11 @@ let panels     = {};   // name → BandPanel instance
 let sse        = null; // EventSource
 let dbMin      = -130;
 let dbMax      = -60;
+
+// ── Bandwidth tracking ────────────────────────────────────────────────────────
+let _bpsAccum    = 0;       // bytes accumulated in current 1s window
+let _bpsLastTime = 0;       // timestamp of last kbps update
+let _bpsCurrent  = null;    // last computed kbps string (null = no data yet)
 
 // ── BandPanel — one spectrum+waterfall per band ───────────────────────────────
 class BandPanel {
@@ -463,7 +470,7 @@ class BandPanel {
                 const tw = sCtx.measureText(label).width;
                 sCtx.fillStyle = 'rgba(10,10,15,0.65)';
                 sCtx.fillRect(2, y - 13, tw + 4, 12);
-                sCtx.fillStyle = '#556677';
+                sCtx.fillStyle = '#ffffff';
                 sCtx.fillText(label, 4, y - 2);
             }
         }
@@ -650,6 +657,8 @@ function buildSSEUrl() {
 
 function connectSSE() {
     if (sse) { sse.close(); sse = null; }
+    // Reset bandwidth counters on each (re)connect so stale figures don't persist.
+    _bpsAccum = 0; _bpsLastTime = 0; _bpsCurrent = null;
     if (activeBands.size === 0) {
         setStatus('wait', 'No bands selected');
         return;
@@ -667,7 +676,21 @@ function connectSSE() {
         if (!decoded) return;
 
         panel.applyFrame(decoded.payload, decoded.flags);
-        setStatus('live', `Live · ${new Date().toLocaleTimeString()}`);
+
+        // Accumulate bytes (base64 data length ≈ wire bytes before gzip)
+        _bpsAccum += e.data.length;
+        const now = performance.now();
+        if (_bpsLastTime === 0) _bpsLastTime = now;
+        const elapsed = now - _bpsLastTime;
+        if (elapsed >= 1000) {
+            const kbps = (_bpsAccum * 8 / elapsed).toFixed(1); // bits/ms = kbps
+            _bpsCurrent = `${kbps} kbps`;
+            _bpsAccum = 0;
+            _bpsLastTime = now;
+        }
+
+        const kbpsStr = _bpsCurrent ? ` · ${_bpsCurrent}` : '';
+        setStatus('live', `Live · ${new Date().toLocaleTimeString()}${kbpsStr}`);
     });
 
     sse.addEventListener('heartbeat', e => {

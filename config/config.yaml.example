@@ -595,9 +595,17 @@ audio:
 spectrum:
   # Enable per-user spectrum channels
   enabled: true
-  # Poll period in milliseconds (how often to request spectrum data)
-  # Lower values = faster updates but more CPU/network usage
+  # Poll period in milliseconds (how often to request spectrum data for user WebSocket sessions).
+  # Lower values = faster updates but more CPU/network usage.
+  # Range: 10–250 ms (values outside this range are clamped). Default: 100ms (10 Hz).
   poll_period_ms: 100
+  # Background poll period in milliseconds (how often to request spectrum data for internal
+  # sessions such as noise floor monitoring and frequency reference).
+  # This also controls the update rate of the /api/noisefloor/spectrum/stream SSE endpoint.
+  # Lower values give smoother real-time waterfall updates at the cost of slightly more
+  # CPU and radiod multicast traffic.
+  # Range: 100–2000 ms (values outside this range are clamped). Default: 1000ms (1 second).
+  background_poll_period_ms: 1000
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
   # Master gain adjustment in dB applied to all spectrum data

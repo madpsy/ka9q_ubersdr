@@ -2186,8 +2186,8 @@ async function _refreshHardware() {
 function _startHardwareTimer() {
     if (_hwTimer !== null) return;
     if (!_rotatorEnabled && !_antSwitchEnabled) return;
-    _refreshHardware();                                    // immediate first fetch
-    _hwTimer = setInterval(_refreshHardware, 30_000);     // every 30 s
+    _refreshHardware();                                   // immediate first fetch
+    _hwTimer = setInterval(_refreshHardware, 5_000);     // every 5 s
 }
 
 function _escHtml(str) {

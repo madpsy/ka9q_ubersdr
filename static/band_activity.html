@@ -487,17 +487,70 @@ body {
 .cond-sw-badge.poor      { background: rgba(244,67,54,0.18);  color: #e57373; border: 1px solid rgba(244,67,54,0.4); }
 .cond-sw-badge.unknown   { background: rgba(80,80,80,0.18);   color: #777;    border: 1px solid rgba(80,80,80,0.4); }
 
-/* ── Forecast strip ── */
-#conditions-bar .cond-forecast {
+/* ── Voice activity ticker ── */
+#conditions-bar .cond-ticker {
     flex: 1 1 100%;
-    padding: 6px 12px 8px;
     border-top: 1px solid #1e1e2e;
-    font-size: 0.75em;
-    color: #666;
-    display: none;   /* shown only when forecast text is available */
+    overflow: hidden;
+    height: 26px;
+    position: relative;
+    display: none;   /* shown only when there is voice activity */
 }
-#conditions-bar .cond-forecast span {
+
+#conditions-bar .cond-ticker-track {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    white-space: nowrap;
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    will-change: transform;
+    animation: ticker-scroll linear infinite;
+}
+
+@keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+}
+
+.cond-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 18px;
+    font-size: 0.76em;
+    color: #aaa;
+    border-right: 1px solid #1e1e2e;
+    height: 100%;
+}
+
+.cond-ticker-band {
+    font-weight: 700;
+    color: #7ec8e3;
+    font-size: 0.9em;
+    letter-spacing: 0.04em;
+}
+
+.cond-ticker-freq {
     color: #888;
+    font-variant-numeric: tabular-nums;
+}
+
+.cond-ticker-call {
+    color: #a0d8a0;
+    font-weight: 600;
+}
+
+.cond-ticker-flag {
+    font-size: 1.1em;
+    line-height: 1;
+}
+
+.cond-ticker-snr {
+    color: #666;
+    font-size: 0.88em;
 }
 
 /* ── Hardware status section (rotator / ant-switch) ── */
@@ -665,7 +718,9 @@ body {
             </div>
         </div>
     </div>
-    <div class="cond-forecast" id="cond-forecast"></div>
+    <div class="cond-ticker" id="cond-ticker">
+        <div class="cond-ticker-track" id="cond-ticker-track"></div>
+    </div>
 </div>
 
 <script>
@@ -2085,6 +2140,102 @@ async function _fetchWeather() {
     return resp.json();
 }
 
+// ── Voice activity ticker ─────────────────────────────────────────────────────
+let _vaTimer = null;
+
+async function _fetchVoiceActivity() {
+    const resp = await fetch('/api/noisefloor/voice-activity/all');
+    if (!resp.ok) throw new Error(`voice-activity HTTP ${resp.status}`);
+    return resp.json();
+}
+
+function _renderVoiceTicker(data) {
+    const tickerEl = document.getElementById('cond-ticker');
+    const trackEl  = document.getElementById('cond-ticker-track');
+    if (!tickerEl || !trackEl) return;
+
+    // Flatten all activities across all bands into a sorted list
+    const items = [];
+    const bands = data?.bands || {};
+    for (const [band, activities] of Object.entries(bands)) {
+        for (const act of activities) {
+            items.push({ band, ...act });
+        }
+    }
+
+    // Sort by SNR descending so strongest signals lead
+    items.sort((a, b) => (b.snr || 0) - (a.snr || 0));
+
+    if (items.length === 0) {
+        tickerEl.style.display = 'none';
+        return;
+    }
+
+    // Build item HTML
+    function makeItem(act) {
+        const freqMHz = ((act.estimated_dial_freq || act.center_freq) / 1e6).toFixed(3);
+        const band    = act.band.toUpperCase();
+        const mode    = (act.mode || 'USB').toUpperCase();
+        const snr     = act.snr !== undefined ? `+${act.snr.toFixed(1)} dB` : '';
+        const call    = act.dx_callsign || '';
+        const cc      = act.dx_country_code || '';
+        const flag    = cc ? iso2ToFlag(cc) : '';
+
+        const el = document.createElement('span');
+        el.className = 'cond-ticker-item';
+
+        el.innerHTML =
+            `<span class="cond-ticker-band">${_escHtml(band)}</span>` +
+            `<span class="cond-ticker-freq">${_escHtml(freqMHz)} MHz ${_escHtml(mode)}</span>` +
+            (call
+                ? `<span class="cond-ticker-flag">${flag}</span><span class="cond-ticker-call">${_escHtml(call)}</span>`
+                : `<span class="cond-ticker-call" style="color:#888">Voice</span>`) +
+            (snr ? `<span class="cond-ticker-snr">${_escHtml(snr)}</span>` : '');
+        return el;
+    }
+
+    // Build the track: items + duplicate for seamless loop
+    trackEl.innerHTML = '';
+    const frag1 = document.createDocumentFragment();
+    const frag2 = document.createDocumentFragment();
+    for (const act of items) {
+        frag1.appendChild(makeItem(act));
+        frag2.appendChild(makeItem(act));
+    }
+    trackEl.appendChild(frag1);
+    trackEl.appendChild(frag2);
+
+    // Set animation duration based on item count (≈6 s per item, min 10 s)
+    const dur = Math.max(10, items.length * 6);
+    trackEl.style.animationDuration = `${dur}s`;
+
+    tickerEl.style.display = '';
+}
+
+async function _refreshVoiceTicker() {
+    try {
+        const data = await _fetchVoiceActivity();
+        _renderVoiceTicker(data);
+        // Adjust body padding in case bar height changed
+        const bar = document.getElementById('conditions-bar');
+        if (bar && bar.style.display !== 'none') {
+            requestAnimationFrame(() => {
+                document.body.style.paddingBottom = bar.offsetHeight + 'px';
+            });
+        }
+    } catch (err) {
+        // Non-fatal — hide ticker if unavailable
+        const tickerEl = document.getElementById('cond-ticker');
+        if (tickerEl) tickerEl.style.display = 'none';
+    }
+}
+
+function _startVoiceTickerTimer() {
+    if (_vaTimer !== null) return;
+    _refreshVoiceTicker();                                 // immediate first fetch
+    _vaTimer = setInterval(_refreshVoiceTicker, 5_000);   // every 5 s
+}
+
 // ── Flag emoji helper ─────────────────────────────────────────────────────────
 function iso2ToFlag(code) {
     if (!code || code.length !== 2) return '';
@@ -2598,8 +2749,10 @@ async function init() {
     _startStatusTimer();
     // Start band conditions + space weather panel (refreshes every 5 min)
     _startConditionsTimer();
-    // Start rotator / ant-switch status poll (refreshes every 30 s, only if enabled)
+    // Start rotator / ant-switch status poll (refreshes every 5 s)
     _startHardwareTimer();
+    // Start voice activity ticker (refreshes every 5 s)
+    _startVoiceTickerTimer();
 }
 
 init();

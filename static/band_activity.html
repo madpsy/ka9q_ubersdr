@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Band Activity Monitor</title>
+<script src="opus-decoder.min.js"></script>
+<script src="minimal-radio.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -152,6 +154,36 @@ body {
     appearance: auto;
 }
 #palette-select:focus { outline: none; border-color: #555; }
+
+/* audio stop button */
+#btn-stop-audio {
+    display: none;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #e57373;
+    background: #2a1a1a;
+    color: #e57373;
+    font-size: 0.78em;
+    cursor: pointer;
+    white-space: nowrap;
+    animation: audio-pulse 2s ease-in-out infinite;
+}
+#btn-stop-audio:hover { border-color: #ef9a9a; color: #ef9a9a; background: #3a1a1a; }
+@keyframes audio-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229,115,115,0); }
+    50%       { box-shadow: 0 0 6px 2px rgba(229,115,115,0.35); }
+}
+
+/* playing indicator on band header */
+.band-playing {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #e57373;
+    margin-right: 5px;
+    animation: audio-pulse 1.2s ease-in-out infinite;
+    flex-shrink: 0;
+}
 
 /* ── Grid of band panels ── */
 #grid {
@@ -336,6 +368,7 @@ body {
             <option value="night-vision">Night Vision</option>
         </select>
     </div>
+    <button id="btn-stop-audio" title="Stop audio">🔊 <span id="audio-label">--</span> ✕</button>
 </div>
 
 <div id="grid"></div>
@@ -445,6 +478,88 @@ let _bpsAccum    = 0;       // bytes accumulated in current 1s window
 let _bpsLastTime = 0;       // timestamp of last kbps update
 let _bpsCurrent  = null;    // last computed kbps string (null = no data yet)
 
+// ── Audio (MinimalRadio) ──────────────────────────────────────────────────────
+let radio        = null;    // MinimalRadio instance (lazy-created on first use)
+let audioFreqHz  = null;    // currently tuned frequency (Hz), null = stopped
+let audioBandName = null;   // band name of currently playing audio
+
+function _getRadio() {
+    if (!radio && window.MinimalRadio) {
+        radio = new MinimalRadio();
+    }
+    return radio;
+}
+
+// Start audio at a specific frequency (Hz). Switches frequency if already playing.
+async function startAudioAt(freqHz, bandName) {
+    const r = _getRadio();
+    if (!r) { console.warn('MinimalRadio not available'); return; }
+
+    // Remove playing indicator from previous band
+    if (audioBandName && audioBandName !== bandName) {
+        _setBandPlayingIndicator(audioBandName, false);
+    }
+
+    audioFreqHz   = freqHz;
+    audioBandName = bandName;
+
+    if (r.isPlaying) {
+        // Already playing — just retune
+        r.changeFrequency(freqHz);
+    } else {
+        try {
+            await r.startPreview(freqHz);
+        } catch (err) {
+            console.error('Audio start failed:', err);
+            audioFreqHz = null; audioBandName = null;
+            _updateAudioUI();
+            return;
+        }
+    }
+    _updateAudioUI();
+}
+
+async function stopAudio() {
+    const r = _getRadio();
+    if (r) await r.stopPreview();
+    if (audioBandName) _setBandPlayingIndicator(audioBandName, false);
+    audioFreqHz = null; audioBandName = null;
+    _updateAudioUI();
+}
+
+function _updateAudioUI() {
+    const btn   = document.getElementById('btn-stop-audio');
+    const label = document.getElementById('audio-label');
+    if (!btn) return;
+    if (audioFreqHz !== null) {
+        const mhz = (audioFreqHz / 1e6).toFixed(4);
+        label.textContent = `${audioBandName ? audioBandName.toUpperCase() + ' ' : ''}${mhz} MHz`;
+        btn.style.display = '';
+        _setBandPlayingIndicator(audioBandName, true);
+    } else {
+        btn.style.display = 'none';
+        label.textContent = '--';
+    }
+}
+
+function _setBandPlayingIndicator(bandName, playing) {
+    if (!bandName) return;
+    const panel = panels[bandName];
+    if (!panel) return;
+    const header = panel.el.querySelector('.band-header');
+    if (!header) return;
+    let dot = header.querySelector('.band-playing');
+    if (playing) {
+        if (!dot) {
+            dot = document.createElement('span');
+            dot.className = 'band-playing';
+            header.insertBefore(dot, header.firstChild);
+        }
+    } else {
+        if (dot) dot.remove();
+    }
+}
+
 // ── BandPanel — one spectrum+waterfall per band ───────────────────────────────
 class BandPanel {
     constructor(name, meta) {
@@ -479,6 +594,9 @@ class BandPanel {
 
         // ── Double-tap detection ─────────────────────────────────────────────
         this._lastTap = 0;
+
+        // ── Click-vs-drag disambiguation ─────────────────────────────────────
+        this._lastClickWasDrag = false;  // set true in onMouseUp after a drag commit
 
         this._buildDOM();
         this._startRenderLoop();
@@ -650,6 +768,25 @@ class BandPanel {
             this._resetZoom();
         });
 
+        // ── Single click → tune audio to clicked frequency ────────────────────
+        // Fires only for genuine single clicks (not drags, not double-clicks).
+        stack.addEventListener('click', (e) => {
+            if (e.detail >= 2) return;           // ignore double-click
+            if (this._lastClickWasDrag) { this._lastClickWasDrag = false; return; }
+            if (!this.bins) return;
+
+            const rect   = stack.getBoundingClientRect();
+            const frac   = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const n      = this.bins.length;
+            const bs     = Math.round(this.zoomStart * (n - 1));
+            const be     = Math.round(this.zoomEnd   * (n - 1));
+            const zn     = Math.max(2, be - bs + 1);
+            const binIdx = bs + Math.round(frac * (zn - 1));
+            const freqHz = this.meta.start + binIdx * this.meta.bin_bandwidth;
+
+            startAudioAt(freqHz, this.name);
+        });
+
         const onMouseDown = (e) => {
             if (e.button !== 0) return;
             // Ignore the second click of a double-click — let dblclick handle it
@@ -702,6 +839,8 @@ class BandPanel {
                 this.zoomEnd   = Math.min(1, b);
                 this._updateAxis();
                 this.dirty = true;
+                // Tell the click handler that this mouseup ended a drag
+                this._lastClickWasDrag = true;
             }
             this._dragStart = null;
             this._dragging  = false;
@@ -1374,6 +1513,9 @@ async function init() {
         // Redraw all panels with the new colour map
         for (const p of Object.values(panels)) p.dirty = true;
     });
+
+    // Stop-audio button
+    document.getElementById('btn-stop-audio').addEventListener('click', () => stopAudio());
 
     // Build initial panels and connect SSE
     rebuildPanels();

@@ -388,10 +388,6 @@ body {
     overflow: hidden;
 }
 
-/* push page content up so the fixed bar doesn't cover it */
-body {
-    padding-bottom: 160px;
-}
 
 #conditions-bar .cond-header {
     display: flex;
@@ -2157,6 +2153,10 @@ function _renderConditions(bandStates, sw, wx) {
     }
 
     bar.style.display = '';
+    // Adjust body bottom padding so the fixed bar never covers content
+    requestAnimationFrame(() => {
+        document.body.style.paddingBottom = bar.offsetHeight + 'px';
+    });
 }
 
 async function _refreshConditions() {

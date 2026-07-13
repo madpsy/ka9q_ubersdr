@@ -2147,6 +2147,7 @@ let _tickerRAF = null;
 let _tickerOffset = 0;
 let _tickerHalfW = 0;
 let _tickerLastTs = null;
+let _tickerHadItems = false; // true once we've shown at least one item
 const _TICKER_PX_PER_S = 60; // scroll speed
 
 function _tickerLoop(ts) {
@@ -2171,7 +2172,8 @@ function _stopTickerLoop() {
         _tickerRAF = null;
     }
     _tickerLastTs = null;
-    _tickerOffset = 0;
+    // Note: _tickerOffset is intentionally NOT reset here so a DOM rebuild
+    // during a refresh can preserve the current scroll position.
 }
 
 function _renderVoiceTicker(data) {
@@ -2188,21 +2190,25 @@ function _renderVoiceTicker(data) {
         }
     }
 
-    // Sort by SNR descending so strongest signals lead
-    items.sort((a, b) => (b.snr || 0) - (a.snr || 0));
+    // Sort by frequency ascending so the ticker reads low-to-high across bands
+    items.sort((a, b) =>
+        (a.estimated_dial_freq || a.center_freq || 0) -
+        (b.estimated_dial_freq || b.center_freq || 0)
+    );
 
+    // If no new items, keep whatever is already scrolling — don't hide or reset
     if (items.length === 0) {
-        _stopTickerLoop();
-        tickerEl.style.display = 'none';
+        // Only hide if we never had anything to show
+        if (!_tickerHadItems) tickerEl.style.display = 'none';
         return;
     }
+    _tickerHadItems = true;
 
     // Build item element
     function makeItem(act) {
         const freqMHz = ((act.estimated_dial_freq || act.center_freq) / 1e6).toFixed(3);
         const band    = act.band.toUpperCase();
         const mode    = (act.mode || 'USB').toUpperCase();
-        const snr     = act.snr !== undefined ? `+${act.snr.toFixed(1)} dB` : '';
         const call    = act.dx_callsign || '';
         const cc      = act.dx_country_code || '';
         const flag    = cc ? iso2ToFlag(cc) : '';
@@ -2214,14 +2220,12 @@ function _renderVoiceTicker(data) {
             `<span class="cond-ticker-freq">${_escHtml(freqMHz)} MHz ${_escHtml(mode)}</span>` +
             (call
                 ? `<span class="cond-ticker-flag">${flag}</span><span class="cond-ticker-call">${_escHtml(call)}</span>`
-                : `<span class="cond-ticker-call" style="color:#888">Voice</span>`) +
-            (snr ? `<span class="cond-ticker-snr">${_escHtml(snr)}</span>` : '');
+                : `<span class="cond-ticker-call" style="color:#888">Voice</span>`);
         return el;
     }
 
-    // Stop any running loop, rebuild DOM
+    // Pause the loop while rebuilding DOM (preserve offset, don't zero it)
     _stopTickerLoop();
-    trackEl.style.transform = '';
     trackEl.innerHTML = '';
     for (const act of items) trackEl.appendChild(makeItem(act));
     // Duplicate for seamless wrap
@@ -2231,8 +2235,7 @@ function _renderVoiceTicker(data) {
     tickerEl.style.display = 'block';
 
     // Measure half-width after two frames (ensures layout is complete).
-    // Use offsetWidth sum since the track is position:absolute (getBoundingClientRect
-    // can return 0 if the element was recently made visible).
+    // Use offsetWidth sum since the track is position:absolute.
     requestAnimationFrame(() => requestAnimationFrame(() => {
         const children = trackEl.children;
         const half = items.length;
@@ -2241,8 +2244,10 @@ function _renderVoiceTicker(data) {
         for (let i = 0; i < half; i++) w += children[i].offsetWidth;
         _tickerHalfW = w;
         if (_tickerHalfW < 10) { _tickerHalfW = 0; return; }
-        _tickerOffset = 0;
-        _tickerLastTs = null;
+        // Clamp offset into the new half-width range to avoid a jump
+        if (_tickerHalfW > 0) _tickerOffset = _tickerOffset % _tickerHalfW;
+        // Apply current offset immediately so there's no visual reset
+        trackEl.style.transform = `translateX(${-_tickerOffset}px)`;
         _tickerRAF = requestAnimationFrame(_tickerLoop);
     }));
 }

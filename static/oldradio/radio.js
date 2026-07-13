@@ -54,6 +54,7 @@ let visualiserCanvas = null;
 let visualiserCtx = null;
 let visualiserAnalyser = null;
 let visualiserAnimFrame = null;
+let visualiserResizeHandler = null; // stored so it can be removed on radio switch
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -214,6 +215,10 @@ async function loadRadio(radioId) {
                 if (visualiserAnimFrame) {
                     cancelAnimationFrame(visualiserAnimFrame);
                     visualiserAnimFrame = null;
+                }
+                if (visualiserResizeHandler) {
+                    window.removeEventListener('resize', visualiserResizeHandler);
+                    visualiserResizeHandler = null;
                 }
                 visualiserCanvas = null;
                 visualiserCtx = null;
@@ -1012,11 +1017,13 @@ function setupOscilloscope() {
     visualiserCtx = visualiserCanvas.getContext('2d');
 
     const resizeCanvas = () => {
+        if (!visualiserCanvas) return;
         const rect = visualiserCanvas.getBoundingClientRect();
         visualiserCanvas.width = rect.width || visualiserCanvas.offsetWidth || 200;
         visualiserCanvas.height = rect.height || visualiserCanvas.offsetHeight || 100;
     };
     resizeCanvas();
+    visualiserResizeHandler = resizeCanvas;
     window.addEventListener('resize', resizeCanvas);
 
     visualiserAnalyser = minimalRadio.audioContext.createAnalyser();

@@ -31,6 +31,7 @@ let minimalRadio = null; // MinimalRadio instance for audio handling
 let currentFrequency = 1000000;
 let currentVolume = 0.25;
 let currentSquelch = 0; // Squelch level 0-1 (0 = off, 1 = max)
+let currentSquelchSnr = -999; // Current squelch SNR threshold in dB (-999 = off)
 let dialRotation = 0;
 let volumeRotation = 0.25 * 330; // matches default currentVolume
 let squelchRotation = 0; // Squelch knob starts at 0 (off)
@@ -792,13 +793,13 @@ function updateSquelchFromKnob() {
     if (clampedRotation === 0) {
         // Knob fully counter-clockwise → squelch OFF
         snrThreshold = SQUELCH_SENTINEL;
-        console.log('Squelch: OFF');
     } else {
         // Map 1°–330° linearly to SQUELCH_SNR_MIN+0.5 … SQUELCH_SNR_MAX dB
         const fraction = clampedRotation / maxRotation; // 0.003 … 1.0
         snrThreshold = SQUELCH_SNR_MIN + 0.5 + fraction * (SQUELCH_SNR_MAX - SQUELCH_SNR_MIN - 0.5);
         snrThreshold = Math.round(snrThreshold * 2) / 2; // round to nearest 0.5 dB
     }
+    currentSquelchSnr = snrThreshold;
 
     // Apply to MinimalRadio client-side gate
     if (minimalRadio) {
@@ -845,32 +846,52 @@ function updateFrequencyDisplay() {
     }
 }
 
-// Update signal bars for CB radio with sub-bar dimming.
+// Update signal bars for CB radio with sub-bar dimming and squelch colouring.
 // Uses vuLevel (0-1) which is already updated by updateSignalLED() from live SNR data.
 // vuLevel 0 = SNR ≤ 30 dB (no bars), vuLevel 1 = SNR ≥ 60 dB (all 8 bars).
+// Bars below the squelch threshold are orange; bars at/above it are green.
 // The leading (partial) bar dims proportionally within its range for an analog feel.
 function updateSignalBars() {
     const NUM_BARS = 8;
+    const SNR_MIN = 30;
+    const SNR_MAX = 60;
     const activeBars = vuLevel * NUM_BARS; // e.g. 3.7 means bars 1-3 full, bar 4 at 70%
+
+    // Convert squelch SNR threshold to bar position (same 30-60 dB scale)
+    // squelchBarPos = 0 means no squelch, > NUM_BARS means all bars are below threshold
+    const squelchActive = currentSquelchSnr > SQUELCH_SENTINEL;
+    const squelchBarPos = squelchActive
+        ? Math.max(0, (currentSquelchSnr - SNR_MIN) / (SNR_MAX - SNR_MIN) * NUM_BARS)
+        : 0;
 
     for (let i = 1; i <= NUM_BARS; i++) {
         const bar = document.getElementById(`signal-bar-${i}`);
         if (!bar) continue;
 
+        // Is this bar below the squelch threshold?
+        const belowSquelch = squelchActive && i <= squelchBarPos;
+        // Colours: orange for below-squelch, green for above
+        const onColour  = belowSquelch ? [255, 107, 0] : [0, 255, 0];   // #ff6b00 or #00ff00
+        const offColour = belowSquelch ? [34,  11, 0]  : [0,  34, 0];   // dim orange or dim green
+
         if (activeBars >= i) {
             // Fully lit
-            bar.style.background = '#00ff00';
-            bar.style.boxShadow = '0 0 5px #00ff00';
+            const [r, g, b] = onColour;
+            bar.style.background = `rgb(${r},${g},${b})`;
+            bar.style.boxShadow = `0 0 5px rgb(${r},${g},${b})`;
         } else if (activeBars > i - 1) {
             // Partially lit — fraction of this bar that's filled
             const frac = activeBars - (i - 1); // 0..1
-            const g = Math.round(34 + frac * (255 - 34));   // #002200 → #00ff00
+            const r = Math.round(offColour[0] + frac * (onColour[0] - offColour[0]));
+            const g = Math.round(offColour[1] + frac * (onColour[1] - offColour[1]));
+            const b = Math.round(offColour[2] + frac * (onColour[2] - offColour[2]));
             const glow = Math.round(frac * 5);
-            bar.style.background = `rgb(0,${g},0)`;
-            bar.style.boxShadow = frac > 0.1 ? `0 0 ${glow}px rgb(0,${g},0)` : 'none';
+            bar.style.background = `rgb(${r},${g},${b})`;
+            bar.style.boxShadow = frac > 0.1 ? `0 0 ${glow}px rgb(${r},${g},${b})` : 'none';
         } else {
             // Off
-            bar.style.background = '#002200';
+            const [r, g, b] = offColour;
+            bar.style.background = `rgb(${r},${g},${b})`;
             bar.style.boxShadow = 'none';
         }
     }

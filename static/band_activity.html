@@ -507,6 +507,23 @@ let radio        = null;    // MinimalRadio instance (lazy-created on first use)
 let audioFreqHz  = null;    // currently tuned frequency (Hz), null = stopped
 let audioBandName = null;   // band name of currently playing audio
 
+// Position the shared tooltip, flipping left of cursor when near the right viewport edge.
+function _positionTooltip(text, cx, cy) {
+    const tip = document.getElementById('tooltip');
+    tip.textContent = text;
+    tip.style.left  = '-9999px';   // off-screen so we can measure width
+    tip.style.top   = '-9999px';
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth;
+    const margin = 12;
+    let x = cx + margin;
+    if (x + tw > window.innerWidth - 4) {
+        x = cx - margin - tw;   // flip to left of cursor
+    }
+    tip.style.left = `${x}px`;
+    tip.style.top  = `${cy - 20}px`;
+}
+
 function _getRadio() {
     if (!radio && window.MinimalRadio) {
         radio = new MinimalRadio();
@@ -1333,11 +1350,7 @@ class BandPanel {
         const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
         const db  = this.bins[binIdx] - 256;
         const mhz = (hz / 1e6).toFixed(4);
-        const tip = document.getElementById('tooltip');
-        tip.textContent = `${mhz} MHz  ${db.toFixed(1)} dBFS`;
-        tip.style.display = 'block';
-        tip.style.left = `${e.clientX + 12}px`;
-        tip.style.top  = `${e.clientY - 20}px`;
+        _positionTooltip(`${mhz} MHz  ${db.toFixed(1)} dBFS`, e.clientX, e.clientY);
     }
 
     _onWfHover(e) {
@@ -1376,11 +1389,7 @@ class BandPanel {
             dbStr = db.toFixed(1) + ' dBFS';
         }
 
-        const tip = document.getElementById('tooltip');
-        tip.textContent = `${mhz} MHz  ${dbStr}  (${ageStr})`;
-        tip.style.display = 'block';
-        tip.style.left = `${e.clientX + 12}px`;
-        tip.style.top  = `${e.clientY - 20}px`;
+        _positionTooltip(`${mhz} MHz  ${dbStr}  (${ageStr})`, e.clientX, e.clientY);
     }
 
     destroy() {

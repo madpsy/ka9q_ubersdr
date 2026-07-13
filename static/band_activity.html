@@ -648,8 +648,9 @@ class BandPanel {
         this._pinchCenter = null;  // fraction of pinch midpoint
 
         // ── Double-tap / single-finger pan detection ─────────────────────────
-        this._lastTap      = 0;
-        this._touchPanLast = null;  // canvas-fraction of previous touch X (for pan)
+        this._lastTap       = 0;
+        this._touchPanLast  = null;  // canvas-fraction of previous touch X (for pan)
+        this._touchTapStart = null;  // {x, y, frac} at touchstart — for tap-vs-pan
 
         // ── Click-vs-drag disambiguation ─────────────────────────────────────
         this._lastClickWasDrag = false;  // set true in onMouseUp after a drag commit
@@ -961,6 +962,7 @@ class BandPanel {
             if (e.touches.length === 2) {
                 e.preventDefault();
                 this._touchPanLast = null; // cancel any single-finger pan
+                this._touchTapStart = null; // cancel tap tracking
                 const t1 = e.touches[0], t2 = e.touches[1];
                 this._pinchDist0  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
                 this._pinchZoom0  = { start: this.zoomStart, end: this.zoomEnd };
@@ -968,17 +970,25 @@ class BandPanel {
                 const midX = (t1.clientX + t2.clientX) / 2;
                 this._pinchCenter = (midX - rect.left) / rect.width;
             } else if (e.touches.length === 1) {
+                // Record tap start position for tap-vs-pan disambiguation
+                const rect = stack.getBoundingClientRect();
+                this._touchTapStart = {
+                    x: e.touches[0].clientX,
+                    y: e.touches[0].clientY,
+                    frac: (e.touches[0].clientX - rect.left) / rect.width,
+                };
+
                 // Double-tap detection
                 const now = Date.now();
                 if (now - this._lastTap < 350) {
                     e.preventDefault();
                     this._resetZoom();
                     this._touchPanLast = null;
+                    this._touchTapStart = null;
                 } else {
                     // Start single-finger pan tracking (only when zoomed)
                     const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
                     if (zoomed) {
-                        const rect = stack.getBoundingClientRect();
                         this._touchPanLast = (e.touches[0].clientX - rect.left) / rect.width;
                         e.preventDefault(); // prevent page scroll while panning
                     } else {
@@ -1035,7 +1045,29 @@ class BandPanel {
                 this._pinchCenter = null;
             }
             if (e.touches.length === 0) {
-                this._touchPanLast = null;
+                // Tap-to-audio: fire if finger lifted close to where it landed
+                // (i.e. it was a tap, not a pan drag).
+                const ts = this._touchTapStart;
+                if (ts && this.bins) {
+                    const touch = e.changedTouches[0];
+                    const dx = touch.clientX - ts.x;
+                    const dy = touch.clientY - ts.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 12) { // 12px threshold = tap
+                        // Map canvas fraction → frequency
+                        const n        = this.bins.length;
+                        const binStart = Math.round(this.zoomStart * (n - 1));
+                        const binEnd   = Math.round(this.zoomEnd   * (n - 1));
+                        const zn       = Math.max(2, binEnd - binStart + 1);
+                        const binIdx   = binStart + Math.round(ts.frac * (zn - 1));
+                        if (binIdx >= 0 && binIdx < n) {
+                            const freqHz = this.meta.start + binIdx * this.meta.bin_bandwidth;
+                            startAudioAt(freqHz, this.name);
+                        }
+                    }
+                }
+                this._touchTapStart = null;
+                this._touchPanLast  = null;
             }
         };
 

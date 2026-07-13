@@ -1463,11 +1463,21 @@ function connectSSE() {
         return;
     }
 
-    setStatus('wait', 'Connecting…');
+    // Only show "Connecting…" if we weren't already live — avoids a flash
+    // when toggling bands while the stream is running.
+    if (!_sseConnected) setStatus('wait', 'Connecting…');
+
     sse = new EventSource(buildSSEUrl());
 
+    // onopen fires as soon as the HTTP connection is established.
+    sse.onopen = () => {
+        _sseConnected = true;
+        _sseRetryDelay = 2000;
+        _touchLastEvent();
+        _updateStatusText();
+    };
+
     sse.addEventListener('spectrum', e => {
-        // Successful data — reset backoff
         _touchLastEvent();
         if (!_sseConnected) {
             _sseConnected = true;
@@ -1483,7 +1493,7 @@ function connectSSE() {
 
         panel.applyFrame(decoded.payload, decoded.flags);
 
-        // Accumulate bytes (base64 data length ≈ wire bytes before gzip)
+        // Accumulate bytes for kbps display (updated by the 1s status timer)
         _bpsAccum += e.data.length;
         const now = performance.now();
         if (_bpsLastTime === 0) _bpsLastTime = now;
@@ -1494,9 +1504,6 @@ function connectSSE() {
             _bpsAccum = 0;
             _bpsLastTime = now;
         }
-
-        const kbpsStr = _bpsCurrent ? ` · ${_bpsCurrent}` : '';
-        setStatus('live', `Live · ${new Date().toLocaleTimeString()}${kbpsStr}`);
     });
 
     sse.addEventListener('heartbeat', () => {
@@ -1505,15 +1512,34 @@ function connectSSE() {
             _sseConnected = true;
             _sseRetryDelay = 2000;
         }
-        setStatus('live', `Heartbeat · ${new Date().toLocaleTimeString()}`);
     });
 
     sse.onerror = () => {
         // Close immediately — don't let the browser silently retry on its own
         // schedule, which can produce duplicate connections.
         if (sse) { sse.close(); sse = null; }
+        _sseConnected = false;
         _scheduleReconnect();
     };
+}
+
+// Update the status text once per second from a timer — decoupled from data events
+// so the "Live" indicator doesn't flicker when connectSSE() is called mid-stream.
+function _updateStatusText() {
+    if (!sse || sse.readyState === EventSource.CLOSED) return; // error path handles its own text
+    if (sse.readyState === EventSource.CONNECTING) {
+        setStatus('wait', 'Connecting…');
+        return;
+    }
+    // OPEN
+    const kbpsStr = _bpsCurrent ? ` · ${_bpsCurrent}` : '';
+    setStatus('live', `Live${kbpsStr}`);
+}
+
+let _statusTimer = null;
+function _startStatusTimer() {
+    if (_statusTimer !== null) return;
+    _statusTimer = setInterval(_updateStatusText, 1000);
 }
 
 // ── Band selection ────────────────────────────────────────────────────────────
@@ -1768,6 +1794,8 @@ async function init() {
 
     // Start stale-connection watchdog (checks every 10 s, fires after 45 s silence)
     _startWatchdog();
+    // Start 1s status text timer (decoupled from data events so it never flickers)
+    _startStatusTimer();
 }
 
 init();

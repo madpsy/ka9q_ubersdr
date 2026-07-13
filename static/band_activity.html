@@ -220,6 +220,22 @@ body {
     image-rendering: pixelated;
 }
 
+/* zoom overlay canvas — sits on top of spec+wf, pointer-events only when dragging */
+.zoom-overlay {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* wrapper that holds spec+wf+overlay stacked */
+.canvas-stack {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
 /* frequency axis */
 .freq-axis {
     height: 16px;
@@ -236,6 +252,22 @@ body {
     top: 2px;
     white-space: nowrap;
     color: #ffffff;
+}
+
+/* zoom indicator badge shown in top-right of spectrum when zoomed */
+.zoom-badge {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    background: rgba(126,200,227,0.18);
+    border: 1px solid rgba(126,200,227,0.4);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.68em;
+    color: #7ec8e3;
+    pointer-events: none;
+    z-index: 11;
+    display: none;
 }
 
 /* waiting overlay */
@@ -419,16 +451,35 @@ class BandPanel {
         this.name = name;
         this.meta = meta;
         this.bins = null;          // Uint8Array — current decoded state
-        this.waterfallRows = [];   // array of Uint8Array (ring buffer, max 120 rows)
+        this.waterfallRows = [];   // array of Float32Array (full n bins, normalised 0-1)
         this.maxRows = 120;
         this.el = null;
         this.specCanvas = null;
         this.specCtx = null;
         this.wfCanvas = null;
         this.wfCtx = null;
+        this.overlayCanvas = null;
+        this.overlayCtx = null;
         this.wfImageData = null;
         this.animFrame = null;
         this.dirty = false;        // true when new data arrived since last draw
+
+        // ── Zoom state ──────────────────────────────────────────────────────
+        this.zoomStart = 0;        // fraction [0,1] of full bin array
+        this.zoomEnd   = 1;
+
+        // ── Drag-to-select state ─────────────────────────────────────────────
+        this._dragStart = null;    // canvas-fraction where drag began
+        this._dragging  = false;
+
+        // ── Pinch-to-zoom state ──────────────────────────────────────────────
+        this._pinchDist0  = null;  // initial finger distance
+        this._pinchZoom0  = null;  // {start, end} at pinch start
+        this._pinchCenter = null;  // fraction of pinch midpoint
+
+        // ── Double-tap detection ─────────────────────────────────────────────
+        this._lastTap = 0;
+
         this._buildDOM();
         this._startRenderLoop();
     }
@@ -450,8 +501,12 @@ class BandPanel {
                     <span>Peak: <span class="val" id="stat-peak-${this.name}">--</span> dB</span>
                 </div>
             </div>
-            <canvas class="spectrum-canvas" id="spec-${this.name}"></canvas>
-            <canvas class="waterfall-canvas" id="wf-${this.name}"></canvas>
+            <div class="canvas-stack" id="stack-${this.name}">
+                <canvas class="spectrum-canvas" id="spec-${this.name}"></canvas>
+                <canvas class="waterfall-canvas" id="wf-${this.name}"></canvas>
+                <canvas class="zoom-overlay" id="overlay-${this.name}"></canvas>
+                <div class="zoom-badge" id="zoom-badge-${this.name}"></div>
+            </div>
             <div class="freq-axis" id="axis-${this.name}"></div>
         `;
 
@@ -461,10 +516,12 @@ class BandPanel {
         document.getElementById('grid').appendChild(panel);
 
         // Grab canvas refs after DOM insertion
-        this.specCanvas = document.getElementById(`spec-${this.name}`);
-        this.wfCanvas   = document.getElementById(`wf-${this.name}`);
-        this.specCtx    = this.specCanvas.getContext('2d');
-        this.wfCtx      = this.wfCanvas.getContext('2d');
+        this.specCanvas    = document.getElementById(`spec-${this.name}`);
+        this.wfCanvas      = document.getElementById(`wf-${this.name}`);
+        this.overlayCanvas = document.getElementById(`overlay-${this.name}`);
+        this.specCtx       = this.specCanvas.getContext('2d');
+        this.wfCtx         = this.wfCanvas.getContext('2d');
+        this.overlayCtx    = this.overlayCanvas.getContext('2d');
 
         // Size canvases to their CSS pixel size
         this._resize();
@@ -482,8 +539,11 @@ class BandPanel {
             document.getElementById('tooltip').style.display = 'none';
         });
 
+        // ── Zoom interaction handlers ────────────────────────────────────────
+        this._setupZoomHandlers();
+
         // Build frequency axis labels
-        this._buildAxis();
+        this._updateAxis();
     }
 
     _resize() {
@@ -493,17 +553,23 @@ class BandPanel {
         this.specCanvas.height = this.specCanvas.offsetHeight;
         this.wfCanvas.width    = w;
         this.wfCanvas.height   = this.wfCanvas.offsetHeight;
+        // Overlay spans the full stack height (spec + wf)
+        const stackH = this.specCanvas.offsetHeight + this.wfCanvas.offsetHeight;
+        this.overlayCanvas.width  = w;
+        this.overlayCanvas.height = stackH;
+        this.overlayCanvas.style.height = stackH + 'px';
         this.wfImageData = this.wfCtx.createImageData(w, 1);
         this.dirty = true;
     }
 
-    _buildAxis() {
+    // Dynamic frequency axis — rebuilt whenever zoom changes
+    _updateAxis() {
         const axis = document.getElementById(`axis-${this.name}`);
-        const startHz = this.meta.start;
-        const endHz   = this.meta.end;
+        axis.innerHTML = '';
+        const startHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+        const endHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
         const spanHz  = endHz - startHz;
-        // Show ~5 labels
-        const steps = 5;
+        const steps   = 5;
         for (let i = 0; i <= steps; i++) {
             const frac = i / steps;
             const hz   = startHz + frac * spanHz;
@@ -514,6 +580,191 @@ class BandPanel {
             lbl.textContent = mhz;
             axis.appendChild(lbl);
         }
+        // Update zoom badge
+        const badge = document.getElementById(`zoom-badge-${this.name}`);
+        if (badge) {
+            const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
+            badge.style.display = zoomed ? 'block' : 'none';
+            if (zoomed) {
+                const spanMHz = (spanHz / 1e6).toFixed(3);
+                badge.textContent = `${spanMHz} MHz  ×${(1/(this.zoomEnd-this.zoomStart)).toFixed(1)}`;
+            }
+        }
+    }
+
+    // ── Zoom helpers ──────────────────────────────────────────────────────────
+    _resetZoom() {
+        this.zoomStart = 0;
+        this.zoomEnd   = 1;
+        this._updateAxis();
+        this.dirty = true;
+    }
+
+    // Apply a zoom centred on `centreFrac` (fraction of current view) by `factor`
+    // factor > 1 = zoom in, factor < 1 = zoom out
+    _applyZoom(centreFrac, factor) {
+        const span    = this.zoomEnd - this.zoomStart;
+        const newSpan = Math.min(1, Math.max(0.01, span / factor));
+        // Centre in absolute fraction space
+        const absCenter = this.zoomStart + centreFrac * span;
+        let newStart = absCenter - centreFrac * newSpan;
+        let newEnd   = newStart + newSpan;
+        // Clamp to [0,1]
+        if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+        if (newEnd   > 1) { newStart -= (newEnd - 1); newEnd = 1; }
+        newStart = Math.max(0, newStart);
+        newEnd   = Math.min(1, newEnd);
+        this.zoomStart = newStart;
+        this.zoomEnd   = newEnd;
+        this._updateAxis();
+        this.dirty = true;
+    }
+
+    // ── All zoom interaction handlers ─────────────────────────────────────────
+    _setupZoomHandlers() {
+        const spec    = this.specCanvas;
+        const wf      = this.wfCanvas;
+        const overlay = this.overlayCanvas;
+
+        // ── Scroll wheel zoom (on spec or wf) ────────────────────────────────
+        const onWheel = (e) => {
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const frac = (e.clientX - rect.left) / rect.width;
+            // deltaY > 0 = scroll down = zoom out; < 0 = zoom in
+            const factor = e.deltaY < 0 ? 1.4 : 1 / 1.4;
+            this._applyZoom(frac, factor);
+        };
+        spec.addEventListener('wheel', onWheel, { passive: false });
+        wf.addEventListener('wheel', onWheel, { passive: false });
+
+        // ── Double-click to reset zoom ────────────────────────────────────────
+        const onDblClick = (e) => {
+            e.preventDefault();
+            this._resetZoom();
+        };
+        spec.addEventListener('dblclick', onDblClick);
+        wf.addEventListener('dblclick', onDblClick);
+
+        // ── Drag-to-select on overlay ─────────────────────────────────────────
+        // The overlay sits over the full stack; we track drag in spec-fraction space.
+        // Drag is initiated on mousedown anywhere in the stack.
+        const stack = document.getElementById(`stack-${this.name}`);
+
+        const onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            // Ignore if it's a double-click (handled separately)
+            const rect = stack.getBoundingClientRect();
+            this._dragStart = (e.clientX - rect.left) / rect.width;
+            this._dragging  = false;
+            overlay.style.pointerEvents = 'auto';
+            overlay.style.cursor = 'col-resize';
+        };
+
+        const onMouseMove = (e) => {
+            if (this._dragStart === null) return;
+            const rect = stack.getBoundingClientRect();
+            const cur  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const dist = Math.abs(cur - this._dragStart);
+            if (dist > 0.01) this._dragging = true;
+            if (!this._dragging) return;
+
+            // Draw selection rectangle on overlay
+            const oCtx = this.overlayCtx;
+            const ow = overlay.width;
+            const oh = overlay.height;
+            oCtx.clearRect(0, 0, ow, oh);
+            const x1 = Math.min(this._dragStart, cur) * ow;
+            const x2 = Math.max(this._dragStart, cur) * ow;
+            oCtx.fillStyle   = 'rgba(126,200,227,0.12)';
+            oCtx.fillRect(x1, 0, x2 - x1, oh);
+            oCtx.strokeStyle = 'rgba(126,200,227,0.7)';
+            oCtx.lineWidth   = 1;
+            oCtx.strokeRect(x1, 0, x2 - x1, oh);
+        };
+
+        const onMouseUp = (e) => {
+            if (this._dragStart === null) return;
+            const rect = stack.getBoundingClientRect();
+            const cur  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+
+            // Clear overlay
+            this.overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            overlay.style.pointerEvents = 'none';
+            overlay.style.cursor = '';
+
+            if (this._dragging && Math.abs(cur - this._dragStart) > 0.01) {
+                // Commit zoom: map drag fractions into absolute bin fractions
+                const span = this.zoomEnd - this.zoomStart;
+                const a = this.zoomStart + Math.min(this._dragStart, cur) * span;
+                const b = this.zoomStart + Math.max(this._dragStart, cur) * span;
+                this.zoomStart = Math.max(0, a);
+                this.zoomEnd   = Math.min(1, b);
+                this._updateAxis();
+                this.dirty = true;
+            }
+            this._dragStart = null;
+            this._dragging  = false;
+        };
+
+        stack.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup',   onMouseUp);
+
+        // ── Touch: pinch-to-zoom + double-tap reset ───────────────────────────
+        const onTouchStart = (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const t1 = e.touches[0], t2 = e.touches[1];
+                this._pinchDist0  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                this._pinchZoom0  = { start: this.zoomStart, end: this.zoomEnd };
+                const rect = spec.getBoundingClientRect();
+                const midX = (t1.clientX + t2.clientX) / 2;
+                this._pinchCenter = (midX - rect.left) / rect.width;
+            } else if (e.touches.length === 1) {
+                // Double-tap detection
+                const now = Date.now();
+                if (now - this._lastTap < 350) {
+                    e.preventDefault();
+                    this._resetZoom();
+                }
+                this._lastTap = now;
+            }
+        };
+
+        const onTouchMove = (e) => {
+            if (e.touches.length === 2 && this._pinchDist0 !== null) {
+                e.preventDefault();
+                const t1 = e.touches[0], t2 = e.touches[1];
+                const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                const factor = dist / this._pinchDist0;
+                // Apply zoom relative to pinch-start state
+                const z0    = this._pinchZoom0;
+                const span0 = z0.end - z0.start;
+                const newSpan = Math.min(1, Math.max(0.01, span0 / factor));
+                const absCenter = z0.start + this._pinchCenter * span0;
+                let newStart = absCenter - this._pinchCenter * newSpan;
+                let newEnd   = newStart + newSpan;
+                if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+                if (newEnd   > 1) { newStart -= (newEnd - 1); newEnd = 1; }
+                this.zoomStart = Math.max(0, newStart);
+                this.zoomEnd   = Math.min(1, newEnd);
+                this._updateAxis();
+                this.dirty = true;
+            }
+        };
+
+        const onTouchEnd = (e) => {
+            if (e.touches.length < 2) {
+                this._pinchDist0  = null;
+                this._pinchZoom0  = null;
+                this._pinchCenter = null;
+            }
+        };
+
+        stack.addEventListener('touchstart', onTouchStart, { passive: false });
+        stack.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        stack.addEventListener('touchend',   onTouchEnd);
     }
 
     // Called by SSE decoder with new float32 dBFS array
@@ -562,24 +813,29 @@ class BandPanel {
         const h = this.specCanvas.height;
         if (w === 0 || h === 0) return;
 
-        const bins = this.bins;
-        const n    = bins.length;
-        const dMin = dbMin;
-        const dMax = dbMax;
+        const bins   = this.bins;
+        const n      = bins.length;
+        const dMin   = dbMin;
+        const dMax   = dbMax;
         const dRange = dMax - dMin;
+
+        // ── Zoomed bin range ──────────────────────────────────────────────────
+        const zs       = this.zoomStart;
+        const ze       = this.zoomEnd;
+        const binStart = Math.round(zs * (n - 1));
+        const binEnd   = Math.round(ze * (n - 1));
+        const zn       = Math.max(2, binEnd - binStart + 1);
 
         // ── Spectrum line graph ───────────────────────────────────────────────
         const sCtx = this.specCtx;
         sCtx.clearRect(0, 0, w, h);
 
-        // Adaptive grid: target ~4 labelled lines regardless of dRange.
-        // Pick the smallest "nice" step that gives ≤5 labels.
+        // Adaptive grid
         const niceSteps = [5, 10, 20, 25, 50, 100];
         let labelStep = niceSteps[niceSteps.length - 1];
         for (const s of niceSteps) {
             if (dRange / s <= 5) { labelStep = s; break; }
         }
-        // Minor grid at half the label step (but at least 5 dB)
         const minorStep = Math.max(5, labelStep / 2);
 
         sCtx.font = '10px monospace';
@@ -595,7 +851,6 @@ class BandPanel {
             sCtx.moveTo(0, y);
             sCtx.lineTo(w, y);
             sCtx.stroke();
-            // Label only on major lines, skip very bottom to avoid clipping
             if (isMajor && y < h - 2) {
                 const label = `${db}`;
                 const tw = sCtx.measureText(label).width;
@@ -606,43 +861,38 @@ class BandPanel {
             }
         }
 
-        // Spectrum fill + line
-        sCtx.beginPath();
-        let p5sum = 0, peakVal = -999;
+        // Build dBFS values for the full bin array
         const vals = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            vals[i] = bins[i] - 256; // uint8 → dBFS
-        }
+        for (let i = 0; i < n; i++) vals[i] = bins[i] - 256;
 
-        // Compute P5 for stats
+        // Stats from full band
         const sorted = Float32Array.from(vals).sort();
-        const p5 = sorted[Math.floor(n * 0.05)];
+        const p5   = sorted[Math.floor(n * 0.05)];
         const peak = sorted[n - 1];
 
-        // Draw
-        for (let i = 0; i < n; i++) {
-            const x = (i / (n - 1)) * w;
-            const db = Math.max(dMin, Math.min(dMax, vals[i]));
+        // Spectrum fill — zoomed slice
+        sCtx.beginPath();
+        for (let i = 0; i < zn; i++) {
+            const x  = (i / (zn - 1)) * w;
+            const db = Math.max(dMin, Math.min(dMax, vals[binStart + i]));
             const y  = h - ((db - dMin) / dRange) * h;
             if (i === 0) sCtx.moveTo(x, y);
             else         sCtx.lineTo(x, y);
         }
-
-        // Fill under line
         sCtx.lineTo(w, h);
         sCtx.lineTo(0, h);
         sCtx.closePath();
         const grad = sCtx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0,   'rgba(126,200,227,0.35)');
-        grad.addColorStop(1,   'rgba(126,200,227,0.02)');
+        grad.addColorStop(0, 'rgba(126,200,227,0.35)');
+        grad.addColorStop(1, 'rgba(126,200,227,0.02)');
         sCtx.fillStyle = grad;
         sCtx.fill();
 
         // Line on top
         sCtx.beginPath();
-        for (let i = 0; i < n; i++) {
-            const x = (i / (n - 1)) * w;
-            const db = Math.max(dMin, Math.min(dMax, vals[i]));
+        for (let i = 0; i < zn; i++) {
+            const x  = (i / (zn - 1)) * w;
+            const db = Math.max(dMin, Math.min(dMax, vals[binStart + i]));
             const y  = h - ((db - dMin) / dRange) * h;
             if (i === 0) sCtx.moveTo(x, y);
             else         sCtx.lineTo(x, y);
@@ -656,44 +906,37 @@ class BandPanel {
         document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
 
         // ── Waterfall ─────────────────────────────────────────────────────────
-        // Build one new row from current bins, scaled to canvas width
         const wfW = this.wfCanvas.width;
         const wfH = this.wfCanvas.height;
         if (wfW === 0 || wfH === 0) return;
 
-        const rowData = new Uint8Array(wfW);
-        for (let px = 0; px < wfW; px++) {
-            const binIdx = Math.round((px / (wfW - 1)) * (n - 1));
-            const db = vals[Math.min(binIdx, n-1)];
-            const norm = Math.max(0, Math.min(1, (db - dMin) / dRange));
-            rowData[px] = Math.round(norm * 255);
+        // Store full-resolution normalised row (one float per bin) so any zoom
+        // level can be rendered from history without data loss.
+        const rowData = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            rowData[i] = Math.max(0, Math.min(1, (vals[i] - dMin) / dRange));
         }
-
-        // Push row into ring buffer
         this.waterfallRows.push(rowData);
-        if (this.waterfallRows.length > this.maxRows) {
-            this.waterfallRows.shift();
-        }
+        if (this.waterfallRows.length > this.maxRows) this.waterfallRows.shift();
 
-        // Redraw entire waterfall (scroll effect: newest row at top)
+        // Redraw entire waterfall using the zoomed bin slice
         const wfCtx = this.wfCtx;
         const rows  = this.waterfallRows;
         const nRows = rows.length;
-        const rowH  = wfH / this.maxRows; // fractional row height
 
-        // Use putImageData row by row for speed
         const imgData = wfCtx.createImageData(wfW, wfH);
         const buf32   = new Uint32Array(imgData.data.buffer);
 
         for (let r = 0; r < nRows; r++) {
-            // Newest row at top (index nRows-1 → y=0)
-            const srcRow = rows[nRows - 1 - r];
+            const srcRow = rows[nRows - 1 - r]; // newest at top
             const yStart = Math.round(r * wfH / this.maxRows);
             const yEnd   = Math.round((r + 1) * wfH / this.maxRows);
             for (let y = yStart; y < yEnd && y < wfH; y++) {
                 const base = y * wfW;
                 for (let x = 0; x < wfW; x++) {
-                    buf32[base + x] = CMAP[srcRow[x]];
+                    const bi   = binStart + Math.round((x / (wfW - 1)) * (zn - 1));
+                    const norm = srcRow[Math.min(bi, n - 1)];
+                    buf32[base + x] = CMAP[Math.round(norm * 255)];
                 }
             }
         }
@@ -704,8 +947,13 @@ class BandPanel {
         if (!this.bins) return;
         const rect = this.specCanvas.getBoundingClientRect();
         const frac = (e.clientX - rect.left) / rect.width;
-        const binIdx = Math.round(frac * (this.bins.length - 1));
-        if (binIdx < 0 || binIdx >= this.bins.length) return;
+        // Map canvas fraction → zoomed bin index
+        const n        = this.bins.length;
+        const binStart = Math.round(this.zoomStart * (n - 1));
+        const binEnd   = Math.round(this.zoomEnd   * (n - 1));
+        const zn       = Math.max(2, binEnd - binStart + 1);
+        const binIdx   = binStart + Math.round(frac * (zn - 1));
+        if (binIdx < 0 || binIdx >= n) return;
         const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
         const db  = this.bins[binIdx] - 256;
         const mhz = (hz / 1e6).toFixed(4);
@@ -718,35 +966,35 @@ class BandPanel {
 
     _onWfHover(e) {
         if (!this.bins) return;
-        const rect = this.wfCanvas.getBoundingClientRect();
+        const rect  = this.wfCanvas.getBoundingClientRect();
         const fracX = (e.clientX - rect.left) / rect.width;
         const fracY = (e.clientY - rect.top)  / rect.height;
 
-        // X → frequency
-        const binIdx = Math.round(fracX * (this.bins.length - 1));
-        if (binIdx < 0 || binIdx >= this.bins.length) return;
+        // Map canvas fraction → zoomed bin index
+        const n        = this.bins.length;
+        const binStart = Math.round(this.zoomStart * (n - 1));
+        const binEnd   = Math.round(this.zoomEnd   * (n - 1));
+        const zn       = Math.max(2, binEnd - binStart + 1);
+        const binIdx   = binStart + Math.round(fracX * (zn - 1));
+        if (binIdx < 0 || binIdx >= n) return;
         const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
         const mhz = (hz / 1e6).toFixed(4);
 
-        // Y → age: row 0 (top) = newest, row maxRows-1 (bottom) = oldest
-        // Each row represents one SSE tick (~1 s).
+        // Y → age
         const rowIdx = Math.round(fracY * (this.maxRows - 1));
-        const ageSec = rowIdx; // approx seconds ago
+        const ageSec = rowIdx;
         const ageStr = ageSec === 0 ? 'now'
                      : ageSec === 1 ? '1 s ago'
                      : `${ageSec} s ago`;
 
-        // dB from the stored waterfall row at that age (if available)
+        // dB from stored waterfall row (Float32Array of normalised values)
         const rows = this.waterfallRows;
         const nRows = rows.length;
-        // waterfallRows[nRows-1] = newest (top), waterfallRows[0] = oldest
         const rowDataIdx = nRows - 1 - rowIdx;
         let dbStr = '--';
         if (rowDataIdx >= 0 && rowDataIdx < nRows) {
-            const wfW = this.wfCanvas.width;
-            const pxIdx = Math.round(fracX * (wfW - 1));
-            const norm = rows[rowDataIdx][Math.min(pxIdx, wfW - 1)] / 255;
-            const db = dbMin + norm * (dbMax - dbMin);
+            const norm = rows[rowDataIdx][Math.min(binIdx, n - 1)];
+            const db   = dbMin + norm * (dbMax - dbMin);
             dbStr = db.toFixed(1) + ' dBFS';
         }
 
@@ -786,10 +1034,43 @@ function buildSSEUrl() {
     return `/api/noisefloor/spectrum/stream${params ? '?' + params : ''}`;
 }
 
+// Reconnect state — exponential backoff capped at 30 s
+let _sseRetryDelay  = 2000;   // ms, doubles on each failure up to _sseRetryMax
+const _sseRetryMax  = 30000;
+let _sseRetryTimer  = null;   // pending setTimeout handle
+let _sseConnected   = false;  // true once we receive at least one event
+
+function _cancelRetry() {
+    if (_sseRetryTimer !== null) {
+        clearTimeout(_sseRetryTimer);
+        _sseRetryTimer = null;
+    }
+}
+
+function _scheduleReconnect() {
+    _cancelRetry();
+    if (activeBands.size === 0) return;
+    const delay = _sseRetryDelay;
+    setStatus('error', `Connection lost — retrying in ${Math.round(delay / 1000)} s…`);
+    _sseRetryTimer = setTimeout(() => {
+        _sseRetryTimer = null;
+        connectSSE();
+    }, delay);
+    // Exponential backoff
+    _sseRetryDelay = Math.min(_sseRetryMax, _sseRetryDelay * 2);
+}
+
 function connectSSE() {
+    // Cancel any pending retry
+    _cancelRetry();
+
+    // Close existing connection
     if (sse) { sse.close(); sse = null; }
+
     // Reset bandwidth counters on each (re)connect so stale figures don't persist.
     _bpsAccum = 0; _bpsLastTime = 0; _bpsCurrent = null;
+    _sseConnected = false;
+
     if (activeBands.size === 0) {
         setStatus('wait', 'No bands selected');
         return;
@@ -799,6 +1080,13 @@ function connectSSE() {
     sse = new EventSource(buildSSEUrl());
 
     sse.addEventListener('spectrum', e => {
+        // Successful data — reset backoff
+        _touchLastEvent();
+        if (!_sseConnected) {
+            _sseConnected = true;
+            _sseRetryDelay = 2000;
+        }
+
         const band = e.lastEventId;
         const panel = panels[band];
         if (!panel) return;
@@ -824,12 +1112,20 @@ function connectSSE() {
         setStatus('live', `Live · ${new Date().toLocaleTimeString()}${kbpsStr}`);
     });
 
-    sse.addEventListener('heartbeat', e => {
+    sse.addEventListener('heartbeat', () => {
+        _touchLastEvent();
+        if (!_sseConnected) {
+            _sseConnected = true;
+            _sseRetryDelay = 2000;
+        }
         setStatus('live', `Heartbeat · ${new Date().toLocaleTimeString()}`);
     });
 
     sse.onerror = () => {
-        setStatus('error', 'Connection lost — retrying…');
+        // Close immediately — don't let the browser silently retry on its own
+        // schedule, which can produce duplicate connections.
+        if (sse) { sse.close(); sse = null; }
+        _scheduleReconnect();
     };
 }
 
@@ -923,6 +1219,44 @@ function setStatus(state, text) {
     span.textContent = text;
 }
 
+// ── Stale-connection watchdog ─────────────────────────────────────────────────
+// If no spectrum or heartbeat event arrives within 45 s, force a reconnect.
+// The server sends a heartbeat every 30 s, so 45 s gives one missed heartbeat
+// of tolerance before we decide the connection is dead.
+let _lastEventTime  = 0;
+const _STALE_MS     = 45_000;
+let _watchdogTimer  = null;
+
+function _touchLastEvent() {
+    _lastEventTime = Date.now();
+}
+
+function _startWatchdog() {
+    if (_watchdogTimer !== null) return;
+    _watchdogTimer = setInterval(() => {
+        if (activeBands.size === 0) return;
+        if (_lastEventTime === 0) return; // haven't connected yet
+        if (Date.now() - _lastEventTime > _STALE_MS) {
+            console.warn('[band-activity] stale SSE connection — reconnecting');
+            _lastEventTime = 0;
+            connectSSE();
+        }
+    }, 10_000); // check every 10 s
+}
+
+// ── Page-visibility reconnect ─────────────────────────────────────────────────
+// When the tab becomes visible again after being hidden, reconnect immediately
+// rather than waiting for the backoff timer.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && activeBands.size > 0) {
+        // Only reconnect if we're not already live
+        if (!sse || sse.readyState === EventSource.CLOSED) {
+            _sseRetryDelay = 2000; // reset backoff
+            connectSSE();
+        }
+    }
+});
+
 // ── Initialisation ────────────────────────────────────────────────────────────
 async function init() {
     setStatus('wait', 'Loading band config…');
@@ -979,9 +1313,16 @@ async function init() {
     // Load saved preferences (which bands were active, dB range)
     loadPrefs();
 
-    // Default: all bands active if no saved prefs
+    // Default: prefer the key HF ham bands; fall back to all bands if none exist
     if (activeBands.size === 0) {
-        for (const name of allBands) activeBands.add(name);
+        const preferred = ['80m', '40m', '20m', '15m', '10m'];
+        for (const name of preferred) {
+            if (bandMeta[name]) activeBands.add(name);
+        }
+        // If none of the preferred bands are configured, show everything
+        if (activeBands.size === 0) {
+            for (const name of allBands) activeBands.add(name);
+        }
     }
 
     // Build band pills
@@ -1036,6 +1377,9 @@ async function init() {
 
     // Build initial panels and connect SSE
     rebuildPanels();
+
+    // Start stale-connection watchdog (checks every 10 s, fires after 45 s silence)
+    _startWatchdog();
 }
 
 init();

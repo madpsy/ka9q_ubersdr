@@ -583,8 +583,9 @@ class BandPanel {
         this._pinchZoom0  = null;  // {start, end} at pinch start
         this._pinchCenter = null;  // fraction of pinch midpoint
 
-        // ── Double-tap detection ─────────────────────────────────────────────
-        this._lastTap = 0;
+        // ── Double-tap / single-finger pan detection ─────────────────────────
+        this._lastTap      = 0;
+        this._touchPanLast = null;  // canvas-fraction of previous touch X (for pan)
 
         // ── Click-vs-drag disambiguation ─────────────────────────────────────
         this._lastClickWasDrag = false;  // set true in onMouseUp after a drag commit
@@ -759,6 +760,13 @@ class BandPanel {
             this._resetZoom();
         });
 
+        // ── Right-click: reset zoom + stop audio ──────────────────────────────
+        stack.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this._resetZoom();
+            if (audioBandName === this.name) stopAudio();
+        });
+
         // ── Single click → tune audio to clicked frequency ────────────────────
         // Fires only for genuine single clicks (not drags, not double-clicks).
         stack.addEventListener('click', (e) => {
@@ -868,10 +876,11 @@ class BandPanel {
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup',   onMouseUp);
 
-        // ── Touch: pinch-to-zoom + double-tap reset ───────────────────────────
+        // ── Touch: pinch-to-zoom + single-finger pan + double-tap reset ───────
         const onTouchStart = (e) => {
             if (e.touches.length === 2) {
                 e.preventDefault();
+                this._touchPanLast = null; // cancel any single-finger pan
                 const t1 = e.touches[0], t2 = e.touches[1];
                 this._pinchDist0  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
                 this._pinchZoom0  = { start: this.zoomStart, end: this.zoomEnd };
@@ -884,6 +893,17 @@ class BandPanel {
                 if (now - this._lastTap < 350) {
                     e.preventDefault();
                     this._resetZoom();
+                    this._touchPanLast = null;
+                } else {
+                    // Start single-finger pan tracking (only when zoomed)
+                    const zoomed = (this.zoomEnd - this.zoomStart) < 0.999;
+                    if (zoomed) {
+                        const rect = stack.getBoundingClientRect();
+                        this._touchPanLast = (e.touches[0].clientX - rect.left) / rect.width;
+                        e.preventDefault(); // prevent page scroll while panning
+                    } else {
+                        this._touchPanLast = null;
+                    }
                 }
                 this._lastTap = now;
             }
@@ -908,6 +928,21 @@ class BandPanel {
                 this.zoomEnd   = Math.min(1, newEnd);
                 this._updateAxis();
                 this.dirty = true;
+            } else if (e.touches.length === 1 && this._touchPanLast !== null) {
+                // Single-finger pan when zoomed
+                e.preventDefault();
+                const rect = stack.getBoundingClientRect();
+                const cur   = (e.touches[0].clientX - rect.left) / rect.width;
+                const delta = cur - this._touchPanLast;
+                let newStart = this.zoomStart - delta;
+                let newEnd   = this.zoomEnd   - delta;
+                if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+                if (newEnd   > 1) { newStart -= (newEnd - 1); newEnd = 1; }
+                this.zoomStart = Math.max(0, newStart);
+                this.zoomEnd   = Math.min(1, newEnd);
+                this._updateAxis();
+                this.dirty = true;
+                this._touchPanLast = cur;
             }
         };
 
@@ -916,6 +951,9 @@ class BandPanel {
                 this._pinchDist0  = null;
                 this._pinchZoom0  = null;
                 this._pinchCenter = null;
+            }
+            if (e.touches.length === 0) {
+                this._touchPanLast = null;
             }
         };
 

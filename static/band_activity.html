@@ -1735,14 +1735,14 @@ class BandPanel {
         // Draw carrier line + bandwidth shading on both canvases when this band
         // is the one currently being listened to.
         if (audioBandName === this.name && audioFreqHz !== null && radio && radio.isPlaying) {
-            this._drawAudioCursor(sCtx, w, h);
-            this._drawAudioCursor(wfCtx, wfW, wfH);
+            this._drawAudioCursor(sCtx, w, h, true);
+            this._drawAudioCursor(wfCtx, wfW, wfH, false);
         }
     }
 
     // Draw carrier line + bandwidth shading on a canvas context.
     // Uses the same linear Hz→pixel mapping as the click handler.
-    _drawAudioCursor(ctx, cw, ch) {
+    _drawAudioCursor(ctx, cw, ch, showLabel = false) {
         // Visible Hz range (matches click/touch/tooltip mapping exactly)
         const viewStartHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
         const viewEndHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
@@ -1777,6 +1777,22 @@ class BandPanel {
         ctx.moveTo(cx, 0);
         ctx.lineTo(cx, ch);
         ctx.stroke();
+
+        // Dial frequency label — spectrum canvas only, sits just below the FT8 label
+        // (FT8 label occupies y=1..13, this sits at y=15)
+        if (showLabel) {
+            ctx.font         = '9px monospace';
+            ctx.textBaseline = 'top';
+            ctx.textAlign    = 'left';
+            const dialLabel = (audioFreqHz / 1000).toFixed(1) + ' kHz';
+            const dlw = ctx.measureText(dialLabel).width;
+            const dlx = (cx + 3 + dlw > cw) ? cx - dlw - 4 : cx + 3;  // flip left if near right edge
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(dlx - 1, 15, dlw + 4, 12);
+            ctx.fillStyle = '#e57373';
+            ctx.fillText(dialLabel, dlx + 1, 16);
+        }
+
         ctx.restore();
     }
 

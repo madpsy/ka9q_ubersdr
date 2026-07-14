@@ -1735,20 +1735,22 @@ class BandPanel {
         // Draw carrier line + bandwidth shading on both canvases when this band
         // is the one currently being listened to.
         if (audioBandName === this.name && audioFreqHz !== null && radio && radio.isPlaying) {
-            this._drawAudioCursor(sCtx, w, h, binStart, zn, n);
-            this._drawAudioCursor(wfCtx, wfW, wfH, binStart, zn, n);
+            this._drawAudioCursor(sCtx, w, h);
+            this._drawAudioCursor(wfCtx, wfW, wfH);
         }
     }
 
     // Draw carrier line + bandwidth shading on a canvas context.
-    // binStart/zn/n describe the current zoom window.
-    _drawAudioCursor(ctx, cw, ch, binStart, zn, n) {
-        const bw        = this.meta.bin_bandwidth;          // Hz per bin
-        const bandStart = this.meta.start;                  // Hz at bin 0
+    // Uses the same linear Hz→pixel mapping as the click handler.
+    _drawAudioCursor(ctx, cw, ch) {
+        // Visible Hz range (matches click/touch/tooltip mapping exactly)
+        const viewStartHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+        const viewEndHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+        const viewSpanHz  = viewEndHz - viewStartHz;
+        if (viewSpanHz <= 0) return;
 
-        // Carrier position as canvas-fraction
-        const carrierBin  = (audioFreqHz - bandStart) / bw;
-        const carrierFrac = (carrierBin - binStart) / (zn - 1);
+        // Carrier position as canvas-fraction using linear Hz mapping
+        const carrierFrac = (audioFreqHz - viewStartHz) / viewSpanHz;
         if (carrierFrac < -0.05 || carrierFrac > 1.05) return; // off-screen
 
         const cx = carrierFrac * cw;
@@ -1757,10 +1759,8 @@ class BandPanel {
         const bwLow  = radio.bandwidthLow  ?? -2850;   // Hz offset (negative = below carrier)
         const bwHigh = radio.bandwidthHigh ??  2850;
 
-        const lowBin  = carrierBin + bwLow  / bw;
-        const highBin = carrierBin + bwHigh / bw;
-        const x1 = Math.max(0, ((lowBin  - binStart) / (zn - 1)) * cw);
-        const x2 = Math.min(cw, ((highBin - binStart) / (zn - 1)) * cw);
+        const x1 = Math.max(0, ((audioFreqHz + bwLow  - viewStartHz) / viewSpanHz) * cw);
+        const x2 = Math.min(cw, ((audioFreqHz + bwHigh - viewStartHz) / viewSpanHz) * cw);
 
         // Bandwidth shading
         if (x2 > x1) {

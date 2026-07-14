@@ -4,6 +4,7 @@
 - Added **Band Activity** dashboard (band_activity.html) which reuses the noise floor data to display per-band spectrum/waterfall as well as other data. Note: the update rate of these is governed by Admin -> Config -> Spectrum -> Background Poll Period ms (default 1000ms). Decreasing this value increases background CPU usage (constant) and Network throughput (when viewing the page). The default 1000 ms is probably a bit slow though, so try decreasing to 250ms to make it more useful without causing unncessarily high resource usage
 - Added **Links Menu** in the top left corner of the main web UI for all users (hides on mobile devices). This is a collection of useful links. The defaults are fixed (and dynamically generated depending on enabled features/addons) but you can add new groups/subgroups/links in Admin -> UI -> Custom Menu Links. Emojis are supported, as can be seen in the default set
 - Added **Timezone** which defaults to UTC. Please set your TZ using Admin -> Config -> Admin -> Timezone dropdown (it sets the IANA TZ value for you). This is DST aware
+- Added **QRSS Grabber** frontened extension (enable in Admin -> Extensions) for viewing very slow speed CW
 
 ### Bug Fixes
 - Disabling Prometheus metrics crashed UberSDR on startup

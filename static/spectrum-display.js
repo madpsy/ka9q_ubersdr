@@ -282,13 +282,9 @@ class SpectrumDisplay {
                         }
                         this.tooltip.innerHTML = tooltipText;
 
-                        // Position tooltip near cursor
-                        const tooltipX = e.clientX + 15;
-                        const tooltipY = e.clientY - 10;
-
-                        this.tooltip.style.left = tooltipX + 'px';
-                        this.tooltip.style.top = tooltipY + 'px';
+                        // Position tooltip near cursor (flips left near the right edge)
                         this.tooltip.style.display = 'block';
+                        this._positionTooltipNearCursor(e.clientX, e.clientY);
                         return;
                     }
                 }
@@ -319,13 +315,9 @@ class SpectrumDisplay {
                         }
                         this.tooltip.innerHTML = tooltipText;
 
-                        // Position tooltip near cursor
-                        const tooltipX = e.clientX + 15;
-                        const tooltipY = e.clientY - 10;
-
-                        this.tooltip.style.left = tooltipX + 'px';
-                        this.tooltip.style.top = tooltipY + 'px';
+                        // Position tooltip near cursor (flips left near the right edge)
                         this.tooltip.style.display = 'block';
+                        this._positionTooltipNearCursor(e.clientX, e.clientY);
                         return;
                     }
                 }
@@ -398,13 +390,9 @@ class SpectrumDisplay {
                             }
                         }
 
-                        // Position tooltip near cursor
-                        const tooltipX = e.clientX + 15;
-                        const tooltipY = e.clientY - 10;
-
-                        this.tooltip.style.left = tooltipX + 'px';
-                        this.tooltip.style.top = tooltipY + 'px';
+                        // Position tooltip near cursor (flips left near the right edge)
                         this.tooltip.style.display = 'block';
+                        this._positionTooltipNearCursor(e.clientX, e.clientY);
                         return;
                     }
                 }
@@ -457,13 +445,9 @@ class SpectrumDisplay {
                             }
                         }
 
-                        // Position tooltip near cursor
-                        const tooltipX = e.clientX + 15;
-                        const tooltipY = e.clientY - 10;
-
-                        this.tooltip.style.left = tooltipX + 'px';
-                        this.tooltip.style.top = tooltipY + 'px';
+                        // Position tooltip near cursor (flips left near the right edge)
                         this.tooltip.style.display = 'block';
+                        this._positionTooltipNearCursor(e.clientX, e.clientY);
                         return;
                     }
                 }
@@ -514,9 +498,8 @@ class SpectrumDisplay {
                             }
                         }
 
-                        this.tooltip.style.left = (e.clientX + 15) + 'px';
-                        this.tooltip.style.top = (e.clientY - 10) + 'px';
                         this.tooltip.style.display = 'block';
+                        this._positionTooltipNearCursor(e.clientX, e.clientY);
                         return;
                     }
                 }

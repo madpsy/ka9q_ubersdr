@@ -1,4 +1,17 @@
-# Latest Stable - 0.1.57 - 7th Jul 2026
+# Latest Stable - 0.1.58 - 14th Jul 2026
+
+### New Features
+- Added **Band Activity** dashboard (band_activity.html) which reuses the noise floor data to display per-band spectrum/waterfall as well as other data. Note: the update rate of these is governed by Admin -> Config -> Spectrum -> Background Poll Period ms (default 1000ms). Decreasing this value increases background CPU usage (constant) and Network throughput (when viewing the page). The default 1000 ms is probably a bit slow though, so try decreasing to 250ms to make it more useful without causing unncessarily high resource usage
+- Added **Links Menu** in the top left corner of the main web UI for all users (hides on mobile devices). This is a collection of useful links. The defaults are fixed (and dynamically generated depending on enabled features/addons) but you can add new groups/subgroups/links in Admin -> UI -> Custom Menu Links. Emoojis are supported, as can be seen in the default set
+- Added **Timezone** which defaults to UTC. Please set your TZ using Admin -> Config -> Admin -> Timezone dropdown (it sets the IANA TZ value for you). This is DST aware
+
+### Bug Fixes
+- Disabling Prometheus metrics crashed UberSDR on startup
+- FM/NFM squelch behaviour caused it to sometimes not fully open (not entirely convinced it's fully fixed but we shall see)
+
+### Other Announcements
+- DX Cluster Addon supports submitting spots which get distributed internally within the cluster. You need to set SPOT_PASSWORD in its docker-compose.yaml and users need to log in with that password to submit spots
+- CW Skimmer Addon now updates Patt3Ch.lst every time it is restarted
 
 ## Version 0.1.57
 

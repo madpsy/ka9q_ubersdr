@@ -2434,6 +2434,13 @@ function _renderVoiceTicker(data) {
     const viewportW  = tickerEl.offsetWidth || 800;
     const copies     = Math.max(2, Math.ceil(viewportW / singleW) + 1);
 
+    // Preserve the fractional scroll position across content changes so the
+    // ticker doesn't jump when items are added or removed.  We express the
+    // current position as a fraction of the old cycle width, then map it into
+    // the new cycle width.  This keeps the visual position smooth even when
+    // singleW changes.
+    const oldFrac = (_tickerHalfW > 0) ? ((_tickerOffset % _tickerHalfW) / _tickerHalfW) : 0;
+
     // Rebuild the live track with the right number of copies.
     // IMPORTANT: do NOT zero _tickerHalfW before this — keep the old value so
     // the wrap guard in _tickerLoop stays active during the DOM swap.
@@ -2442,8 +2449,8 @@ function _renderVoiceTicker(data) {
         for (const act of items) trackEl.appendChild(makeItem(act));
     }
 
-    // Clamp the running offset into the new single-copy range and re-enable wrap.
-    _tickerOffset = _tickerOffset % singleW;
+    // Map the preserved fraction into the new cycle width, then re-enable wrap.
+    _tickerOffset = oldFrac * singleW;
     _tickerHalfW  = singleW;
 }
 

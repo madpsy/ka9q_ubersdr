@@ -269,15 +269,23 @@
             document.removeEventListener('mousedown', onDocMouseDown, true);
             document.removeEventListener('keydown', onKeyDown, true);
             window.removeEventListener('resize', closePopover);
-            window.removeEventListener('scroll', closePopover, true);
+            window.removeEventListener('scroll', onScroll, true);
         }
     }
 
     function onDocMouseDown(e) {
+        // Keep the popover open when interacting with it (including dragging
+        // its scrollbar) or when clicking any help button.
         if (openPopover && !openPopover.contains(e.target) &&
             !e.target.classList.contains('config-help-btn')) {
             closePopover();
         }
+    }
+
+    // Close only when the PAGE scrolls, not when the popover's own body scrolls.
+    function onScroll(e) {
+        if (openPopover && openPopover.contains(e.target)) return;
+        closePopover();
     }
 
     function onKeyDown(e) {
@@ -335,7 +343,7 @@
             document.addEventListener('mousedown', onDocMouseDown, true);
             document.addEventListener('keydown', onKeyDown, true);
             window.addEventListener('resize', closePopover);
-            window.addEventListener('scroll', closePopover, true);
+            window.addEventListener('scroll', onScroll, true);
         }, 0);
     }
 

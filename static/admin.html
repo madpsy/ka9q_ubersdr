@@ -546,6 +546,7 @@
     <script src="d3-geo.v3.min.js"></script>
     <script src="topojson.v3.min.js"></script>
     <script src="rotator-display.js"></script>
+    <script src="config-help.js"></script>
     <style>
         /* ── CodeMirror HTML Editor Modal ─────────────────────────── */
         #cm-editor-modal {
@@ -4315,6 +4316,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 }
 
                 currentConfig = await response.json();
+                // Ensure contextual help text (from config.yaml.example on GitHub)
+                // is loaded before rendering so the "?" buttons appear on first paint.
+                // Degrades gracefully to no buttons if the fetch fails.
+                if (window.ConfigHelp && typeof window.ConfigHelp.load === 'function') {
+                    try { await window.ConfigHelp.load(); } catch (e) { /* ignore */ }
+                }
                 renderVisualEditor();
                 updatePublicInstanceButton();
                 updateCallsignNameDisplay();
@@ -4823,6 +4830,11 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                     const title = document.createElement('h3');
                     title.textContent = section.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    // Add contextual "?" help button for the section (only if the
+                    // example config has a comment block for this top-level key).
+                    // The button's own click handler calls stopPropagation, so
+                    // clicking "?" does not toggle the section collapse.
+                    if (window.ConfigHelp) window.ConfigHelp.attach(title, section);
 
                     const toggle = document.createElement('span');
                     toggle.className = 'config-section-toggle collapsed';
@@ -4900,6 +4912,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     subTitle.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     subTitle.style.color = '#555';
                     subTitle.style.marginBottom = '10px';
+                    if (window.ConfigHelp) window.ConfigHelp.attach(subTitle, fullPath);
                     subSection.appendChild(subTitle);
 
                     renderFields(subSection, value, fullPath);
@@ -4913,6 +4926,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    if (window.ConfigHelp) window.ConfigHelp.attach(label, fullPath);
                     field.appendChild(label);
 
                     if (hasObjects) {
@@ -5041,6 +5055,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    if (window.ConfigHelp) window.ConfigHelp.attach(label, fullPath);
                     field.appendChild(label);
 
                     let input;

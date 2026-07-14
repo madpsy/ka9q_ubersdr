@@ -1238,12 +1238,10 @@ class BandPanel {
 
             const rect   = stack.getBoundingClientRect();
             const frac   = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const n      = this.bins.length;
-            const bs     = Math.round(this.zoomStart * (n - 1));
-            const be     = Math.round(this.zoomEnd   * (n - 1));
-            const zn     = Math.max(2, be - bs + 1);
-            const binIdx = bs + Math.round(frac * (zn - 1));
-            const freqHz = this.meta.start + binIdx * this.meta.bin_bandwidth;
+            // Map cursor fraction linearly across the visible Hz range (1 Hz resolution)
+            const startHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+            const endHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+            const freqHz  = Math.round(startHz + frac * (endHz - startHz));
 
             startAudioAt(freqHz, this.name);
         });
@@ -1436,16 +1434,11 @@ class BandPanel {
                     const dy = touch.clientY - ts.y;
                     const dist = Math.hypot(dx, dy);
                     if (dist < 12) { // 12px threshold = tap
-                        // Map canvas fraction → frequency
-                        const n        = this.bins.length;
-                        const binStart = Math.round(this.zoomStart * (n - 1));
-                        const binEnd   = Math.round(this.zoomEnd   * (n - 1));
-                        const zn       = Math.max(2, binEnd - binStart + 1);
-                        const binIdx   = binStart + Math.round(ts.frac * (zn - 1));
-                        if (binIdx >= 0 && binIdx < n) {
-                            const freqHz = this.meta.start + binIdx * this.meta.bin_bandwidth;
-                            startAudioAt(freqHz, this.name);
-                        }
+                        // Map canvas fraction linearly across the visible Hz range (1 Hz resolution)
+                        const startHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+                        const endHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+                        const freqHz  = Math.round(startHz + ts.frac * (endHz - startHz));
+                        startAudioAt(freqHz, this.name);
                     }
                 }
                 this._touchTapStart = null;
@@ -1817,14 +1810,16 @@ class BandPanel {
         if (!this.bins) return;
         const rect = this.specCanvas.getBoundingClientRect();
         const frac = (e.clientX - rect.left) / rect.width;
-        // Map canvas fraction → zoomed bin index
+        // Frequency: linear interpolation across visible Hz range (1 Hz resolution)
+        const startHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+        const endHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+        const hz      = Math.round(startHz + frac * (endHz - startHz));
+        // dB: still looked up from the nearest bin
         const n        = this.bins.length;
         const binStart = Math.round(this.zoomStart * (n - 1));
         const binEnd   = Math.round(this.zoomEnd   * (n - 1));
         const zn       = Math.max(2, binEnd - binStart + 1);
-        const binIdx   = binStart + Math.round(frac * (zn - 1));
-        if (binIdx < 0 || binIdx >= n) return;
-        const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
+        const binIdx   = Math.min(n - 1, Math.max(0, binStart + Math.round(frac * (zn - 1))));
         const db  = this.bins[binIdx] - 256;
         const mhz = (hz / 1e6).toFixed(4);
         _positionTooltip(`${mhz} MHz  ${db.toFixed(1)} dBFS`, e.clientX, e.clientY);
@@ -1836,15 +1831,17 @@ class BandPanel {
         const fracX = (e.clientX - rect.left) / rect.width;
         const fracY = (e.clientY - rect.top)  / rect.height;
 
-        // Map canvas fraction → zoomed bin index
+        // Frequency: linear interpolation across visible Hz range (1 Hz resolution)
+        const startHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+        const endHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+        const hz      = Math.round(startHz + fracX * (endHz - startHz));
+        const mhz     = (hz / 1e6).toFixed(4);
+        // dB: still looked up from the nearest bin
         const n        = this.bins.length;
         const binStart = Math.round(this.zoomStart * (n - 1));
         const binEnd   = Math.round(this.zoomEnd   * (n - 1));
         const zn       = Math.max(2, binEnd - binStart + 1);
-        const binIdx   = binStart + Math.round(fracX * (zn - 1));
-        if (binIdx < 0 || binIdx >= n) return;
-        const hz  = this.meta.start + binIdx * this.meta.bin_bandwidth;
-        const mhz = (hz / 1e6).toFixed(4);
+        const binIdx   = Math.min(n - 1, Math.max(0, binStart + Math.round(fracX * (zn - 1))));
 
         // Y → row index within actual stored rows (newest = top = index 0)
         const rows    = this.waterfallRows;

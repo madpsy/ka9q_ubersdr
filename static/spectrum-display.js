@@ -3198,14 +3198,10 @@ class SpectrumDisplay {
             // Update tooltip content with cursor position and strongest signal (use innerHTML for line breaks)
             this.tooltip.innerHTML = `Cursor: ${this.formatFrequency(freq)} | ${db.toFixed(1)} dB<br>Peak: ${this.formatFrequency(maxFreq)} | ${maxDb.toFixed(1)} dB`;
 
-            // Position tooltip near cursor
+            // Position tooltip near cursor (flips left near the right edge)
             const rect = this.lineGraphCanvas.getBoundingClientRect();
-            const tooltipX = rect.left + x + 15;
-            const tooltipY = rect.top + y - 10;
-
-            this.tooltip.style.left = tooltipX + 'px';
-            this.tooltip.style.top = tooltipY + 'px';
             this.tooltip.style.display = 'block';
+            this._positionTooltipNearCursor(rect.left + x, rect.top + y);
         }
     }
 
@@ -5451,14 +5447,10 @@ class SpectrumDisplay {
                     }
                     this.tooltip.textContent = tooltipText;
 
-                    // Position tooltip near cursor
+                    // Position tooltip near cursor (flips left near the right edge)
                     const rect = this.canvas.getBoundingClientRect();
-                    const tooltipX = rect.left + this.mouseX + 15;
-                    const tooltipY = rect.top + this.mouseY - 10;
-
-                    this.tooltip.style.left = tooltipX + 'px';
-                    this.tooltip.style.top = tooltipY + 'px';
                     this.tooltip.style.display = 'block';
+                    this._positionTooltipNearCursor(rect.left + this.mouseX, rect.top + this.mouseY);
                     return;
                 }
             }
@@ -5490,14 +5482,30 @@ class SpectrumDisplay {
         // Update tooltip content with cursor position and strongest signal (use innerHTML for line breaks)
         this.tooltip.innerHTML = `Cursor: ${this.formatFrequency(freq)} | ${db.toFixed(1)} dB<br>Peak: ${this.formatFrequency(maxFreq)} | ${maxDb.toFixed(1)} dB`;
 
-        // Position tooltip near cursor
+        // Position tooltip near cursor (flips left near the right edge)
         const rect = this.canvas.getBoundingClientRect();
-        const tooltipX = rect.left + this.mouseX + 15;
-        const tooltipY = rect.top + this.mouseY - 10;
-
-        this.tooltip.style.left = tooltipX + 'px';
-        this.tooltip.style.top = tooltipY + 'px';
         this.tooltip.style.display = 'block';
+        this._positionTooltipNearCursor(rect.left + this.mouseX, rect.top + this.mouseY);
+    }
+
+    // Position the tooltip relative to a cursor point (viewport coordinates).
+    // The tooltip is position:fixed, so it normally sits 15px to the right of the
+    // cursor. If that would push it off the right edge of the viewport, flip it to
+    // the left of the cursor instead so it stays fully readable. The tooltip must
+    // already be display:block with its content set so offsetWidth is accurate.
+    _positionTooltipNearCursor(clientX, clientY) {
+        if (!this.tooltip) return;
+        const margin = 15;
+        const tw = this.tooltip.offsetWidth;
+        let left = clientX + margin;
+        // Flip to the left of the cursor if it would overflow the right edge
+        if (left + tw > window.innerWidth - 5) {
+            left = clientX - tw - margin;
+        }
+        // Never let it run off the left edge either
+        if (left < 5) left = 5;
+        this.tooltip.style.left = left + 'px';
+        this.tooltip.style.top = (clientY - 10) + 'px';
     }
 
     // Hide tooltip

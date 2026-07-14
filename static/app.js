@@ -9175,9 +9175,20 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
     const peakText = `Peak: ${formatFreq(displayPeakFreq)} | ${peakDb === -Infinity ? '-∞' : peakDb.toFixed(1)} dB`;
     audioSpectrumTooltip.innerHTML = `${cursorText}<br>${peakText}`;
 
-    audioSpectrumTooltip.style.left = (clientX + 15) + 'px';
-    audioSpectrumTooltip.style.top = (clientY - 10) + 'px';
+    // Show first so offsetWidth is measurable, then position near the cursor.
+    // The tooltip normally sits 15px to the right of the cursor, but flips to the
+    // left if that would push it off the right edge of the viewport (matching the
+    // main spectrum/waterfall tooltip behaviour).
     audioSpectrumTooltip.style.display = 'block';
+    const margin = 15;
+    const tw = audioSpectrumTooltip.offsetWidth;
+    let left = clientX + margin;
+    if (left + tw > window.innerWidth - 5) {
+        left = clientX - tw - margin;
+    }
+    if (left < 5) left = 5;
+    audioSpectrumTooltip.style.left = left + 'px';
+    audioSpectrumTooltip.style.top = (clientY - 10) + 'px';
 }
 
 // Frequency detection moved to oscilloscope.js

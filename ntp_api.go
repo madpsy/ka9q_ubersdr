@@ -105,6 +105,13 @@ func formatOffsetMs(ms float64) string {
 
 const ntpPollInterval = 64 * time.Second
 
+// ntpMaxAttempts is the number of NTP query attempts made within a single poll
+// before the poll is considered failed. Each attempt re-resolves the server
+// hostname, so for a DNS pool (e.g. ntp.ubuntu.com) successive attempts will
+// typically land on a different pool member — a single dropped UDP packet or
+// one unresponsive pool IP therefore will not mark NTP unhealthy on its own.
+const ntpMaxAttempts = 3
+
 // ntpState holds the most recently cached NTP query result.
 type ntpState struct {
 	mu       sync.RWMutex
@@ -144,15 +151,30 @@ func pollNTP(cfg *Config) {
 		queryErr error
 	)
 
-	resp, queryErr = NtpQuery(srv)
-	if queryErr == nil {
-		if err := resp.Validate(); err != nil {
-			log.Printf("NTP: server %s returned invalid response: %v", srv, err)
-			queryErr = err
-			resp = nil
+	// Retry up to ntpMaxAttempts times within this poll. Each NtpQuery call
+	// re-resolves the hostname via DNS, so for a rotating pool (e.g.
+	// ntp.ubuntu.com) successive attempts typically hit a different pool
+	// member. The poll only fails — and NTP only reports unhealthy — if every
+	// attempt fails, so a single dropped UDP packet or one dead pool IP is
+	// tolerated transparently.
+	for attempt := 1; attempt <= ntpMaxAttempts; attempt++ {
+		resp, queryErr = NtpQuery(srv)
+		if queryErr == nil {
+			if err := resp.Validate(); err != nil {
+				log.Printf("NTP: server %s returned invalid response (attempt %d/%d): %v",
+					srv, attempt, ntpMaxAttempts, err)
+				queryErr = err
+				resp = nil
+			}
+		} else {
+			log.Printf("NTP: query to %s failed (attempt %d/%d): %v",
+				srv, attempt, ntpMaxAttempts, queryErr)
 		}
-	} else {
-		log.Printf("NTP: query to %s failed: %v", srv, queryErr)
+
+		if queryErr == nil && resp != nil {
+			// Success — stop retrying.
+			break
+		}
 	}
 
 	now := time.Now().UTC()

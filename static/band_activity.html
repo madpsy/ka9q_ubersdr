@@ -2397,17 +2397,8 @@ function _renderVoiceTicker(data) {
 
     const isFirstRender = _tickerRAF === null;
 
-    // Rebuild DOM. If the loop is already running, keep it running — it will
-    // continue scrolling the old content while we measure the new layout.
-    // We temporarily set _tickerHalfW = 0 so the wrap logic doesn't fire on
-    // stale data during the measurement window.
-    _tickerHalfW = 0;
-    trackEl.innerHTML = '';
-    for (const act of items) trackEl.appendChild(makeItem(act));
-    // Duplicate for seamless wrap
-    for (const act of items) trackEl.appendChild(makeItem(act));
-
-    // Show ticker — must use 'block' to override the inline style.display='none'
+    // Show ticker first so layout is computable (must use 'block' to override
+    // the inline style.display='none' set on first load).
     tickerEl.style.display = 'block';
 
     // On first render, start the loop immediately so it begins scrolling.
@@ -2417,19 +2408,43 @@ function _renderVoiceTicker(data) {
         _startTickerLoop();
     }
 
-    // Measure half-width after a short delay to ensure layout is complete.
-    // setTimeout is more reliable than double-rAF when the element was just shown.
-    setTimeout(() => {
-        const children = trackEl.children;
-        const half = items.length;
-        if (half === 0 || children.length < half) return;
-        let w = 0;
-        for (let i = 0; i < half; i++) w += children[i].offsetWidth;
-        if (w < 10) return;
-        // Clamp current offset into the new range before enabling wrap
-        _tickerOffset = _tickerOffset % w;
-        _tickerHalfW = w;
-    }, 100);
+    // Build one copy of items into a temporary container so we can measure
+    // the single-copy width before touching the live DOM.  Reading offsetWidth
+    // forces a synchronous reflow, which is fine here because we need the
+    // measurement before we can decide how many copies to insert.
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;';
+    for (const act of items) probe.appendChild(makeItem(act));
+    tickerEl.appendChild(probe);
+    let singleW = 0;
+    for (let i = 0; i < probe.children.length; i++) singleW += probe.children[i].offsetWidth;
+    tickerEl.removeChild(probe);
+
+    if (singleW < 10) {
+        // Fallback: can't measure yet (element may still be transitioning to
+        // visible).  Defer and keep the old _tickerHalfW so the wrap guard
+        // stays active — never zero it out.
+        setTimeout(() => _renderVoiceTicker(data), 120);
+        return;
+    }
+
+    // How many copies do we need so the track is always wider than the viewport?
+    // At least 2, and enough that one full viewport of content is always visible
+    // ahead of the current scroll position.
+    const viewportW  = tickerEl.offsetWidth || 800;
+    const copies     = Math.max(2, Math.ceil(viewportW / singleW) + 1);
+
+    // Rebuild the live track with the right number of copies.
+    // IMPORTANT: do NOT zero _tickerHalfW before this — keep the old value so
+    // the wrap guard in _tickerLoop stays active during the DOM swap.
+    trackEl.innerHTML = '';
+    for (let c = 0; c < copies; c++) {
+        for (const act of items) trackEl.appendChild(makeItem(act));
+    }
+
+    // Clamp the running offset into the new single-copy range and re-enable wrap.
+    _tickerOffset = _tickerOffset % singleW;
+    _tickerHalfW  = singleW;
 }
 
 async function _refreshVoiceTicker() {

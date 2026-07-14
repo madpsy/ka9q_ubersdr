@@ -91,6 +91,16 @@ body {
     letter-spacing: 0.03em;
 }
 
+#local-clock {
+    font-size: 1.05em;
+    font-weight: 700;
+    line-height: 1;
+    color: #a0d8a0;      /* same greenish as receiver callsign */
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+}
+
 /* band selector pills — always on their own row when the topbar wraps */
 #band-pills {
     display: flex;
@@ -732,6 +742,7 @@ body {
         <div id="status-dot" class="wait"></div>
         <span id="status-text">Connecting…</span>
         <span id="utc-clock"></span>
+        <span id="local-clock" style="display:none"></span>
     </div>
     <div id="band-pills"></div>
     <button id="btn-all">All</button>
@@ -882,6 +893,7 @@ let sse         = null; // EventSource
 let dbMin       = -130;
 let dbMax       = -60;
 let currentPalette = 'jet'; // active waterfall palette name
+let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
 
 // ── Bandwidth tracking ────────────────────────────────────────────────────────
 let _bpsAccum    = 0;       // bytes accumulated in current 1s window
@@ -1999,6 +2011,18 @@ function _updateStatusText() {
     const clockEl = document.getElementById('utc-clock');
     if (clockEl) clockEl.textContent = `${hh}:${mm}:${ss} UTC`;
 
+    // Local time — shown only when we have a timezone offset from the server
+    const localEl = document.getElementById('local-clock');
+    if (localEl && _localTzOffsetMin !== null) {
+        const localMs  = now.getTime() + _localTzOffsetMin * 60 * 1000;
+        const localNow = new Date(localMs);
+        const lhh = String(localNow.getUTCHours()).padStart(2, '0');
+        const lmm = String(localNow.getUTCMinutes()).padStart(2, '0');
+        const lss = String(localNow.getUTCSeconds()).padStart(2, '0');
+        localEl.textContent = `${lhh}:${lmm}:${lss} Local`;
+        localEl.style.display = '';
+    }
+
     if (!sse || sse.readyState === EventSource.CLOSED) return; // error path handles its own text
     if (sse.readyState === EventSource.CONNECTING) {
         setStatus('wait', 'Connecting…');
@@ -2852,6 +2876,10 @@ async function init() {
             // Detect hardware features for the conditions bar
             _rotatorEnabled   = !!(desc.rotator?.enabled);
             _antSwitchEnabled = !!(desc.ant_switch?.enabled);
+
+            // Receiver local timezone offset (minutes east of UTC)
+            const tzOffset = desc.receiver?.timezone_offset;
+            if (typeof tzOffset === 'number') _localTzOffsetMin = tzOffset;
             _cwEnabled        = !!(desc.cw_skimmer);
         }
     } catch(_) { /* non-fatal — receiver info is cosmetic */ }

@@ -1,7 +1,8 @@
 /*
  * config-help.js
  *
- * Adds contextual "?" help buttons to the Admin → Config visual editor.
+ * Adds contextual "?" help buttons and a keyword search box to the
+ * Admin → Config visual editor.
  *
  * The help text is sourced from the canonical example configuration file on
  * GitHub (config/config.yaml.example), which contains rich inline and block
@@ -9,12 +10,18 @@
  * into a map keyed by dotted YAML path (e.g. "server.max_sessions",
  * "admin.gps.lat"), and expose:
  *
- *   ConfigHelp.load()            -> Promise, fetch + parse (cached, idempotent)
- *   ConfigHelp.get(path)         -> help string or undefined
- *   ConfigHelp.attach(el, path)  -> append a "?" button to el IF help exists
+ *   ConfigHelp.load()                  -> Promise, fetch + parse (cached, idempotent)
+ *   ConfigHelp.get(path)               -> help string or undefined
+ *   ConfigHelp.attach(el, path)        -> append a "?" button to el IF help exists
+ *   ConfigHelp.renderSearchBox(parent) -> inject search UI into parent element
  *
  * The "no comment => no ? button" rule is enforced by attach(): if get(path)
  * returns nothing, no button is created.
+ *
+ * The search box is only rendered when help text was successfully loaded
+ * (ConfigHelp.isReady() && Object.keys(helpMap).length > 0). Clicking a
+ * search result expands the relevant config section and scrolls to + briefly
+ * highlights the matching field.
  *
  * raw.githubusercontent.com serves "Access-Control-Allow-Origin: *", so the
  * cross-origin fetch works directly from the browser with no proxy. If the
@@ -190,6 +197,7 @@
         const style = document.createElement('style');
         style.id = 'config-help-styles';
         style.textContent = `
+            /* ── ? help buttons ─────────────────────────────────────────── */
             .config-help-btn {
                 display: inline-flex;
                 align-items: center;
@@ -211,6 +219,8 @@
                 transition: background 0.2s;
             }
             .config-help-btn:hover { background: #4c5bd4; }
+
+            /* ── help popover ────────────────────────────────────────────── */
             .config-help-popover {
                 position: absolute;
                 z-index: 10000;
@@ -255,6 +265,109 @@
                 max-height: 320px;
                 overflow-y: auto;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif;
+            }
+
+            /* ── config search box ───────────────────────────────────────── */
+            .config-search-wrap {
+                position: relative;
+                margin-bottom: 18px;
+            }
+            .config-search-input-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                background: #fff;
+                border: 2px solid #667eea;
+                border-radius: 8px;
+                padding: 6px 12px;
+                box-shadow: 0 2px 8px rgba(102,126,234,0.10);
+            }
+            .config-search-icon {
+                color: #667eea;
+                font-size: 16px;
+                flex: 0 0 auto;
+            }
+            .config-search-input {
+                flex: 1;
+                border: none;
+                outline: none;
+                font-size: 14px;
+                background: transparent;
+                color: #333;
+                min-width: 0;
+            }
+            .config-search-input::placeholder { color: #aaa; }
+            .config-search-clear {
+                border: none;
+                background: transparent;
+                color: #aaa;
+                font-size: 18px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 0 2px;
+                display: none;
+            }
+            .config-search-clear:hover { color: #555; }
+            .config-search-results {
+                position: absolute;
+                top: calc(100% + 4px);
+                left: 0;
+                right: 0;
+                background: #fff;
+                border: 1px solid #d0d0e0;
+                border-radius: 8px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+                z-index: 9000;
+                max-height: 420px;
+                overflow-y: auto;
+                display: none;
+            }
+            .config-search-results.visible { display: block; }
+            .config-search-result-item {
+                padding: 10px 14px;
+                cursor: pointer;
+                border-bottom: 1px solid #f0f0f0;
+                transition: background 0.15s;
+            }
+            .config-search-result-item:last-child { border-bottom: none; }
+            .config-search-result-item:hover { background: #f4f5fb; }
+            .config-search-result-path {
+                font-family: monospace;
+                font-size: 12px;
+                font-weight: 700;
+                color: #4c5bd4;
+                margin-bottom: 3px;
+            }
+            .config-search-result-desc {
+                font-size: 12px;
+                color: #555;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .config-search-no-results {
+                padding: 14px;
+                color: #888;
+                font-size: 13px;
+                text-align: center;
+            }
+            .config-search-result-path mark,
+            .config-search-result-desc mark {
+                background: #fff3b0;
+                color: inherit;
+                border-radius: 2px;
+                padding: 0 1px;
+            }
+
+            /* ── field highlight on navigate ─────────────────────────────── */
+            @keyframes config-field-flash {
+                0%   { background: #fff3b0; }
+                60%  { background: #fff3b0; }
+                100% { background: transparent; }
+            }
+            .config-field-highlight {
+                animation: config-field-flash 1.6s ease-out forwards;
+                border-radius: 4px;
             }
         `;
         document.head.appendChild(style);
@@ -417,6 +530,250 @@
             });
             el.appendChild(btn);
             return true;
+        },
+
+        /**
+         * Navigate to a config field by its dotted path.
+         * Expands the section, scrolls to the field, and briefly highlights it.
+         */
+        navigateTo(path) {
+            if (!path) return;
+            const section = path.split('.')[0];
+
+            // Find the section div.
+            const sectionDiv = document.querySelector(
+                `[data-section="${CSS.escape(section)}"]`
+            );
+            if (!sectionDiv) return;
+
+            // Expand the section if collapsed.
+            const content = sectionDiv.querySelector('.config-section-content');
+            const toggle = sectionDiv.querySelector('.config-section-toggle');
+            if (content && !content.classList.contains('expanded')) {
+                content.classList.add('expanded');
+                if (toggle) toggle.classList.remove('collapsed');
+            }
+
+            // Find the field element by data-path (label or h4).
+            // Try exact match first, then section-level fallback.
+            let target = sectionDiv.querySelector(`[data-path="${CSS.escape(path)}"]`);
+            if (!target) {
+                // For section-level paths (e.g. "server") scroll to the section header.
+                target = sectionDiv.querySelector('.config-section-header');
+            }
+            if (!target) return;
+
+            // Scroll into view smoothly.
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Flash the nearest .config-field ancestor, or the target itself.
+            const flashEl = target.closest('.config-field') || target;
+            flashEl.classList.remove('config-field-highlight');
+            // Force reflow so re-adding the class restarts the animation.
+            void flashEl.offsetWidth;
+            flashEl.classList.add('config-field-highlight');
+            setTimeout(() => flashEl.classList.remove('config-field-highlight'), 1700);
+        },
+
+        /**
+         * Inject a keyword search box into `parent`.
+         * Only call this when isReady() is true and helpMap is non-empty.
+         */
+        renderSearchBox(parent) {
+            if (!helpMap || Object.keys(helpMap).length === 0) return;
+            ensureStyles();
+
+            // Remove any existing search box (e.g. on re-render).
+            const existing = parent.querySelector('.config-search-wrap');
+            if (existing) existing.remove();
+
+            const wrap = document.createElement('div');
+            wrap.className = 'config-search-wrap';
+
+            // ── Input row ──────────────────────────────────────────────────
+            const inputRow = document.createElement('div');
+            inputRow.className = 'config-search-input-row';
+
+            const icon = document.createElement('span');
+            icon.className = 'config-search-icon';
+            icon.textContent = '🔍';
+            icon.setAttribute('aria-hidden', 'true');
+
+            const input = document.createElement('input');
+            input.type = 'search';
+            input.className = 'config-search-input';
+            input.placeholder = 'Search config settings…';
+            input.setAttribute('aria-label', 'Search configuration settings');
+            input.autocomplete = 'off';
+            input.spellcheck = false;
+
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'config-search-clear';
+            clearBtn.textContent = '×';
+            clearBtn.setAttribute('aria-label', 'Clear search');
+
+            inputRow.appendChild(icon);
+            inputRow.appendChild(input);
+            inputRow.appendChild(clearBtn);
+
+            // ── Results panel ──────────────────────────────────────────────
+            const results = document.createElement('div');
+            results.className = 'config-search-results';
+            results.setAttribute('role', 'listbox');
+
+            wrap.appendChild(inputRow);
+            wrap.appendChild(results);
+            parent.appendChild(wrap);
+
+            // ── Helpers ────────────────────────────────────────────────────
+
+            // Escape special regex chars in a string.
+            const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            // Wrap all occurrences of `term` in `text` with <mark>.
+            const highlight = (text, term) => {
+                if (!term) return escapeHtml(text);
+                const re = new RegExp('(' + escapeRe(term) + ')', 'gi');
+                return escapeHtml(text).replace(
+                    new RegExp('(' + escapeRe(escapeHtml(term)) + ')', 'gi'),
+                    '<mark>$1</mark>'
+                );
+            };
+
+            const escapeHtml = (s) =>
+                s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            const showResults = (items, term) => {
+                results.innerHTML = '';
+                if (items.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'config-search-no-results';
+                    empty.textContent = 'No matching settings found.';
+                    results.appendChild(empty);
+                } else {
+                    items.forEach(({ path, help }) => {
+                        const item = document.createElement('div');
+                        item.className = 'config-search-result-item';
+                        item.setAttribute('role', 'option');
+
+                        const pathEl = document.createElement('div');
+                        pathEl.className = 'config-search-result-path';
+                        pathEl.innerHTML = highlight(path, term);
+
+                        // Show first non-empty line of help as description.
+                        const firstLine = help.split('\n').find(l => l.trim()) || help;
+                        const desc = document.createElement('div');
+                        desc.className = 'config-search-result-desc';
+                        desc.innerHTML = highlight(
+                            firstLine.length > 120 ? firstLine.slice(0, 120) + '…' : firstLine,
+                            term
+                        );
+
+                        item.appendChild(pathEl);
+                        item.appendChild(desc);
+
+                        item.addEventListener('click', () => {
+                            // Close search and navigate.
+                            input.value = '';
+                            clearBtn.style.display = 'none';
+                            results.classList.remove('visible');
+                            ConfigHelp.navigateTo(path);
+                        });
+
+                        results.appendChild(item);
+                    });
+                }
+                results.classList.add('visible');
+            };
+
+            const hideResults = () => results.classList.remove('visible');
+
+            // ── Search logic (debounced) ───────────────────────────────────
+            let debounceTimer = null;
+
+            const doSearch = (term) => {
+                const q = term.trim().toLowerCase();
+                if (!q) { hideResults(); return; }
+
+                const matches = [];
+                for (const [path, help] of Object.entries(helpMap)) {
+                    if (path.toLowerCase().includes(q) || help.toLowerCase().includes(q)) {
+                        matches.push({ path, help });
+                    }
+                }
+                // Sort: path matches first, then by path length (shorter = more specific).
+                matches.sort((a, b) => {
+                    const aPath = a.path.toLowerCase().includes(q);
+                    const bPath = b.path.toLowerCase().includes(q);
+                    if (aPath && !bPath) return -1;
+                    if (!aPath && bPath) return 1;
+                    return a.path.length - b.path.length;
+                });
+
+                showResults(matches.slice(0, 20), term.trim());
+            };
+
+            input.addEventListener('input', () => {
+                const val = input.value;
+                clearBtn.style.display = val ? 'block' : 'none';
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => doSearch(val), 180);
+            });
+
+            clearBtn.addEventListener('click', () => {
+                input.value = '';
+                clearBtn.style.display = 'none';
+                hideResults();
+                input.focus();
+            });
+
+            // Close results when clicking outside the search widget.
+            document.addEventListener('mousedown', (e) => {
+                if (!wrap.contains(e.target)) hideResults();
+            }, true);
+
+            // Keyboard: Escape closes results; Enter navigates to first result.
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    hideResults();
+                    input.blur();
+                } else if (e.key === 'Enter') {
+                    const first = results.querySelector('.config-search-result-item');
+                    if (first) first.click();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const first = results.querySelector('.config-search-result-item');
+                    if (first) first.focus();
+                }
+            });
+
+            // Allow keyboard navigation within results.
+            results.addEventListener('keydown', (e) => {
+                const items = [...results.querySelectorAll('.config-search-result-item')];
+                const idx = items.indexOf(document.activeElement);
+                if (e.key === 'ArrowDown' && idx < items.length - 1) {
+                    e.preventDefault();
+                    items[idx + 1].focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (idx <= 0) { input.focus(); }
+                    else { items[idx - 1].focus(); }
+                } else if (e.key === 'Enter' && idx >= 0) {
+                    items[idx].click();
+                } else if (e.key === 'Escape') {
+                    hideResults();
+                    input.focus();
+                }
+            });
+
+            // Make result items focusable for keyboard nav.
+            results.addEventListener('mousedown', (e) => {
+                // Prevent input blur when clicking a result.
+                if (e.target.closest('.config-search-result-item')) {
+                    e.preventDefault();
+                }
+            });
         },
     };
 

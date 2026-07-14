@@ -4819,10 +4819,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             globalInfoDiv.innerHTML = 'ℹ️ You can edit basic settings using the <a href="/setup-wizard.html" style="color: #0c5460; font-weight: bold; text-decoration: underline;">Setup Wizard</a>';
             container.appendChild(globalInfoDiv);
 
+            // Config search box (only shown when help text loaded from GitHub)
+            if (window.ConfigHelp && window.ConfigHelp.isReady()) {
+                window.ConfigHelp.renderSearchBox(container);
+            }
+
             for (const [section, values] of Object.entries(currentConfig)) {
                 if (typeof values === 'object' && values !== null) {
                     const sectionDiv = document.createElement('div');
                     sectionDiv.className = 'config-section';
+                    sectionDiv.dataset.section = section;
 
                     // Create collapsible header
                     const header = document.createElement('div');
@@ -4912,6 +4918,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     subTitle.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     subTitle.style.color = '#555';
                     subTitle.style.marginBottom = '10px';
+                    subTitle.dataset.path = fullPath;
                     if (window.ConfigHelp) window.ConfigHelp.attach(subTitle, fullPath);
                     subSection.appendChild(subTitle);
 
@@ -4926,6 +4933,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    label.dataset.path = fullPath;
                     if (window.ConfigHelp) window.ConfigHelp.attach(label, fullPath);
                     field.appendChild(label);
 
@@ -5055,6 +5063,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    label.dataset.path = fullPath;
                     if (window.ConfigHelp) window.ConfigHelp.attach(label, fullPath);
                     field.appendChild(label);
 

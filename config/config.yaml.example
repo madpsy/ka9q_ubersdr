@@ -604,8 +604,8 @@ spectrum:
   # This also controls the update rate of the /api/noisefloor/spectrum/stream SSE endpoint.
   # Lower values give smoother real-time waterfall updates at the cost of slightly more
   # CPU and radiod multicast traffic.
-  # Range: 100–2000 ms (values outside this range are clamped). Default: 1000ms (1 second).
-  background_poll_period_ms: 1000
+  # Range: 100–2000 ms (values outside this range are clamped). Default: 250ms.
+  background_poll_period_ms: 250
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
   # Master gain adjustment in dB applied to all spectrum data

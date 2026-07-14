@@ -567,8 +567,7 @@ body {
     left: 0;
     height: 100%;
     will-change: transform;
-    animation: ticker-scroll linear infinite;
-    animation-play-state: running;
+    /* animation applied entirely via JS once width is known */
 }
 
 .cond-ticker-item {
@@ -2412,18 +2411,14 @@ function _renderVoiceTicker(data) {
         for (const act of items) trackEl.appendChild(makeItem(act));
     }
 
-    // Apply CSS animation.  Setting --ticker-shift tells the keyframe how far
-    // to translate (one full single-copy width to the left).
-    // Removing and re-adding the animation-name forces the browser to restart
-    // the animation from the new delay, avoiding any stale state.
+    // Apply CSS animation.  We set all animation properties via inline style
+    // so the keyframe can use --ticker-shift for the translate distance.
+    // To force the browser to restart the animation (pick up the new delay),
+    // we briefly set animation to 'none', force a reflow, then restore it.
     trackEl.style.setProperty('--ticker-shift', `-${singleW}px`);
-    trackEl.style.animationDuration = `${duration}s`;
-    trackEl.style.animationDelay    = `${delayS}s`;
-    // Force animation restart by toggling animation-name off then on
-    trackEl.style.animationName = 'none';
-    // eslint-disable-next-line no-unused-expressions
-    trackEl.offsetWidth; // trigger reflow so the browser registers the change
-    trackEl.style.animationName = '';
+    trackEl.style.animation = 'none';
+    trackEl.offsetWidth; // force reflow — do NOT remove this line
+    trackEl.style.animation = `ticker-scroll ${duration}s ${delayS}s linear infinite`;
 
     // Record when this animation cycle effectively started (adjusted for delay)
     _tickerAnimStart = performance.now() + delayS * 1000;

@@ -723,10 +723,9 @@ show_ui_password_menu() {
     local pass_file="$HOME/ubersdr/${SELECTED_ADDON}/.config_pass"
     if [[ ! -f "$pass_file" ]]; then
         echo ""
-        echo "Error: password file not found at $pass_file" >&2
-        echo "       Has install.sh been run yet?" >&2
+        echo "  No password file found for ${SELECTED_ADDON} (this addon may not use an admin password)"
         echo ""
-        return 1
+        return 0
     fi
 
     local pass

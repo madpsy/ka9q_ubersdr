@@ -552,6 +552,11 @@ body {
     /* visibility toggled via JS: style.display = 'block' / 'none' */
 }
 
+@keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(var(--ticker-shift)); }
+}
+
 #conditions-bar .cond-ticker-track {
     display: inline-flex;
     align-items: center;
@@ -562,6 +567,8 @@ body {
     left: 0;
     height: 100%;
     will-change: transform;
+    animation: ticker-scroll linear infinite;
+    animation-play-state: running;
 }
 
 .cond-ticker-item {
@@ -2309,44 +2316,10 @@ async function _fetchVoiceActivity() {
     return resp.json();
 }
 
-let _tickerRAF = null;
-let _tickerOffset = 0;
-let _tickerHalfW = 0;
-let _tickerLastTs = null;
 let _tickerHadItems = false; // true once we've shown at least one item
+let _tickerLastKey  = '';    // fingerprint of last rendered item list
+let _tickerAnimStart = null; // performance.now() when current animation began
 const _TICKER_PX_PER_S = 60; // scroll speed
-
-function _tickerLoop(ts) {
-    const trackEl = document.getElementById('cond-ticker-track');
-    if (!trackEl) { _tickerRAF = null; return; }
-
-    if (_tickerLastTs !== null) {
-        const dt = Math.min((ts - _tickerLastTs) / 1000, 0.1); // cap dt to avoid jumps
-        _tickerOffset += _TICKER_PX_PER_S * dt;
-        if (_tickerHalfW > 0 && _tickerOffset >= _tickerHalfW) {
-            _tickerOffset -= _tickerHalfW;
-        }
-        trackEl.style.transform = `translateX(${-_tickerOffset}px)`;
-    }
-    _tickerLastTs = ts;
-    _tickerRAF = requestAnimationFrame(_tickerLoop);
-}
-
-function _stopTickerLoop() {
-    if (_tickerRAF !== null) {
-        cancelAnimationFrame(_tickerRAF);
-        _tickerRAF = null;
-    }
-    _tickerLastTs = null;
-    _tickerOffset = 0;
-    _tickerHalfW = 0;
-}
-
-function _startTickerLoop() {
-    if (_tickerRAF !== null) return; // already running
-    _tickerLastTs = null;            // first frame sets the baseline, no jump
-    _tickerRAF = requestAnimationFrame(_tickerLoop);
-}
 
 function _renderVoiceTicker(data) {
     const tickerEl = document.getElementById('cond-ticker');
@@ -2368,12 +2341,19 @@ function _renderVoiceTicker(data) {
         (b.estimated_dial_freq || b.center_freq || 0)
     );
 
-    // If no new items, keep whatever is already scrolling — don't hide or reset
+    // If no items, keep whatever is already scrolling — don't hide or reset
     if (items.length === 0) {
         if (!_tickerHadItems) tickerEl.style.display = 'none';
         return;
     }
     _tickerHadItems = true;
+
+    // Build a fingerprint — skip DOM rebuild if nothing changed
+    const newKey = items.map(a =>
+        `${a.estimated_dial_freq || a.center_freq}|${a.dx_callsign || ''}|${a.band}`
+    ).join(',');
+    if (newKey === _tickerLastKey) return;
+    _tickerLastKey = newKey;
 
     // Build item element
     function makeItem(act) {
@@ -2395,25 +2375,12 @@ function _renderVoiceTicker(data) {
         return el;
     }
 
-    const isFirstRender = _tickerRAF === null;
-
-    // Show ticker first so layout is computable (must use 'block' to override
-    // the inline style.display='none' set on first load).
+    // Show ticker so layout is computable
     tickerEl.style.display = 'block';
 
-    // On first render, start the loop immediately so it begins scrolling.
-    // On subsequent renders, the loop is already running — just re-measure.
-    if (isFirstRender) {
-        _tickerOffset = 0;
-        _startTickerLoop();
-    }
-
-    // Build one copy of items into a temporary container so we can measure
-    // the single-copy width before touching the live DOM.  Reading offsetWidth
-    // forces a synchronous reflow, which is fine here because we need the
-    // measurement before we can decide how many copies to insert.
+    // Measure single-copy width using a hidden probe element
     const probe = document.createElement('span');
-    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;';
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;display:inline-flex;';
     for (const act of items) probe.appendChild(makeItem(act));
     tickerEl.appendChild(probe);
     let singleW = 0;
@@ -2421,37 +2388,45 @@ function _renderVoiceTicker(data) {
     tickerEl.removeChild(probe);
 
     if (singleW < 10) {
-        // Fallback: can't measure yet (element may still be transitioning to
-        // visible).  Defer and keep the old _tickerHalfW so the wrap guard
-        // stays active — never zero it out.
+        // Can't measure yet — defer and retry
         setTimeout(() => _renderVoiceTicker(data), 120);
         return;
     }
 
-    // How many copies do we need so the track is always wider than the viewport?
-    // At least 2, and enough that one full viewport of content is always visible
-    // ahead of the current scroll position.
-    const viewportW  = tickerEl.offsetWidth || 800;
-    const copies     = Math.max(2, Math.ceil(viewportW / singleW) + 1);
+    // How many copies to fill the viewport with at least one spare
+    const viewportW = tickerEl.offsetWidth || 800;
+    const copies    = Math.max(2, Math.ceil(viewportW / singleW) + 1);
 
-    // Preserve the fractional scroll position across content changes so the
-    // ticker doesn't jump when items are added or removed.  We express the
-    // current position as a fraction of the old cycle width, then map it into
-    // the new cycle width.  This keeps the visual position smooth even when
-    // singleW changes.
-    const oldFrac = (_tickerHalfW > 0) ? ((_tickerOffset % _tickerHalfW) / _tickerHalfW) : 0;
+    // How far through the current cycle are we?  Preserve this so the
+    // animation restarts at the same visual position with no jump.
+    // On first render _tickerAnimStart is null → start from 0.
+    const elapsedMs  = _tickerAnimStart !== null ? (performance.now() - _tickerAnimStart) : 0;
+    const elapsedPx  = (elapsedMs / 1000) * _TICKER_PX_PER_S;
+    const offsetPx   = elapsedPx % singleW;           // position within one cycle
+    const duration   = singleW / _TICKER_PX_PER_S;    // seconds for one full cycle
+    const delayS     = -(offsetPx / _TICKER_PX_PER_S); // negative delay = start mid-cycle
 
-    // Rebuild the live track with the right number of copies.
-    // IMPORTANT: do NOT zero _tickerHalfW before this — keep the old value so
-    // the wrap guard in _tickerLoop stays active during the DOM swap.
+    // Rebuild DOM
     trackEl.innerHTML = '';
     for (let c = 0; c < copies; c++) {
         for (const act of items) trackEl.appendChild(makeItem(act));
     }
 
-    // Map the preserved fraction into the new cycle width, then re-enable wrap.
-    _tickerOffset = oldFrac * singleW;
-    _tickerHalfW  = singleW;
+    // Apply CSS animation.  Setting --ticker-shift tells the keyframe how far
+    // to translate (one full single-copy width to the left).
+    // Removing and re-adding the animation-name forces the browser to restart
+    // the animation from the new delay, avoiding any stale state.
+    trackEl.style.setProperty('--ticker-shift', `-${singleW}px`);
+    trackEl.style.animationDuration = `${duration}s`;
+    trackEl.style.animationDelay    = `${delayS}s`;
+    // Force animation restart by toggling animation-name off then on
+    trackEl.style.animationName = 'none';
+    // eslint-disable-next-line no-unused-expressions
+    trackEl.offsetWidth; // trigger reflow so the browser registers the change
+    trackEl.style.animationName = '';
+
+    // Record when this animation cycle effectively started (adjusted for delay)
+    _tickerAnimStart = performance.now() + delayS * 1000;
 }
 
 async function _refreshVoiceTicker() {

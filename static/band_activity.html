@@ -1031,9 +1031,11 @@ class BandPanel {
         this.animFrame = null;
         this.dirty = false;        // true when new data arrived since last draw
 
-        // ── Smoothed peak state (for top-3 markers) ──────────────────────────
-        // Each entry: { x: canvas-fraction, db: dBFS } — EMA-smoothed per frame.
-        this._smoothPeaks = [];    // up to 3 entries, persisted across frames
+        // ── Peak hold buffer (for top-3 markers) ─────────────────────────────
+        // Rolling max over ~3 s of frames. Indexed by bin position (full band).
+        this._peakHold    = null;  // Float32Array(n) — max dBFS seen per bin
+        this._peakHoldAge = null;  // Uint16Array(n)  — frames since last update
+        this._peakHoldMax = 15;    // frames to hold a peak (~3 s at ~5 fps)
 
         // ── Zoom state ──────────────────────────────────────────────────────
         this.zoomStart = 0;        // fraction [0,1] of full bin array
@@ -1609,26 +1611,51 @@ class BandPanel {
         document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
         document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
 
-        // ── Top-3 local peak markers (smoothed) ──────────────────────────────
-        // 1. Smooth the spectrum with a small box-filter to reduce frame noise.
-        // 2. Find local maxima in the zoomed slice with a minimum separation.
-        // 3. EMA-blend the detected peaks with the previous frame's positions so
-        //    markers glide rather than snap.
+        // ── Top-3 local peak markers (peak-hold) ─────────────────────────────
+        // Rather than tracking per-frame peaks (which flicker), we maintain a
+        // rolling-max buffer over the last _peakHoldMax frames.  Each bin's
+        // value decays by 1 frame of age per draw; a bin is only evicted once
+        // it hasn't been the max for _peakHoldMax consecutive frames.
+        // Peak detection runs on this stable buffer, not the raw noisy frame.
         {
-            // ── Step 1: box-smooth the zoomed slice ───────────────────────────
-            const smoothR = Math.max(2, Math.round(zn / 80)); // ~1.25% of visible width
+            // ── Update peak-hold buffer ───────────────────────────────────────
+            if (!this._peakHold || this._peakHold.length !== n) {
+                this._peakHold    = new Float32Array(n).fill(-256);
+                this._peakHoldAge = new Uint16Array(n);
+            }
+            for (let i = 0; i < n; i++) {
+                const v = vals[i];
+                if (v >= this._peakHold[i]) {
+                    this._peakHold[i]    = v;
+                    this._peakHoldAge[i] = 0;
+                } else {
+                    this._peakHoldAge[i]++;
+                    if (this._peakHoldAge[i] > this._peakHoldMax) {
+                        // Decay toward current value
+                        this._peakHold[i] = v;
+                        this._peakHoldAge[i] = 0;
+                    }
+                }
+            }
+
+            // ── Box-smooth the held values in the zoomed slice ────────────────
+            const smoothR = Math.max(2, Math.round(zn / 60));
             const smoothed = new Float32Array(zn);
             for (let i = 0; i < zn; i++) {
                 let sum = 0, cnt = 0;
                 for (let j = Math.max(0, i - smoothR); j <= Math.min(zn - 1, i + smoothR); j++) {
-                    sum += vals[binStart + j]; cnt++;
+                    sum += this._peakHold[binStart + j]; cnt++;
                 }
                 smoothed[i] = sum / cnt;
             }
 
-            // ── Step 2: find local maxima ─────────────────────────────────────
-            const minSepBins = Math.max(6, Math.round(zn / 30)); // ~3% of visible width
-            const threshold  = p5 + 8; // must be at least 8 dB above noise floor
+            // ── Find top-3 local maxima in the smoothed held spectrum ─────────
+            // Minimum separation: 2.5 kHz expressed in bins of the zoomed slice.
+            // bin_bandwidth is Hz per bin in the full array; zn covers the zoomed
+            // fraction of the full band, so scale accordingly.
+            const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
+            const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
+            const threshold  = p5 + 20;
 
             const candidates = [];
             for (let i = 1; i < zn - 1; i++) {
@@ -1638,58 +1665,21 @@ class BandPanel {
                     candidates.push({ i, db });
                 }
             }
-
             candidates.sort((a, b) => b.db - a.db);
-            const rawPeaks = [];
+            const peaks = [];
             for (const c of candidates) {
-                if (rawPeaks.length >= 3) break;
-                const tooClose = rawPeaks.some(p => Math.abs(p.i - c.i) < minSepBins);
-                if (!tooClose) rawPeaks.push(c);
+                if (peaks.length >= 3) break;
+                if (!peaks.some(p => Math.abs(p.i - c.i) < minSepBins)) peaks.push(c);
             }
-
-            // Convert to canvas-fraction + dBFS for EMA blending
-            const rawFracs = rawPeaks.map(pk => ({
-                frac: pk.i / (zn - 1),
-                db:   pk.db
-            }));
-
-            // ── Step 3: EMA blend with previous frame ─────────────────────────
-            // α = 0.15 → slow glide; higher = snappier
-            const α = 0.15;
-            const prev = this._smoothPeaks;
-
-            // Match each raw peak to the nearest previous peak (greedy nearest-neighbour)
-            const used = new Array(prev.length).fill(false);
-            const next = [];
-            for (const rp of rawFracs) {
-                let bestIdx = -1, bestDist = Infinity;
-                for (let j = 0; j < prev.length; j++) {
-                    if (used[j]) continue;
-                    const d = Math.abs(rp.frac - prev[j].frac);
-                    if (d < bestDist) { bestDist = d; bestIdx = j; }
-                }
-                if (bestIdx >= 0 && bestDist < 0.15) {
-                    // Blend with existing tracked peak
-                    used[bestIdx] = true;
-                    next.push({
-                        frac: prev[bestIdx].frac + α * (rp.frac - prev[bestIdx].frac),
-                        db:   prev[bestIdx].db   + α * (rp.db   - prev[bestIdx].db),
-                    });
-                } else {
-                    // New peak — start tracking immediately (no blend on first frame)
-                    next.push({ frac: rp.frac, db: rp.db });
-                }
-            }
-            this._smoothPeaks = next;
 
             // ── Draw markers ──────────────────────────────────────────────────
             sCtx.save();
-            for (const pk of next) {
-                const x  = pk.frac * w;
+            for (const pk of peaks) {
+                const x  = (pk.i / (zn - 1)) * w;
                 const db = Math.max(dMin, Math.min(dMax, pk.db));
                 const y  = h - ((db - dMin) / dRange) * h;
 
-                // Faint vertical drop-line from peak to bottom
+                // Faint vertical drop-line
                 sCtx.strokeStyle = 'rgba(126,200,227,0.18)';
                 sCtx.lineWidth   = 1;
                 sCtx.setLineDash([2, 3]);
@@ -1699,15 +1689,15 @@ class BandPanel {
                 sCtx.stroke();
                 sCtx.setLineDash([]);
 
-                // Dot at the peak tip
+                // Dot at peak tip
                 sCtx.fillStyle = 'rgba(126,200,227,0.75)';
                 sCtx.beginPath();
                 sCtx.arc(x, y, 2.5, 0, Math.PI * 2);
                 sCtx.fill();
 
-                // Frequency label just above the dot
+                // Frequency label above dot
                 const absHz = this.meta.start +
-                    (this.zoomStart + pk.frac * (this.zoomEnd - this.zoomStart)) *
+                    (this.zoomStart + (pk.i / (zn - 1)) * (this.zoomEnd - this.zoomStart)) *
                     (this.meta.end - this.meta.start);
                 const label = (absHz / 1e6).toFixed(3);
                 sCtx.font         = '8px monospace';

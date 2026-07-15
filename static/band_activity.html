@@ -1605,6 +1605,74 @@ class BandPanel {
         document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
         document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
 
+        // ── Top-3 local peak markers ──────────────────────────────────────────
+        // Find the top 3 local maxima in the visible (zoomed) bin slice.
+        // A bin qualifies as a local maximum if it is higher than its neighbours
+        // within a minimum separation window (avoids marking adjacent bins of the
+        // same signal as separate peaks).
+        {
+            const minSepBins = Math.max(4, Math.round(zn / 40)); // ~2.5% of visible width
+            const threshold  = p5 + 6; // must be at least 6 dB above the noise floor
+
+            // Collect candidate peaks: local maxima above threshold
+            const candidates = [];
+            for (let i = 1; i < zn - 1; i++) {
+                const db = vals[binStart + i];
+                if (db < threshold) continue;
+                if (db >= vals[binStart + i - 1] && db >= vals[binStart + i + 1]) {
+                    candidates.push({ i, db });
+                }
+            }
+
+            // Sort descending by dB, then greedily pick top 3 with min separation
+            candidates.sort((a, b) => b.db - a.db);
+            const peaks = [];
+            for (const c of candidates) {
+                if (peaks.length >= 3) break;
+                const tooClose = peaks.some(p => Math.abs(p.i - c.i) < minSepBins);
+                if (!tooClose) peaks.push(c);
+            }
+
+            // Draw markers — subtle dot + faint dashed drop-line + small freq label
+            sCtx.save();
+            for (const pk of peaks) {
+                const x  = (pk.i / (zn - 1)) * w;
+                const db = Math.max(dMin, Math.min(dMax, pk.db));
+                const y  = h - ((db - dMin) / dRange) * h;
+
+                // Faint vertical drop-line from peak to bottom
+                sCtx.strokeStyle = 'rgba(126,200,227,0.18)';
+                sCtx.lineWidth   = 1;
+                sCtx.setLineDash([2, 3]);
+                sCtx.beginPath();
+                sCtx.moveTo(x, y + 4);
+                sCtx.lineTo(x, h);
+                sCtx.stroke();
+                sCtx.setLineDash([]);
+
+                // Dot at the peak tip
+                sCtx.fillStyle = 'rgba(126,200,227,0.75)';
+                sCtx.beginPath();
+                sCtx.arc(x, y, 2.5, 0, Math.PI * 2);
+                sCtx.fill();
+
+                // Frequency label just above the dot
+                const absHz  = this.meta.start + (this.zoomStart + (pk.i / (zn - 1)) * (this.zoomEnd - this.zoomStart)) * (this.meta.end - this.meta.start);
+                const label  = (absHz / 1e6).toFixed(3);
+                sCtx.font         = '8px monospace';
+                sCtx.textBaseline = 'bottom';
+                const tw = sCtx.measureText(label).width;
+                // Flip label to right side if near left edge, left side if near right edge
+                let lx = x - tw / 2;
+                if (lx < 2)       lx = x + 4;
+                if (lx + tw > w - 2) lx = x - tw - 4;
+                const ly = Math.max(10, y - 4);
+                sCtx.fillStyle = 'rgba(126,200,227,0.55)';
+                sCtx.fillText(label, lx, ly);
+            }
+            sCtx.restore();
+        }
+
         // ── FT8 frequency highlight ───────────────────────────────────────────
         // Highlight the 3 kHz FT8 window (dial freq → dial+3 kHz, USB) if configured.
         const ft8Hz = this.meta.ft8_frequency;

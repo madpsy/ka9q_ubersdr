@@ -593,6 +593,22 @@ body {
     height: 100%;
 }
 
+.cond-ticker-item--new {
+    background: rgba(255,152,0,0.10);
+    border-left: 2px solid rgba(255,152,0,0.55);
+    padding-left: 10px; /* compensate for the 2px border so total stays ~18px */
+}
+
+.cond-ticker-item--new .cond-ticker-call {
+    color: #ffb74d;
+}
+
+.cond-ticker-item--new .cond-ticker-new-star {
+    color: #ffb74d;
+    font-size: 0.85em;
+    flex-shrink: 0;
+}
+
 .cond-ticker-band {
     font-weight: 700;
     color: #7ec8e3;
@@ -2348,6 +2364,11 @@ async function _fetchWeather() {
 // ── Voice activity ticker ─────────────────────────────────────────────────────
 let _vaTimer = null;
 
+// Tracks when each activity fingerprint (freq|callsign) was first seen so we
+// can highlight items that haven't appeared in the last 10 minutes.
+const _VA_NEW_THRESHOLD_MS = 10 * 60 * 1000;
+const _vaSeenMap = new Map(); // fingerprint → timestamp (ms) when last seen
+
 async function _fetchVoiceActivity() {
     const resp = await fetch('/api/noisefloor/voice-activity/all');
     if (!resp.ok) throw new Error(`voice-activity HTTP ${resp.status}`);
@@ -2393,6 +2414,13 @@ function _renderVoiceTicker(data) {
     if (newKey === _tickerLastKey) return;
     _tickerLastKey = newKey;
 
+    // Prune stale entries from the seen-map so it doesn't grow unbounded
+    const _now = Date.now();
+    const _cutoff = _now - _VA_NEW_THRESHOLD_MS;
+    for (const [fp, ts] of _vaSeenMap) {
+        if (ts < _cutoff) _vaSeenMap.delete(fp);
+    }
+
     // Build item element
     function makeItem(act) {
         const freqMHz = ((act.estimated_dial_freq || act.center_freq) / 1e6).toFixed(3);
@@ -2402,9 +2430,17 @@ function _renderVoiceTicker(data) {
         const cc      = act.dx_country_code || '';
         const flag    = cc ? iso2ToFlag(cc) : '';
 
+        // Fingerprint: frequency + callsign (band is redundant with freq range)
+        const fp      = `${act.estimated_dial_freq || act.center_freq}|${call}`;
+        const lastSeen = _vaSeenMap.get(fp);
+        const isNew   = !lastSeen || (_now - lastSeen) > _VA_NEW_THRESHOLD_MS;
+        // Always update the timestamp so continuous activity doesn't re-trigger
+        _vaSeenMap.set(fp, _now);
+
         const el = document.createElement('span');
-        el.className = 'cond-ticker-item';
+        el.className = 'cond-ticker-item' + (isNew ? ' cond-ticker-item--new' : '');
         el.innerHTML =
+            (isNew ? `<span class="cond-ticker-new-star">★</span>` : '') +
             `<span class="cond-ticker-band">${_escHtml(band)}</span>` +
             `<span class="cond-ticker-freq">${_escHtml(freqMHz)} MHz ${_escHtml(mode)}</span>` +
             (call

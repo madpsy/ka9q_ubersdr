@@ -219,12 +219,16 @@
             ? new Date(data.fetched_at).toISOString().replace('T', ' ').substring(0, 19) + ' UTC'
             : '—';
         const rowsBefore = data.rows_before_limit != null ? data.rows_before_limit : '';
+        const isUberSDRRow = r => r.versions && r.versions.some(v => v === 'UberSDR');
+        const uberSdrTotal = rows.filter(isUberSDRRow).length;
+        const uberSdrTop25 = rows.slice(0, 25).filter(isUberSDRRow).length;
         _setStatus(
             'Fetched ' + fetchedAt +
             ' (' + data.fetched_ms + ' ms) · ' +
             'Showing ' + rows.length + ' receivers' +
             (rowsBefore ? ' of ' + rowsBefore.toLocaleString() + ' total' : '') +
-            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : '')
+            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : ''),
+            uberSdrTotal, uberSdrTop25
         );
 
         if (rows.length === 0) {
@@ -308,12 +312,21 @@
                 ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
                 : 'padding:5px 8px;text-align:right;color:#888;font-size:12px;';
             const reporterExtra = isOwn ? ' ⭐' : '';
+            // UberSDR favicon badge
+            const isUberSDR = row.versions && row.versions.some(v => v === 'UberSDR');
+            const uberBadge = isUberSDR
+                ? ' <img src="images/favicon-16x16.png" width="16" height="16" style="vertical-align:middle;display:inline-block;" alt="UberSDR">'
+                : '';
+            // Version tooltip — shown on hover over the reporter cell
+            const verTitle = row.versions && row.versions.length > 0
+                ? ` title="${_esc('💻 ' + row.versions.join(' / '))}"`
+                : '';
             // Encode reporter callsign for use in onclick attribute
             const repEsc = _esc(row.reporter).replace(/'/g, '&#39;');
             return `<tr style="${rowBg}" onclick="wsprRankRowClicked('${repEsc}')" title="Click to select/deselect for comparison">
                 <td style="${rankStyle}">${row.rank}</td>
-                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">
-                    ${_esc(row.reporter)}${reporterExtra}${isSelected ? ' 🔵' : ''}
+                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;"${verTitle}>
+                    ${_esc(row.reporter)}${uberBadge}${reporterExtra}${isSelected ? ' 🔵' : ''}
                     <span style="color:#888;font-size:11px;margin-left:4px;">${_esc(row.locator)}</span>
                 </td>
                 <td style="padding:5px 8px;text-align:right;">${(row.raw || 0).toLocaleString()}</td>
@@ -374,9 +387,24 @@
     }
 
     // ── DOM helpers ──────────────────────────────────────────────────────────
-    function _setStatus(msg) {
+    function _setStatus(msg, uberSdrCount, uberSdrTop25) {
         const el = document.getElementById('wsprRankStatus');
-        if (el) el.textContent = msg;
+        if (!el) return;
+        if (uberSdrCount !== undefined && uberSdrCount > 0) {
+            el.style.display = 'flex';
+            el.style.justifyContent = 'space-between';
+            el.style.alignItems = 'center';
+            const top25Str = uberSdrTop25 > 0 ? ', ' + uberSdrTop25 + ' in top 25' : '';
+            el.innerHTML =
+                '<span>' + _esc(msg) + '</span>' +
+                '<span style="white-space:nowrap;color:#555;"><img src="images/favicon-16x16.png" width="16" height="16" style="vertical-align:middle;display:inline-block;" alt="UberSDR"> ' +
+                uberSdrCount + ' UberSDR reporter' + (uberSdrCount !== 1 ? 's' : '') + top25Str + '</span>';
+        } else {
+            el.style.display = '';
+            el.style.justifyContent = '';
+            el.style.alignItems = '';
+            el.textContent = msg;
+        }
     }
 
     function _setTableContent(html) {

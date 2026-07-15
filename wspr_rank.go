@@ -50,6 +50,21 @@ const (
 	wsprRankURLRolling24h = "https://db1.wspr.live/?query=%20SELECT%20rx_sign%2C%20rx_loc%2C%20arraySum(gross)%20as%20raw%2C%20arraySum(dupes)%20as%20dupe%2C%20arraySum(uniques)%20as%20unique%2C%20groupArray(band)%20as%20bands%2C%20groupArray(uniques)%20as%20uniques%2C%20groupArray(gross)%20as%20gross%2C%20groupArray(dupes)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20rx_loc%2C%20band%2C%20count()%20as%20gross%2C%20count(distinct%20tx_sign)%20as%20uniques%20FROM%20wspr.rx%20WHERE%20time%20between%20subtractHours(now()%2C%2024)%20and%20now()%20and%20match(tx_sign%2C%27%5E%5BQ01%5D%27)%3D0%20GROUP%20BY%20rx_loc%2C%20rx_sign%2C%20band%20)%20AS%20a%20LEFT%20JOIN%20(%20SELECT%20rx_sign%2C%20band%2C%20sum(cnt)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20band%2C%20count()%20as%20cnt%20FROM%20wspr.rx%20WHERE%20time%20between%20subtractHours(now()%2C%2024)%20and%20now()%20GROUP%20BY%20time%2C%20band%2C%20rx_sign%2C%20tx_sign%20HAVING%20cnt%20%3E%201%20)%20GROUP%20BY%20rx_sign%2C%20band%20)%20AS%20b%20USING%20(rx_sign%2C%20band)%20group%20by%20rx_loc%2C%20rx_sign%20ORDER%20BY%20unique%20DESC%20LIMIT%20200%20format%20JSONCompact"
 	wsprRankURLYesterday  = "https://db1.wspr.live/?query=%20SELECT%20rx_sign%2C%20rx_loc%2C%20arraySum(gross)%20as%20raw%2C%20arraySum(dupes)%20as%20dupe%2C%20arraySum(uniques)%20as%20unique%2C%20groupArray(band)%20as%20bands%2C%20groupArray(uniques)%20as%20uniques%2C%20groupArray(gross)%20as%20gross%2C%20groupArray(dupes)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20rx_loc%2C%20band%2C%20count()%20as%20gross%2C%20count(distinct%20tx_sign)%20as%20uniques%20FROM%20wspr.rx%20WHERE%20time%20between%20toStartOfDay%20(yesterday())%20and%20toStartOfDay%20(today())%20and%20match(tx_sign%2C%27%5E%5BQ01%5D%27)%3D0%20GROUP%20BY%20rx_loc%2C%20rx_sign%2C%20band%20)%20AS%20a%20LEFT%20JOIN%20(%20SELECT%20rx_sign%2C%20band%2C%20sum(cnt)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20band%2C%20count()%20as%20cnt%20FROM%20wspr.rx%20WHERE%20time%20between%20toStartOfDay%20(yesterday())%20and%20toStartOfDay%20(today())%20GROUP%20BY%20time%2C%20band%2C%20rx_sign%2C%20tx_sign%20HAVING%20cnt%20%3E%201%20)%20GROUP%20BY%20rx_sign%2C%20band%20)%20AS%20b%20USING%20(rx_sign%2C%20band)%20group%20by%20rx_loc%2C%20rx_sign%20ORDER%20BY%20unique%20DESC%20LIMIT%20200%20format%20JSONCompact"
 	wsprRankURLToday      = "https://db1.wspr.live/?query=%20SELECT%20rx_sign%2C%20rx_loc%2C%20arraySum(gross)%20as%20raw%2C%20arraySum(dupes)%20as%20dupe%2C%20arraySum(uniques)%20as%20unique%2C%20groupArray(band)%20as%20bands%2C%20groupArray(uniques)%20as%20uniques%2C%20groupArray(gross)%20as%20gross%2C%20groupArray(dupes)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20rx_loc%2C%20band%2C%20count()%20as%20gross%2C%20count(distinct%20tx_sign)%20as%20uniques%20FROM%20wspr.rx%20WHERE%20time%20between%20toStartOfDay%20(today())%20and%20now()%20and%20match(tx_sign%2C%27%5E%5BQ01%5D%27)%3D0%20GROUP%20BY%20rx_loc%2C%20rx_sign%2C%20band%20)%20AS%20a%20LEFT%20JOIN%20(%20SELECT%20rx_sign%2C%20band%2C%20sum(cnt)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20band%2C%20count()%20as%20cnt%20FROM%20wspr.rx%20WHERE%20time%20between%20toStartOfDay%20(today())%20and%20now()%20GROUP%20BY%20time%2C%20band%2C%20rx_sign%2C%20tx_sign%20HAVING%20cnt%20%3E%201%20)%20GROUP%20BY%20rx_sign%2C%20band%20)%20AS%20b%20USING%20(rx_sign%2C%20band)%20group%20by%20rx_loc%2C%20rx_sign%20ORDER%20BY%20unique%20DESC%20LIMIT%20200%20format%20JSONCompact"
+
+	// wsprRankURLVersions fetches all distinct non-empty client version strings
+	// for each rx_sign seen in the rolling 24-hour window.  LIMIT 500 ensures
+	// we cover callsigns that appear in any of the three ranking windows.
+	// Decoded query:
+	//   SELECT rx_sign, groupUniqArray(version) AS versions
+	//   FROM wspr.rx
+	//   WHERE time BETWEEN subtractHours(now(), 24) AND now()
+	//     AND match(tx_sign, '^[Q01]') = 0
+	//     AND version != ''
+	//   GROUP BY rx_sign
+	//   ORDER BY count() DESC
+	//   LIMIT 500
+	//   FORMAT JSONCompact
+	wsprRankURLVersions = "https://db1.wspr.live/?query=SELECT%20rx_sign%2C%20groupUniqArray(version)%20AS%20versions%20FROM%20wspr.rx%20WHERE%20time%20BETWEEN%20subtractHours(now()%2C%2024)%20AND%20now()%20AND%20match(tx_sign%2C%20%27%5E%5BQ01%5D%27)%3D0%20AND%20version%20!%3D%20%27%27%20GROUP%20BY%20rx_sign%20ORDER%20BY%20count()%20DESC%20LIMIT%20500%20FORMAT%20JSONCompact"
 )
 
 // WSPRRankRow is one receiver entry returned by the WSPR Live query.
@@ -59,6 +74,9 @@ const (
 //
 // bands is Array(Int16) — integer metres (e.g. 20, 40, 80).
 // raw/dupe/unique and the per-band arrays are UInt64.
+// Versions is populated from a separate concurrent query (wsprRankURLVersions)
+// and contains all distinct non-empty client version strings seen for this
+// rx_sign in the rolling 24-hour window.
 type WSPRRankRow struct {
 	RxSign       string   `json:"rx_sign"`
 	RxLoc        string   `json:"rx_loc"`
@@ -69,6 +87,7 @@ type WSPRRankRow struct {
 	Uniques      []uint64 `json:"uniques"`
 	Gross        []uint64 `json:"gross"`
 	Dupes        []uint64 `json:"dupes"`
+	Versions     []string `json:"versions,omitempty"`      // distinct client version strings from wsprRankURLVersions
 	OriginalRank int      `json:"original_rank,omitempty"` // set when row is extracted from a filtered subset; 0 = use position
 }
 
@@ -102,6 +121,7 @@ var wsprBandOrder = []struct {
 
 // WSPRRankTableRow is one row in the formatted leaderboard table.
 // BandUniques maps band name → unique count for that band.
+// Versions mirrors WSPRRankRow.Versions — all distinct client version strings.
 type WSPRRankTableRow struct {
 	Rank        int               `json:"rank"`
 	Reporter    string            `json:"reporter"`
@@ -110,6 +130,7 @@ type WSPRRankTableRow struct {
 	Dupes       uint64            `json:"dupes"`
 	Unique      uint64            `json:"unique"`
 	BandUniques map[string]uint64 `json:"band_uniques"`
+	Versions    []string          `json:"versions,omitempty"`
 }
 
 // WSPRRankTable is the formatted leaderboard for one time window.
@@ -183,6 +204,7 @@ func formatWSPRRankWindow(w WSPRRankWindow) WSPRRankTable {
 			Dupes:       raw.Dupe,
 			Unique:      raw.Unique,
 			BandUniques: make(map[string]uint64, len(raw.Bands)),
+			Versions:    raw.Versions,
 		}
 
 		for i, metres := range raw.Bands {
@@ -402,7 +424,10 @@ func (f *WSPRRankFetcher) Cached() *WSPRRankResponse {
 	return f.cached
 }
 
-// fetchAll fetches all three time windows concurrently.
+// fetchAll fetches all three time windows plus the version map concurrently.
+// The version map (rx_sign → []string of distinct client versions) is fetched
+// once from the rolling-24h window and merged into every ranking window's rows
+// after all fetches complete.
 func (f *WSPRRankFetcher) fetchAll() *WSPRRankResponse {
 	type result struct {
 		window WSPRRankWindow
@@ -421,7 +446,9 @@ func (f *WSPRRankFetcher) fetchAll() *WSPRRankResponse {
 	}
 
 	results := make(chan result, len(specs))
+	versionsCh := make(chan map[string][]string, 1)
 
+	// Fetch the three ranking windows concurrently.
 	for _, spec := range specs {
 		spec := spec
 		go func() {
@@ -429,6 +456,11 @@ func (f *WSPRRankFetcher) fetchAll() *WSPRRankResponse {
 			results <- result{window: w, key: spec.key}
 		}()
 	}
+
+	// Fetch the version map concurrently alongside the ranking windows.
+	go func() {
+		versionsCh <- f.fetchVersionMap()
+	}()
 
 	resp := &WSPRRankResponse{
 		GeneratedAt: time.Now().UTC(),
@@ -446,7 +478,85 @@ func (f *WSPRRankFetcher) fetchAll() *WSPRRankResponse {
 		}
 	}
 
+	// Merge version strings into every window's rows.
+	versions := <-versionsCh
+	if len(versions) > 0 {
+		mergeVersions := func(w *WSPRRankWindow) {
+			for i := range w.Data {
+				if v, ok := versions[w.Data[i].RxSign]; ok {
+					w.Data[i].Versions = v
+				}
+			}
+		}
+		mergeVersions(&resp.Rolling24h)
+		mergeVersions(&resp.Yesterday)
+		mergeVersions(&resp.Today)
+	}
+
 	return resp
+}
+
+// fetchVersionMap fetches the version query and returns a map of
+// rx_sign → []string of distinct non-empty client version strings.
+// On any error an empty (non-nil) map is returned so callers can
+// safely range over it without a nil check.
+func (f *WSPRRankFetcher) fetchVersionMap() map[string][]string {
+	out := make(map[string][]string)
+
+	start := time.Now()
+	req, err := http.NewRequest(http.MethodGet, wsprRankURLVersions, nil)
+	if err != nil {
+		log.Printf("[WSPRRank] version map: build request: %v", err)
+		return out
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "UberSDR/"+Version+" (wspr-rank-versions; https://github.com/ka9q/ubersdr)")
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		log.Printf("[WSPRRank] version map: fetch error: %v", err)
+		return out
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[WSPRRank] version map: upstream HTTP %d", resp.StatusCode)
+		return out
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, wsprRankMaxBodyBytes))
+	if err != nil {
+		log.Printf("[WSPRRank] version map: body read error: %v", err)
+		return out
+	}
+
+	var compact wsprLiveCompact
+	if err := json.Unmarshal(body, &compact); err != nil {
+		log.Printf("[WSPRRank] version map: JSON parse error: %v", err)
+		return out
+	}
+
+	for i, raw := range compact.Data {
+		if len(raw) < 2 {
+			continue
+		}
+		var rxSign string
+		var versions []string
+		if err := json.Unmarshal(raw[0], &rxSign); err != nil {
+			log.Printf("[WSPRRank] version map row %d rx_sign: %v", i, err)
+			continue
+		}
+		if err := json.Unmarshal(raw[1], &versions); err != nil {
+			log.Printf("[WSPRRank] version map row %d versions: %v", i, err)
+			continue
+		}
+		if rxSign != "" {
+			out[rxSign] = versions
+		}
+	}
+
+	log.Printf("[WSPRRank] version map: fetched %d entries in %s", len(out), time.Since(start).Round(time.Millisecond))
+	return out
 }
 
 // fetchWindow fetches and parses a single WSPR Live JSONCompact endpoint,

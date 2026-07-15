@@ -429,7 +429,7 @@
                 rowBg = 'cursor:pointer;';
             }
             const isUberSDR = row.software && row.software.some(sw => sw.name.startsWith('UberSDR'));
-            const csSuffix = isUberSDR ? ' 📡' : '';
+            const csSuffix = isUberSDR ? ' <img src="images/favicon-16x16.png" width="16" height="16" style="vertical-align:middle;display:inline-block;" alt="UberSDR">' : '';
             const csExtra = isOwn ? ' ⭐' : '';
             const rankStyle = isOwn
                 ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
@@ -528,7 +528,7 @@
             const top10Str = uberSdrTop10 > 0 ? ', ' + uberSdrTop10 + ' in top 10' : '';
             el.innerHTML =
                 '<span>' + _esc(msg) + '</span>' +
-                '<span style="white-space:nowrap;color:#555;">📡 ' + uberSdrCount + ' UberSDR reporter' + (uberSdrCount !== 1 ? 's' : '') + top10Str + '</span>';
+                '<span style="white-space:nowrap;color:#555;"><img src="images/favicon-16x16.png" width="16" height="16" style="vertical-align:middle;display:inline-block;" alt="UberSDR"> ' + uberSdrCount + ' UberSDR reporter' + (uberSdrCount !== 1 ? 's' : '') + top10Str + '</span>';
         } else {
             el.style.display = '';
             el.style.justifyContent = '';

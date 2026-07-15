@@ -254,10 +254,22 @@ func (l *TelegramBotListener) GetHistory() []commandHistoryEntry {
 // clear all commands.
 //
 // /help is always included when registering because it is always handled.
+//
+// Commands are registered for two scopes so the autocomplete menu works in
+// every context where the bot is used:
+//   - default                  (private chats / fallback)
+//   - all_chat_administrators  (group admins — matches the bot's own
+//     admin-only enforcement in groups)
+//
+// Each scope is retried up to 3 times with a 5-second backoff so that a
+// transient network error at startup does not permanently break the menu.
 func (l *TelegramBotListener) syncBotCommands(enabledCmds []string) {
 	type tgBotCommand struct {
 		Command     string `json:"command"`
 		Description string `json:"description"`
+	}
+	type tgBotCommandScope struct {
+		Type string `json:"type"`
 	}
 
 	// Build a set of enabled optional command names for fast lookup.
@@ -288,38 +300,58 @@ func (l *TelegramBotListener) syncBotCommands(enabledCmds []string) {
 	}
 	// nil enabledCmds → clear the menu (cmds stays empty).
 
-	payload := map[string]interface{}{
-		"commands": cmds,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("[TelegramListener:%s] syncBotCommands marshal error: %v", l.channelName, err)
-		return
-	}
-	resp, err := l.client.Post(l.apiBase+"/setMyCommands", "application/json", bytes.NewReader(body)) //nolint:noctx
-	if err != nil {
-		log.Printf("[TelegramListener:%s] setMyCommands error: %v", l.channelName, err)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	// Register (or clear) commands for both the default scope (private chats)
+	// and the all_chat_administrators scope (group chats). Without the latter,
+	// the / autocomplete menu does not appear for admins in group chats.
+	scopes := []string{"default", "all_chat_administrators"}
 
-	var result struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description,omitempty"`
+	for _, scopeType := range scopes {
+		payload := map[string]interface{}{
+			"commands": cmds,
+			"scope":    tgBotCommandScope{Type: scopeType},
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("[TelegramListener:%s] syncBotCommands marshal error (scope=%s): %v",
+				l.channelName, scopeType, err)
+			continue
+		}
+
+		const maxAttempts = 3
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			if attempt > 1 {
+				time.Sleep(5 * time.Second)
+			}
+			resp, err := l.client.Post(l.apiBase+"/setMyCommands", "application/json", bytes.NewReader(body)) //nolint:noctx
+			if err != nil {
+				log.Printf("[TelegramListener:%s] setMyCommands error (scope=%s, attempt %d/%d): %v",
+					l.channelName, scopeType, attempt, maxAttempts, err)
+				continue
+			}
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			var result struct {
+				OK          bool   `json:"ok"`
+				Description string `json:"description,omitempty"`
+			}
+			if err := json.Unmarshal(respBody, &result); err != nil || !result.OK {
+				log.Printf("[TelegramListener:%s] setMyCommands failed (scope=%s, attempt %d/%d): %s",
+					l.channelName, scopeType, attempt, maxAttempts, string(respBody))
+				continue
+			}
+			break // success
+		}
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil || !result.OK {
-		log.Printf("[TelegramListener:%s] setMyCommands failed: %s", l.channelName, string(respBody))
-		return
-	}
+
 	if len(cmds) == 0 {
-		log.Printf("[TelegramListener:%s] setMyCommands: cleared command menu", l.channelName)
+		log.Printf("[TelegramListener:%s] setMyCommands: cleared command menu (all scopes)", l.channelName)
 	} else {
 		names := make([]string, len(cmds))
 		for i, c := range cmds {
 			names[i] = "/" + c.Command
 		}
-		log.Printf("[TelegramListener:%s] setMyCommands: registered %v", l.channelName, names)
+		log.Printf("[TelegramListener:%s] setMyCommands: registered %v (all scopes)", l.channelName, names)
 	}
 }
 

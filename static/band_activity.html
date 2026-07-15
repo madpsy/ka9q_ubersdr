@@ -1655,7 +1655,7 @@ class BandPanel {
             // fraction of the full band, so scale accordingly.
             const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
             const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
-            const threshold  = p5 + 20;
+            const threshold  = p5 + 15;
 
             const candidates = [];
             for (let i = 1; i < zn - 1; i++) {

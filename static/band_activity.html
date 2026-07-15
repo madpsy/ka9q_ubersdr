@@ -2475,9 +2475,13 @@ async function _fetchWeather() {
 let _vaTimer = null;
 
 // Tracks when each activity fingerprint (freq|callsign) was first seen so we
-// can highlight items that haven't appeared in the last 10 minutes.
-const _VA_NEW_THRESHOLD_MS = 10 * 60 * 1000;
-const _vaSeenMap = new Map(); // fingerprint → timestamp (ms) when last seen
+// can highlight items that are newly appeared.
+// _VA_HIGHLIGHT_MS  — how long to keep the amber highlight after first appearance.
+// _VA_NEW_THRESHOLD_MS — how long a station must be absent before it's treated
+//                        as "new" again when it reappears.
+const _VA_HIGHLIGHT_MS    =  2 * 60 * 1000;  // highlight for 2 minutes
+const _VA_NEW_THRESHOLD_MS = 10 * 60 * 1000;  // re-trigger after 10 min absence
+const _vaSeenMap = new Map(); // fingerprint → timestamp (ms) when first seen
 
 async function _fetchVoiceActivity() {
     const resp = await fetch('/api/noisefloor/voice-activity/all');
@@ -2524,7 +2528,7 @@ function _renderVoiceTicker(data, _precomputed) {
         }
         _tickerHadItems = true;
 
-        // Prune stale entries from the seen-map so it doesn't grow unbounded
+        // Prune entries older than the re-trigger threshold so the map doesn't grow unbounded
         const _now = Date.now();
         const _cutoff = _now - _VA_NEW_THRESHOLD_MS;
         for (const [fp, ts] of _vaSeenMap) {
@@ -2533,15 +2537,16 @@ function _renderVoiceTicker(data, _precomputed) {
 
         // Compute isNew for each item BEFORE the fingerprint check so the key
         // includes new/not-new state — a transition triggers a DOM rebuild.
+        //
+        // isNew = true  while (_now - firstSeen) < _VA_HIGHLIGHT_MS  (highlight window)
+        // isNew = true  when firstSeen is absent (never seen, or absent > 10 min → pruned)
+        // isNew = false once the highlight window expires
         itemsWithNew = items.map(act => {
             const call = act.dx_callsign || '';
             const fp   = `${act.estimated_dial_freq || act.center_freq}|${call}`;
             const firstSeen = _vaSeenMap.get(fp);
-            const isNew = !firstSeen || (_now - firstSeen) > _VA_NEW_THRESHOLD_MS;
-            // Only record the timestamp the first time we see this fingerprint.
-            // We do NOT update it on subsequent polls — the entry ages naturally
-            // until it exceeds _VA_NEW_THRESHOLD_MS, at which point the item is
-            // treated as new again (station reappeared after a long absence).
+            const isNew = !firstSeen || (_now - firstSeen) < _VA_HIGHLIGHT_MS;
+            // Record first-seen timestamp only once; it ages out after _VA_NEW_THRESHOLD_MS
             if (!firstSeen) _vaSeenMap.set(fp, _now);
             return { ...act, _fp: fp, _isNew: isNew };
         });

@@ -2380,61 +2380,69 @@ let _tickerLastKey  = '';    // fingerprint of last rendered item list
 let _tickerAnimStart = null; // performance.now() when current animation began
 const _TICKER_PX_PER_S = 60; // scroll speed
 
-function _renderVoiceTicker(data) {
+function _renderVoiceTicker(data, _precomputed) {
     const tickerEl = document.getElementById('cond-ticker');
     const trackEl  = document.getElementById('cond-ticker-track');
     if (!tickerEl || !trackEl) return;
 
-    // Flatten all activities across all bands into a sorted list
-    const items = [];
-    const bands = data?.bands || {};
-    for (const [band, activities] of Object.entries(bands)) {
-        for (const act of activities) {
-            items.push({ band, ...act });
+    let itemsWithNew;
+
+    if (_precomputed) {
+        // Deferred retry path — reuse already-computed items+isNew so we don't
+        // re-run the seen-map logic (which would mark everything as not-new).
+        itemsWithNew = _precomputed;
+    } else {
+        // Flatten all activities across all bands into a sorted list
+        const items = [];
+        const bands = data?.bands || {};
+        for (const [band, activities] of Object.entries(bands)) {
+            for (const act of activities) {
+                items.push({ band, ...act });
+            }
         }
+
+        // Sort by frequency ascending so the ticker reads low-to-high across bands
+        items.sort((a, b) =>
+            (a.estimated_dial_freq || a.center_freq || 0) -
+            (b.estimated_dial_freq || b.center_freq || 0)
+        );
+
+        // If no items, keep whatever is already scrolling — don't hide or reset
+        if (items.length === 0) {
+            if (!_tickerHadItems) tickerEl.style.display = 'none';
+            return;
+        }
+        _tickerHadItems = true;
+
+        // Prune stale entries from the seen-map so it doesn't grow unbounded
+        const _now = Date.now();
+        const _cutoff = _now - _VA_NEW_THRESHOLD_MS;
+        for (const [fp, ts] of _vaSeenMap) {
+            if (ts < _cutoff) _vaSeenMap.delete(fp);
+        }
+
+        // Compute isNew for each item BEFORE the fingerprint check so the key
+        // includes new/not-new state — a transition triggers a DOM rebuild.
+        itemsWithNew = items.map(act => {
+            const call = act.dx_callsign || '';
+            const fp   = `${act.estimated_dial_freq || act.center_freq}|${call}`;
+            const firstSeen = _vaSeenMap.get(fp);
+            const isNew = !firstSeen || (_now - firstSeen) > _VA_NEW_THRESHOLD_MS;
+            // Only record the timestamp the first time we see this fingerprint.
+            // We do NOT update it on subsequent polls — the entry ages naturally
+            // until it exceeds _VA_NEW_THRESHOLD_MS, at which point the item is
+            // treated as new again (station reappeared after a long absence).
+            if (!firstSeen) _vaSeenMap.set(fp, _now);
+            return { ...act, _fp: fp, _isNew: isNew };
+        });
+
+        // Build a fingerprint — skip DOM rebuild if nothing changed (including new/not-new state)
+        const newKey = itemsWithNew.map(a =>
+            `${a._fp}|${a._isNew ? 'N' : ''}`
+        ).join(',');
+        if (newKey === _tickerLastKey) return;
+        _tickerLastKey = newKey;
     }
-
-    // Sort by frequency ascending so the ticker reads low-to-high across bands
-    items.sort((a, b) =>
-        (a.estimated_dial_freq || a.center_freq || 0) -
-        (b.estimated_dial_freq || b.center_freq || 0)
-    );
-
-    // If no items, keep whatever is already scrolling — don't hide or reset
-    if (items.length === 0) {
-        if (!_tickerHadItems) tickerEl.style.display = 'none';
-        return;
-    }
-    _tickerHadItems = true;
-
-    // Prune stale entries from the seen-map so it doesn't grow unbounded
-    const _now = Date.now();
-    const _cutoff = _now - _VA_NEW_THRESHOLD_MS;
-    for (const [fp, ts] of _vaSeenMap) {
-        if (ts < _cutoff) _vaSeenMap.delete(fp);
-    }
-
-    // Compute isNew for each item BEFORE the fingerprint check so the key
-    // includes new/not-new state — a transition triggers a DOM rebuild.
-    const itemsWithNew = items.map(act => {
-        const call = act.dx_callsign || '';
-        const fp   = `${act.estimated_dial_freq || act.center_freq}|${call}`;
-        const firstSeen = _vaSeenMap.get(fp);
-        const isNew = !firstSeen || (_now - firstSeen) > _VA_NEW_THRESHOLD_MS;
-        // Only record the timestamp the first time we see this fingerprint.
-        // We do NOT update it on subsequent polls — the entry ages naturally
-        // until it exceeds _VA_NEW_THRESHOLD_MS, at which point the item is
-        // treated as new again (station reappeared after a long absence).
-        if (!firstSeen) _vaSeenMap.set(fp, _now);
-        return { ...act, _fp: fp, _isNew: isNew };
-    });
-
-    // Build a fingerprint — skip DOM rebuild if nothing changed (including new/not-new state)
-    const newKey = itemsWithNew.map(a =>
-        `${a._fp}|${a._isNew ? 'N' : ''}`
-    ).join(',');
-    if (newKey === _tickerLastKey) return;
-    _tickerLastKey = newKey;
 
     // Build item element
     function makeItem(act) {
@@ -2471,8 +2479,9 @@ function _renderVoiceTicker(data) {
     tickerEl.removeChild(probe);
 
     if (singleW < 10) {
-        // Can't measure yet — defer and retry
-        setTimeout(() => _renderVoiceTicker(data), 120);
+        // Can't measure yet — defer and retry, passing the already-computed items
+        // so the seen-map logic doesn't run again and wipe the isNew flags.
+        setTimeout(() => _renderVoiceTicker(null, itemsWithNew), 120);
         return;
     }
 

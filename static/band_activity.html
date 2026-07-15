@@ -1031,6 +1031,10 @@ class BandPanel {
         this.animFrame = null;
         this.dirty = false;        // true when new data arrived since last draw
 
+        // ── Smoothed peak state (for top-3 markers) ──────────────────────────
+        // Each entry: { x: canvas-fraction, db: dBFS } — EMA-smoothed per frame.
+        this._smoothPeaks = [];    // up to 3 entries, persisted across frames
+
         // ── Zoom state ──────────────────────────────────────────────────────
         this.zoomStart = 0;        // fraction [0,1] of full bin array
         this.zoomEnd   = 1;
@@ -1605,38 +1609,83 @@ class BandPanel {
         document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
         document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
 
-        // ── Top-3 local peak markers ──────────────────────────────────────────
-        // Find the top 3 local maxima in the visible (zoomed) bin slice.
-        // A bin qualifies as a local maximum if it is higher than its neighbours
-        // within a minimum separation window (avoids marking adjacent bins of the
-        // same signal as separate peaks).
+        // ── Top-3 local peak markers (smoothed) ──────────────────────────────
+        // 1. Smooth the spectrum with a small box-filter to reduce frame noise.
+        // 2. Find local maxima in the zoomed slice with a minimum separation.
+        // 3. EMA-blend the detected peaks with the previous frame's positions so
+        //    markers glide rather than snap.
         {
-            const minSepBins = Math.max(4, Math.round(zn / 40)); // ~2.5% of visible width
-            const threshold  = p5 + 6; // must be at least 6 dB above the noise floor
+            // ── Step 1: box-smooth the zoomed slice ───────────────────────────
+            const smoothR = Math.max(2, Math.round(zn / 80)); // ~1.25% of visible width
+            const smoothed = new Float32Array(zn);
+            for (let i = 0; i < zn; i++) {
+                let sum = 0, cnt = 0;
+                for (let j = Math.max(0, i - smoothR); j <= Math.min(zn - 1, i + smoothR); j++) {
+                    sum += vals[binStart + j]; cnt++;
+                }
+                smoothed[i] = sum / cnt;
+            }
 
-            // Collect candidate peaks: local maxima above threshold
+            // ── Step 2: find local maxima ─────────────────────────────────────
+            const minSepBins = Math.max(6, Math.round(zn / 30)); // ~3% of visible width
+            const threshold  = p5 + 8; // must be at least 8 dB above noise floor
+
             const candidates = [];
             for (let i = 1; i < zn - 1; i++) {
-                const db = vals[binStart + i];
+                const db = smoothed[i];
                 if (db < threshold) continue;
-                if (db >= vals[binStart + i - 1] && db >= vals[binStart + i + 1]) {
+                if (db >= smoothed[i - 1] && db >= smoothed[i + 1]) {
                     candidates.push({ i, db });
                 }
             }
 
-            // Sort descending by dB, then greedily pick top 3 with min separation
             candidates.sort((a, b) => b.db - a.db);
-            const peaks = [];
+            const rawPeaks = [];
             for (const c of candidates) {
-                if (peaks.length >= 3) break;
-                const tooClose = peaks.some(p => Math.abs(p.i - c.i) < minSepBins);
-                if (!tooClose) peaks.push(c);
+                if (rawPeaks.length >= 3) break;
+                const tooClose = rawPeaks.some(p => Math.abs(p.i - c.i) < minSepBins);
+                if (!tooClose) rawPeaks.push(c);
             }
 
-            // Draw markers — subtle dot + faint dashed drop-line + small freq label
+            // Convert to canvas-fraction + dBFS for EMA blending
+            const rawFracs = rawPeaks.map(pk => ({
+                frac: pk.i / (zn - 1),
+                db:   pk.db
+            }));
+
+            // ── Step 3: EMA blend with previous frame ─────────────────────────
+            // α = 0.15 → slow glide; higher = snappier
+            const α = 0.15;
+            const prev = this._smoothPeaks;
+
+            // Match each raw peak to the nearest previous peak (greedy nearest-neighbour)
+            const used = new Array(prev.length).fill(false);
+            const next = [];
+            for (const rp of rawFracs) {
+                let bestIdx = -1, bestDist = Infinity;
+                for (let j = 0; j < prev.length; j++) {
+                    if (used[j]) continue;
+                    const d = Math.abs(rp.frac - prev[j].frac);
+                    if (d < bestDist) { bestDist = d; bestIdx = j; }
+                }
+                if (bestIdx >= 0 && bestDist < 0.15) {
+                    // Blend with existing tracked peak
+                    used[bestIdx] = true;
+                    next.push({
+                        frac: prev[bestIdx].frac + α * (rp.frac - prev[bestIdx].frac),
+                        db:   prev[bestIdx].db   + α * (rp.db   - prev[bestIdx].db),
+                    });
+                } else {
+                    // New peak — start tracking immediately (no blend on first frame)
+                    next.push({ frac: rp.frac, db: rp.db });
+                }
+            }
+            this._smoothPeaks = next;
+
+            // ── Draw markers ──────────────────────────────────────────────────
             sCtx.save();
-            for (const pk of peaks) {
-                const x  = (pk.i / (zn - 1)) * w;
+            for (const pk of next) {
+                const x  = pk.frac * w;
                 const db = Math.max(dMin, Math.min(dMax, pk.db));
                 const y  = h - ((db - dMin) / dRange) * h;
 
@@ -1657,14 +1706,15 @@ class BandPanel {
                 sCtx.fill();
 
                 // Frequency label just above the dot
-                const absHz  = this.meta.start + (this.zoomStart + (pk.i / (zn - 1)) * (this.zoomEnd - this.zoomStart)) * (this.meta.end - this.meta.start);
-                const label  = (absHz / 1e6).toFixed(3);
+                const absHz = this.meta.start +
+                    (this.zoomStart + pk.frac * (this.zoomEnd - this.zoomStart)) *
+                    (this.meta.end - this.meta.start);
+                const label = (absHz / 1e6).toFixed(3);
                 sCtx.font         = '8px monospace';
                 sCtx.textBaseline = 'bottom';
                 const tw = sCtx.measureText(label).width;
-                // Flip label to right side if near left edge, left side if near right edge
                 let lx = x - tw / 2;
-                if (lx < 2)       lx = x + 4;
+                if (lx < 2)          lx = x + 4;
                 if (lx + tw > w - 2) lx = x - tw - 4;
                 const ly = Math.max(10, y - 4);
                 sCtx.fillStyle = 'rgba(126,200,227,0.55)';

@@ -2407,19 +2407,34 @@ function _renderVoiceTicker(data) {
     }
     _tickerHadItems = true;
 
-    // Build a fingerprint — skip DOM rebuild if nothing changed
-    const newKey = items.map(a =>
-        `${a.estimated_dial_freq || a.center_freq}|${a.dx_callsign || ''}|${a.band}`
-    ).join(',');
-    if (newKey === _tickerLastKey) return;
-    _tickerLastKey = newKey;
-
     // Prune stale entries from the seen-map so it doesn't grow unbounded
     const _now = Date.now();
     const _cutoff = _now - _VA_NEW_THRESHOLD_MS;
     for (const [fp, ts] of _vaSeenMap) {
         if (ts < _cutoff) _vaSeenMap.delete(fp);
     }
+
+    // Compute isNew for each item BEFORE the fingerprint check so the key
+    // includes new/not-new state — a transition triggers a DOM rebuild.
+    const itemsWithNew = items.map(act => {
+        const call = act.dx_callsign || '';
+        const fp   = `${act.estimated_dial_freq || act.center_freq}|${call}`;
+        const firstSeen = _vaSeenMap.get(fp);
+        const isNew = !firstSeen || (_now - firstSeen) > _VA_NEW_THRESHOLD_MS;
+        // Only record the timestamp the first time we see this fingerprint.
+        // We do NOT update it on subsequent polls — the entry ages naturally
+        // until it exceeds _VA_NEW_THRESHOLD_MS, at which point the item is
+        // treated as new again (station reappeared after a long absence).
+        if (!firstSeen) _vaSeenMap.set(fp, _now);
+        return { ...act, _fp: fp, _isNew: isNew };
+    });
+
+    // Build a fingerprint — skip DOM rebuild if nothing changed (including new/not-new state)
+    const newKey = itemsWithNew.map(a =>
+        `${a._fp}|${a._isNew ? 'N' : ''}`
+    ).join(',');
+    if (newKey === _tickerLastKey) return;
+    _tickerLastKey = newKey;
 
     // Build item element
     function makeItem(act) {
@@ -2429,13 +2444,7 @@ function _renderVoiceTicker(data) {
         const call    = act.dx_callsign || '';
         const cc      = act.dx_country_code || '';
         const flag    = cc ? iso2ToFlag(cc) : '';
-
-        // Fingerprint: frequency + callsign (band is redundant with freq range)
-        const fp      = `${act.estimated_dial_freq || act.center_freq}|${call}`;
-        const lastSeen = _vaSeenMap.get(fp);
-        const isNew   = !lastSeen || (_now - lastSeen) > _VA_NEW_THRESHOLD_MS;
-        // Always update the timestamp so continuous activity doesn't re-trigger
-        _vaSeenMap.set(fp, _now);
+        const isNew   = act._isNew;
 
         const el = document.createElement('span');
         el.className = 'cond-ticker-item' + (isNew ? ' cond-ticker-item--new' : '');
@@ -2455,7 +2464,7 @@ function _renderVoiceTicker(data) {
     // Measure single-copy width using a hidden probe element
     const probe = document.createElement('span');
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;display:inline-flex;';
-    for (const act of items) probe.appendChild(makeItem(act));
+    for (const act of itemsWithNew) probe.appendChild(makeItem(act));
     tickerEl.appendChild(probe);
     let singleW = 0;
     for (let i = 0; i < probe.children.length; i++) singleW += probe.children[i].offsetWidth;
@@ -2483,7 +2492,7 @@ function _renderVoiceTicker(data) {
     // Rebuild DOM
     trackEl.innerHTML = '';
     for (let c = 0; c < copies; c++) {
-        for (const act of items) trackEl.appendChild(makeItem(act));
+        for (const act of itemsWithNew) trackEl.appendChild(makeItem(act));
     }
 
     // Apply CSS animation.  We set all animation properties via inline style

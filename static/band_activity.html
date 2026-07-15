@@ -1638,8 +1638,18 @@ class BandPanel {
                 }
             }
 
-            // ── Box-smooth the held values in the zoomed slice ────────────────
-            const smoothR = Math.max(2, Math.round(zn / 60));
+            // ── Find top-3 local maxima in the held spectrum ──────────────────
+            // Minimum separation: 2.5 kHz expressed in bins of the zoomed slice.
+            // bin_bandwidth is Hz per bin in the full array; zn covers the zoomed
+            // fraction of the full band, so scale accordingly.
+            const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
+            const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
+            const threshold  = p5 + 15;
+
+            // Box-smooth with radius = half the minimum separation so we merge
+            // adjacent bins of the same signal without washing out narrow peaks.
+            // This keeps the FT8 cluster (3 kHz wide) detectable at full zoom.
+            const smoothR = Math.max(1, Math.floor(minSepBins / 2));
             const smoothed = new Float32Array(zn);
             for (let i = 0; i < zn; i++) {
                 let sum = 0, cnt = 0;
@@ -1648,14 +1658,6 @@ class BandPanel {
                 }
                 smoothed[i] = sum / cnt;
             }
-
-            // ── Find top-3 local maxima in the smoothed held spectrum ─────────
-            // Minimum separation: 2.5 kHz expressed in bins of the zoomed slice.
-            // bin_bandwidth is Hz per bin in the full array; zn covers the zoomed
-            // fraction of the full band, so scale accordingly.
-            const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
-            const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
-            const threshold  = p5 + 15;
 
             const candidates = [];
             for (let i = 1; i < zn - 1; i++) {

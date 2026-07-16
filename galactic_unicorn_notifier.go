@@ -28,6 +28,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/cwsl/ka9q_ubersdr/gudriver"
@@ -98,6 +99,14 @@ func (g *GalacticUnicornChannel) sendWithRetry(message string, override Galactic
 
 func (g *GalacticUnicornChannel) doSend(message string, override GalacticUnicornOverride) (ChannelResponse, error) {
 	cfg := g.cfg
+
+	// Strip newlines and bullet characters — multi-line default messages
+	// (e.g. user_session) are designed for Telegram/email; on the LED matrix
+	// the text is a single scrolling line so newlines are meaningless and
+	// inflate the HTTP payload unnecessarily.
+	message = strings.ReplaceAll(message, "\n", " ")
+	message = strings.ReplaceAll(message, "•", "")
+	message = strings.TrimSpace(message)
 
 	// Resolve model — informational only; firmware auto-detects display dimensions.
 	model := cfg.GalacticUnicornModel

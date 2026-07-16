@@ -214,7 +214,7 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan AudioSample, resultChan chan<-
 						// Recover from panics (e.g., send on closed channel if user detaches)
 						defer func() {
 							if r := recover(); r != nil {
-								log.Printf("[SSTV Video Goroutine] Recovered from panic: %v", r)
+								log.Printf("[SSTV Video Goroutine] Recovered from teardown (user disconnected mid-decode): %v", r)
 							}
 							// Always reset state
 							log.Printf("[SSTV Main] Video decode goroutine finished, resetting state")

@@ -525,7 +525,9 @@ async def handle_client(reader, writer):
                     if body_received >= content_length:
                         break
             except asyncio.TimeoutError:
-                break
+                if b"\r\n\r\n" not in raw:
+                    break  # headers never arrived — truly stalled
+                # headers received but body still arriving — keep waiting
             if time.time() > deadline:
                 break
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,20 +191,21 @@ func (d *notifDedupTracker) cleanup() {
 
 // NotificationStats holds runtime counters for the admin API.
 type NotificationStats struct {
-	TotalPublished       int64            `json:"total_published"`
-	TotalMatched         int64            `json:"total_matched"`
-	TotalSent            int64            `json:"total_sent"`
-	TotalErrors          int64            `json:"total_errors"`
-	TotalRateLimited     int64            `json:"total_rate_limited"`
-	ByRule               map[string]int64 `json:"by_rule"`
-	ByRuleErrors         map[string]int64 `json:"by_rule_errors"`
-	ByRuleRateLimited    map[string]int64 `json:"by_rule_rate_limited"`
-	ByChannel            map[string]int64 `json:"by_channel"`
-	ByChannelErrors      map[string]int64 `json:"by_channel_errors"`
-	ByChannelRateLimited map[string]int64 `json:"by_channel_rate_limited"`
-	LastSentAt           *time.Time       `json:"last_sent_at,omitempty"`
-	LastError            string           `json:"last_error,omitempty"`
-	LastErrorAt          *time.Time       `json:"last_error_at,omitempty"`
+	TotalPublished       int64                 `json:"total_published"`
+	TotalMatched         int64                 `json:"total_matched"`
+	TotalSent            int64                 `json:"total_sent"`
+	TotalErrors          int64                 `json:"total_errors"`
+	TotalRateLimited     int64                 `json:"total_rate_limited"`
+	ByRule               map[string]int64      `json:"by_rule"`
+	ByRuleErrors         map[string]int64      `json:"by_rule_errors"`
+	ByRuleRateLimited    map[string]int64      `json:"by_rule_rate_limited"`
+	ByChannel            map[string]int64      `json:"by_channel"`
+	ByChannelErrors      map[string]int64      `json:"by_channel_errors"`
+	ByChannelRateLimited map[string]int64      `json:"by_channel_rate_limited"`
+	ByChannelLastErrorAt map[string]*time.Time `json:"by_channel_last_error_at,omitempty"`
+	LastSentAt           *time.Time            `json:"last_sent_at,omitempty"`
+	LastError            string                `json:"last_error,omitempty"`
+	LastErrorAt          *time.Time            `json:"last_error_at,omitempty"`
 }
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
@@ -483,6 +485,7 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 			ByChannel:            make(map[string]int64),
 			ByChannelErrors:      make(map[string]int64),
 			ByChannelRateLimited: make(map[string]int64),
+			ByChannelLastErrorAt: make(map[string]*time.Time),
 		},
 	}
 
@@ -924,6 +927,7 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				m.stats.LastError = err.Error()
 				now := time.Now()
 				m.stats.LastErrorAt = &now
+				m.stats.ByChannelLastErrorAt[chName] = &now
 				m.appendChannelLog(chName, entry)
 				mqttPub := m.mqtt
 				m.mu.Unlock()
@@ -968,6 +972,7 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				m.stats.LastError = errMsg
 				now := time.Now()
 				m.stats.LastErrorAt = &now
+				m.stats.ByChannelLastErrorAt[chName] = &now
 				m.appendChannelLog(chName, entry)
 				mqttPub := m.mqtt
 				m.mu.Unlock()
@@ -1806,6 +1811,13 @@ func (m *NotificationManager) GetStats() NotificationStats {
 	for k, v := range m.stats.ByChannelRateLimited {
 		s.ByChannelRateLimited[k] = v
 	}
+	s.ByChannelLastErrorAt = make(map[string]*time.Time, len(m.stats.ByChannelLastErrorAt))
+	for k, v := range m.stats.ByChannelLastErrorAt {
+		if v != nil {
+			t := *v
+			s.ByChannelLastErrorAt[k] = &t
+		}
+	}
 	return s
 }
 
@@ -1835,6 +1847,9 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 	chDetails := make([]channelDetail, 0, len(channels))
 	overallStatus := "ok"
 
+	const errorWindow = 15 * time.Minute
+	now := time.Now()
+
 	for name, ch := range channels {
 		sent := stats.ByChannel[name]
 		errs := stats.ByChannelErrors[name]
@@ -1842,17 +1857,29 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		attempts := sent + errs // rate-limited never reached the channel
 		var errRatePct float64
 		chStatus := "ok"
-		if attempts > 0 {
-			errRatePct = float64(errs) / float64(attempts) * 100.0
-			if errRatePct > 25.0 {
+
+		// Only flag warning/critical if the last error for this channel was
+		// within the past 15 minutes. Errors older than that are considered
+		// stale — the channel is treated as recovered until a new error fires.
+		lastErrAt := stats.ByChannelLastErrorAt[name]
+		recentError := lastErrAt != nil && now.Sub(*lastErrAt) < errorWindow
+
+		if recentError {
+			if attempts > 0 {
+				errRatePct = float64(errs) / float64(attempts) * 100.0
+				if errRatePct > 25.0 {
+					chStatus = "critical"
+				} else if errRatePct > 5.0 {
+					chStatus = "warning"
+				}
+			} else if errs > 0 {
+				// errors but no successful sends at all
 				chStatus = "critical"
-			} else if errRatePct > 5.0 {
-				chStatus = "warning"
+				errRatePct = 100.0
 			}
-		} else if errs > 0 {
-			// errors but no successful sends at all
-			chStatus = "critical"
-			errRatePct = 100.0
+		} else if attempts > 0 {
+			// compute rate for display purposes only — does not affect status
+			errRatePct = float64(errs) / float64(attempts) * 100.0
 		}
 		// escalate overall status
 		if chStatus == "critical" {
@@ -1871,6 +1898,11 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 			Status:       chStatus,
 		})
 	}
+
+	// Sort channels by name for a stable order in the admin UI.
+	sort.Slice(chDetails, func(i, j int) bool {
+		return chDetails[i].Name < chDetails[j].Name
+	})
 
 	enabledRules := 0
 	for _, r := range cfg.Rules {

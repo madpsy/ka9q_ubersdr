@@ -800,6 +800,29 @@ dxcluster:
   #
   login_commands: []
 
+  # Spot injection endpoint
+  # When enabled, trusted local services can POST spots directly into the feed
+  # without going through an external cluster connection.  Injected spots are
+  # indistinguishable from real cluster spots — they appear in the SSE stream,
+  # WebSocket feed, spot buffer, and frequency index (voice-activity enrichment).
+  #
+  # POST /api/dxcluster/inject
+  # Content-Type: application/json
+  # Body: { "spotter": "MM3NDH", "frequency": 14074000, "dx_call": "DL1ABC", "comment": "FT8 -12dB" }
+  #   frequency — in Hz; band, country, continent derived automatically
+  #   comment   — optional
+  #
+  # Default: true (enabled)
+  inject_enabled: true
+  #
+  # Docker container names or IPs permitted to call the inject endpoint.
+  # Container names are resolved via DNS every 5 seconds (same mechanism as
+  # server.trusted_containers), so they work correctly even when Docker
+  # reassigns IPs.  Set to [] to deny all injection requests.
+  # Default: ["dxcluster"]
+  inject_trusted_hosts:
+    - "dxcluster"
+
 # FreeDV Reporter activity monitor
 # When enabled, UberSDR connects to the FreeDV Reporter server as a view-only client
 # and makes the live activity list available to browser clients over the DX cluster

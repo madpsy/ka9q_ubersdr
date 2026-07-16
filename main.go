@@ -2877,6 +2877,7 @@ func main() {
 	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
 	http.HandleFunc("/api/voice-activity/stream", HandlePublicVoiceActivityStream(voiceActivitySSEHub, voiceActivitySSELimiter, &config.Server))
 	http.HandleFunc("/api/dxcluster/stream", HandlePublicDXClusterStream(dxClusterSSEHub, dxClusterSSELimiter, &config.Server))
+	http.HandleFunc("/api/dxcluster/inject", HandleDXSpotInject(dxCluster, &config.DXCluster, &config.Server))
 	http.HandleFunc("/api/noisefloor/spectrum/stream", HandleNoiseFloorSpectrumStream(noiseFloorMonitor, config, noiseFloorSpectrumSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin only)

@@ -383,6 +383,7 @@ type ServerConfig struct {
 	containerProxyMu                sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
 	containerResolveErrLastLog      map[string]time.Time // Rate-limit resolve error logging per container name
 	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
+	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 }
 
 // AudioConfig contains audio processing settings
@@ -483,6 +484,23 @@ type DXClusterConfig struct {
 	ReconnectDelay int      `yaml:"reconnect_delay"` // Seconds between reconnection attempts
 	KeepAliveDelay int      `yaml:"keepalive_delay"` // Seconds between keep-alive messages
 	LoginCommands  []string `yaml:"login_commands"`  // Commands sent after login, 250 ms apart
+
+	// Spot injection endpoint — allows trusted local services to POST spots directly
+	// into the feed without going through an external cluster connection.
+	// InjectEnabled uses *bool so that nil (key absent from YAML) can be treated as
+	// the default (true), while an explicit inject_enabled: false disables the endpoint.
+	InjectEnabled      *bool    `yaml:"inject_enabled"`       // Enable POST /api/dxcluster/inject (default true when nil)
+	InjectTrustedHosts []string `yaml:"inject_trusted_hosts"` // Docker container names or IPs allowed to inject (default ["dxcluster"])
+}
+
+// IsInjectEnabled returns true when the spot injection endpoint should be active.
+// The default is true — the endpoint is enabled unless inject_enabled: false is
+// explicitly set in the configuration.
+func (c *DXClusterConfig) IsInjectEnabled() bool {
+	if c.InjectEnabled == nil {
+		return true // default: enabled
+	}
+	return *c.InjectEnabled
 }
 
 // FreeDVReporterConfig contains settings for the FreeDV Reporter activity monitor.
@@ -777,6 +795,7 @@ func LoadConfig(filename string) (*Config, error) {
 	// These are resolved but deliberately NOT added to the trusted-proxy IP set,
 	// so they gain UUID-free lookup access WITHOUT X-Real-IP spoofing privileges.
 	config.Server.lookupResolveNames = config.LookupServices.TrustedContainers
+	config.Server.injectResolveNames = config.DXCluster.InjectTrustedHosts
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
@@ -1104,6 +1123,13 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.DXCluster.Callsign != "" {
 		config.DXCluster.Callsign = strings.ToUpper(config.DXCluster.Callsign)
 	}
+	// inject_trusted_hosts defaults to ["dxcluster"] when absent from config.
+	// An explicit empty list (inject_trusted_hosts: []) disables container-name trust.
+	if config.DXCluster.InjectTrustedHosts == nil {
+		config.DXCluster.InjectTrustedHosts = []string{"dxcluster"}
+	}
+	// inject_enabled uses *bool so nil (key absent) means "default true".
+	// No explicit defaulting needed here — IsInjectEnabled() handles the nil case.
 
 	// Set FreeDV Reporter defaults if not specified
 	if config.FreeDVReporter.URI == "" {
@@ -1636,6 +1662,20 @@ func (sc *ServerConfig) resolveContainerIPs() {
 			seen[n] = true
 			names = append(names, n)
 			lookupOnlySet[n] = true
+		}
+	}
+
+	// Merge in DX inject-only container names (from dxcluster.inject_trusted_hosts).
+	// Same semantics as lookup-only: resolved for IsContainerIP matching but NOT
+	// added to the trusted-proxy IP set, so they cannot spoof X-Real-IP headers.
+	for _, n := range sc.injectResolveNames {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+			lookupOnlySet[n] = true // reuse lookupOnlySet — same "not a proxy" semantics
 		}
 	}
 

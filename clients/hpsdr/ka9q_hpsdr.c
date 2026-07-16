@@ -932,7 +932,6 @@ void *ws_thread(void *arg)
     rcb->last_sample_rate = 0;
     rcb->last_channels    = 0;
     rcb->wsi_closed       = 0;
-    int ever_connected = 0; /* skip /connection check on rate-change reconnects */
 
     /* Allocate a ZSTD decompression context for this receiver */
     rcb->zstd_dctx = ZSTD_createDCtx();
@@ -1031,23 +1030,22 @@ void *ws_thread(void *arg)
          *   2. Connect via WebSocket on the same host
          */
 
-        t_print("ws_thread(%d): outer loop top: ever_connected=%d reconnect_needed=%d rate=%d\n",
-                rcb->rcvr_num, ever_connected, rcb->reconnect_needed, rcb->output_rate / 1000);
+        t_print("ws_thread(%d): outer loop top: reconnect_needed=%d rate=%d\n",
+                rcb->rcvr_num, rcb->reconnect_needed, rcb->output_rate / 1000);
 
-        /* --- Step 1: connection permission check ---
-         * Skip on rate-change reconnects — we were already allowed.
-         * Only check on the very first connect attempt. */
-        if (!ever_connected) {
-            t_print("ws_thread(%d): checking connection permission\n", rcb->rcvr_num);
-            if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
-                t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
-                /* Sleep in short increments so a rate change wakes us promptly */
-                for (int s = 0; s < 50 && !do_exit && !rcb->reconnect_needed; s++)
-                    usleep(100000); /* 100 ms × 50 = 5 s max */
-                continue;
-            }
-        } else {
-            t_print("ws_thread(%d): skipping connection check (ever_connected)\n", rcb->rcvr_num);
+        /* --- Step 1: generate a fresh session ID and check connection permission.
+         * A new UUID must be generated on every connect attempt — the server
+         * invalidates the session when the WebSocket closes, so reusing the old
+         * UUID on reconnect results in "Invalid session" errors. */
+        generate_uuid(rcb->session_id);
+        t_print("ws_thread(%d): checking connection permission (session=%s)\n",
+                rcb->rcvr_num, rcb->session_id);
+        if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
+            t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
+            /* Sleep in short increments so a rate change wakes us promptly */
+            for (int s = 0; s < 50 && !do_exit && !rcb->reconnect_needed; s++)
+                usleep(100000); /* 100 ms × 50 = 5 s max */
+            continue;
         }
 
         /* --- Step 2: build the WebSocket path with query string --- */
@@ -1093,7 +1091,6 @@ void *ws_thread(void *arg)
         }
         t_print("ws_thread(%d): lws_client_connect_via_info succeeded\n", rcb->rcvr_num);
 
-        ever_connected = 1;
         t_print("ws_thread(%d): entering service loop\n", rcb->rcvr_num);
 
         /* Service loop — exits on shutdown, reconnect request, or DDC disable.

@@ -50,7 +50,7 @@ services:
     container_name: ka9q_ubersdr
     restart: unless-stopped
     init: true  # Enable tini init to reap zombie processes from background watchers
-    shm_size: '1024m'
+    shm_size: '2024m'
 
     # Wait for ka9q-radio to be healthy before starting
     depends_on:

@@ -49,6 +49,7 @@ static int do_exit = 0;
 struct main_cb mcb;
 static int sock_udp;
 static int hp_sock;
+static int ddcspec_sock = -1;   /* bound to port 1025; also the source for HP status sends */
 static int interface_offset = 0;
 
 static u_int send_flags = 0;
@@ -88,9 +89,6 @@ static int bits = -1;
 static long rxfreq[MAX_RCVRS] = {0,};
 static int ddcenable[MAX_RCVRS] = {0,};
 static int rxrate[MAX_RCVRS] = {0,};
-static int adcdither = -1;
-static int adcrandom = -1;
-static int stepatt0 = -1;
 static int ddc_port = 1025;
 static int mic_port = 1026;
 static int hp_port = 1027; // also wb_port
@@ -102,28 +100,17 @@ static pthread_t highprio_thread_id = 0;
 static pthread_t ddc_specific_thread_id = 0;
 static pthread_t mic_thread_id = 0;
 static pthread_t wb_thread_id = 0;
+static pthread_t hpstat_thread_id = 0;
+static pthread_t sink_thread_id = 0;
 static pthread_t rx_thread_id[MAX_RCVRS] = {0,};
 static void   *highprio_thread(void*);
 static void   *ddc_specific_thread(void*);
 static void   *mic_thread(void *);
 static void   *wb_thread(void *);
+static void   *hpstat_thread(void *);
+static void   *sink_thread(void *);
 static void   *rx_thread(void *);
 static void   *ws_thread(void *);
-
-// using clock_nanosleep of librt
-extern int clock_nanosleep(clockid_t __clock_id, int __flags,
-                           __const struct timespec *__req,
-                           struct timespec *__rem);
-
-uint64_t get_posix_clock_time_us()
-{
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (uint64_t)(ts.tv_sec * 1000000 + ts.tv_nsec / 1000);
-    } else {
-        return 0; // Error handling
-    }
-}
 
 /* Generate a UUID v4 string into buf (must be at least 37 bytes) */
 void generate_uuid(char *buf)
@@ -773,17 +760,6 @@ void sdr_sighandler (int signum)
     running = 0;
 }
 
-char *time_stamp ()
-{
-    char *timestamp = (char *) malloc (sizeof (char) * 16);
-    time_t ltime = time (NULL);
-    struct tm *tm;
-
-    tm = localtime (&ltime);
-    sprintf (timestamp, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
-    return timestamp;
-}
-
 /* -----------------------------------------------------------------------
  * libwebsockets client for ubersdr
  * ----------------------------------------------------------------------- */
@@ -820,12 +796,21 @@ static int ws_callback(struct lws *wsi,
                 break;
             }
 
-            float complex iq_buf[2048];
             int n_samples = 0, sr = 0, ch = 0;
 
+            if (rcb->iqSamples_remaining < 0)
+                rcb->iqSamples_remaining = 0;
+
+            /*
+             * Decode directly into the tail of iqSamples[].  The buffer is
+             * sized (IQ_RING_SAMPLES) for the largest possible frame plus
+             * one packet of leftover, so nothing is truncated or overflowed.
+             */
+            int space = IQ_RING_SAMPLES - rcb->iqSamples_remaining;
             bool ok = decode_pcm_frame(rcb,
                                        (const uint8_t *)in, len,
-                                       iq_buf, 2048,
+                                       &rcb->iqSamples[rcb->iqSamples_remaining],
+                                       space,
                                        &n_samples, &sr, &ch);
             if (!ok) break;
 
@@ -840,29 +825,29 @@ static int ws_callback(struct lws *wsi,
             rcb->last_sample_rate = sr;
             rcb->last_channels    = ch;
 
-            /* Scale and accumulate into iqSamples ring buffer */
+            /* Scale in place */
             for (int i = 0; i < n_samples; i++) {
-                float re = crealf(iq_buf[i]) * rcb->scale;
-                float im = cimagf(iq_buf[i]) * rcb->scale;
-                rcb->iqSamples[rcb->iqSamples_remaining + i] = re + im * _Complex_I;
+                rcb->iqSamples[rcb->iqSamples_remaining + i] *= rcb->scale;
             }
-
-            if (rcb->iqSamples_remaining < 0)
-                rcb->iqSamples_remaining = 0;
 
             rcb->iqSamples_remaining += n_samples;
 
             int samps_packet = 238;
-            while (rcb->iqSamples_remaining > samps_packet) {
+            while (rcb->iqSamples_remaining >= samps_packet) {
                 load_packet(rcb);
                 rcb->iqSamples_remaining -= samps_packet;
                 rcb->iqSample_offset     += samps_packet;
             }
 
-            if (rcb->iqSample_offset > 0 && rcb->iqSamples_remaining > 0) {
-                memmove(&rcb->iqSamples[0],
-                        &rcb->iqSamples[rcb->iqSample_offset],
-                        rcb->iqSamples_remaining * sizeof(float complex));
+            /* Relocate any leftover to the front and reset the offset —
+             * the offset must also be reset when nothing is left, otherwise
+             * the next load_packet() would read from a stale offset. */
+            if (rcb->iqSample_offset > 0) {
+                if (rcb->iqSamples_remaining > 0) {
+                    memmove(&rcb->iqSamples[0],
+                            &rcb->iqSamples[rcb->iqSample_offset],
+                            rcb->iqSamples_remaining * sizeof(float complex));
+                }
                 rcb->iqSample_offset = 0;
             }
         }
@@ -944,7 +929,6 @@ void *ws_thread(void *arg)
     struct rcvr_cb *rcb = (struct rcvr_cb *)arg;
 
     rcb->iqSample_offset = rcb->iqSamples_remaining = 0;
-    rcb->err_count = 0;
     rcb->last_sample_rate = 0;
     rcb->last_channels    = 0;
     rcb->wsi_closed       = 0;
@@ -1254,7 +1238,6 @@ finishup:
 }
 int main (int argc, char *argv[])
 {
-    uint8_t id[4] = { 0xef, 0xfe, 1, 6 };
     struct sockaddr_in addr_udp;
     struct sockaddr_in addr_from;
     socklen_t lenaddr;
@@ -1266,6 +1249,14 @@ int main (int argc, char *argv[])
     uint32_t *code0;
     int CmdOption;
     struct sigaction sigact;
+
+    /*
+     * Quiet libwebsockets: with one lws context per receiver thread the
+     * default NOTICE/WARN level floods startup with context-creation
+     * notices and harmless "netlink bind failed" warnings (only the
+     * first context can bind the netlink monitor socket).
+     */
+    lws_set_log_level(LLL_ERR, NULL);
 
     code0 = (uint32_t *) buffer;
     memset(&mcb, 0, sizeof(mcb));
@@ -1467,6 +1458,14 @@ int main (int argc, char *argv[])
         t_perror("***** ERROR: Create MIC thread");
     }
 
+    if (pthread_create(&hpstat_thread_id, NULL, hpstat_thread, NULL) < 0) {
+        t_perror("***** ERROR: Create HP status thread");
+    }
+
+    if (pthread_create(&sink_thread_id, NULL, sink_thread, NULL) < 0) {
+        t_perror("***** ERROR: Create sink thread");
+    }
+
     if (mcb.wideband) {
         if (pthread_create(&wb_thread_id, NULL, wb_thread, NULL) < 0) {
             t_perror("***** ERROR: Create WB thread");
@@ -1494,7 +1493,6 @@ int main (int argc, char *argv[])
         mcb.rcb[i].scale = 700.0f;
         mcb.rcb[i].rcvr_num = i;
         mcb.rcb[i].reconnect_needed = 0;
-        mcb.rcvrs_mask |= 1 << i;
         mcb.rcb[i].rcvr_mask = 1 << i;
 
         /* Generate a unique session ID for this receiver */
@@ -1508,9 +1506,8 @@ int main (int argc, char *argv[])
     t_print("Waiting on Discovery...\n");
 
     while (!do_exit) {
-        memcpy(buffer, id, 4);
         lenaddr = sizeof(addr_from);
-        bytes_read = recvfrom(sock_udp, buffer, HPSDR_FRAME_LEN, 0, (struct sockaddr *)&addr_from, &lenaddr);
+        bytes_read = recvfrom(sock_udp, buffer, sizeof(buffer), 0, (struct sockaddr *)&addr_from, &lenaddr);
 
         if (bytes_read < 0 && errno != EAGAIN) {
             t_perror("recvfrom");
@@ -1530,15 +1527,27 @@ int main (int argc, char *argv[])
          * NewProtocol "General"   packet   60 bytes starting with 00 00 00 00 00
          *                                  ==> this starts NewProtocol radio
          */
-        if (code == 0 && buffer[4] == 0x02 && !running) {
-            t_print("NewProtocol discovery packet received from %s\n", inet_ntoa(addr_from.sin_addr));
+        if (bytes_read == 60 && code == 0 && buffer[4] == 0x02) {
+            /*
+             * Always answer discovery — a running radio must reply with
+             * status 3 (busy) so re-discovering clients still find it.
+             * Never answering while running makes the radio invisible to
+             * a client that restarts, until the activity watchdog fires.
+             */
+            t_print("NewProtocol discovery packet received from %s (status %d)\n",
+                    inet_ntoa(addr_from.sin_addr), 2 + (running ? 1 : 0));
             // prepare response
             memset(buffer, 0, 60);
-            buffer [4] = 0x02 + running;
+            buffer [4] = 0x02 + (running ? 1 : 0);
             for (i = 0; i < 6; ++i) buffer[i + 5] = hwaddr.ifr_addr.sa_data[i];
             buffer[11] = mcb.device_type;
             buffer[12] = 38;
-            buffer[13] = 18;
+            /*
+             * Firmware version: for HermesLite (device 6) clients classify
+             * version < 40 as "Hermes Lite V1" with reduced capabilities;
+             * report 62 (a plausible HL2 gateware version) instead.
+             */
+            buffer[13] = (mcb.device_type == HERMES_LITE) ? 62 : HERMES_FW_VER;
             buffer[20] = mcb.num_rxs;
             buffer[21] = 1;
             buffer[22] = 7; // sample rate bitmask: bits 0+1+2 = 48/96/192 kHz (ubersdr cap)
@@ -1608,12 +1617,23 @@ void load_packet (struct rcvr_cb *rcb)
     int k = rcb->rcvr_num;
 
     pthread_mutex_lock (&done_send_lock);
-    while (!(done_send_flags & rcb->rcvr_mask) && running) {
+    while (!(done_send_flags & rcb->rcvr_mask) && running
+           && ddcenable[rcb->rcvr_num]) {
         pthread_cond_wait (&done_send_cond, &done_send_lock);
     }
     done_send_flags &= ~rcb->rcvr_mask;
     pthread_mutex_unlock (&done_send_lock);
 
+    /*
+     * P2 wire order is I first, then Q (3 bytes each, big-endian).
+     *
+     * However, ubersdr's IQ stream uses the OPPOSITE spectral convention
+     * to HPSDR: sending it real-part-first produces a mirrored spectrum
+     * (signals appear on the wrong side of the dial frequency —
+     * empirically confirmed on air).  Swapping the two components on the
+     * wire is equivalent to conjugation and un-mirrors the spectrum, so
+     * the imaginary part deliberately goes first here.
+     */
     for (i = 0, j = 0; i < 238; i++, j+=6) {
         IQData = (int)cimagf(out_buf[i]);
         pbuf[k][j] = IQData >> 16;
@@ -1640,10 +1660,49 @@ void new_protocol_general_packet(unsigned char *buffer)
     gen_rcvd = true;
 
     seqold = seqnum;
-    seqnum = (buffer[0] >> 24) + (buffer[1] << 16) + (buffer[2] << 8) + buffer[3];
+    seqnum = ((unsigned long)buffer[0] << 24) + (buffer[1] << 16) + (buffer[2] << 8) + buffer[3];
 
     if ((seqnum != 0 && seqnum != seqold + 1 ) && seqold != 0) {
         t_print("GP: SEQ ERROR, old=%lu new=%lu\n", seqold, seqnum);
+    }
+
+    /*
+     * Byte 37, bit 3 (0x08): DDC/DUC frequency fields in the High Priority
+     * packet are phase words (freq * 2^32 / 122.88e6) rather than raw Hz.
+     * Most clients (Thetis, piHPSDR, deskHPSDR) set it; some send raw Hz.
+     */
+    rc = buffer[37];
+    if (rc != bits) {
+        bits = rc;
+        t_print("GP: frequency mode byte37=0x%02x (%s)\n", bits,
+                (bits & 0x08) ? "phase word" : "raw Hz");
+    }
+
+    /*
+     * Bytes 5-22 carry the UDP port-override table (0 = default).
+     * This bridge only implements the default ports — if a client
+     * remaps them, nothing will work, so at least say so.
+     */
+    {
+        static int port_override_warned = 0;
+        int nonzero = 0;
+        for (int k = 5; k <= 22; k++) {
+            if (buffer[k]) { nonzero = 1; break; }
+        }
+        if (nonzero && !port_override_warned) {
+            port_override_warned = 1;
+            t_print("GP: WARNING client requests non-default UDP ports "
+                    "(general packet bytes 5-22) — not supported, using defaults\n");
+        }
+    }
+
+    if (!mcb.wideband && (buffer[23] & 1)) {
+        static int wb_req_warned = 0;
+        if (!wb_req_warned) {
+            wb_req_warned = 1;
+            t_print("GP: client requested wideband data but bridge started "
+                    "without --wideband (ignored)\n");
+        }
     }
 
     if (mcb.wideband) {
@@ -1746,6 +1805,14 @@ void *highprio_thread(void *data)
                         rxrate[i] = 0;
                         rxfreq[i] = 0;
                     }
+                    /* Wake any thread blocked on the send handshake so it
+                     * can observe running == 0 and park itself. */
+                    pthread_mutex_lock (&send_lock);
+                    pthread_cond_broadcast (&send_cond);
+                    pthread_mutex_unlock (&send_lock);
+                    pthread_mutex_lock (&done_send_lock);
+                    pthread_cond_broadcast (&done_send_cond);
+                    pthread_mutex_unlock (&done_send_lock);
                 }
             }
             continue;
@@ -1773,22 +1840,29 @@ void *highprio_thread(void *data)
         }
 
         if (rc != 1444) {
-            t_print("Received HighPrio packet with incorrect length %d\n", rc);
-            break;
+            /* A stray/short datagram must not kill the control thread */
+            t_print("Received HighPrio packet with incorrect length %d (ignored)\n", rc);
+            continue;
         }
 
         seqold = seqnum;
-        seqnum = (hp_buffer[0] >> 24) + (hp_buffer[1] << 16) + (hp_buffer[2] << 8) + hp_buffer[3];
+        seqnum = ((unsigned long)hp_buffer[0] << 24) + (hp_buffer[1] << 16) + (hp_buffer[2] << 8) + hp_buffer[3];
 
         if ((seqnum != 0 && seqnum != seqold + 1 ) && seqold != 0) {
             t_print("HP: SEQ ERROR, old=%lu new=%lu\n", seqold, seqnum);
         }
 
         for (i = 0; i < mcb.num_rxs; i++) {
-            freq = (hp_buffer[ 9 + 4 * i] << 24) + (hp_buffer[10 + 4 * i] << 16) + (hp_buffer[11 + 4 * i] << 8) + hp_buffer[12 + 4 * i];
+            /* assemble as uint32_t: byte << 24 on a signed int would
+             * sign-extend for phase words with bit 31 set */
+            uint32_t word = ((uint32_t)hp_buffer[ 9 + 4 * i] << 24)
+                          + ((uint32_t)hp_buffer[10 + 4 * i] << 16)
+                          + ((uint32_t)hp_buffer[11 + 4 * i] << 8)
+                          +  (uint32_t)hp_buffer[12 + 4 * i];
+            freq = (long)word;
 
             if (bits & 0x08) {
-                freq = round(122880000.0 * (double) freq / 4294967296.0);
+                freq = round(122880000.0 * (double) word / 4294967296.0);
             }
 
             if (freq != rxfreq[i]) {
@@ -1798,23 +1872,11 @@ void *highprio_thread(void *data)
             }
         }
 
-        rc = hp_buffer[5] & 0x01;
-        if (rc != adcdither) {
-            adcdither = rc;
-            //t_print("RX: ADC dither=%d\n", adcdither);
-        }
-
-        rc = hp_buffer[6] & 0x01;
-        if (rc != adcrandom) {
-            adcrandom = rc;
-            //t_print("RX: ADC random=%d\n", adcrandom);
-        }
-
-        rc = hp_buffer[1443];
-        if (rc != stepatt0) {
-            stepatt0 = rc;
-            //t_print("HP: StepAtt0 = %d\n", stepatt0);
-        }
+        /* NOTE: bytes 5/6 of the host->radio HP packet are CWX keying
+         * bits (CWX/dot/dash), NOT dither/random (those live in the
+         * DDC-specific packet).  Byte 1443 is the ADC0 step attenuator.
+         * None of these apply to this bridge: no TX and no controllable
+         * front-end, so they are ignored. */
 
         rc = hp_buffer[4] & 0x01;
         if (rc != running) {
@@ -1829,6 +1891,14 @@ void *highprio_thread(void *data)
                     rxrate[i] = 0;
                     rxfreq[i] = 0;
                 }
+                /* Wake any thread blocked on the send handshake so it
+                 * can observe running == 0 and park itself. */
+                pthread_mutex_lock (&send_lock);
+                pthread_cond_broadcast (&send_cond);
+                pthread_mutex_unlock (&send_lock);
+                pthread_mutex_lock (&done_send_lock);
+                pthread_cond_broadcast (&done_send_cond);
+                pthread_mutex_unlock (&done_send_lock);
             } else {
                 // running just went 1 — reset packet counter, watchdog arms after 100 packets
                 hp_watchdog_armed = 0;
@@ -1884,6 +1954,10 @@ void *ddc_specific_thread(void *data)
         return NULL;
     }
 
+    /* Export the fd: HP status packets must originate from source port
+     * 1025, so hpstat_thread() sends on this same socket. */
+    ddcspec_sock = sock;
+
     seqnum = 0;
 
     t_print("Starting ddc_specific_thread()\n");
@@ -1907,15 +1981,37 @@ void *ddc_specific_thread(void *data)
         clock_gettime(CLOCK_MONOTONIC, &last_client_activity);
 
         if (rc != 1444) {
-            t_print("RXspec: Received DDC specific packet with incorrect length");
-            break;
+            /* A stray/short datagram must not kill the control thread */
+            t_print("RXspec: Received DDC specific packet with incorrect length %d (ignored)\n", rc);
+            continue;
         }
 
         seqold = seqnum;
-        seqnum = (ddc_buffer[0] >> 24) + (ddc_buffer[1] << 16) + (ddc_buffer[2] << 8) + ddc_buffer[3];
+        seqnum = ((unsigned long)ddc_buffer[0] << 24) + (ddc_buffer[1] << 16) + (ddc_buffer[2] << 8) + ddc_buffer[3];
 
         if ((seqnum != 0 && seqnum != seqold + 1 ) && seqold != 0) {
             t_print("RXspec: SEQ ERROR, old=%lu new=%lu\n", seqold, seqnum);
+        }
+
+        /* Bytes 5/6 carry the per-ADC dither/random enables — ignored,
+         * as this bridge has no controllable ADC front-end. */
+
+        /*
+         * Bytes 1363+ddc: per-DDC sync bitmap (PureSignal/diversity).
+         * Synced DDCs expect their samples interleaved in one stream,
+         * which this bridge cannot produce — warn instead of failing
+         * silently.
+         */
+        {
+            static int sync_warned = 0;
+            for (i = 0; i < mcb.num_rxs && !sync_warned; i++) {
+                if (ddc_buffer[1363 + i]) {
+                    sync_warned = 1;
+                    t_print("RX: WARNING client requests synced DDCs "
+                            "(byte %d = 0x%02x) — diversity/PureSignal not supported\n",
+                            1363 + i, ddc_buffer[1363 + i]);
+                }
+            }
         }
 
         for (i = 0; i < mcb.num_rxs; i++) {
@@ -1924,7 +2020,11 @@ void *ddc_specific_thread(void *data)
 
             rc = (ddc_buffer[18 + 6 * i] << 8) + ddc_buffer[19 + 6 * i];
             /* Clamp to 192 kHz — ubersdr WebSocket only supports up to iq192 */
-            if (rc > 192) rc = 192;
+            if (rc > 192) {
+                t_print("RX: WARNING DDC%d requested %d kHz but ubersdr max is 192 kHz — "
+                        "expect broken audio/spectrum at this rate\n", i, rc);
+                rc = 192;
+            }
             if (rc != rxrate[i] && rc != 0) {
                 rxrate[i] = rc;
                 mcb.rcb[i].output_rate = (rxrate[i] * 1000);
@@ -1957,6 +2057,15 @@ void *ddc_specific_thread(void *data)
                     send_flags |= 1 << i;
                     pthread_cond_broadcast (&send_cond);
                     pthread_mutex_unlock (&send_lock);
+                } else {
+                    /* Disable: wake anything blocked on the handshake so
+                     * neither rx_thread nor load_packet() wedges. */
+                    pthread_mutex_lock (&send_lock);
+                    pthread_cond_broadcast (&send_cond);
+                    pthread_mutex_unlock (&send_lock);
+                    pthread_mutex_lock (&done_send_lock);
+                    pthread_cond_broadcast (&done_send_cond);
+                    pthread_mutex_unlock (&done_send_lock);
                 }
             }
 
@@ -1967,9 +2076,131 @@ void *ddc_specific_thread(void *data)
         }
     }
 
+    ddcspec_sock = -1;
     close(sock);
     ddc_specific_thread_id = 0;
     t_print("Ending ddc_specific_thread()\n");
+    return NULL;
+}
+
+/*
+ * hpstat_thread — sends the radio->host High Priority status packet.
+ *
+ * The protocol requires the radio to send a 60-byte status packet from
+ * source port 1025 (~every 50 ms during RX): PTT/dot/dash bits, ADC
+ * overload, power and AIN readings.  This bridge has no TX and no real
+ * ADC telemetry, so all fields are zero — but the stream itself (with
+ * correct sequence numbers) must exist: clients use it for meters and
+ * some treat its absence as a dead radio.
+ *
+ * Sends on ddcspec_sock, which is bound to port 1025 by
+ * ddc_specific_thread(), so the source port is correct.
+ */
+void *hpstat_thread(void *data)
+{
+    unsigned long seqnum = 0;
+    unsigned char buffer[60];
+
+    t_print("Starting hpstat_thread()\n");
+    while (!do_exit) {
+        if (!running || !gen_rcvd || addr_new.sin_port == 0 || ddcspec_sock < 0) {
+            seqnum = 0;
+            usleep(50000);
+            continue;
+        }
+
+        memset(buffer, 0, sizeof(buffer));
+        buffer[0] = (seqnum >> 24) & 0xFF;
+        buffer[1] = (seqnum >> 16) & 0xFF;
+        buffer[2] = (seqnum >>  8) & 0xFF;
+        buffer[3] = (seqnum >>  0) & 0xFF;
+        seqnum++;
+        /* byte 4: PTT/dot/dash = 0 (RX only); all telemetry fields zero */
+
+        if (sendto(ddcspec_sock, buffer, sizeof(buffer), 0,
+                   (struct sockaddr *)&addr_new, sizeof(addr_new)) < 0) {
+            t_perror("***** ERROR: hpstat_thread sendto");
+        }
+
+        usleep(50000); /* 50 ms cadence (RX) */
+    }
+
+    t_print("Ending hpstat_thread()\n");
+    return NULL;
+}
+
+/*
+ * sink_thread — drains the host->radio ports this RX-only bridge does
+ * not act on: 1028 (audio) and 1029 (TX IQ).
+ *
+ * Without listeners, every client audio/TX packet triggers an ICMP
+ * port-unreachable, and clients send audio continuously during RX.
+ * Draining also counts as client activity for the disconnect watchdog.
+ *
+ * (Port 1026 — DUC/TX specific — is drained in mic_thread, which owns
+ * the socket bound to 1026 for sending mic data.)
+ */
+void *sink_thread(void *data)
+{
+    static const int sink_ports[] = { 1028, 1029 };
+    enum { NSINK = sizeof(sink_ports) / sizeof(sink_ports[0]) };
+    int socks[NSINK];
+    unsigned char scratch[2048];
+    struct sockaddr_in addr;
+    int i, yes = 1;
+
+    for (i = 0; i < NSINK; i++) {
+        socks[i] = socket(AF_INET, SOCK_DGRAM, 0);
+        if (socks[i] < 0) {
+            t_perror("***** ERROR: sink_thread: socket");
+            return NULL;
+        }
+        setsockopt(socks[i], SOL_SOCKET, SO_REUSEADDR, (void *)&yes, sizeof(yes));
+        setsockopt(socks[i], SOL_SOCKET, SO_REUSEPORT, (void *)&yes, sizeof(yes));
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = (interface_offset > 0) ? inet_addr(mcb.ip) : htonl(INADDR_ANY);
+        addr.sin_port = htons(sink_ports[i]);
+        if (bind(socks[i], (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            t_perror("sink_thread ERROR: bind");
+            /* non-fatal: keep the other ports */
+            close(socks[i]);
+            socks[i] = -1;
+        }
+    }
+
+    t_print("Starting sink_thread() (draining ports 1028/1029)\n");
+    while (!do_exit) {
+        fd_set fds;
+        struct timeval tv;
+        int maxfd = -1;
+
+        FD_ZERO(&fds);
+        for (i = 0; i < NSINK; i++) {
+            if (socks[i] >= 0) {
+                FD_SET(socks[i], &fds);
+                if (socks[i] > maxfd) maxfd = socks[i];
+            }
+        }
+        if (maxfd < 0) break;
+
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
+        if (select(maxfd + 1, &fds, NULL, NULL, &tv) <= 0) continue;
+
+        for (i = 0; i < NSINK; i++) {
+            if (socks[i] >= 0 && FD_ISSET(socks[i], &fds)) {
+                while (recv(socks[i], scratch, sizeof(scratch), MSG_DONTWAIT) > 0) {
+                    clock_gettime(CLOCK_MONOTONIC, &last_client_activity);
+                }
+            }
+        }
+    }
+
+    for (i = 0; i < NSINK; i++) {
+        if (socks[i] >= 0) close(socks[i]);
+    }
+    t_print("Ending sink_thread()\n");
     return NULL;
 }
 
@@ -2015,50 +2246,56 @@ void *rx_thread(void *data)
 
     t_print("Starting rx_thread(%d)\n", myddc);
     while (!do_exit) {
-        if (!gen_rcvd || ddcenable[myddc] <= 0 || rxrate[myddc] == 0 || rxfreq[myddc] == 0) {
+        if (!gen_rcvd || ddcenable[myddc] <= 0 || rxrate[myddc] == 0 || rxfreq[myddc] == 0
+            || addr_new.sin_port == 0) {
             usleep(50000);
             seqnum = 0;
             continue;
         }
 
+        /*
+         * P2 DDC IQ packet header (16 bytes):
+         *   0-3   sequence number (big-endian)
+         *   4-11  timestamp (unused, zero)
+         *   12-13 bits per sample (16-bit BE = 24)
+         *   14-15 samples per frame (16-bit BE = 238)
+         */
         p = rx_buffer;
         *(uint32_t*)p = htonl(seqnum++);
         p += 4;
 
-        // no time stamps
-        p += 9;
+        memset(p, 0, 8);   // no time stamps
+        p += 8;
 
-        *p++ = 24; // bits per sample
-        *p++ = 0;
-        *p++ = 238; // samps per packet
+        *p++ = 0;          // bits per sample, high byte
+        *p++ = 24;         // bits per sample, low byte
+        *p++ = 0;          // samples per frame, high byte
+        *p++ = 238;        // samples per frame, low byte
 
         pthread_mutex_lock (&send_lock);
 
-        while (!(send_flags & rcb->rcvr_mask) && running) {
+        while (!(send_flags & rcb->rcvr_mask) && running && ddcenable[myddc]) {
             pthread_cond_wait (&send_cond, &send_lock);
         }
         send_flags &= ~rcb->rcvr_mask;
         pthread_mutex_unlock (&send_lock);
 
+        if (!running || !ddcenable[myddc]) {
+            /* Woken by stop/disable — don't send; release any blocked
+             * load_packet() and go back to the idle check. */
+            pthread_mutex_lock (&done_send_lock);
+            done_send_flags |= rcb->rcvr_mask;
+            pthread_cond_broadcast (&done_send_cond);
+            pthread_mutex_unlock (&done_send_lock);
+            continue;
+        }
+
         memcpy(p, &pbuf[myddc][0], 1428); // I-Q data
 
-#if 0  // for debug
-        if (seqnum > 1000 && myddc == 1) {
-            t_print ("rcvrs_mask:%x send_flags:%d\n", mcb.rcvrs_mask, send_flags);
-
-            for (int i = 0; i < 1444; i++) {
-                printf("%4d:%2x ", i, rx_buffer[i]);
-
-                if (!((i + 1) % 8))
-                    printf("\n");
-            }
-            //exit(0);
-        }
-#endif
-
         if (sendto(sock, rx_buffer, 1444, 0, (struct sockaddr * )&addr_new, sizeof(addr_new)) < 0) {
+            /* Transient send errors must not kill the DDC stream — the
+             * thread is only respawned on a run 0->1 transition. */
             t_perror("***** ERROR: RX thread sendto");
-            break;
         }
 
         pthread_mutex_lock (&done_send_lock);
@@ -2114,20 +2351,30 @@ void *wb_thread(void *data)
             seqnum = 0; // reset per frame
             fclose(bfile);
 
+            /*
+             * Honor the wideband packet length negotiated in the General
+             * packet (byte 24-25, samples per packet; default 512).
+             * Clamp to what fits our fixed buffer and divides the sweep.
+             */
+            int wlen = wide_len;
+            if (wlen < 64 || wlen > 512 || (16384 % wlen) != 0) wlen = 512;
+            int npkts = 16384 / wlen;      /* 16384 16-bit samples per sweep */
+            int dbytes = wlen * 2;
+
             // frame
-            for (i = 0; i < 32; i++) {
+            for (i = 0; i < npkts; i++) {
                 // update seq number
                 p = wb_buffer;
                 *(uint32_t*)p = htonl(seqnum++);
                 p += 4;
 
                 // packet
-                for (j = 0; j < 1024; j+=2) { //swap bytes
-                    wb_buffer[j+5] = samples[j + (i * 1024)];
-                    wb_buffer[j+4] = samples[j + 1 + (i * 1024)];
+                for (j = 0; j < dbytes; j+=2) { //swap bytes
+                    wb_buffer[j+5] = samples[j + (i * dbytes)];
+                    wb_buffer[j+4] = samples[j + 1 + (i * dbytes)];
                 }
 
-                if (sendto(hp_sock, wb_buffer, 1028, 0,
+                if (sendto(hp_sock, wb_buffer, dbytes + 4, 0,
                            (struct sockaddr * )&addr_new, sizeof(addr_new)) < 0) {
                     t_perror("***** ERROR: WB thread sendto");
                     break;
@@ -2135,8 +2382,13 @@ void *wb_thread(void *data)
             }
             usleep(66000);
         } else {
-            t_print("%s() filename: %s does not exist\n", __FUNCTION__, filename);
-            break;
+            static int wb_warned = 0;
+            if (!wb_warned) {
+                t_print("%s() filename: %s does not exist (will keep retrying)\n",
+                        __FUNCTION__, filename);
+                wb_warned = 1;
+            }
+            usleep(1000000);
         }
     }
 
@@ -2183,9 +2435,21 @@ void *mic_thread(void *data)
 
     t_print("Starting mic_thread()\n");
     while (!do_exit) {
-        if (!gen_rcvd || !running) {
+        /* Drain incoming TX-specific packets — the host sends them to
+         * port 1026, which this socket owns.  We don't act on them
+         * (RX-only bridge) but must not let them pile up unread. */
+        {
+            unsigned char scratch[2048];
+            while (recv(sock, scratch, sizeof(scratch), MSG_DONTWAIT) > 0) {
+                clock_gettime(CLOCK_MONOTONIC, &last_client_activity);
+            }
+        }
+
+        if (!gen_rcvd || !running || addr_new.sin_port == 0) {
             usleep(500000);
             seqnum = 0;
+            /* keep the pacing clock current so we don't burst on resume */
+            clock_gettime(CLOCK_MONOTONIC, &delay);
             continue;
         }
         // update seq number
@@ -2204,8 +2468,8 @@ void *mic_thread(void *data)
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &delay, NULL);
 
         if (sendto(sock, mic_buffer, 132, 0, (struct sockaddr * )&addr_new, sizeof(addr_new)) < 0) {
+            /* Transient send errors must not kill the mic stream */
             t_perror("***** ERROR: Mic thread sendto");
-            break;
         }
     }
 

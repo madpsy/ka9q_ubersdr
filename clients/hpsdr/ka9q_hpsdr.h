@@ -59,15 +59,9 @@
 
 #define HERMES_FW_VER 18
 #define MAX_BUFFER_LEN 2048
-#define HPSDR_FRAME_LEN 1032
-#define IQ_FRAME_DATA_LEN 63
-#define IQ_BUF_COUNT 1024
 #define MAX_RCVRS 10
 #define MAX_PRGMS 2
-#define MAXSTR 128
-#define HERMES 1
 #define HERMES_LITE 6
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 /* PCM binary protocol magic bytes (little-endian uint16) */
 #define PCM_MAGIC_FULL    0x5043  /* "PC" — full 37-byte header  */
@@ -78,10 +72,16 @@
 /* WebSocket receive buffer — large enough for a full iq192 frame */
 #define WS_RX_BUF_SIZE (128 * 1024)
 
-struct main_cb {
-    u_int rcvrs_mask;
-    int nsamps_packet;
+/*
+ * IQ accumulation buffer, in complex samples.
+ * Must hold the largest possible decoded PCM frame (WS_RX_BUF_SIZE / 4
+ * bytes-per-complex-sample = 32768 samples) plus up to one HPSDR packet
+ * (238 samples) of leftover from the previous frame, so that a frame can
+ * be appended at any fill level without overflow or truncation.
+ */
+#define IQ_RING_SAMPLES ((WS_RX_BUF_SIZE / 4) + 256)
 
+struct main_cb {
     int wideband;
     int debug;
     int num_rxs;
@@ -93,7 +93,6 @@ struct main_cb {
 
     struct rcvr_cb {
         int rcvr_num;
-        u_int err_count;
         int new_freq;
         int curr_freq;
         int output_rate;
@@ -117,14 +116,12 @@ struct main_cb {
 
         int iqSample_offset;
         int iqSamples_remaining;
-        float complex iqSamples[IQ_BUF_COUNT + IQ_FRAME_DATA_LEN * 2];
+        float complex iqSamples[IQ_RING_SAMPLES];
     } rcb[MAX_RCVRS];
 };
 
 void load_packet(struct rcvr_cb* rcb);
 void sdr_sighandler(int signum);
-void hpsdrsim_stop_threads(void);
-int new_protocol_running(void);
 void new_protocol_general_packet(unsigned char *buffer);
 void generate_uuid(char *buf);
 bool check_ubersdr_connection(const char *url);

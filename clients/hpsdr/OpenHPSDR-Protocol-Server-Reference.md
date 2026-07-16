@@ -5,15 +5,6 @@
 > written from the point of view of a **server** — i.e. the SDR hardware / gateware, or a
 > software emulation of it — that must interoperate with a client such as deskHPSDR.
 >
-> It was reconstructed from the deskHPSDR client implementation
-> (`src/old_protocol.c`, `src/new_protocol.c`, `src/old_discovery.c`,
-> `src/new_discovery.c`) and cross-checked against the bundled server simulators
-> (`src/hpsdrsim.c`, `src/newhpsdrsim.c`). Byte offsets and bit masks below are exactly
-> those the client emits and expects; a conforming server must produce/consume the same.
->
-> deskHPSDR is a **client only**. Where the client "sends", the server **receives**, and
-> vice-versa. This document flips that framing: **"Host → Radio"** = data your server
-> receives; **"Radio → Host"** = data your server must produce.
 
 ---
 
@@ -725,7 +716,3 @@ commands; the FPGA converts internally. (HL2 IO-board frequency codes use the lo
 5. Use the phase-word arithmetic (`freq * 2^32 / 122.88e6`) for DDC/DUC tuning.
 
 ---
-
-*Generated from the deskHPSDR source tree. Offsets/masks reflect the client as of the version in
-this repository; when in doubt, `src/old_protocol.c` and `src/new_protocol.c` are authoritative, and
-`src/hpsdrsim.c` / `src/newhpsdrsim.c` are working server references.*

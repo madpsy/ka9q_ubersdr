@@ -310,6 +310,13 @@ services:
       - REMOTE_HOST=${HOSTNAME}
       - TZ=${TZ:-UTC}
 
+    healthcheck:
+      test: ["CMD-SHELL", "ssh-keygen -y -f /root/.ssh/id_rsa > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
     logging:
       driver: "fluentd"
       options:

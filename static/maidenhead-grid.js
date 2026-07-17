@@ -80,18 +80,17 @@ class MaidenheadGrid {
     _createCanvas() {
         if (this._canvas) return;
 
-        // Place the canvas directly inside the map container (not a pane) so
-        // it is never shifted by Leaflet's panning transforms.  We cover the
-        // map exactly and use latLngToContainerPoint for all coordinates.
-        const mapContainer = this.map.getContainer();
+        // Place the canvas in the overlayPane so it sits above tiles but below
+        // markers (markerPane z=600), shadows (z=500) and tooltips (z=650).
+        // We use latLngToLayerPoint for drawing, which gives coords relative to
+        // the pane origin — no offset compensation needed even during panning.
+        const pane = this.map.getPanes().overlayPane;
         const canvas = document.createElement('canvas');
         canvas.style.position      = 'absolute';
         canvas.style.top           = '0';
         canvas.style.left          = '0';
         canvas.style.pointerEvents = 'none';
-        // Sit above tile panes (z-index ~200) but below controls (~1000)
-        canvas.style.zIndex        = '400';
-        mapContainer.appendChild(canvas);
+        pane.appendChild(canvas);
         this._canvas = canvas;
         this._ctx    = canvas.getContext('2d');
     }
@@ -112,18 +111,28 @@ class MaidenheadGrid {
         const size = map.getSize();
         const dpr  = window.devicePixelRatio || 1;
 
-        // Size the canvas to match the map container exactly
+        // The overlayPane is translated by Leaflet during panning/zooming.
+        // topLeft is the layer-point of the map container's top-left corner —
+        // i.e. the offset of the pane origin relative to the current view.
+        // We size the canvas to cover the whole map and shift it so its (0,0)
+        // aligns with the pane origin, then use latLngToLayerPoint for drawing.
+        const topLeft = map.containerPointToLayerPoint([0, 0]);
+
+        // Canvas covers the full map container size
         this._canvas.width        = size.x * dpr;
         this._canvas.height       = size.y * dpr;
         this._canvas.style.width  = size.x + 'px';
         this._canvas.style.height = size.y + 'px';
+        // Shift the canvas element so its top-left aligns with the container top-left
+        L.DomUtil.setPosition(this._canvas, topLeft);
 
         const ctx = this._ctx;
         ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
         ctx.save();
         ctx.scale(dpr, dpr);
-        // No translate needed — latLngToContainerPoint already returns coords
-        // relative to the map container, which is exactly where our canvas sits.
+        // Translate so that latLngToLayerPoint coords (which are relative to the
+        // pane origin) land correctly on the canvas (whose top-left = topLeft).
+        ctx.translate(-topLeft.x, -topLeft.y);
 
         if (zoom < this.options.minZoom) { ctx.restore(); return; }
 
@@ -162,17 +171,18 @@ class MaidenheadGrid {
         items.forEach(loc => {
             const bnd = boundsOf(loc);
 
-            // Convert corners to pixel coords (container-relative)
-            const sw = map.latLngToContainerPoint(L.latLng(bnd.south, bnd.west));
-            const ne = map.latLngToContainerPoint(L.latLng(bnd.north, bnd.east));
+            // latLngToLayerPoint returns coords in the pane's coordinate space
+            const sw = map.latLngToLayerPoint(L.latLng(bnd.south, bnd.west));
+            const ne = map.latLngToLayerPoint(L.latLng(bnd.north, bnd.east));
 
             const x = Math.min(sw.x, ne.x);
             const y = Math.min(sw.y, ne.y);
             const w = Math.abs(ne.x - sw.x);
             const h = Math.abs(ne.y - sw.y);
 
-            // Skip cells entirely outside the canvas
-            if (x + w < 0 || x > size.x || y + h < 0 || y > size.y) return;
+            // Skip cells entirely outside the visible area
+            if (x + w < topLeft.x || x > topLeft.x + size.x ||
+                y + h < topLeft.y || y > topLeft.y + size.y) return;
 
             ctx.strokeRect(x, y, w, h);
 
@@ -182,9 +192,8 @@ class MaidenheadGrid {
                 const cy = y + h / 2;
 
                 // Dark halo for legibility
-                ctx.fillStyle = 'rgba(0,0,0,0.75)';
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+                ctx.lineWidth   = 3;
+                ctx.strokeStyle = 'rgba(0,0,0,0.8)';
                 ctx.strokeText(loc, cx, cy);
 
                 ctx.fillStyle   = labelStyle;

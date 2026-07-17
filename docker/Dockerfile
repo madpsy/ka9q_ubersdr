@@ -1,11 +1,12 @@
 # Multi-stage build for ka9q_ubersdr on Ubuntu 24.04
 FROM golang:1.25-bookworm AS builder
 
-# Install build dependencies for Opus
+# Install build dependencies for Opus and JS bundling (esbuild)
 RUN apt-get update && apt-get install -y \
     libopus-dev \
     libopusfile-dev \
     pkg-config \
+    esbuild \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

@@ -65,17 +65,9 @@
     <script src="opus-decoder.min.js"></script>
     <!-- JSZip for creating ZIP files -->
     <script src="jszip.min.js"></script>
-    <!-- SunCalc for sunrise/sunset calculations -->
-    <script src="suncalc.js"></script>
-    <!-- Maidenhead grid helpers (maidenheadToLatLon, latLonToMaidenhead, maidenheadDistance) -->
-    <script src="maidenhead.js"></script>
-    <!-- FFT and NR2 libraries for noise reduction -->
-    <script src="fft.js"></script>
-    <script src="nr2.js"></script>
-    <script src="websdr-nr.js"></script>
-    <script src="noise-blanker.js"></script>
-    <script src="filters.js"></script>
-    <script src="rmnoise.js"></script>
+    <!-- Head bundle: suncalc, maidenhead, fft, nr2, websdr-nr, noise-blanker, filters, rmnoise -->
+    <!-- Built by build-js.sh — replaces 8 individual script tags -->
+    <script src="dist/head-bundle.min.js"></script>
     {{.CustomHeadHTML}}
 </head>
 <body>
@@ -1607,20 +1599,13 @@
         <p class="footer-mobile" style="display: none"><a href="https://ubersdr.org" target="_blank">UberSDR</a> • <a href="/admin.html" target="_blank">Admin</a> • <a href="/noisefloor.html" target="_blank">Noise</a> • <a href="/bandconditions.html" target="_blank">Conditions</a></p>
     </footer>
 
-    <script src="bands_state.js"></script>
-    <script src="band-freq-toggle.js"></script>
-    <script src="extensions.js"></script>
-    <script src="extension-loader.js"></script>
-    <script src="extension-resize.js"></script>
-    <script src="carrier-detector.js"></script>
-    <script src="signal-meter.js"></script>
-    <script src="s-meter-needle.js"></script>
-    <script src="ui-config.js"></script>
-    <script src="spectrum-display.js"></script>
-    <script src="spectrum-webgl.js"></script>
-    <script src="oscilloscope.js"></script>
-    <script src="recorder.js"></script>
-    <script src="idle-detector.js"></script>
+    <!-- Body bundle: bands_state, band-freq-toggle, extensions, extension-loader,
+         extension-resize, carrier-detector, signal-meter, s-meter-needle, ui-config,
+         spectrum-display, spectrum-webgl, oscilloscope, recorder, idle-detector,
+         dxcluster-client, time-display, space-weather-display, voice-activity-service,
+         voice-activity-markers, tts-announcements, welcome-tour, pages-menu -->
+    <!-- Built by build-js.sh — replaces 22 individual script tags -->
+    <script src="dist/body-bundle.min.js"></script>
     <!-- Fetch description once and store globally for chat and other features -->
     <script>
         // Fetch /api/description once and cache it globally
@@ -1638,7 +1623,7 @@
             return null;
         })();
     </script>
-    <script src="dxcluster-client.js"></script>
+    <!-- dxcluster-client.js now in dist/body-bundle.min.js -->
     <!-- Control panel (rotator + ant switch) — loaded when either feature is enabled -->
     <script>
         (async function() {
@@ -1735,18 +1720,18 @@
             }
         })();
     </script>
-    <script src="time-display.js"></script>
-    <script src="space-weather-display.js"></script>
-    <script src="voice-activity-service.js"></script>
-    <script src="voice-activity-markers.js"></script>
-    <script src="tts-announcements.js"></script>
-    
+    <!-- time-display, space-weather-display, voice-activity-service,
+         voice-activity-markers, tts-announcements now in dist/body-bundle.min.js -->
+
     <!-- Local Bookmarks System -->
     <link rel="stylesheet" href="local-bookmarks.css">
-    <script type="module" src="local-bookmarks-ui.js"></script>
-    
+    <!-- local-bookmarks-ui.js + local-bookmarks.js bundled into IIFE by build-js.sh -->
+    <script src="dist/local-bookmarks.bundle.min.js"></script>
+
     <script src="qrcode.min.js"></script>
-    <script type="module" src="app.js"></script>
+    <!-- app.js + websocket-manager.js + bookmark-manager.js + bandwidth-control.js
+         + wake-lock.js bundled into IIFE by build-js.sh -->
+    <script src="dist/app.bundle.min.js"></script>
 
     <!-- RM Noise AI Denoising Modal -->
     <div id="rmnoise-modal" class="rmnoise-modal-overlay" style="display:none;">
@@ -1894,7 +1879,7 @@
         }
     </script>
     <!-- Welcome Tour & Announcements -->
-    <script src="welcome-tour.js"></script>
+    <!-- welcome-tour.js now in dist/body-bundle.min.js -->
     <script>WelcomeTour.init();</script>
 
     <!-- Waterfall pause overlay — position: fixed, positioned over spectrum canvas by JS -->
@@ -2037,6 +2022,6 @@
   }
 })();
 </script>
-<script src="pages-menu.js"></script>
+<!-- pages-menu.js now in dist/body-bundle.min.js -->
 </body>
 </html>

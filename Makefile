@@ -1,6 +1,6 @@
 # Makefile for ka9q_ubersdr
 
-.PHONY: all build run clean test install deps
+.PHONY: all build run clean test install deps js-bundle js-bundle-dev
 
 # Binary name
 BINARY=ka9q_ubersdr
@@ -8,11 +8,20 @@ BINARY=ka9q_ubersdr
 # Build the application
 all: build
 
-# Build the binary
-build:
+# Build the binary (JS bundles are built first)
+build: js-bundle
 	@echo "Building $(BINARY) with Opus support..."
 	go build -tags opus -o $(BINARY) .
 	@echo "Build complete: ./$(BINARY)"
+
+# Bundle and minify static JS files (requires esbuild)
+# Run: apt-get install esbuild  OR  npm install -g esbuild
+js-bundle:
+	@bash build-js.sh
+
+# Development bundles — concatenated only, no minification
+js-bundle-dev:
+	@bash build-js.sh --dev
 
 # Run the application
 run: build
@@ -39,6 +48,7 @@ test:
 clean:
 	@echo "Cleaning..."
 	rm -f $(BINARY)
+	rm -rf static/dist/
 	@echo "Clean complete"
 
 # Install the binary to $GOPATH/bin

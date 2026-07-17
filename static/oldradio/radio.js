@@ -167,8 +167,8 @@ async function loadRadio(radioId) {
         volumeRotation = currentVolume * 330;
         console.log('[loadRadio] defaultVolume from config:', currentRadioConfig.defaultVolume, '→ currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
 
-        // Load radio template
-        const templateResponse = await fetch(`${radio.path}/template.html`);
+        // Load radio template (cache-busted to always get latest)
+        const templateResponse = await fetch(`${radio.path}/template.html?v=` + Date.now());
         const template = await templateResponse.text();
 
         // Replace template variables
@@ -183,7 +183,7 @@ async function loadRadio(radioId) {
         const styleLink = document.getElementById('radio-style');
         await new Promise((resolve) => {
             styleLink.onload = resolve;
-            styleLink.href = `${radio.path}/style.css`;
+            styleLink.href = `${radio.path}/style.css?v=` + Date.now();
         });
 
         // Generate frequency scale marks
@@ -671,10 +671,12 @@ function updateBandDisplay() {
 
 // Channel scanning — steps through channels at SCAN_STEP_MS per channel,
 // stopping on any channel whose SNR is at/above the squelch threshold.
-// With squelch off there is no threshold, so the scan cycles until stopped.
+// With squelch off, SCAN_DEFAULT_SNR is used instead (the SNR at which the
+// first signal bar lights) so the scan still stops on active channels.
 let scanActive = false;
 let scanTimer = null;
 const SCAN_STEP_MS = 100;
+const SCAN_DEFAULT_SNR = 30;
 
 function startScan() {
     if (!currentRadioConfig || !currentRadioConfig.channels) return;
@@ -701,11 +703,12 @@ function scanStep() {
         if (!scanActive) return;
 
         // Dwell over — stop here if the signal is above the squelch threshold
-        if (currentSquelchSnr > SQUELCH_SENTINEL &&
-            minimalRadio && minimalRadio.hasSignalQuality()) {
+        // (or the default stop threshold when squelch is off)
+        const stopSnr = currentSquelchSnr > SQUELCH_SENTINEL ? currentSquelchSnr : SCAN_DEFAULT_SNR;
+        if (minimalRadio && minimalRadio.hasSignalQuality()) {
             const sq = minimalRadio.getSignalQuality();
-            if (sq && sq.snr !== null && sq.snr >= currentSquelchSnr) {
-                console.log('Scan stopped: SNR', sq.snr.toFixed(1), 'dB >= squelch', currentSquelchSnr, 'dB');
+            if (sq && sq.snr !== null && sq.snr >= stopSnr) {
+                console.log('Scan stopped: SNR', sq.snr.toFixed(1), 'dB >= threshold', stopSnr, 'dB');
                 stopScan();
                 return;
             }
@@ -742,8 +745,6 @@ function changeChannel(direction) {
         return;
     }
 
-    console.log('Current channel:', currentChannel.number, 'Direction:', direction);
-
     // Calculate new channel number
     let newChannelNum = currentChannel.number + direction;
 
@@ -754,12 +755,9 @@ function changeChannel(direction) {
         newChannelNum = currentRadioConfig.channels.length;
     }
 
-    console.log('New channel number:', newChannelNum);
-
     // Find new channel
     const newChannel = currentRadioConfig.channels.find(ch => ch.number === newChannelNum);
     if (newChannel) {
-        console.log('Changing to channel', newChannel.number, 'frequency', newChannel.frequency);
         currentFrequency = newChannel.frequency;
         updateFrequencyDisplay();
         throttledUpdateURL();

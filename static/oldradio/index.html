@@ -45,6 +45,9 @@
     <!-- Opus decoder for handling Opus-compressed audio -->
     <script src="../opus-decoder.min.js"></script>
     <script src="../minimal-radio.js"></script>
-    <script src="radio.js"></script>
+    <script>
+        // Cache-bust radio.js so UI changes are picked up without a hard refresh
+        document.write('<script src="radio.js?v=' + Date.now() + '"><\/script>');
+    </script>
 </body>
 </html>

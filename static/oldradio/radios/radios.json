@@ -8,8 +8,8 @@
     },
     {
       "id": "uk-cb",
-      "name": "UK CB Radio",
-      "description": "Classic UK CB radio with 40 FM channels (27 MHz band)",
+      "name": "CB Radio",
+      "description": "Classic CB radio with 40 FM channels, switchable UK/EU bands (27 MHz)",
       "path": "radios/uk-cb"
     }
   ],

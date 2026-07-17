@@ -152,6 +152,11 @@ async function loadRadio(radioId) {
         const configResponse = await fetch(`${radio.path}/config.json?v=` + Date.now());
         currentRadioConfig = await configResponse.json();
 
+        // Apply default band for multi-band radios (merges band values into config)
+        if (currentRadioConfig.bands) {
+            applyBandConfig(currentRadioConfig.defaultBand || Object.keys(currentRadioConfig.bands)[0]);
+        }
+
         // Update global configuration
         MIN_FREQ = currentRadioConfig.minFreq;
         MAX_FREQ = currentRadioConfig.maxFreq;
@@ -209,6 +214,9 @@ async function loadRadio(radioId) {
             changeRadioFloating.onclick = async () => {
                 // Set flags to prevent processing audio and reconnection
                 isChangingRadio = true;
+
+                // Stop any active channel scan
+                stopScan();
 
                 // Cancel visualiser animation loop and clear stale references
                 // so drawVisualiser() doesn't crash when the canvas is removed
@@ -560,6 +568,7 @@ function setupVolumeKnob(volumeKnob) {
 function setupChannelButtons() {
     const channelUpBtn = document.getElementById('channel-up');
     const channelDownBtn = document.getElementById('channel-down');
+    const scanBtn = document.getElementById('channel-scan');
 
     if (!channelUpBtn || !channelDownBtn) {
         console.log('Channel buttons not found - not a channel-based radio');
@@ -575,14 +584,142 @@ function setupChannelButtons() {
     channelUpBtn.addEventListener('click', (e) => {
         e.preventDefault();
         console.log('Channel UP clicked');
+        stopScan();
         changeChannel(1);
     });
 
     channelDownBtn.addEventListener('click', (e) => {
         e.preventDefault();
         console.log('Channel DOWN clicked');
+        stopScan();
         changeChannel(-1);
     });
+
+    if (scanBtn) {
+        scanBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (scanActive) {
+                stopScan();
+            } else {
+                startScan();
+            }
+        });
+    }
+
+    const bandToggle = document.getElementById('band-toggle');
+    if (bandToggle && currentRadioConfig.bands) {
+        bandToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            toggleBand();
+        });
+        updateBandDisplay();
+    }
+}
+
+// Band handling for multi-band radios (e.g. CB with UK/EU channel plans)
+let currentBand = null;
+
+// Merge the named band's values into the active config and global freq limits
+function applyBandConfig(bandName) {
+    if (!currentRadioConfig || !currentRadioConfig.bands) return;
+    const band = currentRadioConfig.bands[bandName];
+    if (!band) return;
+
+    currentBand = bandName;
+    currentRadioConfig.minFreq = band.minFreq;
+    currentRadioConfig.maxFreq = band.maxFreq;
+    currentRadioConfig.defaultFrequency = band.defaultFrequency;
+    currentRadioConfig.channels = band.channels;
+    MIN_FREQ = band.minFreq;
+    MAX_FREQ = band.maxFreq;
+
+    updateBandDisplay();
+}
+
+// Switch to the next band, keeping the current channel number
+function toggleBand() {
+    if (!currentRadioConfig || !currentRadioConfig.bands) return;
+
+    stopScan();
+
+    // Remember the current channel number so we stay on it in the new band
+    const currentChannel = currentRadioConfig.channels.find(ch => ch.frequency === currentFrequency);
+    const channelNum = currentChannel ? currentChannel.number : null;
+
+    const bandNames = Object.keys(currentRadioConfig.bands);
+    const nextBand = bandNames[(bandNames.indexOf(currentBand) + 1) % bandNames.length];
+    applyBandConfig(nextBand);
+
+    const newChannel = channelNum !== null
+        ? currentRadioConfig.channels.find(ch => ch.number === channelNum)
+        : null;
+    currentFrequency = newChannel ? newChannel.frequency : currentRadioConfig.defaultFrequency;
+
+    console.log('Band switched to', nextBand, '— channel', channelNum, '→', currentFrequency, 'Hz');
+
+    updateFrequencyDisplay();
+    throttledUpdateURL();
+    sendTuneCommand();
+}
+
+function updateBandDisplay() {
+    const bandToggle = document.getElementById('band-toggle');
+    if (bandToggle && currentBand) {
+        bandToggle.textContent = currentBand;
+    }
+}
+
+// Channel scanning — steps through channels at SCAN_STEP_MS per channel,
+// stopping on any channel whose SNR is at/above the squelch threshold.
+// With squelch off there is no threshold, so the scan cycles until stopped.
+let scanActive = false;
+let scanTimer = null;
+const SCAN_STEP_MS = 100;
+
+function startScan() {
+    if (!currentRadioConfig || !currentRadioConfig.channels) return;
+    scanActive = true;
+    updateScanButtonState();
+    scanStep();
+}
+
+function stopScan() {
+    if (scanTimer) {
+        clearTimeout(scanTimer);
+        scanTimer = null;
+    }
+    if (!scanActive) return;
+    scanActive = false;
+    updateScanButtonState();
+}
+
+function scanStep() {
+    if (!scanActive) return;
+    changeChannel(1);
+    scanTimer = setTimeout(() => {
+        scanTimer = null;
+        if (!scanActive) return;
+
+        // Dwell over — stop here if the signal is above the squelch threshold
+        if (currentSquelchSnr > SQUELCH_SENTINEL &&
+            minimalRadio && minimalRadio.hasSignalQuality()) {
+            const sq = minimalRadio.getSignalQuality();
+            if (sq && sq.snr !== null && sq.snr >= currentSquelchSnr) {
+                console.log('Scan stopped: SNR', sq.snr.toFixed(1), 'dB >= squelch', currentSquelchSnr, 'dB');
+                stopScan();
+                return;
+            }
+        }
+
+        scanStep();
+    }, SCAN_STEP_MS);
+}
+
+function updateScanButtonState() {
+    const scanBtn = document.getElementById('channel-scan');
+    if (scanBtn) {
+        scanBtn.classList.toggle('scanning', scanActive);
+    }
 }
 
 // Change channel for CB radio
@@ -1212,6 +1349,16 @@ function drawOscilloscope() {}
 function loadSettingsFromURL() {
     const params = new URLSearchParams(window.location.search);
 
+    // Apply band before freq so MIN/MAX limits are correct for clamping
+    if (params.has('band') && currentRadioConfig && currentRadioConfig.bands) {
+        const band = params.get('band');
+        if (currentRadioConfig.bands[band] && band !== currentBand) {
+            applyBandConfig(band);
+            currentFrequency = currentRadioConfig.defaultFrequency;
+            console.log('Loaded band from URL:', band);
+        }
+    }
+
     if (params.has('freq')) {
         let freq = parseInt(params.get('freq'));
         if (!isNaN(freq)) {
@@ -1291,6 +1438,9 @@ function updateURL() {
         const params = new URLSearchParams(window.location.search);
         params.set('freq', currentFrequency);
         params.set('vol', currentVolume.toFixed(2));
+        if (currentBand && currentRadioConfig && currentRadioConfig.bands) {
+            params.set('band', currentBand);
+        }
 
         const newURL = window.location.pathname + '?' + params.toString();
         window.history.replaceState({}, '', newURL);

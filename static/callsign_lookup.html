@@ -529,6 +529,7 @@
     </div>
 
     <script src="leaflet.js"></script>
+    <script src="maidenhead-grid.js"></script>
     <script>
     (function () {
         'use strict';
@@ -769,6 +770,7 @@
         let rxMarker               = null;   // receiver marker
         let geodesicLine           = null;   // polyline between receiver and callsign
         let rotatorConeLayer       = null;   // Leaflet polygon for the antenna cone
+        let maidenheadGrid         = null;   // MaidenheadGrid overlay instance
         let currentSpotLat         = null;   // lat of the currently displayed callsign
         let currentSpotLon         = null;
         let currentSpotDistKm      = null;   // great-circle distance to current callsign (km)
@@ -778,6 +780,10 @@
         let receiverCallsign       = null;   // from /api/description receiver.callsign
         let stateNames             = {};     // abbreviation → full name, from /state_names.json
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
+
+        // Persist grid toggle preference across page loads
+        const GRID_PREF_KEY = 'callsign_lookup_maidenhead_grid';
+        let gridEnabled = localStorage.getItem(GRID_PREF_KEY) === 'true';
 
         // In-memory cache of successful lookup results, keyed by normalised callsign.
         // Each entry is { data, cachedAt } where cachedAt is a Date.now() timestamp.
@@ -900,6 +906,11 @@
             if (rotatorConeLayer) {
                 if (leafletMap) leafletMap.removeLayer(rotatorConeLayer);
                 rotatorConeLayer = null;
+            }
+            if (maidenheadGrid) {
+                maidenheadGrid.disableAutoUpdate();
+                maidenheadGrid.clearGrid();
+                maidenheadGrid = null;
             }
             if (leafletMap) {
                 leafletMap.remove();
@@ -1113,6 +1124,75 @@
                 addReceiverOverlay(cb.checked);
                 cb.onchange = () => addReceiverOverlay(cb.checked);
             }
+
+            // ── Maidenhead grid overlay ──────────────────────────────────────
+            maidenheadGrid = new MaidenheadGrid(leafletMap, {
+                color:       '#4a9eff',
+                weight:      1,
+                opacity:     0.45,
+                fillOpacity: 0,
+                showLabels:  true,
+                labelColor:  '#4a9eff',
+                labelSize:   '10px',
+                minZoom:     3
+            });
+            maidenheadGrid.enableAutoUpdate();
+
+            if (gridEnabled) {
+                maidenheadGrid.showGrid();
+            }
+
+            // Build a Leaflet custom control for the bottom-right corner
+            const GridControl = L.Control.extend({
+                options: { position: 'bottomright' },
+                onAdd() {
+                    const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+                    div.style.cssText = [
+                        'background:#222',
+                        'border:1px solid #444',
+                        'border-radius:5px',
+                        'padding:4px 8px',
+                        'display:flex',
+                        'align-items:center',
+                        'gap:6px',
+                        'cursor:pointer',
+                        'user-select:none',
+                        'font-size:12px',
+                        'color:#aaa',
+                        'white-space:nowrap'
+                    ].join(';');
+
+                    const chk = document.createElement('input');
+                    chk.type    = 'checkbox';
+                    chk.id      = 'map-grid-toggle';
+                    chk.checked = gridEnabled;
+                    chk.style.accentColor = '#4a9eff';
+                    chk.style.cursor      = 'pointer';
+
+                    const lbl = document.createElement('label');
+                    lbl.htmlFor   = 'map-grid-toggle';
+                    lbl.textContent = 'Grid';
+                    lbl.style.cursor = 'pointer';
+
+                    // Prevent map click-through when interacting with the control
+                    L.DomEvent.disableClickPropagation(div);
+                    L.DomEvent.disableScrollPropagation(div);
+
+                    chk.addEventListener('change', () => {
+                        gridEnabled = chk.checked;
+                        localStorage.setItem(GRID_PREF_KEY, gridEnabled);
+                        if (maidenheadGrid) {
+                            gridEnabled ? maidenheadGrid.showGrid() : maidenheadGrid.hideGrid();
+                        }
+                    });
+
+                    div.appendChild(chk);
+                    div.appendChild(lbl);
+                    return div;
+                }
+            });
+
+            new GridControl().addTo(leafletMap);
         }
 
         // ── Render ───────────────────────────────────────────────────────

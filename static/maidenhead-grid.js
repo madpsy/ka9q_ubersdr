@@ -247,16 +247,20 @@ class MaidenheadGrid {
      * Enable auto-update on map move/zoom
      */
     enableAutoUpdate() {
-        this.map.on('moveend', () => this.update());
-        this.map.on('zoomend', () => this.update());
+        this._onMoveEnd = () => this.updateGrid();
+        this._onZoomEnd = () => this.updateGrid();
+        this.map.on('moveend', this._onMoveEnd);
+        this.map.on('zoomend', this._onZoomEnd);
     }
 
     /**
      * Disable auto-update
      */
     disableAutoUpdate() {
-        this.map.off('moveend');
-        this.map.off('zoomend');
+        if (this._onMoveEnd) this.map.off('moveend', this._onMoveEnd);
+        if (this._onZoomEnd) this.map.off('zoomend', this._onZoomEnd);
+        this._onMoveEnd = null;
+        this._onZoomEnd = null;
     }
 
     /**

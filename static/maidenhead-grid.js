@@ -1,10 +1,14 @@
 /**
  * Maidenhead Grid Overlay for Leaflet
+ *
  * Draws 2-char (field), 4-char (square) and 6-char (subsquare) Maidenhead
- * locator grid lines on a Leaflet map, switching level automatically by zoom.
+ * locator grid lines and labels on a Leaflet map using a single <canvas>
+ * element that is redrawn on every map move/zoom.  Labels are always centred
+ * inside their grid square and are suppressed when the square is too small to
+ * fit the text.
  *
  * Zoom thresholds (defaults, overridable via options):
- *   zoom < minZoom  → nothing drawn
+ *   zoom < minZoom        → nothing drawn
  *   minZoom ≤ zoom < zoom4 → 2-char fields  (20° × 10°)
  *   zoom4   ≤ zoom < zoom6 → 4-char squares (2° × 1°)
  *   zoom    ≥ zoom6        → 6-char subsquares (5′ × 2.5′)
@@ -14,38 +18,35 @@ class MaidenheadGrid {
     constructor(map, options = {}) {
         this.map = map;
         this.options = {
-            color:       options.color       || '#3388ff',
-            weight:      options.weight      || 1,
-            opacity:     options.opacity     || 0.5,
-            fillOpacity: options.fillOpacity !== undefined ? options.fillOpacity : 0,
+            color:       options.color       || '#ffdd00',
+            weight:      options.weight      !== undefined ? options.weight      : 1,
+            opacity:     options.opacity     !== undefined ? options.opacity     : 0.75,
             showLabels:  options.showLabels  !== undefined ? options.showLabels  : true,
-            labelColor:  options.labelColor  || '#3388ff',
-            // Minimum zoom to show anything at all
-            minZoom:     options.minZoom     !== undefined ? options.minZoom  : 2,
-            // Zoom at which to switch from 2-char → 4-char
-            zoom4:       options.zoom4       !== undefined ? options.zoom4    : 5,
-            // Zoom at which to switch from 4-char → 6-char
-            zoom6:       options.zoom6       !== undefined ? options.zoom6    : 9,
-            // Minimum zoom to show labels for each level
-            labelZoom2:  options.labelZoom2  !== undefined ? options.labelZoom2 : 2,
-            labelZoom4:  options.labelZoom4  !== undefined ? options.labelZoom4 : 5,
-            labelZoom6:  options.labelZoom6  !== undefined ? options.labelZoom6 : 9,
+            labelColor:  options.labelColor  || '#ffdd00',
+            minZoom:     options.minZoom     !== undefined ? options.minZoom     : 2,
+            zoom4:       options.zoom4       !== undefined ? options.zoom4       : 5,
+            zoom6:       options.zoom6       !== undefined ? options.zoom6       : 9,
+            // Minimum pixel width/height a grid cell must have before its label is drawn
+            minLabelPx:  options.minLabelPx  !== undefined ? options.minLabelPx  : 40,
+            // Font size for labels (px)
+            fontSize:    options.fontSize    !== undefined ? options.fontSize    : 11,
         };
 
-        this.gridLayer    = null;
-        this.labelLayer   = null;
-        this.highlightLayer = null;
-        this._wantGrid    = false;   // true when the user has toggled the grid on
-        this.gridVisible  = false;   // true only while layers are actually on the map
+        this._wantGrid  = false;
+        this._canvas    = null;
+        this._ctx       = null;
+        this._container = null;
+
+        this.highlightLayer     = null;
         this.highlightedSquares = new Map();
 
-        this._onMoveEnd = null;
-        this._onZoomEnd = null;
+        this._onMoveEnd  = null;
+        this._onZoomEnd  = null;
+        this._onViewReset= null;
     }
 
     // ── Bounds helpers ────────────────────────────────────────────────────────
 
-    /** 2-char field bounds (e.g. "IO") — 20° lon × 10° lat */
     fieldToBounds(field) {
         const f = field.toUpperCase();
         const west  = (f.charCodeAt(0) - 65) * 20 - 180;
@@ -53,16 +54,14 @@ class MaidenheadGrid {
         return { south, west, north: south + 10, east: west + 20 };
     }
 
-    /** 4-char square bounds (e.g. "IO91") — 2° lon × 1° lat */
     squareToBounds(locator) {
         const f = locator.substring(0, 2).toUpperCase();
         const s = locator.substring(2, 4);
         const west  = (f.charCodeAt(0) - 65) * 20 - 180 + parseInt(s[0]) * 2;
-        const south = (f.charCodeAt(1) - 65) * 10 - 90  + parseInt(s[1]) * 1;
+        const south = (f.charCodeAt(1) - 65) * 10 - 90  + parseInt(s[1]);
         return { south, west, north: south + 1, east: west + 2 };
     }
 
-    /** 6-char subsquare bounds (e.g. "IO91vl") — 5′ lon × 2.5′ lat */
     subsquareToBounds(locator) {
         const sq  = this.squareToBounds(locator.substring(0, 4));
         const sub = locator.substring(4, 6).toLowerCase();
@@ -75,6 +74,143 @@ class MaidenheadGrid {
 
     // Legacy alias
     locatorToBounds(locator) { return this.squareToBounds(locator); }
+
+    // ── Canvas layer ──────────────────────────────────────────────────────────
+
+    _createCanvas() {
+        if (this._canvas) return;
+
+        // Insert a canvas that exactly covers the map pane
+        this._container = this.map.getPanes().overlayPane;
+        const canvas = document.createElement('canvas');
+        canvas.style.position = 'absolute';
+        canvas.style.top      = '0';
+        canvas.style.left     = '0';
+        canvas.style.pointerEvents = 'none';
+        canvas.style.zIndex   = '200';
+        this._container.appendChild(canvas);
+        this._canvas = canvas;
+        this._ctx    = canvas.getContext('2d');
+    }
+
+    _removeCanvas() {
+        if (this._canvas) {
+            this._canvas.parentNode && this._canvas.parentNode.removeChild(this._canvas);
+            this._canvas = null;
+            this._ctx    = null;
+        }
+    }
+
+    /** Convert a geographic [lat, lon] to pixel coords relative to the map container */
+    _latLonToPixel(lat, lon) {
+        const pt = this.map.latLngToContainerPoint(L.latLng(lat, lon));
+        return pt;
+    }
+
+    _redraw() {
+        if (!this._wantGrid || !this._canvas) return;
+
+        const map  = this.map;
+        const zoom = map.getZoom();
+        const size = map.getSize();
+        const dpr  = window.devicePixelRatio || 1;
+
+        // Size the canvas to the map container
+        this._canvas.width        = size.x * dpr;
+        this._canvas.height       = size.y * dpr;
+        this._canvas.style.width  = size.x + 'px';
+        this._canvas.style.height = size.y + 'px';
+
+        // The overlayPane is translated by Leaflet during panning.
+        // Position the canvas so its top-left aligns with the map container's
+        // top-left, then use latLngToContainerPoint for all coordinates.
+        const paneOffset = map.containerPointToLayerPoint([0, 0]);
+        L.DomUtil.setPosition(this._canvas, paneOffset);
+
+        const ctx = this._ctx;
+        ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        // Shift drawing coords so that latLngToContainerPoint values land
+        // correctly on the canvas (canvas origin = paneOffset in container space).
+        ctx.translate(-paneOffset.x, -paneOffset.y);
+
+        if (zoom < this.options.minZoom) { ctx.restore(); return; }
+
+        // Choose grid level
+        let items, boundsOf;
+        if (zoom >= this.options.zoom6) {
+            items    = this._visibleSubsquares();
+            boundsOf = loc => this.subsquareToBounds(loc);
+        } else if (zoom >= this.options.zoom4) {
+            items    = this._visibleSquares();
+            boundsOf = loc => this.squareToBounds(loc);
+        } else {
+            items    = this._visibleFields();
+            boundsOf = loc => this.fieldToBounds(loc);
+        }
+
+        // Parse colour + apply opacity
+        const col = this._hexToRgb(this.options.color);
+        const strokeStyle = col
+            ? `rgba(${col.r},${col.g},${col.b},${this.options.opacity})`
+            : this.options.color;
+        const labelStyle = col
+            ? `rgba(${col.r},${col.g},${col.b},${Math.min(1, this.options.opacity + 0.2)})`
+            : this.options.color;
+
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth   = this.options.weight;
+
+        const fontSize = this.options.fontSize;
+        ctx.font        = `bold ${fontSize}px monospace`;
+        ctx.textAlign   = 'center';
+        ctx.textBaseline= 'middle';
+
+        const minPx = this.options.minLabelPx;
+
+        items.forEach(loc => {
+            const bnd = boundsOf(loc);
+
+            // Convert corners to pixel coords
+            const sw = this._latLonToPixel(bnd.south, bnd.west);
+            const ne = this._latLonToPixel(bnd.north, bnd.east);
+
+            const x = Math.min(sw.x, ne.x);
+            const y = Math.min(sw.y, ne.y);
+            const w = Math.abs(ne.x - sw.x);
+            const h = Math.abs(ne.y - sw.y);
+
+            // Skip cells entirely outside the canvas
+            if (x + w < 0 || x > size.x || y + h < 0 || y > size.y) return;
+
+            ctx.strokeRect(x, y, w, h);
+
+            // Draw label only when the cell is large enough
+            if (this.options.showLabels && w >= minPx && h >= minPx) {
+                const cx = x + w / 2;
+                const cy = y + h / 2;
+
+                // Dark halo for legibility
+                ctx.fillStyle = 'rgba(0,0,0,0.75)';
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+                ctx.strokeText(loc, cx, cy);
+
+                ctx.fillStyle   = labelStyle;
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth   = this.options.weight;
+                ctx.fillText(loc, cx, cy);
+            }
+        });
+
+        ctx.restore();
+    }
+
+    _hexToRgb(hex) {
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return m ? { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) } : null;
+    }
 
     // ── Visible locator generators ────────────────────────────────────────────
 
@@ -101,13 +237,13 @@ class MaidenheadGrid {
         const fLatEnd   = Math.min(17, Math.floor((mN + 90)  / 10));
         for (let flo = fLonStart; flo <= fLonEnd; flo++) {
             for (let fla = fLatStart; fla <= fLatEnd; fla++) {
-                const field     = String.fromCharCode(65 + flo) + String.fromCharCode(65 + fla);
-                const fieldWest = flo * 20 - 180;
-                const fieldSouth= fla * 10 - 90;
+                const field      = String.fromCharCode(65 + flo) + String.fromCharCode(65 + fla);
+                const fieldWest  = flo * 20 - 180;
+                const fieldSouth = fla * 10 - 90;
                 for (let slo = 0; slo < 10; slo++) {
                     for (let sla = 0; sla < 10; sla++) {
                         const w = fieldWest  + slo * 2;
-                        const s = fieldSouth + sla * 1;
+                        const s = fieldSouth + sla;
                         if (w + 2 >= mW && w <= mE && s + 1 >= mS && s <= mN)
                             results.push(field + slo + sla);
                     }
@@ -121,15 +257,14 @@ class MaidenheadGrid {
         const b = this.map.getBounds();
         const mW = b.getWest(), mE = b.getEast(), mS = b.getSouth(), mN = b.getNorth();
         const results = [];
+        const stepLon = 2 / 24, stepLat = 1 / 24;
         for (const sq of this._visibleSquares()) {
             const sqB = this.squareToBounds(sq);
-            const step_lon = 2 / 24;
-            const step_lat = 1 / 24;
             for (let slo = 0; slo < 24; slo++) {
                 for (let sla = 0; sla < 24; sla++) {
-                    const w = sqB.west  + slo * step_lon;
-                    const s = sqB.south + sla * step_lat;
-                    if (w + step_lon >= mW && w <= mE && s + step_lat >= mS && s <= mN)
+                    const w = sqB.west  + slo * stepLon;
+                    const s = sqB.south + sla * stepLat;
+                    if (w + stepLon >= mW && w <= mE && s + stepLat >= mS && s <= mN)
                         results.push(sq + String.fromCharCode(97 + slo) + String.fromCharCode(97 + sla));
                 }
             }
@@ -137,124 +272,55 @@ class MaidenheadGrid {
         return results;
     }
 
-    // ── Draw / clear ──────────────────────────────────────────────────────────
-
-    /**
-     * (Re)draw the grid for the current viewport and zoom.
-     * Always clears existing layers first, then rebuilds.
-     */
-    drawGrid() {
-        // Remove existing layers without touching _wantGrid
-        if (this.gridLayer)  { this.map.removeLayer(this.gridLayer);  this.gridLayer  = null; }
-        if (this.labelLayer) { this.map.removeLayer(this.labelLayer); this.labelLayer = null; }
-        this.gridVisible = false;
-
-        const zoom = this.map.getZoom();
-        if (zoom < this.options.minZoom) return;
-
-        let items, boundsOf, showLabel, labelSize;
-
-        if (zoom >= this.options.zoom6) {
-            items      = this._visibleSubsquares();
-            boundsOf   = loc => this.subsquareToBounds(loc);
-            showLabel  = this.options.showLabels && zoom >= this.options.labelZoom6;
-            labelSize  = '9px';
-        } else if (zoom >= this.options.zoom4) {
-            items      = this._visibleSquares();
-            boundsOf   = loc => this.squareToBounds(loc);
-            showLabel  = this.options.showLabels && zoom >= this.options.labelZoom4;
-            labelSize  = zoom >= 7 ? '10px' : '9px';
-        } else {
-            items      = this._visibleFields();
-            boundsOf   = loc => this.fieldToBounds(loc);
-            showLabel  = this.options.showLabels && zoom >= this.options.labelZoom2;
-            labelSize  = zoom >= 4 ? '11px' : '10px';
-        }
-
-        if (items.length === 0) return;
-
-        this.gridLayer = L.layerGroup();
-        if (showLabel) this.labelLayer = L.layerGroup();
-
-        items.forEach(loc => {
-            const bnd = boundsOf(loc);
-
-            L.rectangle(
-                [[bnd.south, bnd.west], [bnd.north, bnd.east]],
-                {
-                    color:       this.options.color,
-                    weight:      this.options.weight,
-                    opacity:     this.options.opacity,
-                    fillOpacity: this.options.fillOpacity,
-                    interactive: false
-                }
-            ).addTo(this.gridLayer);
-
-            if (showLabel) {
-                const centerLat = (bnd.south + bnd.north) / 2;
-                const centerLon = (bnd.west  + bnd.east)  / 2;
-                L.marker([centerLat, centerLon], {
-                    icon: L.divIcon({
-                        className: 'maidenhead-label',
-                        html: `<div style="color:${this.options.labelColor};font-size:${labelSize};font-weight:bold;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 2px #000,-1px -1px 2px #000;pointer-events:none;white-space:nowrap;">${loc}</div>`,
-                        iconSize:   [60, 14],
-                        iconAnchor: [30, 7]
-                    }),
-                    interactive: false
-                }).addTo(this.labelLayer);
-            }
-        });
-
-        this.gridLayer.addTo(this.map);
-        if (this.labelLayer) this.labelLayer.addTo(this.map);
-        this.gridVisible = true;
-    }
-
-    clearGrid() {
-        if (this.gridLayer)  { this.map.removeLayer(this.gridLayer);  this.gridLayer  = null; }
-        if (this.labelLayer) { this.map.removeLayer(this.labelLayer); this.labelLayer = null; }
-        this.gridVisible = false;
-        this._wantGrid   = false;
-    }
+    // ── Public API ────────────────────────────────────────────────────────────
 
     showGrid() {
         this._wantGrid = true;
-        this.drawGrid();
+        this._createCanvas();
+        this._redraw();
     }
 
     hideGrid() {
         this._wantGrid = false;
-        if (this.gridLayer)  { this.map.removeLayer(this.gridLayer);  this.gridLayer  = null; }
-        if (this.labelLayer) { this.map.removeLayer(this.labelLayer); this.labelLayer = null; }
-        this.gridVisible = false;
+        if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
     }
 
     toggleGrid() {
         this._wantGrid ? this.hideGrid() : this.showGrid();
     }
 
-    /** Called on map move/zoom — only redraws if the user wants the grid */
+    /** Called on map move/zoom */
     updateGrid() {
-        if (this._wantGrid) this.drawGrid();
+        if (this._wantGrid) this._redraw();
+    }
+
+    clearGrid() {
+        this.hideGrid();
+        this._removeCanvas();
     }
 
     // ── Auto-update ───────────────────────────────────────────────────────────
 
     enableAutoUpdate() {
-        this._onMoveEnd = () => this.updateGrid();
-        this._onZoomEnd = () => this.updateGrid();
-        this.map.on('moveend', this._onMoveEnd);
-        this.map.on('zoomend', this._onZoomEnd);
+        this._onMoveEnd   = () => this.updateGrid();
+        this._onZoomEnd   = () => this.updateGrid();
+        this._onViewReset = () => this.updateGrid();
+        this.map.on('moveend',   this._onMoveEnd);
+        this.map.on('zoomend',   this._onZoomEnd);
+        this.map.on('viewreset', this._onViewReset);
     }
 
     disableAutoUpdate() {
-        if (this._onMoveEnd) this.map.off('moveend', this._onMoveEnd);
-        if (this._onZoomEnd) this.map.off('zoomend', this._onZoomEnd);
-        this._onMoveEnd = null;
-        this._onZoomEnd = null;
+        if (this._onMoveEnd)   this.map.off('moveend',   this._onMoveEnd);
+        if (this._onZoomEnd)   this.map.off('zoomend',   this._onZoomEnd);
+        if (this._onViewReset) this.map.off('viewreset', this._onViewReset);
+        this._onMoveEnd = this._onZoomEnd = this._onViewReset = null;
     }
 
-    // ── Highlight API ─────────────────────────────────────────────────────────
+    isGridVisible()          { return this._wantGrid; }
+    getHighlightedLocators() { return Array.from(this.highlightedSquares.keys()); }
+
+    // ── Highlight API (Leaflet rectangles — unaffected by canvas) ────────────
 
     highlightLocators(locators, defaultStyle = {}) {
         if (!this.highlightLayer) {
@@ -333,9 +399,6 @@ class MaidenheadGrid {
         const item = this.highlightedSquares.get(locator);
         return item ? item.data : null;
     }
-
-    isGridVisible()          { return this._wantGrid; }
-    getHighlightedLocators() { return Array.from(this.highlightedSquares.keys()); }
 }
 
 // Export for use in other scripts

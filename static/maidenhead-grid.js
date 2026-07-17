@@ -80,15 +80,18 @@ class MaidenheadGrid {
     _createCanvas() {
         if (this._canvas) return;
 
-        // Insert a canvas that exactly covers the map pane
-        this._container = this.map.getPanes().overlayPane;
+        // Place the canvas directly inside the map container (not a pane) so
+        // it is never shifted by Leaflet's panning transforms.  We cover the
+        // map exactly and use latLngToContainerPoint for all coordinates.
+        const mapContainer = this.map.getContainer();
         const canvas = document.createElement('canvas');
-        canvas.style.position = 'absolute';
-        canvas.style.top      = '0';
-        canvas.style.left     = '0';
+        canvas.style.position      = 'absolute';
+        canvas.style.top           = '0';
+        canvas.style.left          = '0';
         canvas.style.pointerEvents = 'none';
-        canvas.style.zIndex   = '200';
-        this._container.appendChild(canvas);
+        // Sit above tile panes (z-index ~200) but below controls (~1000)
+        canvas.style.zIndex        = '400';
+        mapContainer.appendChild(canvas);
         this._canvas = canvas;
         this._ctx    = canvas.getContext('2d');
     }
@@ -101,12 +104,6 @@ class MaidenheadGrid {
         }
     }
 
-    /** Convert a geographic [lat, lon] to pixel coords relative to the map container */
-    _latLonToPixel(lat, lon) {
-        const pt = this.map.latLngToContainerPoint(L.latLng(lat, lon));
-        return pt;
-    }
-
     _redraw() {
         if (!this._wantGrid || !this._canvas) return;
 
@@ -115,25 +112,18 @@ class MaidenheadGrid {
         const size = map.getSize();
         const dpr  = window.devicePixelRatio || 1;
 
-        // Size the canvas to the map container
+        // Size the canvas to match the map container exactly
         this._canvas.width        = size.x * dpr;
         this._canvas.height       = size.y * dpr;
         this._canvas.style.width  = size.x + 'px';
         this._canvas.style.height = size.y + 'px';
 
-        // The overlayPane is translated by Leaflet during panning.
-        // Position the canvas so its top-left aligns with the map container's
-        // top-left, then use latLngToContainerPoint for all coordinates.
-        const paneOffset = map.containerPointToLayerPoint([0, 0]);
-        L.DomUtil.setPosition(this._canvas, paneOffset);
-
         const ctx = this._ctx;
         ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
         ctx.save();
         ctx.scale(dpr, dpr);
-        // Shift drawing coords so that latLngToContainerPoint values land
-        // correctly on the canvas (canvas origin = paneOffset in container space).
-        ctx.translate(-paneOffset.x, -paneOffset.y);
+        // No translate needed — latLngToContainerPoint already returns coords
+        // relative to the map container, which is exactly where our canvas sits.
 
         if (zoom < this.options.minZoom) { ctx.restore(); return; }
 
@@ -172,9 +162,9 @@ class MaidenheadGrid {
         items.forEach(loc => {
             const bnd = boundsOf(loc);
 
-            // Convert corners to pixel coords
-            const sw = this._latLonToPixel(bnd.south, bnd.west);
-            const ne = this._latLonToPixel(bnd.north, bnd.east);
+            // Convert corners to pixel coords (container-relative)
+            const sw = map.latLngToContainerPoint(L.latLng(bnd.south, bnd.west));
+            const ne = map.latLngToContainerPoint(L.latLng(bnd.north, bnd.east));
 
             const x = Math.min(sw.x, ne.x);
             const y = Math.min(sw.y, ne.y);

@@ -3,102 +3,78 @@
 
 (async function() {
     try {
-        // Load extension configuration from API endpoint
-        const response = await fetch('/api/extensions').then(r => r.json());
+        // Load all extension assets in a single request
+        const response = await fetch('/api/extensions/bundle').then(r => r.json());
 
-        // Handle new API format with 'available' and 'default' keys
-        const extensions = response.available || response; // Fallback to old format if needed
+        const bundles = response.bundles || [];
         const defaultExtension = response.default || null;
-        
-        console.log(`🔌 Loading ${extensions.length} extension(s)...`);
+
+        console.log(`🔌 Loading ${bundles.length} extension(s) from bundle...`);
         if (defaultExtension) {
             console.log(`🎯 Default extension: ${defaultExtension}`);
         }
-        
+
         // Array to store extension info for dropdown
         const extensionsList = [];
-        
-        // Load each enabled extension
-        for (const ext of extensions) {
-            const extName = ext.slug;
+
+        // Inject each enabled extension's assets from the bundle
+        for (const bundle of bundles) {
+            const extName = bundle.slug;
             try {
-                // Load manifest
-                const manifest = await fetch(`/extensions/${extName}/manifest.json`).then(r => r.json());
-                
-                console.log(`📦 Loading extension: ${manifest.displayName || extName}`);
-                
-                // Load CSS files if specified
-                if (manifest.files?.styles) {
-                    for (const css of manifest.files.styles) {
-                        const link = document.createElement('link');
-                        link.rel = 'stylesheet';
-                        link.href = `/extensions/${extName}/${css}`;
-                        document.head.appendChild(link);
-                        console.log(`  ✓ Loaded CSS: ${css}`);
+                console.log(`📦 Loading extension: ${bundle.displayName || extName}`);
+
+                // Inject CSS inline as <style> elements (no extra GET)
+                if (bundle.styles && bundle.styles.length > 0) {
+                    for (const cssContent of bundle.styles) {
+                        const style = document.createElement('style');
+                        style.textContent = cssContent;
+                        document.head.appendChild(style);
+                        console.log(`  ✓ Injected CSS for: ${extName}`);
                     }
                 }
-                
-                // Load HTML template if specified
-                if (manifest.files?.template) {
-                    const html = await fetch(`/extensions/${extName}/${manifest.files.template}`).then(r => r.text());
-                    // Store template in global scope for extension to use
-                    // Normalize extension name: replace hyphens with underscores for valid JS identifiers
+
+                // Store HTML template in global scope (no extra GET)
+                if (bundle.template) {
                     const normalizedName = extName.replace(/-/g, '_');
-                    window[`${normalizedName}_template`] = html;
-                    console.log(`  ✓ Loaded template: ${manifest.files.template}`);
+                    window[`${normalizedName}_template`] = bundle.template;
+                    console.log(`  ✓ Injected template for: ${extName}`);
                 }
-                
-                // Load additional scripts if specified (must load before main)
-                if (manifest.files?.scripts) {
-                    for (const scriptFile of manifest.files.scripts) {
-                        await new Promise((resolve, reject) => {
-                            const script = document.createElement('script');
-                            script.src = `/extensions/${extName}/${scriptFile}`;
-                            script.onload = () => {
-                                console.log(`  ✓ Loaded script: ${scriptFile}`);
-                                resolve();
-                            };
-                            script.onerror = (err) => {
-                                console.error(`  ✗ Failed to load script: ${scriptFile}`, err);
-                                reject(err);
-                            };
-                            document.body.appendChild(script);
-                        });
+
+                // Inject extra scripts[] inline (no extra GET, preserves load order)
+                if (bundle.scripts && bundle.scripts.length > 0) {
+                    for (const scriptContent of bundle.scripts) {
+                        const script = document.createElement('script');
+                        script.textContent = scriptContent;
+                        document.body.appendChild(script);
+                        console.log(`  ✓ Injected extra script for: ${extName}`);
                     }
                 }
-                
-                // Load main JavaScript (after additional scripts)
-                await new Promise((resolve, reject) => {
+
+                // Inject main JS inline (no extra GET)
+                if (bundle.main) {
                     const script = document.createElement('script');
-                    script.src = `/extensions/${extName}/${manifest.files.main}`;
-                    script.onload = () => {
-                        console.log(`  ✓ Loaded script: ${manifest.files.main}`);
-                        resolve();
-                    };
-                    script.onerror = (err) => {
-                        console.error(`  ✗ Failed to load script: ${manifest.files.main}`, err);
-                        reject(err);
-                    };
+                    script.textContent = bundle.main;
                     document.body.appendChild(script);
-                });
-                
+                    console.log(`  ✓ Injected main script for: ${extName}`);
+                }
+
                 // Store extension info for dropdown
                 extensionsList.push({
-                    slug: manifest.name || extName,
-                    originalSlug: extName, // Keep original slug for matching
-                    displayName: manifest.displayName || extName,
-                    icon: manifest.icon
+                    slug: bundle.slug,
+                    originalSlug: extName,
+                    displayName: bundle.displayName || extName,
+                    icon: bundle.icon
                 });
-                
-                console.log(`✅ Successfully loaded extension: ${manifest.displayName || extName}`);
+
+                console.log(`✅ Successfully loaded extension: ${bundle.displayName || extName}`);
             } catch (err) {
-                console.error(`❌ Failed to load extension "${extName}":`, err);
+                console.error(`❌ Failed to inject extension "${extName}":`, err);
             }
         }
-        
+
         // Populate extensions dropdown
         populateExtensionsDropdown(extensionsList);
-        
+
         // Auto-load default extension if specified AND no URL parameter overrides it
         if (defaultExtension) {
             // Check if we're on a mobile/narrow screen
@@ -107,17 +83,17 @@
                 console.log(`📱 Mobile device detected - skipping default extension auto-load`);
                 return; // Exit early, don't load extensions on mobile
             }
-            
+
             // Check if URL parameters specify extensions to load instead
             const urlParams = new URLSearchParams(window.location.search);
             const urlExtensions = urlParams.has('ext') ? urlParams.get('ext').split(',').filter(e => e.trim()) : [];
-            
+
             // If URL specifies extensions, don't auto-load the default
             if (urlExtensions.length > 0) {
                 console.log(`🔗 URL specifies extensions: ${urlExtensions.join(', ')} - skipping default auto-load`);
                 return; // Exit early, let URL parameter code handle it
             }
-            
+
             // Wait for audio context to be initialized before auto-loading
             // The toggleExtension function requires audioContext to exist
             const waitForAudioContext = () => {
@@ -149,29 +125,28 @@
                                         const panelContent = document.getElementById('extension-panel-content');
 
                                         if (panel && panelTitle && panelContent) {
-                                            // Load extension template into panel
-                                            fetch(`extensions/${matchingExt.slug}/template.html`)
-                                                .then(response => response.text())
-                                                .then(html => {
-                                                    panelContent.innerHTML = html;
-                                                    panelTitle.textContent = decoder.displayName || matchingExt.slug;
-                                                    panel.style.display = 'block';
+                                            // Template was already injected from bundle; use it directly
+                                            const normalizedName = matchingExt.slug.replace(/-/g, '_');
+                                            const templateHtml = window[`${normalizedName}_template`];
+                                            if (templateHtml) {
+                                                panelContent.innerHTML = templateHtml;
+                                                panelTitle.textContent = decoder.displayName || matchingExt.slug;
+                                                panel.style.display = 'block';
 
-                                                    // Initialize and enable decoder
-                                                    const centerFreq = 800; // Default center frequency
-                                                    window.decoderManager.initialize(matchingExt.slug, window.audioContext, window.analyser, centerFreq);
-                                                    window.decoderManager.enable(matchingExt.slug);
+                                                // Initialize and enable decoder
+                                                const centerFreq = 800; // Default center frequency
+                                                window.decoderManager.initialize(matchingExt.slug, window.audioContext, window.analyser, centerFreq);
+                                                window.decoderManager.enable(matchingExt.slug);
 
-                                                    // Notify extension that fresh DOM is ready for event binding
-                                                    if (typeof decoder.onActivate === 'function') {
-                                                        decoder.onActivate();
-                                                    }
+                                                // Notify extension that fresh DOM is ready for event binding
+                                                if (typeof decoder.onActivate === 'function') {
+                                                    decoder.onActivate();
+                                                }
 
-                                                    console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
-                                                })
-                                                .catch(err => {
-                                                    console.error(`Failed to load extension template: ${err.message}`);
-                                                });
+                                                console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                                            } else {
+                                                console.warn(`⚠️ Template not found for: ${matchingExt.slug}`);
+                                            }
                                         }
                                     } else {
                                         console.warn(`⚠️ Decoder not found: ${matchingExt.slug}`);
@@ -200,8 +175,8 @@
 
         console.log('🎉 Extension loading complete');
     } catch (err) {
-        console.error('❌ Failed to load extensions configuration:', err);
-        console.error('Make sure /api/extensions endpoint is accessible');
+        console.error('❌ Failed to load extensions bundle:', err);
+        console.error('Make sure /api/extensions/bundle endpoint is accessible');
     }
 })();
 
@@ -212,12 +187,12 @@ function populateExtensionsDropdown(extensions) {
         console.warn('Extensions dropdown not found in DOM');
         return;
     }
-    
+
     // Clear existing options except the first one (placeholder)
     while (dropdown.options.length > 1) {
         dropdown.remove(1);
     }
-    
+
     // Add option for each extension
     extensions.forEach(ext => {
         const option = document.createElement('option');
@@ -227,6 +202,6 @@ function populateExtensionsDropdown(extensions) {
         option.textContent = `${icon} ${ext.displayName}`;
         dropdown.appendChild(option);
     });
-    
+
     console.log(`📋 Populated dropdown with ${extensions.length} extension(s)`);
 }

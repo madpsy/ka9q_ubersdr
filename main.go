@@ -2435,6 +2435,9 @@ func main() {
 	http.HandleFunc("/api/extensions", func(w http.ResponseWriter, r *http.Request) {
 		handleExtensions(w, r, config)
 	})
+	http.HandleFunc("/api/extensions/bundle", func(w http.ResponseWriter, r *http.Request) {
+		handleExtensionsBundle(w, r, config)
+	})
 
 	// Register rotctl API routes (rotctlHandler was initialized earlier, before admin handler)
 	if rotctlHandler != nil {
@@ -4082,6 +4085,114 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding extensions: %v", err)
+	}
+}
+
+// handleExtensionsBundle serves all enabled extensions' assets in a single JSON response,
+// reducing per-extension fetches (manifest + CSS + HTML + JS) to a single GET.
+func handleExtensionsBundle(w http.ResponseWriter, r *http.Request, config *Config) {
+	type ExtensionBundle struct {
+		Slug        string   `json:"slug"`
+		DisplayName string   `json:"displayName"`
+		Icon        string   `json:"icon,omitempty"`
+		Styles      []string `json:"styles,omitempty"`   // inlined CSS content
+		Template    string   `json:"template,omitempty"` // inlined HTML content
+		Scripts     []string `json:"scripts,omitempty"`  // inlined JS content for extra scripts[]
+		Main        string   `json:"main"`               // inlined JS content for main file
+	}
+
+	bundles := []ExtensionBundle{}
+
+	for _, extName := range config.Extensions {
+		manifestPath := fmt.Sprintf("static/extensions/%s/manifest.json", extName)
+		manifestData, err := os.ReadFile(manifestPath)
+		if err != nil {
+			log.Printf("Warning: Failed to read manifest for extension '%s': %v", extName, err)
+			continue
+		}
+
+		var manifest struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+			Icon        string `json:"icon"`
+			Files       struct {
+				Main     string   `json:"main"`
+				Styles   []string `json:"styles"`
+				Template string   `json:"template"`
+				Scripts  []string `json:"scripts"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			log.Printf("Warning: Failed to parse manifest for extension '%s': %v", extName, err)
+			continue
+		}
+
+		slug := manifest.Name
+		if slug == "" {
+			slug = extName
+		}
+
+		bundle := ExtensionBundle{
+			Slug:        slug,
+			DisplayName: manifest.DisplayName,
+			Icon:        manifest.Icon,
+		}
+
+		// Inline CSS files
+		for _, cssFile := range manifest.Files.Styles {
+			cssPath := fmt.Sprintf("static/extensions/%s/%s", extName, cssFile)
+			cssData, err := os.ReadFile(cssPath)
+			if err != nil {
+				log.Printf("Warning: Failed to read CSS '%s' for extension '%s': %v", cssFile, extName, err)
+				continue
+			}
+			bundle.Styles = append(bundle.Styles, string(cssData))
+		}
+
+		// Inline HTML template
+		if manifest.Files.Template != "" {
+			tmplPath := fmt.Sprintf("static/extensions/%s/%s", extName, manifest.Files.Template)
+			tmplData, err := os.ReadFile(tmplPath)
+			if err != nil {
+				log.Printf("Warning: Failed to read template '%s' for extension '%s': %v", manifest.Files.Template, extName, err)
+			} else {
+				bundle.Template = string(tmplData)
+			}
+		}
+
+		// Inline extra scripts[]
+		for _, scriptFile := range manifest.Files.Scripts {
+			scriptPath := fmt.Sprintf("static/extensions/%s/%s", extName, scriptFile)
+			scriptData, err := os.ReadFile(scriptPath)
+			if err != nil {
+				log.Printf("Warning: Failed to read script '%s' for extension '%s': %v", scriptFile, extName, err)
+				continue
+			}
+			bundle.Scripts = append(bundle.Scripts, string(scriptData))
+		}
+
+		// Inline main JS
+		if manifest.Files.Main != "" {
+			mainPath := fmt.Sprintf("static/extensions/%s/%s", extName, manifest.Files.Main)
+			mainData, err := os.ReadFile(mainPath)
+			if err != nil {
+				log.Printf("Warning: Failed to read main JS '%s' for extension '%s': %v", manifest.Files.Main, extName, err)
+			} else {
+				bundle.Main = string(mainData)
+			}
+		}
+
+		bundles = append(bundles, bundle)
+	}
+
+	response := map[string]interface{}{
+		"bundles": bundles,
+		"default": config.DefaultExtension,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding extensions bundle: %v", err)
 	}
 }
 

@@ -1,251 +1,263 @@
 /**
  * Maidenhead Grid Overlay for Leaflet
- * Draws 4-character Maidenhead locator grid squares on a Leaflet map
+ * Draws 2-char (field), 4-char (square) and 6-char (subsquare) Maidenhead
+ * locator grid lines on a Leaflet map, switching level automatically by zoom.
+ *
+ * Zoom thresholds (defaults, overridable via options):
+ *   zoom < zoom2  → nothing drawn
+ *   zoom2 ≤ zoom < zoom4 → 2-char fields  (20° × 10°)
+ *   zoom4 ≤ zoom < zoom6 → 4-char squares (2° × 1°)
+ *   zoom ≥ zoom6         → 6-char subsquares (5′ × 2.5′)
  */
 
 class MaidenheadGrid {
     constructor(map, options = {}) {
         this.map = map;
         this.options = {
-            color: options.color || '#3388ff',
-            weight: options.weight || 1,
-            opacity: options.opacity || 0.5,
-            fillOpacity: options.fillOpacity || 0,
-            showLabels: options.showLabels !== undefined ? options.showLabels : true,
-            labelColor: options.labelColor || '#3388ff',
-            labelSize: options.labelSize || '10px',
-            minZoom: options.minZoom || 3,
-            maxZoom: options.maxZoom || 18,
-            ...options
+            color:       options.color       || '#3388ff',
+            weight:      options.weight      || 1,
+            opacity:     options.opacity     || 0.5,
+            fillOpacity: options.fillOpacity !== undefined ? options.fillOpacity : 0,
+            showLabels:  options.showLabels  !== undefined ? options.showLabels  : true,
+            labelColor:  options.labelColor  || '#3388ff',
+            labelSize:   options.labelSize   || '10px',
+            // Minimum zoom to show anything at all
+            minZoom:     options.minZoom     !== undefined ? options.minZoom  : 2,
+            // Zoom at which to switch from 2-char → 4-char
+            zoom4:       options.zoom4       !== undefined ? options.zoom4    : 5,
+            // Zoom at which to switch from 4-char → 6-char
+            zoom6:       options.zoom6       !== undefined ? options.zoom6    : 9,
+            // Minimum zoom to show labels for each level
+            labelZoom2:  options.labelZoom2  !== undefined ? options.labelZoom2 : 2,
+            labelZoom4:  options.labelZoom4  !== undefined ? options.labelZoom4 : 5,
+            labelZoom6:  options.labelZoom6  !== undefined ? options.labelZoom6 : 9,
         };
-        
-        this.gridLayer = null;
-        this.labelLayer = null;
-        this.highlightLayer = null; // Separate layer for highlighted squares
-        this.gridVisible = false;
-        this.highlightedSquares = new Map(); // Store highlighted squares
+
+        this.gridLayer    = null;
+        this.labelLayer   = null;
+        this.highlightLayer = null;
+        this.gridVisible  = false;
+        this.highlightedSquares = new Map();
+
+        this._onMoveEnd = null;
+        this._onZoomEnd = null;
+    }
+
+    // ── Bounds helpers ────────────────────────────────────────────────────────
+
+    /**
+     * 2-char field bounds (e.g. "IO")
+     * Field: 20° lon × 10° lat
+     */
+    fieldToBounds(field) {
+        const f = field.toUpperCase();
+        const west  = (f.charCodeAt(0) - 65) * 20 - 180;
+        const south = (f.charCodeAt(1) - 65) * 10 - 90;
+        return { south, west, north: south + 10, east: west + 20 };
     }
 
     /**
-     * Convert Maidenhead locator to lat/lon bounds
-     * @param {string} locator - 4-character Maidenhead locator (e.g., "FN20")
-     * @returns {object} - {south, west, north, east}
+     * 4-char square bounds (e.g. "IO91")
+     * Square: 2° lon × 1° lat within a field
      */
-    locatorToBounds(locator) {
-        if (locator.length !== 4) {
-            throw new Error('Locator must be 4 characters');
-        }
-
-        const field = locator.substring(0, 2).toUpperCase();
-        const square = locator.substring(2, 4);
-
-        // Field (first 2 characters): 20° longitude × 10° latitude
-        const fieldLon = (field.charCodeAt(0) - 65) * 20 - 180;
-        const fieldLat = (field.charCodeAt(1) - 65) * 10 - 90;
-
-        // Square (last 2 digits): 2° longitude × 1° latitude
-        const squareLon = parseInt(square[0]) * 2;
-        const squareLat = parseInt(square[1]) * 1;
-
-        const west = fieldLon + squareLon;
-        const south = fieldLat + squareLat;
-        const east = west + 2;
-        const north = south + 1;
-
-        return { south, west, north, east };
+    squareToBounds(locator) {
+        const f = locator.substring(0, 2).toUpperCase();
+        const s = locator.substring(2, 4);
+        const west  = (f.charCodeAt(0) - 65) * 20 - 180 + parseInt(s[0]) * 2;
+        const south = (f.charCodeAt(1) - 65) * 10 - 90  + parseInt(s[1]) * 1;
+        return { south, west, north: south + 1, east: west + 2 };
     }
 
     /**
-     * Generate all valid 4-character Maidenhead locators
-     * @returns {Array} - Array of locator strings
+     * 6-char subsquare bounds (e.g. "IO91vl")
+     * Subsquare: 5′ lon × 2.5′ lat within a square
+     * (2° / 24 = 5′,  1° / 24 = 2.5′)
      */
-    generateAllLocators() {
-        const locators = [];
-        
-        // Fields: AA to RR (18 × 18 = 324 fields)
-        for (let fieldLon = 0; fieldLon < 18; fieldLon++) {
-            for (let fieldLat = 0; fieldLat < 18; fieldLat++) {
-                const field = String.fromCharCode(65 + fieldLon) + String.fromCharCode(65 + fieldLat);
-                
-                // Squares: 00 to 99 (10 × 10 = 100 squares per field)
-                for (let squareLon = 0; squareLon < 10; squareLon++) {
-                    for (let squareLat = 0; squareLat < 10; squareLat++) {
-                        const locator = field + squareLon + squareLat;
-                        locators.push(locator);
-                    }
-                }
+    subsquareToBounds(locator) {
+        const sq   = this.squareToBounds(locator.substring(0, 4));
+        const sub  = locator.substring(4, 6).toLowerCase();
+        const subLon = (sub.charCodeAt(0) - 97) * (2 / 24);
+        const subLat = (sub.charCodeAt(1) - 97) * (1 / 24);
+        const west  = sq.west  + subLon;
+        const south = sq.south + subLat;
+        return { south, west, north: south + (1 / 24), east: west + (2 / 24) };
+    }
+
+    // ── Visible locator generators ────────────────────────────────────────────
+
+    /** Return all 2-char fields visible in the current map bounds */
+    _visibleFields() {
+        const b = this.map.getBounds();
+        const results = [];
+        const lonStart = Math.max(0,  Math.floor((b.getWest()  + 180) / 20));
+        const lonEnd   = Math.min(17, Math.floor((b.getEast()  + 180) / 20));
+        const latStart = Math.max(0,  Math.floor((b.getSouth() + 90)  / 10));
+        const latEnd   = Math.min(17, Math.floor((b.getNorth() + 90)  / 10));
+        for (let lo = lonStart; lo <= lonEnd; lo++) {
+            for (let la = latStart; la <= latEnd; la++) {
+                results.push(
+                    String.fromCharCode(65 + lo) + String.fromCharCode(65 + la)
+                );
             }
         }
-        
-        return locators;
+        return results;
     }
 
-    /**
-     * Get visible locators based on current map bounds and zoom
-     * @returns {Array} - Array of locator strings visible in current view
-     */
-    getVisibleLocators() {
-        const bounds = this.map.getBounds();
-        const zoom = this.map.getZoom();
-        
-        // Don't show grid if zoom is too low
-        if (zoom < this.options.minZoom) {
-            return [];
-        }
-
-        const visibleLocators = [];
-        const mapSouth = bounds.getSouth();
-        const mapNorth = bounds.getNorth();
-        const mapWest = bounds.getWest();
-        const mapEast = bounds.getEast();
-
-        // Calculate field range
-        const fieldLonStart = Math.max(0, Math.floor((mapWest + 180) / 20));
-        const fieldLonEnd = Math.min(17, Math.floor((mapEast + 180) / 20));
-        const fieldLatStart = Math.max(0, Math.floor((mapSouth + 90) / 10));
-        const fieldLatEnd = Math.min(17, Math.floor((mapNorth + 90) / 10));
-
-        for (let fieldLon = fieldLonStart; fieldLon <= fieldLonEnd; fieldLon++) {
-            for (let fieldLat = fieldLatStart; fieldLat <= fieldLatEnd; fieldLat++) {
-                const field = String.fromCharCode(65 + fieldLon) + String.fromCharCode(65 + fieldLat);
-                
-                for (let squareLon = 0; squareLon < 10; squareLon++) {
-                    for (let squareLat = 0; squareLat < 10; squareLat++) {
-                        const locator = field + squareLon + squareLat;
-                        const locBounds = this.locatorToBounds(locator);
-                        
-                        // Check if locator intersects with map bounds
-                        if (locBounds.east >= mapWest && locBounds.west <= mapEast &&
-                            locBounds.north >= mapSouth && locBounds.south <= mapNorth) {
-                            visibleLocators.push(locator);
+    /** Return all 4-char squares visible in the current map bounds */
+    _visibleSquares() {
+        const b = this.map.getBounds();
+        const mW = b.getWest(), mE = b.getEast(), mS = b.getSouth(), mN = b.getNorth();
+        const results = [];
+        const fLonStart = Math.max(0,  Math.floor((mW + 180) / 20));
+        const fLonEnd   = Math.min(17, Math.floor((mE + 180) / 20));
+        const fLatStart = Math.max(0,  Math.floor((mS + 90)  / 10));
+        const fLatEnd   = Math.min(17, Math.floor((mN + 90)  / 10));
+        for (let flo = fLonStart; flo <= fLonEnd; flo++) {
+            for (let fla = fLatStart; fla <= fLatEnd; fla++) {
+                const field = String.fromCharCode(65 + flo) + String.fromCharCode(65 + fla);
+                const fieldWest  = flo * 20 - 180;
+                const fieldSouth = fla * 10 - 90;
+                for (let slo = 0; slo < 10; slo++) {
+                    for (let sla = 0; sla < 10; sla++) {
+                        const w = fieldWest  + slo * 2;
+                        const s = fieldSouth + sla * 1;
+                        if (w + 2 >= mW && w <= mE && s + 1 >= mS && s <= mN) {
+                            results.push(field + slo + sla);
                         }
                     }
                 }
             }
         }
-
-        return visibleLocators;
+        return results;
     }
 
-    /**
-     * Draw the grid lines on the map
-     */
+    /** Return all 6-char subsquares visible in the current map bounds */
+    _visibleSubsquares() {
+        const b = this.map.getBounds();
+        const mW = b.getWest(), mE = b.getEast(), mS = b.getSouth(), mN = b.getNorth();
+        const results = [];
+
+        // Find which 4-char squares are visible first, then enumerate subsquares within
+        const squares = this._visibleSquares();
+        for (const sq of squares) {
+            const sqB = this.squareToBounds(sq);
+            for (let slo = 0; slo < 24; slo++) {
+                for (let sla = 0; sla < 24; sla++) {
+                    const w = sqB.west  + slo * (2 / 24);
+                    const s = sqB.south + sla * (1 / 24);
+                    const e = w + (2 / 24);
+                    const n = s + (1 / 24);
+                    if (e >= mW && w <= mE && n >= mS && s <= mN) {
+                        results.push(
+                            sq +
+                            String.fromCharCode(97 + slo) +
+                            String.fromCharCode(97 + sla)
+                        );
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    // ── Draw / clear ──────────────────────────────────────────────────────────
+
     drawGrid() {
         this.clearGrid();
 
-        const visibleLocators = this.getVisibleLocators();
-        
-        if (visibleLocators.length === 0) {
-            return;
+        const zoom = this.map.getZoom();
+        if (zoom < this.options.minZoom) return;
+
+        let items, boundsOf, showLabel, labelMinZoom;
+
+        if (zoom >= this.options.zoom6) {
+            // 6-char subsquares
+            items        = this._visibleSubsquares();
+            boundsOf     = loc => this.subsquareToBounds(loc);
+            showLabel    = zoom >= this.options.labelZoom6;
+            labelMinZoom = this.options.labelZoom6;
+        } else if (zoom >= this.options.zoom4) {
+            // 4-char squares
+            items        = this._visibleSquares();
+            boundsOf     = loc => this.squareToBounds(loc);
+            showLabel    = zoom >= this.options.labelZoom4;
+            labelMinZoom = this.options.labelZoom4;
+        } else {
+            // 2-char fields
+            items        = this._visibleFields();
+            boundsOf     = loc => this.fieldToBounds(loc);
+            showLabel    = zoom >= this.options.labelZoom2;
+            labelMinZoom = this.options.labelZoom2;
         }
 
-        // Create layer group for grid rectangles
+        if (items.length === 0) return;
+
         this.gridLayer = L.layerGroup();
-        
-        // Create layer group for labels if enabled
-        if (this.options.showLabels) {
+        if (this.options.showLabels && showLabel) {
             this.labelLayer = L.layerGroup();
         }
 
-        visibleLocators.forEach(locator => {
-            const bounds = this.locatorToBounds(locator);
-            
-            // Create rectangle for grid square (outline only)
-            const rectangle = L.rectangle(
-                [[bounds.south, bounds.west], [bounds.north, bounds.east]],
+        items.forEach(loc => {
+            const bnd = boundsOf(loc);
+
+            const rect = L.rectangle(
+                [[bnd.south, bnd.west], [bnd.north, bnd.east]],
                 {
-                    color: this.options.color,
-                    weight: this.options.weight,
-                    opacity: this.options.opacity,
+                    color:       this.options.color,
+                    weight:      this.options.weight,
+                    opacity:     this.options.opacity,
                     fillOpacity: this.options.fillOpacity,
                     interactive: false
                 }
             );
-            
-            this.gridLayer.addLayer(rectangle);
+            this.gridLayer.addLayer(rect);
 
-            // Add label if enabled and zoom is sufficient
-            if (this.options.showLabels && this.map.getZoom() >= 5) {
-                const centerLat = (bounds.south + bounds.north) / 2;
-                const centerLon = (bounds.west + bounds.east) / 2;
-                
-                const label = L.marker([centerLat, centerLon], {
+            if (this.options.showLabels && showLabel) {
+                const centerLat = (bnd.south + bnd.north) / 2;
+                const centerLon = (bnd.west  + bnd.east)  / 2;
+                const marker = L.marker([centerLat, centerLon], {
                     icon: L.divIcon({
                         className: 'maidenhead-label',
-                        html: `<div style="color: ${this.options.labelColor}; font-size: ${this.options.labelSize}; font-weight: bold; text-shadow: 1px 1px 2px white, -1px -1px 2px white, 1px -1px 2px white, -1px 1px 2px white; pointer-events: none;">${locator}</div>`,
-                        iconSize: [40, 20],
-                        iconAnchor: [20, 10]
+                        html: `<div style="color:${this.options.labelColor};font-size:${this.options.labelSize};font-weight:bold;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 2px #000,-1px -1px 2px #000;pointer-events:none;white-space:nowrap;">${loc}</div>`,
+                        iconSize:   [50, 16],
+                        iconAnchor: [25, 8]
                     }),
                     interactive: false
                 });
-                
-                this.labelLayer.addLayer(label);
+                this.labelLayer.addLayer(marker);
             }
         });
 
-        // Add layers to map
         this.gridLayer.addTo(this.map);
-        if (this.labelLayer) {
-            this.labelLayer.addTo(this.map);
-        }
+        if (this.labelLayer) this.labelLayer.addTo(this.map);
 
         this.gridVisible = true;
     }
 
-    /**
-     * Clear only the grid lines from the map (keeps highlights)
-     */
     clearGrid() {
-        if (this.gridLayer) {
-            this.map.removeLayer(this.gridLayer);
-            this.gridLayer = null;
-        }
-        if (this.labelLayer) {
-            this.map.removeLayer(this.labelLayer);
-            this.labelLayer = null;
-        }
+        if (this.gridLayer)  { this.map.removeLayer(this.gridLayer);  this.gridLayer  = null; }
+        if (this.labelLayer) { this.map.removeLayer(this.labelLayer); this.labelLayer = null; }
         this.gridVisible = false;
     }
 
-    /**
-     * Show the grid lines
-     */
     showGrid() {
-        if (!this.gridVisible) {
-            this.drawGrid();
-        }
+        if (!this.gridVisible) this.drawGrid();
     }
 
-    /**
-     * Hide the grid lines (keeps highlights visible)
-     */
     hideGrid() {
         this.clearGrid();
     }
 
-    /**
-     * Toggle grid lines visibility (highlights remain)
-     */
     toggleGrid() {
-        if (this.gridVisible) {
-            this.hideGrid();
-        } else {
-            this.showGrid();
-        }
+        this.gridVisible ? this.hideGrid() : this.showGrid();
     }
 
-    /**
-     * Update grid when map moves or zooms
-     */
     updateGrid() {
-        if (this.gridVisible) {
-            this.drawGrid();
-        }
+        if (this.gridVisible) this.drawGrid();
     }
 
-    /**
-     * Enable auto-update on map move/zoom
-     */
+    // ── Auto-update ───────────────────────────────────────────────────────────
+
     enableAutoUpdate() {
         this._onMoveEnd = () => this.updateGrid();
         this._onZoomEnd = () => this.updateGrid();
@@ -253,9 +265,6 @@ class MaidenheadGrid {
         this.map.on('zoomend', this._onZoomEnd);
     }
 
-    /**
-     * Disable auto-update
-     */
     disableAutoUpdate() {
         if (this._onMoveEnd) this.map.off('moveend', this._onMoveEnd);
         if (this._onZoomEnd) this.map.off('zoomend', this._onZoomEnd);
@@ -263,22 +272,22 @@ class MaidenheadGrid {
         this._onZoomEnd = null;
     }
 
+    // ── Highlight API (unchanged) ─────────────────────────────────────────────
+
     /**
-     * Highlight specific locators (remains visible even when grid is hidden)
-     * @param {Array} locators - Array of locator strings or objects with locator and style
-     * @param {object} defaultStyle - Default style options for highlighted squares
+     * Highlight specific locators (remains visible even when grid is hidden).
+     * Accepts 4-char locators; style and data per-item are supported.
      */
     highlightLocators(locators, defaultStyle = {}) {
-        // Initialize highlight layer if it doesn't exist
         if (!this.highlightLayer) {
             this.highlightLayer = L.layerGroup().addTo(this.map);
         }
 
         const baseStyle = {
-            color: defaultStyle.color || '#ff0000',
-            weight: defaultStyle.weight || 2,
-            opacity: defaultStyle.opacity || 0.8,
-            fillColor: defaultStyle.fillColor || '#ff0000',
+            color:       defaultStyle.color       || '#ff0000',
+            weight:      defaultStyle.weight      || 2,
+            opacity:     defaultStyle.opacity     || 0.8,
+            fillColor:   defaultStyle.fillColor   || '#ff0000',
             fillOpacity: defaultStyle.fillOpacity || 0.2,
             interactive: defaultStyle.interactive !== undefined ? defaultStyle.interactive : true,
             ...defaultStyle
@@ -286,52 +295,44 @@ class MaidenheadGrid {
 
         locators.forEach(item => {
             try {
-                // Support both string locators and objects with {locator, style, data}
-                const locator = typeof item === 'string' ? item : item.locator;
+                const locator    = typeof item === 'string' ? item : item.locator;
                 const customStyle = typeof item === 'object' && item.style ? item.style : {};
-                const data = typeof item === 'object' && item.data ? item.data : null;
-                
-                const bounds = this.locatorToBounds(locator);
+                const data        = typeof item === 'object' && item.data  ? item.data  : null;
+
+                // Auto-detect precision
+                let bnd;
+                if (locator.length >= 6) {
+                    bnd = this.subsquareToBounds(locator.substring(0, 6));
+                } else if (locator.length >= 4) {
+                    bnd = this.squareToBounds(locator.substring(0, 4));
+                } else {
+                    bnd = this.fieldToBounds(locator.substring(0, 2));
+                }
+
                 const finalStyle = { ...baseStyle, ...customStyle };
-                
-                const rectangle = L.rectangle(
-                    [[bounds.south, bounds.west], [bounds.north, bounds.east]],
+                const rectangle  = L.rectangle(
+                    [[bnd.south, bnd.west], [bnd.north, bnd.east]],
                     finalStyle
                 );
-                
-                // Store reference for later removal
+
                 this.highlightedSquares.set(locator, { rectangle, data });
-                
-                // Add popup or tooltip if data is provided
+
                 if (data && finalStyle.interactive) {
-                    let tooltipContent = `<strong>${locator}</strong><br>`;
-                    if (data.avg_snr !== undefined) {
-                        tooltipContent += `Avg SNR: ${data.avg_snr.toFixed(1)} dB<br>`;
-                    }
-                    if (data.count !== undefined) {
-                        tooltipContent += `Spots: ${data.count}<br>`;
-                    }
-                    if (data.unique_callsigns !== undefined) {
-                        tooltipContent += `Unique Callsigns: ${data.unique_callsigns}`;
-                    }
-                    
-                    // Add hover tooltip
-                    rectangle.bindTooltip(tooltipContent, {
-                        direction: 'top',
-                        offset: [0, -10],
-                        opacity: 0.9
-                    });
-                    
-                    // Add click handler to open callsigns modal if callsigns data is available
+                    let tip = `<strong>${locator}</strong><br>`;
+                    if (data.avg_snr    !== undefined) tip += `Avg SNR: ${data.avg_snr.toFixed(1)} dB<br>`;
+                    if (data.count      !== undefined) tip += `Spots: ${data.count}<br>`;
+                    if (data.unique_callsigns !== undefined) tip += `Unique Callsigns: ${data.unique_callsigns}`;
+                    rectangle.bindTooltip(tip, { direction: 'top', offset: [0, -10], opacity: 0.9 });
+
                     if (data.callsigns && data.callsigns.length > 0) {
-                        rectangle.on('click', function() {
+                        rectangle.on('click', () => {
                             if (typeof window.openCallsignsModal === 'function') {
                                 window.openCallsignsModal(locator, data.callsigns);
                             }
                         });
                     }
                 }
-                
+
                 this.highlightLayer.addLayer(rectangle);
             } catch (e) {
                 console.warn(`Invalid locator: ${item}`, e);
@@ -339,9 +340,6 @@ class MaidenheadGrid {
         });
     }
 
-    /**
-     * Clear all highlighted locators
-     */
     clearHighlights() {
         if (this.highlightLayer) {
             this.highlightLayer.clearLayers();
@@ -349,10 +347,6 @@ class MaidenheadGrid {
         }
     }
 
-    /**
-     * Remove specific highlighted locators
-     * @param {Array} locators - Array of locator strings to remove
-     */
     removeHighlights(locators) {
         locators.forEach(locator => {
             const item = this.highlightedSquares.get(locator);
@@ -363,30 +357,17 @@ class MaidenheadGrid {
         });
     }
 
-    /**
-     * Get data for a highlighted locator
-     * @param {string} locator - Locator string
-     * @returns {object|null} - Data associated with the locator
-     */
     getHighlightData(locator) {
         const item = this.highlightedSquares.get(locator);
         return item ? item.data : null;
     }
 
-    /**
-     * Check if grid lines are visible
-     * @returns {boolean}
-     */
-    isGridVisible() {
-        return this.gridVisible;
-    }
+    isGridVisible()          { return this.gridVisible; }
+    getHighlightedLocators() { return Array.from(this.highlightedSquares.keys()); }
 
-    /**
-     * Get all highlighted locators
-     * @returns {Array} - Array of locator strings
-     */
-    getHighlightedLocators() {
-        return Array.from(this.highlightedSquares.keys());
+    // Legacy: kept for callers that pass a 4-char locator
+    locatorToBounds(locator) {
+        return this.squareToBounds(locator);
     }
 }
 

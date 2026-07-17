@@ -152,9 +152,15 @@ async function loadRadio(radioId) {
         const configResponse = await fetch(`${radio.path}/config.json?v=` + Date.now());
         currentRadioConfig = await configResponse.json();
 
-        // Apply default band for multi-band radios (merges band values into config)
+        // Apply band for multi-band radios (merges band values into config).
+        // Prefer the user's saved choice, else the config default. A URL `band`
+        // param, applied later in loadSettingsFromURL, still takes precedence.
         if (currentRadioConfig.bands) {
-            applyBandConfig(currentRadioConfig.defaultBand || Object.keys(currentRadioConfig.bands)[0]);
+            const savedBand = getSavedBand(radioId);
+            const initialBand = (savedBand && currentRadioConfig.bands[savedBand])
+                ? savedBand
+                : (currentRadioConfig.defaultBand || Object.keys(currentRadioConfig.bands)[0]);
+            applyBandConfig(initialBand);
         }
 
         // Update global configuration
@@ -619,6 +625,27 @@ function setupChannelButtons() {
 // Band handling for multi-band radios (e.g. CB with UK/EU channel plans)
 let currentBand = null;
 
+// Persist the user's band choice (e.g. UK vs EU) per radio across sessions.
+function bandStorageKey(radioId) {
+    return `oldradio-band-${radioId}`;
+}
+
+function getSavedBand(radioId) {
+    try {
+        return localStorage.getItem(bandStorageKey(radioId));
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveBand(radioId, band) {
+    try {
+        localStorage.setItem(bandStorageKey(radioId), band);
+    } catch (e) {
+        /* storage unavailable (e.g. private mode) — ignore */
+    }
+}
+
 // Merge the named band's values into the active config and global freq limits
 function applyBandConfig(bandName) {
     if (!currentRadioConfig || !currentRadioConfig.bands) return;
@@ -649,6 +676,7 @@ function toggleBand() {
     const bandNames = Object.keys(currentRadioConfig.bands);
     const nextBand = bandNames[(bandNames.indexOf(currentBand) + 1) % bandNames.length];
     applyBandConfig(nextBand);
+    saveBand(currentRadioConfig.id, nextBand);
 
     const newChannel = channelNum !== null
         ? currentRadioConfig.channels.find(ch => ch.number === channelNum)
@@ -1352,6 +1380,7 @@ function loadSettingsFromURL() {
         const band = params.get('band');
         if (currentRadioConfig.bands[band] && band !== currentBand) {
             applyBandConfig(band);
+            saveBand(currentRadioConfig.id, band);
             currentFrequency = currentRadioConfig.defaultFrequency;
             console.log('Loaded band from URL:', band);
         }

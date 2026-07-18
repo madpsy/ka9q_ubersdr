@@ -149,6 +149,12 @@ var botCommands = map[string]botCommand{
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleWSPR,
 	},
+	"restart": {
+		desc:      "Restart the UberSDR server process",
+		readOnly:  false,
+		writeHint: "Use <code>/restart &lt;callsign&gt;</code> to restart the server (callsign required as confirmation).",
+		handler:   (*TelegramBotListener).handleRestart,
+	},
 }
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
@@ -2438,4 +2444,54 @@ func fmtSessionDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+// handleRestart restarts the UberSDR server process via the admin handler.
+// The callsign must be supplied as the sole argument and must match the
+// configured admin callsign (case-insensitive), mirroring the web UI behaviour.
+// Write access must be enabled for this command — without it the command is
+// informational only and explains how to enable it.
+func (l *TelegramBotListener) handleRestart(chatID int64, args string) (string, string, bool) {
+	// Without write access, explain what is needed and return.
+	if !l.commandWriteEnabled("restart") {
+		msg := "⚠️ The /restart command requires <b>Allow write</b> to be enabled in the bot listener config. " +
+			"Enable it there, then use <code>/restart &lt;callsign&gt;</code> to restart the server."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Validate that a callsign argument was provided.
+	callsign := strings.TrimSpace(args)
+	if callsign == "" {
+		msg := "❌ Usage: <code>/restart &lt;callsign&gt;</code>\n\nProvide your station callsign as confirmation."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Validate the callsign against the configured admin callsign.
+	if l.config == nil {
+		msg := "❌ Server configuration unavailable — cannot verify callsign."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	if !strings.EqualFold(callsign, l.config.Admin.Callsign) {
+		msg := fmt.Sprintf("❌ Callsign <code>%s</code> does not match the configured callsign — restart aborted.", html.EscapeString(strings.ToUpper(callsign)))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	if l.adminHandler == nil {
+		msg := "❌ Admin handler unavailable — cannot restart."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Send confirmation before the process exits.
+	msg := fmt.Sprintf("🔄 Restarting UberSDR server (confirmed by <code>%s</code>)…\n\nThe server will be back online in a few seconds.", html.EscapeString(strings.ToUpper(callsign)))
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+
+	// Trigger the restart asynchronously so the Telegram API response is sent first.
+	go l.adminHandler.restartServer()
+
+	return msg, apiResp, apiOK
 }

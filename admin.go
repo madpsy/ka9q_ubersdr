@@ -500,6 +500,50 @@ func (ah *AdminHandler) restartServer() {
 	}()
 }
 
+// HandleRestart handles POST /admin/restart — triggers a clean server shutdown
+// (Docker/process manager is expected to restart the container).
+// The request body must be JSON with a "callsign" field matching the configured
+// admin callsign, acting as an explicit confirmation token.
+func (ah *AdminHandler) HandleRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Callsign string `json:"callsign"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: expected JSON with \"callsign\" field", http.StatusBadRequest)
+		return
+	}
+
+	if req.Callsign == "" {
+		http.Error(w, "Missing required field: callsign", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.EqualFold(req.Callsign, ah.config.Admin.Callsign) {
+		log.Printf("Restart request rejected: callsign %q does not match configured callsign %q", req.Callsign, ah.config.Admin.Callsign)
+		http.Error(w, "Callsign does not match — restart aborted", http.StatusForbidden)
+		return
+	}
+
+	log.Printf("Restart requested via /admin/restart (callsign confirmed: %s)", req.Callsign)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Server is restarting...",
+		"restart": true,
+	}); err != nil {
+		log.Printf("Error encoding restart response: %v", err)
+	}
+
+	ah.restartServer()
+}
+
 // NewAdminHandler creates a new admin handler
 func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler, antSwitchScheduler *AntSwitchScheduler, freqRefMonitor *FrequencyReferenceMonitor) *AdminHandler {
 	history := NewAdminLoginHistory()

@@ -2797,6 +2797,7 @@
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
+                    <button class="btn btn-danger" onclick="showRestartModal()" style="background: #c62828; border-color: #c62828;">🔄 Restart Server</button>
                 </div>
                 <div class="button-group" id="uiButtons" style="display: none;">
                     <button class="btn" onclick="saveUIConfig()">Save UI Defaults</button>
@@ -3131,6 +3132,45 @@
                             <button class="btn btn-secondary" onclick="closeForceUpdateModal()">Cancel</button>
                             <button class="btn btn-danger" onclick="confirmForceUpdate()" style="font-weight: bold;">
                                 🔄 Force Update Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Restart Server Modal -->
+        <div id="restartServerModal" class="modal">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h2>🔄 Restart Server</h2>
+                    <button class="modal-close" onclick="closeRestartModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="padding: 20px;">
+                        <p style="font-size: 16px; margin-bottom: 20px; color: #721c24;">
+                            <strong>WARNING:</strong> This will immediately restart the UberSDR server process!
+                        </p>
+                        <ul style="margin-left: 20px; margin-bottom: 20px; line-height: 1.8;">
+                            <li>All active user sessions will be disconnected</li>
+                            <li>Docker will automatically restart the container</li>
+                            <li>The server will be back online in a few seconds</li>
+                        </ul>
+                        <p style="margin-bottom: 20px; color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px;">
+                            <strong>Confirm:</strong> Enter your station callsign to proceed.
+                        </p>
+                        <div style="margin-bottom: 20px;">
+                            <input type="text" id="restartCallsignInput"
+                                placeholder="Enter callsign…"
+                                maxlength="15"
+                                style="width: 100%; padding: 8px 12px; border: 1px solid #f5c6cb; border-radius: 4px; font-size: 15px; font-family: monospace; text-transform: uppercase; box-sizing: border-box;"
+                                oninput="this.value = this.value.toUpperCase()"
+                                onkeydown="if(event.key==='Enter') confirmRestart()">
+                        </div>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="closeRestartModal()">Cancel</button>
+                            <button class="btn btn-danger" onclick="confirmRestart()" style="background: #c62828; border-color: #c62828; font-weight: bold;">
+                                🔄 Restart Now
                             </button>
                         </div>
                     </div>
@@ -25812,11 +25852,69 @@ const tooltipLine2 = timeStr;
             }, 1000);
         }
 
+        function showRestartModal() {
+            const input = document.getElementById('restartCallsignInput');
+            if (input) input.value = '';
+            document.getElementById('restartServerModal').style.display = 'block';
+            setTimeout(() => { if (input) input.focus(); }, 100);
+        }
+
+        function closeRestartModal() {
+            document.getElementById('restartServerModal').style.display = 'none';
+        }
+
+        async function confirmRestart() {
+            const input = document.getElementById('restartCallsignInput');
+            const callsign = (input ? input.value : '').trim();
+
+            if (!callsign) {
+                showAlert('Please enter your callsign to confirm the restart.', 'error');
+                return;
+            }
+
+            closeRestartModal();
+            showAlert('Sending restart request…', 'info');
+
+            try {
+                const response = await authenticatedFetch('/admin/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ callsign })
+                });
+
+                if (!response) {
+                    showAlert('Authentication failed', 'error');
+                    return;
+                }
+
+                if (response.status === 403) {
+                    const text = await response.text();
+                    showAlert('Restart rejected: ' + (text || 'callsign does not match'), 'error');
+                    return;
+                }
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || 'Restart request failed');
+                }
+
+                showAlert('Server is restarting… you will be redirected shortly.', 'success');
+                setTimeout(() => { showRestartCountdown(15); }, 500);
+
+            } catch (error) {
+                showAlert('Error restarting server: ' + error.message, 'error');
+            }
+        }
+
         // Close modal when clicking outside of it
         window.onclick = function(event) {
             const forceUpdateModal = document.getElementById('forceUpdateModal');
             if (event.target === forceUpdateModal) {
                 closeForceUpdateModal();
+            }
+            const restartModal = document.getElementById('restartServerModal');
+            if (event.target === restartModal) {
+                closeRestartModal();
             }
         }
 

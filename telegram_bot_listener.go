@@ -212,13 +212,27 @@ func (l *TelegramBotListener) Start() {
 // It also clears the bot command menu so stale commands are not shown after
 // the listener is disabled.
 func (l *TelegramBotListener) Stop() {
+	l.stopInternal(true)
+}
+
+// stopWithoutClear cancels the polling goroutine and waits for it to exit
+// without clearing the Telegram command menu. Used when the listener is being
+// immediately replaced by a new one (config change) so the new listener's
+// syncBotCommands call is not raced against a nil-clear from the old one.
+func (l *TelegramBotListener) stopWithoutClear() {
+	l.stopInternal(false)
+}
+
+func (l *TelegramBotListener) stopInternal(clearMenu bool) {
 	if l.cancel != nil {
 		l.cancel()
 	}
 	<-l.done
-	// Clear the Telegram command menu now that the listener is stopped.
-	go l.syncBotCommands(nil)
-	log.Printf("[TelegramListener:%s] Stopped", l.channelName)
+	if clearMenu {
+		// Clear the Telegram command menu now that the listener is stopped.
+		go l.syncBotCommands(nil)
+	}
+	log.Printf("[TelegramListener:%s] Stopped (clearMenu=%v)", l.channelName, clearMenu)
 }
 
 // recordCommand appends an entry to the in-memory command history ring buffer.
@@ -1091,6 +1105,9 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 			continue
 		}
 		// Stop existing listener if config changed (token, chat, commands, or rw_commands).
+		// Use stopWithoutClear() so the nil-clear goroutine is not launched — the new
+		// listener's Start() will immediately register the updated command menu, and we
+		// don't want the old listener's async nil-clear to race against it and wipe it.
 		if existing, ok := r.listeners[name]; ok {
 			oldCfg := existing.cfg
 			if oldCfg.BotToken == ch.BotToken &&
@@ -1098,7 +1115,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 				botCommandConfigEqual(oldCfg.BotCommands, ch.BotCommands) {
 				continue // unchanged — keep running
 			}
-			existing.Stop()
+			existing.stopWithoutClear()
 			delete(r.listeners, name)
 		}
 		l := NewTelegramBotListener(name, ch, r.sessions)

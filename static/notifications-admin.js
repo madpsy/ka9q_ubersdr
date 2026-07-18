@@ -1599,13 +1599,15 @@ function renderTelegramManagePanel(name, panel) {
             var uncheckAllBtn = el('tgMgr-uncheckAll-' + name);
             if (checkAllBtn) {
                 checkAllBtn.addEventListener('click', function() {
-                    // Check all command enable checkboxes except /passwords (security risk).
-                    container.querySelectorAll('input.tgMgr-cmdCheck-' + name).forEach(function(cb) {
-                        if (cb.value !== 'passwords') {
-                            cb.checked = true;
-                        }
+                        // Check all command enable checkboxes except:
+                        //   /passwords — security risk (sends passwords in plaintext)
+                        //   /restart   — write-only command; useless without Allow write enabled
+                        container.querySelectorAll('input.tgMgr-cmdCheck-' + name).forEach(function(cb) {
+                            if (cb.value !== 'passwords' && cb.value !== 'restart') {
+                                cb.checked = true;
+                            }
+                        });
                     });
-                });
             }
             if (uncheckAllBtn) {
                 uncheckAllBtn.addEventListener('click', function() {

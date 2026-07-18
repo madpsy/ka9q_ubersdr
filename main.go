@@ -2859,6 +2859,7 @@ func main() {
 	http.HandleFunc("/admin/addon-proxies", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxies))
 	http.HandleFunc("/admin/addon-proxies/test", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxyTest))
 	http.HandleFunc("/admin/addon-proxies/restart", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxiesRestart))
+	http.HandleFunc("/admin/restart", adminHandler.AuthMiddleware(adminHandler.HandleRestart))
 	http.HandleFunc("/admin/rbn-data", adminHandler.AuthMiddleware(adminHandler.HandleRBNData))
 	http.HandleFunc("/admin/rbn-data/refresh", adminHandler.AuthMiddleware(adminHandler.HandleRBNRefresh))
 	http.HandleFunc("/admin/wspr-rank", adminHandler.AuthMiddleware(adminHandler.HandleWSPRRank))

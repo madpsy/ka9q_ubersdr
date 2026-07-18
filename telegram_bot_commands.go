@@ -134,6 +134,11 @@ var botCommands = map[string]botCommand{
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleSpace,
 	},
+	"uptime": {
+		desc:     "Show host system uptime and UberSDR process uptime",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleUptime,
+	},
 	"weather": {
 		desc:     "Show local terrestrial weather (temperature, conditions, wind, humidity)",
 		readOnly: true,
@@ -2345,6 +2350,63 @@ func (l *TelegramBotListener) handleNetwork(chatID int64, args string) (string, 
 	msg := sb.String()
 	apiResp, apiOK := l.sendMessage(chatID, msg)
 	return msg, apiResp, apiOK
+}
+
+// handleUptime reports both the host system uptime and the UberSDR process uptime.
+// Host uptime is obtained via the GoTTY SSH proxy (same mechanism as the admin.html
+// system tab) so it reflects the real host uptime, not the container's uptime.
+// Falls back to "unavailable" when the SSH proxy is not configured.
+// Process uptime is computed from the global StartTime set at process start.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleUptime(chatID int64, args string) (string, string, bool) {
+	var sb strings.Builder
+	sb.WriteString("⏱️ <b>Uptime</b>\n\n")
+
+	// ── Host system uptime via GoTTY SSH proxy ────────────────────────────────
+	// UberSDR runs inside a container, so /proc/uptime would only show container
+	// uptime. The GoTTY client SSHes into the host and runs `uptime` there,
+	// exactly as HandleSystemStats does for the admin.html system tab.
+	if l.config != nil {
+		gottyClient := NewGoTTYClient(&l.config.SSHProxy)
+		if gottyClient != nil {
+			if resp, err := gottyClient.ExecCommand("uptime", 5); err == nil && resp.ExitCode == 0 {
+				hostUptimeRaw := strings.TrimSpace(resp.Stdout)
+				fmt.Fprintf(&sb, "🖥️ <b>Host:</b> <code>%s</code>\n", html.EscapeString(hostUptimeRaw))
+			} else {
+				sb.WriteString("🖥️ <b>Host:</b> <i>unavailable (SSH proxy error)</i>\n")
+			}
+		} else {
+			sb.WriteString("🖥️ <b>Host:</b> <i>unavailable (SSH proxy not configured)</i>\n")
+		}
+	} else {
+		sb.WriteString("🖥️ <b>Host:</b> <i>unavailable</i>\n")
+	}
+
+	// ── UberSDR process uptime (from global StartTime) ────────────────────────
+	processUptime := time.Since(StartTime)
+	fmt.Fprintf(&sb, "🚀 <b>UberSDR:</b> %s\n", html.EscapeString(fmtLongDuration(processUptime)))
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// fmtLongDuration formats a duration as "Xd Xh Xm Xs" for uptime display.
+// Unlike fmtSessionDuration (compact, for session lists), this is verbose and
+// always shows all non-zero components down to seconds.
+func fmtLongDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%02dh %02dm %02ds", hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%02dm %02ds", minutes, seconds)
 }
 
 // ─── Helpers used by command handlers ─────────────────────────────────────────

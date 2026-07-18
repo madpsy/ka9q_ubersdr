@@ -5315,6 +5315,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         continue;
                     }
 
+                    // Special handling for admin.gps.lat and admin.gps.lon — privacy warning
+                    if (fullPath === 'admin.gps.lat' || fullPath === 'admin.gps.lon') {
+                        const isPublic = currentConfig?.instance_reporting?.enabled === true;
+                        const gpsWarning = document.createElement('div');
+                        gpsWarning.style.cssText = `background:${isPublic ? '#fff3cd' : '#f8f9fa'};border:1px solid ${isPublic ? '#ffc107' : '#dee2e6'};border-radius:5px;padding:10px 14px;margin-bottom:8px;font-size:13px;color:${isPublic ? '#856404' : '#555'};display:flex;align-items:flex-start;gap:8px;`;
+                        gpsWarning.innerHTML = `<span style="font-size:16px;flex-shrink:0;">${isPublic ? '⚠️' : 'ℹ️'}</span><span>${isPublic ? '<strong>This value is currently public.</strong> ' : ''}<strong>Location coordinates are published to the instance directory</strong> when instance reporting is enabled. Consider adding some fuzziness (e.g. rounding to 2 decimal places) if you do not wish to reveal your precise location.</span>`;
+                        field.appendChild(gpsWarning);
+
+                        input.dataset.path = fullPath;
+                        input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
+                        field.appendChild(input);
+                        container.appendChild(field);
+                        continue;
+                    }
+
                     input.dataset.path = fullPath;
                     input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
                     // custom_head_html and custom_body_html are already appended inside cm-lined-wrapper

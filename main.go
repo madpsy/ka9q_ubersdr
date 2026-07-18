@@ -2334,6 +2334,9 @@ func main() {
 	// Wire notif manager into admin handler so restartServer() can publish
 	// a shutdown notification before os.Exit.
 	adminHandler.SetNotifManager(notifManager)
+	// Wire GPSDO monitor into admin handler so /admin/monitor-health can include
+	// GPSDO health using the same cached snapshot as the /monitor bot command.
+	adminHandler.SetGPSDOMonitor(gpsdoMonitor)
 	// Wire config and instance reporter so the /info bot command can report
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
@@ -2836,6 +2839,7 @@ func main() {
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))
+	http.HandleFunc("/admin/monitor-health", adminHandler.AuthMiddleware(adminHandler.HandleMonitorHealth))
 	http.HandleFunc("/admin/session-activity/logs", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityLogs))
 	http.HandleFunc("/admin/session-activity/metrics", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityMetrics))
 	http.HandleFunc("/admin/session-activity/chart-data", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityChartData))

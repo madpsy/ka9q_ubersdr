@@ -1,7 +1,0 @@
-# config.py contains Wi-Fi credentials — NEVER commit this file.
-# Use config.py.example as the template; flash.py generates config.py
-# from your credentials and copies it directly to the Pico W via mpremote.
-config.py
-
-# Downloaded Pimoroni MicroPython UF2 firmware files
-*.uf2

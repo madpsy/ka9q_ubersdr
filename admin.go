@@ -397,12 +397,19 @@ type AdminHandler struct {
 	gpsdoProxy          *GPSDOProxy                // GPSDO reverse proxy (live-reloadable)
 	freqRefMonitor      *FrequencyReferenceMonitor // nil if frequency reference not enabled
 	notifManager        *NotificationManager       // for shutdown notifications
+	gpsdoMonitor        *GPSDOMonitor              // nil if GPSDO not enabled; used by /admin/monitor-health
 }
 
 // SetNotifManager wires the notification manager so restartServer() can publish
 // a shutdown event before os.Exit. Called from main after NewAdminHandler.
 func (ah *AdminHandler) SetNotifManager(nm *NotificationManager) {
 	ah.notifManager = nm
+}
+
+// SetGPSDOMonitor wires the GPSDO monitor so /admin/monitor-health can include
+// GPSDO health using the cached snapshot (same source as the /monitor bot command).
+func (ah *AdminHandler) SetGPSDOMonitor(m *GPSDOMonitor) {
+	ah.gpsdoMonitor = m
 }
 
 // GetEnabledPublicAddonNames returns the names of currently enabled, non-admin-only

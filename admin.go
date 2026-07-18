@@ -2583,16 +2583,61 @@ func buildSessionsPayload(sm *SessionManager, dxWsHandler *DXClusterWebSocketHan
 	}
 }
 
-// HandleSessions returns information about all active sessions
+// buildCompactSessionsPayload returns only aggregate user counts and bandwidth
+// totals — a tiny payload for constrained clients (e.g. embedded status
+// displays) that don't need per-session detail.
+func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
+	sessions := sm.GetAllSessionsInfo()
+	internal, external := 0, 0
+	var audioKbps, waterfallKbps, totalKbps int
+	for _, s := range sessions {
+		if isInternal, _ := s["is_internal"].(bool); isInternal {
+			internal++
+			continue
+		}
+		external++
+		if v, ok := s["audio_kbps"].(int); ok {
+			audioKbps += v
+		}
+		if v, ok := s["waterfall_kbps"].(int); ok {
+			waterfallKbps += v
+		}
+		if v, ok := s["total_kbps"].(int); ok {
+			totalKbps += v
+		}
+	}
+	return map[string]interface{}{
+		"users":             sm.GetNonBypassedUserCount(),
+		"bypassed_users":    sm.GetBypassedUserCount(),
+		"max_sessions":      sm.config.Server.MaxSessions,
+		"session_count":     len(sessions),
+		"internal_sessions": internal,
+		"external_sessions": external,
+		"audio_kbps":        audioKbps,
+		"waterfall_kbps":    waterfallKbps,
+		"total_kbps":        totalKbps,
+	}
+}
+
+// HandleSessions returns information about all active sessions.
+// With ?compact=1 (or ?compact=true) it returns only the aggregate counts and
+// bandwidth totals from buildCompactSessionsPayload.
 func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	var payload map[string]interface{}
+	if c := r.URL.Query().Get("compact"); c == "1" || c == "true" {
+		payload = buildCompactSessionsPayload(ah.sessions)
+	} else {
+		payload = buildSessionsPayload(ah.sessions, ah.dxClusterWsHandler, ah.geoIPService)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(buildSessionsPayload(ah.sessions, ah.dxClusterWsHandler, ah.geoIPService)); err != nil {
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("Error encoding sessions: %v", err)
 	}
 }

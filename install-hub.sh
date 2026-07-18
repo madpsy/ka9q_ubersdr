@@ -558,14 +558,26 @@ if [ -f "$AUTHORIZED_KEYS" ]; then
         [ -n "$(tail -c1 "$AUTHORIZED_KEYS")" ] && sudo -u "$ACTUAL_USER" bash -c "echo '' >> '$AUTHORIZED_KEYS'"
         sudo -u "$ACTUAL_USER" bash -c "printf '%s\n' '$PUBLIC_KEY' >> '$AUTHORIZED_KEYS'"
         sudo -u "$ACTUAL_USER" chmod 600 "$AUTHORIZED_KEYS"
-        echo "Public key added successfully."
+        # Verify the key was actually written
+        if grep -qF "$PUBLIC_KEY" "$AUTHORIZED_KEYS"; then
+            echo "Public key added successfully."
+        else
+            echo "Error: Failed to add GoTTY public key to authorized_keys. GoTTY SSH access will not work."
+            exit 1
+        fi
     fi
 else
     # authorized_keys doesn't exist - create it
     echo "Creating authorized_keys and adding GoTTY public key..."
     sudo -u "$ACTUAL_USER" bash -c "printf '%s\n' '$PUBLIC_KEY' > '$AUTHORIZED_KEYS'"
     sudo -u "$ACTUAL_USER" chmod 600 "$AUTHORIZED_KEYS"
-    echo "authorized_keys created and public key added successfully."
+    # Verify the key was actually written
+    if grep -qF "$PUBLIC_KEY" "$AUTHORIZED_KEYS"; then
+        echo "authorized_keys created and public key added successfully."
+    else
+        echo "Error: Failed to create authorized_keys or write GoTTY public key. GoTTY SSH access will not work."
+        exit 1
+    fi
 fi
 
 # Check if docker-compose.yml already exists

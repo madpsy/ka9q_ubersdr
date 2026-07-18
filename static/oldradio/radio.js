@@ -646,7 +646,9 @@ function saveBand(radioId, band) {
     }
 }
 
-// Merge the named band's values into the active config and global freq limits
+// Merge the named band's values into the active config and global freq limits.
+// If the band defines its own "mode" (e.g. US CB uses "am"), that overrides the
+// radio-level default; otherwise the radio-level mode is restored.
 function applyBandConfig(bandName) {
     if (!currentRadioConfig || !currentRadioConfig.bands) return;
     const band = currentRadioConfig.bands[bandName];
@@ -659,6 +661,11 @@ function applyBandConfig(bandName) {
     currentRadioConfig.channels = band.channels;
     MIN_FREQ = band.minFreq;
     MAX_FREQ = band.maxFreq;
+
+    // Mode is read directly from the band definition (e.g. UK/EU = "fm", US = "am")
+    if (band.mode) {
+        MODE = band.mode;
+    }
 
     updateBandDisplay();
 }

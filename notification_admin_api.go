@@ -232,7 +232,13 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 
 	// ── Send and time it ─────────────────────────────────────────────────────
 	start := time.Now()
-	chResp, sendErr := ch.Send(msg)
+	var chResp ChannelResponse
+	var sendErr error
+	if es, ok := ch.(eventAwareSender); ok {
+		chResp, sendErr = es.SendWithEvent(msg, "test", "")
+	} else {
+		chResp, sendErr = ch.Send(msg)
+	}
 	durationMs := time.Since(start).Milliseconds()
 
 	// ── Log to channel ring buffer (named channels only, not ad-hoc) ─────────

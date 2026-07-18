@@ -47,6 +47,15 @@ type galacticUnicornOverrideSender interface {
 	SendWithOverride(message string, override GalacticUnicornOverride) (ChannelResponse, error)
 }
 
+// eventAwareSender is an optional interface for channels whose payload can
+// carry the triggering event type and rule name alongside the rendered message
+// (currently only WebhookChannel — the "json" format and body templates expose
+// them so receivers can title/route notifications without parsing the message
+// text). Channels that don't implement it just receive the message via Send.
+type eventAwareSender interface {
+	SendWithEvent(message, eventType, rule string) (ChannelResponse, error)
+}
+
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
 // rateLimitKey uniquely identifies a (rule, subject) pair for rate limiting.
@@ -943,6 +952,15 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			// (e.g. SoundUnhealthy / SoundRecovery for system_monitor events)
 			// into the override's Sound field so the notifier sees a single
 			// resolved pattern without needing to know the event type.
+			// Prefer the event-aware send when the channel supports it so the
+			// payload can carry the event type and rule name (see eventAwareSender).
+			sendMsg := func(msg string) (ChannelResponse, error) {
+				if es, ok := ch.(eventAwareSender); ok {
+					return es.SendWithEvent(msg, string(evt.EventType()), key)
+				}
+				return ch.Send(msg)
+			}
+
 			var chResp ChannelResponse
 			var sendErr error
 			if ov, ok := rule.GalacticUnicornOverrides[chName]; ok && ov.hasAnyValue() {
@@ -953,10 +971,10 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				if os, ok := ch.(galacticUnicornOverrideSender); ok {
 					chResp, sendErr = os.SendWithOverride(msg, ov)
 				} else {
-					chResp, sendErr = ch.Send(msg)
+					chResp, sendErr = sendMsg(msg)
 				}
 			} else {
-				chResp, sendErr = ch.Send(msg)
+				chResp, sendErr = sendMsg(msg)
 			}
 			if sendErr != nil {
 				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, sendErr)

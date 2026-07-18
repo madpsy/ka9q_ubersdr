@@ -158,6 +158,8 @@ type NotificationChannelConfig struct {
 	// The template receives a WebhookTemplateData struct with fields:
 	//   .Message   string    — the rendered notification text
 	//   .Channel   string    — the channel name
+	//   .Event     string    — the triggering event type (may be empty)
+	//   .Rule      string    — the matched rule name (may be empty)
 	//   .Timestamp string    — UTC time in RFC3339 format
 	// The Content-Type defaults to application/json when the template is set;
 	// override it by setting a "Content-Type" entry in WebhookHeaders.
@@ -957,6 +959,12 @@ type WebhookTemplateData struct {
 	Message string
 	// Channel is the webhook channel name as configured in notifications.yaml.
 	Channel string
+	// Event is the triggering event type (e.g. "dx_spot", "system_monitor";
+	// "test" for test sends). Empty when the send path has no event context.
+	Event string
+	// Rule is the name of the notification rule that matched (free text as
+	// configured in notifications.yaml). Empty for test sends.
+	Rule string
 	// Timestamp is the current UTC time in RFC3339 format (e.g. "2026-07-01T11:00:00Z").
 	Timestamp string
 }

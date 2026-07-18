@@ -98,21 +98,29 @@ func (w *WebhookChannel) Type() string { return "webhook" }
 // Send delivers message to the configured webhook URL. It retries once on
 // transient network errors (same pattern as EmailChannel).
 func (w *WebhookChannel) Send(message string) (ChannelResponse, error) {
-	return w.sendWithRetry(message, 2)
+	return w.SendWithEvent(message, "", "")
 }
 
-func (w *WebhookChannel) sendWithRetry(message string, attemptsLeft int) (ChannelResponse, error) {
-	resp, err := w.doSend(message)
+// SendWithEvent is Send with the triggering event type (e.g. "dx_spot") and
+// rule name included in the payload — in the "json" format's "event"/"rule"
+// fields and as {{.Event}}/{{.Rule}} in body templates. Implements
+// eventAwareSender.
+func (w *WebhookChannel) SendWithEvent(message, eventType, rule string) (ChannelResponse, error) {
+	return w.sendWithRetry(message, eventType, rule, 2)
+}
+
+func (w *WebhookChannel) sendWithRetry(message, eventType, rule string, attemptsLeft int) (ChannelResponse, error) {
+	resp, err := w.doSend(message, eventType, rule)
 	if err != nil && isTransientWebhookError(err) && attemptsLeft > 1 {
 		log.Printf("[Webhook:%s] send error (retrying): %v", w.name, err)
 		time.Sleep(2 * time.Second)
-		return w.sendWithRetry(message, attemptsLeft-1)
+		return w.sendWithRetry(message, eventType, rule, attemptsLeft-1)
 	}
 	return resp, err
 }
 
-func (w *WebhookChannel) doSend(message string) (ChannelResponse, error) {
-	body, contentType := w.buildBody(message)
+func (w *WebhookChannel) doSend(message, eventType, rule string) (ChannelResponse, error) {
+	body, contentType := w.buildBody(message, eventType, rule)
 
 	method := strings.ToUpper(w.cfg.WebhookMethod)
 	if method == "" {
@@ -176,12 +184,14 @@ func (w *WebhookChannel) doSend(message string) (ChannelResponse, error) {
 //	A Go text/template string rendered against WebhookTemplateData.
 //	Content-Type defaults to application/json; override via WebhookHeaders.
 //	Example: {"message":"{{.Message}}","title":"UberSDR","priority":5}
-func (w *WebhookChannel) buildBody(message string) ([]byte, string) {
+func (w *WebhookChannel) buildBody(message, eventType, rule string) ([]byte, string) {
 	// Body template takes precedence over format.
 	if w.bodyTmpl != nil {
 		data := WebhookTemplateData{
 			Message:   message,
 			Channel:   w.name,
+			Event:     eventType,
+			Rule:      rule,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 		var buf bytes.Buffer
@@ -203,6 +213,12 @@ func (w *WebhookChannel) buildBody(message string) ([]byte, string) {
 			"channel":   w.name,
 			"message":   message,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		if eventType != "" {
+			payload["event"] = eventType
+		}
+		if rule != "" {
+			payload["rule"] = rule
 		}
 		b, _ := json.Marshal(payload)
 		return b, "application/json"

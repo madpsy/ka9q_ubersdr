@@ -63,6 +63,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 .sg-canvas-wrap{position:relative;width:100%;cursor:crosshair;background:#000;border-radius:0 0 6px 6px}
 #img-canvas{display:block;width:100%;height:auto;image-rendering:pixelated}
 #overlay-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#ant-switch-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9}
 /* Legend */
 .legend{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:.78em;opacity:.8;padding-left:46px}
 #legend-canvas{width:200px;height:13px;border-radius:3px}
@@ -330,6 +331,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       </div>
       <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled. -->
       <canvas id="overlay-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
+      <!-- Antenna switch event markers — persistent layer below the crosshair overlay -->
+      <canvas id="ant-switch-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9"></canvas>
     </div>
     <!-- Row indicator strip — click or drag to select a time row -->
     <div id="row-indicator" title="Click to select a time row for spectrum view">
@@ -2143,6 +2146,13 @@ function setupHover(){
         var col=snr>20?'#7f7':snr>10?'#ff7':'#fa7';
         h+='<div class="tt-row"><span class="tt-lbl">SNR</span><span class="tt-val" style="color:'+col+'">'+snr.toFixed(1)+' dB</span></div>';
       }
+      /* Active antenna — show for every row when ant-switch data is loaded */
+      if(sgAntSwitchEvents.length>0&&rowMeta&&rowMeta.unix){
+        var _antEv=sgActiveAntenna(rowMeta.unix);
+        if(_antEv){
+          h+='<div class="tt-row"><span class="tt-lbl">Antenna</span><span class="tt-val" style="color:#ff80ff">'+escHtml(sgResolveAntLabel(_antEv))+'</span></div>';
+        }
+      }
     }
     tt.innerHTML=h;
     tt.style.display='block';
@@ -2832,6 +2842,113 @@ function tsResetZoom(){
 var tsCallsign='';
 var sgReceiverLat=null;
 var sgReceiverLon=null;
+
+/* ── Antenna switch state ────────────────────────────────────────────────────
+   Populated only when /api/description reports ant_switch.enabled === true.
+   sgAntLabels  : string[] from /api/ant-switch/status antenna_labels (1-based index)
+   sgAntSwitchEvents : sorted array of {unix, selected, grounded, label} */
+var sgAntLabels=[];
+var sgAntSwitchEvents=[];
+
+/* Resolve a human-readable antenna name from an event object.
+   Uses sgAntLabels (from /api/ant-switch/status) to map 1-based selected[] indices. */
+function sgResolveAntLabel(ev){
+  if(ev.grounded)return '\u26A1 Grounded';
+  if(!ev.selected||ev.selected.length===0)return ev.label||'?';
+  return ev.selected.map(function(idx){
+    return sgAntLabels[idx-1]||('Antenna '+idx);
+  }).join(' + ');
+}
+
+/* Return the last antenna switch event whose unix timestamp <= rowUnix,
+   i.e. the antenna that was active at that moment.
+   Returns null if no event precedes the given time. */
+function sgActiveAntenna(rowUnix){
+  var active=null;
+  for(var i=0;i<sgAntSwitchEvents.length;i++){
+    if(sgAntSwitchEvents[i].unix<=rowUnix)active=sgAntSwitchEvents[i];
+    else break;
+  }
+  return active;
+}
+
+/* Draw horizontal dashed magenta lines on #ant-switch-canvas for every
+   antenna switch event that falls within the currently loaded spectrogram.
+   Called after render(), after zoom/pan changes, and after events load. */
+function sgDrawAntSwitchOverlay(){
+  var canvas=document.getElementById('ant-switch-canvas');
+  if(!canvas||!meta||meta.row_count===0)return;
+
+  /* Size canvas to its CSS pixel dimensions */
+  var or=canvas.getBoundingClientRect();
+  var W=Math.round(or.width)||canvas.offsetWidth||800;
+  var H=Math.round(or.height)||canvas.offsetHeight||600;
+  if(canvas.width!==W)canvas.width=W;
+  if(canvas.height!==H)canvas.height=H;
+
+  var ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  if(!sgAntSwitchEvents.length)return;
+
+  /* Effective Y scale — mirrors buildTimeAxis() */
+  var container=document.querySelector('.sg-right');
+  var ch=container?container.getBoundingClientRect().height:H;
+  if(ch===0)ch=H;
+  var sy=zoom.scale*zoom.scaleY;
+
+  function rowFracToScreenY(rowFrac){
+    return (rowFrac*sy + zoom.ty/ch)*H;
+  }
+
+  /* Row 0 unix timestamp and seconds-per-row */
+  var row0Unix=0;
+  var rowSec=meta.row_interval_seconds||60;
+  if(meta.rows&&meta.rows[0]&&meta.rows[0].unix)row0Unix=meta.rows[0].unix;
+  if(!row0Unix)return;
+
+  var lastRowUnix=row0Unix+meta.row_count*rowSec;
+
+  ctx.save();
+  ctx.strokeStyle='rgba(255,80,255,0.7)';
+  ctx.lineWidth=1.5;
+  ctx.setLineDash([6,4]);
+  ctx.font='bold 10px -apple-system,BlinkMacSystemFont,sans-serif';
+  ctx.textBaseline='bottom';
+  ctx.textAlign='right';
+
+  for(var i=0;i<sgAntSwitchEvents.length;i++){
+    var ev=sgAntSwitchEvents[i];
+    /* Skip events outside the loaded data range */
+    if(ev.unix<row0Unix-rowSec||ev.unix>lastRowUnix+rowSec)continue;
+
+    var rowFrac=(ev.unix-row0Unix)/(meta.row_count*rowSec);
+    var screenY=rowFracToScreenY(rowFrac);
+    if(screenY<-2||screenY>H+2)continue;
+
+    var y=Math.round(screenY)+0.5;
+
+    /* Dashed horizontal line */
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
+    ctx.stroke();
+
+    /* Label on the right edge — use the raw event label (describes the action) */
+    var lbl='\u21C4 '+escHtml(ev.label||sgResolveAntLabel(ev));
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,80,255,0.9)';
+    /* Small pill background */
+    var tw=ctx.measureText(lbl).width;
+    ctx.fillStyle='rgba(40,0,40,0.72)';
+    ctx.fillRect(W-tw-10,y-13,tw+8,12);
+    ctx.fillStyle='rgba(255,120,255,0.95)';
+    ctx.fillText(lbl,W-6,y-2);
+    ctx.setLineDash([6,4]);
+  }
+  ctx.restore();
+}
+
 (function fetchDescription(){
   fetch('/api/description')
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
@@ -2849,6 +2966,29 @@ var sgReceiverLon=null;
         if(typeof d.receiver.gps.lon==='number')sgReceiverLon=d.receiver.gps.lon;
         /* Redraw overlay now that we have coordinates (buildTimeAxis may have run first) */
         buildDayNightOverlay();
+      }
+      /* Antenna switch — only fetch if enabled on this instance */
+      if(d&&d.ant_switch&&d.ant_switch.enabled){
+        Promise.all([
+          fetch('/api/ant-switch/status').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+          fetch('/api/ant-switch/history').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+        ]).then(function(results){
+          var status=results[0];
+          var history=results[1];
+          if(status&&Array.isArray(status.antenna_labels))sgAntLabels=status.antenna_labels;
+          if(history&&Array.isArray(history.history)){
+            sgAntSwitchEvents=history.history.map(function(ev){
+              return{
+                unix:new Date(ev.time).getTime()/1000,
+                selected:ev.selected||[],
+                grounded:ev.grounded||false,
+                label:ev.label||''
+              };
+            });
+            sgAntSwitchEvents.sort(function(a,b){return a.unix-b.unix;});
+            sgDrawAntSwitchOverlay();
+          }
+        });
       }
     })
     .catch(function(){});
@@ -3722,6 +3862,8 @@ applyZoom=function(){
   sgRedrawRowSpectrum();
   /* Redraw bands/bookmarks bar with updated zoom */
   buildBandsBar();
+  /* Redraw antenna switch overlay with updated zoom */
+  sgDrawAntSwitchOverlay();
 };
 
 /* Redraw bands bar on window resize (canvas width changes) */
@@ -4110,6 +4252,34 @@ function sgDrawScrubber() {
     }
   }
 
+  /* Antenna switch event markers — vertical magenta lines before the playhead */
+  if (sgAntSwitchEvents.length > 0 && meta && meta.rows && meta.rows.length > 0) {
+    var _scrubRow0Unix = meta.rows[0].unix || 0;
+    var _scrubRowSec = meta.row_interval_seconds || 60;
+    var _scrubTotalSec = meta.row_count * _scrubRowSec;
+    if (_scrubRow0Unix > 0 && _scrubTotalSec > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,80,255,0.8)';
+      ctx.lineWidth = 1.5;
+      for (var _si = 0; _si < sgAntSwitchEvents.length; _si++) {
+        var _sev = sgAntSwitchEvents[_si];
+        var _sfrac = (_sev.unix - _scrubRow0Unix) / _scrubTotalSec;
+        if (_sfrac < 0 || _sfrac > 1) continue;
+        var _sx = _sfrac * W;
+        ctx.beginPath();
+        ctx.moveTo(_sx, 0); ctx.lineTo(_sx, H);
+        ctx.stroke();
+        /* Small upward triangle at the bottom */
+        ctx.fillStyle = 'rgba(255,80,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(_sx, H); ctx.lineTo(_sx - 4, H - 7); ctx.lineTo(_sx + 4, H - 7);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   /* Playhead — vertical cyan line at the current row */
   if (meta && meta.row_count > 0) {
     var px = (sgSelectedRow / (meta.row_count - 1)) * W;
@@ -4186,6 +4356,7 @@ render = function() {
   _origRender();
   sgDrawScrubber();
   if (window.sgDrawActivityChart) window.sgDrawActivityChart();
+  sgDrawAntSwitchOverlay();
 };
 
 /* ── Band Activity Chart ──────────────────────────────────────────────────────
@@ -4492,6 +4663,47 @@ render = function() {
       ctx.stroke();
       ctx.restore();
     }
+
+    // ── Antenna switch event markers ─────────────────────────────────────────
+    // Vertical dashed magenta lines at each switch event, with a small label
+    if (sgAntSwitchEvents.length > 0 && firstUnix > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,80,255,0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.font = 'bold 9px -apple-system,BlinkMacSystemFont,sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      for (var _ai = 0; _ai < sgAntSwitchEvents.length; _ai++) {
+        var _aev = sgAntSwitchEvents[_ai];
+        // Convert event unix → X position using the same row-time mapping
+        var _aRowFrac = (_aev.unix - firstUnix) / 60 / n;
+        if (_aRowFrac < 0 || _aRowFrac > 1) continue;
+        var _ax = _aRowFrac * W;
+        // Vertical line through chart area only
+        ctx.beginPath();
+        ctx.moveTo(_ax, 0);
+        ctx.lineTo(_ax, H);
+        ctx.stroke();
+        // Small triangle at top
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,80,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(_ax, 0);
+        ctx.lineTo(_ax - 4, 7);
+        ctx.lineTo(_ax + 4, 7);
+        ctx.closePath();
+        ctx.fill();
+        // Label: resolved antenna name, clamped to canvas
+        var _aLbl = sgResolveAntLabel(_aev);
+        var _aLblW = ctx.measureText(_aLbl).width;
+        var _aLblX = Math.min(_ax + 3, W - _aLblW - 2);
+        ctx.fillStyle = 'rgba(255,120,255,0.9)';
+        ctx.fillText(_aLbl, _aLblX, 9);
+        ctx.setLineDash([4, 3]);
+      }
+      ctx.restore();
+    }
   }
 
   // Expose globally so the patches above can call it
@@ -4515,11 +4727,17 @@ render = function() {
       if (typeof SunCalc !== 'undefined' && sgReceiverLat !== null && sgReceiverLon !== null && row.unix) {
         _actDnEmoji = SunCalc.getPosition(new Date(row.unix * 1000), sgReceiverLat, sgReceiverLon).altitude > 0 ? ' \u2600\ufe0f' : ' \uD83C\uDF19';
       }
+      var _actAntStr = '';
+      if (sgAntSwitchEvents.length > 0 && row.unix) {
+        var _actAntEv = sgActiveAntenna(row.unix);
+        if (_actAntEv) _actAntStr = '<br><span style="color:#ff80ff">\u21C4 Antenna: ' + escHtml(sgResolveAntLabel(_actAntEv)) + '</span>';
+      }
       actTip.innerHTML =
         '<b style="color:#7df">' + (row.utc_time || '') + ' UTC' + _actDnEmoji + '</b><br>' +
         '<span style="color:#0ff">Noise floor: ' + (nf !== 0 ? nf.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
         '<span style="color:#f90">Signal peak: ' + (pk !== 0 ? pk.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
-        '<span style="opacity:.7">Dynamic range: ' + (dr !== '—' ? dr + ' dB' : '—') + '</span>';
+        '<span style="opacity:.7">Dynamic range: ' + (dr !== '—' ? dr + ' dB' : '—') + '</span>' +
+        _actAntStr;
       actTip.style.display = 'block';
       var tx = e.clientX + 14, ty = e.clientY - 10;
       if (tx + 200 > window.innerWidth) tx = e.clientX - 210;

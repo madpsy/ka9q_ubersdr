@@ -2628,9 +2628,26 @@ func buildSessionsPayload(sm *SessionManager, dxWsHandler *DXClusterWebSocketHan
 		}
 	}
 
+	// Aggregate counts so consumers (MQTT/Home Assistant, embedded displays)
+	// don't have to re-derive them from the session array and get it wrong.
+	// "count" stays as-is for backwards compatibility: it is EVERY session,
+	// including internal system channels. Only non_bypassed_users counts
+	// towards max_sessions - that is the number the server enforces.
+	internal := 0
+	for _, s := range sessions {
+		if isInternal, _ := s["is_internal"].(bool); isInternal {
+			internal++
+		}
+	}
+
 	return map[string]interface{}{
-		"sessions": sessions,
-		"count":    len(sessions),
+		"sessions":           sessions,
+		"count":              len(sessions),
+		"internal_sessions":  internal,
+		"user_sessions":      len(sessions) - internal,
+		"non_bypassed_users": sm.GetNonBypassedUserCount(),
+		"bypassed_users":     sm.GetBypassedUserCount(),
+		"max_sessions":       sm.config.Server.MaxSessions,
 	}
 }
 

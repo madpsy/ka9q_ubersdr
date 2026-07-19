@@ -10,6 +10,16 @@
 # Uses only BUILT-IN cards - no HACS required. In the sections view you can also
 # drag cards to resize/rearrange them in the UI.
 #
+# Layout notes:
+#   - Each section is a 12-column grid. Cards default to half width (6), so odd
+#     card counts leave holes; every card here gets explicit grid_options so
+#     rows pack fully. Gauges are 2 rows tall, tiles 1 - a 6-wide gauge with two
+#     6-wide tiles beside it fills a 2-row block exactly.
+#   - Wide content (map, tables, multi-band graphs) lives in column_span: 2
+#     sections so it isn't squeezed into one section column.
+#   - Each entity appears ONCE (badges aside): headline state up top, the
+#     detail in its own themed section.
+#
 # Live map (optional): set server.sessions_geojson_enabled + geoip.enabled in
 # UberSDR, then add HA's built-in GeoJSON integration pointed at
 # https://YOUR_SDR/api/sessions.geojson (see home_assistant.md). The map card
@@ -25,6 +35,7 @@ views:
     path: ubersdr
     type: sections
     icon: mdi:radio-tower
+    max_columns: 4
     # Modern pill badges across the top: the headline state at a glance.
     badges:
       - type: entity
@@ -50,7 +61,9 @@ views:
 
     sections:
       # ================================================================
-      # AT A GLANCE - headline magnitudes as gauges, state as tiles
+      # AT A GLANCE - users gauge + status tiles, packed into 3 full rows
+      # (gauge 6x2 with two tiles stacked beside it, then a row of two).
+      # Space-weather numbers live in their own section below - no dupes.
       # ================================================================
       - type: grid
         cards:
@@ -60,12 +73,21 @@ views:
             icon: mdi:view-dashboard-outline
 
           # Active users vs capacity (magnitude, bounded by slots).
+          # This entity counts UNIQUE NON-BYPASSED users - the only sessions
+          # that consume a slot. Bypassed users and internal system channels
+          # are excluded (see sensor.ubersdr_bypassed_users for the former).
+          # NOTE: set max to your server.max_sessions from config.yaml; a gauge
+          # cannot template its bounds. The live value is on the active_users
+          # "max_sessions" attribute if you want to cross-check it.
           - type: gauge
             entity: sensor.ubersdr_active_users
-            name: Active Users
+            name: Users (of limit)
             min: 0
             max: 20
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
             segments:
               - from: 0
                 color: '#2ecc71'
@@ -74,55 +96,49 @@ views:
               - from: 18
                 color: '#e74c3c'
 
-          # Solar flux = propagation fuel (low->high = poor->good quality).
-          - type: gauge
-            entity: sensor.ubersdr_solar_flux
-            name: Solar Flux
-            unit: SFU
-            min: 60
-            max: 300
-            needle: true
-            segments:
-              - from: 60
-                color: '#e74c3c'
-              - from: 100
-                color: '#f1c40f'
-              - from: 150
-                color: '#2ecc71'
-
-          # K-index = geomagnetic disturbance (status: high is bad).
-          - type: gauge
-            entity: sensor.ubersdr_k_index
-            name: K-Index
-            min: 0
-            max: 9
-            needle: true
-            severity:
-              green: 0
-              yellow: 4
-              red: 5
-
-          # State tiles (status colour + icon, not colour alone).
-          - type: tile
-            entity: sensor.ubersdr_propagation_quality
-            name: Propagation
-            icon: mdi:radio-tower
-            color: teal
-          - type: tile
-            entity: sensor.ubersdr_k_index_status
-            name: Geomagnetic
-            icon: mdi:magnet
-            color: indigo
+          # These two stack beside the gauge (each 6x1, gauge is 2 rows tall).
           - type: tile
             entity: binary_sensor.ubersdr_online
             name: Receiver
             icon: mdi:access-point
             color: green
+            grid_options:
+              columns: 6
+              rows: 1
+          # Bypassed users sit outside max_sessions, so they are shown next to
+          # the gauge rather than inside it.
+          - type: tile
+            entity: sensor.ubersdr_bypassed_users
+            name: Bypassed
+            icon: mdi:account-key
+            color: purple
+            grid_options:
+              columns: 6
+              rows: 1
+
+          # Status pair (status colour + icon, not colour alone).
+          - type: tile
+            entity: sensor.ubersdr_propagation_quality
+            name: Propagation
+            icon: mdi:radio-tower
+            color: teal
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: tile
+            entity: sensor.ubersdr_k_index_status
+            name: Geomagnetic
+            icon: mdi:magnet
+            color: indigo
+            grid_options:
+              columns: 6
+              rows: 1
 
       # ================================================================
-      # LIVE LISTENERS - geographic map + detail table + trend
+      # LIVE LISTENERS - wide section: map + detail table + trend
       # ================================================================
       - type: grid
+        column_span: 2
         cards:
           - type: heading
             heading: Live Listeners
@@ -149,26 +165,54 @@ views:
             grid_options:
               columns: full
             content: |-
+              {#- Session classes mirror admin.html: internal (system) vs user,
+                  audio vs spectrum, and public vs local by client IP. -#}
               {%- set all = state_attr('sensor.ubersdr_active_users', 'sessions') or [] -%}
-              {#- drop internal channels (wideband scanner, decoders) - they are not people -#}
-              {%- set rows = all | rejectattr('is_internal', 'equalto', true)
-                                 | rejectattr('is_spectrum', 'equalto', true)
-                                 | list -%}
-              {%- if rows | count == 0 %}
-              _No active listeners right now._
-              {%- else %}
-              | Listener | Location | Frequency | Mode | On air |
+              {%- set internal = all | selectattr('is_internal', 'equalto', true) | list -%}
+              {%- set users = all | rejectattr('is_internal', 'equalto', true) | list -%}
+              {%- set audio = users | rejectattr('is_spectrum', 'equalto', true) | list -%}
+              {%- set waterfall = users | selectattr('is_spectrum', 'equalto', true) | list -%}
+              {#- RFC1918 + loopback + IPv6 ULA + the docker subnet = "local" -#}
+              {%- set lan = '^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1|[fF][cCdD])' -%}
+              {%- set here = audio | selectattr('client_ip', 'match', lan) | list -%}
+              {%- set out = audio | rejectattr('client_ip', 'match', lan) | list -%}
+
+              {%- macro tbl(rows, where) %}
+              | Listener | {{ where }} | Frequency | Mode | On air |
               |:--|:--|--:|:--:|--:|
               {%- for s in rows | sort(attribute='frequency') %}
               {%- set f = s.frequency | float(0) -%}
               {%- set place = [s.city, s.country] | select('string') | select('!=', '') | join(', ') -%}
-              {#- keep the newline on the last set tag so each row starts its own line -#}
-              {%- set mins = ((now().timestamp() - as_timestamp(s.created_at, now().timestamp())) / 60) | round(0) | int %}
-              | **{{ s.chat_username | default('anon', true) }}** | {{ place | default('Unknown', true) }} | {{ '%.3f MHz' | format(f / 1000000) if f >= 1000000 else '%.1f kHz' | format(f / 1000) }} | `{{ s.mode | default('?', true) | upper }}` | {{ '%dh %02dm' | format(mins // 60, mins % 60) if mins >= 60 else '%dm' | format(mins) }} |
+              {%- set mins = ((now().timestamp() - as_timestamp(s.created_at, now().timestamp())) / 60) | round(0) | int -%}
+              {#- keep the newline on this last tag so each row starts its own line -#}
+              {%- set who = s.chat_username | default('', true) or ('anon' if s.is_bypassed is not true else 'local user') %}
+              | **{{ who }}**{{ ' ⚡' if s.is_bypassed is true }} | {{ place | default(s.client_ip | default('Unknown', true), true) }} | {{ '%.3f MHz' | format(f / 1000000) if f >= 1000000 else '%.1f kHz' | format(f / 1000) }} | `{{ s.mode | default('?', true) | upper }}` | {{ '%dh %02dm' | format(mins // 60, mins % 60) if mins >= 60 else '%dm' | format(mins) }} |
               {%- endfor %}
+              {% endmacro -%}
 
-              _{{ rows | count }} listener{{ 's' if rows | count != 1 }} · updated {{ now().strftime('%H:%M') }}_
+              {%- if audio | count == 0 %}
+              _No one is listening right now._
+              {%- else %}
+              {%- if out | count > 0 %}
+              #### 🌐 Public · {{ out | count }}
+              {{ tbl(out, 'Location') }}
               {%- endif %}
+              {%- if here | count > 0 %}
+              #### 🏠 Local · {{ here | count }}
+              {{ tbl(here, 'Host') }}
+              {%- endif %}
+              {%- endif %}
+
+              ---
+
+              {%- set bypassed = users | selectattr('is_bypassed', 'equalto', true) | list | count %}
+              {%- set parts = [
+                   '%d user session%s' | format(users | count, 's' if users | count != 1 else ''),
+                   '%d audio, %d spectrum' | format(audio | count, waterfall | count),
+                   ('%d bypassed ⚡' | format(bypassed)) if bypassed else '',
+                   '%d internal' | format(internal | count),
+                 ] | select('!=', '') | list %}
+              _{{ parts | join(' · ') }} — updated {{ now().strftime('%H:%M') }}_
 
           # Change over time -> line graph.
           - type: history-graph
@@ -204,21 +248,25 @@ views:
           # the OPTIONAL trigger-based template sensor sensor.ubersdr_chat_history
           # (one-time setup snippet in home_assistant.md). Until you add that
           # sensor it simply shows "waiting" - the tile above still works.
+          # Literal block (|-) for the same reason as the listener table.
           - type: markdown
             title: Recent messages
             grid_options:
               columns: full
-            content: >
-              {% set msgs = state_attr('sensor.ubersdr_chat_history', 'messages')
-              %} {% if msgs %}{% for m in msgs | reverse %}**{{ m.username }}**
-              · {{ m.time }}<br>{{ m.message }}
-
-              {% endfor %}{% else %}_Waiting for messages (add the chat history
-              template sensor from home_assistant.md to enable the rolling
-              feed)._{% endif %}
+            content: |-
+              {%- set msgs = state_attr('sensor.ubersdr_chat_history', 'messages') -%}
+              {%- if msgs -%}
+              {%- for m in msgs | reverse %}
+              **{{ m.username }}** · {{ m.time }}<br>{{ m.message }}
+              {% endfor %}
+              {%- else -%}
+              _Waiting for messages (add the chat history template sensor from
+              home_assistant.md to enable the rolling feed)._
+              {%- endif %}
 
       # ================================================================
-      # PROPAGATION & SPACE WEATHER
+      # PROPAGATION & SPACE WEATHER - all four indices as gauges (2x2),
+      # SNR tile pair, then the SFI trend. Single home for these numbers.
       # ================================================================
       - type: grid
         cards:
@@ -227,12 +275,49 @@ views:
             heading_style: title
             icon: mdi:weather-sunny
 
+          # Solar flux = propagation fuel (low->high = poor->good quality).
+          - type: gauge
+            entity: sensor.ubersdr_solar_flux
+            name: Solar Flux
+            unit: SFU
+            min: 60
+            max: 300
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            segments:
+              - from: 60
+                color: '#e74c3c'
+              - from: 100
+                color: '#f1c40f'
+              - from: 150
+                color: '#2ecc71'
+
+          # K-index = geomagnetic disturbance (status: high is bad).
+          - type: gauge
+            entity: sensor.ubersdr_k_index
+            name: K-Index
+            min: 0
+            max: 9
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            severity:
+              green: 0
+              yellow: 4
+              red: 5
+
           - type: gauge
             entity: sensor.ubersdr_a_index
             name: A-Index
             min: 0
             max: 100
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
             severity:
               green: 0
               yellow: 20
@@ -244,17 +329,27 @@ views:
             min: -20
             max: 20
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
 
-          - type: tile
-            entity: sensor.ubersdr_solar_flux
-            name: Solar Flux Index
-            icon: mdi:white-balance-sunny
-            color: amber
+          # Receiver-side SNR pair fills one row.
           - type: tile
             entity: sensor.ubersdr_snr_0_30
-            name: Wideband SNR (0-30)
+            name: SNR 0-30 MHz
             icon: mdi:signal
             color: cyan
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: tile
+            entity: sensor.ubersdr_snr_1_8_30
+            name: SNR 1.8-30 MHz
+            icon: mdi:signal-variant
+            color: cyan
+            grid_options:
+              columns: 6
+              rows: 1
 
           # SFI and K have very different scales, so DON'T co-plot them.
           # Solar flux trend on its own axis:
@@ -268,87 +363,29 @@ views:
                 name: SFI
 
       # ================================================================
-      # LOCAL WEATHER (terrestrial; when the weather source is configured)
+      # BAND ACTIVITY - wide section: occupancy gauges pack 3-across into
+      # two full rows, then the multi-band FT8 SNR trend gets real width.
+      # Occupancy = % of samples above the noise floor (busy = dark blue).
       # ================================================================
       - type: grid
-        cards:
-          - type: heading
-            heading: Local Weather
-            heading_style: title
-            icon: mdi:weather-partly-cloudy
-
-          - type: gauge
-            entity: sensor.ubersdr_weather_temp
-            name: Temperature
-            unit: '°C'
-            min: -10
-            max: 40
-            needle: true
-            segments:
-              - from: -10
-                color: '#3b82c4'
-              - from: 5
-                color: '#2ecc71'
-              - from: 18
-                color: '#f1c40f'
-              - from: 28
-                color: '#e74c3c'
-
-          - type: tile
-            entity: sensor.ubersdr_weather_condition
-            name: Conditions
-            icon: mdi:weather-partly-cloudy
-            color: blue
-          - type: tile
-            entity: sensor.ubersdr_weather_humidity
-            name: Humidity
-            icon: mdi:water-percent
-            color: cyan
-          - type: tile
-            entity: sensor.ubersdr_weather_wind_speed
-            name: Wind
-            icon: mdi:weather-windy
-            color: teal
-
-          - type: entities
-            title: Weather detail
-            grid_options:
-              columns: full
-            show_header_toggle: false
-            entities:
-              - entity: sensor.ubersdr_weather_description
-                name: Description
-              - entity: sensor.ubersdr_weather_feels_like
-                name: Feels like
-              - entity: sensor.ubersdr_weather_pressure
-                name: Pressure
-              - entity: sensor.ubersdr_weather_wind_bearing
-                name: Wind bearing
-
-      # ================================================================
-      # BAND ACTIVITY - occupancy heat (sequential) + FT8 SNR trend
-      # ================================================================
-      - type: grid
+        column_span: 2
         cards:
           - type: heading
             heading: Band Activity
             heading_style: title
             icon: mdi:sine-wave
-          - type: markdown
-            grid_options:
-              columns: full
-            content: >
-              Band **occupancy** = how busy each band is right now (percent of
-              samples above the noise floor). Blue is quiet, dark blue is busy.
 
           # Occupancy is a MAGNITUDE -> sequential single hue (light->dark blue),
-          # not a green/amber/red status ramp. One small gauge per HF band.
+          # not a green/amber/red status ramp. Three 4-wide gauges per row.
           - type: gauge
             entity: sensor.ubersdr_noisefloor_80m_occupancy
-            name: 80m
+            name: 80m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: &occ_grid
+              columns: 4
+              rows: 2
             segments: &occ
               - from: 0
                 color: '#cfe8ff'
@@ -360,38 +397,43 @@ views:
                 color: '#1e3a8a'
           - type: gauge
             entity: sensor.ubersdr_noisefloor_40m_occupancy
-            name: 40m
+            name: 40m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: *occ_grid
             segments: *occ
           - type: gauge
             entity: sensor.ubersdr_noisefloor_30m_occupancy
-            name: 30m
+            name: 30m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: *occ_grid
             segments: *occ
           - type: gauge
             entity: sensor.ubersdr_noisefloor_20m_occupancy
-            name: 20m
+            name: 20m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: *occ_grid
             segments: *occ
           - type: gauge
             entity: sensor.ubersdr_noisefloor_17m_occupancy
-            name: 17m
+            name: 17m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: *occ_grid
             segments: *occ
           - type: gauge
             entity: sensor.ubersdr_noisefloor_15m_occupancy
-            name: 15m
+            name: 15m occupancy
             min: 0
             max: 100
             needle: true
+            grid_options: *occ_grid
             segments: *occ
 
           # FT8 SNR over time, multiple bands -> line graph (HA draws a legend).
@@ -411,6 +453,84 @@ views:
                 name: 15m
 
       # ================================================================
+      # LOCAL WEATHER (terrestrial; when the weather source is configured)
+      # Temp gauge (6x2) + four tiles = three full rows, then the detail.
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Local Weather
+            heading_style: title
+            icon: mdi:weather-partly-cloudy
+
+          - type: gauge
+            entity: sensor.ubersdr_weather_temp
+            name: Temperature
+            unit: '°C'
+            min: -10
+            max: 40
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            segments:
+              - from: -10
+                color: '#3b82c4'
+              - from: 5
+                color: '#2ecc71'
+              - from: 18
+                color: '#f1c40f'
+              - from: 28
+                color: '#e74c3c'
+
+          # Two tiles stack beside the gauge, two more complete the next row.
+          - type: tile
+            entity: sensor.ubersdr_weather_condition
+            name: Conditions
+            icon: mdi:weather-partly-cloudy
+            color: blue
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: tile
+            entity: sensor.ubersdr_weather_humidity
+            name: Humidity
+            icon: mdi:water-percent
+            color: cyan
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: tile
+            entity: sensor.ubersdr_weather_wind_speed
+            name: Wind
+            icon: mdi:weather-windy
+            color: teal
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: tile
+            entity: sensor.ubersdr_weather_pressure
+            name: Pressure
+            icon: mdi:gauge
+            color: blue
+            grid_options:
+              columns: 6
+              rows: 1
+
+          - type: entities
+            title: Weather detail
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: sensor.ubersdr_weather_description
+                name: Description
+              - entity: sensor.ubersdr_weather_feels_like
+                name: Feels like
+              - entity: sensor.ubersdr_weather_wind_bearing
+                name: Wind bearing
+
+      # ================================================================
       # ANTENNAS & ROTATOR
       # (only populated when rotctl / ant_switch are enabled on the instance;
       #  cards for a disabled feature simply show "unavailable")
@@ -422,15 +542,8 @@ views:
             heading_style: title
             icon: mdi:antenna
 
-          # Antenna switch: current selection (state = friendly label, or
-          # "Grounded"); selected ports / labels are in attributes.
-          - type: tile
-            entity: sensor.ubersdr_antenna_switch
-            name: Selected Antenna
-            icon: mdi:antenna
-            color: blue
-
-          # Rotator heading (magnitude, 0-360 degrees).
+          # Rotator heading (magnitude, 0-360 degrees); the two state tiles
+          # stack beside it to fill the 2-row block.
           - type: gauge
             entity: sensor.ubersdr_rotator_azimuth
             name: Azimuth
@@ -438,23 +551,36 @@ views:
             min: 0
             max: 360
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
 
-          # Rotator movement state.
+          # Antenna switch: current selection (state = friendly label, or
+          # "Grounded"); selected ports / labels are in attributes.
+          - type: tile
+            entity: sensor.ubersdr_antenna_switch
+            name: Selected Antenna
+            icon: mdi:antenna
+            color: blue
+            grid_options:
+              columns: 6
+              rows: 1
           - type: tile
             entity: binary_sensor.ubersdr_rotator_moving
             name: Rotator
             icon: mdi:rotate-right
             color: amber
+            grid_options:
+              columns: 6
+              rows: 1
 
-          # Antenna switch / rotator detail.
+          # Detail rows (azimuth lives in the gauge above - not repeated here).
           - type: entities
             title: Antenna & rotator status
             grid_options:
               columns: full
             show_header_toggle: false
             entities:
-              - entity: sensor.ubersdr_rotator_azimuth
-                name: Azimuth
               - entity: sensor.ubersdr_rotator_elevation
                 name: Elevation
               - entity: binary_sensor.ubersdr_rotator_connected
@@ -465,7 +591,8 @@ views:
                 name: Thunderstorm protection
 
       # ================================================================
-      # RECEIVER & DIAGNOSTICS
+      # RECEIVER & DIAGNOSTICS - station identity, host gauges, then
+      # diagnostics and health side by side as two half-width lists.
       # ================================================================
       - type: grid
         cards:
@@ -502,10 +629,6 @@ views:
               - entity: sensor.ubersdr_grid_square
                 name: Grid square
                 icon: mdi:grid
-              - entity: sensor.ubersdr_available_clients
-                name: Free slots
-              - entity: sensor.ubersdr_chat_users
-                name: Chat users
 
           # CPU temperature is a status magnitude -> gauge with severity.
           - type: gauge
@@ -515,6 +638,9 @@ views:
             min: 20
             max: 90
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
             severity:
               green: 20
               yellow: 60
@@ -525,11 +651,15 @@ views:
             min: 0
             max: 8
             needle: true
+            grid_options:
+              columns: 6
+              rows: 2
 
+          # Two half-width lists share a row instead of stacking full-width.
           - type: entities
             title: Diagnostics
             grid_options:
-              columns: full
+              columns: 6
             show_header_toggle: false
             entities:
               - entity: sensor.ubersdr_ntp_offset
@@ -538,18 +668,14 @@ views:
                 name: GPSDO freq offset
               - entity: sensor.ubersdr_freq_ref_snr
                 name: GPSDO ref SNR
-              - entity: sensor.ubersdr_snr_1_8_30
-                name: SNR 1.8-30 MHz
 
           # Health -> binary sensors (status: on = problem). Grouped list.
           - type: entities
             title: Health
             grid_options:
-              columns: full
+              columns: 6
             show_header_toggle: false
             entities:
-              - entity: binary_sensor.ubersdr_online
-                name: Connectivity
               - entity: binary_sensor.ubersdr_ntp_health
                 name: NTP
               - entity: binary_sensor.ubersdr_dsp_health

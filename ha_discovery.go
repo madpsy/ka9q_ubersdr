@@ -247,17 +247,41 @@ func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
 	// --- User sessions (headline) ----------------------------------------
 	// active_users carries the full session array as attributes so a Lovelace
 	// map / table card can render live listeners (lat/lon/freq/mode/country).
+	//
+	// The state is non_bypassed_users, NOT the raw session count: internal
+	// system channels (wideband scanner, decoders) are not people, one user
+	// can hold several sessions (audio + spectrum), and bypassed users do not
+	// count towards max_sessions. This matches what the server enforces, so
+	// the gauge reads as "N of max_sessions used".
 	add(haEntity{
-		component:              "sensor",
-		Name:                   "Active Users",
-		ObjectID:               "active_users",
-		StateTopic:             prefix + "/sessions",
-		ValueTemplate:          "{{ value_json.count }}",
-		UnitOfMeasurement:      "users",
-		StateClass:             "measurement",
-		Icon:                   "mdi:account-group",
-		JSONAttributesTopic:    prefix + "/sessions",
-		JSONAttributesTemplate: "{{ {'sessions': value_json.sessions} | tojson }}",
+		component:           "sensor",
+		Name:                "Active Users",
+		ObjectID:            "active_users",
+		StateTopic:          prefix + "/sessions",
+		ValueTemplate:       "{{ value_json.non_bypassed_users | default(0) }}",
+		UnitOfMeasurement:   "users",
+		StateClass:          "measurement",
+		Icon:                "mdi:account-group",
+		JSONAttributesTopic: prefix + "/sessions",
+		JSONAttributesTemplate: "{{ {'sessions': value_json.sessions," +
+			" 'bypassed_users': value_json.bypassed_users," +
+			" 'internal_sessions': value_json.internal_sessions," +
+			" 'user_sessions': value_json.user_sessions," +
+			" 'max_sessions': value_json.max_sessions} | tojson }}",
+	})
+
+	// Bypassed users are exempt from max_sessions, so they get their own
+	// entity rather than being folded into the headline gauge.
+	add(haEntity{
+		component:         "sensor",
+		Name:              "Bypassed Users",
+		ObjectID:          "bypassed_users",
+		StateTopic:        prefix + "/sessions",
+		ValueTemplate:     "{{ value_json.bypassed_users | default(0) }}",
+		UnitOfMeasurement: "users",
+		StateClass:        "measurement",
+		Icon:              "mdi:account-key",
+		EntityCategory:    "diagnostic",
 	})
 
 	// --- Space weather ----------------------------------------------------

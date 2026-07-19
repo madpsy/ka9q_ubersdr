@@ -252,7 +252,8 @@ All entity IDs are prefixed `ubersdr_` and are the same on every instance.
 
 | Entity | Description |
 | --- | --- |
-| `sensor.ubersdr_active_users` | Active listener count; session list in attributes |
+| `sensor.ubersdr_active_users` | Unique non-bypassed users, i.e. slots used against `max_sessions`. Attributes: `sessions` (full session list), `bypassed_users`, `internal_sessions`, `user_sessions`, `max_sessions` |
+| `sensor.ubersdr_bypassed_users` | Unique bypassed users (IP or password); exempt from `max_sessions` |
 | `sensor.ubersdr_receiver_info` | Version; full identity (callsign, location, grid, antenna, ASL, timezone, feature flags) in attributes |
 | `sensor.ubersdr_grid_square` | Maidenhead grid locator |
 | `sensor.ubersdr_available_clients` | Free client slots |

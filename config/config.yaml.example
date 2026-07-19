@@ -491,7 +491,7 @@ server:
   # them as transient geo_location markers on a map that appear/vanish as users
   # come and go. Requires the GeoIP service to be enabled for locations to
   # resolve. Leave false unless you want visitor approximate locations exposed.
-  sessions_geojson_enabled: false
+  sessions_geojson_enabled: true
 
   # Custom HTML injection for analytics, ads, and meta tags
   # This HTML will be inserted into the <head> section of index.html

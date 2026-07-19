@@ -2640,7 +2640,8 @@ func buildSessionsPayload(sm *SessionManager, dxWsHandler *DXClusterWebSocketHan
 //
 // The response also includes a non_bypassed_users object: one entry per unique
 // non-bypassed user (keyed by user_session_id, or client_ip as fallback),
-// containing their IP, country name+code, and earliest connected_since time.
+// containing their IP, country name+code, earliest connected_since time, and
+// (when the user has an active audio session) their current frequency and mode.
 func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
 	sessions := sm.GetAllSessionsInfo()
 	internal, external := 0, 0
@@ -2668,11 +2669,15 @@ func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
 	// merged into a single entry using the earliest created_at as
 	// connected_since. Country data comes from the already-populated session
 	// fields — no additional GeoIP lookups are performed here.
+	// Frequency and mode are taken from the user's audio session (is_spectrum==false);
+	// spectrum-only users will have frequency==0 and mode=="".
 	type compactUser struct {
 		IP             string
 		Country        string
 		CountryCode    string
 		ConnectedSince time.Time
+		Frequency      uint64
+		Mode           string
 	}
 	userMap := make(map[string]*compactUser)
 
@@ -2695,32 +2700,50 @@ func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
 
 		createdAtStr, _ := s["created_at"].(string)
 		createdAt, _ := time.Parse(time.RFC3339, createdAtStr)
+		isSpectrum, _ := s["is_spectrum"].(bool)
+		frequency, _ := s["frequency"].(uint64)
+		mode, _ := s["mode"].(string)
 
 		if existing, ok := userMap[key]; ok {
 			// Keep the earliest connected_since across all sessions for this user.
 			if !createdAt.IsZero() && createdAt.Before(existing.ConnectedSince) {
 				existing.ConnectedSince = createdAt
 			}
+			// Promote to audio frequency/mode if this session is an audio session
+			// with a tuned frequency and the user doesn't already have one recorded.
+			if !isSpectrum && frequency != 0 && existing.Frequency == 0 {
+				existing.Frequency = frequency
+				existing.Mode = mode
+			}
 		} else {
 			country, _ := s["country"].(string)
 			countryCode, _ := s["country_code"].(string)
-			userMap[key] = &compactUser{
+			u := &compactUser{
 				IP:             ip,
 				Country:        country,
 				CountryCode:    countryCode,
 				ConnectedSince: createdAt,
 			}
+			// Capture frequency/mode only for audio sessions with a tuned frequency.
+			if !isSpectrum && frequency != 0 {
+				u.Frequency = frequency
+				u.Mode = mode
+			}
+			userMap[key] = u
 		}
 	}
 
 	nonBypassedUsers := make(map[string]interface{}, len(userMap))
 	for key, u := range userMap {
-		nonBypassedUsers[key] = map[string]interface{}{
+		entry := map[string]interface{}{
 			"ip":              u.IP,
 			"country":         u.Country,
 			"country_code":    u.CountryCode,
 			"connected_since": u.ConnectedSince.Format(time.RFC3339),
+			"frequency":       u.Frequency,
+			"mode":            u.Mode,
 		}
+		nonBypassedUsers[key] = entry
 	}
 
 	return map[string]interface{}{

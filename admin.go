@@ -2637,6 +2637,10 @@ func buildSessionsPayload(sm *SessionManager, dxWsHandler *DXClusterWebSocketHan
 // buildCompactSessionsPayload returns only aggregate user counts and bandwidth
 // totals — a tiny payload for constrained clients (e.g. embedded status
 // displays) that don't need per-session detail.
+//
+// The response also includes a non_bypassed_users object: one entry per unique
+// non-bypassed user (keyed by user_session_id, or client_ip as fallback),
+// containing their IP, country name+code, and earliest connected_since time.
 func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
 	sessions := sm.GetAllSessionsInfo()
 	internal, external := 0, 0
@@ -2657,16 +2661,79 @@ func buildCompactSessionsPayload(sm *SessionManager) map[string]interface{} {
 			totalKbps += v
 		}
 	}
+
+	// Build per-user detail for non-bypassed users.
+	// One entry per unique user (keyed by user_session_id, falling back to
+	// client_ip). Users with multiple sessions (e.g. audio + spectrum) are
+	// merged into a single entry using the earliest created_at as
+	// connected_since. Country data comes from the already-populated session
+	// fields — no additional GeoIP lookups are performed here.
+	type compactUser struct {
+		IP             string
+		Country        string
+		CountryCode    string
+		ConnectedSince time.Time
+	}
+	userMap := make(map[string]*compactUser)
+
+	for _, s := range sessions {
+		if isInternal, _ := s["is_internal"].(bool); isInternal {
+			continue
+		}
+		if isBypassed, _ := s["is_bypassed"].(bool); isBypassed {
+			continue
+		}
+
+		key, _ := s["user_session_id"].(string)
+		ip, _ := s["client_ip"].(string)
+		if key == "" {
+			key = ip // fallback for sessions without a UUID
+		}
+		if key == "" {
+			continue
+		}
+
+		createdAtStr, _ := s["created_at"].(string)
+		createdAt, _ := time.Parse(time.RFC3339, createdAtStr)
+
+		if existing, ok := userMap[key]; ok {
+			// Keep the earliest connected_since across all sessions for this user.
+			if !createdAt.IsZero() && createdAt.Before(existing.ConnectedSince) {
+				existing.ConnectedSince = createdAt
+			}
+		} else {
+			country, _ := s["country"].(string)
+			countryCode, _ := s["country_code"].(string)
+			userMap[key] = &compactUser{
+				IP:             ip,
+				Country:        country,
+				CountryCode:    countryCode,
+				ConnectedSince: createdAt,
+			}
+		}
+	}
+
+	nonBypassedUsers := make(map[string]interface{}, len(userMap))
+	for key, u := range userMap {
+		nonBypassedUsers[key] = map[string]interface{}{
+			"ip":              u.IP,
+			"country":         u.Country,
+			"country_code":    u.CountryCode,
+			"connected_since": u.ConnectedSince.Format(time.RFC3339),
+		}
+	}
+
 	return map[string]interface{}{
-		"users":             sm.GetNonBypassedUserCount(),
-		"bypassed_users":    sm.GetBypassedUserCount(),
-		"max_sessions":      sm.config.Server.MaxSessions,
-		"session_count":     len(sessions),
-		"internal_sessions": internal,
-		"external_sessions": external,
-		"audio_kbps":        audioKbps,
-		"waterfall_kbps":    waterfallKbps,
-		"total_kbps":        totalKbps,
+		"users":              sm.GetNonBypassedUserCount(),
+		"bypassed_users":     sm.GetBypassedUserCount(),
+		"max_sessions":       sm.config.Server.MaxSessions,
+		"session_count":      len(sessions),
+		"internal_sessions":  internal,
+		"external_sessions":  external,
+		"audio_kbps":         audioKbps,
+		"waterfall_kbps":     waterfallKbps,
+		"total_kbps":         totalKbps,
+		"non_bypassed_users": nonBypassedUsers,
 	}
 }
 

@@ -42,9 +42,18 @@ type haDevice struct {
 // omitempty so each entity only emits what it needs; the JSON shape matches the
 // HA MQTT sensor / binary_sensor discovery schema.
 type haEntity struct {
-	Name              string `json:"name"`
-	UniqueID          string `json:"unique_id"`
-	ObjectID          string `json:"object_id,omitempty"`
+	Name     string `json:"name"`
+	UniqueID string `json:"unique_id"`
+	// ObjectID is the last path element of the discovery topic. On modern Home
+	// Assistant it does NOT influence the entity_id (see DefaultEntityID); it is
+	// still emitted in the payload for older HA versions, where it did.
+	ObjectID string `json:"object_id,omitempty"`
+	// DefaultEntityID pins the entity_id HA assigns on first discovery, e.g.
+	// "sensor.ubersdr_active_users". Without it, HA derives the entity_id from
+	// the area + device + entity names, producing instance-specific ids like
+	// sensor.dalgety_bay_scotland_uk_ubersdr_m9psy_antenna, which no shared
+	// dashboard can reference. Unknown to old HA, which silently drops it.
+	DefaultEntityID   string `json:"default_entity_id,omitempty"`
 	StateTopic        string `json:"state_topic"`
 	ValueTemplate     string `json:"value_template,omitempty"`
 	UnitOfMeasurement string `json:"unit_of_measurement,omitempty"`
@@ -186,8 +195,8 @@ func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
 		Manufacturer:  "UberSDR",
 		Model:         appConfig.Admin.Name, // receiver name, e.g. "RX888 with end-fed long wire"
 		SwVersion:     Version,
-		HWVersion:     appConfig.Admin.Antenna, // antenna description
-		SerialNumber:  mp.haSerialNumber(),     // stable public UUID when available
+		HWVersion:     appConfig.Admin.Antenna,  // antenna description
+		SerialNumber:  mp.haSerialNumber(),      // stable public UUID when available
 		SuggestedArea: appConfig.Admin.Location, // HA groups the device under this area
 		ConfigURL:     appConfig.Admin.PublicURL,
 	}
@@ -198,17 +207,18 @@ func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
 	// unique_id, object_id, availability topic and the device block.
 	//
 	// unique_id is callsign-scoped so it is globally unique (multiple UberSDR
-	// instances into one HA never collide in the registry). object_id — which
-	// drives the entity_id — is deliberately callsign-FREE (e.g.
-	// "ubersdr_active_users" -> sensor.ubersdr_active_users) so a dashboard can
-	// reference entities without hardcoding any callsign. The per-instance
-	// identity still shows via the device name and the receiver_info attributes.
+	// instances into one HA never collide in the registry). default_entity_id —
+	// which pins the entity_id — is deliberately callsign-FREE (e.g.
+	// "sensor.ubersdr_active_users") so a dashboard can reference entities
+	// without hardcoding any callsign or location. The per-instance identity
+	// still shows via the device name and the receiver_info attributes.
 	// (If two instances share one HA, the second instance's entity_ids get an
 	// automatic _2 suffix; unique_ids stay distinct either way.)
 	add := func(e haEntity) {
 		slug := haSlug(e.ObjectID)
 		e.UniqueID = nodeID + "_" + slug
 		e.ObjectID = "ubersdr_" + slug
+		e.DefaultEntityID = e.component + ".ubersdr_" + slug
 		if !e.skipAvailability && e.AvailabilityTopic == "" {
 			e.AvailabilityTopic = statusTopic
 			e.PayloadAvailable = "online"

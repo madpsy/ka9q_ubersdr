@@ -316,6 +316,18 @@ separate dashboard per instance, or rename the entities in the Home Assistant UI
   configs". Confirm Home Assistant's MQTT integration is connected to the same
   broker. Confirm `homeassistant_prefix` matches Home Assistant's discovery
   prefix (default `homeassistant`).
+- **Entity IDs have the receiver name/location baked in** (for example
+  `sensor.dalgety_bay_scotland_uk_ubersdr_m9psy_antenna` instead of
+  `sensor.ubersdr_antenna_switch`), so the dashboard shows nothing. Those
+  entities were created by an UberSDR build that did not pin the entity IDs, so
+  Home Assistant derived them from the area + device + entity names. Upgrade
+  UberSDR, then delete the stale entities so discovery can
+  recreate them with the generic IDs: Settings -> Devices & services -> MQTT ->
+  the "UberSDR &lt;callsign&gt;" device -> three-dot menu -> Delete. Restart
+  UberSDR (or wait for its next MQTT reconnect) and the device reappears with
+  `sensor.ubersdr_*` IDs. Home Assistant only applies the pinned ID when it
+  first creates an entity, so existing ones must be removed - renaming them by
+  hand in the UI works too.
 - **Entities show "unavailable".** UberSDR is not publishing - the broker is down
   or UberSDR is disconnected. The availability topic (`ubersdr/metrics/status`)
   drives this; when UberSDR drops, its Last Will marks everything offline.

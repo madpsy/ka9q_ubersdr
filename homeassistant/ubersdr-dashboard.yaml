@@ -141,19 +141,34 @@ views:
               rows: 4
 
           # Per-listener detail -> table (identity, not a chart).
+          # NOTE: this MUST be a literal block (|), not a folded block (>).
+          # A folded block joins the lines with spaces and the markdown table
+          # collapses into one unreadable run-on line.
           - type: markdown
             title: Who's listening
             grid_options:
               columns: full
-            content: >
-              {% set sessions = state_attr('sensor.ubersdr_active_users',
-              'sessions') %} {% if sessions %} | Country | City | Freq | Mode |
-              User | |---|---|---|---|---| {% for s in sessions %}| {{ s.country
-              | default('?', true) }} | {{ s.city | default('-', true) }} | {{
-              (s.frequency | float(0) / 1000) | round(1) }} kHz | {{ s.mode |
-              default('-', true) | upper }} | {{ s.chat_username | default('-',
-              true) }} | {% endfor %} {% else %} _No active listeners right now._
-              {% endif %}
+            content: |-
+              {%- set all = state_attr('sensor.ubersdr_active_users', 'sessions') or [] -%}
+              {#- drop internal channels (wideband scanner, decoders) - they are not people -#}
+              {%- set rows = all | rejectattr('is_internal', 'equalto', true)
+                                 | rejectattr('is_spectrum', 'equalto', true)
+                                 | list -%}
+              {%- if rows | count == 0 %}
+              _No active listeners right now._
+              {%- else %}
+              | Listener | Location | Frequency | Mode | On air |
+              |:--|:--|--:|:--:|--:|
+              {%- for s in rows | sort(attribute='frequency') %}
+              {%- set f = s.frequency | float(0) -%}
+              {%- set place = [s.city, s.country] | select('string') | select('!=', '') | join(', ') -%}
+              {#- keep the newline on the last set tag so each row starts its own line -#}
+              {%- set mins = ((now().timestamp() - as_timestamp(s.created_at, now().timestamp())) / 60) | round(0) | int %}
+              | **{{ s.chat_username | default('anon', true) }}** | {{ place | default('Unknown', true) }} | {{ '%.3f MHz' | format(f / 1000000) if f >= 1000000 else '%.1f kHz' | format(f / 1000) }} | `{{ s.mode | default('?', true) | upper }}` | {{ '%dh %02dm' | format(mins // 60, mins % 60) if mins >= 60 else '%dm' | format(mins) }} |
+              {%- endfor %}
+
+              _{{ rows | count }} listener{{ 's' if rows | count != 1 }} · updated {{ now().strftime('%H:%M') }}_
+              {%- endif %}
 
           # Change over time -> line graph.
           - type: history-graph

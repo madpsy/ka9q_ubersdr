@@ -482,6 +482,17 @@ server:
   # Set to 0 to keep logs forever (no automatic cleanup).
   session_activity_log_retention_days: 30
 
+  # Active-listener GeoJSON feed for maps (e.g. Home Assistant)
+  # When true, exposes a public, unauthenticated endpoint at
+  #   /api/sessions.geojson
+  # returning the current listeners as a GeoJSON FeatureCollection of Point
+  # features (approximate, GeoIP city-level location). Intended for Home
+  # Assistant's built-in GeoJSON integration (geo_json_events), which renders
+  # them as transient geo_location markers on a map that appear/vanish as users
+  # come and go. Requires the GeoIP service to be enabled for locations to
+  # resolve. Leave false unless you want visitor approximate locations exposed.
+  sessions_geojson_enabled: false
+
   # Custom HTML injection for analytics, ads, and meta tags
   # This HTML will be inserted into the <head> section of index.html
   # Supports Google Analytics, Google Ads, meta tags, and other tracking scripts
@@ -1122,7 +1133,24 @@ mqtt:
   # Retain flag - if true, broker retains last message for new subscribers
   # Recommended: false for time-series data
   retain: false
-  
+
+  # Home Assistant MQTT Discovery
+  # When true, UberSDR publishes retained Home Assistant discovery config
+  # messages so entities auto-appear in Home Assistant with no manual YAML.
+  # It also publishes an availability status topic ({topic_prefix}/status) with
+  # a birth ("online") / Last Will ("offline") message, so entities go
+  # unavailable if UberSDR disconnects from the broker.
+  # Requires Home Assistant's MQTT integration to be set up and pointed at the
+  # same broker. Entities created: active users (+ live session attributes),
+  # space weather (SFI / K / A / Bz / propagation), per-band noise-floor
+  # occupancy & FT8 SNR, system load / CPU temperature, and component health
+  # binary sensors. All grouped under a single "UberSDR <callsign>" device.
+  homeassistant_discovery: false
+
+  # Home Assistant discovery topic prefix. Must match HA's MQTT integration
+  # "discovery prefix" setting (default: "homeassistant").
+  homeassistant_prefix: "homeassistant"
+
   # TLS/SSL settings for secure connections
   tls:
     enabled: false

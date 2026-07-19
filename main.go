@@ -2262,9 +2262,16 @@ func main() {
 		}
 		if rotctlHandler != nil {
 			rotctlHandler.SetMQTTPublisher(mqttPublisher)
+			mqttPublisher.SetRotctl(rotctlHandler) // periodic azimuth refresh for HA
 		}
 		if rotatorScheduler != nil {
 			rotatorScheduler.SetMQTTPublisher(mqttPublisher)
+		}
+		if antSwitchHandler != nil {
+			mqttPublisher.SetAntSwitch(antSwitchHandler) // antenna switch status to MQTT + HA
+		}
+		if weatherService != nil {
+			mqttPublisher.SetWeatherService(weatherService) // terrestrial weather to MQTT + HA
 		}
 		mqttPublisher.SetSessionsContext(dxClusterWsHandler, geoIPService)
 		if multiDecoder != nil {
@@ -2484,6 +2491,11 @@ func main() {
 	})
 	http.HandleFunc("/api/session-stats", func(w http.ResponseWriter, r *http.Request) {
 		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter, geoIPService)
+	})
+	// Active-listener GeoJSON feed for Home Assistant maps (opt-in via
+	// server.sessions_geojson_enabled). Renders transient geo_location markers.
+	http.HandleFunc("/api/sessions.geojson", func(w http.ResponseWriter, r *http.Request) {
+		handleSessionsGeoJSON(w, r, config, sessions, dxClusterWsHandler, geoIPService, sessionStatsRateLimiter)
 	})
 	http.HandleFunc("/api/lookup", func(w http.ResponseWriter, r *http.Request) {
 		handleLookup(w, r, config, sessions, lookupRateLimiter, lookupContainerRateLimiter)

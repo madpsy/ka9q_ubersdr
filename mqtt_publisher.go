@@ -34,6 +34,9 @@ type MQTTPublisher struct {
 	geoIPService        *GeoIPService              // may be nil; used for sessions publishing
 	multiDecoder        *MultiDecoder              // may be nil; used for WSPR phone prediction publishing
 	notifManager        *NotificationManager       // may be nil; used for notifications health publishing
+	antSwitchHandler    *AntSwitchHandler          // may be nil; used for antenna switch status publishing
+	rotctlHandler       *RotctlAPIHandler          // may be nil; used for periodic rotator status publishing
+	weatherService      *WeatherService            // may be nil; used for terrestrial weather publishing
 
 	// Stored when StartPublisher is called so late-registered setters can
 	// launch their own goroutines after startup.
@@ -134,6 +137,17 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 		opts.SetTLSConfig(tlsConfig)
 	}
 
+	// Home Assistant availability: register a Last Will so the broker publishes
+	// "offline" (retained) to the status topic if we disconnect uncleanly. On
+	// (re)connect the OnConnect handler publishes "online". Every discovered
+	// entity references this topic, so HA marks them unavailable when we drop.
+	// Only registered when HA discovery is enabled, so non-HA MQTT users don't
+	// get an unexpected retained status topic.
+	if config.HomeAssistant {
+		statusTopic := config.TopicPrefix + "/status"
+		opts.SetWill(statusTopic, "offline", 1, true)
+	}
+
 	publisher := &MQTTPublisher{
 		config:              config,
 		metrics:             metrics,
@@ -151,6 +165,13 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 		publisher.publishErrCount = 0
 		publisher.mu.Unlock()
 		log.Println("MQTT: Connected to broker")
+
+		// Publish the Home Assistant birth message ("online") and, once the app
+		// config is available (set by StartPublisher), (re)publish the HA
+		// discovery configs. Runs in a goroutine so the connect handler never
+		// blocks. Safe on every reconnect: discovery configs are retained and
+		// idempotent.
+		go publisher.onConnectHomeAssistant()
 	})
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		publisher.mu.Lock()
@@ -273,12 +294,62 @@ func (mp *MQTTPublisher) SetSessionsContext(dxWsHandler *DXClusterWebSocketHandl
 	}
 }
 
+// SetAntSwitch attaches an AntSwitchHandler so that antenna switch status is
+// published to MQTT (topic {prefix}/ant_switch_status, retained) every 30s.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetAntSwitch(h *AntSwitchHandler) {
+	mp.antSwitchHandler = h
+	if mp.publisherCtx != nil {
+		go mp.startAntSwitchStatusPublisher(mp.publisherCtx)
+	}
+}
+
+// SetWeatherService attaches a WeatherService so that terrestrial (local)
+// weather is published to MQTT (topic {prefix}/weather, retained) every 5
+// minutes. The raw OpenWeatherMap current-weather JSON is published verbatim.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetWeatherService(ws *WeatherService) {
+	mp.weatherService = ws
+	if mp.publisherCtx != nil {
+		go mp.startWeatherPublisher(mp.publisherCtx)
+	}
+}
+
+// SetRotctl attaches a RotctlAPIHandler so that rotator status is refreshed to
+// MQTT every 30s (in addition to the on-change publishing done by the rotctl
+// handler itself). The periodic refresh ensures Home Assistant always has a
+// current azimuth even when the rotator is stationary.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetRotctl(h *RotctlAPIHandler) {
+	mp.rotctlHandler = h
+	if mp.publisherCtx != nil {
+		go mp.startRotatorStatusPublisher(mp.publisherCtx)
+	}
+}
+
 // StartPublisher starts the background publishing goroutines.
 // It stores ctx and appConfig so that late-registered setters (called after
 // StartPublisher) can launch their own goroutines immediately.
 func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) {
 	mp.publisherCtx = ctx
 	mp.publisherConfig = appConfig
+
+	// Home Assistant MQTT Discovery: now that the app config (band list,
+	// receiver identity, enabled subsystems) is available, publish the retained
+	// discovery configs so HA auto-creates all entities. If we are not yet
+	// connected, the OnConnect handler will publish them once publisherConfig is
+	// set. Re-published on every reconnect by the OnConnect handler.
+	if mp.config.HomeAssistant {
+		log.Printf("MQTT: Home Assistant discovery enabled (prefix=%s)", mp.config.HomeAssistantPrefix)
+		if mp.isConnected() {
+			// Async: each config publish does a token.Wait(), so run off the
+			// startup goroutine to avoid stalling it if the broker is slow.
+			go func() {
+				mp.publishOnlineStatus()
+				mp.publishHADiscovery(appConfig)
+			}()
+		}
+	}
 
 	// Start metrics publisher
 	go mp.startMetricsPublisher(ctx, appConfig)
@@ -290,6 +361,10 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 
 	// System load publisher always runs (reads /proc/loadavg, no external deps)
 	go mp.startSystemLoadPublisher(ctx)
+
+	// Receiver info publisher always runs — publishes station identity + status
+	// (retained) so Home Assistant discovery entities have data on subscribe.
+	go mp.startReceiverInfoPublisher(ctx)
 
 	// NTP health publisher always runs (reads globalNTPState, no external deps)
 	go mp.startNTPHealthPublisher(ctx, appConfig)
@@ -2114,6 +2189,246 @@ func (mp *MQTTPublisher) publishNotificationsHealthOnce() {
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish notifications health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startReceiverInfoPublisher publishes the station identity + status every 60
+// seconds to {prefix}/receiver_info. Always retained (independent of the global
+// retain setting) so Home Assistant discovery entities have data the moment
+// they subscribe. Topic: {prefix}/receiver_info
+func (mp *MQTTPublisher) startReceiverInfoPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Receiver info publisher started (60s interval)")
+
+	mp.publishReceiverInfoOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Receiver info publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishReceiverInfoOnce()
+		}
+	}
+}
+
+// publishReceiverInfoOnce performs a single receiver info publish.
+func (mp *MQTTPublisher) publishReceiverInfoOnce() {
+	if !mp.isConnected() || mp.publisherConfig == nil {
+		return
+	}
+
+	payload := mp.buildReceiverInfoPayload(mp.publisherConfig)
+
+	topic := fmt.Sprintf("%s/receiver_info", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal receiver info payload: %v", err)
+		return
+	}
+
+	// Retain regardless of the global setting: this is identity/reference data
+	// that HA needs immediately on (re)subscribe, not time-series.
+	token := mp.client.Publish(topic, mp.config.QoS, true, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish receiver info to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// buildReceiverInfoPayload assembles the station identity + live status, mirroring
+// the key fields of GET /api/description in a flat, Home-Assistant-friendly shape.
+func (mp *MQTTPublisher) buildReceiverInfoPayload(cfg *Config) map[string]interface{} {
+	lat := cfg.Admin.GPS.Lat
+	lon := cfg.Admin.GPS.Lon
+
+	snr030, snr1830 := float32(-1), float32(-1)
+	if mp.noiseFloorMonitor != nil {
+		snr030, snr1830 = mp.noiseFloorMonitor.GetWidebandSNR()
+	}
+
+	availableClients := cfg.Server.MaxSessions
+	if mp.sessionManager != nil {
+		availableClients = cfg.Server.MaxSessions - mp.sessionManager.GetNonBypassedUserCount()
+		if availableClients < 0 {
+			availableClients = 0
+		}
+	}
+
+	chatUsers := 0
+	if mp.dxClusterWsHandler != nil {
+		chatUsers = mp.dxClusterWsHandler.GetChatUserCount()
+	}
+
+	cwSkimmer := false
+	if mp.cwSkimmerConfig != nil {
+		cwSkimmer = mp.cwSkimmerConfig.Enabled
+	}
+
+	return map[string]interface{}{
+		"timestamp":         time.Now().Unix(),
+		"callsign":          cfg.Admin.Callsign,
+		"name":              cfg.Admin.Name,
+		"description":       cfg.Admin.Description,
+		"location":          cfg.Admin.Location,
+		"grid_square":       latLonToGridSquare(lat, lon),
+		"latitude":          lat,
+		"longitude":         lon,
+		"asl_m":             cfg.Admin.ASL,
+		"antenna":           cfg.Admin.Antenna,
+		"timezone":          cfg.Admin.Timezone,
+		"public_url":        cfg.Admin.PublicURL,
+		"version":           Version,
+		"max_clients":       cfg.Server.MaxSessions,
+		"available_clients": availableClients,
+		"chat_users":        chatUsers,
+		"max_session_time":  cfg.Server.MaxSessionTime,
+		"snr_0_30_mhz":      int(snr030),
+		"snr_1_8_30_mhz":    int(snr1830),
+		"space_weather":     cfg.SpaceWeather.Enabled,
+		"noise_floor":       cfg.NoiseFloor.Enabled,
+		"digital_decodes":   cfg.Decoder.Enabled,
+		"cw_skimmer":        cwSkimmer,
+		"chat_enabled":      cfg.Chat.Enabled,
+	}
+}
+
+// startAntSwitchStatusPublisher publishes antenna switch status every 30 seconds
+// to {prefix}/ant_switch_status (retained, so Home Assistant always has current
+// state on subscribe).
+func (mp *MQTTPublisher) startAntSwitchStatusPublisher(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Antenna switch status publisher started (30s interval)")
+
+	mp.publishAntSwitchStatusOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Antenna switch status publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishAntSwitchStatusOnce()
+		}
+	}
+}
+
+// publishAntSwitchStatusOnce performs a single antenna switch status publish.
+func (mp *MQTTPublisher) publishAntSwitchStatusOnce() {
+	if !mp.isConnected() || mp.antSwitchHandler == nil {
+		return
+	}
+
+	payload := mp.antSwitchHandler.BuildStatusPayload()
+
+	topic := fmt.Sprintf("%s/ant_switch_status", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal antenna switch status payload: %v", err)
+		return
+	}
+
+	// Retained: current antenna selection is state, not time-series.
+	token := mp.client.Publish(topic, mp.config.QoS, true, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish antenna switch status to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startRotatorStatusPublisher periodically refreshes rotator status to MQTT.
+// The rotctl handler already publishes on change; this 30s refresh guarantees
+// Home Assistant has a current azimuth even when the rotator is stationary.
+func (mp *MQTTPublisher) startRotatorStatusPublisher(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Rotator status refresh publisher started (30s interval)")
+
+	if mp.rotctlHandler != nil {
+		mp.PublishRotatorStatus(mp.rotctlHandler)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Rotator status refresh publisher stopped")
+			return
+		case <-ticker.C:
+			if mp.rotctlHandler != nil {
+				mp.PublishRotatorStatus(mp.rotctlHandler)
+			}
+		}
+	}
+}
+
+// startWeatherPublisher publishes terrestrial weather every 5 minutes to
+// {prefix}/weather (retained). The source (WeatherService) refreshes from the
+// instance reporter every 15 minutes; a 5-minute republish keeps HA current
+// and ensures a value is retained for new subscribers.
+func (mp *MQTTPublisher) startWeatherPublisher(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Weather publisher started (5m interval)")
+
+	mp.publishWeatherOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Weather publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishWeatherOnce()
+		}
+	}
+}
+
+// publishWeatherOnce publishes the cached OpenWeatherMap current-weather JSON
+// verbatim (retained). No-op until the WeatherService has cached data.
+func (mp *MQTTPublisher) publishWeatherOnce() {
+	if !mp.isConnected() || mp.weatherService == nil {
+		return
+	}
+
+	cached, _ := mp.weatherService.GetCached()
+	if len(cached) == 0 {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/weather", mp.config.TopicPrefix)
+
+	// Retained: current conditions are state, and HA needs a value on subscribe.
+	token := mp.client.Publish(topic, mp.config.QoS, true, []byte(cached))
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish weather to %s: %v", topic, token.Error())
 		} else {
 			mp.mu.Lock()
 			mp.messagesSent++

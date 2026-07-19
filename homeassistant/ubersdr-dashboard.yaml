@@ -1,0 +1,545 @@
+# UberSDR - Home Assistant dashboard (modern "sections" layout)
+# =============================================================
+# Setup instructions live in home_assistant.md at the repo root. In short:
+#   1. UberSDR config.yaml: mqtt.enabled + mqtt.homeassistant_discovery = true
+#   2. Add HA's MQTT integration -> the "UberSDR <callsign>" device appears
+#   3. Settings -> Dashboards -> new dashboard -> Edit -> Raw configuration
+#      editor -> paste this whole file.
+#
+# Entity IDs are generic (sensor.ubersdr_*), so this works as-is on any instance.
+# Uses only BUILT-IN cards - no HACS required. In the sections view you can also
+# drag cards to resize/rearrange them in the UI.
+#
+# Live map (optional): set server.sessions_geojson_enabled + geoip.enabled in
+# UberSDR, then add HA's built-in GeoJSON integration pointed at
+# https://YOUR_SDR/api/sessions.geojson (see home_assistant.md). The map card
+# below reads it via geo_location_sources.
+#
+# Performance: sensor.ubersdr_active_users updates every second with the session
+# list in attributes. Exclude it from the recorder to avoid history-DB bloat
+# (see home_assistant.md, "Reduce recorder load").
+
+title: UberSDR
+views:
+  - title: Overview
+    path: ubersdr
+    type: sections
+    icon: mdi:radio-tower
+    # Modern pill badges across the top: the headline state at a glance.
+    badges:
+      - type: entity
+        entity: binary_sensor.ubersdr_online
+        name: Receiver
+        show_name: true
+      - type: entity
+        entity: sensor.ubersdr_active_users
+        show_name: true
+        name: Listeners
+      - type: entity
+        entity: sensor.ubersdr_available_clients
+        show_name: true
+        name: Free slots
+      - type: entity
+        entity: sensor.ubersdr_propagation_quality
+        show_name: true
+        name: Propagation
+      - type: entity
+        entity: sensor.ubersdr_chat_users
+        show_name: true
+        name: Chat
+
+    sections:
+      # ================================================================
+      # AT A GLANCE - headline magnitudes as gauges, state as tiles
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: At a glance
+            heading_style: title
+            icon: mdi:view-dashboard-outline
+
+          # Active users vs capacity (magnitude, bounded by slots).
+          - type: gauge
+            entity: sensor.ubersdr_active_users
+            name: Active Users
+            min: 0
+            max: 20
+            needle: true
+            segments:
+              - from: 0
+                color: '#2ecc71'
+              - from: 12
+                color: '#f1c40f'
+              - from: 18
+                color: '#e74c3c'
+
+          # Solar flux = propagation fuel (low->high = poor->good quality).
+          - type: gauge
+            entity: sensor.ubersdr_solar_flux
+            name: Solar Flux
+            unit: SFU
+            min: 60
+            max: 300
+            needle: true
+            segments:
+              - from: 60
+                color: '#e74c3c'
+              - from: 100
+                color: '#f1c40f'
+              - from: 150
+                color: '#2ecc71'
+
+          # K-index = geomagnetic disturbance (status: high is bad).
+          - type: gauge
+            entity: sensor.ubersdr_k_index
+            name: K-Index
+            min: 0
+            max: 9
+            needle: true
+            severity:
+              green: 0
+              yellow: 4
+              red: 5
+
+          # State tiles (status colour + icon, not colour alone).
+          - type: tile
+            entity: sensor.ubersdr_propagation_quality
+            name: Propagation
+            icon: mdi:radio-tower
+            color: teal
+          - type: tile
+            entity: sensor.ubersdr_k_index_status
+            name: Geomagnetic
+            icon: mdi:magnet
+            color: indigo
+          - type: tile
+            entity: binary_sensor.ubersdr_online
+            name: Receiver
+            icon: mdi:access-point
+            color: green
+
+      # ================================================================
+      # LIVE LISTENERS - geographic map + detail table + trend
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Live Listeners
+            heading_style: title
+            icon: mdi:map-marker-radius-outline
+
+          # Geographic distribution -> map (transient geo_location markers).
+          - type: map
+            title: Listener locations
+            geo_location_sources:
+              - geo_json_events
+            auto_fit: true
+            hours_to_show: 0
+            grid_options:
+              columns: full
+              rows: 4
+
+          # Per-listener detail -> table (identity, not a chart).
+          - type: markdown
+            title: Who's listening
+            grid_options:
+              columns: full
+            content: >
+              {% set sessions = state_attr('sensor.ubersdr_active_users',
+              'sessions') %} {% if sessions %} | Country | City | Freq | Mode |
+              User | |---|---|---|---|---| {% for s in sessions %}| {{ s.country
+              | default('?', true) }} | {{ s.city | default('-', true) }} | {{
+              (s.frequency | float(0) / 1000) | round(1) }} kHz | {{ s.mode |
+              default('-', true) | upper }} | {{ s.chat_username | default('-',
+              true) }} | {% endfor %} {% else %} _No active listeners right now._
+              {% endif %}
+
+          # Change over time -> line graph.
+          - type: history-graph
+            title: Active users (24h)
+            hours_to_show: 24
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.ubersdr_active_users
+                name: Users
+
+      # ================================================================
+      # CHAT (only when chat is enabled on the instance)
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Chat
+            heading_style: title
+            icon: mdi:chat-outline
+
+          # Real-time latest message (updates the instant a message is sent).
+          # Works out of the box from the discovery sensor.
+          - type: tile
+            entity: sensor.ubersdr_last_chat_message
+            name: Latest message
+            icon: mdi:chat-outline
+            color: green
+            grid_options:
+              columns: full
+
+          # Rolling last-10 history feed. This reads the "messages" attribute of
+          # the OPTIONAL trigger-based template sensor sensor.ubersdr_chat_history
+          # (one-time setup snippet in home_assistant.md). Until you add that
+          # sensor it simply shows "waiting" - the tile above still works.
+          - type: markdown
+            title: Recent messages
+            grid_options:
+              columns: full
+            content: >
+              {% set msgs = state_attr('sensor.ubersdr_chat_history', 'messages')
+              %} {% if msgs %}{% for m in msgs | reverse %}**{{ m.username }}**
+              · {{ m.time }}<br>{{ m.message }}
+
+              {% endfor %}{% else %}_Waiting for messages (add the chat history
+              template sensor from home_assistant.md to enable the rolling
+              feed)._{% endif %}
+
+      # ================================================================
+      # PROPAGATION & SPACE WEATHER
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Propagation & Space Weather
+            heading_style: title
+            icon: mdi:weather-sunny
+
+          - type: gauge
+            entity: sensor.ubersdr_a_index
+            name: A-Index
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 0
+              yellow: 20
+              red: 50
+          - type: gauge
+            entity: sensor.ubersdr_solar_wind_bz
+            name: Solar Wind Bz
+            unit: nT
+            min: -20
+            max: 20
+            needle: true
+
+          - type: tile
+            entity: sensor.ubersdr_solar_flux
+            name: Solar Flux Index
+            icon: mdi:white-balance-sunny
+            color: amber
+          - type: tile
+            entity: sensor.ubersdr_snr_0_30
+            name: Wideband SNR (0-30)
+            icon: mdi:signal
+            color: cyan
+
+          # SFI and K have very different scales, so DON'T co-plot them.
+          # Solar flux trend on its own axis:
+          - type: history-graph
+            title: Solar flux (7 days)
+            hours_to_show: 168
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.ubersdr_solar_flux
+                name: SFI
+
+      # ================================================================
+      # LOCAL WEATHER (terrestrial; when the weather source is configured)
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Local Weather
+            heading_style: title
+            icon: mdi:weather-partly-cloudy
+
+          - type: gauge
+            entity: sensor.ubersdr_weather_temp
+            name: Temperature
+            unit: '°C'
+            min: -10
+            max: 40
+            needle: true
+            segments:
+              - from: -10
+                color: '#3b82c4'
+              - from: 5
+                color: '#2ecc71'
+              - from: 18
+                color: '#f1c40f'
+              - from: 28
+                color: '#e74c3c'
+
+          - type: tile
+            entity: sensor.ubersdr_weather_condition
+            name: Conditions
+            icon: mdi:weather-partly-cloudy
+            color: blue
+          - type: tile
+            entity: sensor.ubersdr_weather_humidity
+            name: Humidity
+            icon: mdi:water-percent
+            color: cyan
+          - type: tile
+            entity: sensor.ubersdr_weather_wind_speed
+            name: Wind
+            icon: mdi:weather-windy
+            color: teal
+
+          - type: entities
+            title: Weather detail
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: sensor.ubersdr_weather_description
+                name: Description
+              - entity: sensor.ubersdr_weather_feels_like
+                name: Feels like
+              - entity: sensor.ubersdr_weather_pressure
+                name: Pressure
+              - entity: sensor.ubersdr_weather_wind_bearing
+                name: Wind bearing
+
+      # ================================================================
+      # BAND ACTIVITY - occupancy heat (sequential) + FT8 SNR trend
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Band Activity
+            heading_style: title
+            icon: mdi:sine-wave
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >
+              Band **occupancy** = how busy each band is right now (percent of
+              samples above the noise floor). Blue is quiet, dark blue is busy.
+
+          # Occupancy is a MAGNITUDE -> sequential single hue (light->dark blue),
+          # not a green/amber/red status ramp. One small gauge per HF band.
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_80m_occupancy
+            name: 80m
+            min: 0
+            max: 100
+            needle: true
+            segments: &occ
+              - from: 0
+                color: '#cfe8ff'
+              - from: 25
+                color: '#7ab8f5'
+              - from: 50
+                color: '#3b82c4'
+              - from: 75
+                color: '#1e3a8a'
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_40m_occupancy
+            name: 40m
+            min: 0
+            max: 100
+            needle: true
+            segments: *occ
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_30m_occupancy
+            name: 30m
+            min: 0
+            max: 100
+            needle: true
+            segments: *occ
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_20m_occupancy
+            name: 20m
+            min: 0
+            max: 100
+            needle: true
+            segments: *occ
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_17m_occupancy
+            name: 17m
+            min: 0
+            max: 100
+            needle: true
+            segments: *occ
+          - type: gauge
+            entity: sensor.ubersdr_noisefloor_15m_occupancy
+            name: 15m
+            min: 0
+            max: 100
+            needle: true
+            segments: *occ
+
+          # FT8 SNR over time, multiple bands -> line graph (HA draws a legend).
+          - type: history-graph
+            title: Estimated FT8 SNR by band (dB)
+            hours_to_show: 12
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.ubersdr_noisefloor_40m_ft8_snr
+                name: 40m
+              - entity: sensor.ubersdr_noisefloor_20m_ft8_snr
+                name: 20m
+              - entity: sensor.ubersdr_noisefloor_17m_ft8_snr
+                name: 17m
+              - entity: sensor.ubersdr_noisefloor_15m_ft8_snr
+                name: 15m
+
+      # ================================================================
+      # ANTENNAS & ROTATOR
+      # (only populated when rotctl / ant_switch are enabled on the instance;
+      #  cards for a disabled feature simply show "unavailable")
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Antennas & Rotator
+            heading_style: title
+            icon: mdi:antenna
+
+          # Antenna switch: current selection (state = friendly label, or
+          # "Grounded"); selected ports / labels are in attributes.
+          - type: tile
+            entity: sensor.ubersdr_antenna_switch
+            name: Selected Antenna
+            icon: mdi:antenna
+            color: blue
+
+          # Rotator heading (magnitude, 0-360 degrees).
+          - type: gauge
+            entity: sensor.ubersdr_rotator_azimuth
+            name: Azimuth
+            unit: '°'
+            min: 0
+            max: 360
+            needle: true
+
+          # Rotator movement state.
+          - type: tile
+            entity: binary_sensor.ubersdr_rotator_moving
+            name: Rotator
+            icon: mdi:rotate-right
+            color: amber
+
+          # Antenna switch / rotator detail.
+          - type: entities
+            title: Antenna & rotator status
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: sensor.ubersdr_rotator_azimuth
+                name: Azimuth
+              - entity: sensor.ubersdr_rotator_elevation
+                name: Elevation
+              - entity: binary_sensor.ubersdr_rotator_connected
+                name: Rotator connected
+              - entity: binary_sensor.ubersdr_antenna_grounded
+                name: Antenna grounded
+              - entity: binary_sensor.ubersdr_antenna_thunderstorm
+                name: Thunderstorm protection
+
+      # ================================================================
+      # RECEIVER & DIAGNOSTICS
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Receiver & Diagnostics
+            heading_style: title
+            icon: mdi:radio
+
+          # Identity is reference data -> entities list with attribute rows.
+          - type: entities
+            title: Station
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: sensor.ubersdr_receiver_info
+                name: Version
+                icon: mdi:radio-tower
+              - type: attribute
+                entity: sensor.ubersdr_receiver_info
+                attribute: callsign
+                name: Callsign
+                icon: mdi:card-account-details-outline
+              - type: attribute
+                entity: sensor.ubersdr_receiver_info
+                attribute: location
+                name: Location
+                icon: mdi:map-marker-outline
+              - type: attribute
+                entity: sensor.ubersdr_receiver_info
+                attribute: antenna
+                name: Antenna
+                icon: mdi:antenna
+              - entity: sensor.ubersdr_grid_square
+                name: Grid square
+                icon: mdi:grid
+              - entity: sensor.ubersdr_available_clients
+                name: Free slots
+              - entity: sensor.ubersdr_chat_users
+                name: Chat users
+
+          # CPU temperature is a status magnitude -> gauge with severity.
+          - type: gauge
+            entity: sensor.ubersdr_cpu_temp
+            name: CPU Temp
+            unit: '°C'
+            min: 20
+            max: 90
+            needle: true
+            severity:
+              green: 20
+              yellow: 60
+              red: 75
+          - type: gauge
+            entity: sensor.ubersdr_system_load_1m
+            name: Load (1m)
+            min: 0
+            max: 8
+            needle: true
+
+          - type: entities
+            title: Diagnostics
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: sensor.ubersdr_ntp_offset
+                name: NTP offset
+              - entity: sensor.ubersdr_freq_ref_offset
+                name: GPSDO freq offset
+              - entity: sensor.ubersdr_freq_ref_snr
+                name: GPSDO ref SNR
+              - entity: sensor.ubersdr_snr_1_8_30
+                name: SNR 1.8-30 MHz
+
+          # Health -> binary sensors (status: on = problem). Grouped list.
+          - type: entities
+            title: Health
+            grid_options:
+              columns: full
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.ubersdr_online
+                name: Connectivity
+              - entity: binary_sensor.ubersdr_ntp_health
+                name: NTP
+              - entity: binary_sensor.ubersdr_dsp_health
+                name: DSP
+              - entity: binary_sensor.ubersdr_tunnel_server_health
+                name: Tunnel server
+              - entity: binary_sensor.ubersdr_instance_reporter_health
+                name: Instance reporter

@@ -1411,28 +1411,50 @@ func (h *AntSwitchHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	resp := h.BuildStatusPayload()
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("AntSwitch: error encoding status: %v", err)
+	}
+}
+
+// BuildStatusPayload returns the antenna switch status as a map. Shared by the
+// HTTP status endpoint and the MQTT publisher so both stay in sync. In addition
+// to the raw state it includes a friendly "active" string ("Grounded", or the
+// joined labels of the selected antennas) for convenient display in e.g. Home
+// Assistant.
+func (h *AntSwitchHandler) BuildStatusPayload() map[string]interface{} {
 	state := h.getState()
 
-	w.Header().Set("Content-Type", "application/json")
+	selected := state.Selected
+	if selected == nil {
+		selected = []int{}
+	}
+
+	active := "Grounded"
+	if !state.Grounded && len(selected) > 0 {
+		names := make([]string, 0, len(selected))
+		for _, n := range selected {
+			names = append(names, h.antennaLabel(n))
+		}
+		active = strings.Join(names, ", ")
+	}
+
 	resp := map[string]interface{}{
 		"enabled":        true,
-		"selected":       state.Selected,
+		"selected":       selected,
 		"grounded":       state.Grounded,
+		"active":         active,
 		"allow_mixing":   h.config.AllowMixing,
 		"num_antennas":   h.config.NumAntennas,
 		"antenna_labels": h.buildLabels(),
 		"thunderstorm":   h.config.Thunderstorm,
 		"last_update":    state.LastUpdate,
 	}
-	if state.Selected == nil {
-		resp["selected"] = []int{}
-	}
 	if state.LastError != "" {
 		resp["last_error"] = state.LastError
 	}
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("AntSwitch: error encoding status: %v", err)
-	}
+	return resp
 }
 
 // HandleGetStatusDisabled handles GET /api/ant-switch/status when disabled.

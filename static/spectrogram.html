@@ -2150,7 +2150,8 @@ function setupHover(){
       if(sgAntSwitchEvents.length>0&&rowMeta&&rowMeta.unix){
         var _antEv=sgActiveAntenna(rowMeta.unix);
         if(_antEv){
-          h+='<div class="tt-row"><span class="tt-lbl">Antenna</span><span class="tt-val" style="color:#ff80ff">'+escHtml(sgResolveAntLabel(_antEv))+'</span></div>';
+          var _antCol=sgAntColorForEvent(_antEv)+'1)';
+          h+='<div class="tt-row"><span class="tt-lbl">Antenna</span><span class="tt-val" style="color:'+_antCol+'">'+escHtml(sgResolveAntLabel(_antEv))+'</span></div>';
         }
       }
     }
@@ -2850,6 +2851,26 @@ var sgReceiverLon=null;
 var sgAntLabels=[];
 var sgAntSwitchEvents=[];
 
+/* Fixed colour palette — up to 5 antennas, indexed by (selected[0] - 1).
+   Each entry is an rgba prefix without the alpha value, e.g. 'rgba(255,80,255,'.
+   Append the desired alpha and closing ')' when using. */
+var SG_ANT_COLORS=[
+  'rgba(255,80,255,',   /* antenna 1 — magenta */
+  'rgba(80,200,255,',   /* antenna 2 — sky blue */
+  'rgba(80,255,140,',   /* antenna 3 — green */
+  'rgba(255,180,40,',   /* antenna 4 — amber */
+  'rgba(255,80,80,'     /* antenna 5 — red */
+];
+var SG_ANT_COLOR_GROUNDED='rgba(180,180,180,'; /* grey for grounded/unknown */
+
+/* Return the rgba prefix string for an event's primary antenna (1-based selected[0]).
+   Grounded events always use grey regardless of which antenna is selected. */
+function sgAntColorForEvent(ev){
+  if(ev.grounded)return SG_ANT_COLOR_GROUNDED;
+  var idx=(ev.selected&&ev.selected.length>0)?ev.selected[0]-1:0;
+  return SG_ANT_COLORS[idx%SG_ANT_COLORS.length];
+}
+
 /* Resolve a human-readable antenna name from an event object.
    Uses sgAntLabels (from /api/ant-switch/status) to map 1-based selected[] indices. */
 function sgResolveAntLabel(ev){
@@ -2872,8 +2893,9 @@ function sgActiveAntenna(rowUnix){
   return active;
 }
 
-/* Draw horizontal dashed magenta lines on #ant-switch-canvas for every
-   antenna switch event that falls within the currently loaded spectrogram.
+/* Draw horizontal dashed lines on #ant-switch-canvas for every antenna switch
+   event that falls within the currently loaded spectrogram.  Each event uses
+   the colour for its primary antenna (sgAntColorForEvent).
    Called after render(), after zoom/pan changes, and after events load. */
 function sgDrawAntSwitchOverlay(){
   var canvas=document.getElementById('ant-switch-canvas');
@@ -2910,9 +2932,7 @@ function sgDrawAntSwitchOverlay(){
   var lastRowUnix=row0Unix+meta.row_count*rowSec;
 
   ctx.save();
-  ctx.strokeStyle='rgba(255,80,255,0.7)';
   ctx.lineWidth=1.5;
-  ctx.setLineDash([6,4]);
   ctx.font='bold 10px -apple-system,BlinkMacSystemFont,sans-serif';
   ctx.textBaseline='bottom';
   ctx.textAlign='right';
@@ -2927,24 +2947,26 @@ function sgDrawAntSwitchOverlay(){
     if(screenY<-2||screenY>H+2)continue;
 
     var y=Math.round(screenY)+0.5;
+    var col=sgAntColorForEvent(ev);
 
-    /* Dashed horizontal line */
+    /* Dashed horizontal line in this antenna's colour */
+    ctx.strokeStyle=col+'0.7)';
+    ctx.setLineDash([6,4]);
     ctx.beginPath();
     ctx.moveTo(0,y);
     ctx.lineTo(W,y);
     ctx.stroke();
+    ctx.setLineDash([]);
 
     /* Label on the right edge — use the raw event label (describes the action) */
-    var lbl='\u21C4 '+escHtml(ev.label||sgResolveAntLabel(ev));
-    ctx.setLineDash([]);
-    ctx.fillStyle='rgba(255,80,255,0.9)';
-    /* Small pill background */
+    var lbl='\u21C4 '+(ev.label||sgResolveAntLabel(ev));
     var tw=ctx.measureText(lbl).width;
-    ctx.fillStyle='rgba(40,0,40,0.72)';
+    /* Dark pill background */
+    ctx.fillStyle='rgba(0,0,0,0.65)';
     ctx.fillRect(W-tw-10,y-13,tw+8,12);
-    ctx.fillStyle='rgba(255,120,255,0.95)';
+    /* Label text in the antenna colour */
+    ctx.fillStyle=col+'0.95)';
     ctx.fillText(lbl,W-6,y-2);
-    ctx.setLineDash([6,4]);
   }
   ctx.restore();
 }
@@ -4252,25 +4274,26 @@ function sgDrawScrubber() {
     }
   }
 
-  /* Antenna switch event markers — vertical magenta lines before the playhead */
+  /* Antenna switch event markers — vertical lines coloured by antenna index */
   if (sgAntSwitchEvents.length > 0 && meta && meta.rows && meta.rows.length > 0) {
     var _scrubRow0Unix = meta.rows[0].unix || 0;
     var _scrubRowSec = meta.row_interval_seconds || 60;
     var _scrubTotalSec = meta.row_count * _scrubRowSec;
     if (_scrubRow0Unix > 0 && _scrubTotalSec > 0) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255,80,255,0.8)';
       ctx.lineWidth = 1.5;
       for (var _si = 0; _si < sgAntSwitchEvents.length; _si++) {
         var _sev = sgAntSwitchEvents[_si];
         var _sfrac = (_sev.unix - _scrubRow0Unix) / _scrubTotalSec;
         if (_sfrac < 0 || _sfrac > 1) continue;
         var _sx = _sfrac * W;
+        var _scol = sgAntColorForEvent(_sev);
+        ctx.strokeStyle = _scol + '0.8)';
         ctx.beginPath();
         ctx.moveTo(_sx, 0); ctx.lineTo(_sx, H);
         ctx.stroke();
-        /* Small upward triangle at the bottom */
-        ctx.fillStyle = 'rgba(255,80,255,0.85)';
+        /* Small upward triangle at the bottom in antenna colour */
+        ctx.fillStyle = _scol + '0.85)';
         ctx.beginPath();
         ctx.moveTo(_sx, H); ctx.lineTo(_sx - 4, H - 7); ctx.lineTo(_sx + 4, H - 7);
         ctx.closePath();
@@ -4665,12 +4688,10 @@ render = function() {
     }
 
     // ── Antenna switch event markers ─────────────────────────────────────────
-    // Vertical dashed magenta lines at each switch event, with a small label
+    // Vertical dashed lines at each switch event, coloured by antenna index
     if (sgAntSwitchEvents.length > 0 && firstUnix > 0) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255,80,255,0.75)';
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
       ctx.font = 'bold 9px -apple-system,BlinkMacSystemFont,sans-serif';
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
@@ -4680,27 +4701,29 @@ render = function() {
         var _aRowFrac = (_aev.unix - firstUnix) / 60 / n;
         if (_aRowFrac < 0 || _aRowFrac > 1) continue;
         var _ax = _aRowFrac * W;
-        // Vertical line through chart area only
+        var _acol = sgAntColorForEvent(_aev);
+        // Vertical dashed line through chart area only
+        ctx.strokeStyle = _acol + '0.75)';
+        ctx.setLineDash([4, 3]);
         ctx.beginPath();
         ctx.moveTo(_ax, 0);
         ctx.lineTo(_ax, H);
         ctx.stroke();
-        // Small triangle at top
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(255,80,255,0.85)';
+        // Small downward triangle at top in antenna colour
+        ctx.fillStyle = _acol + '0.85)';
         ctx.beginPath();
         ctx.moveTo(_ax, 0);
         ctx.lineTo(_ax - 4, 7);
         ctx.lineTo(_ax + 4, 7);
         ctx.closePath();
         ctx.fill();
-        // Label: resolved antenna name, clamped to canvas
+        // Label: resolved antenna name, clamped to canvas, in antenna colour
         var _aLbl = sgResolveAntLabel(_aev);
         var _aLblW = ctx.measureText(_aLbl).width;
         var _aLblX = Math.min(_ax + 3, W - _aLblW - 2);
-        ctx.fillStyle = 'rgba(255,120,255,0.9)';
+        ctx.fillStyle = _acol + '0.9)';
         ctx.fillText(_aLbl, _aLblX, 9);
-        ctx.setLineDash([4, 3]);
       }
       ctx.restore();
     }
@@ -4730,7 +4753,11 @@ render = function() {
       var _actAntStr = '';
       if (sgAntSwitchEvents.length > 0 && row.unix) {
         var _actAntEv = sgActiveAntenna(row.unix);
-        if (_actAntEv) _actAntStr = '<br><span style="color:#ff80ff">\u21C4 Antenna: ' + escHtml(sgResolveAntLabel(_actAntEv)) + '</span>';
+        if (_actAntEv) {
+          /* Convert rgba prefix to a CSS hex-like colour for inline style */
+          var _actAntCol = sgAntColorForEvent(_actAntEv) + '1)';
+          _actAntStr = '<br><span style="color:' + _actAntCol + '">\u21C4 Antenna: ' + escHtml(sgResolveAntLabel(_actAntEv)) + '</span>';
+        }
       }
       actTip.innerHTML =
         '<b style="color:#7df">' + (row.utc_time || '') + ' UTC' + _actDnEmoji + '</b><br>' +

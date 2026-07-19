@@ -965,6 +965,12 @@ const WEBHOOK_PRESETS = {
         method: 'POST', format: 'json',
         hint: 'Use the Webhook node URL from your n8n workflow. Add header auth in n8n and mirror it in the Extra Headers below.',
     },
+    ubersdr_cyd: {
+        label: 'UberSDR CYD (Cheap Yellow Display)',
+        urlTemplate: 'http://ubersdr-cyd.local/notify',
+        method: 'POST', format: 'json',
+        hint: 'Sends notifications to a Cheap Yellow Display (ESP32) running the UberSDR CYD firmware. The device must be on the same network. Use <code>http://ubersdr-cyd.local/notify</code> or replace with the device\'s IP address.',
+    },
     custom:     {
         label: 'Custom',
         urlTemplate: '',
@@ -982,6 +988,7 @@ function detectWebhookPreset(url) {
     if (url.indexOf('hooks.zapier.com') >= 0)          return 'zapier';
     if (url.indexOf('n8n') >= 0)                       return 'n8n';
     if (url.indexOf('/api/webhook') >= 0)              return 'homeassist';
+    if (url.indexOf('ubersdr-cyd') >= 0 || url.indexOf('/notify') >= 0 && url.indexOf('192.168.') >= 0) return 'ubersdr_cyd';
     return 'custom';
 }
 
@@ -1947,6 +1954,20 @@ function renderChannelTypeInfo(type, provider) {
         var hintHtml = preset.hint
             ? '<p style="margin:8px 0 0;font-size:0.875rem;color:#1a237e;line-height:1.6">&#x1F4A1; ' + preset.hint + '</p>'
             : '';
+        var cydBox = (provider === 'ubersdr_cyd')
+            ? '<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:12px 14px;margin-top:10px">' +
+                  '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
+                      '<span style="font-size:1.1rem">&#x1F4F2;</span>' +
+                      '<strong style="color:#e65100">UberSDR CYD Firmware</strong>' +
+                  '</div>' +
+                  '<p style="margin:0;font-size:0.875rem;color:#4e342e;line-height:1.6">' +
+                      'Firmware for the Cheap Yellow Display (ESP32-2432S028) can be obtained from ' +
+                      '<a href="https://github.com/madpsy/ubersdr_cyd" target="_blank" rel="noopener" style="color:#e65100;font-weight:600">github.com/madpsy/ubersdr_cyd</a>. ' +
+                      'It includes a <strong>browser-based flash tool</strong> — no software installation required. ' +
+                      'Simply open the page in Chrome or Edge, connect the CYD via USB, and flash directly from the browser.' +
+                  '</p>' +
+              '</div>'
+            : '';
         panel.innerHTML =
             '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
@@ -1959,6 +1980,7 @@ function renderChannelTypeInfo(type, provider) {
                 '</p>' +
                 hintHtml +
                 '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F512; Use <strong>https://</strong> and a <strong>Signing Secret</strong> so the receiver can verify requests came from UberSDR.</p>' +
+                cydBox +
             '</div>';
     } else if (type === 'galactic_unicorn') {
         panel.innerHTML =

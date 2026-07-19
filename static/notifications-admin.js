@@ -542,8 +542,15 @@ async function loadConfig() {
         for (const name in serverChannels) {
             const ch = serverChannels[name];
             const existing = localConfig.channels[name];
+            // CYD channels are saved to the server as type 'webhook' but we
+            // restore them as 'ubersdr_cyd' when the URL matches the CYD pattern.
+            var resolvedType = ch.type || 'telegram';
+            if (resolvedType === 'webhook' &&
+                (ch.webhook_url || '').toLowerCase().indexOf('ubersdr-cyd') >= 0) {
+                resolvedType = 'ubersdr_cyd';
+            }
             merged[name] = {
-                type:               ch.type              || 'telegram',
+                type:               resolvedType,
                 bot_token:          (existing && existing.bot_token && existing.bot_token !== '********')
                                         ? existing.bot_token
                                         : (ch.bot_token_set ? '********' : ''),
@@ -760,6 +767,20 @@ async function saveConfig(alertContainer) {
                 rate_limit_minutes:         ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
                 max_per_minute:             ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
+        } else if (ch.type === 'ubersdr_cyd') {
+            payload.channels[name] = {
+                type:                    'webhook',
+                webhook_url:             ch.webhook_url || 'http://ubersdr-cyd.local/notify',
+                webhook_method:          'POST',
+                webhook_format:          'json',
+                webhook_secret:          '',
+                webhook_headers:         {},
+                webhook_timeout_seconds: Number(ch.webhook_timeout_seconds) || 10,
+                webhook_insecure_skip_verify: false,
+                webhook_body_template:   '',
+                rate_limit_minutes:      ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
+                max_per_minute:          ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
+            };
         } else if (ch.type === 'galactic_unicorn') {
             payload.channels[name] = {
                 type:                               'galactic_unicorn',
@@ -965,12 +986,6 @@ const WEBHOOK_PRESETS = {
         method: 'POST', format: 'json',
         hint: 'Use the Webhook node URL from your n8n workflow. Add header auth in n8n and mirror it in the Extra Headers below.',
     },
-    ubersdr_cyd: {
-        label: 'UberSDR CYD (Cheap Yellow Display)',
-        urlTemplate: 'http://ubersdr-cyd.local/notify',
-        method: 'POST', format: 'json',
-        hint: 'Sends notifications to a Cheap Yellow Display (ESP32) running the UberSDR CYD firmware. The device must be on the same network. Use <code>http://ubersdr-cyd.local/notify</code> or replace with the device\'s IP address.',
-    },
     custom:     {
         label: 'Custom',
         urlTemplate: '',
@@ -988,7 +1003,6 @@ function detectWebhookPreset(url) {
     if (url.indexOf('hooks.zapier.com') >= 0)          return 'zapier';
     if (url.indexOf('n8n') >= 0)                       return 'n8n';
     if (url.indexOf('/api/webhook') >= 0)              return 'homeassist';
-    if (url.indexOf('ubersdr-cyd') >= 0 || url.indexOf('/notify') >= 0 && url.indexOf('192.168.') >= 0) return 'ubersdr_cyd';
     return 'custom';
 }
 
@@ -1060,6 +1074,14 @@ function renderChannels() {
                 (urlDisplay ? '<span class="badge badge-grey" title="' + escHtml(ch.webhook_url) + '">' + escHtml(urlDisplay) + '</span>' : '<span class="badge badge-red">No URL</span>') +
                 '<span class="badge badge-grey">' + escHtml(ch.webhook_method || 'POST') + '</span>' +
                 '<span class="badge badge-grey">' + escHtml(ch.webhook_format || 'text') + '</span>';
+        } else if (ch.type === 'ubersdr_cyd') {
+            const cydUrl = ch.webhook_url
+                ? ch.webhook_url.replace(/^https?:\/\//, '').substring(0, 45) +
+                  (ch.webhook_url.replace(/^https?:\/\//, '').length > 45 ? '…' : '')
+                : '';
+            metaBadges =
+                (cydUrl ? '<span class="badge badge-grey" title="' + escHtml(ch.webhook_url) + '">' + escHtml(cydUrl) + '</span>' : '<span class="badge badge-red">No URL</span>') +
+                '<span class="badge badge-grey">&#x1F4F2; CYD</span>';
         } else if (ch.type === 'galactic_unicorn') {
             const guUrl = ch.galactic_unicorn_url
                 ? ch.galactic_unicorn_url.replace(/^https?:\/\//, '').substring(0, 30) +
@@ -1876,6 +1898,8 @@ async function testChannel(name) {
                 webhook_body_template:      ch.webhook_body_template || '',
             };
         }
+    } else if (ch.type === 'ubersdr_cyd') {
+        body = { channel: name };
     } else if (ch.type === 'galactic_unicorn') {
         // Always test via the saved channel name — no secrets to inline.
         body = { channel: name };
@@ -1954,20 +1978,6 @@ function renderChannelTypeInfo(type, provider) {
         var hintHtml = preset.hint
             ? '<p style="margin:8px 0 0;font-size:0.875rem;color:#1a237e;line-height:1.6">&#x1F4A1; ' + preset.hint + '</p>'
             : '';
-        var cydBox = (provider === 'ubersdr_cyd')
-            ? '<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:12px 14px;margin-top:10px">' +
-                  '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
-                      '<span style="font-size:1.1rem">&#x1F4F2;</span>' +
-                      '<strong style="color:#e65100">UberSDR CYD Firmware</strong>' +
-                  '</div>' +
-                  '<p style="margin:0;font-size:0.875rem;color:#4e342e;line-height:1.6">' +
-                      'Firmware for the Cheap Yellow Display (ESP32-2432S028) can be obtained from ' +
-                      '<a href="https://github.com/madpsy/ubersdr_cyd" target="_blank" rel="noopener" style="color:#e65100;font-weight:600">github.com/madpsy/ubersdr_cyd</a>. ' +
-                      'It includes a <strong>browser-based flash tool</strong> — no software installation required. ' +
-                      'Simply open the page in Chrome or Edge, connect the CYD via USB, and flash directly from the browser.' +
-                  '</p>' +
-              '</div>'
-            : '';
         panel.innerHTML =
             '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
@@ -1980,7 +1990,31 @@ function renderChannelTypeInfo(type, provider) {
                 '</p>' +
                 hintHtml +
                 '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F512; Use <strong>https://</strong> and a <strong>Signing Secret</strong> so the receiver can verify requests came from UberSDR.</p>' +
-                cydBox +
+            '</div>';
+    } else if (type === 'ubersdr_cyd') {
+        panel.innerHTML =
+            '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+                    '<span style="font-size:1.3rem">&#x1F517;</span>' +
+                    '<strong style="color:#1565c0">Webhook (HTTP POST)</strong>' +
+                '</div>' +
+                '<p style="margin:0;font-size:0.875rem;color:#1a237e;line-height:1.6">' +
+                    'Sends a JSON POST request to the CYD device when a notification fires. ' +
+                    'The device must be on the same network as UberSDR.' +
+                '</p>' +
+                '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F4A1; Use <code>http://ubersdr-cyd.local/notify</code> or replace with the device\'s IP address if mDNS is unavailable.</p>' +
+            '</div>' +
+            '<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:12px 14px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
+                    '<span style="font-size:1.1rem">&#x1F4F2;</span>' +
+                    '<strong style="color:#e65100">UberSDR CYD Firmware</strong>' +
+                '</div>' +
+                '<p style="margin:0;font-size:0.875rem;color:#4e342e;line-height:1.6">' +
+                    'Firmware for the Cheap Yellow Display (ESP32-2432S028) can be obtained from ' +
+                    '<a href="https://github.com/madpsy/ubersdr_cyd" target="_blank" rel="noopener" style="color:#e65100;font-weight:600">github.com/madpsy/ubersdr_cyd</a>. ' +
+                    'It includes a <strong>browser-based flash tool</strong> — no software installation required. ' +
+                    'Simply open the page in Chrome or Edge, connect the CYD via USB, and flash directly from the browser.' +
+                '</p>' +
             '</div>';
     } else if (type === 'galactic_unicorn') {
         panel.innerHTML =
@@ -2461,7 +2495,7 @@ function showChannelForm(editName) {
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
-    const types = [['telegram','Telegram'],['email','Email (SMTP)'],['webhook','Webhook (HTTP)'],['galactic_unicorn','Unicorn Display (LED)']];
+    const types = [['telegram','Telegram'],['email','Email (SMTP)'],['webhook','Webhook (HTTP)'],['galactic_unicorn','Unicorn Display (LED)'],['ubersdr_cyd','UberSDR CYD (Cheap Yellow Display)']];
     const typeOptions = types.map(function(t) {
         return '<option value="' + t[0] + '"' + ((ch.type || 'telegram') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
     }).join('');
@@ -2621,6 +2655,19 @@ function showChannelForm(editName) {
                     previewGUSoundButton(btnPreviewGUSound, body, el('channelsAlerts'));
                 });
             }
+        } else if (type === 'ubersdr_cyd') {
+            el('chTypeFields').innerHTML =
+                '<div class="form-group">' +
+                    '<label>Device URL *</label>' +
+                    '<input type="url" id="chCydUrl" value="' + escHtml(ch.webhook_url || 'http://ubersdr-cyd.local/notify') + '" placeholder="http://ubersdr-cyd.local/notify" maxlength="2048">' +
+                    '<div class="form-hint">Use <code>http://ubersdr-cyd.local/notify</code> or replace with the device\'s IP address if mDNS is unavailable on your network.</div>' +
+                '</div>' +
+                '<div class="form-group" style="max-width:130px">' +
+                    '<label>Timeout (s)</label>' +
+                    '<input type="number" id="chCydTimeout" value="' + (ch.webhook_timeout_seconds || 10) + '" min="1" max="60">' +
+                    '<div class="form-hint">1–60 seconds.</div>' +
+                '</div>';
+            renderChannelTypeInfo('ubersdr_cyd');
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');
@@ -2851,6 +2898,19 @@ function showChannelForm(editName) {
                 webhook_body_template:      el('chWebhookBodyTemplate').value.trim(),
                 rate_limit_minutes:         rate,
                 max_per_minute:             maxPerMinFinal,
+            };
+        } else if (type === 'ubersdr_cyd') {
+            const cydUrl = el('chCydUrl').value.trim();
+            if (!cydUrl) { showAlert(el('channelsAlerts'), 'error', 'Device URL is required.', false); return; }
+            if (!/^https?:\/\/.+/.test(cydUrl)) { showAlert(el('channelsAlerts'), 'error', 'Device URL must start with http:// or https://', false); return; }
+            const cydTimeout = parseInt(el('chCydTimeout').value, 10);
+            if (isNaN(cydTimeout) || cydTimeout < 1 || cydTimeout > 60) { showAlert(el('channelsAlerts'), 'error', 'Timeout must be 1–60 seconds.', false); return; }
+            channel = {
+                type:                    'ubersdr_cyd',
+                webhook_url:             cydUrl,
+                webhook_timeout_seconds: cydTimeout,
+                rate_limit_minutes:      rate,
+                max_per_minute:          maxPerMinFinal,
             };
         } else if (type === 'galactic_unicorn') {
             const guUrl = el('chGUUrl').value.trim();

@@ -263,6 +263,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bands</label>
   <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bookmarks</label>
+  <label id="show-antsw-label" style="display:none;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-antsw-cb" checked onchange="savePrefs();sgDrawAntSwitchOverlay();sgDrawScrubber();if(window.sgDrawActivityChart)window.sgDrawActivityChart()"> Antennas</label>
   <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="squish-height-cb" checked onchange="onSquishHeightChange()"> Fixed height</label>
   <select id="squish-height-sel" onchange="onSquishHeightChange()">
     <option value="300">300px</option>
@@ -1118,6 +1119,7 @@ function savePrefs(){
   try{
     var bandsCb=(document.getElementById('show-bands-cb')||{});
     var bmCb=(document.getElementById('show-bookmarks-cb')||{});
+    var antswCb=(document.getElementById('show-antsw-cb')||{});
     var squishCb=(document.getElementById('squish-height-cb')||{});
     var prefs={
       band:urlBand,
@@ -1125,6 +1127,7 @@ function savePrefs(){
       window:(document.getElementById('tsel')||{}).value||'0',
       showBands:bandsCb.checked!==false,
       showBookmarks:bmCb.checked!==false,
+      showAntSw:antswCb.checked!==false,
       squishHeight:squishCb.checked===true,
       squishHeightPx:(document.getElementById('squish-height-sel')||{}).value||'600'
     };
@@ -1422,7 +1425,7 @@ function clampZoom(rect){
     if(tsel)tsel.value=prefs.window;
   }
 
-  /* Apply saved bands/bookmarks checkbox states */
+  /* Apply saved bands/bookmarks/antennas checkbox states */
   if(prefs.showBands===false){
     var bandsCb=document.getElementById('show-bands-cb');
     if(bandsCb)bandsCb.checked=false;
@@ -1430,6 +1433,10 @@ function clampZoom(rect){
   if(prefs.showBookmarks===false){
     var bmCb=document.getElementById('show-bookmarks-cb');
     if(bmCb)bmCb.checked=false;
+  }
+  if(prefs.showAntSw===false){
+    var antswCb=document.getElementById('show-antsw-cb');
+    if(antswCb)antswCb.checked=false;
   }
   /* Apply saved fixed-height state; if no saved pref the checkbox is checked
      by default (HTML attribute), so always call onSquishHeightChange() to
@@ -2900,6 +2907,13 @@ function sgActiveAntenna(rowUnix){
 function sgDrawAntSwitchOverlay(){
   var canvas=document.getElementById('ant-switch-canvas');
   if(!canvas||!meta||meta.row_count===0)return;
+  /* Respect the "Antennas" checkbox — clear and bail if unchecked */
+  var _antswCb=document.getElementById('show-antsw-cb');
+  if(_antswCb&&!_antswCb.checked){
+    var _ctx=canvas.getContext('2d');
+    _ctx.clearRect(0,0,canvas.width||1,canvas.height||1);
+    return;
+  }
 
   /* Size canvas to its CSS pixel dimensions */
   var or=canvas.getBoundingClientRect();
@@ -3008,6 +3022,9 @@ function sgDrawAntSwitchOverlay(){
               };
             });
             sgAntSwitchEvents.sort(function(a,b){return a.unix-b.unix;});
+            /* Show the Antennas checkbox now that we have data */
+            var _antswLbl=document.getElementById('show-antsw-label');
+            if(_antswLbl)_antswLbl.style.display='flex';
             sgDrawAntSwitchOverlay();
           }
         });
@@ -4275,7 +4292,8 @@ function sgDrawScrubber() {
   }
 
   /* Antenna switch event markers — vertical lines coloured by antenna index */
-  if (sgAntSwitchEvents.length > 0 && meta && meta.rows && meta.rows.length > 0) {
+  var _scrubAntswCb = document.getElementById('show-antsw-cb');
+  if (sgAntSwitchEvents.length > 0 && (!_scrubAntswCb || _scrubAntswCb.checked) && meta && meta.rows && meta.rows.length > 0) {
     var _scrubRow0Unix = meta.rows[0].unix || 0;
     var _scrubRowSec = meta.row_interval_seconds || 60;
     var _scrubTotalSec = meta.row_count * _scrubRowSec;
@@ -4689,7 +4707,8 @@ render = function() {
 
     // ── Antenna switch event markers ─────────────────────────────────────────
     // Vertical dashed lines at each switch event, coloured by antenna index
-    if (sgAntSwitchEvents.length > 0 && firstUnix > 0) {
+    var _actAntswCb = document.getElementById('show-antsw-cb');
+    if (sgAntSwitchEvents.length > 0 && (!_actAntswCb || _actAntswCb.checked) && firstUnix > 0) {
       ctx.save();
       ctx.lineWidth = 1.5;
       ctx.font = 'bold 9px -apple-system,BlinkMacSystemFont,sans-serif';

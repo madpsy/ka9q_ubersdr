@@ -740,7 +740,7 @@ if [ -f "$INSTALLED_MARKER" ]; then
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
 
-    if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
+    if sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
         # Pull succeeded - proceed with restart
         echo "Pull successful. Restarting containers with new images..."
 
@@ -751,7 +751,7 @@ if [ -f "$INSTALLED_MARKER" ]; then
         DOWN_SUCCESS=0
         for attempt in 1 2 3; do
             echo "Stop attempt $attempt of 3..."
-            sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down
+            sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down
             DOWN_EXIT=$?
             if [ $DOWN_EXIT -eq 0 ]; then
                 DOWN_SUCCESS=1
@@ -777,7 +777,7 @@ if [ -f "$INSTALLED_MARKER" ]; then
         UP_SUCCESS=0
         for attempt in 1 2 3; do
             echo "Start attempt $attempt of 3..."
-            sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml up -d
+            sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml up -d
             UP_EXIT=$?
             if [ $UP_EXIT -eq 0 ]; then
                 UP_SUCCESS=1
@@ -811,11 +811,11 @@ else
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
 
-    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull
+    sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull
 
     # Clean up any existing containers and network (allow failures)
     echo "Stopping any existing containers..."
-    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
+    sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
 
     echo "Pruning dangling Docker images..."
     sudo docker image prune -f || true
@@ -823,15 +823,15 @@ else
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."
     export ADMIN_PASSWORD="$password"
-    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
+    sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
     
     # Verify containers started successfully before creating marker
     echo "Verifying container startup..."
     sleep 5  # Give containers time to initialize
     
     # Check if all required containers are running
-    if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q-radio" && \
-       sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q_ubersdr"; then
+    if sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q-radio" && \
+       sudo -E USER="$ACTUAL_USER" GOTTY_USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q_ubersdr"; then
         echo "Containers started successfully."
         
         # Wait for ubersdr to become healthy (up to 60 seconds)

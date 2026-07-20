@@ -306,7 +306,7 @@ services:
       - ${HOME}/.ssh/ubersdr_gotty_key.pub:/root/.ssh/id_rsa.pub:ro
 
     environment:
-      - USER=${USER}
+      - USER=${GOTTY_USER:-${USER}}   # GOTTY_USER set by install-hub.sh; USER as fallback for manual use
       - REMOTE_HOST=${HOSTNAME}
       - TZ=${TZ:-UTC}
 

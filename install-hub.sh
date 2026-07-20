@@ -3,6 +3,13 @@
 # Exit on error
 set -e
 
+# Prevent running with sudo (breaks $HOME detection); native root is allowed
+if [ -n "$SUDO_USER" ]; then
+    echo "Error: Do not run this script with sudo. Run it directly as your user:" >&2
+    echo "  bash install-hub.sh" >&2
+    exit 1
+fi
+
 # Determine the actual user (works in both interactive and cron contexts)
 if [ -n "$SUDO_USER" ]; then
     # Script was called with sudo

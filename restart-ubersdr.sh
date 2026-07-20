@@ -1,6 +1,14 @@
 #!/bin/bash
 
 # Script to restart UberSDR Docker containers
+
+# Prevent running with sudo (breaks $HOME detection); native root is allowed
+if [ -n "$SUDO_USER" ]; then
+    echo "Error: Do not run this script with sudo. Run it directly as your user:" >&2
+    echo "  bash restart-ubersdr.sh" >&2
+    exit 1
+fi
+
 UBERSDR_DIR="$HOME/ubersdr"
 
 echo "Restarting UberSDR..."

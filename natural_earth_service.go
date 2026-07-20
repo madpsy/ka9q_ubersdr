@@ -6,7 +6,9 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
@@ -53,11 +55,19 @@ func (c *NaturalEarthCountry) resolvedISO3() string {
 	return c.ADM0A3
 }
 
+// locatorCacheMaxSize is the maximum number of locator→country results to cache.
+// At ~200 bytes per entry, 10,000 entries ≈ 2 MB.  This covers all ~10,000
+// land-based 4-char Maidenhead squares globally, plus a generous allowance for
+// 6-char locators reported by WSPR stations.
+const locatorCacheMaxSize = 10_000
+
 // NaturalEarthService loads and queries the Natural Earth country boundary dataset.
 type NaturalEarthService struct {
-	countries []*NaturalEarthCountry
-	mu        sync.RWMutex
-	loaded    bool
+	countries     []*NaturalEarthCountry
+	mu            sync.RWMutex
+	loaded        bool
+	locatorCache  sync.Map     // map[string]*MaidenheadCountryResult — never evicted, boundaries don't change
+	locatorCacheN atomic.Int64 // current number of cached entries
 }
 
 var globalNaturalEarth *NaturalEarthService
@@ -164,9 +174,18 @@ type MaidenheadCountryResult struct {
 // LookupMaidenhead converts a Maidenhead grid locator to a country.
 // It uses the full grid square polygon (not just the centre point) to handle
 // squares that straddle borders or whose centre falls in water.
+// Results are cached indefinitely — country boundaries don't change at runtime.
 func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCountryResult, error) {
 	if !svc.loaded {
 		return nil, fmt.Errorf("natural earth service not loaded")
+	}
+
+	// Normalise to uppercase for consistent cache keys
+	cacheKey := strings.ToUpper(locator)
+
+	// Check cache first — avoids the expensive grid-sampling computation on repeat lookups
+	if v, ok := svc.locatorCache.Load(cacheKey); ok {
+		return v.(*MaidenheadCountryResult), nil
 	}
 
 	minLat, minLon, maxLat, maxLon, err := maidenheadToBBox(locator)
@@ -222,7 +241,9 @@ func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCou
 			method = "largest_overlap"
 		}
 
-		return buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, best.country, method), nil
+		result := buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, best.country, method)
+		svc.cacheLocator(cacheKey, result)
+		return result, nil
 	}
 
 	// Pass 2: no intersection — grid square is entirely in open ocean or unclaimed territory.
@@ -240,10 +261,22 @@ func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCou
 	}
 
 	if nearest != nil {
-		return buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, nearest, "nearest_land"), nil
+		result := buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, nearest, "nearest_land")
+		svc.cacheLocator(cacheKey, result)
+		return result, nil
 	}
 
 	return nil, fmt.Errorf("no country found for locator %s", locator)
+}
+
+// cacheLocator stores a result in the locator cache if the cache is not full.
+func (svc *NaturalEarthService) cacheLocator(key string, result *MaidenheadCountryResult) {
+	if svc.locatorCacheN.Load() >= locatorCacheMaxSize {
+		return // cache full — skip storing (existing entries remain valid)
+	}
+	if _, loaded := svc.locatorCache.LoadOrStore(key, result); !loaded {
+		svc.locatorCacheN.Add(1)
+	}
 }
 
 // LookupLatLon resolves a latitude/longitude coordinate pair to a country.

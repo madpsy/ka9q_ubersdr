@@ -3390,6 +3390,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         <label style="font-size: 12px; color: #555; white-space: nowrap;">🔍 Filter:</label>
                         <input id="wsprRankSearch" type="text" placeholder="callsign…" oninput="wsprRankSearchChanged()"
                             style="padding: 4px 8px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; width: 160px; outline: none;">
+                        <select id="wsprRankContinentFilter" onchange="wsprRankContinentChanged()"
+                            style="padding: 4px 8px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; outline: none; color: #333; background: #fff;">
+                            <option value="">🌍 All continents</option>
+                            <option value="AF">Africa</option>
+                            <option value="AN">Antarctica</option>
+                            <option value="AS">Asia</option>
+                            <option value="EU">Europe</option>
+                            <option value="NA">North America</option>
+                            <option value="OC">Oceania</option>
+                            <option value="SA">South America</option>
+                        </select>
+                        <select id="wsprRankCountryFilter" onchange="wsprRankCountryChanged()"
+                            style="padding: 4px 8px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; outline: none; color: #333; background: #fff; max-width: 180px;">
+                            <option value="">🏳 All countries</option>
+                        </select>
                         <button onclick="clearWSPRRankSelection();"
                             style="padding:3px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px;cursor:pointer;background:#f5f5f5;color:#555;">✕ Clear</button>
                         <span id="wsprRankSelectionBadge" style="display:none;padding:3px 10px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:12px;font-size:11px;color:#283593;font-weight:600;"></span>

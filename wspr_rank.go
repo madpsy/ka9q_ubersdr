@@ -122,6 +122,9 @@ var wsprBandOrder = []struct {
 // WSPRRankTableRow is one row in the formatted leaderboard table.
 // BandUniques maps band name → unique count for that band.
 // Versions mirrors WSPRRankRow.Versions — all distinct client version strings.
+// Country, CountryCode and Continent are populated at response time via a CTY
+// lookup on the raw Reporter callsign (no normalisation — the CTY prefix walk
+// handles portable prefixes like EA8/DF4UE → Canary Islands correctly).
 type WSPRRankTableRow struct {
 	Rank        int               `json:"rank"`
 	Reporter    string            `json:"reporter"`
@@ -131,6 +134,10 @@ type WSPRRankTableRow struct {
 	Unique      uint64            `json:"unique"`
 	BandUniques map[string]uint64 `json:"band_uniques"`
 	Versions    []string          `json:"versions,omitempty"`
+	// CTY-derived fields — omitted when globalCTY is nil or lookup fails.
+	Country     string `json:"country,omitempty"`
+	CountryCode string `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
+	Continent   string `json:"continent,omitempty"`
 }
 
 // WSPRRankTable is the formatted leaderboard for one time window.
@@ -152,6 +159,35 @@ type WSPRRankTableResponse struct {
 	Rolling24h  WSPRRankTable `json:"rolling_24h"`
 	Yesterday   WSPRRankTable `json:"yesterday"`
 	Today       WSPRRankTable `json:"today"`
+}
+
+// enrichWSPRRankTableWithCTY performs a CTY lookup for every row in t and
+// fills Country, CountryCode and Continent in-place.
+//
+// The raw Reporter callsign is passed directly to LookupCallsignFull without
+// normalisation: the CTY prefix walk shortens the string until it finds a
+// match, so portable/guest callsigns like "EA8/DF4UE" correctly resolve to
+// the country of operation (Canary Islands) rather than the home country
+// (Germany).  NormaliseCallsign must NOT be used here — it is designed for
+// QRZ lookups (find the licensee) and would strip the guest prefix.
+//
+// Failed lookups (nil result or globalCTY == nil) leave the fields empty;
+// the omitempty JSON tags ensure they are absent from the response rather
+// than appearing as empty strings.
+func enrichWSPRRankTableWithCTY(t *WSPRRankTable) {
+	if globalCTY == nil || t == nil {
+		return
+	}
+	for i := range t.Rows {
+		info := globalCTY.LookupCallsignFull(t.Rows[i].Reporter)
+		if info == nil {
+			// No match in CTY database — leave fields empty (omitempty hides them).
+			continue
+		}
+		t.Rows[i].Country = info.Country
+		t.Rows[i].CountryCode = info.CountryCode
+		t.Rows[i].Continent = info.Continent
+	}
 }
 
 // formatWSPRRankWindow converts a raw WSPRRankWindow into a WSPRRankTable.
@@ -807,21 +843,37 @@ func (ah *AdminHandler) HandleWSPRRank(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the requested window(s) in the requested format.
+	// For table format, each window is CTY-enriched after formatting so that
+	// every row carries country name, ISO country code and continent.
+	// enrichWSPRRankTableWithCTY is a no-op when globalCTY is nil or a row
+	// has no CTY match — failed lookups simply leave the fields empty.
 	var payload interface{}
 	if format == "table" {
 		switch window {
 		case "rolling_24h":
-			payload = formatWSPRRankWindow(applyCallsign(resp.Rolling24h))
+			tbl := formatWSPRRankWindow(applyCallsign(resp.Rolling24h))
+			enrichWSPRRankTableWithCTY(&tbl)
+			payload = tbl
 		case "yesterday":
-			payload = formatWSPRRankWindow(applyCallsign(resp.Yesterday))
+			tbl := formatWSPRRankWindow(applyCallsign(resp.Yesterday))
+			enrichWSPRRankTableWithCTY(&tbl)
+			payload = tbl
 		case "today":
-			payload = formatWSPRRankWindow(applyCallsign(resp.Today))
+			tbl := formatWSPRRankWindow(applyCallsign(resp.Today))
+			enrichWSPRRankTableWithCTY(&tbl)
+			payload = tbl
 		default: // "all"
+			r24 := formatWSPRRankWindow(applyCallsign(resp.Rolling24h))
+			enrichWSPRRankTableWithCTY(&r24)
+			yest := formatWSPRRankWindow(applyCallsign(resp.Yesterday))
+			enrichWSPRRankTableWithCTY(&yest)
+			tod := formatWSPRRankWindow(applyCallsign(resp.Today))
+			enrichWSPRRankTableWithCTY(&tod)
 			payload = WSPRRankTableResponse{
 				GeneratedAt: resp.GeneratedAt,
-				Rolling24h:  formatWSPRRankWindow(applyCallsign(resp.Rolling24h)),
-				Yesterday:   formatWSPRRankWindow(applyCallsign(resp.Yesterday)),
-				Today:       formatWSPRRankWindow(applyCallsign(resp.Today)),
+				Rolling24h:  r24,
+				Yesterday:   yest,
+				Today:       tod,
 			}
 		}
 	} else {

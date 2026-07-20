@@ -124,6 +124,9 @@ COPY --from=builder /build/config/custom-links.json.example /etc/ka9q_ubersdr/cu
 # Copy CTY directory with cty.dat file
 COPY --from=builder /build/cty /etc/ka9q_ubersdr/cty
 
+# Copy Natural Earth country boundary dataset for Maidenhead → country lookup
+COPY --from=builder /build/natural_earth /etc/ka9q_ubersdr/natural_earth
+
 # Copy GeoIP databases (licence.txt is excluded via .dockerignore)
 COPY --from=builder /build/geoip ./geoip
 

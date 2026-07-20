@@ -180,6 +180,19 @@ initialize_configs() {
             echo "✓ cty_iso2_map.json synced from image"
         fi
     fi
+
+    # Always sync Natural Earth country boundary dataset from image.
+    # This is a static read-only dataset (not user-editable) so we always
+    # overwrite from the image to pick up updates on container restart.
+    if [ -d "/etc/ka9q_ubersdr/natural_earth" ]; then
+        mkdir -p /app/config/natural_earth
+        for f in /etc/ka9q_ubersdr/natural_earth/*.geojson; do
+            [ -f "$f" ] || continue
+            fname=$(basename "$f")
+            cp "$f" "/app/config/natural_earth/$fname"
+        done
+        echo "✓ Natural Earth dataset synced from image"
+    fi
 }
 
 # Function to update admin password in config.yaml

@@ -1111,3 +1111,55 @@ func (l *SSEIPLimiter) Count(ip string) int {
 	defer l.mu.Unlock()
 	return l.counts[ip]
 }
+
+// MaidenheadRateLimiter manages per-IP rate limiters for the /api/maidenhead/country endpoint.
+// Fixed at 1 request per second per IP with a burst of 1.
+type MaidenheadRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewMaidenheadRateLimiter creates a new Maidenhead endpoint rate limiter.
+func NewMaidenheadRateLimiter() *MaidenheadRateLimiter {
+	return &MaidenheadRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest returns true if the given IP is within the rate limit (1 req/sec).
+func (mrl *MaidenheadRateLimiter) AllowRequest(ip string) bool {
+	mrl.mu.Lock()
+	limiter, exists := mrl.limiters[ip]
+	if !exists {
+		limiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: 1.0, // 1 request per second
+			lastRefill: time.Now(),
+		}
+		mrl.limiters[ip] = limiter
+	}
+	mrl.mu.Unlock()
+	return limiter.Allow()
+}
+
+// Cleanup removes stale per-IP limiters that have not been used in the last 10 minutes.
+func (mrl *MaidenheadRateLimiter) Cleanup() {
+	mrl.mu.Lock()
+	defer mrl.mu.Unlock()
+	now := time.Now()
+	for ip, limiter := range mrl.limiters {
+		limiter.mu.Lock()
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(mrl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the number of currently tracked IPs.
+func (mrl *MaidenheadRateLimiter) GetStats() int {
+	mrl.mu.RLock()
+	defer mrl.mu.RUnlock()
+	return len(mrl.limiters)
+}

@@ -566,6 +566,17 @@ func main() {
 		log.Printf("CTY.DAT database loaded successfully")
 	}
 
+	// Initialize Natural Earth country boundary dataset for Maidenhead → country lookup.
+	// The 1:10m GeoJSON file (~13MB) is shipped alongside the binary in the natural_earth/ directory.
+	naturalEarthPath := "natural_earth/ne_10m_admin_0_countries.geojson"
+	if *configDir != "." {
+		naturalEarthPath = *configDir + "/natural_earth/ne_10m_admin_0_countries.geojson"
+	}
+	if err := InitNaturalEarthService(naturalEarthPath); err != nil {
+		log.Printf("Warning: Failed to load Natural Earth dataset: %v", err)
+		log.Printf("Maidenhead → country lookup (/api/maidenhead/country) will be unavailable")
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -1960,6 +1971,7 @@ func main() {
 			summaryRateLimiter.Cleanup()
 			sessionStatsRateLimiter.Cleanup()
 			rmNoiseRateLimiter.Cleanup()
+			maidenheadRateLimiter.Cleanup()
 			// Cleanup SSH proxy rate limiter if enabled
 			if sshProxy != nil && sshProxy.rateLimiter != nil {
 				sshProxy.rateLimiter.Cleanup()
@@ -2537,6 +2549,10 @@ func main() {
 	http.HandleFunc("/api/rmnoise/credentials", func(w http.ResponseWriter, r *http.Request) {
 		handleRMNoiseCredentials(w, r, rmNoiseRateLimiter)
 	})
+
+	// Maidenhead grid locator → country lookup (public, rate limited to 1 req/sec per IP)
+	http.HandleFunc("/api/maidenhead/country", handleMaidenheadCountry)
+	log.Printf("Maidenhead country lookup enabled at /api/maidenhead/country (1 req/sec per IP)")
 
 	// SunCalc endpoint (sun/moon position and times)
 	http.HandleFunc("/api/suncalc", func(w http.ResponseWriter, r *http.Request) {

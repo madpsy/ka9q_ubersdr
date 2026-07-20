@@ -591,13 +591,64 @@
         return _leafletPromise;
     }
 
+    // Half-size (degrees) of a Maidenhead cell, keyed by locator length.  The API
+    // returns the cell *centre*, so every receiver sharing a grid square lands on
+    // exactly the same pixel — a 6-char grid is ~5 km wide and routinely holds
+    // several reporters.
+    const GRID_HALF = {
+        4: [0.5,     1.0    ], // [lat, lon] — 1° × 2° cell
+        6: [1 / 48,  1 / 24 ], // 2.5' × 5'
+        8: [1 / 480, 1 / 240], // 0.25' × 0.5'
+    };
+
+    // Displaces co-located receivers onto a golden-angle spiral inside their own
+    // grid square, so zooming in separates them instead of stacking one marker on
+    // top of the others.  The spread is deterministic (index within the sorted
+    // group), so markers don't jump around between re-renders, and it is bounded
+    // by the cell size, so a marker never leaves the square it belongs to.
+    // Returns [{ row, lat, lon, shareCount }].
+    function _spreadColocated(rows) {
+        const groups = new Map(); // "lat,lon" → rows sharing that point
+        rows.forEach(r => {
+            const key = r.lat.toFixed(5) + ',' + r.lon.toFixed(5);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(r);
+        });
+
+        const out = [];
+        groups.forEach(group => {
+            if (group.length === 1) {
+                const r = group[0];
+                out.push({ row: r, lat: r.lat, lon: r.lon, shareCount: 1 });
+                return;
+            }
+            // Stable ordering within the group regardless of the current sort.
+            const ordered = [...group].sort((a, b) => a.reporter.localeCompare(b.reporter));
+            const half = GRID_HALF[(ordered[0].locator || '').length] || GRID_HALF[6];
+            const n = ordered.length;
+            ordered.forEach((r, i) => {
+                // Golden-angle spiral: i = 0 stays dead centre, the rest fan out
+                // evenly to 80% of the cell half-width.
+                const angle = i * 2.39996323;
+                const frac  = n > 1 ? Math.sqrt(i / (n - 1)) * 0.8 : 0;
+                out.push({
+                    row: r,
+                    lat: r.lat + half[0] * frac * Math.sin(angle),
+                    lon: r.lon + half[1] * frac * Math.cos(angle),
+                    shareCount: n,
+                });
+            });
+        });
+        return out;
+    }
+
     function _flagEmoji(code) {
         if (!code || code.length !== 2) return '';
         return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
     }
 
     // Popup body — mirrors every column the table shows for this receiver.
-    function _mapPopupHTML(row) {
+    function _mapPopupHTML(row, shareCount) {
         const bands = _visibleBands;
         const bu    = row.band_uniques || {};
         const continentName = row.continent ? (CONTINENT_NAMES[row.continent] || row.continent) : '';
@@ -627,6 +678,8 @@
                 ${(row.lat != null && row.lon != null) ? ' · ' + row.lat.toFixed(3) + ', ' + row.lon.toFixed(3) : ''}
             </div>
             ${row.country ? `<div style="margin-bottom:6px;color:#444;">${_esc(row.country)}${continentName ? ', ' + _esc(continentName) : ''}</div>` : ''}
+            ${shareCount > 1 ? `<div style="margin-bottom:6px;color:#888;font-style:italic;">
+                ${shareCount} receivers share this grid — markers spread within the square</div>` : ''}
             <table style="border-collapse:collapse;width:100%;margin-bottom:6px;">
                 ${line('#Raw',    (row.raw    || 0).toLocaleString())}
                 ${line('#Dupes',  (row.dupes  || 0).toLocaleString())}
@@ -665,15 +718,16 @@
         _map.invalidateSize();
         _markerLayer.clearLayers();
 
-        const rows = _visibleRows.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+        const rows   = _visibleRows.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+        const placed = _spreadColocated(rows);
         const bounds = [];
 
-        rows.forEach(row => {
+        placed.forEach(({ row, lat, lon, shareCount }) => {
             const isOwn      = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
             const isSelected = _selectedCallsigns.has(row.reporter);
             const colour = isSelected ? '#1976d2' : (isOwn ? '#f9a825' : '#3f51b5');
 
-            const marker = L.circleMarker([row.lat, row.lon], {
+            const marker = L.circleMarker([lat, lon], {
                 radius:      (isSelected || isOwn) ? 7 : 5,
                 color:       '#ffffff',
                 weight:      1,
@@ -681,7 +735,7 @@
                 fillOpacity: 0.9,
             });
 
-            marker.bindPopup(_mapPopupHTML(row), { maxWidth: 320 });
+            marker.bindPopup(_mapPopupHTML(row, shareCount), { maxWidth: 320 });
             if (_showMapLabels) {
                 const cls = 'wspr-rank-tip' +
                     (isSelected ? ' wspr-rank-tip-sel' : (isOwn ? ' wspr-rank-tip-own' : ''));
@@ -693,7 +747,7 @@
             marker.on('mouseover', () => { if (!marker.isPopupOpen()) marker.openPopup(); });
 
             marker.addTo(_markerLayer);
-            bounds.push([row.lat, row.lon]);
+            bounds.push([lat, lon]);
         });
 
         // Refit only when the marker set actually changes, so panning/zooming

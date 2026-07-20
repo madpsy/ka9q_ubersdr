@@ -120,24 +120,45 @@ func propString(props geojson.Properties, key string) string {
 	}
 }
 
+// continentCodeMap maps Natural Earth CONTINENT field values (full names) to
+// the 2-letter ham-radio / CTY continent codes used throughout the codebase
+// and expected by the WSPR rank frontend filter.
+var continentCodeMap = map[string]string{
+	"Europe":                  "EU",
+	"Asia":                    "AS",
+	"Africa":                  "AF",
+	"Oceania":                 "OC",
+	"North America":           "NA",
+	"South America":           "SA",
+	"Antarctica":              "AN",
+	"Seven seas (open ocean)": "",
+}
+
+// continentCode returns the 2-letter code for a Natural Earth continent name,
+// or an empty string if the name is not recognised.
+func continentCode(name string) string {
+	return continentCodeMap[name]
+}
+
 // MaidenheadCountryResult is the result of a Maidenhead → country lookup.
 type MaidenheadCountryResult struct {
-	Locator     string  `json:"locator"`
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
-	MinLat      float64 `json:"grid_min_lat"`
-	MinLon      float64 `json:"grid_min_lon"`
-	MaxLat      float64 `json:"grid_max_lat"`
-	MaxLon      float64 `json:"grid_max_lon"`
-	Country     string  `json:"country"`
-	CountryLong string  `json:"country_long"`
-	ISOA2       string  `json:"iso_a2"`
-	ISOA3       string  `json:"iso_a3"`
-	Continent   string  `json:"continent"`
-	Region      string  `json:"region"`
-	Subregion   string  `json:"subregion"`
-	Sovereign   string  `json:"sovereign"`
-	Method      string  `json:"method"` // "intersection", "largest_overlap", or "nearest_land"
+	Locator       string  `json:"locator"`
+	Lat           float64 `json:"lat"`
+	Lon           float64 `json:"lon"`
+	MinLat        float64 `json:"grid_min_lat"`
+	MinLon        float64 `json:"grid_min_lon"`
+	MaxLat        float64 `json:"grid_max_lat"`
+	MaxLon        float64 `json:"grid_max_lon"`
+	Country       string  `json:"country"`
+	CountryLong   string  `json:"country_long"`
+	ISOA2         string  `json:"iso_a2"`
+	ISOA3         string  `json:"iso_a3"`
+	Continent     string  `json:"continent"`      // full name, e.g. "Europe"
+	ContinentCode string  `json:"continent_code"` // 2-letter code, e.g. "EU"
+	Region        string  `json:"region"`
+	Subregion     string  `json:"subregion"`
+	Sovereign     string  `json:"sovereign"`
+	Method        string  `json:"method"` // "intersection", "largest_overlap", "point_in_polygon", or "nearest_land"
 }
 
 // LookupMaidenhead converts a Maidenhead grid locator to a country.
@@ -275,22 +296,23 @@ func (svc *NaturalEarthService) LookupLatLon(lat, lon float64) (*MaidenheadCount
 // buildResult constructs a MaidenheadCountryResult from a matched country.
 func buildResult(locator string, centreLat, centreLon, minLat, minLon, maxLat, maxLon float64, c *NaturalEarthCountry, method string) *MaidenheadCountryResult {
 	return &MaidenheadCountryResult{
-		Locator:     locator,
-		Lat:         centreLat,
-		Lon:         centreLon,
-		MinLat:      minLat,
-		MinLon:      minLon,
-		MaxLat:      maxLat,
-		MaxLon:      maxLon,
-		Country:     c.Name,
-		CountryLong: c.NameLong,
-		ISOA2:       c.resolvedISO2(),
-		ISOA3:       c.resolvedISO3(),
-		Continent:   c.Continent,
-		Region:      c.Region,
-		Subregion:   c.Subregion,
-		Sovereign:   c.Sovereign,
-		Method:      method,
+		Locator:       locator,
+		Lat:           centreLat,
+		Lon:           centreLon,
+		MinLat:        minLat,
+		MinLon:        minLon,
+		MaxLat:        maxLat,
+		MaxLon:        maxLon,
+		Country:       c.Name,
+		CountryLong:   c.NameLong,
+		ISOA2:         c.resolvedISO2(),
+		ISOA3:         c.resolvedISO3(),
+		Continent:     c.Continent,
+		ContinentCode: continentCode(c.Continent),
+		Region:        c.Region,
+		Subregion:     c.Subregion,
+		Sovereign:     c.Sovereign,
+		Method:        method,
 	}
 }
 

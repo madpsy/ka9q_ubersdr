@@ -161,27 +161,45 @@ type WSPRRankTableResponse struct {
 	Today       WSPRRankTable `json:"today"`
 }
 
-// enrichWSPRRankTableWithCTY performs a CTY lookup for every row in t and
-// fills Country, CountryCode and Continent in-place.
+// enrichWSPRRankTableWithCTY fills Country, CountryCode and Continent for
+// every row in t.
 //
-// The raw Reporter callsign is passed directly to LookupCallsignFull without
-// normalisation: the CTY prefix walk shortens the string until it finds a
-// match, so portable/guest callsigns like "EA8/DF4UE" correctly resolve to
-// the country of operation (Canary Islands) rather than the home country
-// (Germany).  NormaliseCallsign must NOT be used here — it is designed for
-// QRZ lookups (find the licensee) and would strip the guest prefix.
+// Strategy (in priority order):
+//  1. If the Natural Earth service is loaded and the row has a non-empty
+//     Maidenhead locator, use GetCountryForMaidenhead — this resolves to the
+//     country where the antenna physically is, which is more accurate than
+//     callsign-prefix matching for portable/guest operations.
+//     ContinentCode ("EU", "NA", …) is used for Continent so the frontend
+//     continent filter continues to work without any changes.
+//  2. Fall back to CTY callsign prefix lookup (original behaviour) when the
+//     Natural Earth service is unavailable or the locator is empty/invalid.
 //
-// Failed lookups (nil result or globalCTY == nil) leave the fields empty;
-// the omitempty JSON tags ensure they are absent from the response rather
-// than appearing as empty strings.
+// Failed lookups leave the fields empty; the omitempty JSON tags ensure they
+// are absent from the response rather than appearing as empty strings.
 func enrichWSPRRankTableWithCTY(t *WSPRRankTable) {
-	if globalCTY == nil || t == nil {
+	if t == nil {
 		return
 	}
 	for i := range t.Rows {
+		locator := t.Rows[i].Locator
+
+		// Pass 1: Natural Earth locator lookup (preferred — resolves by antenna location)
+		if NaturalEarthEnabled() && locator != "" {
+			result, err := GetCountryForMaidenhead(locator)
+			if err == nil && result != nil {
+				t.Rows[i].Country = result.Country
+				t.Rows[i].CountryCode = result.ISOA2
+				t.Rows[i].Continent = result.ContinentCode // "EU", "NA", etc.
+				continue
+			}
+		}
+
+		// Pass 2: CTY callsign prefix lookup (fallback)
+		if globalCTY == nil {
+			continue
+		}
 		info := globalCTY.LookupCallsignFull(t.Rows[i].Reporter)
 		if info == nil {
-			// No match in CTY database — leave fields empty (omitempty hides them).
 			continue
 		}
 		t.Rows[i].Country = info.Country

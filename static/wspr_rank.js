@@ -37,6 +37,14 @@
     let _continentFilter    = '';          // two-letter continent code, or '' for all
     let _countryFilter      = '';          // country name string, or '' for all
     let _selectedCallsigns  = new Set();   // row-click selection
+    let _viewMode           = 'table';     // 'table' | 'map'
+    let _visibleRows        = [];          // rows surviving sort+filter, shared by both views
+    let _visibleBands       = [];          // band column order for the current dataset
+    let _showMapLabels      = true;        // permanent marker tooltips on/off
+    let _leafletPromise     = null;        // lazy Leaflet loader
+    let _map                = null;        // L.Map instance (created on first map view)
+    let _markerLayer        = null;        // L.LayerGroup holding the receiver markers
+    let _lastFitKey         = '';          // marker-set signature; refit bounds when it changes
 
     // ── Constants ────────────────────────────────────────────────────────────
     const WINDOW_LABELS = {
@@ -84,6 +92,7 @@
         _countryFilter = '';
 
         modal.style.display = 'flex';
+        switchView(_viewMode);        // syncs tab styles + shows the right pane
         switchWindow(_currentWindow); // also syncs button highlight styles
     }
 
@@ -315,6 +324,9 @@
         if (rows.length === 0) {
             _setTableContent('<tr><td colspan="99" style="text-align:center;padding:20px;color:#888;">No data for this window.</td></tr>');
             _renderHeaders(bands);
+            _visibleRows  = [];
+            _visibleBands = bands;
+            _renderMap();
             return;
         }
 
@@ -367,6 +379,11 @@
         if (_countryFilter) {
             visible = visible.filter(r => (r.country || '') === _countryFilter);
         }
+
+        // Share the filtered result with the map view so both tabs show the
+        // same set of receivers under the same filters.
+        _visibleRows  = visible;
+        _visibleBands = bands;
 
         // Populate the country dropdown from rows that pass the continent filter
         // (but not the country filter itself, so all countries remain selectable).
@@ -471,6 +488,7 @@
 
         _renderHeaders(bands);
         _setTableContent(totalsRow + dataRows + noMatch);
+        _renderMap();
     }
 
     function _renderHeaders(bands) {
@@ -506,6 +524,185 @@
                 if (_lastData) _renderTable(_lastData);
             });
         });
+    }
+
+    // ── Map view ─────────────────────────────────────────────────────────────
+    // The map shows exactly the rows the table would show (same sort + filters),
+    // positioned from the lat/lon the API derives from each reporter's locator.
+
+    function switchView(mode) {
+        if (mode !== 'table' && mode !== 'map') return;
+        _viewMode = mode;
+
+        const tableBtn = document.getElementById('wsprRankViewBtn_table');
+        const mapBtn   = document.getElementById('wsprRankViewBtn_map');
+        [[tableBtn, 'table'], [mapBtn, 'map']].forEach(([btn, key]) => {
+            if (!btn) return;
+            const active = key === mode;
+            btn.style.background = active ? '#3f51b5' : '#e8eaf6';
+            btn.style.color      = active ? 'white'   : '#283593';
+            btn.style.fontWeight = active ? '600'     : '';
+        });
+
+        const tableView = document.getElementById('wsprRankTableView');
+        const mapView   = document.getElementById('wsprRankMapView');
+        if (tableView) tableView.style.display = (mode === 'table') ? ''     : 'none';
+        if (mapView)   mapView.style.display   = (mode === 'map')   ? 'flex' : 'none';
+        const labelsToggle = document.getElementById('wsprRankMapLabelsToggle');
+        if (labelsToggle) labelsToggle.style.display = (mode === 'map') ? 'flex' : 'none';
+
+        if (mode === 'map') {
+            _lastFitKey = ''; // refit whenever the map tab is entered
+            _renderMap();
+        }
+    }
+
+    function wsprRankMapLabelsChanged() {
+        const el = document.getElementById('wsprRankMapLabels');
+        _showMapLabels = el ? el.checked : true;
+        _renderMap();
+    }
+
+    // Loads leaflet.css + leaflet.js on demand — admin.html does not ship them.
+    function _ensureLeaflet() {
+        if (window.L) return Promise.resolve();
+        if (_leafletPromise) return _leafletPromise;
+        _leafletPromise = new Promise((resolve, reject) => {
+            const css = document.createElement('link');
+            css.rel  = 'stylesheet';
+            css.href = 'leaflet.css';
+            document.head.appendChild(css);
+
+            const style = document.createElement('style');
+            style.textContent =
+                '.wspr-rank-tip{background:rgba(255,255,255,0.88);border:1px solid #9fa8da;border-radius:3px;' +
+                'padding:1px 4px;font-size:11px;font-weight:600;color:#283593;box-shadow:none;white-space:nowrap;}' +
+                '.wspr-rank-tip::before{display:none;}' +
+                '.wspr-rank-tip-own{background:rgba(255,248,225,0.95);border-color:#f9a825;color:#e65100;}' +
+                '.wspr-rank-tip-sel{background:rgba(227,242,253,0.95);border-color:#1976d2;color:#0d47a1;}';
+            document.head.appendChild(style);
+
+            const s = document.createElement('script');
+            s.src     = 'leaflet.js';
+            s.onload  = () => resolve();
+            s.onerror = () => { _leafletPromise = null; reject(new Error('failed to load leaflet.js')); };
+            document.head.appendChild(s);
+        });
+        return _leafletPromise;
+    }
+
+    function _flagEmoji(code) {
+        if (!code || code.length !== 2) return '';
+        return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
+    }
+
+    // Popup body — mirrors every column the table shows for this receiver.
+    function _mapPopupHTML(row) {
+        const bands = _visibleBands;
+        const bu    = row.band_uniques || {};
+        const continentName = row.continent ? (CONTINENT_NAMES[row.continent] || row.continent) : '';
+        const isOwn      = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
+        const isSelected = _selectedCallsigns.has(row.reporter);
+        const isUberSDR  = row.versions && row.versions.some(v => v === 'UberSDR');
+
+        const bandCells = bands
+            .filter(b => (bu[b] || 0) > 0)
+            .map(b => `<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 5px;background:#e8eaf6;border:1px solid #c5cae9;border-radius:3px;">
+                    <b>${_esc(b)}</b> ${(bu[b] || 0).toLocaleString()}</span>`)
+            .join('');
+
+        const line = (label, value) =>
+            `<tr><td style="padding:1px 8px 1px 0;color:#666;white-space:nowrap;">${label}</td>
+                 <td style="padding:1px 0;text-align:right;font-weight:600;">${value}</td></tr>`;
+
+        const repEsc = _esc(row.reporter).replace(/'/g, '&#39;');
+        return `<div style="font-size:12px;min-width:210px;">
+            <div style="font-size:14px;font-weight:700;color:#283593;margin-bottom:2px;">
+                ${_flagEmoji(row.country_code)} ${_esc(row.reporter)}
+                ${isUberSDR ? '<img src="images/favicon-16x16.png" width="14" height="14" style="vertical-align:middle;" alt="UberSDR">' : ''}
+                ${isOwn ? ' ⭐' : ''}${isSelected ? ' 🔵' : ''}
+            </div>
+            <div style="color:#666;margin-bottom:6px;">
+                Rank #${row.rank} · ${_esc(row.locator)}
+                ${(row.lat != null && row.lon != null) ? ' · ' + row.lat.toFixed(3) + ', ' + row.lon.toFixed(3) : ''}
+            </div>
+            ${row.country ? `<div style="margin-bottom:6px;color:#444;">${_esc(row.country)}${continentName ? ', ' + _esc(continentName) : ''}</div>` : ''}
+            <table style="border-collapse:collapse;width:100%;margin-bottom:6px;">
+                ${line('#Raw',    (row.raw    || 0).toLocaleString())}
+                ${line('#Dupes',  (row.dupes  || 0).toLocaleString())}
+                ${line('#Unique', `<span style="color:#283593;">${(row.unique || 0).toLocaleString()}</span>`)}
+            </table>
+            ${bandCells ? `<div style="margin-bottom:6px;line-height:1.7;">${bandCells}</div>` : ''}
+            ${row.versions && row.versions.length ? `<div style="color:#666;margin-bottom:6px;">💻 ${_esc(row.versions.join(' / '))}</div>` : ''}
+            <button onclick="wsprRankRowClicked('${repEsc}')"
+                style="padding:3px 8px;border:1px solid #9fa8da;border-radius:4px;font-size:11px;cursor:pointer;background:#e8eaf6;color:#283593;">
+                ${isSelected ? '✕ Remove from comparison' : '🔵 Add to comparison'}</button>
+        </div>`;
+    }
+
+    async function _renderMap() {
+        if (_viewMode !== 'map') return;
+
+        const host = document.getElementById('wsprRankMap');
+        if (!host) return;
+
+        try {
+            await _ensureLeaflet();
+        } catch (e) {
+            host.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;">Map unavailable: ' + _esc(e.message) + '</div>';
+            return;
+        }
+        if (_viewMode !== 'map') return; // tab switched while Leaflet was loading
+
+        if (!_map) {
+            _map = L.map(host, { worldCopyJump: true, preferCanvas: true }).setView([25, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+            }).addTo(_map);
+            _markerLayer = L.layerGroup().addTo(_map);
+        }
+        _map.invalidateSize();
+        _markerLayer.clearLayers();
+
+        const rows = _visibleRows.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+        const bounds = [];
+
+        rows.forEach(row => {
+            const isOwn      = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
+            const isSelected = _selectedCallsigns.has(row.reporter);
+            const colour = isSelected ? '#1976d2' : (isOwn ? '#f9a825' : '#3f51b5');
+
+            const marker = L.circleMarker([row.lat, row.lon], {
+                radius:      (isSelected || isOwn) ? 7 : 5,
+                color:       '#ffffff',
+                weight:      1,
+                fillColor:   colour,
+                fillOpacity: 0.9,
+            });
+
+            marker.bindPopup(_mapPopupHTML(row), { maxWidth: 320 });
+            if (_showMapLabels) {
+                const cls = 'wspr-rank-tip' +
+                    (isSelected ? ' wspr-rank-tip-sel' : (isOwn ? ' wspr-rank-tip-own' : ''));
+                marker.bindTooltip(
+                    `${_flagEmoji(row.country_code)} ${_esc(row.reporter)} <span style="color:#777;font-weight:400;">#${row.rank}</span>`,
+                    { permanent: true, direction: 'right', offset: [6, 0], className: cls }
+                );
+            }
+            marker.on('mouseover', () => { if (!marker.isPopupOpen()) marker.openPopup(); });
+
+            marker.addTo(_markerLayer);
+            bounds.push([row.lat, row.lon]);
+        });
+
+        // Refit only when the marker set actually changes, so panning/zooming
+        // survives re-renders caused by selection toggles.
+        const fitKey = rows.map(r => r.reporter).join(',');
+        if (bounds.length > 0 && fitKey !== _lastFitKey) {
+            _map.fitBounds(bounds, { padding: [30, 30], maxZoom: 6 });
+        }
+        _lastFitKey = fitKey;
     }
 
     // ── DOM helpers ──────────────────────────────────────────────────────────
@@ -561,6 +758,8 @@
     window.wsprRankContinentChanged = wsprRankContinentChanged;
     window.wsprRankCountryChanged   = wsprRankCountryChanged;
     window.clearWSPRRankSelection   = clearWSPRRankSelection;
+    window.switchWSPRRankView       = switchView;
+    window.wsprRankMapLabelsChanged = wsprRankMapLabelsChanged;
     // Called from inline onclick on table rows
     window.wsprRankRowClicked       = _toggleCallsignSelection;
 

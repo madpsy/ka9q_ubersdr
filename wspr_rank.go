@@ -138,6 +138,9 @@ type WSPRRankTableRow struct {
 	Country     string `json:"country,omitempty"`
 	CountryCode string `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
 	Continent   string `json:"continent,omitempty"`
+	// Locator centre in decimal degrees — omitted when Locator is empty/invalid.
+	Lat *float64 `json:"lat,omitempty"`
+	Lon *float64 `json:"lon,omitempty"`
 }
 
 // WSPRRankTable is the formatted leaderboard for one time window.
@@ -182,6 +185,14 @@ func enrichWSPRRankTableWithCTY(t *WSPRRankTable) {
 	}
 	for i := range t.Rows {
 		locator := t.Rows[i].Locator
+
+		// Locator centre coordinates — independent of the country lookup below.
+		if locator != "" {
+			if lat, lon, err := MaidenheadToLatLon(locator); err == nil {
+				t.Rows[i].Lat = &lat
+				t.Rows[i].Lon = &lon
+			}
+		}
 
 		// Pass 1: Natural Earth locator lookup (preferred — resolves by antenna location)
 		if NaturalEarthEnabled() && locator != "" {

@@ -3410,14 +3410,29 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         <span id="wsprRankSelectionBadge" style="display:none;padding:3px 10px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:12px;font-size:11px;color:#283593;font-weight:600;"></span>
                         <span style="font-size:11px;color:#888;font-style:italic;">Click rows to compare callsigns</span>
                     </div>
+                    <!-- View tabs: Table / Map -->
+                    <div style="padding: 6px 16px; background: #f4f5fb; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; display: flex; align-items: center; gap: 6px;">
+                        <button id="wsprRankViewBtn_table" onclick="switchWSPRRankView('table')"
+                            style="padding:5px 14px;border:1px solid #9fa8da;border-radius:4px 4px 0 0;font-size:12px;cursor:pointer;background:#3f51b5;color:white;font-weight:600;">📋 Table</button>
+                        <button id="wsprRankViewBtn_map" onclick="switchWSPRRankView('map')"
+                            style="padding:5px 14px;border:1px solid #9fa8da;border-radius:4px 4px 0 0;font-size:12px;cursor:pointer;background:#e8eaf6;color:#283593;">🗺️ Map</button>
+                        <div style="flex:1;"></div>
+                        <label id="wsprRankMapLabelsToggle" style="display:none;align-items:center;gap:4px;font-size:11px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="wsprRankMapLabels" checked onchange="wsprRankMapLabelsChanged()"> Show callsign labels
+                        </label>
+                    </div>
                     <!-- Scrollable table -->
-                    <div style="flex: 1; overflow: auto;">
+                    <div id="wsprRankTableView" style="flex: 1; overflow: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                             <thead id="wsprRankThead"></thead>
                             <tbody id="wsprRankTbody">
                                 <tr><td colspan="99" style="text-align:center;padding:20px;color:#888;">Loading…</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <!-- Map view -->
+                    <div id="wsprRankMapView" style="flex: 1; display: none; min-height: 0; position: relative;">
+                        <div id="wsprRankMap" style="flex: 1; width: 100%; height: 100%;"></div>
                     </div>
                 </div>
                 <div style="padding: 10px 16px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; background: #fafafa;">

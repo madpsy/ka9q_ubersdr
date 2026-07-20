@@ -151,6 +151,14 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 					Moving:    state.Moving,
 					Time:      time.Now(),
 				}
+				if state.TargetPosition != nil {
+					evt.TargetAzimuth = state.TargetPosition.Azimuth
+					evt.TargetElevation = state.TargetPosition.Elevation
+				} else {
+					// No explicit target — use current position as best approximation.
+					evt.TargetAzimuth = state.Position.Azimuth
+					evt.TargetElevation = state.Position.Elevation
+				}
 				go h.notifManager.Publish(evt)
 			}
 		}

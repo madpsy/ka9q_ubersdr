@@ -549,10 +549,11 @@ func (r *RotctlClient) DumpState() (string, error) {
 
 // RotatorState holds the current state of the rotator for application use
 type RotatorState struct {
-	Position  *Position
-	Moving    bool
-	LastError error
-	UpdatedAt time.Time
+	Position       *Position
+	Moving         bool
+	LastError      error
+	UpdatedAt      time.Time
+	TargetPosition *Position // nil when no target is set (e.g. after stop or arrival)
 }
 
 // PositionSample represents a position measurement at a specific time
@@ -728,12 +729,16 @@ func (rc *RotatorController) GetState() RotatorState {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
 
-	return RotatorState{
+	s := RotatorState{
 		Position:  &Position{Azimuth: rc.state.Position.Azimuth, Elevation: rc.state.Position.Elevation},
 		Moving:    rc.state.Moving,
 		LastError: rc.state.LastError,
 		UpdatedAt: rc.state.UpdatedAt,
 	}
+	if rc.targetPos != nil {
+		s.TargetPosition = &Position{Azimuth: rc.targetPos.Azimuth, Elevation: rc.targetPos.Elevation}
+	}
+	return s
 }
 
 // SetPosition sets the rotator position and updates state

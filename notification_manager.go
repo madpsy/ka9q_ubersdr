@@ -1584,7 +1584,10 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 		if e.Moving {
 			return fmt.Sprintf("🧭 Rotator: moving to %.0f°", e.TargetAzimuth)
 		}
-		return fmt.Sprintf("🧭 Rotator: stopped at %.0f° el %.0f°", e.Azimuth, e.Elevation)
+		if e.Elevation != 0 {
+			return fmt.Sprintf("🧭 Rotator: stopped at %.0f° az, %.0f° el", e.Azimuth, e.Elevation)
+		}
+		return fmt.Sprintf("🧭 Rotator: stopped at %.0f°", e.Azimuth)
 
 	case SystemMonitorEvent:
 		if e.Healthy {

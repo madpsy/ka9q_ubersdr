@@ -285,6 +285,57 @@
             color: #7f8c8d;
         }
 
+        /* Links inside popups keep the surrounding colour and are marked by the
+           underline alone */
+        .leaflet-popup-content a {
+            color: inherit;
+            text-decoration: underline;
+        }
+
+        .leaflet-popup-content a:hover {
+            color: #7fc7ea;
+        }
+
+        .popup-sun {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #445;
+        }
+
+        /* Map tile selector — light Leaflet-style control, centred at the top of
+           the map itself so it follows the header however that wraps */
+        #map-tile-select-wrap {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+
+        #map-tile-select {
+            appearance: auto;
+            background: #fff;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            color: #333;
+            font-size: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            padding: 4px 6px;
+            cursor: pointer;
+            outline: none;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+            transition: border-color 0.15s;
+        }
+
+        #map-tile-select:hover {
+            border-color: rgba(0, 0, 0, 0.4);
+        }
+
+        #map-tile-select option {
+            background: #fff;
+            color: #333;
+        }
+
         /* Path readout — sits above Leaflet's controls (z-index 1000) and clears
            the attribution strip along the bottom */
         .path-panel {
@@ -412,17 +463,31 @@
         <div class="controls">
             <input type="text" id="search" placeholder="Callsign, locator or lat, lon" title="Callsign (e.g. GM4ABC), Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
             <button id="searchBtn" type="button">Look up</button>
-            <label><input type="checkbox" id="gridToggle"> Grid</label>
+            <label title="Show the country flag markers"><input type="checkbox" id="flagToggle" checked> Flags</label>
+            <label title="Show the day/night terminator"><input type="checkbox" id="greylineToggle" checked> Greyline</label>
+            <label title="Show the Maidenhead grid"><input type="checkbox" id="gridToggle"> Grid</label>
             <span class="status" id="status">Loading…</span>
         </div>
     </div>
-    <div id="map"></div>
+    <div id="map">
+        <!-- Map tile selector — centred top, mirroring digitalspots_map.html -->
+        <div id="map-tile-select-wrap">
+            <select id="map-tile-select" title="Change map style">
+                <option value="osm" selected>OpenStreetMap</option>
+                <option value="topo">Topo (OpenTopoMap)</option>
+                <option value="satellite">Satellite (Esri)</option>
+                <option value="dark">Dark (CartoDB)</option>
+                <option value="light">Light (CartoDB)</option>
+            </select>
+        </div>
+    </div>
     <div class="path-panel" id="pathPanel">
         <button class="path-close" id="pathClose" type="button" title="Hide">×</button>
         <div id="pathBody"></div>
     </div>
 
     <script src="leaflet.js"></script>
+    <script src="suncalc.js"></script>
     <script>
         const COUNTRY_API = '/api/maidenhead/country';
         const CTY_API = '/api/cty/lookup';
@@ -435,6 +500,10 @@
         let rxMarker = null;      // this instance's own location
         let rxLocation = null;    // {lat, lon, ident, locator} once /api/description answers
         let pathLine = null;      // geodesic from the receiver to the last lookup
+        let greylineLayer = null; // day/night terminator, redrawn on move and each minute
+        let tileLayer = null;     // current base map, chosen from the tile selector
+        let countryLayer = L.layerGroup(); // the 258 permanent country flag markers
+        let greylineEnabled = true;
         let gridLayer = null;     // Maidenhead grid overlay, off until asked for
 
         // A locator the server will accept: 4, 6 or 8 characters
@@ -529,17 +598,28 @@
         function initMap() {
             map = L.map('map', { worldCopyJump: true }).setView([25, 0], 2);
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 18
-            }).addTo(map);
+            setupTileSelector();
 
             map.on('click', onMapClick);
+
+            // Greyline: redraw as the view moves so the world copies keep up, and
+            // once a minute so the terminator itself stays current
+            updateGreyline();
+            map.on('moveend zoomend', updateGreyline);
+            setInterval(updateGreyline, 60000);
 
             document.getElementById('pathClose').addEventListener('click', hidePath);
             document.getElementById('searchBtn').addEventListener('click', doSearch);
             document.getElementById('search').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doSearch();
+            });
+            document.getElementById('flagToggle').addEventListener('change', function (e) {
+                if (e.target.checked) countryLayer.addTo(map);
+                else map.removeLayer(countryLayer);
+            });
+            document.getElementById('greylineToggle').addEventListener('change', function (e) {
+                greylineEnabled = e.target.checked;
+                updateGreyline();
             });
             document.getElementById('gridToggle').addEventListener('change', function (e) {
                 if (e.target.checked) {
@@ -552,6 +632,196 @@
                     gridLayer = null;
                 }
             });
+        }
+
+        // ---- Sun and moon at a point -------------------------------------------------
+
+        const MOON_PHASES = [
+            ['🌑', 'New moon'], ['🌒', 'Waxing crescent'], ['🌓', 'First quarter'],
+            ['🌔', 'Waxing gibbous'], ['🌕', 'Full moon'], ['🌖', 'Waning gibbous'],
+            ['🌗', 'Last quarter'], ['🌘', 'Waning crescent']
+        ];
+
+        // HH:MM UTC, or null when the event does not happen — SunCalc returns an
+        // invalid Date during polar day and polar night
+        function hhmm(d) {
+            if (!d || isNaN(d.valueOf())) return null;
+            return String(d.getUTCHours()).padStart(2, '0') + ':' +
+                   String(d.getUTCMinutes()).padStart(2, '0');
+        }
+
+        // Sun/moon block for the point just looked up.  Everything is computed in
+        // the browser from suncalc.js — /api/suncalc only answers for the
+        // receiver's own coordinates, not an arbitrary point.
+        function renderSunMoon(lat, lon) {
+            if (typeof SunCalc === 'undefined') return '';
+
+            const now = new Date();
+            const sun = SunCalc.getPosition(now, lat, lon);
+            const times = SunCalc.getTimes(now, lat, lon);
+            const altDeg = sun.altitude * R2D;
+            const isDay = altDeg > 0;
+
+            let html = '<div class="popup-sun">' +
+                '<div class="popup-row"><span class="label">' +
+                (isDay ? '☀️ Day' : '🌙 Night') + '</span>' +
+                'Sun ' + altDeg.toFixed(1) + '° alt · ' +
+                ((sun.azimuth * R2D + 180) % 360).toFixed(0) + '° az</div>';
+
+            const rise = hhmm(times.sunrise), set = hhmm(times.sunset);
+            if (rise && set) {
+                html += '<div class="popup-row"><span class="label">Sun</span>🌅 ' + rise +
+                    ' · 🌇 ' + set + ' UTC</div>';
+            } else {
+                // No rise or set today: which one depends on where the sun is now
+                html += '<div class="popup-row"><span class="label">Sun</span>' +
+                    (isDay ? 'Midnight sun — no sunset' : 'Polar night — no sunrise') + '</div>';
+            }
+
+            const illum = SunCalc.getMoonIllumination(now);
+            const phase = MOON_PHASES[Math.round(illum.phase * 8) % 8];
+            const moonTimes = SunCalc.getMoonTimes(now, lat, lon, true);
+            const mRise = hhmm(moonTimes.rise), mSet = hhmm(moonTimes.set);
+
+            html += '<div class="popup-row"><span class="label">' + phase[0] + ' Moon</span>' +
+                phase[1] + ' · ' + Math.round(illum.fraction * 100) + '%</div>';
+            if (mRise || mSet) {
+                html += '<div class="popup-row"><span class="label"></span>' +
+                    (mRise ? '↑ ' + mRise : '') + (mRise && mSet ? ' · ' : '') +
+                    (mSet ? '↓ ' + mSet : '') + ' UTC</div>';
+            }
+
+            return html + '</div>';
+        }
+
+        // ---- Base map tiles ----------------------------------------------------------
+
+        // Same set the digital spots and CW skimmer maps offer
+        const MAP_TILE_LAYERS = {
+            osm: {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            },
+            topo: {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)',
+                maxZoom: 17
+            },
+            satellite: {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            },
+            dark: {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            },
+            light: {
+                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            }
+        };
+
+        function setupTileSelector() {
+            const select = document.getElementById('map-tile-select');
+
+            // The control sits inside the map container, so without this a click
+            // on it would also register as a map click and fire a lookup
+            L.DomEvent.disableClickPropagation(document.getElementById('map-tile-select-wrap'));
+
+            const saved = localStorage.getItem('countrymap_mapTile');
+            const key = MAP_TILE_LAYERS[saved] ? saved : 'osm';
+            select.value = key;
+            applyMapTile(key);
+
+            select.addEventListener('change', (e) => {
+                localStorage.setItem('countrymap_mapTile', e.target.value);
+                applyMapTile(e.target.value);
+            });
+        }
+
+        function applyMapTile(key) {
+            const cfg = MAP_TILE_LAYERS[key] || MAP_TILE_LAYERS.osm;
+            if (tileLayer) map.removeLayer(tileLayer);
+            tileLayer = L.tileLayer(cfg.url, {
+                attribution: cfg.attribution,
+                maxZoom: cfg.maxZoom
+            }).addTo(map);
+        }
+
+        // ---- Day/night terminator (greyline) -----------------------------------------
+
+        // Night-side polygon for a given instant, same computation the beacon and
+        // channel maps use.  Note the ecliptic longitude is called sunLonEcl here
+        // rather than L — this file needs Leaflet's L in the same scope.
+        function nightPolygon(date) {
+            const resolution = 2;
+            const d = (date.valueOf() / 86400000) - 0.5 + 2440588 - 2451545;
+            const M = (357.5291 + 0.98560028 * d) * D2R;
+            const C = (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) * D2R;
+            const sunLonEcl = M + C + (102.9372 * D2R) + Math.PI;
+            const sunDec = Math.asin(Math.sin(sunLonEcl) * Math.sin(23.4397 * D2R));
+            const gmst = (280.16 + 360.9856235 * d) * D2R;
+            const sunRA = Math.atan2(Math.sin(sunLonEcl) * Math.cos(23.4397 * D2R), Math.cos(sunLonEcl));
+            const sunLon = ((sunRA - gmst) * R2D + 180) % 360 - 180;
+
+            const terminator = [];
+            for (let lon = -180; lon <= 180; lon += resolution) {
+                const hourAngle = (lon - sunLon) * D2R;
+                const lat = Math.atan(-Math.cos(hourAngle) / Math.tan(sunDec)) * R2D;
+                if (!isNaN(lat) && isFinite(lat)) terminator.push([lat, lon]);
+            }
+            if (terminator.length === 0) return [];
+
+            // Close the polygon around whichever pole is in darkness
+            const darkPole = sunDec > 0 ? -90 : 90;
+            const polygon = terminator.slice();
+            polygon.push([darkPole, 180]);
+            for (let lon = 180; lon >= -180; lon -= resolution * 4) polygon.push([darkPole, lon]);
+            polygon.push([darkPole, -180]);
+            return polygon;
+        }
+
+        // Redraw the night overlay, repeating it across however many world copies
+        // the current view spans — zoomed out, or panned past the dateline with
+        // worldCopyJump, several are visible at once
+        function updateGreyline() {
+            if (!map) return;
+            if (greylineLayer) {
+                map.removeLayer(greylineLayer);
+                greylineLayer = null;
+            }
+            if (!greylineEnabled) return;
+
+            const base = nightPolygon(new Date());
+            if (base.length === 0) return;
+
+            const b = map.getBounds();
+            let first = Math.floor((b.getWest() + 180) / 360);
+            let last = Math.floor((b.getEast() + 180) / 360);
+            // One copy of margin each side, and a hard cap so a pathological
+            // view can never ask for hundreds of polygons
+            first -= 1; last += 1;
+            if (last - first > 8) last = first + 8;
+
+            const style = {
+                color: 'transparent',
+                fillColor: '#000033',
+                fillOpacity: 0.3,
+                interactive: false // clicks must still reach the map underneath
+            };
+
+            const copies = [];
+            for (let k = first; k <= last; k++) {
+                copies.push(L.polygon(base.map(([lat, lon]) => [lat, lon + k * 360]), style));
+            }
+
+            greylineLayer = L.layerGroup(copies).addTo(map);
+            // Keep it beneath the grid, the path line and every marker
+            greylineLayer.eachLayer(l => l.bringToBack());
         }
 
         // ---- Maidenhead grid overlay -------------------------------------------------
@@ -974,7 +1244,15 @@
             const flag = countryCodeToFlag(d.country_code);
             const locator = latLonToLocator(d.latitude, d.longitude, 6);
 
-            let html = '<div class="popup-title">' + (flag ? flag + ' ' : '') + esc(call) + '</div>' +
+            // QRZ wants the base call, so a portable form like W1AW/4 or
+            // PA/GM4ABC links to the longest segment rather than 404ing on the
+            // whole string.  The displayed text stays exactly as entered.
+            const qrzCall = call.split('/').reduce((a, b) => (b.length > a.length ? b : a));
+            const qrzLink = '<a href="https://www.qrz.com/db/' + encodeURIComponent(qrzCall) +
+                '" target="_blank" rel="noopener noreferrer" title="Look up ' +
+                esc(qrzCall) + ' on QRZ">' + esc(call) + '</a>';
+
+            let html = '<div class="popup-title">' + (flag ? flag + ' ' : '') + qrzLink + '</div>' +
                 '<div class="popup-row">' + esc(d.country || 'Unknown') + '</div>';
             if (d.primary_prefix) {
                 html += '<div class="popup-row"><span class="label">DXCC</span>' + esc(d.primary_prefix) + '</div>';
@@ -998,7 +1276,8 @@
                 // rather than letting the pin imply the operator is standing there
                 '<div class="popup-method">entity centre from cty.dat — not the operator\'s location</div>';
 
-            placeSearchResult(d.latitude, d.longitude, flag, html, null);
+            placeSearchResult(d.latitude, d.longitude, flag,
+                () => html + renderSunMoon(d.latitude, d.longitude), null);
             showPath(d.latitude, d.longitude,
                 (flag ? flag + ' ' : '') + call,
                 d.country + (d.primary_prefix ? ' · ' + d.primary_prefix : ''));
@@ -1015,7 +1294,8 @@
                 : null;
 
             const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
-            placeSearchResult(r.lat, r.lon, pin, renderPopup(r, r.lat, r.lon), bounds);
+            placeSearchResult(r.lat, r.lon, pin,
+                () => renderPopup(r, r.lat, r.lon) + renderSunMoon(r.lat, r.lon), bounds);
 
             // A locator search names the square; a coordinate search names the country
             showPath(r.lat, r.lon,
@@ -1029,14 +1309,16 @@
         }
 
         // Drops the search pin, replacing whatever the last lookup left behind.
-        // With bounds, the grid square is outlined and the map fitted to it;
-        // without, the map just centres on the point.
-        function placeSearchResult(lat, lon, pin, popupHtml, bounds) {
+        // render is a function, not a string, so the sun/moon figures are rebuilt
+        // each time the popup is opened.  With bounds, the grid square is outlined
+        // and the map fitted to it; without, the map just centres on the point.
+        function placeSearchResult(lat, lon, pin, render, bounds) {
             if (searchLayer) map.removeLayer(searchLayer);
             searchLayer = L.layerGroup().addTo(map);
 
             const marker = L.marker([lat, lon], { icon: flagIcon(pin, 'click-marker') })
-                .bindPopup(popupHtml);
+                .bindPopup(render());
+            marker.on('popupopen', () => marker.setPopupContent(render()));
             searchLayer.addLayer(marker);
 
             if (bounds) {
@@ -1088,8 +1370,12 @@
                 L.marker([c.lat, c.lon], { icon: flagIcon(flag), title: c.country })
                     .bindTooltip(label, { direction: 'top', offset: [0, -10] })
                     .bindPopup(renderPopup(c, c.lat, c.lon))
-                    .addTo(map);
+                    .addTo(countryLayer);
             }
+
+            // The layer exists from the start, so a user who unticks Flags while
+            // the list is still loading does not get them anyway
+            if (document.getElementById('flagToggle').checked) countryLayer.addTo(map);
 
             setStatus(countries.length + ' countries');
         }
@@ -1144,11 +1430,32 @@
             const r = await resp.json();
             const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
             clickMarker.setIcon(flagIcon(pin, 'click-marker'));
-            clickMarker.setPopupContent(renderPopup(r, lat, lon));
+
+            // Rebuilt on every open so the sun and moon figures are current
+            // rather than frozen at the moment of the click
+            const render = () => renderPopup(r, lat, lon) + renderSunMoon(lat, lon);
+            clickMarker.setPopupContent(render());
+            clickMarker.on('popupopen', () => clickMarker.setPopupContent(render()));
 
             showPath(lat, lon,
                 r.method === 'open_water' ? '🌊 Open water' : (pin ? pin + ' ' : '') + (r.country || 'Unknown'),
                 r.method === 'open_water' ? '' : r.continent);
+        }
+
+        // Plain-English rendering of the endpoint's "method" field.  The five
+        // values are the method* constants in natural_earth_service.go; an
+        // unrecognised one falls back to de-underscoring it rather than showing
+        // nothing.
+        const METHOD_TEXT = {
+            intersection: 'The grid square falls in this country',
+            largest_overlap: 'The grid square spans several countries — this one covers most of it',
+            point_in_polygon: 'The point lies inside this country\'s border',
+            nearest_land: 'The point is over water — this is the nearest land',
+            open_water: 'No country at this point'
+        };
+
+        function describeMethod(method) {
+            return METHOD_TEXT[method] || method.replace(/_/g, ' ');
         }
 
         function renderPopup(r, lat, lon) {
@@ -1191,11 +1498,7 @@
                 esc(r.locator || latLonToLocator(lat, lon, 8)) + '</div>';
 
             if (r.method) {
-                let note = r.method;
-                if (r.method === 'nearest_land') {
-                    note += ' — the click was over water';
-                }
-                html += '<div class="popup-method">method: ' + esc(note) + '</div>';
+                html += '<div class="popup-method">' + esc(describeMethod(r.method)) + '</div>';
             }
             return html;
         }

@@ -40,6 +40,70 @@
             color: #95a5a6;
         }
 
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+        }
+
+        .controls input[type="text"] {
+            background: #1a1a1a;
+            border: 1px solid #445;
+            border-radius: 3px;
+            color: #ecf0f1;
+            font-family: inherit;
+            font-size: 12px;
+            padding: 5px 8px;
+            width: 190px;
+        }
+
+        .controls input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .controls button {
+            background: #3498db;
+            border: none;
+            border-radius: 3px;
+            color: #fff;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            padding: 6px 10px;
+        }
+
+        .controls button:hover {
+            background: #2980b9;
+        }
+
+        .controls label {
+            font-size: 12px;
+            color: #bdc3c7;
+            cursor: pointer;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Maidenhead grid overlay */
+        .grid-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #3498db;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+            white-space: nowrap;
+            pointer-events: none;
+            background: none;
+            border: none;
+        }
+
+        @media (max-width: 900px) {
+            .header .hint { display: none; }
+        }
+
         .status {
             font-size: 12px;
             color: #95a5a6;
@@ -148,8 +212,13 @@
 <body>
     <div class="header">
         <h1>Country Map</h1>
-        <span class="hint">Hover a marker for the country · click anywhere on the map to identify it</span>
-        <span class="status" id="status">Loading…</span>
+        <span class="hint">Click the map to identify a point · or look up a locator / coordinates</span>
+        <div class="controls">
+            <input type="text" id="search" placeholder="Locator or lat, lon" title="Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
+            <button id="searchBtn" type="button">Look up</button>
+            <label><input type="checkbox" id="gridToggle"> Grid</label>
+            <span class="status" id="status">Loading…</span>
+        </div>
     </div>
     <div id="map"></div>
 
@@ -159,6 +228,55 @@
 
         let map = null;
         let clickMarker = null;
+        let searchLayer = null;   // marker + grid square rectangle for a lookup
+        let gridLayer = null;     // Maidenhead grid overlay, off until asked for
+
+        // A locator the server will accept: 4, 6 or 8 characters
+        const LOCATOR_RE = /^[A-R]{2}[0-9]{2}(?:[A-X]{2}(?:[0-9]{2})?)?$/i;
+        // "lat, lon" or "lat lon", decimal degrees
+        const LATLON_RE = /^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/;
+
+        // Size of one grid cell at each precision, in degrees [lon, lat]
+        const GRID_LEVELS = [
+            [20, 10],           // field       — AA
+            [2, 1],             // square      — AA00
+            [2 / 24, 1 / 24],   // subsquare   — AA00aa
+            [2 / 240, 1 / 240]  // extended    — AA00aa00
+        ];
+
+        function normLon(lon) {
+            return ((lon + 180) % 360 + 360) % 360 - 180;
+        }
+
+        // Locator covering a point.  chars is 4, 6 or 8; subsquare letters are
+        // lowercase by convention (the server upper-cases either way).
+        function latLonToLocator(lat, lon, chars) {
+            chars = chars || 6;
+            let x = normLon(lon) + 180;
+            let y = Math.min(Math.max(lat, -90), 90) + 90;
+            // Keep the poles/dateline inside the last cell rather than one past it
+            x = Math.min(x, 359.999999);
+            y = Math.min(y, 179.999999);
+
+            const A = 'A'.charCodeAt(0);
+            let loc = String.fromCharCode(A + Math.floor(x / 20)) +
+                      String.fromCharCode(A + Math.floor(y / 10));
+            x %= 20; y %= 10;
+            if (chars >= 4) {
+                loc += Math.floor(x / 2) + '' + Math.floor(y / 1);
+                x %= 2; y %= 1;
+            }
+            if (chars >= 6) {
+                loc += String.fromCharCode(A + 32 + Math.floor(x / (2 / 24))) +
+                       String.fromCharCode(A + 32 + Math.floor(y / (1 / 24)));
+                x %= (2 / 24); y %= (1 / 24);
+            }
+            if (chars >= 8) {
+                loc += Math.floor(x / (2 / 240)) + '' + Math.floor(y / (1 / 240));
+            }
+            return loc;
+        }
+
 
         // Convert an ISO 3166-1 alpha-2 code to its flag emoji (regional indicator pair)
         function countryCodeToFlag(countryCode) {
@@ -206,6 +324,181 @@
             }).addTo(map);
 
             map.on('click', onMapClick);
+
+            document.getElementById('searchBtn').addEventListener('click', doSearch);
+            document.getElementById('search').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') doSearch();
+            });
+            document.getElementById('gridToggle').addEventListener('change', function (e) {
+                if (e.target.checked) {
+                    gridLayer = L.layerGroup().addTo(map);
+                    map.on('moveend zoomend', drawGrid);
+                    drawGrid();
+                } else {
+                    map.off('moveend zoomend', drawGrid);
+                    if (gridLayer) map.removeLayer(gridLayer);
+                    gridLayer = null;
+                }
+            });
+        }
+
+        // ---- Maidenhead grid overlay -------------------------------------------------
+
+        // Which precision to draw at this zoom.  Each step is a 10× finer cell, so
+        // the thresholds keep cells at a usable size on screen rather than a mesh.
+        function gridLevelForZoom(zoom) {
+            if (zoom < 4) return 0;   // fields
+            if (zoom < 8) return 1;   // squares
+            if (zoom < 13) return 2;  // subsquares
+            return 3;                 // extended squares
+        }
+
+        function drawGrid() {
+            if (!gridLayer) return;
+            gridLayer.clearLayers();
+
+            const level = gridLevelForZoom(map.getZoom());
+            const lonSize = GRID_LEVELS[level][0];
+            const latSize = GRID_LEVELS[level][1];
+            const chars = [2, 4, 6, 8][level];
+
+            const b = map.getBounds();
+            const south = Math.max(-90, b.getSouth());
+            const north = Math.min(90, b.getNorth());
+            // worldCopyJump lets the view run past ±180; draw at most one extra
+            // world either side so panning never turns into an unbounded loop
+            const west = Math.max(-540, b.getWest());
+            const east = Math.min(540, b.getEast());
+
+            const lon0 = Math.floor((west + 180) / lonSize) * lonSize - 180;
+            const lat0 = Math.floor((south + 90) / latSize) * latSize - 90;
+
+            const nLon = Math.ceil((east - lon0) / lonSize) + 1;
+            const nLat = Math.ceil((north - lat0) / latSize) + 1;
+            if (nLon > 400 || nLat > 400) return; // nothing legible to draw
+
+            const style = { color: '#3498db', weight: 1, opacity: 0.35, interactive: false };
+            for (let i = 0; i <= nLon; i++) {
+                const lon = lon0 + i * lonSize;
+                gridLayer.addLayer(L.polyline([[south, lon], [north, lon]], style));
+            }
+            for (let j = 0; j <= nLat; j++) {
+                const lat = lat0 + j * latSize;
+                if (lat < -90 || lat > 90) continue;
+                gridLayer.addLayer(L.polyline([[lat, west], [lat, east]], style));
+            }
+
+            // Label cells only when they are wide enough for the text to fit
+            const cellPx = map.project([lat0, lon0 + lonSize]).x - map.project([lat0, lon0]).x;
+            if (cellPx < chars * 9) return;
+
+            for (let i = 0; i < nLon; i++) {
+                for (let j = 0; j < nLat; j++) {
+                    const lon = lon0 + (i + 0.5) * lonSize;
+                    const lat = lat0 + (j + 0.5) * latSize;
+                    if (lat < -90 || lat > 90) continue;
+                    gridLayer.addLayer(L.marker([lat, lon], {
+                        interactive: false,
+                        icon: L.divIcon({
+                            className: 'grid-label',
+                            html: latLonToLocator(lat, lon, chars),
+                            iconSize: [chars * 9, 14],
+                            iconAnchor: [chars * 4.5, 7]
+                        })
+                    }));
+                }
+            }
+        }
+
+        // ---- Search ------------------------------------------------------------------
+
+        // Accepts a Maidenhead locator (4/6/8 chars) or a "lat, lon" pair — both of
+        // which the endpoint understands — and shows the answer on the map.
+        async function doSearch() {
+            const raw = document.getElementById('search').value.trim();
+            if (!raw) return;
+
+            let body;
+            const latlon = raw.match(LATLON_RE);
+
+            if (LOCATOR_RE.test(raw)) {
+                body = { locator: raw, nearest_land: false };
+            } else if (latlon) {
+                const lat = parseFloat(latlon[1]), lon = parseFloat(latlon[2]);
+                if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                    setStatus('Latitude must be -90..90 and longitude -180..180', true);
+                    return;
+                }
+                body = { lat: lat, lon: lon, nearest_land: false };
+            } else {
+                setStatus('Enter a locator (IO86ha) or coordinates (56.02, -3.375)', true);
+                return;
+            }
+
+            setStatus('Looking up…');
+
+            let resp;
+            try {
+                resp = await fetch(COUNTRY_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+            } catch (err) {
+                setStatus('Lookup failed: ' + err.message, true);
+                return;
+            }
+
+            if (resp.status === 429) {
+                setStatus('Too fast — one lookup per second. Try again.', true);
+                return;
+            }
+            if (!resp.ok) {
+                let msg = 'HTTP ' + resp.status;
+                try {
+                    const errBody = await resp.json();
+                    if (errBody.error) msg = errBody.error;
+                } catch (e) { /* non-JSON error body */ }
+                setStatus('Lookup failed: ' + msg, true);
+                return;
+            }
+
+            showSearchResult(await resp.json());
+        }
+
+        function showSearchResult(r) {
+            // A locator lookup answers with the square's bounds; a coordinate
+            // lookup collapses them onto the point itself, so there is nothing
+            // to outline.
+            const bounds = r.locator
+                ? { minLat: r.grid_min_lat, minLon: r.grid_min_lon,
+                    maxLat: r.grid_max_lat, maxLon: r.grid_max_lon }
+                : null;
+
+            if (searchLayer) map.removeLayer(searchLayer);
+            searchLayer = L.layerGroup().addTo(map);
+
+            const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
+            const marker = L.marker([r.lat, r.lon], { icon: flagIcon(pin, 'click-marker') })
+                .bindPopup(renderPopup(r, r.lat, r.lon));
+            searchLayer.addLayer(marker);
+
+            if (bounds) {
+                searchLayer.addLayer(L.rectangle(
+                    [[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]],
+                    { color: '#3498db', weight: 2, fillOpacity: 0.08, interactive: false }
+                ));
+                map.fitBounds([[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]], {
+                    padding: [60, 60], maxZoom: 10
+                });
+            } else {
+                map.setView([r.lat, r.lon], Math.max(map.getZoom(), 6));
+            }
+
+            marker.openPopup();
+            setStatus(r.method === 'open_water'
+                ? 'Open water'
+                : (r.country || 'Unknown') + ' — ' + latLonToLocator(r.lat, r.lon, 6));
         }
 
         // Load every country's centre point from the GET endpoint.  The payload is
@@ -306,7 +599,9 @@
                 return '<div class="popup-title">🌊 Open water</div>' +
                     '<div class="popup-row">No country at this point</div>' +
                     '<div class="popup-row"><span class="label">Position</span>' +
-                    lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
+                    lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>' +
+                    '<div class="popup-row"><span class="label">Locator</span>' +
+                    esc(r.locator || latLonToLocator(lat, lon, 8)) + '</div>';
             }
 
             const flag = countryCodeToFlag(r.iso_a2);
@@ -335,6 +630,8 @@
             const posLabel = r.method ? 'Position' : 'Centre';
             html += '<div class="popup-row"><span class="label">' + posLabel + '</span>' +
                 lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
+            html += '<div class="popup-row"><span class="label">Locator</span>' +
+                esc(r.locator || latLonToLocator(lat, lon, 8)) + '</div>';
 
             if (r.method) {
                 let note = r.method;

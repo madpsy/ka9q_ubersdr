@@ -221,9 +221,9 @@
 <body>
     <div class="header">
         <h1>Country Map</h1>
-        <span class="hint">Click the map to identify a point · or look up a locator / coordinates</span>
+        <span class="hint">Click the map to identify a point · or look up a callsign / locator / coordinates</span>
         <div class="controls">
-            <input type="text" id="search" placeholder="Locator or lat, lon" title="Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
+            <input type="text" id="search" placeholder="Callsign, locator or lat, lon" title="Callsign (e.g. GM4ABC), Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
             <button id="searchBtn" type="button">Look up</button>
             <label><input type="checkbox" id="gridToggle"> Grid</label>
             <span class="status" id="status">Loading…</span>
@@ -234,6 +234,7 @@
     <script src="leaflet.js"></script>
     <script>
         const COUNTRY_API = '/api/maidenhead/country';
+        const CTY_API = '/api/cty/lookup';
 
         let map = null;
         let clickMarker = null;
@@ -244,6 +245,11 @@
         const LOCATOR_RE = /^[A-R]{2}[0-9]{2}(?:[A-X]{2}(?:[0-9]{2})?)?$/i;
         // "lat, lon" or "lat lon", decimal degrees
         const LATLON_RE = /^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/;
+        // Anything callsign-shaped, including portable/appended forms like
+        // GM4ABC/P or W1AW/4 — cty.dat does the real prefix matching, so this
+        // only has to be loose enough to hand over and tight enough not to
+        // swallow typos meant as coordinates
+        const CALLSIGN_RE = /^[A-Z0-9]+(?:\/[A-Z0-9]+)*$/i;
 
         // Size of one grid cell at each precision, in degrees [lon, lat]
         const GRID_LEVELS = [
@@ -427,8 +433,9 @@
 
         // ---- Search ------------------------------------------------------------------
 
-        // Accepts a Maidenhead locator (4/6/8 chars) or a "lat, lon" pair — both of
-        // which the endpoint understands — and shows the answer on the map.
+        // Accepts a Maidenhead locator (4/6/8 chars), a "lat, lon" pair, or a
+        // callsign, and shows the answer on the map.  The first two go to the
+        // Natural Earth endpoint; a callsign goes to the DXCC prefix database.
         async function doSearch() {
             const raw = document.getElementById('search').value.trim();
             if (!raw) return;
@@ -445,8 +452,10 @@
                     return;
                 }
                 body = { lat: lat, lon: lon, nearest_land: false };
+            } else if (CALLSIGN_RE.test(raw)) {
+                return lookupCallsign(raw.toUpperCase());
             } else {
-                setStatus('Enter a locator (IO86ha) or coordinates (56.02, -3.375)', true);
+                setStatus('Enter a callsign (GM4ABC), locator (IO86ha) or coordinates (56.02, -3.375)', true);
                 return;
             }
 
@@ -481,6 +490,65 @@
             showSearchResult(await resp.json());
         }
 
+        // Look up a callsign in the DXCC prefix database (cty.dat).  This is prefix
+        // matching, not a callbook — the answer is the entity, not the operator.
+        async function lookupCallsign(call) {
+            setStatus('Looking up ' + call + '…');
+
+            let resp;
+            try {
+                resp = await fetch(CTY_API + '?callsign=' + encodeURIComponent(call));
+            } catch (err) {
+                setStatus('Lookup failed: ' + err.message, true);
+                return;
+            }
+
+            let payload = null;
+            try {
+                payload = await resp.json();
+            } catch (e) { /* non-JSON error body */ }
+
+            if (!resp.ok || !payload || !payload.success) {
+                const msg = (payload && payload.error) || 'HTTP ' + resp.status;
+                setStatus(call + ': ' + msg, true);
+                return;
+            }
+
+            showCallsignResult(call, payload.data);
+        }
+
+        function showCallsignResult(call, d) {
+            const flag = countryCodeToFlag(d.country_code);
+            const locator = latLonToLocator(d.latitude, d.longitude, 6);
+
+            let html = '<div class="popup-title">' + (flag ? flag + ' ' : '') + esc(call) + '</div>' +
+                '<div class="popup-row">' + esc(d.country || 'Unknown') + '</div>';
+            if (d.primary_prefix) {
+                html += '<div class="popup-row"><span class="label">DXCC</span>' + esc(d.primary_prefix) + '</div>';
+            }
+            if (d.continent) {
+                html += '<div class="popup-row"><span class="label">Continent</span>' + esc(d.continent) + '</div>';
+            }
+            if (d.cq_zone || d.itu_zone) {
+                html += '<div class="popup-row"><span class="label">Zones</span>CQ ' +
+                    esc(d.cq_zone) + ' · ITU ' + esc(d.itu_zone) + '</div>';
+            }
+            if (typeof d.time_offset === 'number') {
+                const off = d.time_offset;
+                html += '<div class="popup-row"><span class="label">UTC</span>' +
+                    (off >= 0 ? '+' : '') + off + '</div>';
+            }
+            html += '<div class="popup-row"><span class="label">Centre</span>' +
+                d.latitude.toFixed(4) + ', ' + d.longitude.toFixed(4) + '</div>' +
+                '<div class="popup-row"><span class="label">Locator</span>' + esc(locator) + '</div>' +
+                // The coordinates are the entity's centre from cty.dat, so say so
+                // rather than letting the pin imply the operator is standing there
+                '<div class="popup-method">entity centre from cty.dat — not the operator\'s location</div>';
+
+            placeSearchResult(d.latitude, d.longitude, flag, html, null);
+            setStatus(call + ' — ' + (d.country || 'Unknown'));
+        }
+
         function showSearchResult(r) {
             // A locator lookup answers with the square's bounds; a coordinate
             // lookup collapses them onto the point itself, so there is nothing
@@ -490,12 +558,23 @@
                     maxLat: r.grid_max_lat, maxLon: r.grid_max_lon }
                 : null;
 
+            const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
+            placeSearchResult(r.lat, r.lon, pin, renderPopup(r, r.lat, r.lon), bounds);
+
+            setStatus(r.method === 'open_water'
+                ? 'Open water'
+                : (r.country || 'Unknown') + ' — ' + latLonToLocator(r.lat, r.lon, 6));
+        }
+
+        // Drops the search pin, replacing whatever the last lookup left behind.
+        // With bounds, the grid square is outlined and the map fitted to it;
+        // without, the map just centres on the point.
+        function placeSearchResult(lat, lon, pin, popupHtml, bounds) {
             if (searchLayer) map.removeLayer(searchLayer);
             searchLayer = L.layerGroup().addTo(map);
 
-            const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
-            const marker = L.marker([r.lat, r.lon], { icon: flagIcon(pin, 'click-marker') })
-                .bindPopup(renderPopup(r, r.lat, r.lon));
+            const marker = L.marker([lat, lon], { icon: flagIcon(pin, 'click-marker') })
+                .bindPopup(popupHtml);
             searchLayer.addLayer(marker);
 
             if (bounds) {
@@ -507,13 +586,10 @@
                     padding: [60, 60], maxZoom: 10
                 });
             } else {
-                map.setView([r.lat, r.lon], Math.max(map.getZoom(), 6));
+                map.setView([lat, lon], Math.max(map.getZoom(), 6));
             }
 
             marker.openPopup();
-            setStatus(r.method === 'open_water'
-                ? 'Open water'
-                : (r.country || 'Unknown') + ' — ' + latLonToLocator(r.lat, r.lon, 6));
         }
 
         // Load every country's centre point from the GET endpoint.  The payload is

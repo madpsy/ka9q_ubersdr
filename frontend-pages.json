@@ -148,6 +148,15 @@
     },
     {
       "group": "💾 Clients",
+      "files": [
+        {
+          "path": "addon/dxcluster/client/download",
+          "name": "🌐 DX Cluster",
+          "depends_on": "addons:dxcluster",
+          "download": true,
+          "description": "Download the DX Cluster desktop client for your operating system."
+        }
+      ],
       "subgroups": [
         {
           "name": "🖥️ Desktop Client",
@@ -248,6 +257,11 @@
           "path": "oldradio/index.html",
           "name": "📻 Old Radio Skin",
           "description": "Alternative retro-styled radio interface skin with skeuomorphic controls, supporting Grundig and UK/EU CB radio themes."
+        },
+        {
+          "path": "map.html",
+          "name": "🗺️ World Map",
+          "description": "Interactive world map — hover a marker to see the country, or click anywhere on the map to identify it."
         }
       ]
     }

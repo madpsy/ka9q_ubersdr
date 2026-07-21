@@ -15,6 +15,7 @@ type PagesLink struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	DependsOn   string `json:"depends_on,omitempty"`
+	Download    bool   `json:"download,omitempty"`
 }
 
 // PagesSubgroup represents a named sub-menu inside a group.

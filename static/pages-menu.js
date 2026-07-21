@@ -287,6 +287,11 @@
 
         function isEnabled(key) {
             if (!key) return true;
+            // "addons:<name>" — require that a specific addon proxy is enabled
+            if (key.startsWith('addons:')) {
+                const name = key.slice('addons:'.length);
+                return Array.isArray(apiDesc.addons) && apiDesc.addons.includes(name);
+            }
             const val = apiDesc[key];
             if (!val) return false;
             if (Array.isArray(val)) return val.length > 0;
@@ -306,7 +311,8 @@
                     url:      isExt ? file.path : '/' + file.path.replace(/^\//, ''),
                     label:    file.name,
                     tooltip:  file.description || '',
-                    external: isExt,
+                    // Downloads open in a plain tab, not a popup window
+                    external: isExt || file.download === true,
                 };
             }
 

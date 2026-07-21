@@ -169,8 +169,10 @@ body {
     width: 100%;
     max-width: 100%;
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
+    gap: 15px;
     position: relative;
 }
 
@@ -184,10 +186,10 @@ body {
 }
 
 /* Change Radio Button */
+/* Sits in normal flow above the radio (first child of .radio-container) so it
+   can never overlap the set's own controls, whatever the viewport size */
 .change-radio-floating {
-    position: fixed;
-    top: 20px;
-    right: 20px;
+    align-self: center;
     background: rgba(0, 0, 0, 0.8);
     border: 2px solid rgba(255, 255, 255, 0.3);
     border-radius: 8px;
@@ -211,26 +213,6 @@ body {
 
 .change-radio-floating:active {
     transform: translateY(0);
-}
-
-/*
- * When the viewport is small enough that the radio fills it (e.g. window
- * shrunk to just fit the CB radio), the fixed top-right button overlaps the
- * radio's own controls. In that case take it out of the corner and stack it
- * in normal flow above the radio so nothing overlaps.
- */
-@media (max-width: 780px), (max-height: 400px) {
-    .radio-container {
-        flex-direction: column;
-        gap: 15px;
-    }
-
-    .change-radio-floating {
-        position: static;
-        top: auto;
-        right: auto;
-        align-self: center;
-    }
 }
 
 /* Radio Header */

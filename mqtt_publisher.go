@@ -862,7 +862,9 @@ func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	// Retained: HA subscribes to this for solar flux / K-index sensors and needs
+	// the last value immediately on (re)subscribe.
+	token := mp.client.Publish(topic, 1, true, data)
 	if token.Wait() && token.Error() != nil {
 		mp.logPublishError("MQTT ERROR: Failed to publish spaceweather: %v", token.Error())
 		return
@@ -1044,7 +1046,9 @@ func (mp *MQTTPublisher) PublishRotatorStatus(h *RotctlAPIHandler) {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	// Retained: HA subscribes to this for azimuth/elevation/moving sensors and
+	// needs the last value immediately on (re)subscribe.
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish rotator status to %s: %v", topic, token.Error())

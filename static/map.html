@@ -88,6 +88,40 @@
             border-right-color: #2c3e50;
         }
 
+        /* Flag markers.  Setting a className on a divIcon replaces Leaflet's
+           default .leaflet-div-icon, so there is no white box to undo. */
+        .flag-marker {
+            font-family: 'Twemoji Flags', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 18px;
+            line-height: 1;
+            text-align: center;
+            /* Keeps flags legible against both light land and dark sea tiles */
+            filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+            cursor: pointer;
+        }
+
+        /* The click pin — tinted and ringed so it stands out from the 258
+           country flags it sits among */
+        .flag-marker.click-marker {
+            filter: drop-shadow(0 0 3px #3498db) drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+        }
+
+        .flag-marker.click-marker.no-flag::before {
+            background: #3498db;
+        }
+
+        /* Fallback for features with no ISO alpha-2 code (e.g. Akrotiri) */
+        .flag-marker.no-flag::before {
+            content: '';
+            display: block;
+            width: 8px;
+            height: 8px;
+            margin: 5px auto;
+            border-radius: 50%;
+            background: #f39c12;
+            box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+        }
+
         .popup-title {
             font-size: 15px;
             font-weight: 600;
@@ -134,6 +168,21 @@
                 .split('')
                 .map(char => 127397 + char.charCodeAt());
             return String.fromCodePoint(...codePoints);
+        }
+
+        // Build a marker icon showing the flag itself.  Leaflet's default marker
+        // needs images/marker-icon.png and images/marker-shadow.png, which this
+        // install does not ship — using a divIcon everywhere avoids the 404s.
+        function flagIcon(flag, extraClass) {
+            const classes = ['flag-marker'];
+            if (!flag) classes.push('no-flag');
+            if (extraClass) classes.push(extraClass);
+            return L.divIcon({
+                className: classes.join(' '),
+                html: flag || '',
+                iconSize: [22, 18],
+                iconAnchor: [11, 9]
+            });
         }
 
         function esc(str) {
@@ -187,14 +236,12 @@
                 const flag = countryCodeToFlag(c.iso_a2);
                 const label = (flag ? flag + ' ' : '') + c.country;
 
-                L.circleMarker([c.lat, c.lon], {
-                    radius: 4,
-                    color: '#f39c12',
-                    weight: 1,
-                    fillColor: '#f39c12',
-                    fillOpacity: 0.8
-                })
-                    .bindTooltip(label, { direction: 'top', offset: [0, -4] })
+                // Leaflet stops marker clicks from reaching the map, so a flag
+                // click answers from the data we already have — no POST, and no
+                // spending the caller's one-per-second budget.
+                L.marker([c.lat, c.lon], { icon: flagIcon(flag), title: c.country })
+                    .bindTooltip(label, { direction: 'top', offset: [0, -10] })
+                    .bindPopup(renderPopup(c, c.lat, c.lon))
                     .addTo(map);
             }
 
@@ -211,7 +258,10 @@
             if (clickMarker) {
                 map.removeLayer(clickMarker);
             }
-            clickMarker = L.marker([lat, e.latlng.lng]).addTo(map);
+            // Starts as a plain dot; becomes the country's flag once we know it
+            clickMarker = L.marker([lat, e.latlng.lng], {
+                icon: flagIcon('', 'click-marker')
+            }).addTo(map);
             clickMarker.bindPopup('Looking up…').openPopup();
 
             let resp;
@@ -244,6 +294,7 @@
             }
 
             const r = await resp.json();
+            clickMarker.setIcon(flagIcon(countryCodeToFlag(r.iso_a2), 'click-marker'));
             clickMarker.setPopupContent(renderPopup(r, lat, lon));
         }
 
@@ -270,7 +321,9 @@
             if (r.sovereign && r.sovereign !== r.country) {
                 html += '<div class="popup-row"><span class="label">Sovereign</span>' + esc(r.sovereign) + '</div>';
             }
-            html += '<div class="popup-row"><span class="label">Position</span>' +
+            // Country markers carry no method — their coordinates are the centre
+            const posLabel = r.method ? 'Position' : 'Centre';
+            html += '<div class="popup-row"><span class="label">' + posLabel + '</span>' +
                 lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
 
             if (r.method) {

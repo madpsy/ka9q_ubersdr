@@ -4,6 +4,16 @@
 // Register the datalabels plugin with Chart.js
 Chart.register(ChartDataLabels);
 
+// Escape before interpolating into marker tooltips/popups. The chart's tooltips
+// are canvas-drawn by Chart.js so its strings need no escaping, but the map
+// builds real HTML from the same spot fields plus operator-set receiver details.
+function cwGraphEsc(value) {
+    if (value == null) return '';
+    return String(value).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
 function cwGraphIso2ToFlag(code) {
     if (!code || code.length !== 2) return '';
     const c = code.toUpperCase();
@@ -33,6 +43,16 @@ class CWSpotsGraph {
         this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
         this._lastHoverFrequency = null; // Debounce hover-tune: only send when spot changes
 
+        // Map view state. The Chart/Map switcher only appears when the server
+        // reports that CW spots carry real QRZ positions; until then the map is
+        // never built and 'chart' is the only view.
+        this.view = 'chart'; // 'chart' | 'map' — chart is always the default
+        this.mapEnabled = false; // Set from /api/description
+        this.map = null; // Leaflet map, lazily created on first switch to map view
+        this.mapMarkers = new Map(); // dx_call -> { marker, stamp }, diffed against the filtered set
+        this.description = null; // Cached /api/description payload (gating + receiver marker)
+        this.rxMarker = null; // This instance's own location marker
+
         // CW decoder state
         this.morseRunning = false;
         this.morseTextBuffer = '';
@@ -53,6 +73,10 @@ class CWSpotsGraph {
         // Setup UI event handlers
         this.setupEventHandlers();
         this.setupDecoderHandlers();
+
+        // Ask the server whether CW spots are enriched with QRZ positions.
+        // Only then is a map worth offering (see checkMapAvailability).
+        this.checkMapAvailability();
 
         // Apply initial collapsed state to decoder body
         this._morseApplyCollapsedState();
@@ -141,12 +165,12 @@ class CWSpotsGraph {
                 this.bandFilter = data;
                 const syncBandSelect = document.getElementById('graph-band-filter');
                 if (syncBandSelect) syncBandSelect.value = data;
-                this.updateChart();
+                this.updateViews();
                 this.updateUI();
                 break;
             case 'frequency_changed':
                 this.currentFrequency = event.data.frequency;
-                this.updateChart();
+                this.updateViews();
                 // Auto-lookup: if enabled, find matching spot and look it up — but only when
                 // the matched callsign changes (debounce repeated lookups on same spot)
                 if (this.autoLookup && this.currentFrequency != null) {
@@ -176,7 +200,7 @@ class CWSpotsGraph {
                 this.bandFilter = data;
                 const bandSelect = document.getElementById('graph-band-filter');
                 if (bandSelect) bandSelect.value = data;
-                this.updateChart();
+                this.updateViews();
                 this.updateUI();
                 break;
             case 'morse_attached':
@@ -218,7 +242,7 @@ class CWSpotsGraph {
             const bandSelect = document.getElementById('graph-band-filter');
             if (bandSelect) bandSelect.value = bandFilter;
         }
-        this.updateChart();
+        this.updateViews();
         this.updateUI();
         this.updateLatestSpotForBand();
     }
@@ -253,7 +277,7 @@ class CWSpotsGraph {
         }
 
         // Update chart and UI
-        this.updateChart();
+        this.updateViews();
         this.updateUI();
     }
 
@@ -271,15 +295,20 @@ class CWSpotsGraph {
             delete latestSpotEl.dataset.spot;
         }
 
-        this.updateChart();
+        this.updateViews();
         this.updateUI();
     }
     
     setupEventHandlers() {
+        // Chart/Map view switcher (hidden unless QRZ lookups are enabled)
+        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.setView(btn.dataset.view));
+        });
+
         // Band filter
         document.getElementById('graph-band-filter').addEventListener('change', (e) => {
             this.bandFilter = e.target.value;
-            this.updateChart();
+            this.updateViews();
             this.updateUI();
             this.updateLatestSpotForBand();
             // Notify parent window to sync its band filter (no data refresh needed)
@@ -294,14 +323,14 @@ class CWSpotsGraph {
         // Age filter
         document.getElementById('graph-age-filter').addEventListener('change', (e) => {
             this.ageFilter = parseInt(e.target.value);
-            this.updateChart();
+            this.updateViews();
             this.updateUI();
         });
         
         // SNR filter
         document.getElementById('graph-snr-filter').addEventListener('change', (e) => {
             this.snrFilter = parseInt(e.target.value);
-            this.updateChart();
+            this.updateViews();
             this.updateUI();
         });
         
@@ -317,7 +346,7 @@ class CWSpotsGraph {
         // Show labels checkbox
         document.getElementById('show-labels-checkbox').addEventListener('change', (e) => {
             this.showLabels = e.target.checked;
-            this.updateChart();
+            this.updateViews();
         });
 
         // Hover-tune checkbox
@@ -558,20 +587,310 @@ class CWSpotsGraph {
         });
     }
     
-    updateChart() {
-        if (!this.chart) return;
-        
-        // Filter spots
+    // ── View switching (Chart / Map) ──────────────────────────────────────────
+
+    async checkMapAvailability() {
+        // The map is only offered when CW spots actually carry per-operator QRZ
+        // positions. Without lookups every spot falls back to its DXCC entity
+        // centroid, so a map would show one pile per country — worse than no map.
+        try {
+            const resp = await fetch('/api/description');
+            if (!resp.ok) return;
+            const info = await resp.json();
+            if (!info.cw_skimmer_callsign_lookup) return;
+            // Retained for the receiver marker, so the map costs no second fetch.
+            this.description = info;
+        } catch (err) {
+            // Endpoint unreachable — leave the switcher hidden and stay on the chart.
+            console.warn('CW Spots Graph: Could not determine lookup availability:', err);
+            return;
+        }
+
+        this.mapEnabled = true;
+        const toggle = document.getElementById('view-toggle');
+        if (toggle) toggle.style.display = '';
+        console.log('CW Spots Graph: QRZ lookups enabled — map view available');
+    }
+
+    setView(view) {
+        if (!this.mapEnabled && view === 'map') return;
+        if (view === this.view) return;
+        this.view = view;
+
+        const chartWrapper = document.getElementById('chart-wrapper');
+        const mapWrapper = document.getElementById('map-wrapper');
+        const chartFooter = document.getElementById('chart-footer-text');
+        const mapFooter = document.getElementById('map-footer-text');
+        const showMap = view === 'map';
+
+        if (chartWrapper) chartWrapper.style.display = showMap ? 'none' : '';
+        if (mapWrapper) mapWrapper.style.display = showMap ? '' : 'none';
+        if (chartFooter) chartFooter.style.display = showMap ? 'none' : '';
+        if (mapFooter) mapFooter.style.display = showMap ? '' : 'none';
+
+        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        if (showMap) {
+            this.initMap();
+            // Leaflet cannot measure a hidden container, so the size it computed
+            // while display:none was wrong. Recalculate now that it is visible.
+            if (this.map) this.map.invalidateSize();
+        }
+
+        // Render whichever view just became visible with the current filter set.
+        this.updateViews();
+    }
+
+    initMap() {
+        if (this.map) return;
+
+        this.map = L.map('spots-map', {
+            worldCopyJump: true,
+            preferCanvas: true
+        }).setView([25, 0], 2);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18
+        }).addTo(this.map);
+
+        this.addReceiverMarker();
+    }
+
+    // updateViews is the single entry point for "the filtered spot set may have
+    // changed". Both views are driven from one getFilteredSpots() call so the map
+    // can never drift from the chart — spots appear and age out identically.
+    updateViews() {
         const filtered = this.getFilteredSpots();
-        
+        if (this.view === 'map') {
+            this.updateMap(filtered);
+        } else {
+            this.updateChart(filtered);
+        }
+    }
+
+    // Collapse the filtered spots to one entry per station, keeping the most
+    // recent. The chart plots frequency against time, so repeated spots of the
+    // same station are distinct and meaningful points there. A map has no time
+    // axis: those repeats resolve to identical coordinates and would stack into
+    // invisible duplicate markers. Same stations, same appear/disappear moments
+    // as the chart — just without the time dimension the map cannot show.
+    latestPerStation(spots) {
+        const byCall = new Map();
+        for (const spot of spots) {
+            const prev = byCall.get(spot.dx_call);
+            if (!prev || spot.timestamp > prev.timestamp) {
+                byCall.set(spot.dx_call, spot);
+            }
+        }
+        return byCall;
+    }
+
+    // Deterministic per-callsign scatter, used ONLY for centroid positions so a
+    // country's spots don't stack on a single pixel. Precise QRZ positions are
+    // never moved. Same hash approach as the standalone CW skimmer map.
+    centroidOffset(callsign) {
+        let hash = 0;
+        for (let i = 0; i < callsign.length; i++) {
+            hash = ((hash << 5) - hash) + callsign.charCodeAt(i);
+            hash |= 0;
+        }
+        hash = Math.abs(hash);
+        return {
+            lat: ((hash % 1000) / 1000 - 0.5) * 0.8,   // ±0.4°
+            lon: (((hash / 1000) % 1000) / 1000 - 0.5) * 1.6 // ±0.8°
+        };
+    }
+
+    // Marker HTML: an SNR-coloured dot plus the flag+callsign label, mirroring
+    // the chart's datalabels — same "Show Callsigns" toggle, same flag+call
+    // text, and the same bright green for the station currently tuned.
+    markerHtml(spot, approx) {
+        const colour = this.snrColour(spot.snr);
+        let html = `<div class="cw-map-marker${approx ? ' approx' : ''}" style="background:${colour};border-color:${colour}"></div>`;
+
+        if (this.showLabels) {
+            const tuned = this.currentFrequency != null &&
+                Math.abs(spot.frequency - this.currentFrequency) <= 10;
+            const flag = cwGraphIso2ToFlag(spot.country_code);
+            const label = flag + cwGraphEsc(spot.dx_call || 'Unknown');
+            html += `<span class="cw-map-label${tuned ? ' tuned' : ''}">${label}</span>`;
+        }
+        return html;
+    }
+
+    markerIcon(spot, approx) {
+        return L.divIcon({
+            className: 'cw-map-icon',
+            html: this.markerHtml(spot, approx),
+            iconSize: [11, 11],
+            iconAnchor: [5.5, 5.5]
+        });
+    }
+
+    updateMap(spots) {
+        if (!this.map) return;
+
+        const wanted = this.latestPerStation(spots);
+
+        for (const [call, spot] of wanted) {
+            // Spots without a resolved position can't be mapped at all.
+            if (!spot.latitude && !spot.longitude) {
+                wanted.delete(call);
+                continue;
+            }
+
+            // loc_source tells us whether the position is a real QRZ one or the
+            // DXCC centroid; only the latter gets scattered and drawn hollow.
+            const approx = spot.loc_source !== 'qrz';
+            const existing = this.mapMarkers.get(call);
+            const stamp = spot.timestamp.getTime();
+
+            if (existing) {
+                // The icon depends on more than the spot itself — the "Show
+                // Callsigns" toggle and the tuned frequency both change it — so
+                // diff the rendered HTML rather than the timestamp, and repaint
+                // only when it genuinely differs.
+                const html = this.markerHtml(spot, approx);
+                if (html !== existing.html) {
+                    existing.marker.setIcon(this.markerIcon(spot, approx));
+                    existing.html = html;
+                }
+
+                // Tooltip/popup/tune target only change when the spot does. The
+                // position never does: QRZ coords and the centroid offset are
+                // both per-callsign deterministic, so updating in place keeps
+                // any open popup anchored instead of churning the marker.
+                if (existing.stamp !== stamp) {
+                    const content = this.mapPopupContent(spot, approx);
+                    existing.marker.setTooltipContent(content);
+                    existing.marker.setPopupContent(content);
+                    existing.marker.off('click');
+                    existing.marker.on('click', () => this.tuneToSpotClick(spot));
+                    existing.stamp = stamp;
+                }
+                continue;
+            }
+
+            let lat = spot.latitude;
+            let lon = spot.longitude;
+            if (approx) {
+                const off = this.centroidOffset(call || '');
+                lat += off.lat;
+                lon += off.lon;
+            }
+
+            const content = this.mapPopupContent(spot, approx);
+            const marker = L.marker([lat, lon], { icon: this.markerIcon(spot, approx) });
+            marker.bindTooltip(content, { direction: 'top', offset: [0, -8] });
+            marker.bindPopup(content);
+            marker.on('click', () => this.tuneToSpotClick(spot));
+
+            marker.addTo(this.map);
+            this.mapMarkers.set(call, { marker, stamp, html: this.markerHtml(spot, approx) });
+        }
+
+        // Drop markers for stations that no longer pass the filters — aged out,
+        // band/SNR filter changed, or the spot list was cleared.
+        for (const [call, entry] of this.mapMarkers) {
+            if (!wanted.has(call)) {
+                this.map.removeLayer(entry.marker);
+                this.mapMarkers.delete(call);
+            }
+        }
+    }
+
+    // Marker tooltip/popup content. Deliberately mirrors the chart tooltip
+    // (title + Freq/Band/SNR/WPM/Country/Distance, same formatting and same
+    // conditional rows) so hovering a marker and hovering a chart point tell you
+    // the same things — only the map-specific "approximate position" caveat is
+    // added, because the chart has no position to caveat.
+    mapPopupContent(spot, approx) {
+        const flag = cwGraphIso2ToFlag(spot.country_code);
+        const rows = [`<div class="cw-map-popup-call">${flag}${cwGraphEsc(spot.dx_call || 'Unknown')}</div>`];
+        rows.push(`<div class="cw-map-popup-row">Freq: ${(spot.frequency / 1e6).toFixed(4)} MHz</div>`);
+        rows.push(`<div class="cw-map-popup-row">Band: ${cwGraphEsc(spot.band || 'Unknown')}</div>`);
+        rows.push(`<div class="cw-map-popup-row">SNR: ${cwGraphEsc(spot.snr)} dB</div>`);
+        rows.push(`<div class="cw-map-popup-row">WPM: ${cwGraphEsc(spot.wpm || 'N/A')}</div>`);
+        if (spot.country) rows.push(`<div class="cw-map-popup-row">Country: ${cwGraphEsc(spot.country)}</div>`);
+        if (spot.distance_km) rows.push(`<div class="cw-map-popup-row">Distance: ${Math.round(spot.distance_km)} km</div>`);
+        if (approx) {
+            rows.push('<div class="cw-map-popup-hint">Approximate position (country centroid)</div>');
+        }
+        rows.push('<div class="cw-map-popup-hint">Click to tune</div>');
+        return rows.join('');
+    }
+
+    // ── This receiver ─────────────────────────────────────────────────────────
+
+    // Drop a marker on the instance's own site, mirroring map.html's loadReceiver.
+    // Uses the /api/description response already fetched for the map gating, so
+    // this costs no extra request.
+    addReceiverMarker() {
+        if (!this.map || this.rxMarker || !this.description) return;
+
+        const rx = this.description.receiver || {};
+        const gps = rx.gps || {};
+        // 0,0 is the unset default, not a station in the Gulf of Guinea
+        if (typeof gps.lat !== 'number' || typeof gps.lon !== 'number' ||
+            (gps.lat === 0 && gps.lon === 0)) {
+            return;
+        }
+
+        const ident = rx.callsign || rx.name || 'This receiver';
+        const rows = [`<div class="cw-map-popup-call">📡 ${cwGraphEsc(ident)}</div>`];
+        if (rx.callsign && rx.name && rx.name !== rx.callsign) {
+            rows.push(`<div class="cw-map-popup-row">${cwGraphEsc(rx.name)}</div>`);
+        }
+        if (rx.location) rows.push(`<div class="cw-map-popup-row">${cwGraphEsc(rx.location)}</div>`);
+        if (gps.maidenhead) rows.push(`<div class="cw-map-popup-row">${cwGraphEsc(gps.maidenhead)}</div>`);
+        if (rx.antenna) rows.push(`<div class="cw-map-popup-row">Antenna: ${cwGraphEsc(rx.antenna)}</div>`);
+
+        this.rxMarker = L.marker([gps.lat, gps.lon], {
+            icon: L.divIcon({
+                className: '',
+                html: '<div class="cw-map-rx-marker">📡</div>',
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            }),
+            zIndexOffset: 1000 // always on top of the spot markers
+        });
+
+        const content = rows.join('');
+        this.rxMarker.bindTooltip(content, { direction: 'top', offset: [0, -12] });
+        this.rxMarker.bindPopup(content);
+        this.rxMarker.addTo(this.map);
+
+        // Open on the receiver rather than an arbitrary point, so the first view
+        // is centred on where the spots are being heard from.
+        this.map.setView([gps.lat, gps.lon], 3);
+    }
+
+    snrColour(snr) {
+        if (snr > 26) return '#28a745';
+        if (snr >= 13) return '#ffc107';
+        if (snr >= 6) return '#ff8c00';
+        return '#dc3545';
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+
+    updateChart(filtered) {
+        if (!this.chart) return;
+
+        // Filter spots (unless updateViews already did it for us)
+        if (!filtered) filtered = this.getFilteredSpots();
+
         // Group by SNR for color coding
         const datasets = this.createDatasets(filtered);
-        
+
         // Update chart
         this.chart.data.datasets = datasets;
         this.chart.update('none'); // Use 'none' mode for better performance
     }
-    
+
     getFilteredSpots() {
         const now = new Date();
         const maxAge = this.ageFilter * 60 * 1000; // Convert to milliseconds
@@ -987,5 +1306,11 @@ if (document.readyState === 'loading') {
 setInterval(() => {
     if (window.cwSpotsGraph) {
         window.cwSpotsGraph.updateUI();
+        // The map has no time axis of its own, so ageing spots would linger
+        // until the next spot arrived. Re-diff the markers every second so they
+        // drop off exactly when the age filter says they should.
+        if (window.cwSpotsGraph.view === 'map') {
+            window.cwSpotsGraph.updateViews();
+        }
     }
 }, 1000);

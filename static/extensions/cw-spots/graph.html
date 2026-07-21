@@ -5,7 +5,9 @@
     <link rel="stylesheet" href="/fonts/fonts.css">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CW Spots Graph</title>
-    <link rel="stylesheet" href="graph.css?v=6">
+    <link rel="stylesheet" href="/leaflet.css">
+    <link rel="stylesheet" href="graph.css?v=7">
+    <script src="/leaflet.js"></script>
     <script src="/chart.umd.min.js"></script>
     <script src="/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="/chartjs-plugin-datalabels.min.js"></script>
@@ -17,6 +19,17 @@
                 <h2>CW Spots - Frequency vs Time</h2>
                 <span id="status-indicator" class="status-badge status-waiting">Waiting for data...</span>
             </div>
+            <!-- View switcher: hidden unless the server reports that CW spots are
+                 enriched with QRZ positions (see cw_skimmer_callsign_lookup in
+                 /api/description). Without lookups every spot sits on its DXCC
+                 centroid, which makes a map misleading rather than useful. -->
+            <div class="header-middle">
+                <div id="view-toggle" class="view-toggle" style="display: none;">
+                    <button id="view-chart-btn" class="view-toggle-btn active" data-view="chart">Chart</button>
+                    <button id="view-map-btn" class="view-toggle-btn" data-view="map">Map</button>
+                </div>
+            </div>
+
             <div class="header-right">
                 <span id="spot-count" class="spot-count">0 spots</span>
                 <span id="last-spot-time" class="last-spot-time"></span>
@@ -103,12 +116,17 @@
             </div>
         </div>
         
-        <div class="chart-wrapper">
+        <div class="chart-wrapper" id="chart-wrapper">
             <canvas id="spotsChart"></canvas>
         </div>
-        
+
+        <div class="map-wrapper" id="map-wrapper" style="display: none;">
+            <div id="spots-map"></div>
+        </div>
+
         <div class="graph-footer">
-            <p>Click on a spot or callsign to tune to that frequency. Colours indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span></p>
+            <p id="chart-footer-text">Click on a spot or callsign to tune to that frequency. Colours indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span></p>
+            <p id="map-footer-text" style="display: none;">Click a marker to tune to that spot. Same filters as the chart. Colours indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span> — hollow markers are approximate (country centroid, no QRZ position).</p>
         </div>
 
         <!-- CW Decoder Panel -->
@@ -172,6 +190,6 @@
         </div>
     </div>
     
-    <script src="graph.js?v=5"></script>
+    <script src="graph.js?v=6"></script>
 </body>
 </html>

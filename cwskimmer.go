@@ -38,6 +38,13 @@ type CWSkimmerSpot struct {
 	Name  string `json:"name_fmt,omitempty"` // Operator name (QRZ name_fmt)
 	State string `json:"state,omitempty"`    // State/region (QRZ)
 	Grid  string `json:"grid,omitempty"`     // Maidenhead grid square (QRZ)
+
+	// LocSource records where Latitude/Longitude came from: "qrz" for a real
+	// per-operator position from the callsign lookup, or "cty" for the DXCC
+	// entity/prefix centroid. Consumers (maps in particular) need this because
+	// a centroid stacks every station in a country on one point and must be
+	// jittered, whereas a QRZ position is accurate and must not be.
+	LocSource string `json:"loc_source,omitempty"`
 }
 
 // CWSkimmerClient manages connection to a CW Skimmer server
@@ -652,6 +659,9 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		// CTY parser already converts to standard format (+ for East, - for West)
 		spot.Latitude = info.Latitude
 		spot.Longitude = info.Longitude
+		if spot.Latitude != 0 || spot.Longitude != 0 {
+			spot.LocSource = "cty"
+		}
 	}
 
 	// Optionally override the location with a precise callsign-lookup result.
@@ -664,6 +674,10 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 			if qrz.Lat != 0 || qrz.Lon != 0 {
 				spot.Latitude = qrz.Lat
 				spot.Longitude = qrz.Lon
+				// Only now is the position a real per-operator one. A QRZ hit
+				// without coordinates leaves the CTY centroid in place, so
+				// LocSource must stay "cty".
+				spot.LocSource = "qrz"
 			}
 			spot.Name = qrz.NameFmt
 			spot.State = qrz.State

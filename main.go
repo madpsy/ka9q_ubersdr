@@ -4405,6 +4405,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"cw_skimmer_rbn_spots": cwskimmerConfig.Enabled && cwskimmerConfig.RBNSpots,
 		"cw_skimmer_callsign":  cwskimmerConfig.Callsign,
+		// True only when CW spots are actually being enriched with per-operator
+		// QRZ positions: the skimmer must be running with callsign lookup on,
+		// AND the lookup service must have initialised (it is left nil when
+		// lookup_services is disabled or the credentials are missing).
+		"cw_skimmer_callsign_lookup": cwskimmerConfig.Enabled &&
+			cwskimmerConfig.CallsignLookupEnabled && globalQRZService != nil,
 		"chat_enabled":         config.Chat.Enabled,
 		"chat_users":           chatUserCount,
 		"public_iq_modes":      publicIQModes,

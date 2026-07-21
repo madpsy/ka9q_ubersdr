@@ -884,6 +884,13 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 		data["grid"] = spot.Grid
 	}
 
+	// Tell consumers whether latitude/longitude is a real QRZ position or the
+	// DXCC entity centroid, so maps can jitter the centroids without blurring
+	// the accurate positions.
+	if spot.LocSource != "" {
+		data["loc_source"] = spot.LocSource
+	}
+
 	message := map[string]interface{}{
 		"type": "cw_spot",
 		"data": data,

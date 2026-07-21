@@ -61,11 +61,6 @@
             font-weight: 400;
         }
 
-        .header .hint {
-            font-size: 12px;
-            color: #95a5a6;
-        }
-
         .controls {
             display: flex;
             flex-wrap: wrap;
@@ -135,47 +130,6 @@
             border-radius: 3px;
             white-space: nowrap;
             pointer-events: none;
-        }
-
-        @media (max-width: 900px) {
-            .header .hint { display: none; }
-        }
-
-        /* Phones: the controls drop to their own full-width row and the input
-           takes the slack, so nothing is pushed off-screen to the right */
-        @media (max-width: 640px) {
-            .header {
-                padding: 8px 10px;
-                gap: 6px 10px;
-            }
-
-            .header h1 {
-                font-size: 15px;
-            }
-
-            .controls {
-                margin-left: 0;
-                flex-basis: 100%;
-                gap: 6px 8px;
-            }
-
-            .controls input[type="text"] {
-                flex: 1 1 120px;
-                width: auto;
-                min-width: 0;
-                /* 16px keeps iOS Safari from zooming the page on focus */
-                font-size: 16px;
-            }
-
-            .controls button {
-                font-size: 13px;
-                padding: 7px 12px;
-            }
-
-            .status {
-                flex-basis: 100%;
-                white-space: normal;
-            }
         }
 
         .status {
@@ -330,13 +284,131 @@
             font-size: 11px;
             color: #7f8c8d;
         }
-    </style>
+
+        /* Path readout — sits above Leaflet's controls (z-index 1000) and clears
+           the attribution strip along the bottom */
+        .path-panel {
+            position: fixed;
+            right: 10px;
+            bottom: 24px;
+            z-index: 1200;
+            display: none;
+            max-width: 300px;
+            padding: 10px 26px 10px 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            background: rgba(44, 62, 80, 0.94);
+            border: 1px solid #445;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+        }
+
+        .path-panel.visible {
+            display: block;
+        }
+
+        .path-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .path-row {
+            color: #bdc3c7;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .path-row .label {
+            color: #7f8c8d;
+            display: inline-block;
+            min-width: 62px;
+        }
+
+        .path-figures {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #445;
+        }
+
+        .path-figures .value {
+            font-weight: 600;
+            color: #ecf0f1;
+        }
+
+        .path-note {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #7f8c8d;
+        }
+
+        .path-close {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            padding: 2px 4px;
+            background: none;
+            border: none;
+            color: #95a5a6;
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .path-close:hover {
+            color: #ecf0f1;
+        }
+
+        /* Phones: the controls drop to their own full-width row and the input
+           takes the slack, so nothing is pushed off-screen to the right */
+        @media (max-width: 640px) {
+            .header {
+                padding: 8px 10px;
+                gap: 6px 10px;
+            }
+
+            .header h1 {
+                font-size: 15px;
+            }
+
+            .controls {
+                margin-left: 0;
+                flex-basis: 100%;
+                gap: 6px 8px;
+            }
+
+            .controls input[type="text"] {
+                flex: 1 1 120px;
+                width: auto;
+                min-width: 0;
+                /* 16px keeps iOS Safari from zooming the page on focus */
+                font-size: 16px;
+            }
+
+            .controls button {
+                font-size: 13px;
+                padding: 7px 12px;
+            }
+
+            .status {
+                flex-basis: 100%;
+                white-space: normal;
+            }
+
+            /* Span the width rather than crowding into the corner */
+            .path-panel {
+                left: 10px;
+                right: 10px;
+                max-width: none;
+            }
+        }
+</style>
 </head>
 <body>
     <div class="header">
         <h1>Country Map</h1>
         <span class="rx-id" id="rxId"></span>
-        <span class="hint">Click the map to identify a point · or look up a callsign / locator / coordinates</span>
         <div class="controls">
             <input type="text" id="search" placeholder="Callsign, locator or lat, lon" title="Callsign (e.g. GM4ABC), Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
             <button id="searchBtn" type="button">Look up</button>
@@ -345,6 +417,10 @@
         </div>
     </div>
     <div id="map"></div>
+    <div class="path-panel" id="pathPanel">
+        <button class="path-close" id="pathClose" type="button" title="Hide">×</button>
+        <div id="pathBody"></div>
+    </div>
 
     <script src="leaflet.js"></script>
     <script>
@@ -357,6 +433,8 @@
         let clickMarker = null;
         let searchLayer = null;   // marker + grid square rectangle for a lookup
         let rxMarker = null;      // this instance's own location
+        let rxLocation = null;    // {lat, lon, ident, locator} once /api/description answers
+        let pathLine = null;      // geodesic from the receiver to the last lookup
         let gridLayer = null;     // Maidenhead grid overlay, off until asked for
 
         // A locator the server will accept: 4, 6 or 8 characters
@@ -458,6 +536,7 @@
 
             map.on('click', onMapClick);
 
+            document.getElementById('pathClose').addEventListener('click', hidePath);
             document.getElementById('searchBtn').addEventListener('click', doSearch);
             document.getElementById('search').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doSearch();
@@ -549,6 +628,120 @@
             }
         }
 
+        // ---- Path from this receiver -------------------------------------------------
+
+        const R_EARTH_KM = 6371;
+        const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+
+        // Great-circle distance (km) and initial bearing (°), matching the
+        // server's CalculateDistanceAndBearing
+        function distanceBearing(lat1, lon1, lat2, lon2) {
+            const φ1 = lat1 * D2R, φ2 = lat2 * D2R;
+            const λ1 = lon1 * D2R, λ2 = lon2 * D2R;
+            const dφ = φ2 - φ1, dλ = λ2 - λ1;
+
+            const a = Math.sin(dφ / 2) ** 2 +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ / 2) ** 2;
+            const km = R_EARTH_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            const y = Math.sin(dλ) * Math.cos(φ2);
+            const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dλ);
+            const bearing = (Math.atan2(y, x) * R2D + 360) % 360;
+
+            return { km: km, bearing: bearing };
+        }
+
+        // Points along the great circle, so the drawn path is the true shortest
+        // route rather than the straight Mercator line between the two pins
+        function greatCirclePoints(lat1, lon1, lat2, lon2, segments) {
+            const φ1 = lat1 * D2R, λ1 = lon1 * D2R;
+            const φ2 = lat2 * D2R, λ2 = lon2 * D2R;
+
+            const d = 2 * Math.asin(Math.sqrt(
+                Math.sin((φ2 - φ1) / 2) ** 2 +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2));
+            if (d === 0) return [[lat1, lon1]];
+
+            const pts = [];
+            for (let i = 0; i <= segments; i++) {
+                const f = i / segments;
+                const A = Math.sin((1 - f) * d) / Math.sin(d);
+                const B = Math.sin(f * d) / Math.sin(d);
+                const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+                const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+                const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+                pts.push([Math.atan2(z, Math.hypot(x, y)) * R2D, Math.atan2(y, x) * R2D]);
+            }
+
+            // Unwrap longitudes so a path over the dateline is drawn as one line
+            // instead of whipping back across the whole map
+            for (let i = 1; i < pts.length; i++) {
+                const step = pts[i][1] - pts[i - 1][1];
+                if (step > 180) pts[i][1] -= 360;
+                else if (step < -180) pts[i][1] += 360;
+            }
+            return pts;
+        }
+
+        // Draw the path to a looked-up point and fill in the corner readout.
+        // label/sub describe the far end — a country, a callsign, a locator.
+        function showPath(lat, lon, label, sub) {
+            if (pathLine) {
+                map.removeLayer(pathLine);
+                pathLine = null;
+            }
+
+            const locator = latLonToLocator(lat, lon, 6);
+            let html = '<div class="path-title">' + esc(label || 'Selected point') + '</div>';
+            if (sub) html += '<div class="path-row">' + esc(sub) + '</div>';
+            html += '<div class="path-row"><span class="label">Point</span>' +
+                lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>' +
+                '<div class="path-row"><span class="label">Locator</span>' + esc(locator) + '</div>';
+
+            if (rxLocation) {
+                pathLine = L.polyline(greatCirclePoints(rxLocation.lat, rxLocation.lon, lat, lon, 128), {
+                    color: '#e74c3c',
+                    weight: 2,
+                    opacity: 0.85,
+                    dashArray: '6 6',
+                    interactive: false
+                }).addTo(map);
+
+                const there = distanceBearing(rxLocation.lat, rxLocation.lon, lat, lon);
+                const back = distanceBearing(lat, lon, rxLocation.lat, rxLocation.lon);
+
+                html = '<div class="path-title">📡 ' + esc(rxLocation.ident) + ' → ' +
+                        esc(label || 'Selected point') + '</div>' +
+                    (sub ? '<div class="path-row">' + esc(sub) + '</div>' : '') +
+                    '<div class="path-row"><span class="label">From</span>' +
+                        esc(rxLocation.locator) + ' · ' +
+                        rxLocation.lat.toFixed(3) + ', ' + rxLocation.lon.toFixed(3) + '</div>' +
+                    '<div class="path-row"><span class="label">To</span>' +
+                        esc(locator) + ' · ' + lat.toFixed(3) + ', ' + lon.toFixed(3) + '</div>' +
+                    '<div class="path-figures">' +
+                    '<div class="path-row"><span class="label">Distance</span><span class="value">' +
+                        Math.round(there.km).toLocaleString() + ' km</span> · ' +
+                        Math.round(there.km * 0.621371).toLocaleString() + ' mi</div>' +
+                    '<div class="path-row"><span class="label">Bearing</span><span class="value">' +
+                        there.bearing.toFixed(1) + '°</span> · return ' +
+                        back.bearing.toFixed(1) + '°</div>' +
+                    '</div>';
+            } else {
+                html += '<div class="path-note">Receiver location unknown — no path</div>';
+            }
+
+            document.getElementById('pathBody').innerHTML = html;
+            document.getElementById('pathPanel').classList.add('visible');
+        }
+
+        function hidePath() {
+            document.getElementById('pathPanel').classList.remove('visible');
+            if (pathLine) {
+                map.removeLayer(pathLine);
+                pathLine = null;
+            }
+        }
+
         // ---- This receiver -----------------------------------------------------------
 
         // Identify the instance in the header and drop a marker on its own site.
@@ -579,6 +772,13 @@
                 (gps.lat === 0 && gps.lon === 0)) {
                 return;
             }
+
+            rxLocation = {
+                lat: gps.lat,
+                lon: gps.lon,
+                ident: ident || 'Receiver',
+                locator: gps.maidenhead || latLonToLocator(gps.lat, gps.lon, 6)
+            };
 
             const html = renderReceiver(desc, rx, gps, await loadWeather());
 
@@ -799,6 +999,9 @@
                 '<div class="popup-method">entity centre from cty.dat — not the operator\'s location</div>';
 
             placeSearchResult(d.latitude, d.longitude, flag, html, null);
+            showPath(d.latitude, d.longitude,
+                (flag ? flag + ' ' : '') + call,
+                d.country + (d.primary_prefix ? ' · ' + d.primary_prefix : ''));
             setStatus(call + ' — ' + (d.country || 'Unknown'));
         }
 
@@ -813,6 +1016,12 @@
 
             const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
             placeSearchResult(r.lat, r.lon, pin, renderPopup(r, r.lat, r.lon), bounds);
+
+            // A locator search names the square; a coordinate search names the country
+            showPath(r.lat, r.lon,
+                r.locator ? r.locator.toUpperCase() : (r.method === 'open_water'
+                    ? '🌊 Open water' : (pin ? pin + ' ' : '') + (r.country || 'Unknown')),
+                r.locator ? (r.method === 'open_water' ? 'Open water' : (pin ? pin + ' ' : '') + (r.country || '')) : r.continent);
 
             setStatus(r.method === 'open_water'
                 ? 'Open water'
@@ -936,6 +1145,10 @@
             const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
             clickMarker.setIcon(flagIcon(pin, 'click-marker'));
             clickMarker.setPopupContent(renderPopup(r, lat, lon));
+
+            showPath(lat, lon,
+                r.method === 'open_water' ? '🌊 Open water' : (pin ? pin + ' ' : '') + (r.country || 'Unknown'),
+                r.method === 'open_water' ? '' : r.continent);
         }
 
         function renderPopup(r, lat, lon) {

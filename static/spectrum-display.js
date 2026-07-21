@@ -10,6 +10,67 @@ function _spectrumIso2ToFlag(code) {
     catch (e) { return ''; }
 }
 
+// Local-time formatters, cached per IANA zone. The tooltip is rebuilt on every
+// mousemove, and constructing Intl.DateTimeFormat is expensive enough that
+// doing it per event is worth avoiding.
+const _spectrumTzFmtCache = new Map();
+
+function _spectrumTzFormatters(tz) {
+    let entry = _spectrumTzFmtCache.get(tz);
+    if (entry !== undefined) return entry;
+    try {
+        entry = {
+            time: new Intl.DateTimeFormat('en-GB', {
+                timeZone: tz, hour: '2-digit', minute: '2-digit',
+                second: '2-digit', hour12: false
+            }),
+            // shortOffset is ES2022; if unsupported the offset is omitted.
+            offset: (() => {
+                try {
+                    return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'shortOffset' });
+                } catch (e) { return null; }
+            })()
+        };
+    } catch (e) {
+        entry = null;   // zone unknown to this browser — cache the failure too
+    }
+    _spectrumTzFmtCache.set(tz, entry);
+    return entry;
+}
+
+/**
+ * "☀️ 08:41:07 (UTC-4)" for a spot carrying tz_iana, or '' when it has none.
+ *
+ * tz_iana is only present when the server resolved the position precisely
+ * enough to trust the zone (see qrzGeoLocIsPrecise), so its absence means we
+ * genuinely don't know the operator's local time and must not guess one.
+ * The sun's altitude — not sunrise/sunset times — decides day vs night, since
+ * SunCalc.getTimes() returns Invalid Date inside the polar circles.
+ */
+function _spectrumLocalTime(spot) {
+    if (!spot || !spot.tz_iana) return '';
+    const fmts = _spectrumTzFormatters(spot.tz_iana);
+    if (!fmts) return '';
+
+    let emoji = '';
+    const lat = parseFloat(spot.latitude), lon = parseFloat(spot.longitude);
+    if (typeof SunCalc !== 'undefined' && !isNaN(lat) && !isNaN(lon)) {
+        try {
+            emoji = SunCalc.getPosition(new Date(), lat, lon).altitude > 0 ? '☀️ ' : '🌙 ';
+        } catch (e) { /* leave emoji empty */ }
+    }
+
+    let out = emoji + fmts.time.format(new Date());
+    if (fmts.offset) {
+        try {
+            const part = fmts.offset.formatToParts(new Date())
+                .find(p => p.type === 'timeZoneName');
+            if (part && part.value) out += ` (${part.value.replace(/^GMT/, 'UTC')})`;
+        } catch (e) { /* omit offset */ }
+    }
+    return out;
+}
+
 class SpectrumDisplay {
     constructor(canvasId, config = {}) {
         this.canvas = document.getElementById(canvasId);
@@ -420,7 +481,10 @@ class SpectrumDisplay {
                         const _cwName = (_cwC && _cwC.data) ? (() => { const _n = _cwC.data.name_fmt || [_cwC.data.fname, _cwC.data.nickname ? `"${_cwC.data.nickname}"` : '', _cwC.data.name].filter(Boolean).join(' '); return _n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n; })() : '';
                         let tooltipText = `${cwCallDisplay}: ${freqStr}`;
                         if (_cwName) tooltipText += `<br>Name: ${_cwName}`;
-                        tooltipText += `<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
+                        tooltipText += `<br>Time: ${timeStr} UTC`;
+                        const _cwLocal = _spectrumLocalTime(pos.spot);
+                        if (_cwLocal) tooltipText += `<br>Local: ${_cwLocal}`;
+                        tooltipText += `<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
                         if (pos.spot.country) {
                             tooltipText += `<br>Country: ${pos.spot.country}`;
                         }

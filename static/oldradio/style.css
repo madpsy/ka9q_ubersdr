@@ -6,7 +6,12 @@
 
 body {
     font-family: 'Arial', sans-serif;
-    background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%);
+    /* Soft vignette rather than flat black, so the radio casing reads as an
+       object sitting on a surface instead of blending into the page */
+    background:
+        radial-gradient(ellipse at 50% 42%, rgba(90, 110, 130, 0.20), transparent 62%),
+        linear-gradient(160deg, #22282e 0%, #14181c 55%, #0d1013 100%);
+    background-attachment: fixed;
     display: flex;
     justify-content: center;
     align-items: center;

@@ -1,16 +1,19 @@
-/* UK CB Radio - Midland Car CB Style */
+/* UK CB Radio - Midland Car CB Style
+   Gunmetal case with a brushed-metal faceplate, so the set reads against the
+   dark page instead of disappearing into it. Display stays green-on-black. */
 
 .radio-body {
     width: 700px;
     max-width: 95vw;
     height: 180px;
-    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
-    border: 2px solid #000;
-    border-radius: 3px;
+    background: linear-gradient(160deg, #4e565e, #2f353b 55%, #23282d);
+    border: 2px solid #171b1f;
+    border-radius: 5px;
     padding: 0;
-    box-shadow: 
-        0 4px 15px rgba(0, 0, 0, 0.9),
-        inset 0 1px 2px rgba(255, 255, 255, 0.05);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.85),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 -2px 4px rgba(0, 0, 0, 0.5);
     position: relative;
 }
 
@@ -26,15 +29,15 @@
 .radio-brand {
     font-size: 18px;
     font-weight: bold;
-    color: #666;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    color: #d5dbe0;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9), 0 -1px 0 rgba(255, 255, 255, 0.12);
     letter-spacing: 4px;
     margin: 0;
 }
 
 .radio-model {
     font-size: 9px;
-    color: #444;
+    color: #949ba2;
     letter-spacing: 1px;
     font-weight: normal;
     opacity: 1;
@@ -45,7 +48,7 @@
 .cb-main-body {
     display: flex;
     height: 100%;
-    background: #0a0a0a;
+    background: transparent;
     border-radius: 3px;
     padding: 0;
     padding-top: 35px;
@@ -57,13 +60,14 @@
     display: flex;
     flex-direction: column;
     padding: 10px 15px 10px 15px;
-    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
-    border-right: 1px solid #000;
+    background: linear-gradient(150deg, #434a51, #2b3037);
+    border-right: 1px solid rgba(0, 0, 0, 0.6);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
 }
 
 .display-screen {
     background: #001100;
-    border: 2px solid #000;
+    border: 2px solid #12161a;
     border-radius: 2px;
     padding: 12px 15px;
     box-shadow:
@@ -76,10 +80,10 @@
     position: relative;
 }
 
-.band-toggle {
+.band-toggle,
+.mode-toggle {
     position: absolute;
     top: 8px;
-    left: 10px;
     background: transparent;
     border: 1px solid #ffff00;
     color: #ffff00;
@@ -94,7 +98,16 @@
     transition: all 0.15s ease;
 }
 
-.band-toggle:hover {
+.band-toggle {
+    left: 10px;
+}
+
+.mode-toggle {
+    right: 10px;
+}
+
+.band-toggle:hover,
+.mode-toggle:hover {
     background: rgba(255, 255, 0, 0.1);
     box-shadow: 0 0 8px rgba(255, 255, 0, 0.4);
 }
@@ -160,14 +173,14 @@
 /* Center Section - Speaker / Visualiser */
 .speaker-grille {
     flex: 1;
-    background: linear-gradient(145deg, #0a0a0a, #000);
+    background: linear-gradient(145deg, #14181b, #080a0c);
     margin: 10px 0;
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9);
+    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.95);
     overflow: hidden;
     position: relative;
     cursor: pointer;
-    border-left: 1px solid #1a1a1a;
-    border-right: 1px solid #1a1a1a;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .speaker-grille:hover {
@@ -220,8 +233,9 @@
     display: flex;
     flex-direction: column;
     padding: 10px 15px;
-    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
-    border-left: 1px solid #000;
+    background: linear-gradient(150deg, #434a51, #2b3037);
+    border-left: 1px solid rgba(0, 0, 0, 0.6);
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.06);
     gap: 12px;
 }
 
@@ -232,7 +246,7 @@
 }
 
 .channel-btn {
-    background: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+    background: linear-gradient(145deg, #39424a, #232a30);
     border: 2px solid #00ff00;
     color: #00ff00;
     font-size: 14px;
@@ -262,7 +276,7 @@
 }
 
 .channel-btn:hover {
-    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
+    background: linear-gradient(145deg, #4a545d, #333c44);
     box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
 }
 
@@ -284,22 +298,26 @@
 /* Knobs Container - Side by Side */
 .knobs-container {
     display: flex;
-    gap: 15px;
+    gap: 12px;
     justify-content: center;
     align-items: center;
+    flex-wrap: wrap;
 }
 
 .volume-control-cb,
-.squelch-control {
+.squelch-control,
+.tune-control {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 5px;
     position: relative;
+    flex: 0 0 60px;
 }
 
 .volume-label,
-.squelch-label {
+.squelch-label,
+.tune-label {
     color: #00ff00;
     font-size: 9px;
     font-weight: bold;
@@ -308,11 +326,25 @@
     text-shadow: 0 0 3px rgba(0, 255, 0, 0.3);
 }
 
+/* Doubles as the clarifier readout, so keep it on one line — "+1200 Hz" is
+   wider than the knob it sits above, hence the fixed-width parent */
+.tune-label {
+    white-space: nowrap;
+    color: #ffff00;
+    text-shadow: 0 0 3px rgba(255, 255, 0, 0.4);
+    cursor: default;
+    user-select: none;
+}
+
+#tune-knob {
+    cursor: ns-resize;
+}
+
 .knob {
     width: 60px;
     height: 60px;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #2a2a2a, #0a0a0a);
+    background: radial-gradient(circle at 35% 35%, #4a5259, #14181b);
     box-shadow:
         0 3px 8px rgba(0, 0, 0, 0.8),
         inset 0 1px 3px rgba(255, 255, 255, 0.05),
@@ -321,7 +353,7 @@
     cursor: pointer;
     transition: transform 0.1s ease;
     z-index: 2;
-    border: 1px solid #000;
+    border: 1px solid #0d0f11;
 }
 
 .knob:active {
@@ -379,13 +411,13 @@
 
 /* Change Radio Button - CB Style */
 .change-radio-floating {
-    background: linear-gradient(145deg, #2a2a2a, #1a1a1a) !important;
+    background: linear-gradient(145deg, #39424a, #232a30) !important;
     border: 2px solid #00ff00 !important;
     color: #00ff00 !important;
 }
 
 .change-radio-floating:hover {
-    background: linear-gradient(145deg, #3a3a3a, #2a2a2a) !important;
+    background: linear-gradient(145deg, #4a545d, #333c44) !important;
     border-color: #00ff00 !important;
     box-shadow: 0 0 10px rgba(0, 255, 0, 0.3) !important;
 }

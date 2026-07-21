@@ -161,14 +161,22 @@ async function loadRadio(radioId) {
                 ? savedBand
                 : (currentRadioConfig.defaultBand || Object.keys(currentRadioConfig.bands)[0]);
             applyBandConfig(initialBand);
+        } else {
+            currentBand = null;
         }
 
         // Update global configuration
         MIN_FREQ = currentRadioConfig.minFreq;
         MAX_FREQ = currentRadioConfig.maxFreq;
-        MODE = currentRadioConfig.mode;
+        // applyBandConfig already resolved the mode for multi-band radios; for the
+        // rest, fall back to the config default unless the user picked a mode before.
+        MODE = getSavedMode(radioId, currentBand) || currentRadioConfig.mode;
+        currentRadioConfig.mode = MODE;
         DIAL_GEAR_RATIO = currentRadioConfig.dialGearRatio;
         currentFrequency = currentRadioConfig.defaultFrequency;
+        tuneOffset = 0;
+        tuneRotation = 0;
+        tuneNotch = 0;
         currentVolume = currentRadioConfig.defaultVolume;
         volumeRotation = currentVolume * 330;
         console.log('[loadRadio] defaultVolume from config:', currentRadioConfig.defaultVolume, '→ currentVolume:', currentVolume, 'volumeRotation:', volumeRotation);
@@ -357,7 +365,9 @@ function setupAudioStartButton() {
 async function startRadio() {
     setupDials();
     setupChannelButtons();
+    setupModeButton();
     setupSquelchKnob();
+    setupTuneKnob();
 
     // Initialize MinimalRadio with our session ID
     minimalRadio = new MinimalRadio(userSessionID);
@@ -366,7 +376,7 @@ async function startRadio() {
 
     // Start audio preview
     try {
-        await minimalRadio.startPreview(currentFrequency, MODE);
+        await minimalRadio.startPreview(tunedFrequency(), MODE);
         console.log('Radio started successfully');
 
         // Wait a bit for audio context to be fully ready
@@ -622,6 +632,65 @@ function setupChannelButtons() {
     }
 }
 
+// Mode handling — each band (or radio) has a default mode, but the user can
+// cycle through the demodulators below and the choice is remembered per band.
+const MODE_CYCLE = ['fm', 'am', 'lsb', 'usb'];
+
+function modeStorageKey(radioId, band) {
+    return `oldradio-mode-${radioId}-${band || 'default'}`;
+}
+
+function getSavedMode(radioId, band) {
+    try {
+        const mode = localStorage.getItem(modeStorageKey(radioId, band));
+        return MODE_CYCLE.includes(mode) ? mode : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveMode(radioId, band, mode) {
+    try {
+        localStorage.setItem(modeStorageKey(radioId, band), mode);
+    } catch (e) {
+        /* storage unavailable (e.g. private mode) — ignore */
+    }
+}
+
+function setupModeButton() {
+    const modeToggle = document.getElementById('mode-toggle');
+    if (!modeToggle) return;
+
+    modeToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleMode();
+    });
+    updateModeDisplay();
+}
+
+// Step to the next demodulator and retune in place
+function toggleMode() {
+    const idx = MODE_CYCLE.indexOf(MODE);
+    MODE = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
+
+    if (currentRadioConfig) {
+        currentRadioConfig.mode = MODE;
+        saveMode(currentRadioConfig.id, currentBand, MODE);
+    }
+
+    console.log('Mode switched to', MODE);
+    updateModeDisplay();
+    throttledUpdateURL();
+    sendTuneCommand();
+}
+
+function updateModeDisplay() {
+    const modeToggle = document.getElementById('mode-toggle');
+    if (modeToggle) {
+        modeToggle.textContent = MODE.toUpperCase();
+    }
+}
+
 // Band handling for multi-band radios (e.g. CB with UK/EU channel plans)
 let currentBand = null;
 
@@ -662,12 +731,15 @@ function applyBandConfig(bandName) {
     MIN_FREQ = band.minFreq;
     MAX_FREQ = band.maxFreq;
 
-    // Mode is read directly from the band definition (e.g. UK/EU = "fm", US = "am")
-    if (band.mode) {
-        MODE = band.mode;
-    }
+    // Each band has a default mode (e.g. UK/EU = "fm", US = "am"), but a mode the
+    // user picked for this band previously wins. Write it back into the config so
+    // the radio-level `mode` doesn't clobber it after loadRadio applies the band.
+    const savedMode = getSavedMode(currentRadioConfig.id, bandName);
+    MODE = savedMode || band.mode || currentRadioConfig.mode;
+    currentRadioConfig.mode = MODE;
 
     updateBandDisplay();
+    updateModeDisplay();
 }
 
 // Switch to the next band, keeping the current channel number
@@ -846,7 +918,7 @@ function updateFrequencyFromDial() {
 // Send tune command to server via MinimalRadio
 function sendTuneCommand() {
     if (minimalRadio && minimalRadio.isPlaying) {
-        minimalRadio.changeFrequency(currentFrequency, MODE);
+        minimalRadio.changeFrequency(tunedFrequency(), MODE);
     }
 }
 
@@ -933,6 +1005,134 @@ function setupSquelchKnob() {
     });
 }
 
+// Fine tuning knob — a free-turning clarifier. Each detent shifts the tuned
+// frequency by TUNE_STEP_HZ; on channel-based radios the shift is kept as an
+// offset from the channel frequency so channel up/down keeps working.
+const TUNE_DETENT_DEG = 15;   // 24 detents per revolution
+const TUNE_STEP_HZ = 100;
+const TUNE_OFFSET_LIMIT = 5000;
+
+let tuneRotation = 0;
+let tuneNotch = 0;
+let tuneOffset = 0;
+
+// The frequency actually sent to the server (channel frequency + clarifier)
+function tunedFrequency() {
+    return isChannelRadio() ? currentFrequency + tuneOffset : currentFrequency;
+}
+
+function isChannelRadio() {
+    return !!(currentRadioConfig && currentRadioConfig.channels);
+}
+
+function setupTuneKnob() {
+    const tuneKnob = document.getElementById('tune-knob');
+    if (!tuneKnob) return;
+
+    let isDraggingTune = false;
+    let lastAngleTune = 0;
+
+    // Rotate freely — no end stops — and fire a step on each detent crossed
+    const applyRotation = (angle) => {
+        let delta = angle - lastAngleTune;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        lastAngleTune = angle;
+        tuneRotation += delta;
+
+        const notch = Math.round(tuneRotation / TUNE_DETENT_DEG);
+        if (notch !== tuneNotch) {
+            stepTune(notch - tuneNotch);
+            tuneNotch = notch;
+            // Snap to the detent so the knob feels clicky rather than continuous
+            tuneKnob.style.transform = `rotate(${notch * TUNE_DETENT_DEG}deg)`;
+        }
+    };
+
+    tuneKnob.addEventListener('mousedown', (e) => {
+        isDraggingTune = true;
+        lastAngleTune = getAngle(tuneKnob, e);
+        e.preventDefault();
+    });
+
+    tuneKnob.addEventListener('touchstart', (e) => {
+        isDraggingTune = true;
+        lastAngleTune = getAngle(tuneKnob, e.touches[0]);
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (isDraggingTune) applyRotation(getAngle(tuneKnob, e));
+    });
+
+    document.addEventListener('touchmove', (e) => {
+        if (isDraggingTune) {
+            applyRotation(getAngle(tuneKnob, e.touches[0]));
+            e.preventDefault();
+        }
+    });
+
+    document.addEventListener('mouseup', () => { isDraggingTune = false; });
+    document.addEventListener('touchend', () => { isDraggingTune = false; });
+
+    // Scroll wheel over the knob steps one detent at a time
+    tuneKnob.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        tuneNotch += e.deltaY < 0 ? 1 : -1;
+        tuneRotation = tuneNotch * TUNE_DETENT_DEG;
+        tuneKnob.style.transform = `rotate(${tuneRotation}deg)`;
+        stepTune(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+
+    // Double click recentres the clarifier
+    tuneKnob.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        resetTune();
+    });
+
+    updateTuneDisplay();
+}
+
+// Shift the tuned frequency by `steps` detents
+function stepTune(steps) {
+    if (!steps) return;
+    const delta = steps * TUNE_STEP_HZ;
+
+    if (isChannelRadio()) {
+        tuneOffset = Math.max(-TUNE_OFFSET_LIMIT, Math.min(TUNE_OFFSET_LIMIT, tuneOffset + delta));
+    } else {
+        currentFrequency = Math.max(MIN_FREQ, Math.min(MAX_FREQ, currentFrequency + delta));
+        throttledUpdateURL();
+    }
+
+    updateFrequencyDisplay();
+    updateTuneDisplay();
+    sendTuneCommand();
+}
+
+function resetTune() {
+    tuneRotation = 0;
+    tuneNotch = 0;
+    const tuneKnob = document.getElementById('tune-knob');
+    if (tuneKnob) tuneKnob.style.transform = 'rotate(0deg)';
+
+    if (tuneOffset !== 0) {
+        tuneOffset = 0;
+        updateFrequencyDisplay();
+        sendTuneCommand();
+    }
+    updateTuneDisplay();
+}
+
+// Label doubles as the clarifier readout so the offset is always visible
+function updateTuneDisplay() {
+    const label = document.getElementById('tune-label');
+    if (!label) return;
+    label.textContent = tuneOffset === 0
+        ? 'TUNE'
+        : `${tuneOffset > 0 ? '+' : '-'}${Math.abs(tuneOffset)} Hz`;
+}
+
 // SNR squelch constants — mirror the main interface values
 const SQUELCH_SNR_MIN = 24;   // slider far-left = disabled (matches SNR_SQUELCH_OFF_VAL)
 const SQUELCH_SNR_MAX = 80;   // slider far-right = 80 dB threshold
@@ -995,8 +1195,8 @@ function updateFrequencyDisplay() {
             if (channelElement) {
                 channelElement.textContent = String(channel.number).padStart(2, '0');
             }
-            // Update frequency display in MHz
-            freqElement.textContent = (currentFrequency / 1000000).toFixed(5);
+            // Update frequency display in MHz, including any clarifier offset
+            freqElement.textContent = (tunedFrequency() / 1000000).toFixed(5);
 
             // Update signal bars based on signal strength
             updateSignalBars();
@@ -1393,6 +1593,20 @@ function loadSettingsFromURL() {
         }
     }
 
+    // Mode comes after band so it overrides the band's default
+    if (params.has('mode')) {
+        const mode = params.get('mode').toLowerCase();
+        if (MODE_CYCLE.includes(mode)) {
+            MODE = mode;
+            if (currentRadioConfig) {
+                currentRadioConfig.mode = mode;
+                saveMode(currentRadioConfig.id, currentBand, mode);
+            }
+            updateModeDisplay();
+            console.log('Loaded mode from URL:', mode);
+        }
+    }
+
     if (params.has('freq')) {
         let freq = parseInt(params.get('freq'));
         if (!isNaN(freq)) {
@@ -1474,6 +1688,9 @@ function updateURL() {
         params.set('vol', currentVolume.toFixed(2));
         if (currentBand && currentRadioConfig && currentRadioConfig.bands) {
             params.set('band', currentBand);
+        }
+        if (MODE) {
+            params.set('mode', MODE);
         }
 
         const newURL = window.location.pathname + '?' + params.toString();

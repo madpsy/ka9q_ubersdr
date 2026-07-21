@@ -96,6 +96,52 @@
         document.getElementById('adminAllowAll').addEventListener('change', checkAdminLockoutWarning);
     }
 
+    // Timezone auto-detection from the marker position.  The lookup endpoint is
+    // rate limited to one request per second per IP, and the marker moves
+    // continuously while dragging, so the call is debounced by a second — only
+    // the position the user settles on is looked up.
+    let timezoneLookupTimer = null;
+    let pendingTimezone = null; // set when the answer beats the dropdown loading
+
+    function scheduleTimezoneLookup(lat, lon) {
+        if (!isFinite(lat) || !isFinite(lon)) return;
+        clearTimeout(timezoneLookupTimer);
+        timezoneLookupTimer = setTimeout(function() {
+            lookupTimezoneForLocation(lat, lon);
+        }, 1000);
+    }
+
+    async function lookupTimezoneForLocation(lat, lon) {
+        try {
+            const resp = await fetch('/api/maidenhead/country', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: lat, lon: lon })
+            });
+            // 429 (too fast) or 503 (dataset absent) — keep whatever is selected
+            if (!resp.ok) return;
+
+            const data = await resp.json();
+            // Land only: a marker dropped offshore returns no zone, and the
+            // existing selection is better than blanking it
+            if (!data.timezone) return;
+
+            // The dataset spells plain UTC as "Etc/UTC"; the dropdown lists "UTC"
+            const tz = data.timezone === 'Etc/UTC' ? 'UTC' : data.timezone;
+
+            const sel = document.getElementById('timezone');
+            if (!sel) return;
+            sel.value = tz;
+            if (sel.value !== tz) {
+                // Dropdown not populated yet, or the server's tz list lacks the
+                // name — remember it for loadTimezoneDropdown to apply
+                pendingTimezone = tz;
+            }
+        } catch (e) {
+            console.log('Timezone lookup failed:', e.message);
+        }
+    }
+
     async function loadTimezoneDropdown(preselect) {
         const sel = document.getElementById('timezone');
         if (!sel) return;
@@ -120,6 +166,10 @@
                 sel.value = preselect;
                 // If the value wasn't found in the list, fall back to placeholder
                 if (sel.value !== preselect) sel.value = '';
+            } else if (pendingTimezone) {
+                // A map lookup answered while the list was still loading
+                sel.value = pendingTimezone;
+                pendingTimezone = null;
             }
         } catch (e) {
             sel.innerHTML = '<option value="">Could not load timezones</option>';
@@ -923,6 +973,8 @@
                 updateMarkerTooltip();
                 updateMaidenheadLocator();
             }
+            // Covers GPSDO and browser geolocation on a fresh install
+            scheduleTimezoneLookup(lat, lon);
         }
 
         // Add OpenStreetMap tiles
@@ -943,6 +995,7 @@
             lonInput.value = position.lng.toFixed(6);
             updateMarkerTooltip();
             updateMaidenheadLocator();
+            scheduleTimezoneLookup(position.lat, position.lng);
         });
 
         // Update marker when inputs change
@@ -961,6 +1014,7 @@
             lonInput.value = e.latlng.lng.toFixed(6);
             updateMarkerTooltip();
             updateMaidenheadLocator();
+            scheduleTimezoneLookup(e.latlng.lat, e.latlng.lng);
         });
 
         // Initial tooltip update (after event listeners are set up)
@@ -1168,6 +1222,9 @@
             marker.setLatLng([lat, lon]);
             map.setView([lat, lon], map.getZoom());
             updateMarkerTooltip();
+            // Typed coordinates arrive a digit at a time — the debounce means only
+            // the finished value is looked up
+            scheduleTimezoneLookup(lat, lon);
         }
     }
 

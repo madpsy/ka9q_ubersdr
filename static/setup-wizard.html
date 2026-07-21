@@ -466,14 +466,6 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="timezone">Timezone</label>
-                    <select id="timezone" name="timezone" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff;">
-                        <option value="">Loading timezones…</option>
-                    </select>
-                    <div class="help-text">Server local time — daylight saving time is handled automatically</div>
-                </div>
-
-                <div class="form-group">
                     <label for="location">Location *</label>
                     <input type="text" id="location" name="location" required placeholder="e.g., Boston, MA, USA">
                     <div class="help-text">City, state/province, country</div>
@@ -515,6 +507,14 @@
                     <label for="asl">Altitude (ASL) *</label>
                     <input type="number" id="asl" name="asl" required placeholder="10">
                     <div class="help-text">Height above sea level in meters</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="timezone">Timezone</label>
+                    <select id="timezone" name="timezone" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff;">
+                        <option value="">Loading timezones…</option>
+                    </select>
+                    <div class="help-text">Detected from the map location — change it if it is wrong. Daylight saving time is handled automatically.</div>
                 </div>
 
                 <!-- GPSDO configuration section: shown when Leo Bodnar LBE-1420 is detected -->

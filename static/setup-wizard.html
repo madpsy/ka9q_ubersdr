@@ -471,19 +471,6 @@
                     <div class="help-text">City, state/province, country</div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="latitude">Latitude *</label>
-                        <input type="number" id="latitude" name="latitude" step="0.000001" required placeholder="42.3601">
-                        <div class="help-text">Decimal degrees (e.g., 42.3601)</div>
-                    </div>
-                    <div class="form-group">
-                        <label for="longitude">Longitude *</label>
-                        <input type="number" id="longitude" name="longitude" step="0.000001" required placeholder="-71.0589">
-                        <div class="help-text">Decimal degrees (e.g., -71.0589)</div>
-                    </div>
-                </div>
-
                 <!-- GPSDO location hint: shown when Leo Bodnar LBE-1420 has a GPS fix -->
                 <div id="gpsdo-location-hint" style="display:none; margin-bottom: 16px; padding: 12px 16px; background: #e8f5e9; border: 1px solid #4caf50; border-radius: 6px; font-size: 13px; color: #1b5e20;">
                     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
@@ -500,7 +487,20 @@
 
                 <div class="map-container">
                     <div id="location-map"></div>
-                    <p class="map-help">💡 Drag the marker to set your location, or enter coordinates above</p>
+                    <p class="map-help">💡 Drag the marker to set your location, or enter coordinates below</p>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="latitude">Latitude *</label>
+                        <input type="number" id="latitude" name="latitude" step="0.000001" required placeholder="42.3601">
+                        <div class="help-text">Decimal degrees (e.g., 42.3601)</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="longitude">Longitude *</label>
+                        <input type="number" id="longitude" name="longitude" step="0.000001" required placeholder="-71.0589">
+                        <div class="help-text">Decimal degrees (e.g., -71.0589)</div>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -514,7 +514,12 @@
                     <select id="timezone" name="timezone" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff;">
                         <option value="">Loading timezones…</option>
                     </select>
-                    <div class="help-text">Detected from the map location — change it if it is wrong. Daylight saving time is handled automatically.</div>
+                    <!-- Live clock for the selected zone, so a wrong guess is obvious -->
+                    <div id="timezone-preview" style="margin-top:8px;padding:10px 12px;background:#f0f7ff;border:1px solid #bcd8f5;border-radius:8px;font-size:14px;color:#1a4971;">
+                        <span style="color:#5b7f9e;">Current time there:</span>
+                        <strong id="timezone-preview-time" style="font-variant-numeric:tabular-nums;">—</strong>
+                    </div>
+                    <div class="help-text">Detected from the map location — check the time above and change the zone if it is wrong. Daylight saving time is handled automatically.</div>
                 </div>
 
                 <!-- GPSDO configuration section: shown when Leo Bodnar LBE-1420 is detected -->

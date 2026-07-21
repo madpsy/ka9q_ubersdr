@@ -132,6 +132,7 @@
             const sel = document.getElementById('timezone');
             if (!sel) return;
             sel.value = tz;
+            updateTimezonePreview();
             if (sel.value !== tz) {
                 // Dropdown not populated yet, or the server's tz list lacks the
                 // name — remember it for loadTimezoneDropdown to apply
@@ -139,6 +140,34 @@
             }
         } catch (e) {
             console.log('Timezone lookup failed:', e.message);
+        }
+    }
+
+    // Live clock for whichever zone is selected.  Reading a real time is the only
+    // way an operator can tell an auto-detected zone is wrong for them.
+    function updateTimezonePreview() {
+        const sel = document.getElementById('timezone');
+        const box = document.getElementById('timezone-preview');
+        const out = document.getElementById('timezone-preview-time');
+        if (!sel || !box || !out) return;
+
+        if (!sel.value) {
+            box.style.display = 'none';
+            return;
+        }
+        box.style.display = '';
+
+        try {
+            out.textContent = new Intl.DateTimeFormat('en-GB', {
+                timeZone: sel.value,
+                weekday: 'short', day: 'numeric', month: 'short',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false, timeZoneName: 'short'
+            }).format(new Date());
+        } catch (e) {
+            // Zone the browser's tz data does not know — say so rather than
+            // showing a stale time from the previous selection
+            out.textContent = 'unknown timezone';
         }
     }
 
@@ -171,6 +200,8 @@
                 sel.value = pendingTimezone;
                 pendingTimezone = null;
             }
+            // 'change' only fires for user edits, so refresh the clock by hand
+            updateTimezonePreview();
         } catch (e) {
             sel.innerHTML = '<option value="">Could not load timezones</option>';
             console.error('Timezone load error:', e);
@@ -180,6 +211,13 @@
     function setupEventListeners() {
         prevBtn.addEventListener('click', previousStep);
         nextBtn.addEventListener('click', nextStep);
+
+        const tzSel = document.getElementById('timezone');
+        if (tzSel) {
+            tzSel.addEventListener('change', updateTimezonePreview);
+            updateTimezonePreview();
+            setInterval(updateTimezonePreview, 1000);
+        }
     }
 
     function updateUI() {

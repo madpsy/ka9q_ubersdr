@@ -520,6 +520,7 @@
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
+    stopLocalTimeClock();   // don't tick against a hidden widget
   });
 
   // ── Collapse / expand ────────────────────────────────────────────────────
@@ -672,6 +673,7 @@
     statusEl.textContent = msg;
     statusEl.style.display = '';
     resultEl.style.display = 'none';
+    stopLocalTimeClock();   // the result (and its clock element) is now hidden
   }
 
   function iso2ToFlagWidget(code) {
@@ -720,9 +722,19 @@
       var nameDisplay = flagEmoji ? flagEmoji + '\u00A0' + fullName : fullName;
       html += '<div id="qrz-name-line"><a href="https://www.qrz.com/db/' + esc(callsign) + '" target="_blank" rel="noopener noreferrer">' + esc(nameDisplay) + '</a></div>';
     }
-    if (country || d.grid) {
-      var loc = [country, d.grid].filter(Boolean).join(' · ');
-      html += '<div id="qrz-country-line">' + esc(loc) + '</div>';
+    // Start the clock before building the line so localTimeNow() has a value
+    // to render immediately instead of a placeholder until the first tick.
+    startLocalTimeClock(d.tz_iana);
+
+    if (country || d.grid || localTimeFmt) {
+      // Each segment is escaped individually — the time is wrapped in its own
+      // span so the 1 s tick can update it without re-rendering the result.
+      var segs = [country, d.grid].filter(Boolean).map(esc);
+      if (localTimeFmt) {
+        segs.push('<span id="qrz-local-time" title="' + esc(d.tz_iana) + '">' +
+                  esc(localTimeNow()) + '</span>');
+      }
+      html += '<div id="qrz-country-line">' + segs.join(' · ') + '</div>';
     }
     if (distBearing) {
       html += buildDistLineHtml(distBearing);
@@ -783,6 +795,54 @@
   // Update just the dist line in-place (called by rotator_ant_status listener).
   // lastDistBearing is kept in closure scope so we can rebuild without re-rendering.
   var lastDistBearing = null;
+
+  // ── Operator local time ──────────────────────────────────────────────────
+  // tz_iana is supplied by /api/lookup only when the QRZ position is precise
+  // enough to sit inside the right zone (a state or DXCC centroid is refused
+  // server-side), so its absence means "don't claim to know the local time".
+  // QRZ's own timezone/gmtoffset fields are deliberately unused: gmtoffset is a
+  // whole-hour integer that cannot express +5:30, +5:45 or -3:30, and its DST
+  // flag carries no switchover dates. Intl.DateTimeFormat applies real rules.
+  var localTimeTimer = null;
+  var localTimeFmt   = null;
+
+  function stopLocalTimeClock() {
+    if (localTimeTimer !== null) {
+      clearInterval(localTimeTimer);
+      localTimeTimer = null;
+    }
+    localTimeFmt = null;
+  }
+
+  // Returns '' when no usable zone — callers use that to omit the segment
+  // entirely rather than render an empty slot after the separator.
+  function localTimeNow() {
+    return localTimeFmt ? localTimeFmt.format(new Date()) : '';
+  }
+
+  function startLocalTimeClock(tz) {
+    stopLocalTimeClock();
+    if (!tz) return;
+    try {
+      localTimeFmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour:   '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    } catch (e) {
+      // Zone unknown to this browser's tz database — show nothing rather than
+      // a wrong time.
+      localTimeFmt = null;
+      return;
+    }
+    localTimeTimer = setInterval(function () {
+      var el = document.getElementById('qrz-local-time');
+      if (!el) return;   // result replaced or widget collapsed
+      el.textContent = localTimeNow();
+    }, 1000);
+  }
 
   function refreshDistLine() {
     var el = document.getElementById('qrz-dist-line');

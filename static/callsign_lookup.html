@@ -780,6 +780,8 @@
         let receiverCallsign       = null;   // from /api/description receiver.callsign
         let stateNames             = {};     // abbreviation → full name, from /state_names.json
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
+        let localTimeTimer   = null;   // setInterval handle for the operator's live local clock
+        let localTimeFmt     = null;   // Intl.DateTimeFormat for the displayed callsign's zone, or null
 
         // Persist grid toggle preference across page loads
         const GRID_PREF_KEY = 'callsign_lookup_maidenhead_grid';
@@ -867,6 +869,7 @@
 
             // Destroy any existing map before replacing the DOM
             destroyMap();
+            stopLocalTimeClock();
 
             // Show loading state
             resultArea.innerHTML = '<div class="state-msg">Looking up <strong>' + esc(base) + '</strong>…</div>';
@@ -1106,13 +1109,20 @@
             currentSpotDistKm = db ? db.distKm : null;
             const flag = iso2ToFlag(countryCode || '');
             const countryLine = country ? `<br>${esc(country)}` : '';
+            // Operator's local time, directly under the country.  Empty unless a
+            // trustworthy zone was resolved — the same condition that governs the
+            // Local Time row in the info grid.  Leaflet rebuilds this node every
+            // time the popup is reopened, hence the class rather than an id.
+            const localTimeLine = localTimeFmt
+                ? `<br>Local <span class="local-time-live">${esc(currentLocalTimeString())}</span>`
+                : '';
             const popupExtra = db
                 ? `<br>${db.distKm.toLocaleString()} km &nbsp;|&nbsp; ${db.bearing}°`
                 : '';
 
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<div style="line-height:1.4;"><b>${flag}${esc(callsign)}</b>${countryLine}${popupExtra}</div>`, {
+                .bindPopup(`<div style="line-height:1.4;"><b>${flag}${esc(callsign)}</b>${countryLine}${localTimeLine}${popupExtra}</div>`, {
                     autoPanPaddingTopLeft: L.point(10, 60)
                 })
                 .openPopup();
@@ -1213,7 +1223,82 @@
             }
         }
 
+        /**
+         * Stop the live local-time clock.  Must be called before every
+         * innerHTML replacement of the result area — the element the timer
+         * writes into is destroyed by the replacement, and without this each
+         * lookup would leave another interval running forever.
+         */
+        function stopLocalTimeClock() {
+            if (localTimeTimer !== null) {
+                clearInterval(localTimeTimer);
+                localTimeTimer = null;
+            }
+            localTimeFmt = null;
+        }
+
+        /**
+         * Current wall-clock time at the operator's location, or '' when no
+         * usable zone was resolved for the displayed callsign.  Lets the map
+         * popup render a correct time at build time instead of showing a
+         * placeholder until the next tick.
+         */
+        function currentLocalTimeString() {
+            return localTimeFmt ? localTimeFmt.format(new Date()) : '';
+        }
+
+        /**
+         * Start a 1-second clock showing the operator's wall-clock time.
+         *
+         * tz is an IANA zone name (tz_iana) resolved server-side from the QRZ
+         * position, and only present when that position is precise enough to
+         * sit in the right zone — see qrzGeoLocIsPrecise in qrz_lookup.go.
+         * QRZ's own timezone/gmtoffset fields are deliberately not used as a
+         * fallback: gmtoffset is a whole-hour integer that cannot express
+         * +5:30, +5:45 or -3:30, and its dst flag carries no switchover dates.
+         * Intl.DateTimeFormat applies the real rules for us.
+         */
+        function startLocalTimeClock(tz) {
+            const el = document.getElementById('local-time-val');
+            if (!el || !tz) return;
+
+            try {
+                localTimeFmt = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: tz,
+                    hour:   '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+            } catch (e) {
+                // Zone unknown to this browser's tz database — drop the row
+                // (label span + value span) rather than show a wrong time.
+                // localTimeFmt stays null, so the map popup omits its time
+                // line too.
+                localTimeFmt = null;
+                const label = el.previousElementSibling;
+                if (label && label.classList.contains('info-label')) label.remove();
+                el.remove();
+                return;
+            }
+
+            // Every display of the operator's clock carries .local-time-live and
+            // is refreshed by this one timer.  The map popup is built later (and
+            // is destroyed and rebuilt by Leaflet each time it is reopened), so
+            // the tick re-queries rather than holding element references.
+            const tick = () => {
+                const now = localTimeFmt.format(new Date());
+                document.querySelectorAll('.local-time-live').forEach(e => { e.textContent = now; });
+            };
+            tick();
+            localTimeTimer = setInterval(tick, 1000);
+        }
+
         function renderResult(d, callsign, generation) {
+            // A previous card's clock writes into an element this render is
+            // about to destroy.
+            stopLocalTimeClock();
+
             // Build name string.
             // Prefer name_fmt (QRZ pre-formatted, e.g. 'Michael "Mike" Sauer').
             // Fallback: assemble from fname + "nickname" + name.
@@ -1281,6 +1366,16 @@
             addRow('ITU Zone', d.ituzone);
             addRow('Time Zone',d.timezone);
             addRow('GMT Offset', d.gmtoffset !== undefined && d.gmtoffset !== '' ? d.gmtoffset : null);
+
+            // Live local clock — only when the server resolved an IANA zone
+            // from a position it considers precise.  Its absence is meaningful
+            // (QRZ fell back to a state or DXCC centroid), so no fallback row.
+            if (d.tz_iana) {
+                rows.push(
+                    `<span class="info-label">Local Time</span>` +
+                    `<span class="info-value local-time-live" id="local-time-val" title="${esc(d.tz_iana)}">—</span>`
+                );
+            }
 
             if (d.url || d.qslmgr) {
                 addDivider();
@@ -1362,6 +1457,9 @@
                 <div id="rx-ant-switch-section"></div>
                 ${mapHtml}
             `;
+
+            // Start the operator's local clock (no-op when tz_iana was absent)
+            startLocalTimeClock(d.tz_iana);
 
             // Wire up alias tags to trigger a new lookup
             resultArea.querySelectorAll('.alias-tag').forEach(el => {

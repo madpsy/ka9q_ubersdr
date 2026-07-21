@@ -86,6 +86,20 @@ type QRZCallsign struct {
 	Lon  float64 `xml:"lon"  json:"lon,omitempty"`
 	Grid string  `xml:"grid" json:"grid,omitempty"`
 
+	// TZIana is the IANA timezone name at Lat/Lon (e.g. "Europe/London").  It is
+	// derived locally, not returned by QRZ — hence xml:"-" — and is the only
+	// member of this struct that does not mirror the QRZ schema.
+	//
+	// Prefer it over TimeZone/GMTOffset below: those are US-centric, operator-
+	// entered, and GMTOffset is a whole-hour int that cannot express +5:30
+	// (India), +5:45 (Nepal) or -3:30 (Newfoundland).  An IANA name lets
+	// time.LoadLocation and Intl.DateTimeFormat apply real DST rules.
+	//
+	// Empty when the position is not precise enough to trust — see
+	// qrzGeoLocIsPrecise — or when the coordinate falls outside every zone
+	// polygon (the dataset is land-only, so a station at sea yields "").
+	TZIana string `xml:"-" json:"tz_iana,omitempty"`
+
 	// Licence
 	EfDate  string `xml:"efdate"  json:"efdate,omitempty"`
 	ExpDate string `xml:"expdate" json:"expdate,omitempty"`
@@ -1051,5 +1065,47 @@ func (s *QRZService) fetchCallsign(call, sessionKey string) (*QRZCallsign, bool,
 		s.mu.Unlock()
 	}
 
+	// Derive the IANA timezone once, here, so every consumer (the public
+	// /api/lookup endpoint, CW skimmer spot enrichment, anything added later)
+	// shares one definition of "precise enough" and the point-in-polygon test
+	// runs once per callsign rather than once per use — the result is about to
+	// be cached with the record.
+	if db.Callsign != nil && qrzGeoLocIsPrecise(db.Callsign.GeoLoc) &&
+		(db.Callsign.Lat != 0 || db.Callsign.Lon != 0) {
+		db.Callsign.TZIana = TimezoneForLatLon(db.Callsign.Lat, db.Callsign.Lon)
+	}
+
 	return db.Callsign, false, nil
+}
+
+// qrzGeoLocIsPrecise reports whether QRZ's stated provenance for a record's
+// coordinates is precise enough to resolve a timezone from.
+//
+// QRZ returns coordinates for nearly every callsign, falling back through
+// progressively coarser sources, and reports which was used in the geoloc
+// field.  A coordinate is only usable here if it lands inside the station's
+// actual timezone polygon, which rules out the two centroid fallbacks:
+//
+//	user, geocode, grid, zip → accepted (point, address, grid square, postcode)
+//	state                    → refused: ~a dozen US states span two zones
+//	                           (Florida, Tennessee, Kentucky, Indiana, Michigan,
+//	                           Kansas, Nebraska, Texas, the Dakotas, Idaho,
+//	                           Oregon, Nevada, Alaska), so a state centre gives
+//	                           roughly half their operators the wrong zone
+//	none, dxcc               → refused: no position, or the country centre
+//
+// Unknown and empty values fail closed: QRZ's own accuracy claim for these
+// coordinates is that they are "close enough for DX antenna positioning",
+// which is a bearing guarantee, not a which-polygon-am-I-in guarantee.
+//
+// Note geocode, zip and state are USA-only paths.  For a non-US callsign the
+// coordinates are user-supplied, grid-derived, or the DXCC centre — nothing in
+// between — so a large share of DX legitimately yields no timezone.
+func qrzGeoLocIsPrecise(geoloc string) bool {
+	switch strings.ToLower(strings.TrimSpace(geoloc)) {
+	case "user", "geocode", "grid", "zip":
+		return true
+	default:
+		return false
+	}
 }

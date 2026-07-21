@@ -39,6 +39,19 @@ type CWSkimmerSpot struct {
 	State string `json:"state,omitempty"`    // State/region (QRZ)
 	Grid  string `json:"grid,omitempty"`     // Maidenhead grid square (QRZ)
 
+	// GeoLoc is QRZ's own account of where Latitude/Longitude came from:
+	// "user", "geocode", "grid", "zip", "state", "dxcc" or "none".  Passed
+	// through so consumers can judge how much to trust the position — QRZ
+	// returns coordinates for nearly every callsign, so their presence says
+	// nothing about their accuracy.
+	GeoLoc string `json:"geoloc,omitempty"`
+
+	// Timezone is the IANA name at the QRZ position, set only when GeoLoc is
+	// precise enough to trust it (see qrzGeoLocIsPrecise).  Absent for
+	// CTY-centroid spots and for QRZ records positioned by state or DXCC
+	// centre, so its presence means the local time really is the operator's.
+	Timezone string `json:"tz_iana,omitempty"`
+
 	// LocSource records where Latitude/Longitude came from: "qrz" for a real
 	// per-operator position from the callsign lookup, or "cty" for the DXCC
 	// entity/prefix centroid. Consumers (maps in particular) need this because
@@ -682,6 +695,10 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 			spot.Name = qrz.NameFmt
 			spot.State = qrz.State
 			spot.Grid = qrz.Grid
+			spot.GeoLoc = qrz.GeoLoc
+			// Already resolved and cached with the QRZ record; empty whenever
+			// the position is a state or DXCC centroid rather than a real one.
+			spot.Timezone = qrz.TZIana
 		}
 	}
 

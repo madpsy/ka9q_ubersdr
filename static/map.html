@@ -336,6 +336,23 @@
             color: #333;
         }
 
+        /* Pointer coordinate readout — follows the cursor, never takes events */
+        .cursor-latlon {
+            position: fixed;
+            z-index: 1100;
+            display: none;
+            pointer-events: none;
+            padding: 3px 6px;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-size: 11px;
+            line-height: 1.3;
+            color: #ecf0f1;
+            background: rgba(26, 26, 26, 0.85);
+            border: 1px solid #445;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
         /* Path readout — sits above Leaflet's controls (z-index 1000) and clears
            the attribution strip along the bottom */
         .path-panel {
@@ -481,6 +498,7 @@
             </select>
         </div>
     </div>
+    <div class="cursor-latlon" id="cursorLatLon"></div>
     <div class="path-panel" id="pathPanel">
         <button class="path-close" id="pathClose" type="button" title="Hide">×</button>
         <div id="pathBody"></div>
@@ -601,6 +619,8 @@
             setupTileSelector();
 
             map.on('click', onMapClick);
+            map.on('mousemove', onMapHover);
+            map.on('mouseout', hideCursorLatLon);
 
             // Greyline: redraw as the view moves so the world copies keep up, and
             // once a minute so the terminator itself stays current
@@ -1386,6 +1406,38 @@
             if (document.getElementById('flagToggle').checked) countryLayer.addTo(map);
 
             setStatus(countries.length + ' countries');
+        }
+
+        // ---- Pointer coordinate readout ----------------------------------------------
+
+        // Follows the cursor with the coordinates under it.  A marker's own
+        // tooltip says more than a coordinate pair does, so this yields whenever
+        // the pointer is over a marker, tooltip, popup or control.
+        function onMapHover(e) {
+            const el = document.getElementById('cursorLatLon');
+            const target = e.originalEvent && e.originalEvent.target;
+
+            if (target && target.closest &&
+                target.closest('.leaflet-marker-icon, .leaflet-tooltip, .leaflet-popup, .leaflet-control, .path-panel')) {
+                el.style.display = 'none';
+                return;
+            }
+
+            const lat = e.latlng.lat;
+            const lon = normLon(e.latlng.lng); // worldCopyJump allows panning past ±180
+            el.textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+            el.style.display = 'block';
+
+            // Keep the box on screen when the pointer nears the right or bottom edge
+            const pad = 14;
+            const w = el.offsetWidth, h = el.offsetHeight;
+            const x = e.originalEvent.clientX, y = e.originalEvent.clientY;
+            el.style.left = (x + pad + w > window.innerWidth ? x - pad - w : x + pad) + 'px';
+            el.style.top = (y + pad + h > window.innerHeight ? y - pad - h : y + pad) + 'px';
+        }
+
+        function hideCursorLatLon() {
+            document.getElementById('cursorLatLon').style.display = 'none';
         }
 
         // Identify whatever was clicked via the POST endpoint (point-in-polygon,

@@ -353,6 +353,11 @@
             white-space: nowrap;
         }
 
+        .cursor-locator {
+            color: #7fc7ea;
+            letter-spacing: 0.5px;
+        }
+
         /* Path readout — sits above Leaflet's controls (z-index 1000) and clears
            the attribution strip along the bottom */
         .path-panel {
@@ -1425,7 +1430,8 @@
 
             const lat = e.latlng.lat;
             const lon = normLon(e.latlng.lng); // worldCopyJump allows panning past ±180
-            el.textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+            el.innerHTML = lat.toFixed(4) + ', ' + lon.toFixed(4) +
+                '<div class="cursor-locator">' + latLonToLocator(lat, lon, 8) + '</div>';
             el.style.display = 'block';
 
             // Keep the box on screen when the pointer nears the right or bottom edge

@@ -1050,15 +1050,22 @@
                 locator: gps.maidenhead || latLonToLocator(gps.lat, gps.lon, 6)
             };
 
-            const html = renderReceiver(desc, rx, gps, await loadWeather());
+            // Weather is fetched once; the sun and moon figures inside are
+            // recomputed on every open, so a long-lived tab keeps showing the
+            // real day/night state rather than whatever it was at page load
+            const weather = await loadWeather();
+            const render = () => renderReceiver(desc, rx, gps, weather);
 
             rxMarker = L.marker([gps.lat, gps.lon], {
                 icon: flagIcon('📡', 'rx-marker'),
                 zIndexOffset: 1000 // always on top of the country flags
             })
-                .bindTooltip(html, { className: 'rx-tooltip', direction: 'top', offset: [0, -12] })
-                .bindPopup(html)
+                .bindTooltip(render(), { className: 'rx-tooltip', direction: 'top', offset: [0, -12] })
+                .bindPopup(render())
                 .addTo(map);
+
+            rxMarker.on('tooltipopen', () => rxMarker.setTooltipContent(render()));
+            rxMarker.on('popupopen', () => rxMarker.setPopupContent(render()));
         }
 
         async function loadWeather() {
@@ -1102,6 +1109,7 @@
             }
 
             html += renderWeather(weather);
+            html += renderSunMoon(gps.lat, gps.lon);
 
             if (desc.version) {
                 html += '<div class="popup-method">UberSDR ' + esc(desc.version) + '</div>';

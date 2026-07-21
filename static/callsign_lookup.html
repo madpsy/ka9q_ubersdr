@@ -530,6 +530,7 @@
 
     <script src="leaflet.js"></script>
     <script src="maidenhead-grid.js"></script>
+    <script src="suncalc.js"></script>
     <script>
     (function () {
         'use strict';
@@ -782,6 +783,8 @@
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
         let localTimeTimer   = null;   // setInterval handle for the operator's live local clock
         let localTimeFmt     = null;   // Intl.DateTimeFormat for the displayed callsign's zone, or null
+        let localTimeLat     = null;   // operator position, for the day/night indicator
+        let localTimeLon     = null;
 
         // Persist grid toggle preference across page loads
         const GRID_PREF_KEY = 'callsign_lookup_maidenhead_grid';
@@ -1235,16 +1238,42 @@
                 localTimeTimer = null;
             }
             localTimeFmt = null;
+            localTimeLat = null;
+            localTimeLon = null;
         }
 
         /**
-         * Current wall-clock time at the operator's location, or '' when no
-         * usable zone was resolved for the displayed callsign.  Lets the map
-         * popup render a correct time at build time instead of showing a
+         * Day/night emoji for the operator's position, or '' when we have no
+         * coordinates (or suncalc.js failed to load).
+         *
+         * Uses the sun's altitude rather than SunCalc.getTimes(): getTimes
+         * returns Invalid Date inside the polar circles during permanent day or
+         * night, where a sunrise/sunset comparison silently reports "night" all
+         * summer.  Altitude above the horizon is the definition of daytime and
+         * is well-defined everywhere.
+         */
+        function dayNightEmoji() {
+            if (localTimeLat === null || localTimeLon === null) return '';
+            if (typeof SunCalc === 'undefined') return '';
+            try {
+                const pos = SunCalc.getPosition(new Date(), localTimeLat, localTimeLon);
+                return pos.altitude > 0 ? '☀️' : '🌙';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        /**
+         * Current wall-clock time at the operator's location, prefixed with the
+         * day/night emoji, or '' when no usable zone was resolved.  Lets the map
+         * popup render a correct value at build time instead of showing a
          * placeholder until the next tick.
          */
         function currentLocalTimeString() {
-            return localTimeFmt ? localTimeFmt.format(new Date()) : '';
+            if (!localTimeFmt) return '';
+            const emoji = dayNightEmoji();
+            const time  = localTimeFmt.format(new Date());
+            return emoji ? emoji + ' ' + time : time;
         }
 
         /**
@@ -1258,9 +1287,17 @@
          * +5:30, +5:45 or -3:30, and its dst flag carries no switchover dates.
          * Intl.DateTimeFormat applies the real rules for us.
          */
-        function startLocalTimeClock(tz) {
+        function startLocalTimeClock(tz, lat, lon) {
             const el = document.getElementById('local-time-val');
             if (!el || !tz) return;
+
+            // Position drives the day/night emoji only — a missing or unparseable
+            // coordinate just omits it, leaving the clock itself intact.
+            const flat = parseFloat(lat), flon = parseFloat(lon);
+            if (!isNaN(flat) && !isNaN(flon)) {
+                localTimeLat = flat;
+                localTimeLon = flon;
+            }
 
             try {
                 localTimeFmt = new Intl.DateTimeFormat('en-GB', {
@@ -1286,8 +1323,10 @@
             // is refreshed by this one timer.  The map popup is built later (and
             // is destroyed and rebuilt by Leaflet each time it is reopened), so
             // the tick re-queries rather than holding element references.
+            // Recomputed every tick so the emoji flips by itself when the
+            // operator's sun crosses the horizon while the page is open.
             const tick = () => {
-                const now = localTimeFmt.format(new Date());
+                const now = currentLocalTimeString();
                 document.querySelectorAll('.local-time-live').forEach(e => { e.textContent = now; });
             };
             tick();
@@ -1459,7 +1498,7 @@
             `;
 
             // Start the operator's local clock (no-op when tz_iana was absent)
-            startLocalTimeClock(d.tz_iana);
+            startLocalTimeClock(d.tz_iana, d.lat, d.lon);
 
             // Wire up alias tags to trigger a new lookup
             resultArea.querySelectorAll('.alias-tag').forEach(el => {

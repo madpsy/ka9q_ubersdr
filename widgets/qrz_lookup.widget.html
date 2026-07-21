@@ -724,7 +724,7 @@
     }
     // Start the clock before building the line so localTimeNow() has a value
     // to render immediately instead of a placeholder until the first tick.
-    startLocalTimeClock(d.tz_iana);
+    startLocalTimeClock(d.tz_iana, d.lat, d.lon);
 
     if (country || d.grid || localTimeFmt) {
       // Each segment is escaped individually — the time is wrapped in its own
@@ -805,6 +805,8 @@
   // flag carries no switchover dates. Intl.DateTimeFormat applies real rules.
   var localTimeTimer = null;
   var localTimeFmt   = null;
+  var localTimeLat   = null;
+  var localTimeLon   = null;
 
   function stopLocalTimeClock() {
     if (localTimeTimer !== null) {
@@ -812,17 +814,43 @@
       localTimeTimer = null;
     }
     localTimeFmt = null;
+    localTimeLat = null;
+    localTimeLon = null;
+  }
+
+  // Day/night emoji at the operator's position. SunCalc is loaded by the host
+  // page (head-bundle.min.js). Uses the sun's altitude rather than
+  // SunCalc.getTimes(), which returns Invalid Date inside the polar circles
+  // during permanent day or night and would then report "night" all summer.
+  function dayNightEmoji() {
+    if (localTimeLat === null || localTimeLon === null) return '';
+    if (typeof SunCalc === 'undefined') return '';
+    try {
+      return SunCalc.getPosition(new Date(), localTimeLat, localTimeLon).altitude > 0 ? '☀️' : '🌙';
+    } catch (e) { return ''; }
   }
 
   // Returns '' when no usable zone — callers use that to omit the segment
   // entirely rather than render an empty slot after the separator.
   function localTimeNow() {
-    return localTimeFmt ? localTimeFmt.format(new Date()) : '';
+    if (!localTimeFmt) return '';
+    var emoji = dayNightEmoji();
+    var time  = localTimeFmt.format(new Date());
+    return emoji ? emoji + ' ' + time : time;
   }
 
-  function startLocalTimeClock(tz) {
+  function startLocalTimeClock(tz, lat, lon) {
     stopLocalTimeClock();
     if (!tz) return;
+
+    // Position drives the emoji only — a missing coordinate still leaves a
+    // working clock.
+    var flat = parseFloat(lat), flon = parseFloat(lon);
+    if (!isNaN(flat) && !isNaN(flon)) {
+      localTimeLat = flat;
+      localTimeLon = flon;
+    }
+
     try {
       localTimeFmt = new Intl.DateTimeFormat('en-GB', {
         timeZone: tz,

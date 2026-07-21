@@ -646,7 +646,12 @@ html.is-mobile #sdr-games-widget { display: none !important; }
   border: 1px solid rgba(127, 140, 141, 0.35);
   border-radius: 4px;
   margin: 2px 0 7px;
+  /* The map pans on drag, so it must not inherit the widget's grab cursor
+     (dragging here moves the map, not the panel — see the drag guard). */
+  cursor: grab;
+  touch-action: none;
 }
+#sdr-co-map.sdr-co-panning { cursor: grabbing; }
 #sdr-co-options {
   display: flex;
   flex-direction: column;
@@ -824,7 +829,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
   <!-- ── Game 9: Countries (added to the rotation once the country list loads) ── -->
   <div class="sdr-game-panel" id="sdr-panel-co">
     <div class="sdr-game-status" id="sdr-co-status">Where is this?</div>
-    <canvas id="sdr-co-map" width="336" height="168"></canvas>
+    <canvas id="sdr-co-map" width="336" height="168" title="Drag to pan, scroll to zoom"></canvas>
     <div id="sdr-co-options"></div>
     <div class="sdr-game-footer">
       <span class="sdr-game-score" id="sdr-co-score">Streak:0 Best:0</span>
@@ -905,7 +910,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
     widget.addEventListener('pointerdown', e => {
       // Only drag from non-interactive targets
-      if (e.target.closest('#sdr-games-collapse, button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell, .sdr-su-cell, .sdr-lo-cell, .sdr-mm-sw')) return;
+      if (e.target.closest('#sdr-games-collapse, button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell, .sdr-su-cell, .sdr-lo-cell, .sdr-mm-sw, #sdr-co-map')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;
@@ -2599,8 +2604,12 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     const RECENT_MAX  = 25;                      // don't repeat these countries
 
     let list = null;          // [{country, iso_a2, continent_code, lat, lon}, …]
-    let baseMap = null;       // offscreen canvas holding the coastlines
+    let arcs = null;          // decoded coastline polylines, each {pts, b: bbox}
     let loading = false, loaded = false;
+
+    // Current view: centre in degrees + zoom, where z=1 fits the whole world.
+    const ZOOM_MIN = 1, ZOOM_MAX = 24, ZOOM_STEP = 1.25;
+    const view = { lon: 0, lat: 0, z: 1 };
     let busy = false, answered = false, current = null;
     let streak = 0, best = 0;
     let autoNext = null;
@@ -2628,9 +2637,50 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       return a;
     }
 
-    // Equirectangular projection — matches the 2:1 canvas exactly.
+    // Equirectangular projection about the current view.  The canvas is 2:1 and
+    // the world is 360×180, so one scale factor serves both axes.
+    function pxPerDeg() { return (W / 360) * view.z; }
+
     function proj(lon, lat) {
-      return [ (lon + 180) / 360 * W, (90 - lat) / 180 * H ];
+      const s = pxPerDeg();
+      return [ W / 2 + (lon - view.lon) * s, H / 2 - (lat - view.lat) * s ];
+    }
+
+    function unproj(x, y) {
+      const s = pxPerDeg();
+      return [ view.lon + (x - W / 2) / s, view.lat - (y - H / 2) / s ];
+    }
+
+    // Keep the view on the planet: once the visible span exceeds the world in
+    // an axis, lock that axis to the centre rather than showing empty space.
+    function clampView() {
+      view.z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.z));
+      const halfLon = (W / 2) / pxPerDeg();
+      const halfLat = (H / 2) / pxPerDeg();
+      view.lon = halfLon >= 180 ? 0 : Math.min(180 - halfLon, Math.max(-180 + halfLon, view.lon));
+      view.lat = halfLat >= 90  ? 0 : Math.min(90  - halfLat, Math.max(-90  + halfLat, view.lat));
+    }
+
+    // Frame a country: fit its bounding box with padding, clamped to a sensible
+    // range.  Natural Earth bounding boxes are unusable for territories that
+    // straddle the antimeridian or own distant islands (Russia, the USA, Fiji,
+    // Norway + Bouvet all span most of the globe), so anything implausibly wide
+    // falls back to a fixed regional zoom centred on the label point.
+    function setViewFor(c) {
+      view.lon = c.lon;
+      view.lat = c.lat;
+      const spanLon = (typeof c.max_lon === 'number' && typeof c.min_lon === 'number')
+        ? c.max_lon - c.min_lon : NaN;
+      const spanLat = (typeof c.max_lat === 'number' && typeof c.min_lat === 'number')
+        ? c.max_lat - c.min_lat : NaN;
+      if (isFinite(spanLon) && isFinite(spanLat) && spanLon > 0 && spanLon < 120 && spanLat < 90) {
+        // Show ~2.2× the country's larger dimension so its surroundings frame it
+        const span = Math.max(spanLon, spanLat * 2, 1) * 2.2;
+        view.z = Math.min(8, Math.max(2, 360 / span));
+      } else {
+        view.z = 3;
+      }
+      clampView();
     }
 
     // ── World outline ─────────────────────────────────────────────────
@@ -2644,36 +2694,51 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       const tx = t ? t.translate[0] : 0, ty = t ? t.translate[1] : 0;
       return topo.arcs.map(arc => {
         let x = 0, y = 0;
-        const out = [];
+        const pts = [];
+        let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
         for (const p of arc) {
-          if (t) { x += p[0]; y += p[1]; out.push([x * sx + tx, y * sy + ty]); }
-          else   { out.push([p[0], p[1]]); }
+          let lon, lat;
+          if (t) { x += p[0]; y += p[1]; lon = x * sx + tx; lat = y * sy + ty; }
+          else   { lon = p[0]; lat = p[1]; }
+          pts.push(lon, lat);
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
         }
-        return out;
+        // Flat array + cached bbox: the map is redrawn on every wheel tick, so
+        // per-point array allocation and off-screen arcs are both worth avoiding.
+        return { pts, b: [minLon, minLat, maxLon, maxLat] };
       });
     }
 
-    function buildBaseMap(arcs) {
-      const c = document.createElement('canvas');
-      c.width = W; c.height = H;
-      const g = c.getContext('2d');
-      g.strokeStyle = 'rgba(149, 165, 166, 0.85)';
-      g.lineWidth = 0.8;
-      g.lineJoin = 'round';
-      g.beginPath();
+    function drawWorld() {
+      if (!arcs) return;
+      const halfLon = (W / 2) / pxPerDeg();
+      const halfLat = (H / 2) / pxPerDeg();
+      const vMinLon = view.lon - halfLon, vMaxLon = view.lon + halfLon;
+      const vMinLat = view.lat - halfLat, vMaxLat = view.lat + halfLat;
+
+      ctx.strokeStyle = 'rgba(149, 165, 166, 0.85)';
+      ctx.lineWidth = 0.8;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
       for (const arc of arcs) {
+        const b = arc.b;
+        if (b[2] < vMinLon || b[0] > vMaxLon || b[3] < vMinLat || b[1] > vMaxLat) continue;
+        const pts = arc.pts;
         let prevLon = null;
-        for (const pt of arc) {
-          const [px, py] = proj(pt[0], pt[1]);
+        for (let i = 0; i < pts.length; i += 2) {
+          const lon = pts[i], lat = pts[i + 1];
+          const px = proj(lon, lat);
           // A jump wider than half the world means the arc wrapped the
           // antimeridian — break the path instead of streaking across.
-          if (prevLon === null || Math.abs(pt[0] - prevLon) > 180) g.moveTo(px, py);
-          else g.lineTo(px, py);
-          prevLon = pt[0];
+          if (prevLon === null || Math.abs(lon - prevLon) > 180) ctx.moveTo(px[0], px[1]);
+          else ctx.lineTo(px[0], px[1]);
+          prevLon = lon;
         }
       }
-      g.stroke();
-      return c;
+      ctx.stroke();
     }
 
     // ── Marker ────────────────────────────────────────────────────────
@@ -2706,13 +2771,75 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       ctx.restore();
     }
 
-    function draw(target) {
+    function render() {
       ctx.clearRect(0, 0, W, H);
-      if (baseMap) ctx.drawImage(baseMap, 0, 0);
-      if (!target) return;
-      const [x, y] = proj(target.lon, target.lat);
+      drawWorld();
+      if (!current) return;
+      const [x, y] = proj(current.lon, current.lat);
       drawPin(x, y);
     }
+
+    // ── Drag to pan ───────────────────────────────────────────────────
+    // The canvas is excluded from the widget's own drag guard, so a drag that
+    // starts here pans the map instead of moving the whole panel.
+    let pan = null;
+
+    canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      pan = {
+        x: e.clientX, y: e.clientY,
+        sx: W / rect.width, sy: H / rect.height,   // CSS px → canvas units
+      };
+      canvas.classList.add('sdr-co-panning');
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (!pan) return;
+      const s = pxPerDeg();
+      const dx = (e.clientX - pan.x) * pan.sx;
+      const dy = (e.clientY - pan.y) * pan.sy;
+      // Drag right → the world moves right → the view centre moves west
+      view.lon -= dx / s;
+      view.lat += dy / s;
+      pan.x = e.clientX;
+      pan.y = e.clientY;
+      clampView();
+      render();
+    });
+
+    function endPan() {
+      if (!pan) return;
+      pan = null;
+      canvas.classList.remove('sdr-co-panning');
+    }
+    canvas.addEventListener('pointerup', endPan);
+    canvas.addEventListener('pointercancel', endPan);
+
+    // ── Wheel zoom, anchored on the pointer ───────────────────────────
+    canvas.addEventListener('wheel', e => {
+      if (!current && !arcs) return;
+      e.preventDefault();          // don't scroll the page under the widget
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      // CSS pixels → canvas internal coordinates
+      const cx = (e.clientX - rect.left) * (W / rect.width);
+      const cy = (e.clientY - rect.top)  * (H / rect.height);
+      const [lonAt, latAt] = unproj(cx, cy);
+
+      view.z *= (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+      view.z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.z));
+
+      // Keep whatever was under the cursor under the cursor
+      const s = pxPerDeg();
+      view.lon = lonAt - (cx - W / 2) / s;
+      view.lat = latAt + (cy - H / 2) / s;
+      clampView();
+      render();
+    }, { passive: false });
 
     // ── Data ──────────────────────────────────────────────────────────
     // Both fetches are one-shot and cached for the life of the page.  The
@@ -2748,11 +2875,22 @@ html.is-mobile #sdr-games-widget { display: none !important; }
             c && c.country && typeof c.lat === 'number' && typeof c.lon === 'number' &&
             typeof c.iso_a2 === 'string' && c.iso_a2.length === 2);
         }
-        if (topo && topo.arcs && topo.objects) {
-          try { baseMap = buildBaseMap(decodeArcs(topo)); } catch (_) { baseMap = null; }
+        if (topo && topo.arcs) {
+          try { arcs = decodeArcs(topo); } catch (_) { arcs = null; }
         }
         loaded = !!(list && list.length >= 5);
       }).finally(() => { loading = false; });
+    }
+
+    // The Natural Earth dataset is optional server-side, so the endpoint can be
+    // absent (503). Rather than leave a dead entry in the ◀ ▶ rotation, take the
+    // game back out — matching how the Callsign Quiz handles unavailability.
+    function dropFromRotation() {
+      const idx = GAMES.indexOf(COUNTRIES_GAME);
+      if (idx === -1) return;
+      if (currentGame === idx) showGame(0);   // move off it before removing
+      GAMES.splice(idx, 1);
+      if (currentGame > idx) currentGame--;
     }
 
     // ── Rounds ────────────────────────────────────────────────────────
@@ -2803,15 +2941,18 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       await ensureData();
       if (!loaded) {
         statusEl.textContent = 'Country list unavailable';
+        dropFromRotation();
         busy = false;
         return;
       }
+      if (!isActive()) { busy = false; return; }   // user navigated away mid-fetch
 
       current = pickCountry();
       recent.push(current.country);
       if (recent.length > RECENT_MAX) recent.shift();
 
-      draw(current);
+      setViewFor(current);   // reset the zoom for each new round
+      render();
       buildOptions(current);
       statusEl.textContent = 'Where is this?';
       busy = false;
@@ -2852,23 +2993,26 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       document.getElementById('sdr-games-widget').style.display = 'none';
     });
 
-    // Start a round the moment the panel becomes the active game.
+    // Start a round the moment the panel becomes the active game.  This is also
+    // what triggers the first fetch — see newRound → ensureData.
     new MutationObserver(() => {
       if (isActive() && !busy && !answered && optionsEl.children.length === 0) newRound();
     }).observe(panel, { attributes: true, attributeFilter: ['class'] });
 
-    // Join the rotation once the data is in. Nothing on the page has changed
-    // the game yet in the normal case, so honour a saved selection of this
-    // panel — restoreGame() ran before the fetch resolved and skipped it.
-    ensureData().then(() => {
-      if (!loaded) return;                       // endpoint unavailable — stay out
-      if (GAMES.indexOf(COUNTRIES_GAME) === -1) GAMES.push(COUNTRIES_GAME);
+    // Join the rotation immediately: nothing is fetched until the game is
+    // actually opened, so this costs nothing on page load. If the country list
+    // then turns out to be unavailable, newRound drops the game back out.
+    GAMES.push(COUNTRIES_GAME);
+
+    // restoreGame() ran before this module was reached, so it couldn't restore
+    // a saved selection of this panel — honour it here.
+    (function restoreIfSaved() {
       let savedId = null;
       try { savedId = localStorage.getItem(LS_GAME_KEY); } catch (_) {}
       if (savedId === COUNTRIES_GAME.id && currentGame === 0) {
         showGame(GAMES.indexOf(COUNTRIES_GAME));
       }
-    });
+    })();
   })();
 
 })();

@@ -33,6 +33,20 @@
         .header h1 {
             font-size: 18px;
             font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* Receiver identity, filled in from /api/description */
+        .rx-id {
+            font-size: 13px;
+            color: #7fc7ea;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .rx-id .rx-sub {
+            color: #95a5a6;
+            font-weight: 400;
         }
 
         .header .hint {
@@ -173,6 +187,41 @@
             cursor: pointer;
         }
 
+        /* This receiver.  Green rather than the click pin's blue, and glowing
+           harder than the country flags, so the home station is findable at a
+           glance among them. */
+        .flag-marker.rx-marker {
+            font-size: 22px;
+            filter: drop-shadow(0 0 4px #2ecc71) drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+        }
+
+        /* The receiver tooltip carries several rows, so it needs to read as a
+           panel rather than the one-line country labels */
+        .leaflet-tooltip.rx-tooltip {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, 'Twemoji Flags', sans-serif;
+            text-align: left;
+            max-width: 300px;
+            white-space: normal;
+            border-color: #2ecc71;
+            padding: 8px 10px;
+            line-height: 1.5;
+        }
+
+        .rx-weather {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #445;
+        }
+
+        .rx-weather img {
+            width: 34px;
+            height: 34px;
+            flex-shrink: 0;
+        }
+
         /* The click pin — tinted and ringed so it stands out from the 258
            country flags it sits among */
         .flag-marker.click-marker {
@@ -221,6 +270,7 @@
 <body>
     <div class="header">
         <h1>Country Map</h1>
+        <span class="rx-id" id="rxId"></span>
         <span class="hint">Click the map to identify a point · or look up a callsign / locator / coordinates</span>
         <div class="controls">
             <input type="text" id="search" placeholder="Callsign, locator or lat, lon" title="Callsign (e.g. GM4ABC), Maidenhead locator (4/6/8 chars, e.g. IO86ha) or coordinates (e.g. 56.02, -3.375)" autocomplete="off" spellcheck="false">
@@ -235,10 +285,13 @@
     <script>
         const COUNTRY_API = '/api/maidenhead/country';
         const CTY_API = '/api/cty/lookup';
+        const DESCRIPTION_API = '/api/description';
+        const WEATHER_API = '/api/weather';
 
         let map = null;
         let clickMarker = null;
         let searchLayer = null;   // marker + grid square rectangle for a lookup
+        let rxMarker = null;      // this instance's own location
         let gridLayer = null;     // Maidenhead grid overlay, off until asked for
 
         // A locator the server will accept: 4, 6 or 8 characters
@@ -429,6 +482,144 @@
                     }));
                 }
             }
+        }
+
+        // ---- This receiver -----------------------------------------------------------
+
+        // Identify the instance in the header and drop a marker on its own site.
+        // Weather is fetched alongside — it is optional (the endpoint 404s when
+        // the service is disabled or has no data yet), so it never blocks the pin.
+        async function loadReceiver() {
+            let desc;
+            try {
+                const resp = await fetch(DESCRIPTION_API);
+                if (!resp.ok) return;
+                desc = await resp.json();
+            } catch (err) {
+                return; // no instance info — the map still works standalone
+            }
+
+            const rx = desc.receiver || {};
+            const ident = rx.callsign || rx.name || '';
+            if (ident) {
+                const sub = rx.callsign && rx.name && rx.name !== rx.callsign ? rx.name : '';
+                document.getElementById('rxId').innerHTML = '📡 ' + esc(ident) +
+                    (sub ? ' <span class="rx-sub">· ' + esc(sub) + '</span>' : '');
+                document.title = ident + ' — Country Map';
+            }
+
+            const gps = rx.gps || {};
+            // 0,0 is the unset default, not a station in the Gulf of Guinea
+            if (typeof gps.lat !== 'number' || typeof gps.lon !== 'number' ||
+                (gps.lat === 0 && gps.lon === 0)) {
+                return;
+            }
+
+            const html = renderReceiver(desc, rx, gps, await loadWeather());
+
+            rxMarker = L.marker([gps.lat, gps.lon], {
+                icon: flagIcon('📡', 'rx-marker'),
+                zIndexOffset: 1000 // always on top of the country flags
+            })
+                .bindTooltip(html, { className: 'rx-tooltip', direction: 'top', offset: [0, -12] })
+                .bindPopup(html)
+                .addTo(map);
+        }
+
+        async function loadWeather() {
+            try {
+                const resp = await fetch(WEATHER_API);
+                if (!resp.ok) return null; // 404 when disabled or not yet populated
+                return await resp.json();
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function renderReceiver(desc, rx, gps, weather) {
+            const ident = rx.callsign || rx.name || 'This receiver';
+            let html = '<div class="popup-title">📡 ' + esc(ident) + '</div>';
+
+            if (rx.callsign && rx.name && rx.name !== rx.callsign) {
+                html += '<div class="popup-row">' + esc(rx.name) + '</div>';
+            }
+            if (desc.description && desc.description !== rx.name) {
+                html += '<div class="popup-row">' + esc(desc.description) + '</div>';
+            }
+            if (rx.location) {
+                html += '<div class="popup-row"><span class="label">Location</span>' + esc(rx.location) + '</div>';
+            }
+
+            const locator = gps.maidenhead || latLonToLocator(gps.lat, gps.lon, 6);
+            html += '<div class="popup-row"><span class="label">Locator</span>' + esc(locator) + '</div>' +
+                '<div class="popup-row"><span class="label">Position</span>' +
+                gps.lat.toFixed(4) + ', ' + gps.lon.toFixed(4) +
+                (typeof rx.asl === 'number' && rx.asl ? ' · ' + rx.asl + ' m ASL' : '') + '</div>';
+
+            if (rx.antenna) {
+                html += '<div class="popup-row"><span class="label">Antenna</span>' + esc(rx.antenna) + '</div>';
+            }
+            if (typeof rx.timezone_offset === 'number') {
+                html += '<div class="popup-row"><span class="label">Local time</span>' +
+                    esc(localTime(rx.timezone_offset)) +
+                    (rx.timezone ? ' · ' + esc(rx.timezone) : '') + '</div>';
+            }
+            if (typeof desc.available_clients === 'number' && typeof desc.max_clients === 'number') {
+                html += '<div class="popup-row"><span class="label">Slots</span>' +
+                    desc.available_clients + ' of ' + desc.max_clients + ' free</div>';
+            }
+
+            html += renderWeather(weather);
+
+            if (desc.version) {
+                html += '<div class="popup-method">UberSDR ' + esc(desc.version) + '</div>';
+            }
+            return html;
+        }
+
+        // Wall-clock time at the receiver, from the DST-adjusted offset in minutes
+        function localTime(offsetMinutes) {
+            const d = new Date(Date.now() + offsetMinutes * 60000);
+            const hh = String(d.getUTCHours()).padStart(2, '0');
+            const mm = String(d.getUTCMinutes()).padStart(2, '0');
+            const sign = offsetMinutes < 0 ? '-' : '+';
+            const abs = Math.abs(offsetMinutes);
+            const off = sign + Math.floor(abs / 60) + (abs % 60 ? ':' + String(abs % 60).padStart(2, '0') : '');
+            return hh + ':' + mm + ' (UTC' + off + ')';
+        }
+
+        // OpenWeatherMap payload — every field is optional, so each is guarded
+        function renderWeather(w) {
+            if (!w || !w.weather || !w.weather.length) return '';
+
+            const cur = w.weather[0];
+            const bits = [];
+            if (w.main && typeof w.main.temp === 'number') {
+                bits.push('🌡️ ' + Math.round(w.main.temp) + '°C');
+            }
+            if (w.main && typeof w.main.humidity === 'number') {
+                bits.push('💧 ' + w.main.humidity + '%');
+            }
+            if (w.main && typeof w.main.pressure === 'number') {
+                bits.push('🔵 ' + w.main.pressure + ' hPa');
+            }
+            if (w.wind && typeof w.wind.speed === 'number') {
+                const dir = typeof w.wind.deg === 'number'
+                    ? ' ' + ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(w.wind.deg / 45) % 8]
+                    : '';
+                bits.push('💨 ' + Math.round(w.wind.speed * 3.6) + ' km/h' + dir);
+            }
+
+            const desc = (cur.description || '').replace(/\b\w/g, c => c.toUpperCase());
+            // Icons are served locally; hide the image rather than show a broken one
+            const icon = cur.icon
+                ? '<img src="/weather/' + esc(cur.icon) + '_t.png" alt="" onerror="this.style.display=\'none\'">'
+                : '';
+
+            return '<div class="rx-weather">' + icon + '<div>' +
+                '<div>' + esc(desc) + '</div>' +
+                (bits.length ? '<div class="popup-row">' + bits.join(' · ') + '</div>' : '') +
+                '</div></div>';
         }
 
         // ---- Search ------------------------------------------------------------------
@@ -736,6 +927,7 @@
 
         initMap();
         loadCountries();
+        loadReceiver();
     </script>
 </body>
 </html>

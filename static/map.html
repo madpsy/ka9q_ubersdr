@@ -88,16 +88,25 @@
             gap: 4px;
         }
 
-        /* Maidenhead grid overlay */
+        /* Maidenhead grid overlay.  Labels sit on whatever tile happens to be
+           underneath — light desert, dark sea, busy city — so they carry their
+           own background rather than relying on a text shadow for contrast. */
         .grid-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
             font-size: 11px;
             font-weight: 600;
-            color: #3498db;
-            text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+            letter-spacing: 0.5px;
+            line-height: 1;
+            color: #eaf6ff;
+            background: rgba(20, 28, 38, 0.78);
+            border: 1px solid rgba(52, 152, 219, 0.55);
+            border-radius: 3px;
             white-space: nowrap;
             pointer-events: none;
-            background: none;
-            border: none;
         }
 
         @media (max-width: 900px) {
@@ -377,7 +386,7 @@
             const nLat = Math.ceil((north - lat0) / latSize) + 1;
             if (nLon > 400 || nLat > 400) return; // nothing legible to draw
 
-            const style = { color: '#3498db', weight: 1, opacity: 0.35, interactive: false };
+            const style = { color: '#5dade2', weight: 1, opacity: 0.5, interactive: false };
             for (let i = 0; i <= nLon; i++) {
                 const lon = lon0 + i * lonSize;
                 gridLayer.addLayer(L.polyline([[south, lon], [north, lon]], style));
@@ -388,9 +397,15 @@
                 gridLayer.addLayer(L.polyline([[lat, west], [lat, east]], style));
             }
 
-            // Label cells only when they are wide enough for the text to fit
+            // Label size: monospace 11px is ~7px per character, plus the padding
+            // and border the badge draws around it
+            const labelW = chars * 7 + 10;
+            const labelH = 17;
+
+            // Only label when the badge fits inside the cell with room to spare —
+            // otherwise the labels collide and the grid becomes unreadable
             const cellPx = map.project([lat0, lon0 + lonSize]).x - map.project([lat0, lon0]).x;
-            if (cellPx < chars * 9) return;
+            if (cellPx < labelW + 8) return;
 
             for (let i = 0; i < nLon; i++) {
                 for (let j = 0; j < nLat; j++) {
@@ -402,8 +417,8 @@
                         icon: L.divIcon({
                             className: 'grid-label',
                             html: latLonToLocator(lat, lon, chars),
-                            iconSize: [chars * 9, 14],
-                            iconAnchor: [chars * 4.5, 7]
+                            iconSize: [labelW, labelH],
+                            iconAnchor: [labelW / 2, labelH / 2]
                         })
                     }));
                 }

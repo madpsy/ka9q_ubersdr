@@ -19,6 +19,20 @@ type maidenheadRequest struct {
 	Locator string   `json:"locator"` // Maidenhead grid locator, 4/6/8 chars (e.g. "IO86ha")
 	Lat     *float64 `json:"lat"`     // Latitude in decimal degrees, -90 to +90
 	Lon     *float64 `json:"lon"`     // Longitude in decimal degrees, -180 to +180
+
+	// NearestLand controls what happens when the query hits no land.  Omitted or
+	// true (the default, and the historical behaviour) attributes the query to
+	// the nearest coastline with method "nearest_land" — the right answer for a
+	// station report, where the locator is known to be somewhere real.  Set it
+	// false when a miss is meaningful, e.g. a click on a map: the response then
+	// carries method "open_water" and no country.
+	NearestLand *bool `json:"nearest_land"`
+}
+
+// wantsNearestLand reports whether the nearest-land fallback should be used.
+// Absent field == true, preserving the behaviour of existing callers.
+func (r *maidenheadRequest) wantsNearestLand() bool {
+	return r.NearestLand == nil || *r.NearestLand
 }
 
 // handleMaidenheadCountry handles POST /api/maidenhead/country
@@ -30,6 +44,7 @@ type maidenheadRequest struct {
 //
 //	{"locator": "IO86ha"}
 //	{"lat": 56.02, "lon": -3.375}
+//	{"lat": 30.0, "lon": -40.0, "nearest_land": false}   // → method "open_water"
 //
 // Response (200 OK):
 //
@@ -49,8 +64,12 @@ type maidenheadRequest struct {
 //	  "region":       "Europe",
 //	  "subregion":    "Northern Europe",
 //	  "sovereign":    "United Kingdom",
-//	  "method":       "intersection"  // or "largest_overlap", "point_in_polygon", "nearest_land"
+//	  "method":       "intersection"  // or "largest_overlap", "point_in_polygon",
+//	                                  // "nearest_land", "open_water"
 //	}
+//
+// When method is "open_water" every country field is empty — the query hit no
+// land and the caller passed "nearest_land": false.
 func handleMaidenheadCountry(w http.ResponseWriter, r *http.Request) {
 	// GET returns the full country list with centre coordinates
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -109,11 +128,11 @@ func handleMaidenheadCountry(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case locator != "":
 		// Maidenhead locator lookup — uses full grid square polygon
-		result, lookupErr = GetCountryForMaidenhead(locator)
+		result, lookupErr = GetCountryForMaidenheadOpt(locator, req.wantsNearestLand())
 
 	case req.Lat != nil && req.Lon != nil:
-		// Lat/lon coordinate lookup — point-in-polygon, then nearest-land fallback
-		result, lookupErr = GetCountryForLatLon(*req.Lat, *req.Lon)
+		// Lat/lon coordinate lookup — point-in-polygon, then nearest land unless declined
+		result, lookupErr = GetCountryForLatLonOpt(*req.Lat, *req.Lon, req.wantsNearestLand())
 
 	case req.Lat != nil || req.Lon != nil:
 		writeJSONError(w, "both lat and lon are required for coordinate lookup", http.StatusBadRequest)

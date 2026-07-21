@@ -269,7 +269,9 @@
                 resp = await fetch(COUNTRY_API, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ lat: lat, lon: lon })
+                    // nearest_land:false — on a map, a click in the ocean should
+                    // say "open water", not name the nearest coastline
+                    body: JSON.stringify({ lat: lat, lon: lon, nearest_land: false })
                 });
             } catch (err) {
                 clickMarker.setPopupContent('Lookup failed: ' + esc(err.message));
@@ -294,11 +296,19 @@
             }
 
             const r = await resp.json();
-            clickMarker.setIcon(flagIcon(countryCodeToFlag(r.iso_a2), 'click-marker'));
+            const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
+            clickMarker.setIcon(flagIcon(pin, 'click-marker'));
             clickMarker.setPopupContent(renderPopup(r, lat, lon));
         }
 
         function renderPopup(r, lat, lon) {
+            if (r.method === 'open_water') {
+                return '<div class="popup-title">🌊 Open water</div>' +
+                    '<div class="popup-row">No country at this point</div>' +
+                    '<div class="popup-row"><span class="label">Position</span>' +
+                    lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
+            }
+
             const flag = countryCodeToFlag(r.iso_a2);
             const iso = [r.iso_a2, r.iso_a3].filter(Boolean).join(' / ');
 

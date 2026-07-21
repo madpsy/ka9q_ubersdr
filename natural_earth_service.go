@@ -571,7 +571,32 @@ type MaidenheadCountryResult struct {
 	Region        string  `json:"region"`
 	Subregion     string  `json:"subregion"`
 	Sovereign     string  `json:"sovereign"`
-	Method        string  `json:"method"` // "intersection", "largest_overlap", "point_in_polygon", or "nearest_land"
+	Method        string  `json:"method"` // see the method constants below
+}
+
+// Lookup methods reported in MaidenheadCountryResult.Method.
+const (
+	methodIntersection   = "intersection"     // locator: exactly one country overlaps the square
+	methodLargestOverlap = "largest_overlap"  // locator: several overlap, largest area wins
+	methodPointInPolygon = "point_in_polygon" // lat/lon: the point is inside a country
+	methodNearestLand    = "nearest_land"     // no land hit; nearest country by distance
+	methodOpenWater      = "open_water"       // no land hit and nearest-land was declined
+)
+
+// waterResult builds the result returned when a lookup finds no land and the
+// caller has opted out of the nearest-land fallback.  Every country field is
+// left empty — the coordinates are the only meaningful part.
+func waterResult(locator string, centreLat, centreLon, minLat, minLon, maxLat, maxLon float64) *MaidenheadCountryResult {
+	return &MaidenheadCountryResult{
+		Locator: locator,
+		Lat:     centreLat,
+		Lon:     centreLon,
+		MinLat:  minLat,
+		MinLon:  minLon,
+		MaxLat:  maxLat,
+		MaxLon:  maxLon,
+		Method:  methodOpenWater,
+	}
 }
 
 // LookupMaidenhead converts a Maidenhead grid locator to a country.
@@ -579,12 +604,27 @@ type MaidenheadCountryResult struct {
 // squares that straddle borders or whose centre falls in water.
 // Results are cached indefinitely — country boundaries don't change at runtime.
 func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCountryResult, error) {
+	return svc.lookupMaidenhead(locator, true)
+}
+
+// LookupMaidenheadStrict is LookupMaidenhead without the nearest-land fallback:
+// a square lying entirely in water yields method "open_water" and no country.
+func (svc *NaturalEarthService) LookupMaidenheadStrict(locator string) (*MaidenheadCountryResult, error) {
+	return svc.lookupMaidenhead(locator, false)
+}
+
+func (svc *NaturalEarthService) lookupMaidenhead(locator string, nearestLand bool) (*MaidenheadCountryResult, error) {
 	if !svc.loaded {
 		return nil, fmt.Errorf("natural earth service not loaded")
 	}
 
-	// Normalise to uppercase for consistent cache keys
+	// Normalise to uppercase for consistent cache keys.  Strict lookups get a
+	// separate key space — the two modes disagree for water squares, so they
+	// must never read each other's cached results.
 	cacheKey := strings.ToUpper(locator)
+	if !nearestLand {
+		cacheKey = "!" + cacheKey
+	}
 
 	// Check cache first — avoids the expensive grid-sampling computation on repeat lookups
 	if v, ok := svc.locatorCache.Load(cacheKey); ok {
@@ -641,9 +681,9 @@ func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCou
 	}
 
 	if bestCountry != nil {
-		method := "intersection"
+		method := methodIntersection
 		if nCandidates > 1 {
-			method = "largest_overlap"
+			method = methodLargestOverlap
 		}
 
 		result := buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, bestCountry, method)
@@ -651,13 +691,20 @@ func (svc *NaturalEarthService) LookupMaidenhead(locator string) (*MaidenheadCou
 		return result, nil
 	}
 
-	// Pass 2: no intersection — grid square is entirely in open ocean or unclaimed territory.
-	// Fall back to the nearest country by distance from the grid square centre.
+	// No intersection — the grid square is entirely in open ocean or unclaimed
+	// territory.  Report that when the caller has declined the fallback.
+	if !nearestLand {
+		result := waterResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon)
+		svc.cacheLocator(cacheKey, result)
+		return result, nil
+	}
+
+	// Pass 2: fall back to the nearest country by distance from the square's centre.
 	centrePoint := orb.Point{centreLon, centreLat}
 	nearest := svc.nearestCountry(centrePoint)
 
 	if nearest != nil {
-		result := buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, nearest, "nearest_land")
+		result := buildResult(locator, centreLat, centreLon, minLat, minLon, maxLat, maxLon, nearest, methodNearestLand)
 		svc.cacheLocator(cacheKey, result)
 		return result, nil
 	}
@@ -679,6 +726,17 @@ func (svc *NaturalEarthService) cacheLocator(key string, result *MaidenheadCount
 // Unlike LookupMaidenhead, this tests a single point (no grid square polygon).
 // If the point falls in water, it falls back to the nearest country by distance.
 func (svc *NaturalEarthService) LookupLatLon(lat, lon float64) (*MaidenheadCountryResult, error) {
+	return svc.lookupLatLon(lat, lon, true)
+}
+
+// LookupLatLonStrict is LookupLatLon without the nearest-land fallback: a point
+// in water yields a result with method "open_water" and no country, rather than
+// being attributed to the nearest coastline.
+func (svc *NaturalEarthService) LookupLatLonStrict(lat, lon float64) (*MaidenheadCountryResult, error) {
+	return svc.lookupLatLon(lat, lon, false)
+}
+
+func (svc *NaturalEarthService) lookupLatLon(lat, lon float64, nearestLand bool) (*MaidenheadCountryResult, error) {
 	if !svc.loaded {
 		return nil, fmt.Errorf("natural earth service not loaded")
 	}
@@ -702,14 +760,20 @@ func (svc *NaturalEarthService) LookupLatLon(lat, lon float64) (*MaidenheadCount
 			continue
 		}
 		if pointInGeometry(&c.prepared, pt) {
-			return buildResult("", lat, lon, lat, lon, lat, lon, c, "point_in_polygon"), nil
+			return buildResult("", lat, lon, lat, lon, lat, lon, c, methodPointInPolygon), nil
 		}
 	}
 
-	// Pass 2: nearest land (point is in water or unclaimed territory)
+	// The point is in water or unclaimed territory.  Callers that want to know
+	// that (a map, say) stop here; the default is to name the nearest coastline.
+	if !nearestLand {
+		return waterResult("", lat, lon, lat, lon, lat, lon), nil
+	}
+
+	// Pass 2: nearest land
 	nearest := svc.nearestCountry(pt)
 	if nearest != nil {
-		return buildResult("", lat, lon, lat, lon, lat, lon, nearest, "nearest_land"), nil
+		return buildResult("", lat, lon, lat, lon, lat, lon, nearest, methodNearestLand), nil
 	}
 
 	return nil, fmt.Errorf("no country found for coordinates (%g, %g)", lat, lon)
@@ -1067,18 +1131,32 @@ func NaturalEarthCountryListJSON() (payload []byte, etag string, ok bool) {
 
 // GetCountryForMaidenhead is a convenience function using the global service.
 func GetCountryForMaidenhead(locator string) (*MaidenheadCountryResult, error) {
+	return GetCountryForMaidenheadOpt(locator, true)
+}
+
+// GetCountryForMaidenheadOpt is GetCountryForMaidenhead with control over the
+// nearest-land fallback.  With nearestLand false, a square in open water is
+// reported as such instead of being attributed to the nearest coastline.
+func GetCountryForMaidenheadOpt(locator string, nearestLand bool) (*MaidenheadCountryResult, error) {
 	if globalNaturalEarth == nil {
 		return nil, fmt.Errorf("natural earth service not initialised")
 	}
-	return globalNaturalEarth.LookupMaidenhead(locator)
+	return globalNaturalEarth.lookupMaidenhead(locator, nearestLand)
 }
 
 // GetCountryForLatLon is a convenience function using the global service.
 func GetCountryForLatLon(lat, lon float64) (*MaidenheadCountryResult, error) {
+	return GetCountryForLatLonOpt(lat, lon, true)
+}
+
+// GetCountryForLatLonOpt is GetCountryForLatLon with control over the
+// nearest-land fallback.  With nearestLand false, a point in water is reported
+// as such instead of being attributed to the nearest coastline.
+func GetCountryForLatLonOpt(lat, lon float64, nearestLand bool) (*MaidenheadCountryResult, error) {
 	if globalNaturalEarth == nil {
 		return nil, fmt.Errorf("natural earth service not initialised")
 	}
-	return globalNaturalEarth.LookupLatLon(lat, lon)
+	return globalNaturalEarth.lookupLatLon(lat, lon, nearestLand)
 }
 
 // NaturalEarthEnabled returns true if the service has been successfully loaded.

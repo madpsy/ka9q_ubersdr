@@ -543,9 +543,6 @@
             if (rx.callsign && rx.name && rx.name !== rx.callsign) {
                 html += '<div class="popup-row">' + esc(rx.name) + '</div>';
             }
-            if (desc.description && desc.description !== rx.name) {
-                html += '<div class="popup-row">' + esc(desc.description) + '</div>';
-            }
             if (rx.location) {
                 html += '<div class="popup-row"><span class="label">Location</span>' + esc(rx.location) + '</div>';
             }

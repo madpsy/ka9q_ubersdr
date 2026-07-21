@@ -764,6 +764,7 @@ function toggleBand() {
 
     console.log('Band switched to', nextBand, '— channel', channelNum, '→', currentFrequency, 'Hz');
 
+    resetTune(true);
     updateFrequencyDisplay();
     throttledUpdateURL();
     sendTuneCommand();
@@ -838,6 +839,9 @@ function changeChannel(direction) {
         console.log('No channels available');
         return;
     }
+
+    // Leaving the channel drops any clarifier offset — the new channel starts centred
+    resetTune(true);
 
     // Find current channel
     const currentChannel = currentRadioConfig.channels.find(ch => ch.frequency === currentFrequency);
@@ -1110,18 +1114,22 @@ function stepTune(steps) {
     sendTuneCommand();
 }
 
-function resetTune() {
+// Recentre the clarifier and spin the knob back to its zero position.
+// `silent` skips the retune for callers (e.g. changeChannel) that tune anyway.
+function resetTune(silent) {
     tuneRotation = 0;
     tuneNotch = 0;
     const tuneKnob = document.getElementById('tune-knob');
     if (tuneKnob) tuneKnob.style.transform = 'rotate(0deg)';
 
-    if (tuneOffset !== 0) {
-        tuneOffset = 0;
+    const wasOffset = tuneOffset !== 0;
+    tuneOffset = 0;
+    updateTuneDisplay();
+
+    if (wasOffset && !silent) {
         updateFrequencyDisplay();
         sendTuneCommand();
     }
-    updateTuneDisplay();
 }
 
 // Label doubles as the clarifier readout so the offset is always visible

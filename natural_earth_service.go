@@ -572,6 +572,12 @@ type MaidenheadCountryResult struct {
 	Subregion     string  `json:"subregion"`
 	Sovereign     string  `json:"sovereign"`
 	Method        string  `json:"method"` // see the method constants below
+
+	// Timezone is the IANA name at Lat/Lon (e.g. "Europe/London"), or empty when
+	// the point is at sea or the timezone dataset is not loaded.  A name rather
+	// than an offset, so the caller's tz database applies DST for the date in
+	// question instead of this server guessing.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // Lookup methods reported in MaidenheadCountryResult.Method.
@@ -799,6 +805,10 @@ func buildResult(locator string, centreLat, centreLon, minLat, minLon, maxLat, m
 		Subregion:     c.Subregion,
 		Sovereign:     c.Sovereign,
 		Method:        method,
+		// Resolved at the point/centre being reported, so a locator straddling a
+		// zone boundary answers for its centre — the same point the rest of the
+		// result describes.
+		Timezone: TimezoneForLatLon(centreLat, centreLon),
 	}
 }
 

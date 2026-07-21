@@ -57,6 +57,16 @@ type CTYCallsignLookupResponse struct {
 	Longitude     float64 `json:"longitude"`
 	TimeOffset    float64 `json:"time_offset"`
 	IsWAEDC       bool    `json:"is_waedc,omitempty"`
+
+	// Timezone is the IANA name at the entity's coordinates (e.g. "Europe/London"),
+	// resolved from the timezone boundary dataset.  Empty when that dataset is not
+	// loaded or the coordinates fall at sea.
+	//
+	// Prefer it over TimeOffset: cty.dat carries one standard offset per entity
+	// with no DST, whereas the name lets the caller's tz database apply the rules
+	// in force today.  Both describe the entity's nominal centre, so neither is
+	// the operator's own zone for an entity spanning several.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // handleCTYCountries returns a list of all countries in the database
@@ -242,6 +252,7 @@ func handleCTYLookup(w http.ResponseWriter, r *http.Request, ipBanManager *IPBan
 		Longitude:     result.Longitude,
 		TimeOffset:    result.TimeOffset,
 		IsWAEDC:       result.IsWAEDC,
+		Timezone:      TimezoneForLatLon(result.Latitude, result.Longitude),
 	}
 
 	w.WriteHeader(http.StatusOK)

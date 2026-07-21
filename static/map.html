@@ -1299,11 +1299,18 @@
                     html += '<div class="popup-row"><span class="label">Zones</span>CQ ' +
                         esc(d.cq_zone) + ' · ITU ' + esc(d.itu_zone) + '</div>';
                 }
-                if (typeof d.time_offset === 'number') {
-                    // cty.dat gives the entity's standard offset in hours — no DST,
-                    // and one figure for entities that really span several zones
+                // The endpoint resolves the entity's coordinates against the
+                // timezone boundaries, so this is DST-correct.  cty.dat's own
+                // standard offset is the fallback when that dataset is absent.
+                const zoneTime = d.timezone ? localTimeInZone(d.timezone) : null;
+                if (zoneTime) {
                     html += '<div class="popup-row"><span class="label">Local time</span>' +
-                        esc(localTime(d.time_offset * 60)) + '</div>';
+                        esc(zoneTime) + '</div>' +
+                        '<div class="popup-row"><span class="label">Zone</span>' +
+                        esc(d.timezone) + '</div>';
+                } else if (typeof d.time_offset === 'number') {
+                    html += '<div class="popup-row"><span class="label">Local time</span>' +
+                        esc(localTime(d.time_offset * 60)) + ' — standard time, no DST</div>';
                 }
                 html += '<div class="popup-row"><span class="label">Centre</span>' +
                     d.latitude.toFixed(4) + ', ' + d.longitude.toFixed(4) + '</div>' +
@@ -1311,8 +1318,8 @@
                     renderSunMoon(d.latitude, d.longitude) +
                     // The coordinates are the entity's centre from cty.dat, so say so
                     // rather than letting the pin imply the operator is standing there
-                    '<div class="popup-method">entity centre and standard time offset from ' +
-                    'cty.dat — not the operator\'s location, and no DST</div>';
+                    '<div class="popup-method">entity centre from cty.dat — not the ' +
+                    'operator\'s own location or timezone</div>';
                 return html;
             };
 
@@ -1514,6 +1521,24 @@
                 r.method === 'open_water' ? '' : r.continent);
         }
 
+        // Current wall-clock time in an IANA zone, e.g. "14:23 BST".  Intl carries
+        // the tz database, so DST is applied for today's date without the page
+        // knowing any rules — which a fixed UTC offset could never do.
+        function localTimeInZone(tzid) {
+            try {
+                const now = new Date();
+                const time = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: tzid, hour: '2-digit', minute: '2-digit', hour12: false
+                }).format(now);
+                const abbr = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: tzid, timeZoneName: 'short'
+                }).formatToParts(now).find(p => p.type === 'timeZoneName');
+                return time + (abbr ? ' ' + abbr.value : '');
+            } catch (e) {
+                return null; // unknown zone name — older browser tz data
+            }
+        }
+
         // Plain-English rendering of the endpoint's "method" field.  The five
         // values are the method* constants in natural_earth_service.go; an
         // unrecognised one falls back to de-underscoring it rather than showing
@@ -1568,6 +1593,15 @@
                 lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
             html += '<div class="popup-row"><span class="label">Locator</span>' +
                 esc(r.locator || latLonToLocator(lat, lon, 8)) + '</div>';
+
+            // Land only, so a point at sea simply has no zone
+            const zoneTime = r.timezone ? localTimeInZone(r.timezone) : null;
+            if (zoneTime) {
+                html += '<div class="popup-row"><span class="label">Local time</span>' +
+                    esc(zoneTime) + '</div>' +
+                    '<div class="popup-row"><span class="label">Zone</span>' +
+                    esc(r.timezone) + '</div>';
+            }
 
             if (r.method) {
                 html += '<div class="popup-method">' + esc(describeMethod(r.method)) + '</div>';

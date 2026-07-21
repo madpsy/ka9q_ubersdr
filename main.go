@@ -577,6 +577,18 @@ func main() {
 		log.Printf("Maidenhead → country lookup (/api/maidenhead/country) will be unavailable")
 	}
 
+	// Timezone boundaries (land only) — adds the IANA zone name to
+	// /api/maidenhead/country results.  Optional: without it the lookup works
+	// exactly as before, minus the "timezone" field.
+	timezonePath := "natural_earth/timezones.geojson"
+	if *configDir != "." {
+		timezonePath = *configDir + "/natural_earth/timezones.geojson"
+	}
+	if err := InitTimezoneService(timezonePath); err != nil {
+		log.Printf("Warning: Failed to load timezone boundaries: %v", err)
+		log.Printf("/api/maidenhead/country results will omit the timezone field")
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)

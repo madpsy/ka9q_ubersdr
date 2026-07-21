@@ -200,16 +200,24 @@
         .leaflet-tooltip.rx-tooltip {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, 'Twemoji Flags', sans-serif;
             text-align: left;
-            /* The tooltip pane is zero-width, so an absolutely positioned child
-               with white-space:normal shrink-to-fits against nothing and wraps
-               into a one-word column.  max-content sizes it from the text, and
-               max-width then caps how wide a long location line may get. */
-            width: max-content;
-            max-width: 300px;
-            white-space: normal;
+            /* Keep Leaflet's white-space:nowrap.  The tooltip pane is zero-width
+               and the tooltip is absolutely positioned inside it, so anything
+               that lets the text wrap shrink-to-fits against no available width
+               and collapses into a one-word-per-line column.  Every row here is
+               a short single line, so nowrap is what we want anyway — the one
+               unbounded field is truncated below instead. */
             border-color: #2ecc71;
             padding: 8px 10px;
             line-height: 1.5;
+        }
+
+        /* With nowrap, one long antenna or location string would stretch the
+           whole panel — cap each row and ellipsise instead */
+        .leaflet-tooltip.rx-tooltip .popup-row,
+        .leaflet-tooltip.rx-tooltip .popup-title {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .rx-weather {

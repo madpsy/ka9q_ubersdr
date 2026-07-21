@@ -1285,32 +1285,38 @@
                 '" target="_blank" rel="noopener noreferrer" title="Look up ' +
                 esc(qrzCall) + ' on QRZ">' + esc(call) + '</a>';
 
-            let html = '<div class="popup-title">' + (flag ? flag + ' ' : '') + qrzLink + '</div>' +
-                '<div class="popup-row">' + esc(d.country || 'Unknown') + '</div>';
-            if (d.primary_prefix) {
-                html += '<div class="popup-row"><span class="label">DXCC</span>' + esc(d.primary_prefix) + '</div>';
-            }
-            if (d.continent) {
-                html += '<div class="popup-row"><span class="label">Continent</span>' + esc(d.continent) + '</div>';
-            }
-            if (d.cq_zone || d.itu_zone) {
-                html += '<div class="popup-row"><span class="label">Zones</span>CQ ' +
-                    esc(d.cq_zone) + ' · ITU ' + esc(d.itu_zone) + '</div>';
-            }
-            if (typeof d.time_offset === 'number') {
-                const off = d.time_offset;
-                html += '<div class="popup-row"><span class="label">UTC</span>' +
-                    (off >= 0 ? '+' : '') + off + '</div>';
-            }
-            html += '<div class="popup-row"><span class="label">Centre</span>' +
-                d.latitude.toFixed(4) + ', ' + d.longitude.toFixed(4) + '</div>' +
-                '<div class="popup-row"><span class="label">Locator</span>' + esc(locator) + '</div>' +
-                // The coordinates are the entity's centre from cty.dat, so say so
-                // rather than letting the pin imply the operator is standing there
-                '<div class="popup-method">entity centre from cty.dat — not the operator\'s location</div>';
+            // Rebuilt on each open so the clock keeps ticking, like the sun data
+            const render = () => {
+                let html = '<div class="popup-title">' + (flag ? flag + ' ' : '') + qrzLink + '</div>' +
+                    '<div class="popup-row">' + esc(d.country || 'Unknown') + '</div>';
+                if (d.primary_prefix) {
+                    html += '<div class="popup-row"><span class="label">DXCC</span>' + esc(d.primary_prefix) + '</div>';
+                }
+                if (d.continent) {
+                    html += '<div class="popup-row"><span class="label">Continent</span>' + esc(d.continent) + '</div>';
+                }
+                if (d.cq_zone || d.itu_zone) {
+                    html += '<div class="popup-row"><span class="label">Zones</span>CQ ' +
+                        esc(d.cq_zone) + ' · ITU ' + esc(d.itu_zone) + '</div>';
+                }
+                if (typeof d.time_offset === 'number') {
+                    // cty.dat gives the entity's standard offset in hours — no DST,
+                    // and one figure for entities that really span several zones
+                    html += '<div class="popup-row"><span class="label">Local time</span>' +
+                        esc(localTime(d.time_offset * 60)) + '</div>';
+                }
+                html += '<div class="popup-row"><span class="label">Centre</span>' +
+                    d.latitude.toFixed(4) + ', ' + d.longitude.toFixed(4) + '</div>' +
+                    '<div class="popup-row"><span class="label">Locator</span>' + esc(locator) + '</div>' +
+                    renderSunMoon(d.latitude, d.longitude) +
+                    // The coordinates are the entity's centre from cty.dat, so say so
+                    // rather than letting the pin imply the operator is standing there
+                    '<div class="popup-method">entity centre and standard time offset from ' +
+                    'cty.dat — not the operator\'s location, and no DST</div>';
+                return html;
+            };
 
-            placeSearchResult(d.latitude, d.longitude, flag,
-                () => html + renderSunMoon(d.latitude, d.longitude), null);
+            placeSearchResult(d.latitude, d.longitude, flag, render, null);
             showPath(d.latitude, d.longitude,
                 (flag ? flag + ' ' : '') + call,
                 d.country + (d.primary_prefix ? ' · ' + d.primary_prefix : ''));

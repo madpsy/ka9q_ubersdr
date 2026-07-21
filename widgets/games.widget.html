@@ -2,8 +2,10 @@
      UberSDR Games Widget
      • Wide-screen only (hidden ≤1024px)
      • Fixed to left edge, vertically centred
-     • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4, Mini Sudoku, Lights Out, Mastermind
-       and Callsign Quiz (the last only when ≥10 callsign markers have been seen; uses local CTY lookup)
+     • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4, Mini Sudoku, Lights Out, Mastermind,
+       Callsign Quiz (only when ≥10 callsign markers have been seen; uses local CTY lookup)
+       and Countries (guess the country from a marker on a world map; uses GET /api/maidenhead/country
+       for the country centres and countries-110m.json for the coastlines)
      • ◀ ▶ arrows to switch games
      • Drag widget to reposition
      ═══════════════════════════════════════════════════════════ -->
@@ -631,6 +633,41 @@ html.is-mobile #sdr-games-widget { display: none !important; }
   color: #7f8c8d;
   font-size: 9px;
 }
+
+/* ══════════════════════════════════════
+   COUNTRIES (guess the country from a marker on a world map)
+   ══════════════════════════════════════ */
+#sdr-co-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 1;          /* equirectangular world */
+  background: rgba(20, 30, 48, 0.85);
+  border: 1px solid rgba(127, 140, 141, 0.35);
+  border-radius: 4px;
+  margin: 2px 0 7px;
+}
+#sdr-co-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.sdr-co-opt {
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sdr-co-opt.done { cursor: default; }
+/* Prefixed with #sdr-games-widget so these out-specify the base
+   `#sdr-games-widget button { background: …!important }` rule. */
+#sdr-games-widget .sdr-co-opt.correct { background: rgba(46, 204, 113, 0.45) !important; border-color: #2ecc71 !important; color: #fff !important; }
+#sdr-games-widget .sdr-co-opt.wrong   { background: rgba(231, 76, 60, 0.45) !important;  border-color: #e74c3c !important; color: #fff !important; }
 </style>
 
 <div id="sdr-games-widget">
@@ -781,6 +818,18 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       <span class="sdr-game-score" id="sdr-cq-score">Streak:0 Best:0</span>
       <button class="sdr-game-btn close" id="sdr-cq-close-btn" title="Hide widget">Close</button>
       <button class="sdr-game-btn" id="sdr-cq-next-btn">Next</button>
+    </div>
+  </div>
+
+  <!-- ── Game 9: Countries (added to the rotation once the country list loads) ── -->
+  <div class="sdr-game-panel" id="sdr-panel-co">
+    <div class="sdr-game-status" id="sdr-co-status">Where is this?</div>
+    <canvas id="sdr-co-map" width="336" height="168"></canvas>
+    <div id="sdr-co-options"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-co-score">Streak:0 Best:0</span>
+      <button class="sdr-game-btn close" id="sdr-co-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-co-next-btn">Next</button>
     </div>
   </div>
 
@@ -2526,6 +2575,300 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     // Re-evaluate availability on a timer (spots/audio arrive asynchronously).
     syncRotation();
     setInterval(syncRotation, 8000);
+  })();
+
+  // ══════════════════════════════════════════════════════════════════
+  // COUNTRIES — a marker is dropped on a world map; guess which country.
+  // Country centres come from GET /api/maidenhead/country (Natural Earth
+  // label points, precomputed server-side).  The map itself is drawn from
+  // countries-110m.json, the TopoJSON the stats pages already ship.
+  // Joins the ◀ ▶ rotation once both loads succeed.
+  // ══════════════════════════════════════════════════════════════════
+  (function countriesGame() {
+    const COUNTRIES_GAME = { id: 'sdr-panel-co', title: 'Countries' };
+
+    const panel     = document.getElementById('sdr-panel-co');
+    const canvas    = document.getElementById('sdr-co-map');
+    const optionsEl = document.getElementById('sdr-co-options');
+    const statusEl  = document.getElementById('sdr-co-status');
+    const scoreEl   = document.getElementById('sdr-co-score');
+    const ctx       = canvas.getContext('2d');
+
+    const W = canvas.width, H = canvas.height;   // internal resolution (2:1)
+    const LS_BEST_KEY = 'sdr-co-best';
+    const RECENT_MAX  = 25;                      // don't repeat these countries
+
+    let list = null;          // [{country, iso_a2, continent_code, lat, lon}, …]
+    let baseMap = null;       // offscreen canvas holding the coastlines
+    let loading = false, loaded = false;
+    let busy = false, answered = false, current = null;
+    let streak = 0, best = 0;
+    let autoNext = null;
+    const recent = [];
+
+    try { best = parseInt(localStorage.getItem(LS_BEST_KEY), 10) || 0; } catch (_) {}
+    scoreEl.textContent = 'Streak:0 Best:' + best;
+
+    const isActive = () => panel.classList.contains('active');
+
+    // ── Flag emoji helper (ISO 3166-1 alpha-2 → regional indicator pair) ──
+    function iso2ToFlag(code) {
+      if (!code || code.length !== 2) return '';
+      const c = code.toUpperCase();
+      const base = 0x1F1E6 - 0x41;
+      try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+      catch (e) { return ''; }
+    }
+
+    function shuffle(a) {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // Equirectangular projection — matches the 2:1 canvas exactly.
+    function proj(lon, lat) {
+      return [ (lon + 180) / 360 * W, (90 - lat) / 180 * H ];
+    }
+
+    // ── World outline ─────────────────────────────────────────────────
+    // countries-110m.json is quantised TopoJSON: arc points are delta-encoded
+    // integers that need a running sum plus the topology transform.  We only
+    // want coastlines, so every arc is stroked as an open polyline — no need
+    // to reassemble polygons from arc indices.
+    function decodeArcs(topo) {
+      const t = topo.transform;
+      const sx = t ? t.scale[0] : 1,     sy = t ? t.scale[1] : 1;
+      const tx = t ? t.translate[0] : 0, ty = t ? t.translate[1] : 0;
+      return topo.arcs.map(arc => {
+        let x = 0, y = 0;
+        const out = [];
+        for (const p of arc) {
+          if (t) { x += p[0]; y += p[1]; out.push([x * sx + tx, y * sy + ty]); }
+          else   { out.push([p[0], p[1]]); }
+        }
+        return out;
+      });
+    }
+
+    function buildBaseMap(arcs) {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const g = c.getContext('2d');
+      g.strokeStyle = 'rgba(149, 165, 166, 0.85)';
+      g.lineWidth = 0.8;
+      g.lineJoin = 'round';
+      g.beginPath();
+      for (const arc of arcs) {
+        let prevLon = null;
+        for (const pt of arc) {
+          const [px, py] = proj(pt[0], pt[1]);
+          // A jump wider than half the world means the arc wrapped the
+          // antimeridian — break the path instead of streaking across.
+          if (prevLon === null || Math.abs(pt[0] - prevLon) > 180) g.moveTo(px, py);
+          else g.lineTo(px, py);
+          prevLon = pt[0];
+        }
+      }
+      g.stroke();
+      return c;
+    }
+
+    // ── Marker ────────────────────────────────────────────────────────
+    function drawPin(x, y) {
+      const r = 4.6, stalk = 7;
+      ctx.save();
+      // Halo so the pin reads against coastlines
+      ctx.beginPath();
+      ctx.arc(x, y, r + 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(231, 76, 60, 0.25)';
+      ctx.fill();
+      // Teardrop: circular head over a tapering stalk
+      ctx.beginPath();
+      ctx.moveTo(x, y + stalk);
+      ctx.lineTo(x - r * 0.72, y + r * 0.5);
+      ctx.lineTo(x + r * 0.72, y + r * 0.5);
+      ctx.closePath();
+      ctx.moveTo(x + r, y);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#e74c3c';
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+      // Centre dot
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function draw(target) {
+      ctx.clearRect(0, 0, W, H);
+      if (baseMap) ctx.drawImage(baseMap, 0, 0);
+      if (!target) return;
+      const [x, y] = proj(target.lon, target.lat);
+      drawPin(x, y);
+    }
+
+    // ── Data ──────────────────────────────────────────────────────────
+    // Both fetches are one-shot and cached for the life of the page.  The
+    // country list is served from a precomputed buffer, and the endpoint is
+    // rate limited to 1 req/s per IP, so a 429 just means something else on
+    // the page got there first — wait and retry once.
+    function fetchCountries(retry) {
+      return fetch('/api/maidenhead/country')
+        .then(r => {
+          if (r.status === 429 && !retry) {
+            return new Promise(res => setTimeout(res, 1500)).then(() => fetchCountries(true));
+          }
+          return r.ok ? r.json() : null;
+        })
+        .then(j => {
+          if (!j) return null;
+          if (Array.isArray(j.countries)) return j.countries;
+          return Array.isArray(j) ? j : null;    // already unwrapped
+        })
+        .catch(() => null);
+    }
+
+    function ensureData() {
+      if (loaded || loading) return Promise.resolve();
+      loading = true;
+      return Promise.all([
+        fetchCountries(false),
+        fetch('countries-110m.json').then(r => (r.ok ? r.json() : null)).catch(() => null),
+      ]).then(([countries, topo]) => {
+        if (Array.isArray(countries)) {
+          // Keep only entries we can render a flag for and that have a centre.
+          list = countries.filter(c =>
+            c && c.country && typeof c.lat === 'number' && typeof c.lon === 'number' &&
+            typeof c.iso_a2 === 'string' && c.iso_a2.length === 2);
+        }
+        if (topo && topo.arcs && topo.objects) {
+          try { baseMap = buildBaseMap(decodeArcs(topo)); } catch (_) { baseMap = null; }
+        }
+        loaded = !!(list && list.length >= 5);
+      }).finally(() => { loading = false; });
+    }
+
+    // ── Rounds ────────────────────────────────────────────────────────
+    function pickCountry() {
+      const recentSet = new Set(recent);
+      let pool = list.filter(c => !recentSet.has(c.country));
+      if (pool.length === 0) { recent.length = 0; pool = list; }
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // Two distractors from the same continent (so the map actually has to be
+    // read) plus two from anywhere (so a round is not always a coin toss).
+    function buildOptions(correct) {
+      const others = list.filter(c => c.country !== correct.country);
+      const sameCont = correct.continent_code
+        ? shuffle(others.filter(c => c.continent_code === correct.continent_code))
+        : [];
+      const picks = [];
+      const used = new Set([correct.country]);
+      for (const c of sameCont) {
+        if (picks.length >= 2) break;
+        if (!used.has(c.country)) { picks.push(c); used.add(c.country); }
+      }
+      for (const c of shuffle(others.slice())) {
+        if (picks.length >= 4) break;
+        if (!used.has(c.country)) { picks.push(c); used.add(c.country); }
+      }
+
+      optionsEl.innerHTML = '';
+      for (const c of shuffle([correct, ...picks])) {
+        const b = document.createElement('button');
+        b.className = 'sdr-co-opt';
+        const flag = iso2ToFlag(c.iso_a2);
+        b.textContent = (flag ? flag + ' ' : '') + c.country;
+        b.dataset.name = c.country;
+        optionsEl.appendChild(b);
+      }
+    }
+
+    async function newRound() {
+      if (busy) return;
+      clearTimeout(autoNext); autoNext = null;
+      busy = true;
+      answered = false;
+      optionsEl.innerHTML = '';
+      statusEl.textContent = 'Loading…';
+
+      await ensureData();
+      if (!loaded) {
+        statusEl.textContent = 'Country list unavailable';
+        busy = false;
+        return;
+      }
+
+      current = pickCountry();
+      recent.push(current.country);
+      if (recent.length > RECENT_MAX) recent.shift();
+
+      draw(current);
+      buildOptions(current);
+      statusEl.textContent = 'Where is this?';
+      busy = false;
+    }
+
+    // ── Answer handling ───────────────────────────────────────────────
+    optionsEl.addEventListener('click', e => {
+      const b = e.target.closest('.sdr-co-opt');
+      if (!b || answered || busy || !current) return;
+      answered = true;
+      const pick = b.dataset.name;
+      for (const x of optionsEl.children) {
+        x.classList.add('done');
+        if (x.dataset.name === current.country) x.classList.add('correct');
+        else if (x === b) x.classList.add('wrong');
+      }
+      if (pick === current.country) {
+        streak++;
+        if (streak > best) {
+          best = streak;
+          try { localStorage.setItem(LS_BEST_KEY, String(best)); } catch (_) {}
+        }
+        statusEl.textContent = 'Correct! ✓';
+      } else {
+        streak = 0;
+        statusEl.textContent = 'Nope — ' + current.country;
+      }
+      scoreEl.textContent = 'Streak:' + streak + ' Best:' + best;
+
+      // Auto-advance after 3s unless the user presses Next (or leaves) first.
+      clearTimeout(autoNext);
+      autoNext = setTimeout(() => { if (isActive()) newRound(); }, 3000);
+    });
+
+    document.getElementById('sdr-co-next-btn').addEventListener('click', () => { if (!busy) newRound(); });
+    document.getElementById('sdr-co-close-btn').addEventListener('click', () => {
+      clearTimeout(autoNext); autoNext = null;
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    // Start a round the moment the panel becomes the active game.
+    new MutationObserver(() => {
+      if (isActive() && !busy && !answered && optionsEl.children.length === 0) newRound();
+    }).observe(panel, { attributes: true, attributeFilter: ['class'] });
+
+    // Join the rotation once the data is in. Nothing on the page has changed
+    // the game yet in the normal case, so honour a saved selection of this
+    // panel — restoreGame() ran before the fetch resolved and skipped it.
+    ensureData().then(() => {
+      if (!loaded) return;                       // endpoint unavailable — stay out
+      if (GAMES.indexOf(COUNTRIES_GAME) === -1) GAMES.push(COUNTRIES_GAME);
+      let savedId = null;
+      try { savedId = localStorage.getItem(LS_GAME_KEY); } catch (_) {}
+      if (savedId === COUNTRIES_GAME.id && currentGame === 0) {
+        showGame(GAMES.indexOf(COUNTRIES_GAME));
+      }
+    });
   })();
 
 })();

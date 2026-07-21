@@ -1511,7 +1511,7 @@ func (mp *MQTTPublisher) publishTunnelServerHealthOnce(cfg *Config) {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish tunnel server health to %s: %v", topic, token.Error())
@@ -1562,7 +1562,7 @@ func (mp *MQTTPublisher) publishInstanceReporterHealthOnce(cfg *Config) {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish instance reporter health to %s: %v", topic, token.Error())
@@ -1613,7 +1613,7 @@ func (mp *MQTTPublisher) publishCWSkimmerHealthOnce() {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish CW Skimmer health to %s: %v", topic, token.Error())
@@ -1665,7 +1665,7 @@ func (mp *MQTTPublisher) publishNTPHealthOnce(cfg *Config) {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish NTP health to %s: %v", topic, token.Error())
@@ -1717,7 +1717,7 @@ func (mp *MQTTPublisher) publishSystemLoadOnce() {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish system load to %s: %v", topic, token.Error())
@@ -1774,7 +1774,7 @@ func (mp *MQTTPublisher) publishFrequencyReferenceOnce() {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish frequency reference to %s: %v", topic, token.Error())
@@ -2049,7 +2049,7 @@ func (mp *MQTTPublisher) publishDSPHealthOnce(appConfig *Config) {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish DSP health to %s: %v", topic, token.Error())
@@ -2185,7 +2185,7 @@ func (mp *MQTTPublisher) publishNotificationsHealthOnce() {
 		return
 	}
 
-	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	token := mp.client.Publish(topic, 1, true, data)
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish notifications health to %s: %v", topic, token.Error())

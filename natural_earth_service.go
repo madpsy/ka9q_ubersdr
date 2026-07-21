@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,6 +71,14 @@ type NaturalEarthCountry struct {
 	Region    string
 	Subregion string
 	Sovereign string
+
+	// LabelLat/LabelLon are Natural Earth's LABEL_Y/LABEL_X — a hand-placed
+	// label anchor that sits on the country's main landmass.  It is a far better
+	// "centre" than a bounding-box or area centroid, which for countries like
+	// Norway, Indonesia or the USA lands in the sea or in another country.
+	// Zero when the feature carries no label point; see countryCentre.
+	LabelLat float64
+	LabelLon float64
 }
 
 // resolvedISO2 returns the best available 2-letter ISO code for the country.
@@ -120,6 +130,11 @@ type NaturalEarthService struct {
 	// load time, never mutated afterwards, so it needs no locking.
 	cellIndex [][]int32
 
+	// countryListJSON is the fully serialised response for
+	// GET /api/maidenhead/country, built once by buildCountryList at load time.
+	countryListJSON []byte
+	countryListETag string
+
 	mu            sync.RWMutex
 	loaded        bool
 	locatorCache  sync.Map     // map[string]*MaidenheadCountryResult — never evicted, boundaries don't change
@@ -162,12 +177,15 @@ func InitNaturalEarthService(path string) error {
 			Region:    propString(props, "REGION_UN"),
 			Subregion: propString(props, "SUBREGION"),
 			Sovereign: propString(props, "SOVEREIGNT"),
+			LabelLat:  propFloat(props, "LABEL_Y"),
+			LabelLon:  propFloat(props, "LABEL_X"),
 		}
 		c.prepared = prepareGeometry(feat.Geometry)
 		svc.countries = append(svc.countries, c)
 	}
 
 	svc.buildCellIndex()
+	svc.buildCountryList()
 
 	svc.loaded = true
 	globalNaturalEarth = svc
@@ -498,6 +516,20 @@ func propString(props geojson.Properties, key string) string {
 		return s
 	default:
 		return fmt.Sprintf("%v", v)
+	}
+}
+
+// propFloat reads a numeric property, returning 0 when it is missing or is not
+// a number.  encoding/json decodes every GeoJSON number into a float64, so the
+// float64 case carries all real data; the rest is defensive.
+func propFloat(props geojson.Properties, key string) float64 {
+	switch v := props[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	default:
+		return 0
 	}
 }
 
@@ -939,6 +971,98 @@ func (pp *preparedPolygon) verticesDistanceSq(pt orb.Point) float64 {
 		}
 	}
 	return minDist
+}
+
+// NaturalEarthCountryCentre is one entry of the country list served by
+// GET /api/maidenhead/country.  Field names mirror MaidenheadCountryResult so a
+// client can use the two interchangeably.
+type NaturalEarthCountryCentre struct {
+	Name          string  `json:"country"`
+	NameLong      string  `json:"country_long"`
+	ISOA2         string  `json:"iso_a2"`
+	ISOA3         string  `json:"iso_a3"`
+	Continent     string  `json:"continent"`
+	ContinentCode string  `json:"continent_code"`
+	Region        string  `json:"region"`
+	Subregion     string  `json:"subregion"`
+	Sovereign     string  `json:"sovereign"`
+	Lat           float64 `json:"lat"` // centre point — see countryCentre
+	Lon           float64 `json:"lon"`
+	MinLat        float64 `json:"min_lat"` // bounding box of the whole feature
+	MinLon        float64 `json:"min_lon"`
+	MaxLat        float64 `json:"max_lat"`
+	MaxLon        float64 `json:"max_lon"`
+}
+
+// countryCentre returns the country's representative point: Natural Earth's
+// hand-placed label anchor when present, otherwise the centre of the feature's
+// bounding box.  The fallback is approximate for countries whose territory
+// straddles the antimeridian (Fiji, Russia, Kiribati), but every feature in
+// ne_10m_admin_0_countries carries LABEL_X/LABEL_Y, so it is effectively unused.
+func countryCentre(c *NaturalEarthCountry) (lat, lon float64) {
+	if c.LabelLat != 0 || c.LabelLon != 0 {
+		return c.LabelLat, c.LabelLon
+	}
+	b := c.prepared.bound
+	return (b.Min[1] + b.Max[1]) / 2, (b.Min[0] + b.Max[0]) / 2
+}
+
+// buildCountryList precomputes the country list and its serialised JSON once at
+// load time, so GET /api/maidenhead/country is a buffer write and nothing more.
+// Called from InitNaturalEarthService before the service is published, so it
+// needs no locking and the results are read-only thereafter.
+func (svc *NaturalEarthService) buildCountryList() {
+	list := make([]NaturalEarthCountryCentre, 0, len(svc.countries))
+	for _, c := range svc.countries {
+		lat, lon := countryCentre(c)
+		b := c.prepared.bound
+		list = append(list, NaturalEarthCountryCentre{
+			Name:          c.Name,
+			NameLong:      c.NameLong,
+			ISOA2:         c.resolvedISO2(),
+			ISOA3:         c.resolvedISO3(),
+			Continent:     c.Continent,
+			ContinentCode: continentCode(c.Continent),
+			Region:        c.Region,
+			Subregion:     c.Subregion,
+			Sovereign:     c.Sovereign,
+			Lat:           lat,
+			Lon:           lon,
+			MinLat:        b.Min[1],
+			MinLon:        b.Min[0],
+			MaxLat:        b.Max[1],
+			MaxLon:        b.Max[0],
+		})
+	}
+
+	// Stable, name-ordered output so clients (and ETags) see a fixed ordering.
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"count":     len(list),
+		"countries": list,
+	})
+	if err != nil {
+		log.Printf("NaturalEarth: cannot marshal country list: %v", err)
+		return
+	}
+
+	h := fnv.New64a()
+	_, _ = h.Write(payload)
+
+	svc.countryListJSON = payload
+	svc.countryListETag = fmt.Sprintf(`"ne-%d-%016x"`, len(list), h.Sum64())
+}
+
+// NaturalEarthCountryListJSON returns the precomputed country-list payload and
+// its ETag.  ok is false when the dataset is not loaded.  The returned slice is
+// shared and must not be modified.
+func NaturalEarthCountryListJSON() (payload []byte, etag string, ok bool) {
+	svc := globalNaturalEarth
+	if svc == nil || !svc.loaded || svc.countryListJSON == nil {
+		return nil, "", false
+	}
+	return svc.countryListJSON, svc.countryListETag, true
 }
 
 // GetCountryForMaidenhead is a convenience function using the global service.

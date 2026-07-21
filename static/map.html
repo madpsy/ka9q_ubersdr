@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Country Map</title>
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <link rel="stylesheet" href="leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
+            background: #1a1a1a;
+            color: #ecf0f1;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            border-bottom: 2px solid #444;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header .hint {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .status {
+            font-size: 12px;
+            color: #95a5a6;
+            white-space: nowrap;
+        }
+
+        .status.error {
+            color: #e74c3c;
+        }
+
+        #map {
+            width: 100%;
+            height: calc(100vh - 51px);
+        }
+
+        .leaflet-container {
+            background: #1a1a1a;
+        }
+
+        .leaflet-popup-content-wrapper,
+        .leaflet-popup-tip {
+            background: #2c3e50;
+            color: #ecf0f1;
+        }
+
+        .leaflet-popup-content {
+            margin: 10px 12px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        /* Tooltips are flag + name, so they need the flag font too */
+        .leaflet-tooltip {
+            font-family: 'Twemoji Flags', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #2c3e50;
+            color: #ecf0f1;
+            border: 1px solid #445;
+            font-size: 13px;
+        }
+
+        .leaflet-tooltip-left::before {
+            border-left-color: #2c3e50;
+        }
+
+        .leaflet-tooltip-right::before {
+            border-right-color: #2c3e50;
+        }
+
+        .popup-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .popup-row {
+            color: #bdc3c7;
+        }
+
+        .popup-row .label {
+            color: #7f8c8d;
+            display: inline-block;
+            min-width: 74px;
+        }
+
+        .popup-method {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Country Map</h1>
+        <span class="hint">Hover a marker for the country · click anywhere on the map to identify it</span>
+        <span class="status" id="status">Loading…</span>
+    </div>
+    <div id="map"></div>
+
+    <script src="leaflet.js"></script>
+    <script>
+        const COUNTRY_API = '/api/maidenhead/country';
+
+        let map = null;
+        let clickMarker = null;
+
+        // Convert an ISO 3166-1 alpha-2 code to its flag emoji (regional indicator pair)
+        function countryCodeToFlag(countryCode) {
+            if (!countryCode || countryCode.length !== 2) return '';
+            const codePoints = countryCode
+                .toUpperCase()
+                .split('')
+                .map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
+        function esc(str) {
+            const div = document.createElement('div');
+            div.textContent = str == null ? '' : String(str);
+            return div.innerHTML;
+        }
+
+        function setStatus(text, isError) {
+            const el = document.getElementById('status');
+            el.textContent = text;
+            el.className = isError ? 'status error' : 'status';
+        }
+
+        function initMap() {
+            map = L.map('map', { worldCopyJump: true }).setView([25, 0], 2);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            map.on('click', onMapClick);
+        }
+
+        // Load every country's centre point from the GET endpoint.  The payload is
+        // precomputed server-side and cached for a day, so this is a single request.
+        async function loadCountries() {
+            let resp;
+            try {
+                resp = await fetch(COUNTRY_API);
+            } catch (err) {
+                setStatus('Country list unavailable: ' + err.message, true);
+                return;
+            }
+
+            if (!resp.ok) {
+                let msg = 'HTTP ' + resp.status;
+                try {
+                    const body = await resp.json();
+                    if (body.error) msg = body.error;
+                } catch (e) { /* non-JSON error body */ }
+                setStatus('Country list unavailable: ' + msg, true);
+                return;
+            }
+
+            const data = await resp.json();
+            const countries = data.countries || [];
+
+            for (const c of countries) {
+                const flag = countryCodeToFlag(c.iso_a2);
+                const label = (flag ? flag + ' ' : '') + c.country;
+
+                L.circleMarker([c.lat, c.lon], {
+                    radius: 4,
+                    color: '#f39c12',
+                    weight: 1,
+                    fillColor: '#f39c12',
+                    fillOpacity: 0.8
+                })
+                    .bindTooltip(label, { direction: 'top', offset: [0, -4] })
+                    .addTo(map);
+            }
+
+            setStatus(countries.length + ' countries');
+        }
+
+        // Identify whatever was clicked via the POST endpoint (point-in-polygon,
+        // falling back to nearest land for ocean clicks).
+        async function onMapClick(e) {
+            // Normalise longitude — worldCopyJump lets the user pan past ±180
+            const lat = e.latlng.lat;
+            const lon = ((e.latlng.lng + 180) % 360 + 360) % 360 - 180;
+
+            if (clickMarker) {
+                map.removeLayer(clickMarker);
+            }
+            clickMarker = L.marker([lat, e.latlng.lng]).addTo(map);
+            clickMarker.bindPopup('Looking up…').openPopup();
+
+            let resp;
+            try {
+                resp = await fetch(COUNTRY_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lat: lat, lon: lon })
+                });
+            } catch (err) {
+                clickMarker.setPopupContent('Lookup failed: ' + esc(err.message));
+                return;
+            }
+
+            // The endpoint allows 1 request per second per IP — clicking faster
+            // than that is expected, so say so rather than showing a raw error.
+            if (resp.status === 429) {
+                clickMarker.setPopupContent('Too fast — one lookup per second. Click again.');
+                return;
+            }
+
+            if (!resp.ok) {
+                let msg = 'HTTP ' + resp.status;
+                try {
+                    const body = await resp.json();
+                    if (body.error) msg = body.error;
+                } catch (err) { /* non-JSON error body */ }
+                clickMarker.setPopupContent('Lookup failed: ' + esc(msg));
+                return;
+            }
+
+            const r = await resp.json();
+            clickMarker.setPopupContent(renderPopup(r, lat, lon));
+        }
+
+        function renderPopup(r, lat, lon) {
+            const flag = countryCodeToFlag(r.iso_a2);
+            const iso = [r.iso_a2, r.iso_a3].filter(Boolean).join(' / ');
+
+            let html = '<div class="popup-title">' +
+                (flag ? flag + ' ' : '') + esc(r.country || 'Unknown') + '</div>';
+
+            if (r.country_long && r.country_long !== r.country) {
+                html += '<div class="popup-row">' + esc(r.country_long) + '</div>';
+            }
+            if (iso) {
+                html += '<div class="popup-row"><span class="label">ISO</span>' + esc(iso) + '</div>';
+            }
+            if (r.continent) {
+                const cont = r.continent_code ? r.continent + ' (' + r.continent_code + ')' : r.continent;
+                html += '<div class="popup-row"><span class="label">Continent</span>' + esc(cont) + '</div>';
+            }
+            if (r.subregion) {
+                html += '<div class="popup-row"><span class="label">Subregion</span>' + esc(r.subregion) + '</div>';
+            }
+            if (r.sovereign && r.sovereign !== r.country) {
+                html += '<div class="popup-row"><span class="label">Sovereign</span>' + esc(r.sovereign) + '</div>';
+            }
+            html += '<div class="popup-row"><span class="label">Position</span>' +
+                lat.toFixed(4) + ', ' + lon.toFixed(4) + '</div>';
+
+            if (r.method) {
+                let note = r.method;
+                if (r.method === 'nearest_land') {
+                    note += ' — the click was over water';
+                }
+                html += '<div class="popup-method">method: ' + esc(note) + '</div>';
+            }
+            return html;
+        }
+
+        initMap();
+        loadCountries();
+    </script>
+</body>
+</html>

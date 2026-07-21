@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -51,10 +52,16 @@ type maidenheadRequest struct {
 //	  "method":       "intersection"  // or "largest_overlap", "point_in_polygon", "nearest_land"
 //	}
 func handleMaidenheadCountry(w http.ResponseWriter, r *http.Request) {
+	// GET returns the full country list with centre coordinates
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		handleCountryList(w, r)
+		return
+	}
+
 	// Only allow POST
 	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		writeJSONError(w, "method not allowed — use POST", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", "GET, POST")
+		writeJSONError(w, "method not allowed — use GET or POST", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -133,6 +140,77 @@ func handleMaidenheadCountry(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400") // country boundaries don't change
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		log.Printf("maidenhead_api: error encoding response: %v", err)
+	}
+}
+
+// handleCountryList handles GET /api/maidenhead/country
+//
+// Returns every country in the Natural Earth dataset with its centre
+// coordinates and bounding box.  The payload is serialised once at startup, so
+// this handler does no geometry work and no JSON encoding — it writes a cached
+// buffer and is safe to call at any rate the network can carry.
+//
+// Response (200 OK):
+//
+//	{
+//	  "count": 258,
+//	  "countries": [
+//	    {
+//	      "country":        "United Kingdom",
+//	      "country_long":   "United Kingdom",
+//	      "iso_a2":         "GB",
+//	      "iso_a3":         "GBR",
+//	      "continent":      "Europe",
+//	      "continent_code": "EU",
+//	      "region":         "Europe",
+//	      "subregion":      "Northern Europe",
+//	      "sovereign":      "United Kingdom",
+//	      "lat":            52.14,      // Natural Earth label point (on the main landmass)
+//	      "lon":            -1.48,
+//	      "min_lat":        49.9,       // bounding box of all territory in the feature
+//	      "min_lon":        -8.17,
+//	      "max_lat":        60.86,
+//	      "max_lon":        1.75
+//	    }
+//	  ]
+//	}
+func handleCountryList(w http.ResponseWriter, r *http.Request) {
+	// Rate limit: 1 request per second per IP, same as the POST path
+	clientIP := getClientIP(r)
+	if !maidenheadRateLimiter.AllowRequest(clientIP) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		if _, err := w.Write([]byte(`{"error":"rate limit exceeded — max 1 request per second per IP"}`)); err != nil {
+			log.Printf("maidenhead_api: error writing rate limit response: %v", err)
+		}
+		return
+	}
+
+	payload, etag, ok := NaturalEarthCountryListJSON()
+	if !ok {
+		writeJSONError(w, "Natural Earth dataset not loaded — check server configuration", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // country boundaries don't change
+	w.Header().Set("ETag", etag)
+
+	// The payload only changes when the server restarts with a new dataset, so a
+	// conditional request is normally answered with an empty 304.
+	if match := r.Header.Get("If-None-Match"); match != "" && strings.Contains(match, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		return
+	}
+
+	if _, err := w.Write(payload); err != nil {
+		log.Printf("maidenhead_api: error writing country list: %v", err)
 	}
 }
 

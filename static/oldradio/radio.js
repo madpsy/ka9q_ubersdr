@@ -169,9 +169,8 @@ async function loadRadio(radioId) {
         MIN_FREQ = currentRadioConfig.minFreq;
         MAX_FREQ = currentRadioConfig.maxFreq;
         // applyBandConfig already resolved the mode for multi-band radios; for the
-        // rest, fall back to the config default unless the user picked a mode before.
-        MODE = getSavedMode(radioId, currentBand) || currentRadioConfig.mode;
-        currentRadioConfig.mode = MODE;
+        // rest this is just the radio's configured default.
+        MODE = currentRadioConfig.mode;
         DIAL_GEAR_RATIO = currentRadioConfig.dialGearRatio;
         currentFrequency = currentRadioConfig.defaultFrequency;
         tuneOffset = 0;
@@ -632,30 +631,10 @@ function setupChannelButtons() {
     }
 }
 
-// Mode handling — each band (or radio) has a default mode, but the user can
-// cycle through the demodulators below and the choice is remembered per band.
+// Mode handling — the user can cycle through the demodulators below, but the
+// choice is deliberately not persisted: selecting a band always asserts that
+// band's own default mode (UK/EU = FM, US = AM).
 const MODE_CYCLE = ['fm', 'am', 'lsb', 'usb'];
-
-function modeStorageKey(radioId, band) {
-    return `oldradio-mode-${radioId}-${band || 'default'}`;
-}
-
-function getSavedMode(radioId, band) {
-    try {
-        const mode = localStorage.getItem(modeStorageKey(radioId, band));
-        return MODE_CYCLE.includes(mode) ? mode : null;
-    } catch (e) {
-        return null;
-    }
-}
-
-function saveMode(radioId, band, mode) {
-    try {
-        localStorage.setItem(modeStorageKey(radioId, band), mode);
-    } catch (e) {
-        /* storage unavailable (e.g. private mode) — ignore */
-    }
-}
 
 function setupModeButton() {
     const modeToggle = document.getElementById('mode-toggle');
@@ -675,7 +654,6 @@ function toggleMode() {
 
     if (currentRadioConfig) {
         currentRadioConfig.mode = MODE;
-        saveMode(currentRadioConfig.id, currentBand, MODE);
     }
 
     console.log('Mode switched to', MODE);
@@ -731,11 +709,10 @@ function applyBandConfig(bandName) {
     MIN_FREQ = band.minFreq;
     MAX_FREQ = band.maxFreq;
 
-    // Each band has a default mode (e.g. UK/EU = "fm", US = "am"), but a mode the
-    // user picked for this band previously wins. Write it back into the config so
-    // the radio-level `mode` doesn't clobber it after loadRadio applies the band.
-    const savedMode = getSavedMode(currentRadioConfig.id, bandName);
-    MODE = savedMode || band.mode || currentRadioConfig.mode;
+    // The band's own mode always wins (UK/EU = "fm", US = "am"), discarding any
+    // manual mode selection. Written back into the config so the radio-level
+    // `mode` doesn't clobber it after loadRadio applies the band.
+    MODE = band.mode || currentRadioConfig.mode;
     currentRadioConfig.mode = MODE;
 
     updateBandDisplay();
@@ -1608,7 +1585,6 @@ function loadSettingsFromURL() {
             MODE = mode;
             if (currentRadioConfig) {
                 currentRadioConfig.mode = mode;
-                saveMode(currentRadioConfig.id, currentBand, mode);
             }
             updateModeDisplay();
             console.log('Loaded mode from URL:', mode);

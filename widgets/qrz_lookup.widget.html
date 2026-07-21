@@ -170,18 +170,33 @@
 
   #qrz-name-line a {
     color: inherit;
-    text-decoration: underline;
+    text-decoration: none;
     cursor: pointer;
   }
 
+  /* No underline at rest — an underline under a flag emoji reads as clutter.
+     The pointer cursor plus the hover brightening carry the affordance. */
   #qrz-name-line a:hover {
     color: #fff;
+    text-decoration: underline;
   }
 
   #qrz-country-line {
     font-size: 10px;
     font-weight: normal;
     color: rgba(255,255,255,0.6);
+  }
+
+  #qrz-local-time-line {
+    font-size: 10px;
+    font-weight: normal;
+    color: rgba(255,255,255,0.6);
+    margin-top: 2px;
+    white-space: nowrap;
+  }
+
+  #qrz-local-time-offset {
+    color: rgba(255,255,255,0.45);
   }
 
   #qrz-dist-line {
@@ -726,15 +741,21 @@
     // to render immediately instead of a placeholder until the first tick.
     startLocalTimeClock(d.tz_iana, d.lat, d.lon);
 
-    if (country || d.grid || localTimeFmt) {
-      // Each segment is escaped individually — the time is wrapped in its own
-      // span so the 1 s tick can update it without re-rendering the result.
-      var segs = [country, d.grid].filter(Boolean).map(esc);
-      if (localTimeFmt) {
-        segs.push('<span id="qrz-local-time" title="' + esc(d.tz_iana) + '">' +
-                  esc(localTimeNow()) + '</span>');
-      }
-      html += '<div id="qrz-country-line">' + segs.join(' · ') + '</div>';
+    if (country || d.grid) {
+      var loc = [country, d.grid].filter(Boolean).join(' · ');
+      html += '<div id="qrz-country-line">' + esc(loc) + '</div>';
+    }
+
+    // Local time on its own line, with the current UTC offset in brackets.
+    // Both spans are updated in place by the 1 s tick.
+    if (localTimeFmt) {
+      var offNow = localOffsetNow();
+      html += '<div id="qrz-local-time-line" title="' + esc(d.tz_iana) + '">' +
+                '<span id="qrz-local-time">' + esc(localTimeNow()) + '</span>' +
+                '<span id="qrz-local-time-offset">' +
+                  (offNow ? esc(' (' + offNow + ')') : '') +
+                '</span>' +
+              '</div>';
     }
     if (distBearing) {
       html += buildDistLineHtml(distBearing);
@@ -803,19 +824,37 @@
   // QRZ's own timezone/gmtoffset fields are deliberately unused: gmtoffset is a
   // whole-hour integer that cannot express +5:30, +5:45 or -3:30, and its DST
   // flag carries no switchover dates. Intl.DateTimeFormat applies real rules.
-  var localTimeTimer = null;
-  var localTimeFmt   = null;
-  var localTimeLat   = null;
-  var localTimeLon   = null;
+  var localTimeTimer  = null;
+  var localTimeFmt    = null;
+  var localOffsetFmt  = null;
+  var localTimeLat    = null;
+  var localTimeLon    = null;
 
   function stopLocalTimeClock() {
     if (localTimeTimer !== null) {
       clearInterval(localTimeTimer);
       localTimeTimer = null;
     }
-    localTimeFmt = null;
-    localTimeLat = null;
-    localTimeLon = null;
+    localTimeFmt   = null;
+    localOffsetFmt = null;
+    localTimeLat   = null;
+    localTimeLon   = null;
+  }
+
+  // Current UTC offset for the zone, e.g. "UTC-4", "UTC+5:45", or "UTC" at zero.
+  // Recomputed per tick so a DST transition while the widget is open is picked
+  // up. Intl reports this as "GMT…"; we relabel to UTC to match ham convention.
+  // Returns '' if the browser lacks shortOffset support (pre-ES2022).
+  function localOffsetNow() {
+    if (!localOffsetFmt) return '';
+    try {
+      var part = localOffsetFmt.formatToParts(new Date()).find(function (p) {
+        return p.type === 'timeZoneName';
+      });
+      if (!part || !part.value) return '';
+      // "GMT" (zero offset) becomes plain "UTC"; "GMT+5:45" becomes "UTC+5:45".
+      return part.value.replace(/^GMT/, 'UTC');
+    } catch (e) { return ''; }
   }
 
   // Day/night emoji at the operator's position. SunCalc is loaded by the host
@@ -865,10 +904,27 @@
       localTimeFmt = null;
       return;
     }
+
+    // Separate formatter for the UTC offset. timeZoneName:'shortOffset' is
+    // ES2022; on an older engine this throws and the offset is simply omitted,
+    // leaving the clock working.
+    try {
+      localOffsetFmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        timeZoneName: 'shortOffset'
+      });
+    } catch (e) {
+      localOffsetFmt = null;
+    }
+
     localTimeTimer = setInterval(function () {
       var el = document.getElementById('qrz-local-time');
-      if (!el) return;   // result replaced or widget collapsed
-      el.textContent = localTimeNow();
+      if (el) el.textContent = localTimeNow();   // absent when result replaced
+      var offEl = document.getElementById('qrz-local-time-offset');
+      if (offEl) {
+        var off = localOffsetNow();
+        offEl.textContent = off ? ' (' + off + ')' : '';
+      }
     }, 1000);
   }
 

@@ -891,6 +891,18 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 		data["loc_source"] = spot.LocSource
 	}
 
+	// QRZ's own account of where the position came from ("user", "geocode",
+	// "grid", "zip", "state", "dxcc"), and the IANA zone derived from it.
+	// tz_iana is present only for positions precise enough to sit in the right
+	// zone polygon, so consumers can show a local clock without second-guessing
+	// the accuracy — see qrzGeoLocIsPrecise.
+	if spot.GeoLoc != "" {
+		data["geoloc"] = spot.GeoLoc
+	}
+	if spot.Timezone != "" {
+		data["tz_iana"] = spot.Timezone
+	}
+
 	message := map[string]interface{}{
 		"type": "cw_spot",
 		"data": data,

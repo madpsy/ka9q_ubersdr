@@ -1119,6 +1119,17 @@ func (mp *MQTTPublisher) PublishCWSpot(spot CWSkimmerSpot) {
 		spotPayload["bearing_deg"] = *spot.BearingDeg
 	}
 
+	// QRZ position provenance and the IANA zone derived from it (both only
+	// when callsign lookup is enabled and the position is precise enough —
+	// see qrzGeoLocIsPrecise).  geoloc is published alongside tz_iana so a
+	// subscriber can tell an operator-set position from a country centroid.
+	if spot.GeoLoc != "" {
+		spotPayload["geoloc"] = spot.GeoLoc
+	}
+	if spot.Timezone != "" {
+		spotPayload["tz_iana"] = spot.Timezone
+	}
+
 	// Build topic: {prefix}/cw_spots/{band}
 	// e.g., ubersdr/metrics/cw_spots/40m
 	topic := fmt.Sprintf("%s/cw_spots/%s",

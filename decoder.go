@@ -61,10 +61,13 @@ type MultiDecoder struct {
 }
 
 // SetDB wires the SQLite database into the multi-decoder for dual-write.
-// It propagates the DB handle to the inner SpotsLogger.
+// It propagates the DB handle to the inner SpotsLogger and MetricsLogger.
 func (md *MultiDecoder) SetDB(db *sql.DB) {
 	if md.spotsLogger != nil {
 		md.spotsLogger.SetDB(db)
+	}
+	if md.metricsLogger != nil {
+		md.metricsLogger.SetDB(db)
 	}
 }
 

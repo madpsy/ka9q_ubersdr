@@ -420,6 +420,97 @@ func (m *DBManager) initSchema() error {
 			)`,
 		},
 		{"space_weather_idx_ts", `CREATE INDEX IF NOT EXISTS space_weather_idx_ts ON space_weather(ts)`},
+
+		// ----------------------------------------------------------------
+		// decoder_metrics
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
+		// Source struct: MetricsSnapshot (decoder_metrics_log.go)
+		// Written every metrics_log_interval (default 5 min) per mode/band.
+		// ----------------------------------------------------------------
+		{
+			"decoder_metrics",
+			`CREATE TABLE IF NOT EXISTS decoder_metrics (
+				id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts                   INTEGER NOT NULL,  -- Unix seconds UTC
+				mode                 TEXT    NOT NULL,  -- e.g. "FT8", "WSPR"
+				band                 TEXT    NOT NULL,  -- e.g. "20m"
+				band_name            TEXT,              -- decoder config name
+				-- Decode counts
+				decodes_1h           INTEGER,
+				decodes_3h           INTEGER,
+				decodes_6h           INTEGER,
+				decodes_12h          INTEGER,
+				decodes_24h          INTEGER,
+				-- Decodes per cycle (rolling averages)
+				dpc_1m               REAL,
+				dpc_5m               REAL,
+				dpc_15m              REAL,
+				dpc_30m              REAL,
+				dpc_60m              REAL,
+				-- Unique callsigns
+				unique_calls_1h      INTEGER,
+				unique_calls_3h      INTEGER,
+				unique_calls_6h      INTEGER,
+				unique_calls_12h     INTEGER,
+				unique_calls_24h     INTEGER,
+				-- Execution time (seconds)
+				exec_avg_1m          REAL,
+				exec_min_1m          REAL,
+				exec_max_1m          REAL,
+				exec_avg_5m          REAL,
+				exec_min_5m          REAL,
+				exec_max_5m          REAL,
+				-- Activity
+				decodes_per_hour     REAL,
+				callsigns_per_hour   REAL,
+				activity_score       REAL
+			)`,
+		},
+		{"decoder_metrics_idx_ts", `CREATE INDEX IF NOT EXISTS decoder_metrics_idx_ts      ON decoder_metrics(ts)`},
+		{"decoder_metrics_idx_mode_band", `CREATE INDEX IF NOT EXISTS decoder_metrics_idx_mode_band ON decoder_metrics(mode, band)`},
+		{"decoder_metrics_idx_ts_mode_band", `CREATE INDEX IF NOT EXISTS decoder_metrics_idx_ts_mode_band ON decoder_metrics(ts, mode, band)`},
+
+		// ----------------------------------------------------------------
+		// cw_metrics
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/<BAND>.jsonl
+		// Source struct: CWMetricsSnapshot (cwskimmer_metrics.go)
+		// Written every metrics_log_interval (default 5 min) per band.
+		// ----------------------------------------------------------------
+		{
+			"cw_metrics",
+			`CREATE TABLE IF NOT EXISTS cw_metrics (
+				id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts                   INTEGER NOT NULL,  -- Unix seconds UTC
+				band                 TEXT    NOT NULL,  -- e.g. "20m"
+				-- Spot counts
+				spots_1h             INTEGER,
+				spots_24h            INTEGER,
+				-- Unique callsigns
+				unique_calls_1h      INTEGER,
+				unique_calls_24h     INTEGER,
+				-- Activity
+				spots_per_hour       REAL,
+				callsigns_per_hour   REAL,
+				activity_score       REAL,
+				-- WPM stats (1-minute window)
+				wpm_avg_1m           REAL,
+				wpm_min_1m           INTEGER,
+				wpm_max_1m           INTEGER,
+				-- WPM stats (5-minute window)
+				wpm_avg_5m           REAL,
+				wpm_min_5m           INTEGER,
+				wpm_max_5m           INTEGER,
+				-- WPM stats (10-minute window)
+				wpm_avg_10m          REAL,
+				wpm_min_10m          INTEGER,
+				wpm_max_10m          INTEGER
+			)`,
+		},
+		{"cw_metrics_idx_ts", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_ts   ON cw_metrics(ts)`},
+		{"cw_metrics_idx_band", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_band ON cw_metrics(band)`},
+		{"cw_metrics_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_ts_band ON cw_metrics(ts, band)`},
 	}
 
 	for _, s := range stmts {

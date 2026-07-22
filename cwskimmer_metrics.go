@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,7 +37,18 @@ type CWSkimmerMetrics struct {
 	// Summary aggregator
 	summaryAggregator *CWMetricsSummaryAggregator
 
+	// SQLite dual-write (optional)
+	db   *sql.DB
+	dbMu sync.Mutex
+
 	mu sync.RWMutex
+}
+
+// SetDB wires the SQLite database for dual-write. Safe to call at any time.
+func (cm *CWSkimmerMetrics) SetDB(db *sql.DB) {
+	cm.dbMu.Lock()
+	cm.db = db
+	cm.dbMu.Unlock()
 }
 
 // SpotEvent represents a single CW spot event for time-series tracking
@@ -547,6 +559,38 @@ func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 		// Close file and check for errors
 		if err := file.Close(); err != nil {
 			return fmt.Errorf("failed to close metrics file: %w", err)
+		}
+
+		// Dual-write to SQLite (best-effort — never blocks or fails the JSONL write)
+		cm.dbMu.Lock()
+		db := cm.db
+		cm.dbMu.Unlock()
+		if db != nil {
+			_, dbErr := db.Exec(`
+				INSERT INTO cw_metrics (
+					ts, band,
+					spots_1h, spots_24h,
+					unique_calls_1h, unique_calls_24h,
+					spots_per_hour, callsigns_per_hour, activity_score,
+					wpm_avg_1m, wpm_min_1m, wpm_max_1m,
+					wpm_avg_5m, wpm_min_5m, wpm_max_5m,
+					wpm_avg_10m, wpm_min_10m, wpm_max_10m
+				) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				snapshot.Timestamp.Unix(), snapshot.Band,
+				snapshot.SpotCounts.Last1Hour, snapshot.SpotCounts.Last24Hour,
+				snapshot.UniqueCallsigns.Last1Hour, snapshot.UniqueCallsigns.Last24Hour,
+				snapshot.Activity.SpotsPerHour, snapshot.Activity.CallsignsPerHour,
+				snapshot.Activity.ActivityScore,
+				snapshot.WPMStats.Last1Min.AvgWPM, snapshot.WPMStats.Last1Min.MinWPM,
+				snapshot.WPMStats.Last1Min.MaxWPM,
+				snapshot.WPMStats.Last5Min.AvgWPM, snapshot.WPMStats.Last5Min.MinWPM,
+				snapshot.WPMStats.Last5Min.MaxWPM,
+				snapshot.WPMStats.Last10Min.AvgWPM, snapshot.WPMStats.Last10Min.MinWPM,
+				snapshot.WPMStats.Last10Min.MaxWPM,
+			)
+			if dbErr != nil {
+				log.Printf("[cw_metrics] db insert error: %v", dbErr)
+			}
 		}
 	}
 

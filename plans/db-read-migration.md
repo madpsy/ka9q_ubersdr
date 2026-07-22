@@ -1,0 +1,920 @@
+# DB Read Migration Plan
+
+Migrate all file-based read operations (CSV/JSONL) to query the SQLite database instead.
+Each component currently dual-writes to both files and DB. This plan replaces the read
+path with DB queries, keeping the file write path intact as a fallback/backup.
+
+---
+
+## Cross-cutting principles
+
+- **DB-first with file fallback**: If `db == nil` (DB not configured), fall back to the
+  existing file-based read. This preserves backward compatibility for historical data
+  predating the DB.
+- **Historical data**: Data written before the DB was introduced only exists in files.
+  A one-time migration script (separate task) can import it. Until then, the fallback
+  handles it transparently.
+- **No API contract changes**: All HTTP response shapes remain identical. Only the
+  internal data source changes.
+- **Unix timestamps in DB**: All `ts` columns store Unix seconds (INTEGER). Convert with
+  `time.Unix(ts, 0).UTC()` when building response structs.
+
+---
+
+## Component 1 — `chat_messages` table
+
+**DB table**: `chat_messages(id, ts, source_ip, username, message, country, country_code)`
+**Current read files**: [`chat_logs_api.go`](../chat_logs_api.go) · [`chat_logger.go`](../chat_logger.go)
+
+### DB access pattern for this component
+
+`HandleChatLogs` is a method on `AdminHandler`, which already has `dbManager *DBManager`
+(field added in the dual-write phase). Access the DB via `ah.dbManager.DB()` (or
+`ah.dbManager.db` if unexported). The package-level `readChatLogs(dataDir, filter)` function
+should gain a `db *sql.DB` parameter: `readChatLogs(dataDir string, db *sql.DB, filter *ChatLogFilter)`.
+When `db != nil`, use the DB path; otherwise fall back to the file walk.
+
+`ChatLogger` already has a `db *sql.DB` field (added for dual-write). Use it directly.
+
+### Operations to migrate
+
+#### 1.1 `HandleChatLogs` — `/admin/chat-logs` (GET)
+
+**Current**: [`readChatLogs()`](../chat_logs_api.go:158) walks `YYYY/MM/DD/chat.csv` files day by day,
+applies IP/nickname/message filters in Go, sorts descending, truncates to limit.
+
+**SQL replacement**:
+```sql
+SELECT ts, source_ip, username, message, country, country_code
+FROM chat_messages
+WHERE ts >= ?          -- filter.StartDate.Unix()
+  AND ts <  ?          -- filter.EndDate.Add(24h).Unix()
+  AND (? = '' OR source_ip LIKE '%' || ? || '%')   -- IP partial match
+  AND (? = '' OR LOWER(username) LIKE '%' || LOWER(?) || '%')  -- nickname
+  AND (? = '' OR LOWER(message)  LIKE '%' || LOWER(?) || '%')  -- message
+ORDER BY ts DESC
+LIMIT ?                -- filter.Limit
+```
+
+**Notes**: SQLite `LIKE` is case-insensitive for ASCII by default, matching the existing
+`strings.ToLower` behaviour. The `EndDate` bound should be `EndDate + 24h` to include
+the full last day (current code iterates through `EndDate` inclusive).
+
+**File to change**: [`chat_logs_api.go`](../chat_logs_api.go) — add `db *sql.DB` parameter to
+`readChatLogs()`; add DB query path inside; keep file walk as fallback when `db == nil`.
+In `HandleChatLogs`, pass `ah.dbManager.db` (or a `DB()` accessor) as the `db` argument.
+
+---
+
+#### 1.2 `LoadRecentMessages` — startup chat seed
+
+**Current**: [`chat_logger.go:LoadRecentMessages()`](../chat_logger.go:183) walks back up to
+`maxDays` day-files, reads all rows, filters banned IPs, returns last `maxMessages`.
+
+**SQL replacement**:
+```sql
+SELECT ts, source_ip, username, message
+FROM chat_messages
+WHERE ts >= ?          -- now - maxDays*24h
+ORDER BY ts ASC
+LIMIT ?                -- maxMessages (take tail = most recent)
+```
+
+Since there is no `banned_ips` table in the DB, filter banned IPs in Go after the query
+(same as today, just operating on DB rows instead of CSV rows).
+
+**File to change**: [`chat_logger.go`](../chat_logger.go) — use existing `cl.db` field for the
+DB read path in `LoadRecentMessages()`; fall back to file walk when `cl.db == nil`.
+
+---
+
+#### 1.3 `GetLastKnownIPForUser` — reverse IP lookup
+
+**Current**: [`chat_logger.go:GetLastKnownIPForUser()`](../chat_logger.go:332) walks back 30 days
+of CSV files via `findLastIPInDayFile()`, returns the most recent `source_ip` for a given
+username (case-insensitive).
+
+**SQL replacement**:
+```sql
+SELECT source_ip
+FROM chat_messages
+WHERE LOWER(username) = LOWER(?)
+  AND source_ip != ''
+ORDER BY ts DESC
+LIMIT 1
+```
+
+**File to change**: [`chat_logger.go`](../chat_logger.go) — use existing `cl.db` field; replace
+file walk with DB query when `cl.db != nil`.
+
+---
+
+## Component 2 — `noise_floor` table
+
+**DB table**: `noise_floor(id, ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db, dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz)`
+**Current read files**: [`noise_floor.go`](../noise_floor.go) · handlers in [`main.go`](../main.go)
+
+### Operations to migrate
+
+#### 2.1 `GetHistoricalData` — `/noise-floor/historical` (GET)
+
+**Current**: [`noise_floor.go:GetHistoricalData()`](../noise_floor.go:1116) opens
+`YYYY/MM/DD/<band>.csv` via `readBandFile()`, parses all rows, returns `[]*BandMeasurement`.
+
+**SQL replacement**:
+```sql
+SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+FROM noise_floor
+WHERE (? = '' OR band = ?)   -- band filter (empty = all bands)
+  AND ts >= ?                 -- start of day (date.Unix())
+  AND ts <  ?                 -- start of next day
+ORDER BY ts ASC
+```
+
+---
+
+#### 2.2 `GetRecentData` — `/noise-floor/recent` (GET)
+
+**Current**: [`noise_floor.go:GetRecentData()`](../noise_floor.go:1173) reads CSV files for
+the last hour (today + possibly yesterday), **not** from an in-memory ring buffer.
+
+**SQL replacement**:
+```sql
+SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+FROM noise_floor
+WHERE (? = '' OR band = ?)
+  AND ts >= ?    -- now - 1h
+  AND ts <= ?    -- now
+ORDER BY ts ASC
+```
+
+---
+
+#### 2.3 `GetTrendData` — `/noise-floor/trend` (GET)
+
+**Current**: [`noise_floor.go:GetTrendData()`](../noise_floor.go:1235) reads CSV files for
+a date (or rolling 24h window for today), groups into 10-minute buckets in Go, averages.
+
+**SQL replacement** — fetch raw rows, keep Go 10-minute bucketing logic unchanged:
+```sql
+SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+FROM noise_floor
+WHERE (? = '' OR band = ?)
+  AND ts >= ?    -- startTime.Unix()
+  AND ts <= ?    -- endTime.Unix()
+ORDER BY ts ASC
+```
+
+The 10-minute bucket averaging in Go remains unchanged — only the data source changes.
+
+For today (rolling 24h), `startTime = now - 24h`, `endTime = now`.
+For historical dates, `startTime = start of day`, `endTime = end of day`.
+
+---
+
+#### 2.4 `GetTrendDataAllBands` — `/noise-floor/trend` all-bands variant (GET)
+
+**Current**: [`noise_floor.go:GetTrendDataAllBands()`](../noise_floor.go:1364) reads CSV
+files for all bands for the rolling 24h window, groups into 10-minute buckets in Go.
+
+**SQL replacement** — same query as 2.3 but without band filter:
+```sql
+SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+FROM noise_floor
+WHERE ts >= ?    -- now - 24h
+  AND ts <= ?    -- now
+ORDER BY ts ASC
+```
+
+Go bucketing and per-band grouping logic remains unchanged.
+
+---
+
+#### 2.5 `GetAvailableDates` — `/noise-floor/dates` (GET)
+
+**Current**: [`noise_floor.go:GetAvailableDates()`](../noise_floor.go:1568) walks the
+`YYYY/MM/DD/` directory tree looking for `.csv` files. Takes `includeToday bool` param.
+
+**SQL replacement**:
+```sql
+SELECT DISTINCT DATE(ts, 'unixepoch') AS date
+FROM noise_floor
+ORDER BY date DESC
+```
+
+When `includeToday=false`, filter out today's date in Go after the query (or add
+`AND DATE(ts,'unixepoch') != DATE('now')` to the WHERE clause).
+
+---
+
+**File to change**: [`noise_floor.go`](../noise_floor.go) — add DB read paths to
+`GetHistoricalData()`, `GetRecentData()`, `GetTrendData()`, `GetTrendDataAllBands()`,
+`GetAvailableDates()`. The `db` field already exists for writes. Keep file fallback when
+`db == nil`.
+
+---
+
+## Component 3 — `spots` table (decoder spots)
+
+**DB table**: `spots(id, ts, mode, decoder_name, callsign, locator, snr, frequency, band, message, country, cq_zone, itu_zone, continent, distance_km, bearing_deg, dbm)`  
+**Current read files**: [`decoder_spots_log.go`](../decoder_spots_log.go) · [`main.go`](../main.go)
+
+### Operations to migrate
+
+#### 3.1 `GetHistoricalSpots` — `/decoder-spots` (GET)
+
+**Current**: [`decoder_spots_log.go:GetHistoricalSpots()`](../decoder_spots_log.go:337) iterates
+dates × modes, reads CSV files, applies 15 filter parameters in Go, deduplicates, sorts.
+
+**SQL replacement** (base query, conditions added dynamically):
+```sql
+SELECT ts, mode, decoder_name, callsign, locator, snr, frequency, band,
+       message, country, cq_zone, itu_zone, continent, distance_km, bearing_deg, dbm
+FROM spots
+WHERE ts >= ?                          -- fromDate.Unix()
+  AND ts <  ?                          -- toDate+1day.Unix()
+  AND (? = '' OR mode = ?)             -- mode filter
+  AND (? = '' OR band = ?)             -- band filter
+  AND (? = '' OR decoder_name = ?)     -- name filter
+  AND (? = '' OR callsign = ?)         -- exact callsign
+  AND (? = '' OR locator = ?)          -- exact locator
+  AND (? = '' OR continent = ?)        -- continent
+  AND (? = 0  OR distance_km >= ?)     -- minDistanceKm
+  AND (? = -999 OR snr >= ?)           -- minSNR
+  AND (? = 0  OR locator != '')        -- locatorsOnly
+  AND (? = '' OR (                     -- time-of-day filter (startTime HH:MM)
+        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
+      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) >= ?
+  ))
+  AND (? = '' OR (
+        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
+      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) <= ?
+  ))
+ORDER BY ts DESC
+```
+
+**Deduplication** (when `deduplicate=true`): Use a CTE or `GROUP BY` to keep the latest
+row per `(callsign, locator, band, mode, DATE(ts,'unixepoch'))`:
+```sql
+WITH ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY callsign, locator, band, mode, DATE(ts,'unixepoch')
+        ORDER BY ts DESC
+    ) AS rn
+    FROM spots
+    WHERE ...  -- same filters as above
+)
+SELECT * FROM ranked WHERE rn = 1
+ORDER BY ts DESC
+```
+
+**Direction filter**: SQLite has no bearing-to-direction function. Compute the bearing
+range in Go (e.g. N = bearing >= 337.5 OR bearing < 22.5) and add `bearing_deg` range
+conditions to the WHERE clause.
+
+---
+
+#### 3.2 `GetAvailableDates` — `/decoder-spots/dates` (GET)
+
+**Current**: [`decoder_spots_log.go:GetAvailableDates()`](../decoder_spots_log.go:622) walks
+the entire `MODE/YYYY/MM/DD/` directory tree.
+
+**SQL replacement**:
+```sql
+SELECT DISTINCT DATE(ts, 'unixepoch') AS date
+FROM spots
+ORDER BY date DESC
+```
+
+---
+
+#### 3.3 `GetAvailableNames` — `/decoder-spots/names` (GET)
+
+**Current**: [`decoder_spots_log.go:GetAvailableNames()`](../decoder_spots_log.go:700) walks
+the directory tree collecting `.csv` filenames (without extension).
+
+**SQL replacement**:
+```sql
+SELECT DISTINCT decoder_name
+FROM spots
+WHERE decoder_name IS NOT NULL AND decoder_name != ''
+ORDER BY decoder_name ASC
+```
+
+---
+
+#### 3.4 `GetHistoricalCSV` — `/decoder-spots/csv` (GET)
+
+**Current**: calls `GetHistoricalSpots()` then formats as CSV string.
+
+**Migration**: Once `GetHistoricalSpots()` is migrated to DB, this function automatically
+benefits — no separate change needed.
+
+---
+
+#### 3.5 `GetSpotsAnalytics` — `/decoder-spots/analytics` (GET)
+
+**Current**: [`decoder_spots_log.go:GetSpotsAnalytics()`](../decoder_spots_log.go:918) calls
+`GetHistoricalSpots()` then aggregates in Go (country → band → locator → callsign tree,
+hourly distribution, best hours).
+
+**SQL replacement** (aggregate query):
+```sql
+-- Per-country, per-band spot counts and SNR stats
+SELECT
+    country, continent, band,
+    COUNT(*)                    AS spots,
+    COUNT(DISTINCT callsign)    AS unique_callsigns,
+    COUNT(DISTINCT locator)     AS unique_locators,
+    MIN(snr)                    AS min_snr,
+    AVG(snr)                    AS avg_snr,
+    MAX(snr)                    AS max_snr
+FROM spots
+WHERE ts >= ?
+  AND ts <  ?
+  AND locator != ''
+  AND (? = '' OR mode = ?)
+  AND (? = '' OR band = ?)
+  AND (? = '' OR continent = ?)
+  AND (? = '' OR country = ?)
+  AND snr >= ?
+GROUP BY country, continent, band
+ORDER BY spots DESC
+```
+
+The locator-level detail (per-locator callsign lists with mode+band combinations) is
+complex to express in a single SQL query. Two options:
+
+- **Option A**: Run the aggregate query above for the summary, then run a second query
+  for locator detail only when a specific country is requested.
+- **Option B**: Keep the Go aggregation logic but feed it rows from the DB query
+  (replacing the file read with a DB scan). This is the lowest-risk approach.
+
+**Recommended**: Option B for the initial migration — replace `GetHistoricalSpots()` with
+a DB query, keep the Go aggregation logic unchanged.
+
+---
+
+#### 3.6 `GetSpotsAnalyticsHourly` — `/decoder-spots/analytics/hourly` (GET)
+
+**Current**: [`decoder_spots_log.go:GetSpotsAnalyticsHourly()`](../decoder_spots_log.go:1350)
+calls `GetHistoricalSpots()` then groups by UTC hour in Go.
+
+**SQL replacement** (hourly aggregation):
+```sql
+SELECT
+    CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) AS hour,
+    locator,
+    COUNT(*)                    AS spots,
+    COUNT(DISTINCT callsign)    AS unique_callsigns,
+    AVG(snr)                    AS avg_snr
+FROM spots
+WHERE ts >= ?
+  AND ts <  ?
+  AND locator != ''
+  AND (? = '' OR mode = ?)
+  AND (? = '' OR band = ?)
+  AND (? = '' OR continent = ?)
+  AND (? = '' OR country = ?)
+  AND snr >= ?
+GROUP BY hour, locator
+ORDER BY hour ASC, spots DESC
+```
+
+Same recommendation as 3.5: replace the data source with DB rows, keep Go aggregation.
+
+---
+
+**Files to change**: [`decoder_spots_log.go`](../decoder_spots_log.go) — add `db *sql.DB`
+read path to `GetHistoricalSpots()`, `GetAvailableDates()`, `GetAvailableNames()`.
+Keep file fallback when `db == nil`.
+
+---
+
+## Component 4 — `cw_spots` table
+
+**DB table**: `cw_spots(id, ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment, country, country_code, cq_zone, itu_zone, continent, latitude, longitude, distance_km, bearing_deg, op_name, state, grid, geoloc, tz_iana, loc_source)`  
+**Current read files**: [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) · [`cwskimmer_spots_log.go`](../cwskimmer_spots_log.go)
+
+### Operations to migrate
+
+#### 4.1 `GetCWHistoricalSpots` — `/cw-spots` (GET)
+
+**Current**: [`cwskimmer_spots_api.go:GetCWHistoricalSpots()`](../cwskimmer_spots_api.go:52)
+walks `YYYY/MM/DD/<band>.csv` files, applies filters, enriches with CTY lat/lon.
+
+**SQL replacement**:
+```sql
+SELECT ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment,
+       country, country_code, cq_zone, itu_zone, continent,
+       latitude, longitude, distance_km, bearing_deg,
+       op_name, state, grid, geoloc, tz_iana, loc_source
+FROM cw_spots
+WHERE ts >= ?                          -- fromDate.Unix()
+  AND ts <  ?                          -- toDate+1day.Unix()
+  AND (? = '' OR band = ?)             -- band filter
+  AND (? = '' OR dx_call = ?)          -- callsign exact match (or IN set)
+  AND (? = '' OR continent = ?)        -- continent
+  AND (? = 0  OR distance_km >= ?)     -- minDistanceKm
+  AND (? = -999 OR snr >= ?)           -- minSNR
+  AND (? = '' OR (                     -- time-of-day startTime
+        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
+      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) >= ?
+  ))
+  AND (? = '' OR (                     -- time-of-day endTime
+        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
+      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) <= ?
+  ))
+ORDER BY ts DESC
+```
+
+**Callsign set filter**: When `callsigns` is a non-empty map, generate
+`dx_call IN (?,?,?)` with one placeholder per callsign.
+
+**CTY lat/lon enrichment**: The `latitude`/`longitude` columns in `cw_spots` are already
+populated at write time from CTY lookup. No post-query enrichment needed.
+
+---
+
+#### 4.2 CW spots analytics — `/cw-spots/analytics` (GET)
+
+**Current**: [`cwskimmer_spots_analytics.go`](../cwskimmer_spots_analytics.go) calls
+`GetCWHistoricalSpots()` then aggregates in Go.
+
+**SQL replacement** (same Option B approach as decoder spots analytics):
+Replace the data source with a DB query, keep Go aggregation logic.
+
+```sql
+SELECT ts, dx_call, snr, frequency, band, wpm, country, continent,
+       latitude, longitude, distance_km, bearing_deg
+FROM cw_spots
+WHERE ts >= ?
+  AND ts <  ?
+  AND (? = '' OR band = ?)
+  AND (? = '' OR continent = ?)
+  AND snr >= ?
+ORDER BY ts DESC
+```
+
+---
+
+#### 4.3 `GetCWAvailableDates` — `/cw-spots/dates` (GET)
+
+**Current**: [`cwskimmer_spots_api.go:GetCWAvailableDates()`](../cwskimmer_spots_api.go:288)
+walks `YYYY/MM/DD/` directory tree.
+
+**SQL replacement**:
+```sql
+SELECT DISTINCT DATE(ts, 'unixepoch') AS date
+FROM cw_spots
+ORDER BY date DESC
+```
+
+---
+
+#### 4.4 `GetCWAvailableNames` — `/cw-spots/names` (GET)
+
+**Current**: [`cwskimmer_spots_api.go:GetCWAvailableNames()`](../cwskimmer_spots_api.go:354)
+walks `YYYY/MM/DD/` directory tree collecting `.csv` filenames (band names, e.g. "20m", "40m").
+The "name" in this context is the **band** (the CSV filename without extension).
+
+**SQL replacement** — distinct bands that have CW spot data:
+```sql
+SELECT DISTINCT band
+FROM cw_spots
+WHERE band IS NOT NULL AND band != ''
+ORDER BY band ASC
+```
+
+**Note**: Confirmed from [`db_manager.go`](../db_manager.go:313) schema — `cw_spots` has a
+`band` column (e.g. "20m") and a `spotter` column (skimmer callsign). The file-based
+`GetCWAvailableNames()` returns band names from filenames, which maps to `band` in the DB.
+
+---
+
+#### 4.5 CW spots CSV export — `/cw-spots/csv` (GET)
+
+**Current**: [`cwskimmer_spots_api.go:GetCWHistoricalCSV()`](../cwskimmer_spots_api.go:433)
+calls `GetCWHistoricalSpots()` then formats as CSV.
+
+**Migration**: Automatically benefits once `GetCWHistoricalSpots()` is migrated to DB.
+
+---
+
+**Files to change**: [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) — add DB read path
+to `GetCWHistoricalSpots()`, `GetCWAvailableDates()`, `GetCWAvailableNames()`.
+[`cwskimmer_spots_analytics.go`](../cwskimmer_spots_analytics.go) — replace data source.
+
+---
+
+## Component 5 — `sessions` table
+
+**DB table**: `sessions(id, snapshot_ts, event_type, user_session_id, client_ip, source_ip, auth_method, session_types, bands, modes, created_at, first_seen, user_agent, country, country_code)`
+**Current read files**: [`session_activity_log.go`](../session_activity_log.go) · [`admin.go`](../admin.go)
+
+### DB access pattern for this component
+
+`ReadActivityLogs` is a **package-level function** (not a method), called from 6 places:
+- [`admin.go`](../admin.go:5600) — `HandleSessionActivityLogs`
+- [`admin.go`](../admin.go:5686) — `HandleSessionActivityMetrics`
+- [`admin.go`](../admin.go:5785) — `HandleSessionActivityChartData`
+- [`admin.go`](../admin.go:5988) — `HandleSessionActivityEvents`
+- [`session_stats_api.go`](../session_stats_api.go:81) — public stats endpoint
+- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go:123) — Telegram bot
+
+**Recommended approach**: Add a `db *sql.DB` parameter to `ReadActivityLogs`:
+```go
+func ReadActivityLogs(dataDir string, db *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error)
+```
+When `db != nil`, use the DB path; otherwise fall back to the JSONL file walk.
+All 6 call sites must be updated to pass the DB. The `AdminHandler` already has
+`dbManager *DBManager` — pass `ah.dbManager.db`. The `session_stats_api.go` handler
+and Telegram bot handler need the DB threaded in via their respective structs or
+function parameters.
+
+### Operations to migrate
+
+#### 5.1 `ReadActivityLogs` — core data fetch used by all session endpoints
+
+**Current**: [`session_activity_log.go:ReadActivityLogs()`](../session_activity_log.go:714)
+walks `YYYY/MM/DD/sessions.jsonl` files, parses JSON lines, filters by time range.
+
+**SQL replacement**:
+```sql
+SELECT snapshot_ts, event_type, user_session_id, client_ip, source_ip,
+       auth_method, session_types, bands, modes,
+       created_at, first_seen, user_agent, country, country_code
+FROM sessions
+WHERE snapshot_ts >= ?    -- startTime.Unix()
+  AND snapshot_ts <  ?    -- endTime.Unix()
+ORDER BY snapshot_ts ASC
+```
+
+**Struct reconstruction**: Each DB row represents one session entry. Group rows by
+`(snapshot_ts, event_type)` in Go to reconstruct `SessionActivityLog` structs with
+`ActiveSessions []SessionActivityEntry`. The `session_types`, `bands`, `modes` columns
+are JSON arrays — unmarshal with `json.Unmarshal([]byte(col), &slice)`.
+
+The existing callers (`aggregateLogsIntoBuckets`, `calculateSessionMetrics`,
+`convertLogsToEvents`, `FilterSessionsByAuthMethod`) all operate on `[]SessionActivityLog`
+and remain unchanged — only the data source changes.
+
+---
+
+#### 5.2 Session activity chart data — `/admin/session-activity/chart` (GET)
+
+**Current**: [`admin.go:HandleSessionActivityChartData()`](../admin.go:5723) calls
+`ReadActivityLogs()` then `aggregateLogsIntoBuckets()` in Go.
+
+**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
+benefits. The `aggregateLogsIntoBuckets()` Go function remains unchanged.
+
+**Optional direct SQL** (if performance requires it):
+```sql
+SELECT
+    (snapshot_ts / (? * 60)) * (? * 60) AS bucket_ts,
+    MAX(concurrent_in_snapshot) AS peak_regular,
+    MAX(concurrent_password) AS peak_password,
+    MAX(concurrent_bypassed) AS peak_bypassed
+FROM (
+    SELECT snapshot_ts,
+        COUNT(DISTINCT CASE WHEN auth_method = '' THEN user_session_id END) AS concurrent_in_snapshot,
+        COUNT(DISTINCT CASE WHEN auth_method = 'password' THEN user_session_id END) AS concurrent_password,
+        COUNT(DISTINCT CASE WHEN auth_method = 'ip_bypass' THEN user_session_id END) AS concurrent_bypassed
+    FROM sessions
+    WHERE snapshot_ts >= ? AND snapshot_ts < ?
+      AND event_type = 'snapshot'
+    GROUP BY snapshot_ts
+)
+GROUP BY bucket_ts
+ORDER BY bucket_ts ASC
+```
+
+---
+
+#### 5.3 Session activity metrics — `/admin/session-activity/metrics` (GET)
+
+**Current**: [`admin.go:HandleSessionActivityMetrics()`](../admin.go:5634) calls
+`ReadActivityLogs()` then `calculateSessionMetrics()` in Go.
+
+**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
+benefits. The `calculateSessionMetrics()` Go function remains unchanged.
+
+---
+
+#### 5.4 Session activity events — `/admin/session-activity/events` (GET)
+
+**Current**: [`admin.go:HandleSessionActivityEvents()`](../admin.go:5911) calls
+`ReadActivityLogs()` then `convertLogsToEvents()` in Go.
+
+**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
+benefits. The `convertLogsToEvents()` Go function remains unchanged.
+
+---
+
+#### 5.5 Public session stats — `/session-stats` (GET)
+
+**Current**: [`session_stats_api.go`](../session_stats_api.go:81) calls `ReadActivityLogs()`
+for the last 28 days.
+
+**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
+benefits. The DB must be threaded into the handler (currently takes `config *Config` and
+`geoIPService *GeoIPService` — add `db *sql.DB` parameter or store on a struct).
+
+---
+
+#### 5.6 Telegram bot session stats
+
+**Current**: [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go:123) calls
+`ReadActivityLogs()` for the last 24 hours.
+
+**Migration**: Once `ReadActivityLogs()` is migrated to DB, this caller automatically
+benefits. The Telegram bot struct needs a `db *sql.DB` field added and wired from main.
+
+---
+
+**Files to change**:
+- [`session_activity_log.go`](../session_activity_log.go) — add `db *sql.DB` parameter to `ReadActivityLogs()`; add DB read path; keep JSONL fallback
+- [`admin.go`](../admin.go) — update 4 `ReadActivityLogs()` call sites to pass `ah.dbManager.db`
+- [`session_stats_api.go`](../session_stats_api.go) — thread DB into handler; update call site
+- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go) — add `db *sql.DB` to bot struct; update call site
+
+---
+
+## Component 6 — `space_weather` table
+
+**DB table**: `space_weather(id, ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality, forecast_*, day_*, night_*)`  
+**Current read files**: [`space_weather.go`](../space_weather.go) · handlers in [`main.go`](../main.go)
+
+### Operations to migrate
+
+#### 6.1 `GetHistoricalData` — `/space-weather/historical` (GET)
+
+**Current**: [`space_weather.go:GetHistoricalData()`](../space_weather.go:960) walks
+`YYYY/MM/spaceweather-YYYY-MM-DD.csv` files, parses 37-column CSV records. Supports:
+- `targetTime` — single closest-record lookup via `findClosestRecord()`
+- `fromTime`/`toTime` — time-of-day range filter via `filterByTimeRangeMultiDay()`
+
+**SQL replacement** — fetch date range from DB, then apply existing Go filter functions:
+```sql
+SELECT ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz,
+       propagation_quality,
+       forecast_g_scale, forecast_g_text,
+       forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
+       forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
+       day_160m, day_80m, day_60m, day_40m, day_30m,
+       day_20m, day_17m, day_15m, day_12m, day_10m,
+       night_160m, night_80m, night_60m, night_40m, night_30m,
+       night_20m, night_17m, night_15m, night_12m, night_10m
+FROM space_weather
+WHERE ts >= ?    -- fromDate.Unix()
+  AND ts <  ?    -- toDate+1day.Unix()
+ORDER BY ts ASC
+LIMIT 10000
+```
+
+After fetching rows, apply the existing Go helper functions unchanged:
+- `findClosestRecord(allRecords, targetTime)` for single-record closest-match
+- `filterByTimeRangeMultiDay(allRecords, fromDate, toDate, fromTime, toTime)` for time-of-day range
+
+Each DB row must be converted to `*SpaceWeatherData` by scanning columns and calling
+`buildForecastSummary()` to reconstruct the `Forecast.Summary` field (same logic as
+`parseCSVRecord()`).
+
+---
+
+#### 6.2 `GetAvailableDates` — `/space-weather/dates` (GET)
+
+**Current**: [`space_weather.go:GetAvailableDates()`](../space_weather.go:1335) walks
+`YYYY/MM/` directory tree looking for `spaceweather-*.csv` files.
+
+**SQL replacement**:
+```sql
+SELECT DISTINCT DATE(ts, 'unixepoch') AS date
+FROM space_weather
+ORDER BY date DESC
+```
+
+---
+
+#### 6.3 `GetHistoricalCSV` — `/space-weather/csv` (GET)
+
+**Current**: [`space_weather.go:GetHistoricalCSV()`](../space_weather.go:1402) reads raw CSV
+files for a date range, optionally filters by time range, returns CSV string with header.
+Called from [`main.go`](../main.go:5697).
+
+**Migration**: Once `GetHistoricalData()` is migrated to DB, `GetHistoricalCSV()` can call
+the DB-backed `GetHistoricalData()` and format the `[]*SpaceWeatherData` slice as CSV.
+Alternatively, keep reading from files for this raw-export endpoint (lowest risk).
+
+---
+
+**Files to change**: [`space_weather.go`](../space_weather.go) — add DB read path to
+`GetHistoricalData()` and `GetAvailableDates()`. `GetHistoricalCSV()` can be migrated
+as a follow-on. Keep file fallback when `db == nil`.
+
+---
+
+## Component 7 — `decoder_metrics` table
+
+**DB table**: `decoder_metrics(id, ts, mode, band, band_name, decodes_1h…24h, dpc_1m…60m, unique_calls_1h…24h, exec_avg/min/max_1m/5m, decodes_per_hour, callsigns_per_hour, activity_score)`  
+**Current read files**: [`decoder_metrics_log.go`](../decoder_metrics_log.go) · [`decoder_metrics_api.go`](../decoder_metrics_api.go)
+
+### Operations to migrate
+
+#### 7.1 `ReadMetricsFromFiles` — used by `/decoder-metrics` (GET)
+
+**Current**: [`decoder_metrics_log.go:ReadMetricsFromFiles()`](../decoder_metrics_log.go:520)
+walks `YYYY/MM/DD/MODE-BAND.jsonl` files, returns `map[string][]MetricsSnapshot` grouped
+by `mode:band`.
+
+**SQL replacement**:
+```sql
+SELECT ts, mode, band, band_name,
+       decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
+       dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
+       unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
+       exec_avg_1m, exec_min_1m, exec_max_1m,
+       exec_avg_5m, exec_min_5m, exec_max_5m,
+       decodes_per_hour, callsigns_per_hour, activity_score
+FROM decoder_metrics
+WHERE ts >= ?              -- startTime.Unix()
+  AND ts <= ?              -- endTime.Unix()
+  AND (? = '' OR mode = ?)
+  AND (? = '' OR band = ?)
+ORDER BY ts ASC
+```
+
+Group results by `mode:band` key in Go to match the existing return type.
+
+---
+
+#### 7.2 `LoadRecentMetrics` — startup warm-up
+
+**Current**: [`decoder_metrics_log.go:LoadRecentMetrics()`](../decoder_metrics_log.go:406)
+reads the last 24h of JSONL files to restore `DigitalDecodeMetrics` in-memory state.
+
+**SQL replacement**:
+```sql
+SELECT ts, mode, band, exec_avg_1m
+FROM decoder_metrics
+WHERE ts >= ?    -- now - 24h
+ORDER BY ts ASC
+```
+
+Then call `dm.RecordExecutionTime(mode, band, execTime)` for each row, same as today.
+
+---
+
+**Files to change**: [`decoder_metrics_log.go`](../decoder_metrics_log.go) — add DB read path
+to `ReadMetricsFromFiles()` and `LoadRecentMetrics()`.
+
+---
+
+## Component 8 — `cw_metrics` table
+
+**DB table**: `cw_metrics(id, ts, band, spots_1h, spots_24h, unique_calls_1h, unique_calls_24h, spots_per_hour, callsigns_per_hour, activity_score, wpm_avg/min/max_1m/5m/10m)`  
+**Current read files**: [`cwskimmer_metrics.go`](../cwskimmer_metrics.go) · [`decoder_metrics_api.go`](../decoder_metrics_api.go)
+
+### Operations to migrate
+
+#### 8.1 `ReadMetricsFromFiles` — used by CW metrics API
+
+**Current**: [`cwskimmer_metrics.go:ReadMetricsFromFiles()`](../cwskimmer_metrics.go:715)
+walks `YYYY/MM/DD/BAND.jsonl` files, returns `map[string][]CWMetricsSnapshot` grouped by band.
+
+**SQL replacement**:
+```sql
+SELECT ts, band,
+       spots_1h, spots_24h,
+       unique_calls_1h, unique_calls_24h,
+       spots_per_hour, callsigns_per_hour, activity_score,
+       wpm_avg_1m, wpm_min_1m, wpm_max_1m,
+       wpm_avg_5m, wpm_min_5m, wpm_max_5m,
+       wpm_avg_10m, wpm_min_10m, wpm_max_10m
+FROM cw_metrics
+WHERE ts >= ?              -- startTime.Unix()
+  AND ts <= ?              -- endTime.Unix()
+  AND (? = '' OR band = ?)
+ORDER BY ts ASC
+```
+
+Group results by `band` key in Go to match the existing return type.
+
+---
+
+**Files to change**: [`cwskimmer_metrics.go`](../cwskimmer_metrics.go) — add DB read path
+to `ReadMetricsFromFiles()`.
+
+---
+
+## Implementation strategy
+
+### Recommended order — ranked easiest to hardest
+
+Each operation is ranked by implementation difficulty. Criteria:
+- **Easier**: method on a struct that already has `db` field; simple SELECT; no callers to update; no struct reconstruction
+- **Harder**: package-level function with many callers; complex struct reconstruction; many filter parameters; window functions
+
+| Rank | Operation | File | Why easy/hard |
+|------|-----------|------|---------------|
+| 1 | `GetAvailableDates` (space_weather) | [`space_weather.go`](../space_weather.go) | Method, db field exists, trivial DISTINCT query |
+| 2 | `GetLastKnownIPForUser` (chat) | [`chat_logger.go`](../chat_logger.go) | Method, cl.db exists, single-row query |
+| 3 | `GetAvailableDates` (noise_floor) | [`noise_floor.go`](../noise_floor.go) | Method, db field exists, trivial DISTINCT query |
+| 4 | `GetCWAvailableDates` (cw_spots) | [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) | Method, db field exists, trivial DISTINCT query |
+| 5 | `GetCWAvailableNames` (cw_spots) | [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) | Method, db field exists, trivial DISTINCT band query |
+| 6 | `GetAvailableDates` (spots) | [`decoder_spots_log.go`](../decoder_spots_log.go) | Method, db field exists, trivial DISTINCT query |
+| 7 | `GetAvailableNames` (spots) | [`decoder_spots_log.go`](../decoder_spots_log.go) | Method, db field exists, trivial DISTINCT decoder_name query |
+| 8 | `GetHistoricalData` (space_weather) | [`space_weather.go`](../space_weather.go) | Method, db field exists, simple SELECT; reuse existing Go filter helpers |
+| 9 | `LoadRecentMessages` (chat) | [`chat_logger.go`](../chat_logger.go) | Method, cl.db exists, simple SELECT; Go ban filter unchanged |
+| 10 | `GetHistoricalData` (noise_floor) | [`noise_floor.go`](../noise_floor.go) | Method, db field exists, simple SELECT |
+| 11 | `GetRecentData` (noise_floor) | [`noise_floor.go`](../noise_floor.go) | Method, db field exists, simple SELECT with 1h window |
+| 12 | `LoadRecentMetrics` (decoder_metrics) | [`decoder_metrics_log.go`](../decoder_metrics_log.go) | Method, db field exists, simple SELECT; Go RecordExecutionTime call unchanged |
+| 13 | `ReadMetricsFromFiles` (decoder_metrics) | [`decoder_metrics_log.go`](../decoder_metrics_log.go) | Method, db field exists, flat column mapping; group by mode:band in Go |
+| 14 | `ReadMetricsFromFiles` (cw_metrics) | [`cwskimmer_metrics.go`](../cwskimmer_metrics.go) | Method, db field exists, flat column mapping; group by band in Go |
+| 15 | `GetTrendData` (noise_floor) | [`noise_floor.go`](../noise_floor.go) | Method, db field exists; rolling 24h vs historical date logic; Go 10-min bucketing unchanged |
+| 16 | `GetTrendDataAllBands` (noise_floor) | [`noise_floor.go`](../noise_floor.go) | Same as above but all bands; Go bucketing unchanged |
+| 17 | `HandleChatLogs` / `readChatLogs` | [`chat_logs_api.go`](../chat_logs_api.go) | Package-level fn needs db param; 1 call site to update |
+| 18 | `GetCWHistoricalSpots` (cw_spots) | [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) | Method, db field exists; ~10 filter params; callsign set IN clause |
+| 19 | `GetHistoricalSpots` (spots) | [`decoder_spots_log.go`](../decoder_spots_log.go) | Method, db field exists; 15 filter params; deduplication window fn; direction→bearing range |
+| 20 | `ReadActivityLogs` (sessions) | [`session_activity_log.go`](../session_activity_log.go) | Package-level fn; **6 call sites** to update; struct reconstruction from flat rows |
+
+---
+
+**Suggested grouping for implementation PRs**
+
+- **PR 1** (ranks 1–7): All trivial DISTINCT/date queries — one-liners, zero risk
+- **PR 2** (ranks 8–14): Simple SELECT reads — space_weather, chat seed, noise_floor historical/recent, metrics
+- **PR 3** (ranks 15–17): Trend data + chat logs API — slightly more logic
+- **PR 4** (ranks 18–19): Spots reads — most complex SQL
+- **PR 5** (rank 20): Sessions — package-level fn refactor + 6 call sites
+
+---
+
+### Per-component implementation pattern
+
+Each component follows the same pattern:
+
+```go
+func (x *Foo) GetHistoricalData(params...) ([]*Result, error) {
+    if x.db != nil {
+        return x.getHistoricalDataFromDB(params...)
+    }
+    return x.getHistoricalDataFromFiles(params...)  // existing code, unchanged
+}
+
+func (x *Foo) getHistoricalDataFromDB(params...) ([]*Result, error) {
+    rows, err := x.db.Query(`SELECT ... FROM table WHERE ...`, args...)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+    var results []*Result
+    for rows.Next() {
+        var r Result
+        var ts int64
+        if err := rows.Scan(&ts, &r.Field1, ...); err != nil {
+            return nil, err
+        }
+        r.Time = time.Unix(ts, 0).UTC()
+        results = append(results, &r)
+    }
+    return results, rows.Err()
+}
+```
+
+Key rules:
+- **Never remove the file-based path** — it remains the fallback for `db == nil` and for
+  historical data predating the DB.
+- **DB mutex**: use `dbMu.RLock()` / `RUnlock()` around reads if the struct has one;
+  otherwise `*sql.DB` is safe for concurrent reads without a mutex.
+- **Error handling**: if the DB query fails, log the error and fall back to the file path
+  rather than returning an error to the caller. This makes the migration transparent.
+
+---
+
+### Testing approach
+
+1. Run with DB enabled; verify API responses are identical to file-based responses for
+   the same date range.
+2. Run with `db = nil` (DB disabled in config); verify file-based fallback still works.
+3. For spots: verify deduplication produces the same result as the Go-based deduplication.
+4. For sessions: verify `SessionActivityLog` struct reconstruction matches JSONL parsing.
+
+---
+
+### Historical data import (separate task)
+
+Data written before the DB was introduced only exists in files. A one-time import script
+can backfill the DB by reading all existing CSV/JSONL files and INSERTing rows. Until
+that script exists, the file fallback handles historical queries transparently.
+
+The import script should:
+- Walk the same directory trees as the existing file readers
+- Parse each file using the same CSV/JSON parsing logic
+- INSERT with `ON CONFLICT DO NOTHING` to be idempotent
+- Process oldest files first so retention pruning doesn't immediately delete them

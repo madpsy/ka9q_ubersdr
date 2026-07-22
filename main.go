@@ -1221,6 +1221,21 @@ func main() {
 		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/" + cwskimmerConfig.MetricsSummaryDataDir
 	}
 
+	// Start historical DB backfill — runs in background, only when a table is empty.
+	// All data directory paths are fully resolved by this point.
+	dbImporter := &DBImporter{
+		db:                dbManager.DB(),
+		ChatDir:           config.Chat.DataDir,
+		NoiseFloorDir:     config.NoiseFloor.DataDir,
+		SpotsDir:          config.Decoder.SpotsLogDataDir,
+		CWSpotsDir:        cwskimmerConfig.SpotsLogDataDir,
+		SessionsDir:       config.Server.SessionActivityLogDir,
+		SpaceWeatherDir:   config.SpaceWeather.DataDir,
+		DecoderMetricsDir: config.Decoder.MetricsLogDataDir,
+		CWMetricsDir:      cwskimmerConfig.MetricsLogDataDir,
+	}
+	dbImporter.RunImportIfEmpty(mainCtx)
+
 	// Initialize CW Skimmer client
 	var cwSkimmer *CWSkimmerClient
 	if cwskimmerConfig.Enabled {
@@ -1239,6 +1254,9 @@ func main() {
 				cwskimmerConfig.MetricsSummaryDataDir,
 			)
 			cwSkimmer.SetMetrics(cwMetrics)
+			if dbManager != nil {
+				cwMetrics.SetDB(dbManager.db)
+			}
 			cwMetrics.StartPeriodicTasks()
 			log.Printf("CW Skimmer metrics logging enabled: dir=%s, interval=%ds",
 				cwskimmerConfig.MetricsLogDataDir, cwskimmerConfig.MetricsLogIntervalSecs)

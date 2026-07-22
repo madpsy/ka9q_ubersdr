@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +16,10 @@ import (
 type MetricsLogger struct {
 	dataDir string
 
+	// SQLite dual-write (optional)
+	db   *sql.DB
+	dbMu sync.Mutex
+
 	// JSON Lines logging (one file per mode-band combination per day)
 	openFiles map[string]*os.File // key: mode-band/date
 	fileMu    sync.Mutex
@@ -23,6 +28,13 @@ type MetricsLogger struct {
 	enabled       bool
 	writeInterval time.Duration
 	lastWrite     time.Time
+}
+
+// SetDB wires the SQLite database for dual-write. Safe to call at any time.
+func (ml *MetricsLogger) SetDB(db *sql.DB) {
+	ml.dbMu.Lock()
+	ml.db = db
+	ml.dbMu.Unlock()
 }
 
 // MetricsSnapshot represents a single metrics snapshot for JSON Lines output
@@ -243,7 +255,49 @@ func (ml *MetricsLogger) writeSnapshot(snapshot *MetricsSnapshot) error {
 	}
 
 	// Sync to ensure data is written to disk
-	return file.Sync()
+	if err := file.Sync(); err != nil {
+		return err
+	}
+
+	// Dual-write to SQLite (best-effort — never blocks or fails the CSV write)
+	ml.dbMu.Lock()
+	db := ml.db
+	ml.dbMu.Unlock()
+	if db != nil {
+		_, dbErr := db.Exec(`
+			INSERT INTO decoder_metrics (
+				ts, mode, band, band_name,
+				decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
+				dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
+				unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
+				exec_avg_1m, exec_min_1m, exec_max_1m,
+				exec_avg_5m, exec_min_5m, exec_max_5m,
+				decodes_per_hour, callsigns_per_hour, activity_score
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			snapshot.Timestamp.Unix(),
+			snapshot.Mode, snapshot.Band, snapshot.BandName,
+			snapshot.DecodeCounts.Last1Hour, snapshot.DecodeCounts.Last3Hours,
+			snapshot.DecodeCounts.Last6Hours, snapshot.DecodeCounts.Last12Hours,
+			snapshot.DecodeCounts.Last24Hours,
+			snapshot.DecodesPerCycle.Last1Min, snapshot.DecodesPerCycle.Last5Min,
+			snapshot.DecodesPerCycle.Last15Min, snapshot.DecodesPerCycle.Last30Min,
+			snapshot.DecodesPerCycle.Last60Min,
+			snapshot.UniqueCallsigns.Last1Hour, snapshot.UniqueCallsigns.Last3Hours,
+			snapshot.UniqueCallsigns.Last6Hours, snapshot.UniqueCallsigns.Last12Hours,
+			snapshot.UniqueCallsigns.Last24Hours,
+			snapshot.ExecutionTime.Last1Min.Avg, snapshot.ExecutionTime.Last1Min.Min,
+			snapshot.ExecutionTime.Last1Min.Max,
+			snapshot.ExecutionTime.Last5Min.Avg, snapshot.ExecutionTime.Last5Min.Min,
+			snapshot.ExecutionTime.Last5Min.Max,
+			snapshot.Activity.DecodesPerHour, snapshot.Activity.CallsignsPerHour,
+			snapshot.Activity.ActivityScore,
+		)
+		if dbErr != nil {
+			log.Printf("[decoder_metrics] db insert error: %v", dbErr)
+		}
+	}
+
+	return nil
 }
 
 // getOrCreateFile gets or creates a file for the given snapshot

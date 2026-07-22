@@ -27706,6 +27706,12 @@ const tooltipLine2 = timeStr;
                 const rows = rowsData.rows || [];
                 const cols = rowsData.columns || [];
                 dbBrowseTotalRows = (countData.rows && countData.rows[0]) ? (countData.rows[0]['n'] || 0) : 0;
+                // Update the row count shown in the sidebar for the current table
+                const sidebarItem = document.querySelector(`.db-table-item[data-name="${CSS.escape(dbCurrentTable)}"]`);
+                if (sidebarItem) {
+                    const countEl = sidebarItem.querySelector('div:last-child');
+                    if (countEl) countEl.textContent = dbBrowseTotalRows.toLocaleString() + ' rows';
+                }
 
                 if (rows.length === 0) {
                     resultsEl.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No rows found.</div>';

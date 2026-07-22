@@ -59,48 +59,63 @@ type DBImporter struct {
 	CWMetricsDir      string // cw_metrics:    <dir>/YYYY/MM/DD/<BAND>.jsonl
 }
 
-// RunImportIfEmpty checks each table and, if empty, backfills from files.
-// Runs entirely in a background goroutine; returns immediately.
+// RunImportIfEmpty checks each table synchronously (before live writers start),
+// then backfills only the empty ones in a background goroutine.
+//
+// The empty check MUST happen synchronously so that live writes arriving after
+// startup cannot cause a table to appear non-empty before the decision is made.
 func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
-	go func() {
-		type tableImport struct {
-			table    string
-			dir      string
-			importFn func(context.Context) error
-		}
-		tables := []tableImport{
-			{"chat_messages", imp.ChatDir, imp.importChat},
-			{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
-			{"spots", imp.SpotsDir, imp.importSpots},
-			{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
-			{"sessions", imp.SessionsDir, imp.importSessions},
-			{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
-			{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
-			{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
-		}
+	type tableImport struct {
+		table    string
+		dir      string
+		importFn func(context.Context) error
+	}
+	all := []tableImport{
+		{"chat_messages", imp.ChatDir, imp.importChat},
+		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
+		{"spots", imp.SpotsDir, imp.importSpots},
+		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
+		{"sessions", imp.SessionsDir, imp.importSessions},
+		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
+		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
+		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
+	}
 
-		for _, t := range tables {
+	// Determine which tables need importing NOW, before any live writers start.
+	var toImport []tableImport
+	for _, t := range all {
+		if t.dir == "" {
+			continue // subsystem not configured
+		}
+		if _, err := os.Stat(t.dir); os.IsNotExist(err) {
+			continue // data directory doesn't exist yet
+		}
+		empty, err := imp.tableIsEmpty(t.table)
+		if err != nil {
+			log.Printf("[DB import] checking %s: %v (skipping)", t.table, err)
+			continue
+		}
+		if !empty {
+			log.Printf("[DB import] %s already has data — skipping backfill", t.table)
+			continue
+		}
+		log.Printf("[DB import] %s is empty — queued for backfill from %s", t.table, t.dir)
+		toImport = append(toImport, t)
+	}
+
+	if len(toImport) == 0 {
+		return // nothing to do
+	}
+
+	// Run the actual file-reading and inserting in the background so startup
+	// is not blocked. The decision of WHICH tables to import was already made
+	// above, so live writes arriving now cannot affect it.
+	go func() {
+		for _, t := range toImport {
 			if ctx.Err() != nil {
 				return
 			}
-			if t.dir == "" {
-				continue // subsystem not configured
-			}
-			if _, err := os.Stat(t.dir); os.IsNotExist(err) {
-				continue // data directory doesn't exist yet
-			}
-
-			empty, err := imp.tableIsEmpty(t.table)
-			if err != nil {
-				log.Printf("[DB import] checking %s: %v", t.table, err)
-				continue
-			}
-			if !empty {
-				log.Printf("[DB import] %s already has data — skipping backfill", t.table)
-				continue
-			}
-
-			log.Printf("[DB import] %s is empty — starting backfill from %s", t.table, t.dir)
+			log.Printf("[DB import] %s: starting backfill", t.table)
 			start := time.Now()
 			if err := t.importFn(ctx); err != nil {
 				log.Printf("[DB import] %s backfill error: %v", t.table, err)

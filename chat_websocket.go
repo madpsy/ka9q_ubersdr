@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"regexp"
@@ -92,6 +93,14 @@ type ChatManager struct {
 	// notifyFn is called for join, leave, and message events (optional).
 	// Set via OnChatEvent after construction.
 	notifyFn func(ChatEvent)
+}
+
+// SetDB wires the SQLite database into the chat manager for dual-write.
+// It propagates the DB handle to the inner ChatLogger.
+func (cm *ChatManager) SetDB(db *sql.DB) {
+	if cm.chatLogger != nil {
+		cm.chatLogger.SetDB(db)
+	}
 }
 
 // OnChatEvent registers a callback that is called for every chat event

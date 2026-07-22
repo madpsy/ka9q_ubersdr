@@ -1,0 +1,328 @@
+package main
+
+// db_manager.go — SQLite database manager for ka9q_ubersdr.
+//
+// Uses modernc.org/sqlite — a pure-Go SQLite implementation that requires no
+// CGo and therefore builds cleanly in the Docker multi-stage build without any
+// additional system packages or build flags.
+//
+// Schema mirrors the existing flat-file formats exactly so that a future
+// migration can INSERT from the CSV/JSONL files without any field mapping:
+//
+//	sessions      — replaces session_activity_log JSONL (SessionActivityLog / SessionActivityEntry)
+//	chat_messages — replaces chat CSV (ChatLogger: timestamp,source_ip,username,message,country,country_code)
+//	spots         — replaces decoder spots CSV (SpotRecord / DecodeInfo)
+//	cw_spots      — replaces CW skimmer spots CSV (CWSkimmerSpot)
+//	noise_floor   — replaces noise floor CSV (BandMeasurement)
+//
+// WAL mode is enabled so concurrent readers never block the single writer.
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
+	_ "modernc.org/sqlite" // pure-Go SQLite driver; registers as "sqlite"
+)
+
+// DBManager wraps the SQLite database connection and owns the schema lifecycle.
+type DBManager struct {
+	db   *sql.DB
+	path string
+}
+
+// NewDBManager opens (or creates) the SQLite database at the given path,
+// applies PRAGMA settings, and ensures the schema is up to date.
+// The caller is responsible for calling Close() when done.
+func NewDBManager(dataDir string) (*DBManager, error) {
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("db_manager: create data dir %q: %w", dataDir, err)
+	}
+
+	dbPath := filepath.Join(dataDir, "ubersdr.db")
+
+	// modernc driver name is "sqlite" (not "sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("db_manager: open %q: %w", dbPath, err)
+	}
+
+	// SQLite is not safe for concurrent writers from multiple OS threads unless
+	// WAL mode is used. WAL allows one writer + many concurrent readers.
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL", // safe with WAL; faster than FULL
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",  // ms — retry on locked DB instead of failing immediately
+		"PRAGMA cache_size=-131072", // 128 MiB page cache (negative value = KiB)
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("db_manager: exec %q: %w", p, err)
+		}
+	}
+
+	mgr := &DBManager{db: db, path: dbPath}
+
+	if err := mgr.initSchema(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("db_manager: init schema: %w", err)
+	}
+
+	log.Printf("[DB] opened %s", dbPath)
+	return mgr, nil
+}
+
+// DB returns the underlying *sql.DB for use by subsystem managers.
+func (m *DBManager) DB() *sql.DB {
+	return m.db
+}
+
+// Close closes the database connection.
+func (m *DBManager) Close() error {
+	if m.db != nil {
+		log.Printf("[DB] closing %s", m.path)
+		return m.db.Close()
+	}
+	return nil
+}
+
+// initSchema creates all tables and indexes if they do not already exist.
+// Column names and types mirror the existing Go structs and CSV column order
+// so that future migration code can map fields 1-to-1.
+func (m *DBManager) initSchema() error {
+	stmts := []struct {
+		name string
+		ddl  string
+	}{
+		// ----------------------------------------------------------------
+		// sessions
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/sessions.jsonl
+		// Source structs: SessionActivityLog / SessionActivityEntry
+		//
+		// The JSONL format stores a snapshot envelope (SessionActivityLog)
+		// containing a list of active sessions ([]SessionActivityEntry).
+		// Here each SessionActivityEntry becomes one row; the snapshot
+		// envelope fields (timestamp, event_type) are denormalised onto
+		// every row so queries don't need a join.
+		// ----------------------------------------------------------------
+		{
+			"sessions",
+			`CREATE TABLE IF NOT EXISTS sessions (
+				id              INTEGER PRIMARY KEY AUTOINCREMENT,
+				-- envelope fields (from SessionActivityLog)
+				snapshot_ts     INTEGER NOT NULL,   -- Unix seconds UTC (SessionActivityLog.Timestamp)
+				event_type      TEXT    NOT NULL,   -- "snapshot" | "session_created" | "session_destroyed"
+				-- per-session fields (from SessionActivityEntry)
+				user_session_id TEXT    NOT NULL,
+				client_ip       TEXT,
+				source_ip       TEXT,
+				auth_method     TEXT,               -- "" | "password" | "ip_bypass"
+				session_types   TEXT,               -- JSON array e.g. ["audio","spectrum"]
+				bands           TEXT,               -- JSON array e.g. ["20m","40m"]
+				modes           TEXT,               -- JSON array e.g. ["usb","ft8"]
+				created_at      INTEGER,            -- Unix seconds UTC
+				first_seen      INTEGER,            -- Unix seconds UTC
+				user_agent      TEXT,
+				country         TEXT,
+				country_code    TEXT                -- ISO 3166-1 alpha-2
+			)`,
+		},
+		{"sessions_idx_snapshot_ts", `CREATE INDEX IF NOT EXISTS sessions_idx_snapshot_ts ON sessions(snapshot_ts)`},
+		{"sessions_idx_source_ip", `CREATE INDEX IF NOT EXISTS sessions_idx_source_ip   ON sessions(source_ip)`},
+		{"sessions_idx_session_id", `CREATE INDEX IF NOT EXISTS sessions_idx_session_id  ON sessions(user_session_id)`},
+
+		// ----------------------------------------------------------------
+		// chat_messages
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/chat.csv
+		// CSV columns: timestamp, source_ip, username, message, country, country_code
+		// Source: ChatLogger.LogMessage()
+		// ----------------------------------------------------------------
+		{
+			"chat_messages",
+			`CREATE TABLE IF NOT EXISTS chat_messages (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC
+				source_ip    TEXT,
+				username     TEXT,
+				message      TEXT,
+				country      TEXT,
+				country_code TEXT               -- ISO 3166-1 alpha-2
+			)`,
+		},
+		{"chat_idx_ts", `CREATE INDEX IF NOT EXISTS chat_idx_ts       ON chat_messages(ts)`},
+		{"chat_idx_ip", `CREATE INDEX IF NOT EXISTS chat_idx_ip       ON chat_messages(source_ip)`},
+		{"chat_idx_username", `CREATE INDEX IF NOT EXISTS chat_idx_username ON chat_messages(username)`},
+
+		// ----------------------------------------------------------------
+		// spots
+		//
+		// Replaces: <dataDir>/<MODE>/YYYY/MM/DD/<band>.csv
+		// CSV columns (v2, 14 cols): timestamp, callsign, locator, snr,
+		//   frequency, band, message, country, cq_zone, itu_zone, continent,
+		//   distance_km, bearing_deg, dbm
+		// Source struct: SpotRecord / DecodeInfo
+		// ----------------------------------------------------------------
+		{
+			"spots",
+			`CREATE TABLE IF NOT EXISTS spots (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC
+				mode         TEXT    NOT NULL,  -- "FT8" | "FT4" | "WSPR" | "JS8" | "FT2" …
+				decoder_name TEXT,              -- decoder config band name (SpotRecord.Name)
+				callsign     TEXT,
+				locator      TEXT,              -- Maidenhead grid square
+				snr          INTEGER,           -- dB
+				frequency    INTEGER,           -- Hz
+				band         TEXT,              -- calculated from frequency e.g. "20m"
+				message      TEXT,              -- raw decoded message
+				country      TEXT,
+				cq_zone      INTEGER,
+				itu_zone     INTEGER,
+				continent    TEXT,
+				distance_km  REAL,              -- NULL when not computed
+				bearing_deg  REAL,              -- NULL when not computed
+				dbm          INTEGER            -- transmitter power dBm (WSPR only, else NULL)
+			)`,
+		},
+		{"spots_idx_ts", `CREATE INDEX IF NOT EXISTS spots_idx_ts          ON spots(ts)`},
+		{"spots_idx_mode_band", `CREATE INDEX IF NOT EXISTS spots_idx_mode_band   ON spots(mode, band)`},
+		{"spots_idx_callsign", `CREATE INDEX IF NOT EXISTS spots_idx_callsign    ON spots(callsign)`},
+		{"spots_idx_ts_mode", `CREATE INDEX IF NOT EXISTS spots_idx_ts_mode     ON spots(ts, mode)`},
+
+		// ----------------------------------------------------------------
+		// cw_spots
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/<band>.csv
+		// CSV columns (13 cols): timestamp, dx_call, snr, frequency, band,
+		//   wpm, comment, country, cq_zone, itu_zone, continent,
+		//   distance_km, bearing_deg
+		// Source struct: CWSkimmerSpot
+		// ----------------------------------------------------------------
+		{
+			"cw_spots",
+			`CREATE TABLE IF NOT EXISTS cw_spots (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC (CWSkimmerSpot.Time)
+				dx_call      TEXT,              -- callsign being spotted
+				spotter      TEXT,              -- skimmer callsign
+				snr          INTEGER,           -- dB
+				frequency    REAL,              -- Hz (stored as float to match CWSkimmerSpot.Frequency)
+				band         TEXT,
+				wpm          INTEGER,           -- speed in WPM (CW) or BPS (RTTY)
+				mode         TEXT,              -- "CW" | "RTTY"
+				comment      TEXT,              -- "CQ", "DE", or empty
+				country      TEXT,
+				country_code TEXT,              -- ISO 3166-1 alpha-2
+				cq_zone      INTEGER,
+				itu_zone     INTEGER,
+				continent    TEXT,
+				latitude     REAL,
+				longitude    REAL,
+				distance_km  REAL,              -- NULL when not computed
+				bearing_deg  REAL,              -- NULL when not computed
+				-- QRZ enrichment (optional, populated when callsign lookup enabled)
+				op_name      TEXT,              -- operator name (QRZ name_fmt)
+				state        TEXT,              -- state/region
+				grid         TEXT,              -- Maidenhead grid square
+				geoloc       TEXT,              -- QRZ geoloc source
+				tz_iana      TEXT,              -- IANA timezone
+				loc_source   TEXT               -- "qrz" | "cty"
+			)`,
+		},
+		{"cw_spots_idx_ts", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts       ON cw_spots(ts)`},
+		{"cw_spots_idx_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_band     ON cw_spots(band)`},
+		{"cw_spots_idx_dx_call", `CREATE INDEX IF NOT EXISTS cw_spots_idx_dx_call  ON cw_spots(dx_call)`},
+		{"cw_spots_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts_band  ON cw_spots(ts, band)`},
+
+		// ----------------------------------------------------------------
+		// noise_floor
+		//
+		// Replaces: <dataDir>/YYYY/MM/DD/<band>.csv
+		// CSV columns (13 cols): timestamp, min_db, max_db, mean_db,
+		//   median_db, p5_db, p10_db, p95_db, dynamic_range, occupancy_pct,
+		//   ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+		// Source struct: BandMeasurement
+		// ----------------------------------------------------------------
+		{
+			"noise_floor",
+			`CREATE TABLE IF NOT EXISTS noise_floor (
+				id              INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts              INTEGER NOT NULL,  -- Unix seconds UTC
+				band            TEXT    NOT NULL,  -- e.g. "20m", "40m"
+				min_db          REAL,
+				max_db          REAL,
+				mean_db         REAL,
+				median_db       REAL,
+				p5_db           REAL,              -- 5th percentile — noise floor estimate
+				p10_db          REAL,              -- 10th percentile
+				p95_db          REAL,              -- 95th percentile — signal peak
+				dynamic_range   REAL,              -- p95_db - p5_db
+				occupancy_pct   REAL,              -- % of bins above noise + 10 dB
+				ft8_snr         REAL,              -- FT8 signal power minus noise floor (dB)
+				snr_0_30_mhz    REAL,              -- wideband SNR 0–30 MHz
+				snr_1_8_30_mhz  REAL               -- wideband SNR 1.8–30 MHz (HF bands only)
+			)`,
+		},
+		{"noise_floor_idx_ts", `CREATE INDEX IF NOT EXISTS noise_floor_idx_ts      ON noise_floor(ts)`},
+		{"noise_floor_idx_band", `CREATE INDEX IF NOT EXISTS noise_floor_idx_band    ON noise_floor(band)`},
+		{"noise_floor_idx_ts_band", `CREATE INDEX IF NOT EXISTS noise_floor_idx_ts_band ON noise_floor(ts, band)`},
+
+		// ----------------------------------------------------------------
+		// space_weather
+		//
+		// Replaces: <dataDir>/YYYY/MM/spaceweather-YYYY-MM-DD.csv
+		// CSV columns: timestamp, solar_flux, k_index, k_index_status,
+		//   a_index, solar_wind_bz, propagation_quality,
+		//   forecast_g_scale, forecast_g_text,
+		//   forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
+		//   forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
+		//   day_160m … day_10m (10 cols), night_160m … night_10m (10 cols)
+		// Source struct: SpaceWeatherData / ForecastData
+		// ----------------------------------------------------------------
+		{
+			"space_weather",
+			`CREATE TABLE IF NOT EXISTS space_weather (
+				id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts                    INTEGER NOT NULL,  -- Unix seconds UTC (SpaceWeatherData.LastUpdate)
+				solar_flux            REAL,              -- 10.7cm solar flux (SFU)
+				k_index               INTEGER,           -- Planetary K-index (0-9)
+				k_index_status        TEXT,              -- "Quiet" | "Unsettled" | "Active" | "Storm"
+				a_index               INTEGER,           -- Planetary A-index
+				solar_wind_bz         REAL,              -- Solar wind Bz component (nT)
+				propagation_quality   TEXT,              -- "Poor" | "Fair" | "Good" | "Excellent"
+				-- Forecast (NULL when not available)
+				forecast_g_scale      TEXT,
+				forecast_g_text       TEXT,
+				forecast_r_scale      TEXT,
+				forecast_r_text       TEXT,
+				forecast_r_minor_prob TEXT,
+				forecast_r_major_prob TEXT,
+				forecast_s_scale      TEXT,
+				forecast_s_text       TEXT,
+				forecast_s_prob       TEXT,
+				forecast_summary      TEXT,
+				-- Band conditions (day) — "Poor" | "Fair" | "Good"
+				day_160m TEXT, day_80m TEXT, day_60m TEXT, day_40m TEXT, day_30m TEXT,
+				day_20m  TEXT, day_17m TEXT, day_15m TEXT, day_12m TEXT, day_10m TEXT,
+				-- Band conditions (night)
+				night_160m TEXT, night_80m TEXT, night_60m TEXT, night_40m TEXT, night_30m TEXT,
+				night_20m  TEXT, night_17m TEXT, night_15m TEXT, night_12m TEXT, night_10m TEXT
+			)`,
+		},
+		{"space_weather_idx_ts", `CREATE INDEX IF NOT EXISTS space_weather_idx_ts ON space_weather(ts)`},
+	}
+
+	for _, s := range stmts {
+		if _, err := m.db.Exec(s.ddl); err != nil {
+			return fmt.Errorf("create %q: %w", s.name, err)
+		}
+	}
+
+	return nil
+}

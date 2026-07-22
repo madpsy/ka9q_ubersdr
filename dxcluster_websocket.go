@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -89,6 +90,14 @@ type DXClusterWebSocketHandler struct {
 	dxBytesSent    map[string]uint64        // UserSessionID -> total bytes sent
 	dxBytesSamples map[string][]BytesSample // UserSessionID -> sliding window samples
 	dxThroughputMu sync.RWMutex
+}
+
+// SetDB wires the SQLite database into the DX cluster WebSocket handler for dual-write.
+// It propagates the DB handle to the inner ChatManager → ChatLogger.
+func (h *DXClusterWebSocketHandler) SetDB(db *sql.DB) {
+	if h.chatManager != nil {
+		h.chatManager.SetDB(db)
+	}
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -49,6 +50,9 @@ type NoiseFloorMonitor struct {
 	csvWriters   map[string]*csv.Writer
 	currentDates map[string]string
 	fileMu       sync.Mutex
+
+	// SQLite (dual-write alongside CSV; nil when DB not available)
+	db *sql.DB
 
 	// Control
 	running  bool
@@ -945,15 +949,23 @@ func (nfm *NoiseFloorMonitor) calculateFT8SNR(bandName string, data []float32) f
 	return snr
 }
 
+// SetDB wires the SQLite database into the noise floor monitor for dual-write.
+func (nfm *NoiseFloorMonitor) SetDB(db *sql.DB) {
+	nfm.db = db
+}
+
 // logMeasurement writes a measurement to the band-specific CSV file
+// and, if a database is wired in, also inserts into the noise_floor table.
 func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
+	// CSV write under mutex — released before the DB INSERT so a slow/locked
+	// database never blocks other goroutines waiting on fileMu.
 	nfm.fileMu.Lock()
-	defer nfm.fileMu.Unlock()
 
 	// Check if we need to rotate to a new file for this band
 	dateStr := m.Timestamp.Format("2006-01-02")
 	if dateStr != nfm.currentDates[m.Band] {
 		if err := nfm.rotateFile(m.Band, dateStr); err != nil {
+			nfm.fileMu.Unlock()
 			return err
 		}
 	}
@@ -961,6 +973,7 @@ func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
 	// Get writer for this band
 	writer := nfm.csvWriters[m.Band]
 	if writer == nil {
+		nfm.fileMu.Unlock()
 		return fmt.Errorf("no CSV writer for band %s", m.Band)
 	}
 
@@ -982,12 +995,41 @@ func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
 	}
 
 	if err := writer.Write(record); err != nil {
+		nfm.fileMu.Unlock()
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
 	writer.Flush()
-	return writer.Error()
+	csvErr := writer.Error()
+
+	// Release the mutex before the DB INSERT — a slow or locked database must
+	// never block other goroutines that need fileMu for CSV rotation/writes.
+	nfm.fileMu.Unlock()
+
+	if csvErr != nil {
+		return csvErr
+	}
+
+	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
+	if nfm.db != nil {
+		_, dbErr := nfm.db.Exec(
+			`INSERT INTO noise_floor
+			 (ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+			  dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			m.Timestamp.Unix(), m.Band,
+			m.MinDB, m.MaxDB, m.MeanDB, m.MedianDB,
+			m.P5DB, m.P10DB, m.P95DB,
+			m.DynamicRange, m.OccupancyPct,
+			m.FT8SNR, m.SNR_0_30MHz, m.SNR_1_8_30MHz,
+		)
+		if dbErr != nil {
+			log.Printf("[DB] noise_floor insert error: %v", dbErr)
+		}
+	}
+
+	return nil
 }
 
 // rotateFile creates a new CSV file for the specified band and date

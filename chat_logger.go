@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -23,6 +24,14 @@ type ChatLogger struct {
 	csvWriter  *csv.Writer
 	currentDay string
 	fileMu     sync.Mutex
+
+	// SQLite (dual-write alongside CSV; nil when DB not available)
+	db *sql.DB
+}
+
+// SetDB wires the SQLite database into the chat logger for dual-write.
+func (cl *ChatLogger) SetDB(db *sql.DB) {
+	cl.db = db
 }
 
 // NewChatLogger creates a new chat logger
@@ -47,17 +56,20 @@ func NewChatLogger(dataDir string, enabled bool) (*ChatLogger, error) {
 }
 
 // LogMessage writes a chat message to the appropriate CSV file (organized by date)
+// and, if a database is wired in, also inserts into the chat_messages table.
 func (cl *ChatLogger) LogMessage(timestamp time.Time, sourceIP, username, message, country, countryCode string) error {
 	if !cl.enabled {
 		return nil
 	}
 
+	// CSV write under mutex — released before the DB INSERT so a slow/locked
+	// database never blocks other goroutines waiting on fileMu.
 	cl.fileMu.Lock()
-	defer cl.fileMu.Unlock()
 
 	// Get or create the CSV writer for this date
 	writer, err := cl.getOrCreateWriter(timestamp)
 	if err != nil {
+		cl.fileMu.Unlock()
 		return err
 	}
 
@@ -72,12 +84,35 @@ func (cl *ChatLogger) LogMessage(timestamp time.Time, sourceIP, username, messag
 	}
 
 	if err := writer.Write(record); err != nil {
+		cl.fileMu.Unlock()
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
 	writer.Flush()
-	return writer.Error()
+	csvErr := writer.Error()
+
+	// Release the mutex before the DB INSERT — a slow or locked database must
+	// never block other goroutines that need fileMu for CSV rotation/writes.
+	cl.fileMu.Unlock()
+
+	if csvErr != nil {
+		return csvErr
+	}
+
+	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
+	if cl.db != nil {
+		_, dbErr := cl.db.Exec(
+			`INSERT INTO chat_messages (ts, source_ip, username, message, country, country_code)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			timestamp.Unix(), sourceIP, username, message, country, countryCode,
+		)
+		if dbErr != nil {
+			log.Printf("[DB] chat_messages insert error: %v", dbErr)
+		}
+	}
+
+	return nil
 }
 
 // getOrCreateWriter gets or creates a CSV writer for the given date

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -26,6 +27,14 @@ type SpotsLogger struct {
 	// Control
 	enabled   bool
 	stopClean chan struct{} // Signal to stop cleanup goroutine
+
+	// SQLite (dual-write alongside CSV; nil when DB not available)
+	db *sql.DB
+}
+
+// SetDB wires the SQLite database into the spots logger for dual-write.
+func (sl *SpotsLogger) SetDB(db *sql.DB) {
+	sl.db = db
 }
 
 // SpotRecord represents a decoded spot from CSV
@@ -130,12 +139,14 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		return nil
 	}
 
+	// CSV write under mutex — released before the DB INSERT so a slow/locked
+	// database never blocks other goroutines waiting on fileMu.
 	sl.fileMu.Lock()
-	defer sl.fileMu.Unlock()
 
 	// Get or create the CSV writer for this mode/date/band combination
 	writer, err := sl.getOrCreateWriter(decode)
 	if err != nil {
+		sl.fileMu.Unlock()
 		return err
 	}
 
@@ -165,12 +176,57 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 	}
 
 	if err := writer.Write(record); err != nil {
+		sl.fileMu.Unlock()
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
 	writer.Flush()
-	return writer.Error()
+	csvErr := writer.Error()
+
+	// Release the mutex before the DB INSERT — a slow or locked database must
+	// never block other goroutines that need fileMu for CSV rotation/writes.
+	sl.fileMu.Unlock()
+
+	if csvErr != nil {
+		return csvErr
+	}
+
+	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
+	if sl.db != nil {
+		var dbm interface{} // NULL unless WSPR
+		if decode.IsWSPR {
+			dbm = decode.DBm
+		}
+		_, dbErr := sl.db.Exec(
+			`INSERT INTO spots
+			 (ts, mode, decoder_name, callsign, locator, snr, frequency, band,
+			  message, country, cq_zone, itu_zone, continent,
+			  distance_km, bearing_deg, dbm)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			decode.Timestamp.Unix(),
+			decode.Mode,
+			decode.BandName,
+			decode.Callsign,
+			decode.Locator,
+			decode.SNR,
+			decode.Frequency,
+			band,
+			decode.Message,
+			decode.Country,
+			decode.CQZone,
+			decode.ITUZone,
+			decode.Continent,
+			decode.DistanceKm, // *float64 — nil becomes NULL
+			decode.BearingDeg, // *float64 — nil becomes NULL
+			dbm,
+		)
+		if dbErr != nil {
+			log.Printf("[DB] spots insert error: %v", dbErr)
+		}
+	}
+
+	return nil
 }
 
 // getOrCreateWriter gets or creates a CSV writer for the given decode

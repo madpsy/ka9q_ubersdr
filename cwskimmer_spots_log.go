@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -27,6 +28,14 @@ type CWSkimmerSpotsLogger struct {
 
 	// Control
 	enabled bool
+
+	// SQLite (dual-write alongside CSV; nil when DB not available)
+	db *sql.DB
+}
+
+// SetDB wires the SQLite database into the CW skimmer spots logger for dual-write.
+func (sl *CWSkimmerSpotsLogger) SetDB(db *sql.DB) {
+	sl.db = db
 }
 
 // NewCWSkimmerSpotsLogger creates a new CW Skimmer spots logger
@@ -102,12 +111,14 @@ func (sl *CWSkimmerSpotsLogger) logWorker() {
 
 // writeSpot writes a CW Skimmer spot to the appropriate CSV file (internal, called by logWorker)
 func (sl *CWSkimmerSpotsLogger) writeSpot(spot *CWSkimmerSpot) error {
+	// CSV write under mutex — released before the DB INSERT so a slow/locked
+	// database never blocks the log worker goroutine's fileMu.
 	sl.fileMu.Lock()
-	defer sl.fileMu.Unlock()
 
 	// Get or create the CSV writer for this date/band combination
 	writer, err := sl.getOrCreateWriter(spot)
 	if err != nil {
+		sl.fileMu.Unlock()
 		return err
 	}
 
@@ -139,12 +150,62 @@ func (sl *CWSkimmerSpotsLogger) writeSpot(spot *CWSkimmerSpot) error {
 	}
 
 	if err := writer.Write(record); err != nil {
+		sl.fileMu.Unlock()
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
 	writer.Flush()
-	return writer.Error()
+	csvErr := writer.Error()
+
+	// Release the mutex before the DB INSERT — a slow or locked database must
+	// never block the log worker goroutine holding fileMu.
+	sl.fileMu.Unlock()
+
+	if csvErr != nil {
+		return csvErr
+	}
+
+	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
+	if sl.db != nil {
+		_, dbErr := sl.db.Exec(
+			`INSERT INTO cw_spots
+			 (ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment,
+			  country, country_code, cq_zone, itu_zone, continent,
+			  latitude, longitude, distance_km, bearing_deg,
+			  op_name, state, grid, geoloc, tz_iana, loc_source)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			spot.Time.Unix(),
+			spot.DXCall,
+			spot.Spotter,
+			spot.SNR,
+			spot.Frequency,
+			spot.Band,
+			spot.WPM,
+			spot.Mode,
+			spot.Comment,
+			spot.Country,
+			spot.CountryCode,
+			spot.CQZone,
+			spot.ITUZone,
+			spot.Continent,
+			spot.Latitude,
+			spot.Longitude,
+			spot.DistanceKm, // *float64 — nil becomes NULL
+			spot.BearingDeg, // *float64 — nil becomes NULL
+			spot.Name,
+			spot.State,
+			spot.Grid,
+			spot.GeoLoc,
+			spot.Timezone,
+			spot.LocSource,
+		)
+		if dbErr != nil {
+			log.Printf("[DB] cw_spots insert error: %v", dbErr)
+		}
+	}
+
+	return nil
 }
 
 // getOrCreateWriter gets or creates a CSV writer for the given spot

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,14 @@ type SpaceWeatherMonitor struct {
 	csvWriter   *csv.Writer
 	currentDate string
 	fileMu      sync.Mutex
+
+	// SQLite (dual-write alongside CSV; nil when DB not available)
+	db *sql.DB
+}
+
+// SetDB wires the SQLite database into the space weather monitor for dual-write.
+func (swm *SpaceWeatherMonitor) SetDB(db *sql.DB) {
+	swm.db = db
 }
 
 // OnUpdate registers a callback that is called after each successful space
@@ -739,21 +748,25 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool, forecast
 	return conditions
 }
 
-// logToCSV writes space weather data to CSV file
+// logToCSV writes space weather data to CSV file and, if a database is wired
+// in, also inserts into the space_weather table.
 func (swm *SpaceWeatherMonitor) logToCSV(data *SpaceWeatherData) error {
+	// CSV write under mutex — released before the DB INSERT so a slow/locked
+	// database never blocks other goroutines waiting on fileMu.
 	swm.fileMu.Lock()
-	defer swm.fileMu.Unlock()
 
 	// Check if we need to rotate to a new file
 	dateStr := data.LastUpdate.Format("2006-01-02")
 	if dateStr != swm.currentDate {
 		if err := swm.rotateCSVFile(dateStr); err != nil {
+			swm.fileMu.Unlock()
 			return err
 		}
 	}
 
 	// Get writer
 	if swm.csvWriter == nil {
+		swm.fileMu.Unlock()
 		return fmt.Errorf("CSV writer not initialized")
 	}
 
@@ -807,12 +820,86 @@ func (swm *SpaceWeatherMonitor) logToCSV(data *SpaceWeatherData) error {
 
 	// Write record
 	if err := swm.csvWriter.Write(record); err != nil {
+		swm.fileMu.Unlock()
 		return err
 	}
 
 	// Flush after each write
 	swm.csvWriter.Flush()
-	return swm.csvWriter.Error()
+	csvErr := swm.csvWriter.Error()
+
+	// Release the mutex before the DB INSERT — a slow or locked database must
+	// never block other goroutines that need fileMu for CSV rotation/writes.
+	swm.fileMu.Unlock()
+
+	if csvErr != nil {
+		return csvErr
+	}
+
+	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
+	if swm.db != nil {
+		// Helper to get a band condition or nil
+		dayBand := func(b string) interface{} {
+			if v, ok := data.BandConditionsDay[b]; ok && v != "" {
+				return v
+			}
+			return nil
+		}
+		nightBand := func(b string) interface{} {
+			if v, ok := data.BandConditionsNight[b]; ok && v != "" {
+				return v
+			}
+			return nil
+		}
+
+		// Forecast fields — nil when no forecast
+		var fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb interface{}
+		var fSScale, fSText, fSProb, fSummary interface{}
+		if data.Forecast != nil {
+			fGScale = nullableStr(data.Forecast.GScale)
+			fGText = nullableStr(data.Forecast.GText)
+			fRScale = nullableStr(data.Forecast.RScale)
+			fRText = nullableStr(data.Forecast.RText)
+			fRMinorProb = nullableStr(data.Forecast.RMinorProb)
+			fRMajorProb = nullableStr(data.Forecast.RMajorProb)
+			fSScale = nullableStr(data.Forecast.SScale)
+			fSText = nullableStr(data.Forecast.SText)
+			fSProb = nullableStr(data.Forecast.SProb)
+			fSummary = nullableStr(data.Forecast.Summary)
+		}
+
+		_, dbErr := swm.db.Exec(
+			`INSERT INTO space_weather
+			 (ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality,
+			  forecast_g_scale, forecast_g_text,
+			  forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
+			  forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
+			  day_160m, day_80m, day_60m, day_40m, day_30m, day_20m, day_17m, day_15m, day_12m, day_10m,
+			  night_160m, night_80m, night_60m, night_40m, night_30m, night_20m, night_17m, night_15m, night_12m, night_10m)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			data.LastUpdate.Unix(),
+			data.SolarFlux, data.KIndex, nullableStr(data.KIndexStatus), data.AIndex, data.SolarWindBz, nullableStr(data.PropagationQuality),
+			fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb, fSScale, fSText, fSProb, fSummary,
+			dayBand("160m"), dayBand("80m"), dayBand("60m"), dayBand("40m"), dayBand("30m"),
+			dayBand("20m"), dayBand("17m"), dayBand("15m"), dayBand("12m"), dayBand("10m"),
+			nightBand("160m"), nightBand("80m"), nightBand("60m"), nightBand("40m"), nightBand("30m"),
+			nightBand("20m"), nightBand("17m"), nightBand("15m"), nightBand("12m"), nightBand("10m"),
+		)
+		if dbErr != nil {
+			log.Printf("[DB] space_weather insert error: %v", dbErr)
+		}
+	}
+
+	return nil
+}
+
+// nullableStr returns nil for empty strings (stored as NULL in SQLite) or the
+// string value as an interface{} for non-empty strings.
+func nullableStr(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // rotateCSVFile creates a new CSV file for the specified date

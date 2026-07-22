@@ -398,12 +398,19 @@ type AdminHandler struct {
 	freqRefMonitor      *FrequencyReferenceMonitor // nil if frequency reference not enabled
 	notifManager        *NotificationManager       // for shutdown notifications
 	gpsdoMonitor        *GPSDOMonitor              // nil if GPSDO not enabled; used by /admin/monitor-health
+	dbManager           *DBManager                 // SQLite database (closed before os.Exit in restartServer)
 }
 
 // SetNotifManager wires the notification manager so restartServer() can publish
 // a shutdown event before os.Exit. Called from main after NewAdminHandler.
 func (ah *AdminHandler) SetNotifManager(nm *NotificationManager) {
 	ah.notifManager = nm
+}
+
+// SetDBManager wires the SQLite database manager so restartServer() can close
+// it cleanly before os.Exit (defer does not run on os.Exit).
+func (ah *AdminHandler) SetDBManager(db *DBManager) {
+	ah.dbManager = db
 }
 
 // SetGPSDOMonitor wires the GPSDO monitor so /admin/monitor-health can include
@@ -493,6 +500,14 @@ func (ah *AdminHandler) restartServer() {
 		if ah.sessions != nil {
 			log.Println("Shutting down all sessions...")
 			ah.sessions.Shutdown()
+		}
+
+		// Close the SQLite database before exiting so WAL is checkpointed cleanly.
+		// (defer in main does not fire on os.Exit)
+		if ah.dbManager != nil {
+			if err := ah.dbManager.Close(); err != nil {
+				log.Printf("Warning: error closing database: %v", err)
+			}
 		}
 
 		log.Println("All components stopped. Restarting server now...")

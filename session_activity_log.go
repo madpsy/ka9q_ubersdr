@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -78,6 +79,14 @@ type SessionActivityLogger struct {
 	stopChan      chan struct{}
 	logChan       chan logEvent // Channel for async logging
 	wg            sync.WaitGroup
+
+	// SQLite (dual-write alongside JSONL; nil when DB not available)
+	db *sql.DB
+}
+
+// SetDB wires the SQLite database into the session activity logger for dual-write.
+func (sal *SessionActivityLogger) SetDB(db *sql.DB) {
+	sal.db = db
 }
 
 // NewSessionActivityLogger creates a new session activity logger
@@ -280,6 +289,48 @@ func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 	// Write JSON line
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("failed to write log entry: %w", err)
+	}
+
+	// Dual-write to SQLite — one row per SessionActivityEntry (non-fatal)
+	if sal.db != nil {
+		for _, entry := range logEntry.ActiveSessions {
+			sessionTypesJSON, _ := json.Marshal(entry.SessionTypes)
+			bandsJSON, _ := json.Marshal(entry.Bands)
+			modesJSON, _ := json.Marshal(entry.Modes)
+
+			var createdAt, firstSeen int64
+			if !entry.CreatedAt.IsZero() {
+				createdAt = entry.CreatedAt.Unix()
+			}
+			if !entry.FirstSeen.IsZero() {
+				firstSeen = entry.FirstSeen.Unix()
+			}
+
+			_, dbErr := sal.db.Exec(
+				`INSERT INTO sessions
+				 (snapshot_ts, event_type, user_session_id, client_ip, source_ip,
+				  auth_method, session_types, bands, modes,
+				  created_at, first_seen, user_agent, country, country_code)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				logEntry.Timestamp.Unix(),
+				logEntry.EventType,
+				entry.UserSessionID,
+				entry.ClientIP,
+				entry.SourceIP,
+				entry.AuthMethod,
+				string(sessionTypesJSON),
+				string(bandsJSON),
+				string(modesJSON),
+				createdAt,
+				firstSeen,
+				entry.UserAgent,
+				entry.Country,
+				entry.CountryCode,
+			)
+			if dbErr != nil {
+				log.Printf("[DB] sessions insert error: %v", dbErr)
+			}
+		}
 	}
 
 	return nil

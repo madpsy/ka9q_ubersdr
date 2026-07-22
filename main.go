@@ -421,6 +421,15 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
+	// Initialize SQLite database early so all subsystems can use it.
+	// The database file lives at <configDir>/db/ubersdr.db — alongside all
+	// other data directories so it is covered by the same volume mount in Docker.
+	dbManager, err := NewDBManager(*configDir + "/db")
+	if err != nil {
+		log.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer dbManager.Close()
+
 	// Set global config for tunnel server IP checking
 	globalConfig = config
 
@@ -697,6 +706,7 @@ func main() {
 		sessions,
 	)
 	sessions.SetActivityLogger(sessionActivityLogger)
+	sessionActivityLogger.SetDB(dbManager.DB())
 
 	// Start version checker to fetch latest version from GitHub
 	// Must be called after sessions is initialized so it can check for active users
@@ -784,6 +794,9 @@ func main() {
 		voiceActivitySSEHub.SetEnabled(true)
 
 		defer noiseFloorMonitor.Stop()
+	}
+	if noiseFloorMonitor != nil {
+		noiseFloorMonitor.SetDB(dbManager.DB())
 	}
 
 	// Initialize and start the wideband spectrogram recorder (one PNG per UTC day)
@@ -945,6 +958,9 @@ func main() {
 		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)
 		log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
 		multiDecoder = nil
+	}
+	if multiDecoder != nil {
+		multiDecoder.SetDB(dbManager.DB())
 	}
 	// Note: multiDecoder.Start() will be called later after dxClusterWsHandler is initialized
 
@@ -1240,6 +1256,7 @@ func main() {
 				log.Printf("Warning: Failed to initialize CW Skimmer spots logger: %v", err)
 			} else {
 				cwSkimmer.SetSpotsLogger(spotsLogger)
+				spotsLogger.SetDB(dbManager.DB())
 				defer spotsLogger.Close()
 				log.Printf("CW Skimmer spots logging enabled to: %s", cwskimmerConfig.SpotsLogDataDir)
 			}
@@ -1297,6 +1314,7 @@ func main() {
 		log.Printf("Warning: Failed to start space weather monitor: %v", err)
 	}
 	defer spaceWeatherMonitor.Stop()
+	spaceWeatherMonitor.SetDB(dbManager.DB())
 
 	// Initialize EiBi shortwave broadcast schedule
 	eibiSchedule := NewEiBiSchedule(&config.EiBi)
@@ -1350,6 +1368,7 @@ func main() {
 		receiverLocator = config.Decoder.ReceiverLocator
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, mqttPublisher, receiverLocator, config.Chat, &config.Admin)
+	dxClusterWsHandler.SetDB(dbManager.DB())
 
 	// Initialize FreeDV Reporter activity monitor (view-only connection to qso.freedv.org)
 	if config.FreeDVReporter.Enabled {
@@ -2365,6 +2384,9 @@ func main() {
 	// Wire notif manager into admin handler so restartServer() can publish
 	// a shutdown notification before os.Exit.
 	adminHandler.SetNotifManager(notifManager)
+	// Wire DB manager so restartServer() can close it before os.Exit
+	// (defer in main does not fire on os.Exit).
+	adminHandler.SetDBManager(dbManager)
 	// Wire GPSDO monitor into admin handler so /admin/monitor-health can include
 	// GPSDO health using the same cached snapshot as the /monitor bot command.
 	adminHandler.SetGPSDOMonitor(gpsdoMonitor)

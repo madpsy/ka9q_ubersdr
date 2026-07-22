@@ -570,7 +570,7 @@ type NoiseFloorConfig struct {
 	Enabled         bool             `yaml:"enabled"`
 	PollIntervalSec int              `yaml:"poll_interval_sec"` // Seconds between measurements
 	RestartOnStall  *bool            `yaml:"restart_on_stall"`  // Exit ubersdr when all bands stall post-reconnect (default: true)
-	DataDir         string           `yaml:"data_dir"`          // Directory to store CSV files
+	DataDir         string           `yaml:"data_dir"`          // Directory containing legacy CSV files for one-time DB import (db_import.go)
 	Bands           []NoiseFloorBand `yaml:"bands"`             // Amateur radio bands to monitor
 }
 

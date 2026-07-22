@@ -1168,12 +1168,9 @@ noisefloor:
   # NOTE: Set explicitly to false to disable — omitting this key defaults to true.
   restart_on_stall: true
 
-  # Directory to store CSV data files (one file per day)
-  # If relative path, will be created relative to config directory
-  # Default: "noisefloor" (creates <config_dir>/noisefloor/)
-  # Absolute paths are also supported
-  data_dir: "noisefloor"
-  
+  # Historical data is stored in the SQLite database (ubersdr.db).
+  # The data_dir option is no longer used for runtime writes.
+
   # Amateur radio bands to monitor
   # Each band gets its own dedicated spectrum channel with optimized resolution
   # This provides much better frequency resolution than a single wide 0-30 MHz spectrum

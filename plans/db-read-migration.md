@@ -117,112 +117,46 @@ file walk with DB query when `cl.readDB != nil`.
 
 ---
 
-## Component 2 — `noise_floor` table
+## Component 2 — `noise_floor` table ✅ MIGRATED
 
 **DB table**: `noise_floor(id, ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db, dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz)`
-**Current read files**: [`noise_floor.go`](../noise_floor.go) · handlers in [`main.go`](../main.go)
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### Operations to migrate
+### What was done
 
-#### 2.1 `GetHistoricalData` — `/noise-floor/historical` (GET)
+All five read operations and the write path were migrated. CSV file infrastructure removed entirely — no fallback, no dual-write.
 
-**Current**: [`noise_floor.go:GetHistoricalData()`](../noise_floor.go:1116) opens
-`YYYY/MM/DD/<band>.csv` via `readBandFile()`, parses all rows, returns `[]*BandMeasurement`.
+#### 2.1 `GetHistoricalData` ✅ — DB SELECT with band + date range filter; returns error if `readDB == nil`
 
-**SQL replacement**:
-```sql
-SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
-FROM noise_floor
-WHERE (? = '' OR band = ?)   -- band filter (empty = all bands)
-  AND ts >= ?                 -- start of day (date.Unix())
-  AND ts <  ?                 -- start of next day
-ORDER BY ts ASC
-```
+#### 2.2 `GetRecentData` ✅ — DB SELECT with `ts >= now-1h AND ts <= now`; optional band filter
 
----
+#### 2.3 `GetTrendData` ✅ — DB SELECT for rolling 24h (today) or single day (historical); Go 10-min bucketing unchanged
 
-#### 2.2 `GetRecentData` — `/noise-floor/recent` (GET)
+#### 2.4 `GetTrendDataAllBands` ✅ — DB SELECT for rolling 24h, all bands; Go bucketing unchanged
 
-**Current**: [`noise_floor.go:GetRecentData()`](../noise_floor.go:1173) reads CSV files for
-the last hour (today + possibly yesterday), **not** from an in-memory ring buffer.
+#### 2.5 `GetAvailableDates` ✅ — `SELECT DISTINCT DATE(ts,'unixepoch')` replaces directory walk; `includeToday` filter applied in Go
 
-**SQL replacement**:
-```sql
-SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
-FROM noise_floor
-WHERE (? = '' OR band = ?)
-  AND ts >= ?    -- now - 1h
-  AND ts <= ?    -- now
-ORDER BY ts ASC
-```
+#### Write path ✅ — `logToDB()` replaces `logMeasurement()` + `rotateFile()`; DB INSERT only
 
----
+#### `GetAggregatedData` (`noise_floor_aggregate.go`) ✅ — also migrated to DB SELECT with band + time range
 
-#### 2.3 `GetTrendData` — `/noise-floor/trend` (GET)
+### Struct changes
 
-**Current**: [`noise_floor.go:GetTrendData()`](../noise_floor.go:1235) reads CSV files for
-a date (or rolling 24h window for today), groups into 10-minute buckets in Go, averages.
+- Removed: `currentFiles`, `csvWriters`, `currentDates`, `fileMu` (CSV infrastructure)
+- Added: `readDB *sql.DB` + `SetReadDB()` method
+- `Stop()`: removed CSV file close loop
+- `NewNoiseFloorMonitor()`: removed `os.MkdirAll` for CSV data directory
 
-**SQL replacement** — fetch raw rows, keep Go 10-minute bucketing logic unchanged:
-```sql
-SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
-FROM noise_floor
-WHERE (? = '' OR band = ?)
-  AND ts >= ?    -- startTime.Unix()
-  AND ts <= ?    -- endTime.Unix()
-ORDER BY ts ASC
-```
+### Config changes
 
-The 10-minute bucket averaging in Go remains unchanged — only the data source changes.
+- `DataDir string` retained in `NoiseFloorConfig` for [`db_import.go`](../db_import.go) (one-time historical CSV backfill)
+- `data_dir` removed from [`config/config.yaml.example`](../config/config.yaml.example) noisefloor section
+- `DataDir` resolution in [`main.go`](../main.go) no longer gated on `Enabled`
+- `SetReadDB(dbManager.ReadDB())` wired in [`main.go`](../main.go) alongside existing `SetDB`
 
-For today (rolling 24h), `startTime = now - 24h`, `endTime = now`.
-For historical dates, `startTime = start of day`, `endTime = end of day`.
+### Imports removed from `noise_floor.go`
 
----
-
-#### 2.4 `GetTrendDataAllBands` — `/noise-floor/trend` all-bands variant (GET)
-
-**Current**: [`noise_floor.go:GetTrendDataAllBands()`](../noise_floor.go:1364) reads CSV
-files for all bands for the rolling 24h window, groups into 10-minute buckets in Go.
-
-**SQL replacement** — same query as 2.3 but without band filter:
-```sql
-SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-       dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
-FROM noise_floor
-WHERE ts >= ?    -- now - 24h
-  AND ts <= ?    -- now
-ORDER BY ts ASC
-```
-
-Go bucketing and per-band grouping logic remains unchanged.
-
----
-
-#### 2.5 `GetAvailableDates` — `/noise-floor/dates` (GET)
-
-**Current**: [`noise_floor.go:GetAvailableDates()`](../noise_floor.go:1568) walks the
-`YYYY/MM/DD/` directory tree looking for `.csv` files. Takes `includeToday bool` param.
-
-**SQL replacement**:
-```sql
-SELECT DISTINCT DATE(ts, 'unixepoch') AS date
-FROM noise_floor
-ORDER BY date DESC
-```
-
-When `includeToday=false`, filter out today's date in Go after the query (or add
-`AND DATE(ts,'unixepoch') != DATE('now')` to the WHERE clause).
-
----
-
-**File to change**: [`noise_floor.go`](../noise_floor.go) — add DB read paths to
-`GetHistoricalData()`, `GetRecentData()`, `GetTrendData()`, `GetTrendDataAllBands()`,
-`GetAvailableDates()`. The `db` field already exists for writes. Keep file fallback when
-`db == nil`.
+`encoding/csv`, `path/filepath` — removed entirely. `os` retained (used by `os.Exit` in watchdog).
 
 ---
 

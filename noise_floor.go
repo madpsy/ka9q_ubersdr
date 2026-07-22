@@ -2,13 +2,11 @@ package main
 
 import (
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -45,14 +43,11 @@ type NoiseFloorMonitor struct {
 	wideBandSpectrum  *BandSpectrum
 	wideBandFFTBuffer *FFTBuffer
 
-	// CSV logging (one file per band)
-	currentFiles map[string]*os.File
-	csvWriters   map[string]*csv.Writer
-	currentDates map[string]string
-	fileMu       sync.Mutex
-
-	// SQLite (dual-write alongside CSV; nil when DB not available)
+	// SQLite write connection (for INSERTs)
 	db *sql.DB
+
+	// SQLite read-only pool (for SELECTs)
+	readDB *sql.DB
 
 	// Control
 	running  bool
@@ -293,11 +288,6 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		return nil, nil
 	}
 
-	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(config.NoiseFloor.DataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create noise floor data directory: %w", err)
-	}
-
 	nfm := &NoiseFloorMonitor{
 		config:             config,
 		radiod:             radiod,
@@ -306,9 +296,6 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		bandSpectrums:      make(map[string]*BandSpectrum),
 		latestMeasurements: make(map[string]*BandMeasurement),
 		fftBuffers:         make(map[string]*FFTBuffer),
-		currentFiles:       make(map[string]*os.File),
-		csvWriters:         make(map[string]*csv.Writer),
-		currentDates:       make(map[string]string),
 	}
 
 	// Initialize FFT buffers for each band (store up to 1 minute of samples)
@@ -521,17 +508,6 @@ func (nfm *NoiseFloorMonitor) Stop() {
 	nfm.running = false
 	close(nfm.stopChan)
 	nfm.wg.Wait()
-
-	// Close all CSV files
-	nfm.fileMu.Lock()
-	for band, file := range nfm.currentFiles {
-		if file != nil {
-			if err := file.Close(); err != nil {
-				log.Printf("Error closing noise floor CSV file for %s: %v", band, err)
-			}
-		}
-	}
-	nfm.fileMu.Unlock()
 
 	// Disable and remove all band spectrum channels
 	if nfm.spectrumsReady {
@@ -815,8 +791,8 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 			nfm.prometheusMetrics.UpdateFromMeasurement(measurement)
 		}
 
-		// Log to CSV
-		if err := nfm.logMeasurement(measurement); err != nil {
+		// Log to DB
+		if err := nfm.logToDB(measurement); err != nil {
 			log.Printf("Error logging noise floor measurement: %v", err)
 		} else {
 			bandsProcessed++
@@ -949,146 +925,35 @@ func (nfm *NoiseFloorMonitor) calculateFT8SNR(bandName string, data []float32) f
 	return snr
 }
 
-// SetDB wires the SQLite database into the noise floor monitor for dual-write.
+// SetDB wires the SQLite write connection into the noise floor monitor.
 func (nfm *NoiseFloorMonitor) SetDB(db *sql.DB) {
 	nfm.db = db
 }
 
-// logMeasurement writes a measurement to the band-specific CSV file
-// and, if a database is wired in, also inserts into the noise_floor table.
-func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
-	// CSV write under mutex — released before the DB INSERT so a slow/locked
-	// database never blocks other goroutines waiting on fileMu.
-	nfm.fileMu.Lock()
-
-	// Check if we need to rotate to a new file for this band
-	dateStr := m.Timestamp.Format("2006-01-02")
-	if dateStr != nfm.currentDates[m.Band] {
-		if err := nfm.rotateFile(m.Band, dateStr); err != nil {
-			nfm.fileMu.Unlock()
-			return err
-		}
-	}
-
-	// Get writer for this band
-	writer := nfm.csvWriters[m.Band]
-	if writer == nil {
-		nfm.fileMu.Unlock()
-		return fmt.Errorf("no CSV writer for band %s", m.Band)
-	}
-
-	// Write CSV record (no band column needed since it's per-band file)
-	record := []string{
-		m.Timestamp.Format(time.RFC3339),
-		fmt.Sprintf("%.1f", m.MinDB),
-		fmt.Sprintf("%.1f", m.MaxDB),
-		fmt.Sprintf("%.1f", m.MeanDB),
-		fmt.Sprintf("%.1f", m.MedianDB),
-		fmt.Sprintf("%.1f", m.P5DB),
-		fmt.Sprintf("%.1f", m.P10DB),
-		fmt.Sprintf("%.1f", m.P95DB),
-		fmt.Sprintf("%.1f", m.DynamicRange),
-		fmt.Sprintf("%.1f", m.OccupancyPct),
-		fmt.Sprintf("%.1f", m.FT8SNR),
-		fmt.Sprintf("%.1f", m.SNR_0_30MHz),
-		fmt.Sprintf("%.1f", m.SNR_1_8_30MHz),
-	}
-
-	if err := writer.Write(record); err != nil {
-		nfm.fileMu.Unlock()
-		return err
-	}
-
-	// Flush after each write to ensure data is saved
-	writer.Flush()
-	csvErr := writer.Error()
-
-	// Release the mutex before the DB INSERT — a slow or locked database must
-	// never block other goroutines that need fileMu for CSV rotation/writes.
-	nfm.fileMu.Unlock()
-
-	if csvErr != nil {
-		return csvErr
-	}
-
-	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
-	if nfm.db != nil {
-		_, dbErr := nfm.db.Exec(
-			`INSERT INTO noise_floor
-			 (ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-			  dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.Timestamp.Unix(), m.Band,
-			m.MinDB, m.MaxDB, m.MeanDB, m.MedianDB,
-			m.P5DB, m.P10DB, m.P95DB,
-			m.DynamicRange, m.OccupancyPct,
-			m.FT8SNR, m.SNR_0_30MHz, m.SNR_1_8_30MHz,
-		)
-		if dbErr != nil {
-			log.Printf("[DB] noise_floor insert error: %v", dbErr)
-		}
-	}
-
-	return nil
+// SetReadDB wires the SQLite read-only pool into the noise floor monitor.
+func (nfm *NoiseFloorMonitor) SetReadDB(readDB *sql.DB) {
+	nfm.readDB = readDB
 }
 
-// rotateFile creates a new CSV file for the specified band and date
-func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
-	// Close current file for this band if open
-	if nfm.currentFiles[band] != nil {
-		if err := nfm.currentFiles[band].Close(); err != nil {
-			log.Printf("Warning: error closing previous CSV file for %s: %v", band, err)
-		}
+// logToDB inserts a measurement into the noise_floor SQLite table.
+func (nfm *NoiseFloorMonitor) logToDB(m *BandMeasurement) error {
+	if nfm.db == nil {
+		return fmt.Errorf("noise floor database not configured")
 	}
-
-	// Parse date to create year/month/day directory structure
-	t, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return fmt.Errorf("invalid date format: %w", err)
-	}
-
-	// Create directory path: base_dir/YYYY/MM/DD/
-	dirPath := filepath.Join(
-		nfm.config.NoiseFloor.DataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
+	_, err := nfm.db.Exec(
+		`INSERT INTO noise_floor
+		 (ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+		  dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Timestamp.Unix(), m.Band,
+		m.MinDB, m.MaxDB, m.MeanDB, m.MedianDB,
+		m.P5DB, m.P10DB, m.P95DB,
+		m.DynamicRange, m.OccupancyPct,
+		m.FT8SNR, m.SNR_0_30MHz, m.SNR_1_8_30MHz,
 	)
-
-	// Create directory structure if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return fmt.Errorf("failed to create directory structure: %w", err)
-	}
-
-	// Create file: base_dir/YYYY/MM/DD/band.csv
-	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", band))
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("[DB] noise_floor insert error: %w", err)
 	}
-
-	// Check if file is new (needs header)
-	stat, _ := file.Stat()
-	needsHeader := stat.Size() == 0
-
-	nfm.currentFiles[band] = file
-	nfm.csvWriters[band] = csv.NewWriter(file)
-	nfm.currentDates[band] = dateStr
-
-	// Write header if new file (no band column since it's per-band)
-	if needsHeader {
-		header := []string{
-			"timestamp", "min_db", "max_db", "mean_db", "median_db",
-			"p5_db", "p10_db", "p95_db", "dynamic_range", "occupancy_pct", "ft8_snr",
-			"snr_0_30_mhz", "snr_1_8_30_mhz",
-		}
-		if err := nfm.csvWriters[band].Write(header); err != nil {
-			return fmt.Errorf("failed to write CSV header: %w", err)
-		}
-		nfm.csvWriters[band].Flush()
-		log.Printf("Created new noise floor log file: %s", filename)
-	}
-
 	return nil
 }
 
@@ -1111,179 +976,155 @@ func (nfm *NoiseFloorMonitor) GetLatestMeasurements() map[string]*BandMeasuremen
 	return result
 }
 
-// GetHistoricalData reads historical data from band-specific CSV files
-// Returns only the requested day's data (00:00:00 to 23:59:59)
+// GetHistoricalData returns data for a specific date from the SQLite database.
+// Returns only the requested day's data (00:00:00 to 23:59:59).
 func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
 
-	// Parse the requested date
 	requestedDate, err := time.Parse("2006-01-02", date)
 	if err != nil {
 		return nil, fmt.Errorf("invalid date format: %w", err)
 	}
+	startTS := requestedDate.Unix()
+	endTS := requestedDate.Add(24 * time.Hour).Unix()
 
-	// Set time boundaries for the requested day only
-	startTime := requestedDate                   // 00:00:00 of requested day
-	endTime := requestedDate.Add(24 * time.Hour) // 00:00:00 of next day
-
-	var allMeasurements []*BandMeasurement
-
-	// If band is specified, read only that band's file
+	query := `SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+	                 dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+	          FROM noise_floor
+	          WHERE ts >= ? AND ts < ?`
+	args := []interface{}{startTS, endTS}
 	if band != "" {
-		measurements, err := nfm.readBandFile(band, date)
-		if err != nil {
-			return nil, fmt.Errorf("no data found for band %s on date %s: %w", band, date, err)
-		}
-		allMeasurements = append(allMeasurements, measurements...)
-	} else {
-		// Read all band files for the requested date
-		for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-			measurements, err := nfm.readBandFile(bandConfig.Name, date)
-			if err != nil {
-				// Skip bands that don't have data
-				continue
-			}
-			allMeasurements = append(allMeasurements, measurements...)
-		}
+		query += " AND band = ?"
+		args = append(args, band)
 	}
+	query += " ORDER BY ts ASC"
 
-	if len(allMeasurements) == 0 {
+	rows, err := nfm.readDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("noise_floor query error: %w", err)
+	}
+	defer rows.Close()
+
+	var measurements []*BandMeasurement
+	for rows.Next() {
+		var ts int64
+		m := &BandMeasurement{}
+		if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+			&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
+			&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
+			return nil, fmt.Errorf("noise_floor scan error: %w", err)
+		}
+		m.Timestamp = time.Unix(ts, 0).UTC()
+		measurements = append(measurements, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(measurements) == 0 {
 		return nil, fmt.Errorf("no data found for date %s", date)
 	}
-
-	// Filter measurements to only include those within the requested day
-	filteredMeasurements := make([]*BandMeasurement, 0, len(allMeasurements))
-	for _, m := range allMeasurements {
-		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
-			m.Timestamp.Before(endTime) {
-			filteredMeasurements = append(filteredMeasurements, m)
-		}
-	}
-
-	// Sort by timestamp (oldest first) for consistent ordering
-	sort.Slice(filteredMeasurements, func(i, j int) bool {
-		return filteredMeasurements[i].Timestamp.Before(filteredMeasurements[j].Timestamp)
-	})
-
-	return filteredMeasurements, nil
+	return measurements, nil
 }
 
-// GetRecentData returns the last hour of data with all data points
+// GetRecentData returns the last hour of data from the SQLite database.
 func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
 
-	// Calculate time range (last hour)
 	now := time.Now()
-	startTime := now.Add(-1 * time.Hour)
+	startTS := now.Add(-1 * time.Hour).Unix()
+	endTS := now.Unix()
 
-	// Determine which dates we might need (current and possibly previous day)
-	currentDate := now.Format("2006-01-02")
-	startDate := startTime.Format("2006-01-02")
-
-	dates := []string{currentDate}
-
-	// If start time is on a different day than now, also read that day's file
-	if startDate != currentDate {
-		dates = append([]string{startDate}, dates...)
-	}
-
-	var allMeasurements []*BandMeasurement
-
-	// Read data from relevant dates
+	query := `SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+	                 dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+	          FROM noise_floor
+	          WHERE ts >= ? AND ts <= ?`
+	args := []interface{}{startTS, endTS}
 	if band != "" {
-		for _, d := range dates {
-			measurements, err := nfm.readBandFile(band, d)
-			if err != nil {
-				continue
-			}
-			allMeasurements = append(allMeasurements, measurements...)
-		}
-	} else {
-		// Read all bands
-		for _, d := range dates {
-			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-				measurements, err := nfm.readBandFile(bandConfig.Name, d)
-				if err != nil {
-					continue
-				}
-				allMeasurements = append(allMeasurements, measurements...)
-			}
-		}
+		query += " AND band = ?"
+		args = append(args, band)
 	}
+	query += " ORDER BY ts ASC"
 
-	// Filter to last hour
-	recentMeasurements := make([]*BandMeasurement, 0)
-	for _, m := range allMeasurements {
-		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
-			(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
-			recentMeasurements = append(recentMeasurements, m)
-		}
+	rows, err := nfm.readDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("noise_floor recent query error: %w", err)
 	}
+	defer rows.Close()
 
-	// Sort by timestamp (oldest first)
-	sort.Slice(recentMeasurements, func(i, j int) bool {
-		return recentMeasurements[i].Timestamp.Before(recentMeasurements[j].Timestamp)
-	})
-
-	return recentMeasurements, nil
+	var measurements []*BandMeasurement
+	for rows.Next() {
+		var ts int64
+		m := &BandMeasurement{}
+		if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+			&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
+			&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
+			return nil, fmt.Errorf("noise_floor scan error: %w", err)
+		}
+		m.Timestamp = time.Unix(ts, 0).UTC()
+		measurements = append(measurements, m)
+	}
+	return measurements, rows.Err()
 }
 
-// GetTrendData returns 24 hours of data averaged in 10-minute chunks
+// GetTrendData returns 24 hours of data averaged in 10-minute chunks from the SQLite database.
 func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
 
-	// Check if this is today - if so, use rolling 24-hour window
 	today := time.Now().Format("2006-01-02")
 	var rawData []*BandMeasurement
 
 	if date == today {
-		// For today (live mode), get rolling 24-hour window
+		// Rolling 24-hour window from DB
 		now := time.Now()
-		startTime := now.Add(-24 * time.Hour)
-		startDate := startTime.Format("2006-01-02")
+		startTS := now.Add(-24 * time.Hour).Unix()
+		endTS := now.Unix()
 
-		dates := []string{today}
-		if startDate != today {
-			dates = append([]string{startDate}, dates...)
-		}
-
-		// Read data from relevant dates
-		var allMeasurements []*BandMeasurement
+		query := `SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+		                 dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+		          FROM noise_floor WHERE ts >= ? AND ts <= ?`
+		args := []interface{}{startTS, endTS}
 		if band != "" {
-			for _, d := range dates {
-				measurements, err := nfm.readBandFile(band, d)
-				if err != nil {
-					continue
-				}
-				allMeasurements = append(allMeasurements, measurements...)
-			}
-		} else {
-			for _, d := range dates {
-				for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-					measurements, err := nfm.readBandFile(bandConfig.Name, d)
-					if err != nil {
-						continue
-					}
-					allMeasurements = append(allMeasurements, measurements...)
-				}
-			}
+			query += " AND band = ?"
+			args = append(args, band)
 		}
+		query += " ORDER BY ts ASC"
 
-		// Filter to last 24 hours
-		for _, m := range allMeasurements {
-			if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
-				(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
-				rawData = append(rawData, m)
+		rows, err := nfm.readDB.Query(query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("noise_floor trend query error: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ts int64
+			m := &BandMeasurement{}
+			if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+				&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
+				&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
+				return nil, fmt.Errorf("noise_floor scan error: %w", err)
 			}
+			m.Timestamp = time.Unix(ts, 0).UTC()
+			rawData = append(rawData, m)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 	} else {
-		// For historical dates, get single day's data
+		// Historical date — reuse GetHistoricalData (already DB-backed)
 		var err error
 		rawData, err = nfm.GetHistoricalData(date, band)
 		if err != nil {
@@ -1361,43 +1202,44 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 	return averaged, nil
 }
 
-// GetTrendDataAllBands returns 24 hours of data for all bands averaged in 10-minute chunks
-// This is more efficient than calling GetTrendData for each band individually
+// GetTrendDataAllBands returns 24 hours of data for all bands averaged in 10-minute chunks from the SQLite database.
 func (nfm *NoiseFloorMonitor) GetTrendDataAllBands() (map[string][]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
 
-	// Get today's date for rolling 24-hour window
-	today := time.Now().Format("2006-01-02")
 	now := time.Now()
-	startTime := now.Add(-24 * time.Hour)
-	startDate := startTime.Format("2006-01-02")
+	startTS := now.Add(-24 * time.Hour).Unix()
+	endTS := now.Unix()
 
-	dates := []string{today}
-	if startDate != today {
-		dates = append([]string{startDate}, dates...)
+	rows, err := nfm.readDB.Query(
+		`SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+		        dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+		 FROM noise_floor WHERE ts >= ? AND ts <= ? ORDER BY ts ASC`,
+		startTS, endTS,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("noise_floor all-bands trend query error: %w", err)
 	}
+	defer rows.Close()
 
-	// Read data from relevant dates for all bands
-	var allMeasurements []*BandMeasurement
-	for _, d := range dates {
-		for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-			measurements, err := nfm.readBandFile(bandConfig.Name, d)
-			if err != nil {
-				continue
-			}
-			allMeasurements = append(allMeasurements, measurements...)
-		}
-	}
-
-	// Filter to last 24 hours
 	var rawData []*BandMeasurement
-	for _, m := range allMeasurements {
-		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
-			(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
-			rawData = append(rawData, m)
+	for rows.Next() {
+		var ts int64
+		m := &BandMeasurement{}
+		if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+			&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
+			&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
+			return nil, fmt.Errorf("noise_floor scan error: %w", err)
 		}
+		m.Timestamp = time.Unix(ts, 0).UTC()
+		rawData = append(rawData, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	if len(rawData) == 0 {
@@ -1474,185 +1316,36 @@ func (nfm *NoiseFloorMonitor) GetTrendDataAllBands() (map[string][]*BandMeasurem
 	return result, nil
 }
 
-// readBandFile reads a single band's CSV file for a specific date
-func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasurement, error) {
-	// Parse date to create year/month/day directory structure
-	t, err := time.Parse("2006-01-02", date)
-	if err != nil {
-		return nil, fmt.Errorf("invalid date format: %w", err)
-	}
-
-	// Build path: base_dir/YYYY/MM/DD/band.csv
-	filename := filepath.Join(
-		nfm.config.NoiseFloor.DataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
-		fmt.Sprintf("%s.csv", band),
-	)
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("Warning: error closing file %s: %v", filename, err)
-		}
-	}()
-
-	reader := csv.NewReader(file)
-	// Allow variable number of fields per record for backward compatibility
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV: %w", err)
-	}
-
-	if len(records) < 2 {
-		return nil, fmt.Errorf("no data in file")
-	}
-
-	// Skip header
-	records = records[1:]
-
-	measurements := make([]*BandMeasurement, 0, len(records))
-	for _, record := range records {
-		// Need at least 10 columns (old format without FT8 SNR)
-		// Format evolution:
-		// - 10 columns: original (no FT8 SNR)
-		// - 11 columns: with FT8 SNR
-		// - 13 columns: with FT8 SNR + wideband SNR measurements
-		if len(record) < 10 {
-			continue
-		}
-
-		timestamp, err := time.Parse(time.RFC3339, record[0])
-		if err != nil {
-			continue
-		}
-
-		m := &BandMeasurement{
-			Timestamp: timestamp,
-			Band:      band, // Band comes from filename, not CSV
-		}
-
-		// Parse float values (no band column in per-band files)
-		_, _ = fmt.Sscanf(record[1], "%f", &m.MinDB)
-		_, _ = fmt.Sscanf(record[2], "%f", &m.MaxDB)
-		_, _ = fmt.Sscanf(record[3], "%f", &m.MeanDB)
-		_, _ = fmt.Sscanf(record[4], "%f", &m.MedianDB)
-		_, _ = fmt.Sscanf(record[5], "%f", &m.P5DB)
-		_, _ = fmt.Sscanf(record[6], "%f", &m.P10DB)
-		_, _ = fmt.Sscanf(record[7], "%f", &m.P95DB)
-		_, _ = fmt.Sscanf(record[8], "%f", &m.DynamicRange)
-		_, _ = fmt.Sscanf(record[9], "%f", &m.OccupancyPct)
-
-		// Parse FT8 SNR if available (for backward compatibility with old CSV files)
-		if len(record) >= 11 {
-			_, _ = fmt.Sscanf(record[10], "%f", &m.FT8SNR)
-		}
-
-		// Parse wideband SNR measurements if available (newest format)
-		if len(record) >= 13 {
-			_, _ = fmt.Sscanf(record[11], "%f", &m.SNR_0_30MHz)
-			_, _ = fmt.Sscanf(record[12], "%f", &m.SNR_1_8_30MHz)
-		}
-
-		measurements = append(measurements, m)
-	}
-
-	return measurements, nil
-}
-
-// GetAvailableDates returns a list of dates for which data is available
-// Scans the year/month/day directory structure
-// If includeToday is false, excludes today's date since it uses a rolling 24-hour window
+// GetAvailableDates returns a list of dates for which noise floor data exists in the SQLite database.
+// If includeToday is false, excludes today's date (it uses a rolling 24-hour window instead).
 func (nfm *NoiseFloorMonitor) GetAvailableDates(includeToday bool) ([]string, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
 
-	dateMap := make(map[string]bool)
-	today := time.Now().Format("2006-01-02")
-
-	// Walk through year directories
-	yearDirs, err := os.ReadDir(nfm.config.NoiseFloor.DataDir)
+	rows, err := nfm.readDB.Query(
+		`SELECT DISTINCT DATE(ts, 'unixepoch') AS date FROM noise_floor ORDER BY date DESC`,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read data directory: %w", err)
+		return nil, fmt.Errorf("noise_floor dates query error: %w", err)
 	}
+	defer rows.Close()
 
-	for _, yearDir := range yearDirs {
-		if !yearDir.IsDir() {
-			continue
+	today := time.Now().Format("2006-01-02")
+	var dates []string
+	for rows.Next() {
+		var date string
+		if err := rows.Scan(&date); err != nil {
+			return nil, err
 		}
-		year := yearDir.Name()
-
-		// Walk through month directories
-		monthPath := filepath.Join(nfm.config.NoiseFloor.DataDir, year)
-		monthDirs, err := os.ReadDir(monthPath)
-		if err != nil {
-			continue
-		}
-
-		for _, monthDir := range monthDirs {
-			if !monthDir.IsDir() {
-				continue
-			}
-			month := monthDir.Name()
-
-			// Walk through day directories
-			dayPath := filepath.Join(monthPath, month)
-			dayDirs, err := os.ReadDir(dayPath)
-			if err != nil {
-				continue
-			}
-
-			for _, dayDir := range dayDirs {
-				if !dayDir.IsDir() {
-					continue
-				}
-				day := dayDir.Name()
-
-				// Check if this day directory has any CSV files
-				csvPath := filepath.Join(dayPath, day)
-				files, err := os.ReadDir(csvPath)
-				if err != nil {
-					continue
-				}
-
-				hasCSV := false
-				for _, file := range files {
-					if !file.IsDir() && filepath.Ext(file.Name()) == ".csv" {
-						hasCSV = true
-						break
-					}
-				}
-
-				if hasCSV {
-					// Format as YYYY-MM-DD
-					date := fmt.Sprintf("%s-%s-%s", year, month, day)
-					// Conditionally exclude today's date based on includeToday parameter
-					if includeToday || date != today {
-						dateMap[date] = true
-					}
-				}
-			}
+		if includeToday || date != today {
+			dates = append(dates, date)
 		}
 	}
-
-	// Convert map to sorted slice
-	dates := make([]string, 0, len(dateMap))
-	for date := range dateMap {
-		dates = append(dates, date)
-	}
-
-	// Sort dates in descending order (newest first)
-	sort.Slice(dates, func(i, j int) bool {
-		return dates[i] > dates[j]
-	})
-
-	return dates, nil
+	return dates, rows.Err()
 }
 
 // GetLatestFFT returns the max-hold FFT data for a specific band.

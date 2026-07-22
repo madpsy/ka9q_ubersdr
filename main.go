@@ -769,11 +769,10 @@ func main() {
 	defer userSpectrumManager.Stop()
 
 	// Initialize noise floor monitor
-	// Set data directory relative to config directory
-	if config.NoiseFloor.Enabled && config.NoiseFloor.DataDir == "" {
+	// Resolve DataDir for the historical CSV importer (db_import.go).
+	if config.NoiseFloor.DataDir == "" {
 		config.NoiseFloor.DataDir = *configDir + "/noisefloor"
-	} else if config.NoiseFloor.Enabled && !strings.HasPrefix(config.NoiseFloor.DataDir, "/") {
-		// If relative path, make it relative to config directory
+	} else if !strings.HasPrefix(config.NoiseFloor.DataDir, "/") {
 		config.NoiseFloor.DataDir = *configDir + "/" + config.NoiseFloor.DataDir
 	}
 
@@ -805,6 +804,7 @@ func main() {
 	}
 	if noiseFloorMonitor != nil {
 		noiseFloorMonitor.SetDB(dbManager.DB())
+		noiseFloorMonitor.SetReadDB(dbManager.ReadDB())
 	}
 
 	// Initialize and start the wideband spectrogram recorder (one PNG per UTC day)

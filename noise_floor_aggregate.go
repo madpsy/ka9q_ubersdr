@@ -245,29 +245,45 @@ func (nfm *NoiseFloorMonitor) GetAggregatedData(timeRange TimeRange, bands []str
 		return nil, err
 	}
 
-	// Collect all measurements for the time range
+	// Collect all measurements for the time range from the DB
 	allMeasurements := make(map[string][]*BandMeasurement)
 
-	// Determine which dates we need to read
-	dates := getDateRange(fromTime, toTime)
+	if nfm.readDB == nil {
+		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
+	}
+
+	startTS := fromTime.Unix()
+	endTS := toTime.Unix()
 
 	for _, band := range bands {
-		bandMeasurements := make([]*BandMeasurement, 0)
+		rows, err := nfm.readDB.Query(
+			`SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+			        dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+			 FROM noise_floor
+			 WHERE band = ? AND ts >= ? AND ts <= ?
+			 ORDER BY ts ASC`,
+			band, startTS, endTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("noise_floor aggregate query error: %w", err)
+		}
 
-		for _, date := range dates {
-			measurements, err := nfm.readBandFile(band, date)
-			if err != nil {
-				// Skip dates without data
-				continue
+		var bandMeasurements []*BandMeasurement
+		for rows.Next() {
+			var ts int64
+			m := &BandMeasurement{}
+			if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+				&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
+				&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("noise_floor scan error: %w", err)
 			}
-
-			// Filter to time range
-			for _, m := range measurements {
-				if (m.Timestamp.Equal(fromTime) || m.Timestamp.After(fromTime)) &&
-					(m.Timestamp.Before(toTime) || m.Timestamp.Equal(toTime)) {
-					bandMeasurements = append(bandMeasurements, m)
-				}
-			}
+			m.Timestamp = time.Unix(ts, 0).UTC()
+			bandMeasurements = append(bandMeasurements, m)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 
 		if len(bandMeasurements) > 0 {

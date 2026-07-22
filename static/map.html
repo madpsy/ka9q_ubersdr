@@ -488,6 +488,7 @@
             <label title="Show the country flag markers"><input type="checkbox" id="flagToggle" checked> Flags</label>
             <label title="Show the day/night terminator"><input type="checkbox" id="greylineToggle" checked> Greyline</label>
             <label title="Show the Maidenhead grid"><input type="checkbox" id="gridToggle"> Grid</label>
+            <label title="Show the MUF ionosphere overlay" id="mufToggleLabel" style="display:none"><input type="checkbox" id="mufToggle" checked> MUF</label>
             <span class="status" id="status">Loading…</span>
         </div>
     </div>
@@ -1506,19 +1507,31 @@
                 return;
             }
 
+            // Kick off MUF fetch in parallel with parsing the country response
+            const mufPromise = fetchMUFSnippet(lat, lon);
+
             const r = await resp.json();
             const pin = r.method === 'open_water' ? '🌊' : countryCodeToFlag(r.iso_a2);
             clickMarker.setIcon(flagIcon(pin, 'click-marker'));
 
             // Rebuilt on every open so the sun and moon figures are current
-            // rather than frozen at the moment of the click
-            const render = () => renderPopup(r, lat, lon) + renderSunMoon(lat, lon);
+            // rather than frozen at the moment of the click.
+            // mufExtra is fetched once and cached in the closure — it does not
+            // change between opens, and re-fetching on every open would be noisy.
+            let mufExtra = '';
+            const render = () => renderPopup(r, lat, lon) + renderSunMoon(lat, lon) + mufExtra;
             clickMarker.setPopupContent(render());
             clickMarker.on('popupopen', () => clickMarker.setPopupContent(render()));
 
             showPath(lat, lon,
                 r.method === 'open_water' ? '🌊 Open water' : (pin ? pin + ' ' : '') + (r.country || 'Unknown'),
                 r.method === 'open_water' ? '' : r.continent);
+
+            // Append MUF data once it arrives — update the popup if it is still open
+            mufExtra = await mufPromise;
+            if (mufExtra && clickMarker.isPopupOpen()) {
+                clickMarker.setPopupContent(render());
+            }
         }
 
         // Current wall-clock time in an IANA zone, e.g. "14:23 BST".  Intl carries
@@ -1609,9 +1622,592 @@
             return html;
         }
 
+        // ---- MUF ionosphere overlay --------------------------------------------------
+
+        const MUF_COLLECTOR = 'https://instances.ubersdr.org';
+        const MUF_CACHE_MS  = 15 * 60 * 1000;
+
+        // State
+        let showMUF         = true;
+        let mufLayer        = null;
+        let mufLegend       = null;
+        let mufTimestamp    = null;
+        let mufFetchedAt    = 0;
+        let mufDataTS       = null;
+        let mufDataIsFetchTime = false;
+        let mufClickPopup   = null;
+        let mufClickSeq     = 0;
+        let mufPngObjectURL = null;
+
+        const MUF_LEVEL_COLOURS = {
+            5.3:  '#462d7c',
+            7.0:  '#3a538b',
+            10.1: '#277d8e',
+            14.0: '#1fa286',
+            18.0: '#3ebc73',
+            21.0: '#62ca5f',
+            24.8: '#92d741',
+            28.0: '#b7dd29',
+        };
+
+        const VIRIDIS_STOPS = [
+            [68,1,84],   [71,13,96],  [72,24,106], [72,36,117],
+            [71,46,124], [69,56,130], [66,65,134], [62,76,138],
+            [58,84,140], [54,93,141], [50,101,142],[46,109,142],
+            [43,117,142],[40,125,142],[37,132,142],[34,140,141],
+            [31,148,140],[30,156,137],[32,163,134],[37,171,130],
+            [46,179,124],[58,186,118],[72,193,110],[88,199,101],
+            [105,205,91],[127,211,78],[147,215,65],[168,219,52],
+            [189,223,38],[213,226,26],[234,229,26],[253,231,37],
+        ];
+
+        const MUF_LEGEND_HALO = '0 0 3px #fff,0 0 2px #fff,0 1px 1px #fff';
+
+        function mufViridisRGB(mufd) {
+            const MIN = 4.0, MAX = 35.0;
+            let t = (Math.log(mufd) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN));
+            if (!isFinite(t) || t < 0) t = 0;
+            if (t > 1) t = 1;
+            const pos = t * (VIRIDIS_STOPS.length - 1);
+            const i0 = Math.min(Math.floor(pos), VIRIDIS_STOPS.length - 1);
+            const i1 = Math.min(i0 + 1, VIRIDIS_STOPS.length - 1);
+            const f = pos - i0;
+            const a = VIRIDIS_STOPS[i0], b = VIRIDIS_STOPS[i1];
+            return [
+                Math.round(a[0] * (1 - f) + b[0] * f),
+                Math.round(a[1] * (1 - f) + b[1] * f),
+                Math.round(a[2] * (1 - f) + b[2] * f),
+            ];
+        }
+
+        function mufScaleFraction(mhz) {
+            const MIN = 4.0, MAX = 35.0;
+            let t = (Math.log(mhz) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN));
+            if (!isFinite(t) || t < 0) t = 0;
+            if (t > 1) t = 1;
+            return t;
+        }
+
+        function mufLevelColour(level) {
+            const levels = Object.keys(MUF_LEVEL_COLOURS).map(Number);
+            let closest = levels[0];
+            let minDiff = Math.abs(level - closest);
+            for (const l of levels) {
+                const d = Math.abs(level - l);
+                if (d < minDiff) { minDiff = d; closest = l; }
+            }
+            return MUF_LEVEL_COLOURS[closest] || '#888888';
+        }
+
+        function _mufContourMidpoint(coords) {
+            if (!coords || coords.length === 0) return null;
+            const mid = Math.floor(coords.length / 2);
+            return [coords[mid][1], coords[mid][0]];
+        }
+
+        function _formatLatLon(lat, lon) {
+            const ns = lat >= 0 ? 'N' : 'S';
+            const ew = lon >= 0 ? 'E' : 'W';
+            return `${Math.abs(lat).toFixed(2)}°${ns}, ${Math.abs(lon).toFixed(2)}°${ew}`;
+        }
+
+        function _mufRow(label, value, opts) {
+            const o = opts || {};
+            return `<div style="display:flex;justify-content:space-between;gap:14px;` +
+                `${o.dim ? 'opacity:0.7;' : ''}">` +
+                `<span>${label}</span>` +
+                `<span style="font-weight:600;${o.colour ? `color:${o.colour};` : ''}">${value}</span>` +
+                `</div>`;
+        }
+
+        function _mufAgeText(ts) {
+            const mins = Math.max(0, Math.round(Date.now() / 1000 - ts) / 60);
+            const m = Math.round(mins);
+            if (m < 60) return `${m} min ago`;
+            const h = Math.floor(m / 60);
+            const rem = m % 60;
+            return rem ? `${h}h ${rem}m ago` : `${h}h ago`;
+        }
+
+        function _mufTimestampHTML() {
+            if (!mufDataTS) return `<span style="opacity:0.65;">ionosphere data…</span>`;
+            const d = new Date(mufDataTS * 1000);
+            const hh = String(d.getUTCHours()).padStart(2, '0');
+            const mm = String(d.getUTCMinutes()).padStart(2, '0');
+            const label = mufDataIsFetchTime ? 'Fetched' : 'Data';
+            return `${label} ${hh}:${mm} UTC ` +
+                `<span style="opacity:0.65;">· ${_mufAgeText(mufDataTS)}</span>`;
+        }
+
+        function updateMUFTimestamp() {
+            if (mufTimestamp && mufTimestamp._div) {
+                mufTimestamp._div.innerHTML = _mufTimestampHTML();
+            }
+        }
+
+        function createMUFTimestamp() {
+            const ctrl = L.control({ position: 'bottomleft' });
+            let timer = null;
+            ctrl.onAdd = function() {
+                const div = L.DomUtil.create('div', '');
+                div.style.cssText = [
+                    'position:absolute',
+                    'left:3px',
+                    'bottom:1px',
+                    'margin:0',
+                    'white-space:nowrap',
+                    'font-size:9px',
+                    'font-weight:600',
+                    'color:#000',
+                    'pointer-events:none',
+                    `text-shadow:${MUF_LEGEND_HALO}`,
+                ].join(';');
+                div.innerHTML = _mufTimestampHTML();
+                ctrl._div = div;
+                timer = setInterval(() => {
+                    if (ctrl._div) ctrl._div.innerHTML = _mufTimestampHTML();
+                }, 60000);
+                return div;
+            };
+            ctrl.onRemove = function() {
+                if (timer) { clearInterval(timer); timer = null; }
+                ctrl._div = null;
+            };
+            return ctrl;
+        }
+
+        function createMUFLegend() {
+            const legend = L.control({ position: 'bottomleft' });
+            let corner = null;
+            legend.onAdd = function() {
+                const div = L.DomUtil.create('div', '');
+                div.style.cssText = [
+                    'padding:0 4px 2px',
+                    'margin:0 auto',
+                    'color:#000',
+                    'pointer-events:none',
+                    'width:min(420px, max(280px, calc(100vw - 60px)))',
+                    'box-sizing:border-box',
+                ].join(';');
+
+                const stops = VIRIDIS_STOPS.map((c, i) => {
+                    const pct = (i / (VIRIDIS_STOPS.length - 1)) * 100;
+                    return `rgb(${c[0]},${c[1]},${c[2]}) ${pct.toFixed(2)}%`;
+                }).join(',');
+
+                const levels = Object.keys(MUF_LEVEL_COLOURS).map(Number).sort((a, b) => a - b);
+
+                const notches = levels.map(l => {
+                    const pct = (mufScaleFraction(l) * 100).toFixed(2);
+                    return `<span style="
+                        position:absolute;left:${pct}%;top:-2px;bottom:-2px;
+                        width:1px;margin-left:-0.5px;
+                        background:#000;
+                        box-shadow:0 0 0 1px rgba(255,255,255,0.75);
+                    "></span>`;
+                }).join('');
+
+                const labels = levels.map(l => {
+                    const pct = (mufScaleFraction(l) * 100).toFixed(2);
+                    return `<span style="
+                        position:absolute;left:${pct}%;top:0;
+                        transform:translateX(-50%);
+                        font-size:9px;font-weight:700;
+                        color:#000;
+                        white-space:nowrap;
+                        text-shadow:${MUF_LEGEND_HALO};
+                    ">${l}</span>`;
+                }).join('');
+
+                const ends = [['left:0', 4], ['right:0', 35]].map(([side, v]) =>
+                    `<span style="
+                        position:absolute;${side};top:1px;
+                        font-size:8px;font-weight:600;
+                        color:#000;opacity:0.65;
+                        text-shadow:${MUF_LEGEND_HALO};
+                    ">${v}</span>`
+                ).join('');
+
+                div.innerHTML =
+                    `<div style="font-size:10px;font-weight:bold;letter-spacing:0.04em;margin-bottom:3px;` +
+                    `text-align:center;text-shadow:${MUF_LEGEND_HALO};">MUF (MHz)</div>` +
+                    `<div style="position:relative;height:11px;border-radius:2px;border:1px solid rgba(0,0,0,0.45);` +
+                    `background:linear-gradient(to right,${stops});">${notches}</div>` +
+                    `<div style="position:relative;height:12px;margin-top:3px;">${labels}${ends}</div>`;
+
+                setTimeout(() => {
+                    corner = div.parentNode;
+                    if (!corner) return;
+                    corner.style.width = '100%';
+                    corner.style.display = 'block';
+                    corner.style.paddingBottom = '15px';
+                    div.style.float = 'none';
+                }, 0);
+
+                return div;
+            };
+            legend.onRemove = function() {
+                if (!corner) return;
+                corner.style.width = '';
+                corner.style.display = '';
+                corner.style.paddingBottom = '';
+                corner = null;
+            };
+            return legend;
+        }
+
+        async function loadMUFLayer() {
+            if (!map) return;
+            if (mufLayer) { map.removeLayer(mufLayer); mufLayer = null; }
+            if (mufPngObjectURL) { URL.revokeObjectURL(mufPngObjectURL); mufPngObjectURL = null; }
+
+            try {
+                const [pngResp, geojsonResp, stationsResp] = await Promise.all([
+                    fetch(MUF_COLLECTOR + '/api/ionosonde/mufd.png'),
+                    fetch(MUF_COLLECTOR + '/api/ionosonde/mufd.geojson'),
+                    fetch(MUF_COLLECTOR + '/api/ionosonde/stations.json'),
+                ]);
+                if (!geojsonResp.ok) throw new Error(`GeoJSON HTTP ${geojsonResp.status}`);
+                const geojson = await geojsonResp.json();
+                mufFetchedAt = Date.now();
+
+                const group = L.layerGroup();
+
+                // Viridis raster overlay
+                if (pngResp.ok) {
+                    mufPngObjectURL = URL.createObjectURL(await pngResp.blob());
+                    const MERCATOR_MAX_LAT = 85.0511287798066;
+                    const overlay = L.imageOverlay(mufPngObjectURL, [
+                        [-MERCATOR_MAX_LAT, -180],
+                        [ MERCATOR_MAX_LAT,  180],
+                    ], {
+                        opacity: 1.0,
+                        interactive: false,
+                        zIndex: 200,
+                        className: 'muf-raster',
+                    });
+                    overlay.on('load', function() {
+                        const el = overlay.getElement();
+                        if (el) {
+                            el.style.imageRendering = 'auto';
+                            el.style.imageRendering = '-webkit-optimize-contrast';
+                        }
+                    });
+                    overlay.addTo(group);
+                }
+
+                // Contour lines
+                L.geoJSON(geojson, {
+                    style: function(feature) {
+                        const level = feature.properties && feature.properties.level;
+                        return {
+                            color: mufLevelColour(level),
+                            weight: 2,
+                            opacity: 0.85,
+                            fill: false,
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        const level = feature.properties && feature.properties.level;
+                        if (level != null) {
+                            layer.bindTooltip(`MUF ${level} MHz`, { sticky: true, className: 'muf-tooltip' });
+                        }
+                    }
+                }).addTo(group);
+
+                // Inline contour labels — one per level, on the longest segment
+                const longestByLevel = {};
+                for (const feature of geojson.features) {
+                    const level = feature.properties && feature.properties.level;
+                    if (level == null) continue;
+                    const coords = feature.geometry && feature.geometry.coordinates;
+                    if (!coords || coords.length < 2) continue;
+                    if (!longestByLevel[level] || coords.length > longestByLevel[level].coords.length) {
+                        longestByLevel[level] = { coords, level };
+                    }
+                }
+                for (const { coords, level } of Object.values(longestByLevel)) {
+                    const midLatLng = _mufContourMidpoint(coords);
+                    if (!midLatLng) continue;
+                    const colour = mufLevelColour(level);
+                    const icon = L.divIcon({
+                        className: '',
+                        html: `<span style="
+                            font-size:10px;font-weight:bold;
+                            color:${colour};
+                            background:rgba(255,255,255,0.75);
+                            padding:0 2px;border-radius:2px;
+                            white-space:nowrap;pointer-events:none;
+                            text-shadow:0 0 2px #fff;
+                        ">${Math.round(level)} MHz</span>`,
+                        iconAnchor: [16, 7],
+                    });
+                    L.marker(midLatLng, { icon, interactive: false, keyboard: false }).addTo(group);
+                }
+
+                // Ionosonde station dots
+                if (stationsResp.ok) {
+                    let stations = [];
+                    try {
+                        const payload = await stationsResp.json();
+                        stations = payload.stations || [];
+                        if (payload.ts) {
+                            mufDataTS = payload.ts;
+                            mufDataIsFetchTime = false;
+                        }
+                    } catch (e) {
+                        console.warn('MUF overlay: failed to parse station data:', e);
+                    }
+                    for (const s of stations) {
+                        const [r, g, b] = mufViridisRGB(s.mufd);
+                        const alpha = Math.min(1, 0.35 + 0.6 * (s.cs || 0));
+                        const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+                        const fg = lum > 0.55 ? '#111' : '#fff';
+                        const icon = L.divIcon({
+                            className: '',
+                            html: `<div style="
+                                width:22px;height:22px;border-radius:50%;
+                                background:rgba(${r},${g},${b},${alpha.toFixed(2)});
+                                border:1.5px solid rgba(255,255,255,0.85);
+                                box-shadow:0 0 3px rgba(0,0,0,0.5);
+                                color:${fg};font-size:10px;font-weight:700;
+                                line-height:22px;text-align:center;
+                            ">${Math.round(s.mufd)}</div>`,
+                            iconSize: [22, 22],
+                            iconAnchor: [11, 11],
+                        });
+                        const marker = L.marker([s.lat, s.lon], { icon, keyboard: false });
+                        const age = Math.max(0, Math.round((Date.now() / 1000 - s.time) / 60));
+                        const extra = [];
+                        if (s.fof2 != null) extra.push(`foF2 ${s.fof2.toFixed(2)} MHz`);
+                        if (s.hmf2 != null) extra.push(`hmF2 ${Math.round(s.hmf2)} km`);
+                        marker.bindTooltip(
+                            `<b>${s.name}</b>${s.code ? ` (${s.code})` : ''}<br>` +
+                            `MUF ${s.mufd.toFixed(1)} MHz` +
+                            (extra.length ? `<br>${extra.join('<br>')}` : '') +
+                            `<br>${s.source} · ${age} min ago · cs ${s.cs.toFixed(2)}`,
+                            { className: 'muf-tooltip' }
+                        );
+                        marker.addTo(group);
+                    }
+                }
+
+                // Fall back to fetch time if station payload had no ts
+                if (!mufDataTS) {
+                    const hdr = geojsonResp.headers.get('X-Ionosonde-Fetched');
+                    const parsed = hdr ? Date.parse(hdr) : NaN;
+                    if (!isNaN(parsed)) {
+                        mufDataTS = Math.round(parsed / 1000);
+                        mufDataIsFetchTime = true;
+                    }
+                }
+                updateMUFTimestamp();
+
+                mufLayer = group;
+                group.addTo(map);
+            } catch (err) {
+                console.warn('MUF overlay: failed to load:', err);
+            }
+        }
+
+        async function applyMUFToggle(enabled) {
+            showMUF = enabled;
+            if (showMUF) {
+                if (!mufLegend) mufLegend = createMUFLegend();
+                mufLegend.addTo(map);
+                if (!mufTimestamp) mufTimestamp = createMUFTimestamp();
+                mufTimestamp.addTo(map);
+                updateMUFTimestamp();
+                const age = Date.now() - mufFetchedAt;
+                if (!mufLayer || age > MUF_CACHE_MS) {
+                    await loadMUFLayer();
+                } else if (mufLayer) {
+                    mufLayer.addTo(map);
+                }
+            } else {
+                if (mufLayer && map.hasLayer(mufLayer)) map.removeLayer(mufLayer);
+                if (mufLegend) map.removeControl(mufLegend);
+                if (mufTimestamp) map.removeControl(mufTimestamp);
+                if (mufClickPopup) { map.closePopup(mufClickPopup); mufClickPopup = null; }
+            }
+        }
+
+        async function showMUFPopupAt(latlng) {
+            if (!map) return;
+            const lat = latlng.lat;
+            const lon = ((latlng.lng + 180) % 360 + 360) % 360 - 180;
+            const seq = ++mufClickSeq;
+            const popup = L.popup({ maxWidth: 320, className: 'muf-click-popup' })
+                .setLatLng(latlng)
+                .setContent(`<div style="font-size:12px;padding:2px 1px;">Reading ionosphere…</div>`)
+                .openOn(map);
+            mufClickPopup = popup;
+
+            try {
+                // Use the instance's own location for path MUF if available
+                const hasHome = rxLocation != null;
+                const pointURL = `${MUF_COLLECTOR}/api/ionosonde/muf?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+                const requests = [fetch(pointURL)];
+                if (hasHome) {
+                    requests.push(fetch(
+                        `${MUF_COLLECTOR}/api/ionosonde/muf` +
+                        `?lat=${rxLocation.lat.toFixed(4)}&lon=${rxLocation.lon.toFixed(4)}` +
+                        `&to_lat=${lat.toFixed(4)}&to_lon=${lon.toFixed(4)}`
+                    ));
+                }
+                const [pointResp, pathResp] = await Promise.all(requests);
+                if (seq !== mufClickSeq) return;
+
+                if (!pointResp.ok) {
+                    popup.setContent(`<div style="font-size:12px;">MUF data unavailable` +
+                        `${pointResp.status === 503 ? ' yet' : ''}.</div>`);
+                    return;
+                }
+                const pt = (await pointResp.json()).point;
+                const [r, g, b] = mufViridisRGB(pt.muf_3000_mhz);
+                const swatch = `rgb(${r},${g},${b})`;
+
+                let html =
+                    `<div style="font-size:12px;line-height:1.55;min-width:210px;">` +
+                    `<div style="font-weight:700;margin-bottom:5px;">${_formatLatLon(lat, lon)}</div>` +
+                    `<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px;">` +
+                    `<span style="width:13px;height:13px;border-radius:3px;background:${swatch};` +
+                    `border:1px solid rgba(0,0,0,0.35);flex-shrink:0;"></span>` +
+                    `<span style="font-size:16px;font-weight:700;">${pt.muf_3000_mhz.toFixed(1)} MHz</span>` +
+                    `<span style="opacity:0.7;font-size:11px;">MUF (3000 km)</span>` +
+                    `</div>` +
+                    _mufRow('foF2 (vertical)', `${pt.fof2_mhz.toFixed(2)} MHz`) +
+                    _mufRow('foE', `${pt.foe_mhz.toFixed(2)} MHz`, { dim: true }) +
+                    _mufRow('hmF2', `${Math.round(pt.hmf2_km)} km`, { dim: true }) +
+                    _mufRow('M(3000)F2', pt.md.toFixed(2), { dim: true });
+
+                if (pathResp && pathResp.ok) {
+                    const p = await pathResp.json();
+                    const [pr, pg, pb] = mufViridisRGB(p.muf_mhz);
+                    html +=
+                        `<div style="margin:7px 0 5px;padding-top:6px;` +
+                        `border-top:1px solid rgba(128,128,128,0.35);font-weight:700;">` +
+                        `Path from ${esc(rxLocation.ident)}</div>` +
+                        `<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">` +
+                        `<span style="width:13px;height:13px;border-radius:3px;background:rgb(${pr},${pg},${pb});` +
+                        `border:1px solid rgba(0,0,0,0.35);flex-shrink:0;"></span>` +
+                        `<span style="font-size:16px;font-weight:700;">${p.muf_mhz.toFixed(1)} MHz</span>` +
+                        `<span style="opacity:0.7;font-size:11px;">path MUF</span>` +
+                        `</div>` +
+                        _mufRow('Distance', `${Math.round(p.distance_km).toLocaleString()} km`) +
+                        _mufRow('Bearing', `${Math.round(p.bearing_deg)}°`) +
+                        _mufRow('Hops', `${p.hops} × ${Math.round(p.hop_km).toLocaleString()} km`, { dim: true }) +
+                        _mufRow('Takeoff angle', `${p.elevation_deg.toFixed(1)}°`, { dim: true });
+                    if (p.elevation_deg < 3) {
+                        html += `<div style="margin-top:4px;font-size:10.5px;opacity:0.75;">` +
+                            `Very low takeoff angle — needs a low-angle antenna.</div>`;
+                    }
+                } else if (!hasHome) {
+                    html += `<div style="margin-top:6px;font-size:10.5px;opacity:0.7;">` +
+                        `Receiver location unknown — point MUF only.</div>`;
+                }
+
+                html += `</div>`;
+                popup.setContent(html);
+            } catch (err) {
+                if (seq !== mufClickSeq) return;
+                console.warn('MUF popup: query failed:', err);
+                popup.setContent(`<div style="font-size:12px;">MUF query failed.</div>`);
+            }
+        }
+
+        // true once the probe confirms all three collector endpoints are live
+        let mufAvailable = false;
+
+        // Probe the three collector endpoints; show the MUF checkbox only if all
+        // respond with 200.  Uses HEAD to avoid downloading the large PNG.
+        async function setupMUFToggle() {
+            const urls = [
+                MUF_COLLECTOR + '/api/ionosonde/mufd.png',
+                MUF_COLLECTOR + '/api/ionosonde/mufd.geojson',
+                MUF_COLLECTOR + '/api/ionosonde/stations.json',
+            ];
+            try {
+                const results = await Promise.all(urls.map(u => fetch(u, { method: 'HEAD' })));
+                if (!results.every(r => r.ok)) return;
+            } catch (e) {
+                return;
+            }
+
+            mufAvailable = true;
+
+            // All endpoints live — show the checkbox and wire it up
+            const label = document.getElementById('mufToggleLabel');
+            if (label) label.style.display = '';
+            const checkbox = document.getElementById('mufToggle');
+            if (!checkbox) return;
+            checkbox.addEventListener('change', (e) => applyMUFToggle(e.target.checked));
+            if (checkbox.checked) applyMUFToggle(true);
+        }
+
+        // Fetch MUF data for a point and return an HTML snippet to append to a
+        // popup.  Returns '' on any failure so callers can always concatenate.
+        // When rxLocation is known, also fetches the path MUF from the receiver.
+        async function fetchMUFSnippet(lat, lon) {
+            if (!mufAvailable) return '';
+            try {
+                const hasHome = rxLocation != null;
+                const pointURL = `${MUF_COLLECTOR}/api/ionosonde/muf?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+                const requests = [fetch(pointURL)];
+                if (hasHome) {
+                    requests.push(fetch(
+                        `${MUF_COLLECTOR}/api/ionosonde/muf` +
+                        `?lat=${rxLocation.lat.toFixed(4)}&lon=${rxLocation.lon.toFixed(4)}` +
+                        `&to_lat=${lat.toFixed(4)}&to_lon=${lon.toFixed(4)}`
+                    ));
+                }
+                const [pointResp, pathResp] = await Promise.all(requests);
+                if (!pointResp.ok) return '';
+
+                const pt = (await pointResp.json()).point;
+                const [r, g, b] = mufViridisRGB(pt.muf_3000_mhz);
+                const swatch = `rgb(${r},${g},${b})`;
+
+                let html =
+                    `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.3);">` +
+                    `<div style="font-weight:700;margin-bottom:4px;font-size:11px;">Ionosphere</div>` +
+                    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">` +
+                    `<span style="width:11px;height:11px;border-radius:2px;background:${swatch};` +
+                    `border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
+                    `<span style="font-size:14px;font-weight:700;">${pt.muf_3000_mhz.toFixed(1)} MHz</span>` +
+                    `<span style="opacity:0.65;font-size:10px;">MUF (3000 km)</span>` +
+                    `</div>` +
+                    _mufRow('foF2', `${pt.fof2_mhz.toFixed(2)} MHz`) +
+                    _mufRow('hmF2', `${Math.round(pt.hmf2_km)} km`, { dim: true });
+
+                if (pathResp && pathResp.ok) {
+                    const p = await pathResp.json();
+                    const [pr, pg, pb] = mufViridisRGB(p.muf_mhz);
+                    html +=
+                        `<div style="margin-top:5px;font-weight:700;font-size:11px;">` +
+                        `Path from ${esc(rxLocation.ident)}</div>` +
+                        `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">` +
+                        `<span style="width:11px;height:11px;border-radius:2px;background:rgb(${pr},${pg},${pb});` +
+                        `border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
+                        `<span style="font-size:14px;font-weight:700;">${p.muf_mhz.toFixed(1)} MHz</span>` +
+                        `<span style="opacity:0.65;font-size:10px;">path MUF</span>` +
+                        `</div>` +
+                        _mufRow('Distance', `${Math.round(p.distance_km).toLocaleString()} km`) +
+                        _mufRow('Bearing', `${Math.round(p.bearing_deg)}°`) +
+                        _mufRow('Takeoff', `${p.elevation_deg.toFixed(1)}°`, { dim: true });
+                }
+
+                html += `</div>`;
+                return html;
+            } catch (e) {
+                return '';
+            }
+        }
+
         initMap();
         loadCountries();
         loadReceiver();
+        setupMUFToggle();
     </script>
 </body>
 </html>

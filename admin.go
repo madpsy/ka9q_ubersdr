@@ -9029,3 +9029,188 @@ func (ah *AdminHandler) HandleDSPHealth(w http.ResponseWriter, r *http.Request) 
 		log.Printf("Error encoding DSP health response: %v", err)
 	}
 }
+
+// HandleDBQuery executes a read-only SQL query against the SQLite database and
+// returns the results as JSON. Only SELECT statements are permitted; any query
+// that begins with a keyword other than SELECT (after stripping comments and
+// whitespace) is rejected with HTTP 400.
+//
+// Route: POST /admin/db-query  (protected by AuthMiddleware)
+// Request body: {"query": "SELECT ..."}
+// Response:     {"columns": [...], "rows": [{col: val, ...}, ...]}
+func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ah.dbManager == nil || ah.dbManager.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Strip leading whitespace/comments and check the first keyword.
+	// We only allow SELECT to prevent any accidental or malicious writes.
+	trimmed := strings.TrimSpace(req.Query)
+	// Remove leading SQL line comments (-- ...) and block comments (/* ... */)
+	for {
+		if strings.HasPrefix(trimmed, "--") {
+			if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[idx+1:])
+			} else {
+				trimmed = ""
+			}
+		} else if strings.HasPrefix(trimmed, "/*") {
+			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[idx+2:])
+			} else {
+				trimmed = ""
+			}
+		} else {
+			break
+		}
+	}
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "PRAGMA") && !strings.HasPrefix(upper, "EXPLAIN") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "only SELECT, PRAGMA, and EXPLAIN queries are allowed"})
+		return
+	}
+
+	rows, err := ah.dbManager.db.QueryContext(r.Context(), req.Query)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		http.Error(w, `{"error":"failed to get columns"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Scan all rows into []map[string]any
+	var result []map[string]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		row := make(map[string]any, len(cols))
+		for i, col := range cols {
+			v := vals[i]
+			// Convert []byte to string for JSON readability
+			if b, ok := v.([]byte); ok {
+				v = string(b)
+			}
+			row[col] = v
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if result == nil {
+		result = []map[string]any{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"columns": cols,
+		"rows":    result,
+	})
+}
+
+// HandleDBTables returns metadata for all user tables in the SQLite database:
+// table name, approximate row count, column names, and the CREATE TABLE SQL.
+//
+// Route: GET /admin/db-tables  (protected by AuthMiddleware)
+// Response: {"tables": [{"name":"spots","row_count":12345,"columns":["ts","callsign",...],"schema":"CREATE TABLE ..."},...]}
+func (ah *AdminHandler) HandleDBTables(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ah.dbManager == nil || ah.dbManager.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Fetch all user table names and their CREATE SQL from sqlite_master.
+	masterRows, err := ah.dbManager.db.QueryContext(r.Context(),
+		`SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer masterRows.Close()
+
+	type tableInfo struct {
+		Name     string   `json:"name"`
+		RowCount int64    `json:"row_count"`
+		Columns  []string `json:"columns"`
+		Schema   string   `json:"schema"`
+	}
+
+	var tables []tableInfo
+	for masterRows.Next() {
+		var name, schema string
+		if err := masterRows.Scan(&name, &schema); err != nil {
+			continue
+		}
+		tables = append(tables, tableInfo{Name: name, Schema: schema})
+	}
+	_ = masterRows.Close()
+
+	// For each table, get row count and column names.
+	for i := range tables {
+		// Row count — use COUNT(*); safe because name comes from sqlite_master.
+		countRow := ah.dbManager.db.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM "`+tables[i].Name+`"`)
+		_ = countRow.Scan(&tables[i].RowCount)
+
+		// Column names via PRAGMA table_info.
+		pragmaRows, err := ah.dbManager.db.QueryContext(r.Context(),
+			`PRAGMA table_info("`+tables[i].Name+`")`)
+		if err == nil {
+			for pragmaRows.Next() {
+				var cid int
+				var colName, colType string
+				var notNull, pk int
+				var dflt any
+				if err := pragmaRows.Scan(&cid, &colName, &colType, &notNull, &dflt, &pk); err == nil {
+					tables[i].Columns = append(tables[i].Columns, colName)
+				}
+			}
+			_ = pragmaRows.Close()
+		}
+	}
+
+	if tables == nil {
+		tables = []tableInfo{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"tables": tables})
+}

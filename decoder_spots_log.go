@@ -111,11 +111,6 @@ func NewSpotsLogger(dataDir string, enabled bool, maxAgeDays int) (*SpotsLogger,
 		return nil, fmt.Errorf("failed to create spots log directory: %w", err)
 	}
 
-	// Default to 90 days if not specified
-	if maxAgeDays == 0 {
-		maxAgeDays = 90
-	}
-
 	sl := &SpotsLogger{
 		dataDir:    dataDir,
 		maxAgeDays: maxAgeDays,
@@ -125,7 +120,8 @@ func NewSpotsLogger(dataDir string, enabled bool, maxAgeDays int) (*SpotsLogger,
 		stopClean:  make(chan struct{}),
 	}
 
-	// Start cleanup goroutine if maxAgeDays > 0
+	// Start cleanup goroutine only when maxAgeDays > 0.
+	// 0 means "keep forever" (no automatic cleanup).
 	if maxAgeDays > 0 {
 		go sl.cleanupLoop()
 	}

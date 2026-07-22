@@ -524,6 +524,14 @@ func main() {
 		log.Printf("No decoder.yaml found or error loading: %v", err)
 	}
 
+	// Start DB retention pruning loop — runs once at startup then daily at midnight UTC.
+	// Uses each subsystem's configured retention period; 0 = keep forever.
+	dbManager.StartRetentionLoop(mainCtx, RetentionConfig{
+		SessionsDays: config.Server.SessionActivityLogRetentionDays,
+		SpotsDays:    config.Decoder.SpotsLogMaxAgeDays,
+		// CWSpotsDays, ChatDays, NoiseFloorDays, SpaceWeatherDays: no config field yet — 0 = unlimited
+	})
+
 	// Load notifications configuration from notifications.yaml if it exists
 	notificationsPath := "notifications.yaml"
 	if *configDir != "." {
@@ -2881,6 +2889,8 @@ func main() {
 		handleVersionHealth(w, r, config.Admin.VersionCheckEnabled)
 	}))
 	http.HandleFunc("/admin/dsp-health", adminHandler.AuthMiddleware(adminHandler.HandleDSPHealth))
+	http.HandleFunc("/admin/db-query", adminHandler.AuthMiddleware(adminHandler.HandleDBQuery))
+	http.HandleFunc("/admin/db-tables", adminHandler.AuthMiddleware(adminHandler.HandleDBTables))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))

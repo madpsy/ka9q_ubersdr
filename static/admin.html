@@ -2741,6 +2741,7 @@
                     <button class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importConfig()">Import Config</button>
                     <button class="btn btn-danger" onclick="resetConfig()">Reset to Default</button>
+                    <button class="btn btn-secondary" onclick="openDBQueryModal()" style="background:#5c6bc0;color:white;border-color:#5c6bc0;">🗄️ Database</button>
                 </div>
                 <div class="button-group" id="radiodButtons" style="display: none;">
                     <button class="btn" onclick="saveRadiodConfig()">Save Configuration</button>
@@ -3614,6 +3615,140 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     <button class="btn btn-secondary" onclick="closeWidgetMakePublicModal(false)" style="margin-left:0;">Cancel</button>
                     <button class="btn" onclick="closeWidgetMakePublicModal(true)" style="background:#2e7d32;color:#fff;">🌐 Add to Public Catalog</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- DB Browser Modal -->
+        <div id="dbQueryModal" class="modal">
+            <div class="modal-content" style="max-width:1100px;width:96vw;max-height:92vh;display:flex;flex-direction:column;">
+                <div class="modal-header" style="background:#3949ab;flex-shrink:0;">
+                    <h2 style="color:white;">🗄️ Database Browser</h2>
+                    <button class="modal-close" onclick="closeDBQueryModal()" style="color:white;">&times;</button>
+                </div>
+                <div style="flex:1;overflow:hidden;display:flex;min-height:0;">
+
+                    <!-- Left sidebar: table list -->
+                    <div style="width:200px;flex-shrink:0;border-right:1px solid #e0e0e0;overflow-y:auto;background:#f8f9fa;padding:10px 0;">
+                        <div style="padding:8px 12px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;">Tables</div>
+                        <div id="dbTableList" style="font-size:13px;">
+                            <div style="padding:8px 12px;color:#aaa;font-size:12px;">Loading…</div>
+                        </div>
+                    </div>
+
+                    <!-- Right panel -->
+                    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;">
+
+                        <!-- Sub-tab bar -->
+                        <div style="display:flex;border-bottom:1px solid #e0e0e0;background:#fff;flex-shrink:0;">
+                            <button id="dbTabBrowse" onclick="dbSwitchTab('browse')"
+                                style="padding:10px 20px;border:none;border-bottom:3px solid #3949ab;background:transparent;font-size:13px;font-weight:600;color:#3949ab;cursor:pointer;">
+                                📋 Browse
+                            </button>
+                            <button id="dbTabQuery" onclick="dbSwitchTab('query')"
+                                style="padding:10px 20px;border:none;border-bottom:3px solid transparent;background:transparent;font-size:13px;font-weight:600;color:#888;cursor:pointer;">
+                                ⌨️ Query
+                            </button>
+                            <div style="flex:1;"></div>
+                            <div id="dbActiveTableBadge" style="display:none;align-items:center;padding:0 16px;font-size:12px;color:#5c6bc0;font-weight:600;"></div>
+                        </div>
+
+                        <!-- Browse tab -->
+                        <div id="dbPanelBrowse" style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:12px;gap:10px;">
+                            <!-- Controls row -->
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex-shrink:0;">
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <label style="font-size:12px;color:#555;font-weight:600;">Rows:</label>
+                                    <select id="dbBrowseLimit" onchange="dbBrowsePage(0)" style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;">
+                                        <option value="25">25</option>
+                                        <option value="50" selected>50</option>
+                                        <option value="100">100</option>
+                                        <option value="250">250</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <label style="font-size:12px;color:#555;font-weight:600;">Sort:</label>
+                                    <select id="dbBrowseSortCol" onchange="dbBrowsePage(0)" style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;max-width:140px;">
+                                        <option value="">— default —</option>
+                                    </select>
+                                    <select id="dbBrowseSortDir" onchange="dbBrowsePage(0)" style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;">
+                                        <option value="DESC">DESC</option>
+                                        <option value="ASC">ASC</option>
+                                    </select>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <label style="font-size:12px;color:#555;font-weight:600;">Filter:</label>
+                                    <input id="dbBrowseFilter" type="text" placeholder="WHERE clause…"
+                                        style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;width:200px;font-family:monospace;"
+                                        onkeydown="if(event.key==='Enter')dbBrowsePage(0);">
+                                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="dbBrowsePage(0)">Apply</button>
+                                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="document.getElementById('dbBrowseFilter').value='';dbBrowsePage(0);">Clear</button>
+                                </div>
+                                <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;margin-left:auto;" onclick="dbCopyBrowseAsSQL()">📋 Copy as SQL</button>
+                            </div>
+                            <!-- Schema info (collapsible) -->
+                            <div id="dbSchemaBar" style="display:none;background:#f0f4ff;border:1px solid #c5cae9;border-radius:5px;padding:8px 12px;font-size:11px;font-family:monospace;color:#3949ab;flex-shrink:0;white-space:pre-wrap;word-break:break-all;"></div>
+                            <!-- Results table -->
+                            <div style="flex:1;overflow:auto;border:1px solid #e0e0e0;border-radius:5px;background:#fff;min-height:0;">
+                                <div id="dbBrowseResults" style="min-width:max-content;">
+                                    <div style="padding:20px;color:#aaa;font-size:13px;text-align:center;">Select a table from the left panel to browse its data.</div>
+                                </div>
+                            </div>
+                            <!-- Pagination -->
+                            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;">
+                                <button class="btn btn-secondary" id="dbBrowsePrev" style="font-size:12px;padding:4px 12px;" onclick="dbBrowsePage(dbBrowseOffset-dbBrowseCurrentLimit)" disabled>← Prev</button>
+                                <span id="dbBrowsePagination" style="font-size:12px;color:#666;"></span>
+                                <button class="btn btn-secondary" id="dbBrowseNext" style="font-size:12px;padding:4px 12px;" onclick="dbBrowsePage(dbBrowseOffset+dbBrowseCurrentLimit)" disabled>Next →</button>
+                                <span id="dbBrowseMeta" style="font-size:12px;color:#888;margin-left:8px;"></span>
+                            </div>
+                        </div>
+
+                        <!-- Query tab -->
+                        <div id="dbPanelQuery" style="flex:1;display:none;flex-direction:column;overflow:hidden;padding:12px;gap:10px;">
+                            <!-- Example queries -->
+                            <div style="flex-shrink:0;">
+                                <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Examples</div>
+                                <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT COUNT(*) AS rows, MIN(datetime(ts,\'unixepoch\')) AS oldest, MAX(datetime(ts,\'unixepoch\')) AS newest FROM spots')">spots summary</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT mode, COUNT(*) AS cnt FROM spots GROUP BY mode ORDER BY cnt DESC')">spots by mode</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT band, COUNT(*) AS cnt FROM spots GROUP BY band ORDER BY cnt DESC LIMIT 20')">spots by band</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT callsign, COUNT(*) AS cnt FROM spots GROUP BY callsign ORDER BY cnt DESC LIMIT 20')">top callsigns</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT dx_call, COUNT(*) AS cnt FROM cw_spots GROUP BY dx_call ORDER BY cnt DESC LIMIT 20')">top CW callsigns</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT username, COUNT(*) AS cnt FROM chat_messages GROUP BY username ORDER BY cnt DESC LIMIT 20')">top chatters</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT datetime(ts,\'unixepoch\') AS time, solar_flux, k_index, propagation_quality FROM space_weather ORDER BY ts DESC LIMIT 20')">space weather</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT datetime(ts,\'unixepoch\') AS time, band, mean_db, ft8_snr FROM noise_floor ORDER BY ts DESC LIMIT 20')">noise floor</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT name, sql FROM sqlite_master WHERE type=\'table\' ORDER BY name')">all schemas</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA table_info(spots)')">PRAGMA spots</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA index_list(spots)')">indexes: spots</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA page_count; PRAGMA page_size; PRAGMA freelist_count')">DB size info</button>
+                                </div>
+                            </div>
+                            <!-- SQL input -->
+                            <div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <label style="font-size:12px;font-weight:600;color:#444;">SQL <span style="font-weight:400;color:#888;">(SELECT / PRAGMA / EXPLAIN only)</span></label>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:auto;" onclick="dbCopyQueryAsSQL()">📋 Copy SQL</button>
+                                </div>
+                                <textarea id="dbQueryInput" rows="4"
+                                    style="font-family:'Courier New',Courier,monospace;font-size:13px;padding:10px;border:1px solid #ccc;border-radius:5px;resize:vertical;width:100%;box-sizing:border-box;"
+                                    placeholder="SELECT * FROM spots ORDER BY ts DESC LIMIT 50"
+                                    onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){runDBQuery();}"></textarea>
+                                <div style="display:flex;gap:8px;align-items:center;">
+                                    <button class="btn" onclick="runDBQuery()" style="background:#3949ab;border-color:#3949ab;">▶ Run <small style="opacity:.8;">(Ctrl+Enter)</small></button>
+                                    <button class="btn btn-secondary" style="font-size:12px;" onclick="document.getElementById('dbQueryInput').value='';dbClearQueryResults();">Clear</button>
+                                    <span id="dbQueryMeta" style="font-size:12px;color:#888;margin-left:4px;"></span>
+                                </div>
+                            </div>
+                            <!-- Results -->
+                            <div style="flex:1;overflow:auto;border:1px solid #e0e0e0;border-radius:5px;background:#fff;min-height:0;">
+                                <div id="dbQueryResults" style="min-width:max-content;padding:10px;">
+                                    <span style="color:#aaa;font-size:13px;">Results will appear here…</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- /right panel -->
+                </div><!-- /body flex -->
             </div>
         </div>
 
@@ -27403,6 +27538,279 @@ const tooltipLine2 = timeStr;
                 closeGeoIPModal();
             }
         });
+
+        // ── DB Browser Modal ──────────────────────────────────────────────────
+        let dbCurrentTable = null;
+        let dbBrowseOffset = 0;
+        let dbBrowseCurrentLimit = 50;
+        let dbBrowseCols = [];
+        let dbBrowseTotalRows = 0;
+
+        function openDBQueryModal() {
+            document.getElementById('dbQueryModal').style.display = 'flex';
+            dbLoadTables();
+        }
+
+        function closeDBQueryModal() {
+            document.getElementById('dbQueryModal').style.display = 'none';
+        }
+
+        function dbSwitchTab(tab) {
+            const isBrowse = tab === 'browse';
+            document.getElementById('dbPanelBrowse').style.display = isBrowse ? 'flex' : 'none';
+            document.getElementById('dbPanelQuery').style.display = isBrowse ? 'none' : 'flex';
+            const browseBtn = document.getElementById('dbTabBrowse');
+            const queryBtn  = document.getElementById('dbTabQuery');
+            browseBtn.style.borderBottomColor = isBrowse ? '#3949ab' : 'transparent';
+            browseBtn.style.color = isBrowse ? '#3949ab' : '#888';
+            queryBtn.style.borderBottomColor  = isBrowse ? 'transparent' : '#3949ab';
+            queryBtn.style.color  = isBrowse ? '#888' : '#3949ab';
+        }
+
+        async function dbLoadTables() {
+            const listEl = document.getElementById('dbTableList');
+            listEl.innerHTML = '<div style="padding:8px 12px;color:#aaa;font-size:12px;">Loading…</div>';
+            try {
+                const resp = await authenticatedFetch('/admin/db-tables');
+                if (!resp.ok) throw new Error(resp.statusText);
+                const data = await resp.json();
+                const tables = data.tables || [];
+                if (tables.length === 0) {
+                    listEl.innerHTML = '<div style="padding:8px 12px;color:#aaa;font-size:12px;">No tables found.</div>';
+                    return;
+                }
+                listEl.innerHTML = tables.map(t => `
+                    <div class="db-table-item" onclick="dbSelectTable('${escapeHtml(t.name)}')"
+                        style="padding:8px 12px;cursor:pointer;border-left:3px solid transparent;transition:background .15s;"
+                        onmouseover="this.style.background='#e8eaf6'" onmouseout="this.style.background=dbCurrentTable===this.dataset.name?'#e8eaf6':''"
+                        data-name="${escapeHtml(t.name)}">
+                        <div style="font-weight:600;color:#333;">${escapeHtml(t.name)}</div>
+                        <div style="font-size:11px;color:#888;">${t.row_count.toLocaleString()} rows</div>
+                    </div>`).join('');
+            } catch (e) {
+                listEl.innerHTML = `<div style="padding:8px 12px;color:#c62828;font-size:12px;">Error: ${escapeHtml(String(e))}</div>`;
+            }
+        }
+
+        async function dbSelectTable(name) {
+            dbCurrentTable = name;
+            dbBrowseOffset = 0;
+            dbBrowseCols = [];
+
+            // Highlight selected table in sidebar
+            document.querySelectorAll('.db-table-item').forEach(el => {
+                const isSelected = el.dataset.name === name;
+                el.style.background = isSelected ? '#e8eaf6' : '';
+                el.style.borderLeftColor = isSelected ? '#3949ab' : 'transparent';
+            });
+
+            // Show table name badge
+            const badge = document.getElementById('dbActiveTableBadge');
+            badge.textContent = name;
+            badge.style.display = 'flex';
+
+            // Switch to browse tab
+            dbSwitchTab('browse');
+
+            // Fetch schema to populate sort column dropdown
+            try {
+                const resp = await authenticatedFetch('/admin/db-tables');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const tableInfo = (data.tables || []).find(t => t.name === name);
+                    if (tableInfo && tableInfo.columns) {
+                        dbBrowseCols = tableInfo.columns;
+                        const sortSel = document.getElementById('dbBrowseSortCol');
+                        sortSel.innerHTML = '<option value="">— default —</option>' +
+                            tableInfo.columns.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+                        // Default sort: if there's a 'ts' column, sort by it DESC
+                        if (tableInfo.columns.includes('ts')) {
+                            sortSel.value = 'ts';
+                        }
+                        // Show schema bar
+                        const schemaBar = document.getElementById('dbSchemaBar');
+                        if (tableInfo.schema) {
+                            schemaBar.textContent = tableInfo.schema;
+                            schemaBar.style.display = 'block';
+                        } else {
+                            schemaBar.style.display = 'none';
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            await dbBrowsePage(0);
+        }
+
+        async function dbBrowsePage(offset) {
+            if (!dbCurrentTable) return;
+            if (offset < 0) offset = 0;
+            dbBrowseOffset = offset;
+
+            const limit = parseInt(document.getElementById('dbBrowseLimit').value, 10) || 50;
+            dbBrowseCurrentLimit = limit;
+            const sortCol = document.getElementById('dbBrowseSortCol').value;
+            const sortDir = document.getElementById('dbBrowseSortDir').value;
+            const filter  = document.getElementById('dbBrowseFilter').value.trim();
+
+            let sql = `SELECT * FROM ${dbCurrentTable}`;
+            if (filter) sql += ` WHERE ${filter}`;
+            if (sortCol) sql += ` ORDER BY ${sortCol} ${sortDir}`;
+            sql += ` LIMIT ${limit} OFFSET ${offset}`;
+
+            // Also get total count for pagination
+            let countSql = `SELECT COUNT(*) AS n FROM ${dbCurrentTable}`;
+            if (filter) countSql += ` WHERE ${filter}`;
+
+            const resultsEl = document.getElementById('dbBrowseResults');
+            const metaEl    = document.getElementById('dbBrowseMeta');
+            const paginEl   = document.getElementById('dbBrowsePagination');
+            resultsEl.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">Loading…</div>';
+            metaEl.textContent = '';
+            paginEl.textContent = '';
+
+            const t0 = Date.now();
+            try {
+                // Run both queries in parallel
+                const [rowsResp, countResp] = await Promise.all([
+                    authenticatedFetch('/admin/db-query', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: sql}),
+                    }),
+                    authenticatedFetch('/admin/db-query', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: countSql}),
+                    }),
+                ]);
+                const elapsed = Date.now() - t0;
+                const rowsData  = await rowsResp.json();
+                const countData = await countResp.json();
+
+                if (!rowsResp.ok) {
+                    resultsEl.innerHTML = `<div style="padding:20px;color:#c62828;">Error: ${escapeHtml(rowsData.error || rowsResp.statusText)}</div>`;
+                    return;
+                }
+
+                const rows = rowsData.rows || [];
+                const cols = rowsData.columns || [];
+                dbBrowseTotalRows = (countData.rows && countData.rows[0]) ? (countData.rows[0]['n'] || 0) : 0;
+
+                if (rows.length === 0) {
+                    resultsEl.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No rows found.</div>';
+                } else {
+                    let html = '<table style="border-collapse:collapse;width:100%;font-size:12px;">';
+                    html += '<thead><tr style="position:sticky;top:0;z-index:1;">' +
+                        cols.map(c => `<th style="border:1px solid #ddd;padding:5px 10px;background:#f0f4ff;text-align:left;white-space:nowrap;font-size:11px;color:#3949ab;cursor:pointer;" onclick="document.getElementById('dbBrowseSortCol').value='${escapeHtml(c)}';dbBrowsePage(0);">${escapeHtml(c)} ↕</th>`).join('') +
+                        '</tr></thead><tbody>';
+                    for (const row of rows) {
+                        html += '<tr onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'\'">' +
+                            cols.map(c => {
+                                const v = row[c];
+                                if (v === null) return '<td style="border:1px solid #eee;padding:4px 10px;color:#bbb;font-style:italic;">NULL</td>';
+                                const s = String(v);
+                                // Detect unix timestamps (10-digit numbers in ts/time columns)
+                                if ((c === 'ts' || c.endsWith('_ts') || c === 'time') && /^\d{9,11}$/.test(s)) {
+                                    const d = new Date(parseInt(s, 10) * 1000);
+                                    return `<td style="border:1px solid #eee;padding:4px 10px;white-space:nowrap;" title="${escapeHtml(s)}">${escapeHtml(d.toISOString().replace('T',' ').slice(0,19))}</td>`;
+                                }
+                                return `<td style="border:1px solid #eee;padding:4px 10px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s)}">${escapeHtml(s)}</td>`;
+                            }).join('') + '</tr>';
+                    }
+                    html += '</tbody></table>';
+                    resultsEl.innerHTML = html;
+                }
+
+                // Pagination controls
+                const from = offset + 1;
+                const to   = offset + rows.length;
+                const total = dbBrowseTotalRows;
+                paginEl.textContent = total > 0 ? `${from}–${to} of ${total.toLocaleString()}` : `${rows.length} rows`;
+                metaEl.textContent  = `${elapsed}ms`;
+                document.getElementById('dbBrowsePrev').disabled = offset <= 0;
+                document.getElementById('dbBrowseNext').disabled = rows.length < limit;
+
+            } catch (e) {
+                resultsEl.innerHTML = `<div style="padding:20px;color:#c62828;">Request failed: ${escapeHtml(String(e))}</div>`;
+            }
+        }
+
+        function dbCopyBrowseAsSQL() {
+            if (!dbCurrentTable) return;
+            const limit    = document.getElementById('dbBrowseLimit').value;
+            const sortCol  = document.getElementById('dbBrowseSortCol').value;
+            const sortDir  = document.getElementById('dbBrowseSortDir').value;
+            const filter   = document.getElementById('dbBrowseFilter').value.trim();
+            let sql = `SELECT * FROM ${dbCurrentTable}`;
+            if (filter) sql += ` WHERE ${filter}`;
+            if (sortCol) sql += ` ORDER BY ${sortCol} ${sortDir}`;
+            sql += ` LIMIT ${limit} OFFSET ${dbBrowseOffset}`;
+            navigator.clipboard.writeText(sql).then(() => showAlert('SQL copied to clipboard', 'success')).catch(() => {});
+        }
+
+        function dbSetExample(sql) {
+            document.getElementById('dbQueryInput').value = sql;
+            dbSwitchTab('query');
+            document.getElementById('dbQueryInput').focus();
+        }
+
+        function dbCopyQueryAsSQL() {
+            const sql = document.getElementById('dbQueryInput').value.trim();
+            if (!sql) return;
+            navigator.clipboard.writeText(sql).then(() => showAlert('SQL copied to clipboard', 'success')).catch(() => {});
+        }
+
+        function dbClearQueryResults() {
+            document.getElementById('dbQueryResults').innerHTML = '';
+            document.getElementById('dbQueryMeta').textContent = '';
+        }
+
+        async function runDBQuery() {
+            const sql = document.getElementById('dbQueryInput').value.trim();
+            if (!sql) return;
+            const resultsEl = document.getElementById('dbQueryResults');
+            const metaEl = document.getElementById('dbQueryMeta');
+            resultsEl.innerHTML = '<span style="color:#888;">Running…</span>';
+            metaEl.textContent = '';
+            const t0 = Date.now();
+            try {
+                const resp = await authenticatedFetch('/admin/db-query', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({query: sql}),
+                });
+                const elapsed = Date.now() - t0;
+                const data = await resp.json();
+                if (!resp.ok) {
+                    resultsEl.innerHTML = `<span style="color:#c62828;">Error: ${escapeHtml(data.error || resp.statusText)}</span>`;
+                    return;
+                }
+                const rows = data.rows || [];
+                const cols = data.columns || [];
+                if (rows.length === 0) {
+                    resultsEl.innerHTML = '<span style="color:#888;">No rows returned.</span>';
+                    metaEl.textContent = `0 rows · ${elapsed}ms`;
+                    return;
+                }
+                let html = '<table style="border-collapse:collapse;width:100%;font-size:12px;">';
+                html += '<thead><tr>' + cols.map(c => `<th style="border:1px solid #ddd;padding:5px 10px;background:#f0f4ff;text-align:left;white-space:nowrap;font-size:11px;color:#3949ab;">${escapeHtml(c)}</th>`).join('') + '</tr></thead>';
+                html += '<tbody>';
+                for (const row of rows) {
+                    html += '<tr onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'\'">' +
+                        cols.map(c => {
+                            const v = row[c];
+                            if (v === null) return '<td style="border:1px solid #eee;padding:4px 10px;color:#bbb;font-style:italic;">NULL</td>';
+                            return `<td style="border:1px solid #eee;padding:4px 10px;vertical-align:top;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(String(v))}">${escapeHtml(String(v))}</td>`;
+                        }).join('') + '</tr>';
+                }
+                html += '</tbody></table>';
+                resultsEl.innerHTML = html;
+                metaEl.textContent = `${rows.length} row${rows.length !== 1 ? 's' : ''} · ${elapsed}ms`;
+            } catch (e) {
+                resultsEl.innerHTML = `<span style="color:#c62828;">Request failed: ${escapeHtml(String(e))}</span>`;
+            }
+        }
 
         function closeAutoCalibrationModal() {
             const modal = document.getElementById('autoCalibrationModal');

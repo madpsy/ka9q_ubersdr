@@ -18,11 +18,13 @@ package main
 // WAL mode is enabled so concurrent readers never block the single writer.
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; registers as "sqlite"
 )
@@ -79,6 +81,108 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 // DB returns the underlying *sql.DB for use by subsystem managers.
 func (m *DBManager) DB() *sql.DB {
 	return m.db
+}
+
+// RetentionConfig holds per-table retention periods in days.
+// A value of 0 means "keep forever" (no automatic pruning for that table).
+// Tables with no corresponding config field default to 0 (unlimited).
+type RetentionConfig struct {
+	// Sessions: config.Server.SessionActivityLogRetentionDays (default 30)
+	SessionsDays int
+	// Spots (decoder): decoder config spots_log_max_age_days (default 0 = unlimited)
+	SpotsDays int
+	// CWSpots: no config field yet — 0 = unlimited
+	CWSpotsDays int
+	// ChatMessages: no config field yet — 0 = unlimited
+	ChatDays int
+	// NoiseFloor: no config field yet — 0 = unlimited
+	NoiseFloorDays int
+	// SpaceWeather: no config field yet — 0 = unlimited
+	SpaceWeatherDays int
+}
+
+// retentionInterval is how often the retention loop runs after the initial
+// startup prune. 1 hour matches the CSV cleanup interval used by the spots
+// logger and ensures pruning happens even on short-lived instances.
+// Most hourly runs will find 0 rows to delete (cheap no-op).
+const retentionInterval = 1 * time.Hour
+
+// StartRetentionLoop starts a background goroutine that prunes old rows from
+// all DB tables once at startup and then every retentionInterval (6 hours).
+// It stops when ctx is cancelled (e.g. on graceful shutdown).
+// Tables whose retention value is 0 are skipped (kept forever).
+func (m *DBManager) StartRetentionLoop(ctx context.Context, cfg RetentionConfig) {
+	go func() {
+		// Run immediately at startup so rows aged out while the process was
+		// down are removed without waiting for the first interval tick.
+		m.pruneAll(cfg)
+
+		ticker := time.NewTicker(retentionInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.pruneAll(cfg)
+			}
+		}
+	}()
+}
+
+// pruneAll deletes rows older than the configured retention period from each table.
+// Deletes are batched (pruneChunkSize rows at a time) to keep WAL pressure low
+// and avoid blocking readers for extended periods on large tables.
+func (m *DBManager) pruneAll(cfg RetentionConfig) {
+	type tableRule struct {
+		table string
+		days  int
+	}
+	rules := []tableRule{
+		{"sessions", cfg.SessionsDays},
+		{"spots", cfg.SpotsDays},
+		{"cw_spots", cfg.CWSpotsDays},
+		{"chat_messages", cfg.ChatDays},
+		{"noise_floor", cfg.NoiseFloorDays},
+		{"space_weather", cfg.SpaceWeatherDays},
+	}
+	for _, r := range rules {
+		if r.days <= 0 {
+			continue // 0 = keep forever
+		}
+		cutoff := time.Now().UTC().AddDate(0, 0, -r.days).Unix()
+		m.pruneTable(r.table, cutoff, r.days)
+	}
+}
+
+// pruneChunkSize is the maximum number of rows deleted per batch.
+// Keeping this small limits WAL growth and reader-blocking time.
+const pruneChunkSize = 10_000
+
+// pruneTable deletes rows with ts < cutoff from the named table in chunks,
+// sleeping 100 ms between batches to yield to concurrent readers/writers.
+func (m *DBManager) pruneTable(table string, cutoff int64, days int) {
+	total := int64(0)
+	query := `DELETE FROM ` + table + ` WHERE id IN (
+		SELECT id FROM ` + table + ` WHERE ts < ? LIMIT ?
+	)`
+	for {
+		res, err := m.db.Exec(query, cutoff, pruneChunkSize)
+		if err != nil {
+			log.Printf("[DB] retention prune %s: %v", table, err)
+			return
+		}
+		n, _ := res.RowsAffected()
+		total += n
+		if n < pruneChunkSize {
+			break // last (or only) batch
+		}
+		// Yield between batches so readers aren't starved.
+		time.Sleep(100 * time.Millisecond)
+	}
+	if total > 0 {
+		log.Printf("[DB] retention prune %s: deleted %d rows older than %d days", table, total, days)
+	}
 }
 
 // Close closes the database connection.

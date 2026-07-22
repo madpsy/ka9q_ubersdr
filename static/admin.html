@@ -3725,7 +3725,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                                     <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT name, sql FROM sqlite_master WHERE type=\'table\' ORDER BY name')">all schemas</button>
                                     <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA table_info(spots)')">PRAGMA spots</button>
                                     <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA index_list(spots)')">indexes: spots</button>
-                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('PRAGMA page_count; PRAGMA page_size; PRAGMA freelist_count')">DB size info</button>
+                                    <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="dbSetExample('SELECT page_count, page_size, freelist_count, page_count * page_size AS total_bytes, (page_count - freelist_count) * page_size AS used_bytes, freelist_count * page_size AS free_bytes FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count()')">DB size info</button>
                                 </div>
                             </div>
                             <!-- SQL input -->

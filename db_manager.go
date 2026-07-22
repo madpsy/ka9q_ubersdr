@@ -66,8 +66,9 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL", // safe with WAL; faster than FULL
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",  // ms — retry on locked DB instead of failing immediately
-		"PRAGMA cache_size=-131072", // 128 MiB page cache (negative value = KiB)
+		"PRAGMA busy_timeout=5000",       // ms — retry on locked DB instead of failing immediately
+		"PRAGMA cache_size=-131072",      // 128 MiB page cache (negative value = KiB)
+		"PRAGMA auto_vacuum=INCREMENTAL", // enables incremental_vacuum; must be set before first write
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -139,7 +140,8 @@ func (m *DBManager) StartRetentionLoop(ctx context.Context, cfg RetentionConfig)
 	}()
 }
 
-// pruneAll deletes rows older than the configured retention period from each table.
+// pruneAll deletes rows older than the configured retention period from each table,
+// then reclaims freed pages via PRAGMA incremental_vacuum.
 // Deletes are batched (pruneChunkSize rows at a time) to keep WAL pressure low
 // and avoid blocking readers for extended periods on large tables.
 func (m *DBManager) pruneAll(cfg RetentionConfig) {
@@ -155,12 +157,23 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 		{"noise_floor", cfg.NoiseFloorDays},
 		{"space_weather", cfg.SpaceWeatherDays},
 	}
+	anyDeleted := false
 	for _, r := range rules {
 		if r.days <= 0 {
 			continue // 0 = keep forever
 		}
 		cutoff := time.Now().UTC().AddDate(0, 0, -r.days).Unix()
-		m.pruneTable(r.table, cutoff, r.days)
+		if m.pruneTable(r.table, cutoff, r.days) {
+			anyDeleted = true
+		}
+	}
+
+	// Reclaim freed pages from the freelist. Requires auto_vacuum=INCREMENTAL
+	// (set at DB creation). This is a no-op when nothing was deleted.
+	if anyDeleted {
+		if _, err := m.db.Exec("PRAGMA incremental_vacuum"); err != nil {
+			log.Printf("[DB] incremental_vacuum: %v", err)
+		}
 	}
 }
 
@@ -170,7 +183,8 @@ const pruneChunkSize = 10_000
 
 // pruneTable deletes rows with ts < cutoff from the named table in chunks,
 // sleeping 100 ms between batches to yield to concurrent readers/writers.
-func (m *DBManager) pruneTable(table string, cutoff int64, days int) {
+// Returns true if any rows were deleted.
+func (m *DBManager) pruneTable(table string, cutoff int64, days int) bool {
 	total := int64(0)
 	query := `DELETE FROM ` + table + ` WHERE id IN (
 		SELECT id FROM ` + table + ` WHERE ts < ? LIMIT ?
@@ -179,7 +193,7 @@ func (m *DBManager) pruneTable(table string, cutoff int64, days int) {
 		res, err := m.db.Exec(query, cutoff, pruneChunkSize)
 		if err != nil {
 			log.Printf("[DB] retention prune %s: %v", table, err)
-			return
+			return total > 0
 		}
 		n, _ := res.RowsAffected()
 		total += n
@@ -192,6 +206,7 @@ func (m *DBManager) pruneTable(table string, cutoff int64, days int) {
 	if total > 0 {
 		log.Printf("[DB] retention prune %s: deleted %d rows older than %d days", table, total, days)
 	}
+	return total > 0
 }
 
 // Close closes the database connection.

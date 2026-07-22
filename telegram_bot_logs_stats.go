@@ -111,8 +111,8 @@ func (l *TelegramBotListener) handleStats(chatID int64, args string) (string, st
 		return msg, apiResp, apiOK
 	}
 
-	if !l.config.Server.SessionActivityLogEnabled {
-		msg := "📊 Session activity logging is not enabled on this receiver."
+	if l.readDB == nil {
+		msg := "📊 Session activity data is not available (database not configured)."
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
@@ -120,7 +120,7 @@ func (l *TelegramBotListener) handleStats(chatID int64, args string) (string, st
 	endTime := time.Now().UTC()
 	startTime := endTime.Add(-24 * time.Hour)
 
-	logs, err := ReadActivityLogs(l.config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(l.readDB, startTime, endTime)
 	if err != nil {
 		msg := fmt.Sprintf("📊 Failed to read activity logs: %s", html.EscapeString(err.Error()))
 		apiResp, apiOK := l.sendMessage(chatID, msg)

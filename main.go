@@ -699,9 +699,8 @@ func main() {
 	// bot command listeners (e.g. /stats) can query active sessions.
 	notifManager.SetSessionManager(sessions)
 
-	// Make session activity log directory relative to config directory if it's a relative path
-	if config.Server.SessionActivityLogEnabled && !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
-		// If relative path, make it relative to config directory
+	// Resolve SessionActivityLogDir for the historical JSONL importer (db_import.go).
+	if !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
 		config.Server.SessionActivityLogDir = *configDir + "/" + config.Server.SessionActivityLogDir
 	}
 
@@ -2422,6 +2421,7 @@ func main() {
 	// Wire config and instance reporter so the /info bot command can report
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
+	notifManager.SetReadDB(dbManager.ReadDB())
 	notifManager.SetInstanceReporter(instanceReporter)
 	// Wire IP ban manager so the /banned bot command can list, add, and remove bans.
 	notifManager.SetIPBanManager(ipBanManager)
@@ -2565,7 +2565,7 @@ func main() {
 		handleInstanceStatus(w, r, config)
 	})
 	http.HandleFunc("/api/session-stats", func(w http.ResponseWriter, r *http.Request) {
-		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter, geoIPService)
+		handlePublicSessionStats(w, r, config, dbManager.ReadDB(), sessionStatsRateLimiter, geoIPService)
 	})
 	// Active-listener GeoJSON feed for Home Assistant maps (opt-in via
 	// server.sessions_geojson_enabled). Renders transient geo_location markers.

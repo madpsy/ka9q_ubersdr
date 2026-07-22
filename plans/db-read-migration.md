@@ -417,137 +417,43 @@ to `GetCWHistoricalSpots()`, `GetCWAvailableDates()`, `GetCWAvailableNames()`.
 
 ---
 
-## Component 5 — `sessions` table
+## Component 5 — `sessions` table ✅ MIGRATED
 
 **DB table**: `sessions(id, snapshot_ts, event_type, user_session_id, client_ip, source_ip, auth_method, session_types, bands, modes, created_at, first_seen, user_agent, country, country_code)`
-**Current read files**: [`session_activity_log.go`](../session_activity_log.go) · [`admin.go`](../admin.go)
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### DB access pattern for this component
+### What was done
 
-`ReadActivityLogs` is a **package-level function** (not a method), called from 6 places:
-- [`admin.go`](../admin.go:5600) — `HandleSessionActivityLogs`
-- [`admin.go`](../admin.go:5686) — `HandleSessionActivityMetrics`
-- [`admin.go`](../admin.go:5785) — `HandleSessionActivityChartData`
-- [`admin.go`](../admin.go:5988) — `HandleSessionActivityEvents`
-- [`session_stats_api.go`](../session_stats_api.go:81) — public stats endpoint
-- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go:123) — Telegram bot
+#### Write path ✅
 
-**Recommended approach**: Add a `readDB *sql.DB` parameter to `ReadActivityLogs`:
-```go
-func ReadActivityLogs(dataDir string, readDB *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error)
-```
-When `readDB != nil`, use the DB path; otherwise fall back to the JSONL file walk.
-All 6 call sites must be updated to pass the read pool. The `AdminHandler` already has
-`dbManager *DBManager` — pass `ah.dbManager.ReadDB()`. The `session_stats_api.go` handler
-and Telegram bot handler need the read pool threaded in via their respective structs or
-function parameters.
+`logActivitySync()` now does a direct SQLite INSERT only. Removed: `getOrCreateFile()`, `cleanupOldFiles()`, `cleanupLoop()`, `currentFile`, `currentDate` from struct. `Stop()` no longer closes any file handle.
 
-### Operations to migrate
+#### Read path ✅ — `ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time)`
 
-#### 5.1 `ReadActivityLogs` — core data fetch used by all session endpoints
+Replaces `ReadActivityLogs()` (file-based). Groups rows by `(snapshot_ts, event_type)` to reconstruct `[]SessionActivityLog`. JSON-unmarshals `session_types`, `bands`, `modes` columns. All downstream Go functions (`aggregateLogsIntoBuckets`, `calculateSessionMetrics`, `convertLogsToEvents`, `FilterSessionsByAuthMethod`) unchanged.
 
-**Current**: [`session_activity_log.go:ReadActivityLogs()`](../session_activity_log.go:714)
-walks `YYYY/MM/DD/sessions.jsonl` files, parses JSON lines, filters by time range.
+#### 5.1–5.4 Admin handlers ✅
 
-**SQL replacement**:
-```sql
-SELECT snapshot_ts, event_type, user_session_id, client_ip, source_ip,
-       auth_method, session_types, bands, modes,
-       created_at, first_seen, user_agent, country, country_code
-FROM sessions
-WHERE snapshot_ts >= ?    -- startTime.Unix()
-  AND snapshot_ts <  ?    -- endTime.Unix()
-ORDER BY snapshot_ts ASC
-```
+All 4 `admin.go` handlers updated: `ReadActivityLogs(ah.config.Server.SessionActivityLogDir, ...)` → `ReadActivityLogsFromDB(ah.dbManager.ReadDB(), ...)`. Guards changed from `!ah.config.Server.SessionActivityLogEnabled` → `ah.dbManager.ReadDB() == nil`.
 
-**Struct reconstruction**: Each DB row represents one session entry. Group rows by
-`(snapshot_ts, event_type)` in Go to reconstruct `SessionActivityLog` structs with
-`ActiveSessions []SessionActivityEntry`. The `session_types`, `bands`, `modes` columns
-are JSON arrays — unmarshal with `json.Unmarshal([]byte(col), &slice)`.
+#### 5.5 Public session stats ✅
 
-The existing callers (`aggregateLogsIntoBuckets`, `calculateSessionMetrics`,
-`convertLogsToEvents`, `FilterSessionsByAuthMethod`) all operate on `[]SessionActivityLog`
-and remain unchanged — only the data source changes.
+`handlePublicSessionStats` gained `readDB *sql.DB` parameter. Guard changed to `readDB == nil`. Call site in `main.go` passes `dbManager.ReadDB()`.
 
----
+#### 5.6 Telegram bot session stats ✅
 
-#### 5.2 Session activity chart data — `/admin/session-activity/chart` (GET)
+`TelegramBotListener` gained `readDB *sql.DB` field. `TelegramListenerRegistry.SetReadDB()` added. `NotificationManager.SetReadDB()` added. Wired in `main.go` via `notifManager.SetReadDB(dbManager.ReadDB())`.
 
-**Current**: [`admin.go:HandleSessionActivityChartData()`](../admin.go:5723) calls
-`ReadActivityLogs()` then `aggregateLogsIntoBuckets()` in Go.
+### Config changes
 
-**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
-benefits. The `aggregateLogsIntoBuckets()` Go function remains unchanged.
+- `session_activity_log_dir` removed from [`config/config.yaml.example`](../config/config.yaml.example); `SessionActivityLogDir` retained in `ServerConfig` for [`db_import.go`](../db_import.go)
+- `session_activity_log_retention_days` kept — now controls SQLite DB pruning via `DBManager.StartRetentionLoop`
+- `SessionActivityLogDir` resolution in [`main.go`](../main.go) no longer gated on `SessionActivityLogEnabled`
+- Disk-usage check in [`admin.go`](../admin.go): removed `SessionActivityLogEnabled` gate
 
-**Optional direct SQL** (if performance requires it):
-```sql
-SELECT
-    (snapshot_ts / (? * 60)) * (? * 60) AS bucket_ts,
-    MAX(concurrent_in_snapshot) AS peak_regular,
-    MAX(concurrent_password) AS peak_password,
-    MAX(concurrent_bypassed) AS peak_bypassed
-FROM (
-    SELECT snapshot_ts,
-        COUNT(DISTINCT CASE WHEN auth_method = '' THEN user_session_id END) AS concurrent_in_snapshot,
-        COUNT(DISTINCT CASE WHEN auth_method = 'password' THEN user_session_id END) AS concurrent_password,
-        COUNT(DISTINCT CASE WHEN auth_method = 'ip_bypass' THEN user_session_id END) AS concurrent_bypassed
-    FROM sessions
-    WHERE snapshot_ts >= ? AND snapshot_ts < ?
-      AND event_type = 'snapshot'
-    GROUP BY snapshot_ts
-)
-GROUP BY bucket_ts
-ORDER BY bucket_ts ASC
-```
+### Imports removed from `session_activity_log.go`
 
----
-
-#### 5.3 Session activity metrics — `/admin/session-activity/metrics` (GET)
-
-**Current**: [`admin.go:HandleSessionActivityMetrics()`](../admin.go:5634) calls
-`ReadActivityLogs()` then `calculateSessionMetrics()` in Go.
-
-**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
-benefits. The `calculateSessionMetrics()` Go function remains unchanged.
-
----
-
-#### 5.4 Session activity events — `/admin/session-activity/events` (GET)
-
-**Current**: [`admin.go:HandleSessionActivityEvents()`](../admin.go:5911) calls
-`ReadActivityLogs()` then `convertLogsToEvents()` in Go.
-
-**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
-benefits. The `convertLogsToEvents()` Go function remains unchanged.
-
----
-
-#### 5.5 Public session stats — `/session-stats` (GET)
-
-**Current**: [`session_stats_api.go`](../session_stats_api.go:81) calls `ReadActivityLogs()`
-for the last 28 days.
-
-**Migration**: Once `ReadActivityLogs()` is migrated to DB, this handler automatically
-benefits. The DB must be threaded into the handler (currently takes `config *Config` and
-`geoIPService *GeoIPService` — add `db *sql.DB` parameter or store on a struct).
-
----
-
-#### 5.6 Telegram bot session stats
-
-**Current**: [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go:123) calls
-`ReadActivityLogs()` for the last 24 hours.
-
-**Migration**: Once `ReadActivityLogs()` is migrated to DB, this caller automatically
-benefits. The Telegram bot struct needs a `db *sql.DB` field added and wired from main.
-
----
-
-**Files to change**:
-- [`session_activity_log.go`](../session_activity_log.go) — add `readDB *sql.DB` parameter to `ReadActivityLogs()`; add DB read path; keep JSONL fallback
-- [`admin.go`](../admin.go) — update 4 `ReadActivityLogs()` call sites to pass `ah.dbManager.ReadDB()`
-- [`session_stats_api.go`](../session_stats_api.go) — thread read pool into handler; update call site
-- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go) — add `readDB *sql.DB` to bot struct; update call site
+`bufio`, `bytes`, `os`, `path/filepath`
 
 ---
 

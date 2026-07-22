@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"log"
 	"sort"
@@ -449,6 +450,17 @@ func (m *NotificationManager) SetConfig(c *Config) {
 	m.mu.RUnlock()
 	if reg != nil {
 		reg.SetConfig(c)
+	}
+}
+
+// SetReadDB wires the SQLite read-only pool into the listener registry
+// so that the /stats bot command can query session activity from the DB.
+func (m *NotificationManager) SetReadDB(db *sql.DB) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetReadDB(db)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,6 +83,7 @@ type TelegramBotListener struct {
 	config           *Config                    // nil until wired; used by /info
 	instanceReporter *InstanceReporter          // nil until wired; used by /info (public URL)
 	ipBanManager     *IPBanManager              // nil until wired; used by /banned
+	readDB           *sql.DB                    // nil until wired; used by /stats (session activity)
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -1052,6 +1054,15 @@ func (r *TelegramListenerRegistry) SetChatManager(h *ChatManager) {
 	r.chatManager = h
 	for _, l := range r.listeners {
 		l.chatManager = h
+	}
+}
+
+// SetReadDB wires the SQLite read-only pool into all current and future listeners.
+func (r *TelegramListenerRegistry) SetReadDB(db *sql.DB) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, l := range r.listeners {
+		l.readDB = db
 	}
 }
 

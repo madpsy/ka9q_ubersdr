@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -74,13 +70,11 @@ type SessionActivityLogger struct {
 	retentionDays int // Number of days to retain log files (0 = keep forever)
 	sessionMgr    *SessionManager
 	mu            sync.Mutex
-	currentFile   *os.File
-	currentDate   string
 	stopChan      chan struct{}
 	logChan       chan logEvent // Channel for async logging
 	wg            sync.WaitGroup
 
-	// SQLite (dual-write alongside JSONL; nil when DB not available)
+	// SQLite write connection (for INSERTs)
 	db *sql.DB
 }
 
@@ -121,15 +115,7 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 	logger.wg.Add(1)
 	go logger.periodicSnapshotLoop()
 
-	// Start daily cleanup goroutine (runs at startup then once per day at midnight UTC)
-	logger.wg.Add(1)
-	go logger.cleanupLoop()
-
-	retentionDesc := "forever"
-	if retentionDays > 0 {
-		retentionDesc = fmt.Sprintf("%d days", retentionDays)
-	}
-	log.Printf("Session activity logger started: dir=%s, interval=%v, retention=%s", dataDir, logger.logInterval, retentionDesc)
+	log.Printf("Session activity logger started: interval=%v", logger.logInterval)
 
 	return logger
 }
@@ -257,79 +243,59 @@ func (sal *SessionActivityLogger) LogSessionDestroyedWithData(uuid string, bands
 	return nil
 }
 
-// logActivitySync logs the current state of all active sessions (synchronous, called from async loop)
+// logActivitySync logs the current state of all active sessions to the SQLite database.
 func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 	// Get all active sessions from session manager FIRST (without holding our lock)
 	// This prevents deadlock since session manager may call us while holding its lock
 	activeSessions := sal.getActiveSessionEntries(event)
 
-	// Create log entry
 	logEntry := SessionActivityLog{
 		Timestamp:      time.Now().UTC(),
 		EventType:      event.eventType,
 		ActiveSessions: activeSessions,
 	}
 
-	// Now acquire our lock for file operations
-	sal.mu.Lock()
-	defer sal.mu.Unlock()
-
-	// Get or create file for today
-	file, err := sal.getOrCreateFile()
-	if err != nil {
-		return fmt.Errorf("failed to get log file: %w", err)
+	if sal.db == nil {
+		return nil // DB not configured — nothing to write
 	}
 
-	// Marshal to JSON
-	data, err := json.Marshal(logEntry)
-	if err != nil {
-		return fmt.Errorf("failed to marshal log entry: %w", err)
-	}
+	// Insert one row per SessionActivityEntry into the sessions table.
+	for _, entry := range logEntry.ActiveSessions {
+		sessionTypesJSON, _ := json.Marshal(entry.SessionTypes)
+		bandsJSON, _ := json.Marshal(entry.Bands)
+		modesJSON, _ := json.Marshal(entry.Modes)
 
-	// Write JSON line
-	if _, err := file.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("failed to write log entry: %w", err)
-	}
+		var createdAt, firstSeen int64
+		if !entry.CreatedAt.IsZero() {
+			createdAt = entry.CreatedAt.Unix()
+		}
+		if !entry.FirstSeen.IsZero() {
+			firstSeen = entry.FirstSeen.Unix()
+		}
 
-	// Dual-write to SQLite — one row per SessionActivityEntry (non-fatal)
-	if sal.db != nil {
-		for _, entry := range logEntry.ActiveSessions {
-			sessionTypesJSON, _ := json.Marshal(entry.SessionTypes)
-			bandsJSON, _ := json.Marshal(entry.Bands)
-			modesJSON, _ := json.Marshal(entry.Modes)
-
-			var createdAt, firstSeen int64
-			if !entry.CreatedAt.IsZero() {
-				createdAt = entry.CreatedAt.Unix()
-			}
-			if !entry.FirstSeen.IsZero() {
-				firstSeen = entry.FirstSeen.Unix()
-			}
-
-			_, dbErr := sal.db.Exec(
-				`INSERT INTO sessions
-				 (snapshot_ts, event_type, user_session_id, client_ip, source_ip,
-				  auth_method, session_types, bands, modes,
-				  created_at, first_seen, user_agent, country, country_code)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				logEntry.Timestamp.Unix(),
-				logEntry.EventType,
-				entry.UserSessionID,
-				entry.ClientIP,
-				entry.SourceIP,
-				entry.AuthMethod,
-				string(sessionTypesJSON),
-				string(bandsJSON),
-				string(modesJSON),
-				createdAt,
-				firstSeen,
-				entry.UserAgent,
-				entry.Country,
-				entry.CountryCode,
-			)
-			if dbErr != nil {
-				log.Printf("[DB] sessions insert error: %v", dbErr)
-			}
+		_, dbErr := sal.db.Exec(
+			`INSERT INTO sessions
+			 (snapshot_ts, event_type, user_session_id, client_ip, source_ip,
+			  auth_method, session_types, bands, modes,
+			  created_at, first_seen, user_agent, country, country_code)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			logEntry.Timestamp.Unix(),
+			logEntry.EventType,
+			entry.UserSessionID,
+			entry.ClientIP,
+			entry.SourceIP,
+			entry.AuthMethod,
+			string(sessionTypesJSON),
+			string(bandsJSON),
+			string(modesJSON),
+			createdAt,
+			firstSeen,
+			entry.UserAgent,
+			entry.Country,
+			entry.CountryCode,
+		)
+		if dbErr != nil {
+			log.Printf("[DB] sessions insert error: %v", dbErr)
 		}
 	}
 
@@ -526,164 +492,6 @@ func sortStrings(s []string) {
 	}
 }
 
-// getOrCreateFile gets or creates the log file for today
-func (sal *SessionActivityLogger) getOrCreateFile() (*os.File, error) {
-	now := time.Now().UTC()
-	dateStr := now.Format("2006-01-02")
-
-	// Check if we need to rotate to a new file
-	if sal.currentFile != nil && sal.currentDate == dateStr {
-		return sal.currentFile, nil
-	}
-
-	// Close old file if open
-	if sal.currentFile != nil {
-		sal.currentFile.Close()
-		sal.currentFile = nil
-	}
-
-	// Create directory structure: data_dir/YYYY/MM/DD/
-	year := now.Format("2006")
-	month := now.Format("01")
-	day := now.Format("02")
-	dirPath := filepath.Join(sal.dataDir, year, month, day)
-
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", dirPath, err)
-	}
-
-	// Create file: data_dir/YYYY/MM/DD/sessions.jsonl
-	filename := filepath.Join(dirPath, "sessions.jsonl")
-
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %w", filename, err)
-	}
-
-	sal.currentFile = file
-	sal.currentDate = dateStr
-
-	return file, nil
-}
-
-// cleanupLoop runs cleanupOldFiles once at startup, then once per day at midnight UTC.
-func (sal *SessionActivityLogger) cleanupLoop() {
-	defer sal.wg.Done()
-
-	// Run immediately at startup so files aged out while the process was down are removed.
-	if err := sal.cleanupOldFiles(); err != nil {
-		log.Printf("Session activity log cleanup error: %v", err)
-	}
-
-	for {
-		// Sleep until next midnight UTC.
-		now := time.Now().UTC()
-		next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
-		timer := time.NewTimer(time.Until(next))
-
-		select {
-		case <-timer.C:
-			if err := sal.cleanupOldFiles(); err != nil {
-				log.Printf("Session activity log cleanup error: %v", err)
-			}
-		case <-sal.stopChan:
-			timer.Stop()
-			return
-		}
-	}
-}
-
-// cleanupOldFiles removes YYYY/MM/DD directories older than retentionDays.
-// Empty parent MM/ and YYYY/ directories are pruned afterwards.
-func (sal *SessionActivityLogger) cleanupOldFiles() error {
-	if sal.retentionDays <= 0 {
-		return nil // 0 = keep forever
-	}
-
-	cutoff := time.Now().UTC().AddDate(0, 0, -sal.retentionDays)
-
-	// Walk the top-level directory looking for YYYY sub-directories.
-	yearEntries, err := os.ReadDir(sal.dataDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // Nothing to clean up yet
-		}
-		return fmt.Errorf("cleanupOldFiles: reading dataDir %s: %w", sal.dataDir, err)
-	}
-
-	removedDirs := 0
-
-	for _, yearEntry := range yearEntries {
-		if !yearEntry.IsDir() {
-			continue
-		}
-		yearPath := filepath.Join(sal.dataDir, yearEntry.Name())
-
-		monthEntries, err := os.ReadDir(yearPath)
-		if err != nil {
-			log.Printf("Session activity log cleanup: cannot read year dir %s: %v", yearPath, err)
-			continue
-		}
-
-		for _, monthEntry := range monthEntries {
-			if !monthEntry.IsDir() {
-				continue
-			}
-			monthPath := filepath.Join(yearPath, monthEntry.Name())
-
-			dayEntries, err := os.ReadDir(monthPath)
-			if err != nil {
-				log.Printf("Session activity log cleanup: cannot read month dir %s: %v", monthPath, err)
-				continue
-			}
-
-			for _, dayEntry := range dayEntries {
-				if !dayEntry.IsDir() {
-					continue
-				}
-				// Parse the date from YYYY/MM/DD path components.
-				dateStr := fmt.Sprintf("%s-%s-%s", yearEntry.Name(), monthEntry.Name(), dayEntry.Name())
-				t, err := time.Parse("2006-01-02", dateStr)
-				if err != nil {
-					// Not a date directory — skip.
-					continue
-				}
-
-				if t.Before(cutoff) {
-					dayPath := filepath.Join(monthPath, dayEntry.Name())
-					if err := os.RemoveAll(dayPath); err != nil {
-						log.Printf("Session activity log cleanup: failed to remove %s: %v", dayPath, err)
-					} else {
-						removedDirs++
-					}
-				}
-			}
-
-			// Remove the month directory if it is now empty.
-			remaining, _ := os.ReadDir(monthPath)
-			if len(remaining) == 0 {
-				if err := os.Remove(monthPath); err != nil && !os.IsNotExist(err) {
-					log.Printf("Session activity log cleanup: failed to remove empty month dir %s: %v", monthPath, err)
-				}
-			}
-		}
-
-		// Remove the year directory if it is now empty.
-		remaining, _ := os.ReadDir(yearPath)
-		if len(remaining) == 0 {
-			if err := os.Remove(yearPath); err != nil && !os.IsNotExist(err) {
-				log.Printf("Session activity log cleanup: failed to remove empty year dir %s: %v", yearPath, err)
-			}
-		}
-	}
-
-	if removedDirs > 0 {
-		log.Printf("Session activity log cleanup: removed %d old day director(ies) (retention: %d days)", removedDirs, sal.retentionDays)
-	}
-
-	return nil
-}
-
 // Stop stops the session activity logger
 func (sal *SessionActivityLogger) Stop() {
 	if !sal.enabled {
@@ -691,109 +499,109 @@ func (sal *SessionActivityLogger) Stop() {
 	}
 
 	log.Println("Stopping session activity logger...")
-
-	// Signal stop
 	close(sal.stopChan)
-
-	// Wait for goroutine to finish
 	sal.wg.Wait()
-
-	// Close current file
-	sal.mu.Lock()
-	if sal.currentFile != nil {
-		sal.currentFile.Close()
-		sal.currentFile = nil
-	}
-	sal.mu.Unlock()
-
 	log.Println("Session activity logger stopped")
 }
 
-// ReadActivityLogs reads session activity logs for a given time range
-// Returns all log entries within the specified time range
-func ReadActivityLogs(dataDir string, startTime, endTime time.Time) ([]SessionActivityLog, error) {
-	var logs []SessionActivityLog
-
-	// Iterate through each day in the range
-	currentDate := startTime.UTC()
-	endDate := endTime.UTC()
-
-	for !currentDate.After(endDate) {
-		// Build directory path for this day
-		year := currentDate.Format("2006")
-		month := currentDate.Format("01")
-		day := currentDate.Format("02")
-		dirPath := filepath.Join(dataDir, year, month, day)
-
-		// Check if directory exists
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			// No data for this day, skip
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Read the sessions.jsonl file
-		filename := filepath.Join(dirPath, "sessions.jsonl")
-		file, err := os.Open(filename)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// File doesn't exist for this day, skip
-				currentDate = currentDate.AddDate(0, 0, 1)
-				continue
-			}
-			return nil, fmt.Errorf("failed to open file %s: %w", filename, err)
-		}
-
-		// Read line by line using bufio.Scanner to properly handle corrupted data
-		scanner := bufio.NewScanner(file)
-		// Increase buffer size to 10MB to handle large JSON lines
-		scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
-		lineNum := 0
-		corruptedLines := 0
-		for scanner.Scan() {
-			lineNum++
-			line := scanner.Bytes()
-
-			// Skip empty lines
-			if len(line) == 0 {
-				continue
-			}
-
-			// Skip lines with null bytes (corrupted data)
-			if bytes.Contains(line, []byte{0}) {
-				corruptedLines++
-				continue
-			}
-
-			var entry SessionActivityLog
-			if err := json.Unmarshal(line, &entry); err != nil {
-				corruptedLines++
-				continue
-			}
-
-			// Filter by time range
-			if (entry.Timestamp.Equal(startTime) || entry.Timestamp.After(startTime)) &&
-				(entry.Timestamp.Equal(endTime) || entry.Timestamp.Before(endTime)) {
-				logs = append(logs, entry)
-			}
-		}
-
-		// Log summary only if there were corrupted lines (not per-line to avoid log spam)
-		if corruptedLines > 0 {
-			log.Printf("Warning: skipped %d corrupted lines in %s", corruptedLines, filename)
-		}
-
-		if err := scanner.Err(); err != nil {
-			file.Close()
-			return nil, fmt.Errorf("error reading file %s: %w", filename, err)
-		}
-
-		file.Close()
-
-		// Move to next day
-		currentDate = currentDate.AddDate(0, 0, 1)
+// ReadActivityLogsFromDB reads session activity logs from the SQLite database for a given time range.
+// It reconstructs []SessionActivityLog by grouping rows by (snapshot_ts, event_type).
+func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error) {
+	if db == nil {
+		return nil, fmt.Errorf("session activity database not configured")
 	}
 
+	rows, err := db.Query(
+		`SELECT snapshot_ts, event_type,
+		        user_session_id, client_ip, source_ip, auth_method,
+		        session_types, bands, modes,
+		        created_at, first_seen, user_agent, country, country_code
+		 FROM sessions
+		 WHERE snapshot_ts >= ? AND snapshot_ts <= ?
+		 ORDER BY snapshot_ts ASC`,
+		startTime.Unix(), endTime.Unix(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessions query error: %w", err)
+	}
+	defer rows.Close()
+
+	// Group rows by (snapshot_ts, event_type) to reconstruct SessionActivityLog entries.
+	type snapshotKey struct {
+		ts        int64
+		eventType string
+	}
+	order := make([]snapshotKey, 0)
+	groups := make(map[snapshotKey]*SessionActivityLog)
+
+	for rows.Next() {
+		var snapshotTS, createdAt, firstSeen int64
+		var eventType, userSessionID, clientIP, sourceIP, authMethod string
+		var sessionTypesJSON, bandsJSON, modesJSON string
+		var userAgent, country, countryCode string
+
+		if err := rows.Scan(
+			&snapshotTS, &eventType,
+			&userSessionID, &clientIP, &sourceIP, &authMethod,
+			&sessionTypesJSON, &bandsJSON, &modesJSON,
+			&createdAt, &firstSeen, &userAgent, &country, &countryCode,
+		); err != nil {
+			return nil, fmt.Errorf("sessions scan error: %w", err)
+		}
+
+		key := snapshotKey{ts: snapshotTS, eventType: eventType}
+		if _, exists := groups[key]; !exists {
+			groups[key] = &SessionActivityLog{
+				Timestamp:      time.Unix(snapshotTS, 0).UTC(),
+				EventType:      eventType,
+				ActiveSessions: []SessionActivityEntry{},
+			}
+			order = append(order, key)
+		}
+
+		var sessionTypes, bands, modes []string
+		_ = json.Unmarshal([]byte(sessionTypesJSON), &sessionTypes)
+		_ = json.Unmarshal([]byte(bandsJSON), &bands)
+		_ = json.Unmarshal([]byte(modesJSON), &modes)
+		if sessionTypes == nil {
+			sessionTypes = []string{}
+		}
+		if bands == nil {
+			bands = []string{}
+		}
+		if modes == nil {
+			modes = []string{}
+		}
+
+		entry := SessionActivityEntry{
+			UserSessionID: userSessionID,
+			ClientIP:      clientIP,
+			SourceIP:      sourceIP,
+			AuthMethod:    authMethod,
+			SessionTypes:  sessionTypes,
+			Bands:         bands,
+			Modes:         modes,
+			UserAgent:     userAgent,
+			Country:       country,
+			CountryCode:   countryCode,
+		}
+		if createdAt != 0 {
+			entry.CreatedAt = time.Unix(createdAt, 0).UTC()
+		}
+		if firstSeen != 0 {
+			entry.FirstSeen = time.Unix(firstSeen, 0).UTC()
+		}
+
+		groups[key].ActiveSessions = append(groups[key].ActiveSessions, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	logs := make([]SessionActivityLog, 0, len(order))
+	for _, key := range order {
+		logs = append(logs, *groups[key])
+	}
 	return logs, nil
 }
 

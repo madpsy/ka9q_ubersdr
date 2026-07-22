@@ -5005,8 +5005,8 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Session activity directory
-	if ah.config.Server.SessionActivityLogEnabled && ah.config.Server.SessionActivityLogDir != "" {
+	// Session activity directory (legacy JSONL files, used by the one-time DB importer)
+	if ah.config.Server.SessionActivityLogDir != "" {
 		if _, err := os.Stat(ah.config.Server.SessionActivityLogDir); err == nil {
 			duCmd := exec.Command("du", "-sh", ah.config.Server.SessionActivityLogDir)
 			if duOutput, err := duCmd.CombinedOutput(); err == nil {
@@ -5543,13 +5543,9 @@ func (ah *AdminHandler) HandleSessionActivityLogs(w http.ResponseWriter, r *http
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if session activity logging is enabled
-	if !ah.config.Server.SessionActivityLogEnabled {
-		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error":   "not_enabled",
-			"message": "Session activity logging is not enabled in configuration",
-		})
+	// Check if session activity DB is available
+	if ah.dbManager == nil || ah.dbManager.ReadDB() == nil {
+		http.Error(w, "Session activity data is not available (database not configured)", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -5596,8 +5592,7 @@ func (ah *AdminHandler) HandleSessionActivityLogs(w http.ResponseWriter, r *http
 		}
 	}
 
-	// Read logs from disk
-	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return
@@ -5639,13 +5634,9 @@ func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *h
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if session activity logging is enabled
-	if !ah.config.Server.SessionActivityLogEnabled {
-		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error":   "not_enabled",
-			"message": "Session activity logging is not enabled in configuration",
-		})
+	// Check if session activity DB is available
+	if ah.dbManager == nil || ah.dbManager.ReadDB() == nil {
+		http.Error(w, "Session activity data is not available (database not configured)", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -5682,8 +5673,7 @@ func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *h
 		authMethods = strings.Split(authMethodsStr, ",")
 	}
 
-	// Read logs from disk
-	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return
@@ -5728,13 +5718,9 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if session activity logging is enabled
-	if !ah.config.Server.SessionActivityLogEnabled {
-		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error":   "not_enabled",
-			"message": "Session activity logging is not enabled in configuration",
-		})
+	// Check if session activity DB is available
+	if ah.dbManager == nil || ah.dbManager.ReadDB() == nil {
+		http.Error(w, "Session activity data is not available (database not configured)", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -5781,8 +5767,7 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 		}
 	}
 
-	// Read logs from disk
-	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return
@@ -5916,13 +5901,9 @@ func (ah *AdminHandler) HandleSessionActivityEvents(w http.ResponseWriter, r *ht
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if session activity logging is enabled
-	if !ah.config.Server.SessionActivityLogEnabled {
-		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error":   "not_enabled",
-			"message": "Session activity logging is not enabled in configuration",
-		})
+	// Check if session activity DB is available
+	if ah.dbManager == nil || ah.dbManager.ReadDB() == nil {
+		http.Error(w, "Session activity data is not available (database not configured)", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -5984,8 +5965,7 @@ func (ah *AdminHandler) HandleSessionActivityEvents(w http.ResponseWriter, r *ht
 		}
 	}
 
-	// Read logs from disk
-	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return

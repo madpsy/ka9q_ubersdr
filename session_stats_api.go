@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -43,7 +44,7 @@ func isValidMode(mode string) bool {
 // - Unique user count (without exposing IPs)
 // - Only includes 'regular' auth users (not bypassed/password)
 // Rate limited to 1 request per 3 seconds per IP
-func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Config, rateLimiter *SessionStatsRateLimiter, geoIPService *GeoIPService) {
+func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Config, readDB *sql.DB, rateLimiter *SessionStatsRateLimiter, geoIPService *GeoIPService) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -63,12 +64,12 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if session activity logging is enabled
-	if !config.Server.SessionActivityLogEnabled {
+	// Check if session activity DB is available
+	if readDB == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error":   "not_enabled",
-			"message": "Session activity logging is not enabled in configuration",
+			"message": "Session activity data is not available (database not configured)",
 		})
 		return
 	}
@@ -77,8 +78,7 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 	endTime := time.Now().UTC()
 	startTime := endTime.Add(-28 * 24 * time.Hour)
 
-	// Read logs from disk
-	logs, err := ReadActivityLogs(config.Server.SessionActivityLogDir, startTime, endTime)
+	logs, err := ReadActivityLogsFromDB(readDB, startTime, endTime)
 	if err != nil {
 		http.Error(w, "Failed to read activity logs", http.StatusInternalServerError)
 		log.Printf("Error reading activity logs for public stats: %v", err)

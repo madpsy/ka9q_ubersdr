@@ -21,6 +21,8 @@ class BandConditionsMonitor {
         this.utcClockInterval = null; // Interval for UTC clock updates
         this.wsprEnabled = false; // Whether WSPR phone predictions are available
         this.weatherData = null; // Cached local weather data from /api/weather
+        this.timezone = null; // IANA timezone name e.g. "Europe/London"
+        this.timezoneOffset = null; // DST-adjusted UTC offset in minutes
 
         // Tableau 10 color palette
         this.bandColors = {
@@ -67,6 +69,14 @@ class BandConditionsMonitor {
                 // Store location name if available
                 if (data.receiver && data.receiver.location && data.receiver.location.trim() !== '') {
                     this.location = data.receiver.location;
+                }
+
+                // Store timezone info if available
+                if (data.timezone) {
+                    this.timezone = data.timezone;
+                }
+                if (typeof data.timezone_offset === 'number') {
+                    this.timezoneOffset = data.timezone_offset;
                 }
 
                 // Update receiver name in subtitle
@@ -909,8 +919,29 @@ class BandConditionsMonitor {
         const clockEl = document.getElementById('utc-clock');
         if (clockEl) {
             const now = new Date();
-            const timeStr = now.toISOString().substr(11, 8); // Extract HH:MM:SS
-            clockEl.textContent = `🕐 UTC: ${timeStr}`;
+            const utcStr = now.toISOString().substr(11, 8); // HH:MM:SS
+
+            let localPart = '';
+            if (this.timezoneOffset !== null) {
+                const localMs = now.getTime() + this.timezoneOffset * 60 * 1000;
+                const localDate = new Date(localMs);
+                const localStr = localDate.toISOString().substr(11, 8);
+
+                // Build a short offset label e.g. "UTC+1" or "UTC-5:30"
+                const sign = this.timezoneOffset >= 0 ? '+' : '-';
+                const absMin = Math.abs(this.timezoneOffset);
+                const offsetH = Math.floor(absMin / 60);
+                const offsetM = absMin % 60;
+                const offsetLabel = offsetM === 0
+                    ? `UTC${sign}${offsetH}`
+                    : `UTC${sign}${offsetH}:${String(offsetM).padStart(2, '0')}`;
+
+                // Use IANA name as tooltip if available
+                const tzLabel = this.timezone || offsetLabel;
+                localPart = ` &nbsp;|&nbsp; 🕐 <span title="${tzLabel}">${offsetLabel}: ${localStr}</span>`;
+            }
+
+            clockEl.innerHTML = `🕐 UTC: ${utcStr}${localPart}`;
         }
     }
 

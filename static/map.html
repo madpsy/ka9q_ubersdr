@@ -1092,6 +1092,18 @@
 
             rxMarker.on('tooltipopen', () => rxMarker.setTooltipContent(render()));
             rxMarker.on('popupopen', () => rxMarker.setPopupContent(render()));
+
+            // Fetch MUF for the instance's own location and append it to the popup.
+            // Done after the marker is placed so the pin appears immediately.
+            // mufExtra is captured in the closure so subsequent opens also show it.
+            let mufExtra = '';
+            const renderWithMUF = () => renderReceiver(desc, rx, gps, weather) + mufExtra;
+            mufExtra = await fetchMUFSnippet(gps.lat, gps.lon);
+            if (mufExtra) {
+                rxMarker.setPopupContent(renderWithMUF());
+                rxMarker.off('popupopen');
+                rxMarker.on('popupopen', () => rxMarker.setPopupContent(renderWithMUF()));
+            }
         }
 
         async function loadWeather() {
@@ -1359,13 +1371,20 @@
         // render is a function, not a string, so the sun/moon figures are rebuilt
         // each time the popup is opened.  With bounds, the grid square is outlined
         // and the map fitted to it; without, the map just centres on the point.
-        function placeSearchResult(lat, lon, pin, render, bounds) {
+        // MUF data is fetched in parallel and appended once it arrives.
+        async function placeSearchResult(lat, lon, pin, render, bounds) {
             if (searchLayer) map.removeLayer(searchLayer);
             searchLayer = L.layerGroup().addTo(map);
 
+            // Start MUF fetch immediately, before the map animation
+            const mufPromise = fetchMUFSnippet(lat, lon);
+
+            let mufExtra = '';
+            const renderWithMUF = () => render() + mufExtra;
+
             const marker = L.marker([lat, lon], { icon: flagIcon(pin, 'click-marker') })
-                .bindPopup(render());
-            marker.on('popupopen', () => marker.setPopupContent(render()));
+                .bindPopup(renderWithMUF());
+            marker.on('popupopen', () => marker.setPopupContent(renderWithMUF()));
             searchLayer.addLayer(marker);
 
             if (bounds) {
@@ -1381,6 +1400,12 @@
             }
 
             marker.openPopup();
+
+            // Append MUF data once it arrives
+            mufExtra = await mufPromise;
+            if (mufExtra && marker.isPopupOpen()) {
+                marker.setPopupContent(renderWithMUF());
+            }
         }
 
         // Load every country's centre point from the GET endpoint.  The payload is

@@ -18,6 +18,13 @@ path with DB queries, keeping the file write path intact as a fallback/backup.
   internal data source changes.
 - **Unix timestamps in DB**: All `ts` columns store Unix seconds (INTEGER). Convert with
   `time.Unix(ts, 0).UTC()` when building response structs.
+- **Read vs write connections**: `DBManager` exposes two pools:
+  - `DB()` — single write connection (`MaxOpenConns=1`). Use for all `INSERT`/`UPDATE`/`DELETE`/`PRAGMA`.
+  - `ReadDB()` — read-only pool (`MaxOpenConns=4`, `mode=ro`). **Use this for all `SELECT` queries.**
+    WAL mode allows `ReadDB()` to run concurrently with the writer without any serialization delay.
+  All subsystem structs that currently store `db *sql.DB` for writes should store a second
+  `readDB *sql.DB` field (or receive it at construction) for reads. When `dbManager` is
+  available, pass `dbManager.ReadDB()` to read paths and `dbManager.DB()` to write paths.
 
 ---
 
@@ -29,12 +36,13 @@ path with DB queries, keeping the file write path intact as a fallback/backup.
 ### DB access pattern for this component
 
 `HandleChatLogs` is a method on `AdminHandler`, which already has `dbManager *DBManager`
-(field added in the dual-write phase). Access the DB via `ah.dbManager.DB()` (or
-`ah.dbManager.db` if unexported). The package-level `readChatLogs(dataDir, filter)` function
-should gain a `db *sql.DB` parameter: `readChatLogs(dataDir string, db *sql.DB, filter *ChatLogFilter)`.
-When `db != nil`, use the DB path; otherwise fall back to the file walk.
+(field added in the dual-write phase). The package-level `readChatLogs(dataDir, filter)` function
+should gain a `readDB *sql.DB` parameter: `readChatLogs(dataDir string, readDB *sql.DB, filter *ChatLogFilter)`.
+When `readDB != nil`, use the DB path; otherwise fall back to the file walk.
+In `HandleChatLogs`, pass `ah.dbManager.ReadDB()` as the `readDB` argument.
 
-`ChatLogger` already has a `db *sql.DB` field (added for dual-write). Use it directly.
+`ChatLogger` already has a `db *sql.DB` field (added for dual-write). Add a `readDB *sql.DB`
+field alongside it. Pass `dbManager.ReadDB()` at construction for read queries.
 
 ### Operations to migrate
 
@@ -60,9 +68,9 @@ LIMIT ?                -- filter.Limit
 `strings.ToLower` behaviour. The `EndDate` bound should be `EndDate + 24h` to include
 the full last day (current code iterates through `EndDate` inclusive).
 
-**File to change**: [`chat_logs_api.go`](../chat_logs_api.go) — add `db *sql.DB` parameter to
-`readChatLogs()`; add DB query path inside; keep file walk as fallback when `db == nil`.
-In `HandleChatLogs`, pass `ah.dbManager.db` (or a `DB()` accessor) as the `db` argument.
+**File to change**: [`chat_logs_api.go`](../chat_logs_api.go) — add `readDB *sql.DB` parameter to
+`readChatLogs()`; add DB query path inside; keep file walk as fallback when `readDB == nil`.
+In `HandleChatLogs`, pass `ah.dbManager.ReadDB()` as the `readDB` argument.
 
 ---
 
@@ -83,8 +91,8 @@ LIMIT ?                -- maxMessages (take tail = most recent)
 Since there is no `banned_ips` table in the DB, filter banned IPs in Go after the query
 (same as today, just operating on DB rows instead of CSV rows).
 
-**File to change**: [`chat_logger.go`](../chat_logger.go) — use existing `cl.db` field for the
-DB read path in `LoadRecentMessages()`; fall back to file walk when `cl.db == nil`.
+**File to change**: [`chat_logger.go`](../chat_logger.go) — use `cl.readDB` field for the
+DB read path in `LoadRecentMessages()`; fall back to file walk when `cl.readDB == nil`.
 
 ---
 
@@ -104,8 +112,8 @@ ORDER BY ts DESC
 LIMIT 1
 ```
 
-**File to change**: [`chat_logger.go`](../chat_logger.go) — use existing `cl.db` field; replace
-file walk with DB query when `cl.db != nil`.
+**File to change**: [`chat_logger.go`](../chat_logger.go) — use `cl.readDB` field; replace
+file walk with DB query when `cl.readDB != nil`.
 
 ---
 
@@ -526,14 +534,14 @@ to `GetCWHistoricalSpots()`, `GetCWAvailableDates()`, `GetCWAvailableNames()`.
 - [`session_stats_api.go`](../session_stats_api.go:81) — public stats endpoint
 - [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go:123) — Telegram bot
 
-**Recommended approach**: Add a `db *sql.DB` parameter to `ReadActivityLogs`:
+**Recommended approach**: Add a `readDB *sql.DB` parameter to `ReadActivityLogs`:
 ```go
-func ReadActivityLogs(dataDir string, db *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error)
+func ReadActivityLogs(dataDir string, readDB *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error)
 ```
-When `db != nil`, use the DB path; otherwise fall back to the JSONL file walk.
-All 6 call sites must be updated to pass the DB. The `AdminHandler` already has
-`dbManager *DBManager` — pass `ah.dbManager.db`. The `session_stats_api.go` handler
-and Telegram bot handler need the DB threaded in via their respective structs or
+When `readDB != nil`, use the DB path; otherwise fall back to the JSONL file walk.
+All 6 call sites must be updated to pass the read pool. The `AdminHandler` already has
+`dbManager *DBManager` — pass `ah.dbManager.ReadDB()`. The `session_stats_api.go` handler
+and Telegram bot handler need the read pool threaded in via their respective structs or
 function parameters.
 
 ### Operations to migrate
@@ -638,10 +646,10 @@ benefits. The Telegram bot struct needs a `db *sql.DB` field added and wired fro
 ---
 
 **Files to change**:
-- [`session_activity_log.go`](../session_activity_log.go) — add `db *sql.DB` parameter to `ReadActivityLogs()`; add DB read path; keep JSONL fallback
-- [`admin.go`](../admin.go) — update 4 `ReadActivityLogs()` call sites to pass `ah.dbManager.db`
-- [`session_stats_api.go`](../session_stats_api.go) — thread DB into handler; update call site
-- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go) — add `db *sql.DB` to bot struct; update call site
+- [`session_activity_log.go`](../session_activity_log.go) — add `readDB *sql.DB` parameter to `ReadActivityLogs()`; add DB read path; keep JSONL fallback
+- [`admin.go`](../admin.go) — update 4 `ReadActivityLogs()` call sites to pass `ah.dbManager.ReadDB()`
+- [`session_stats_api.go`](../session_stats_api.go) — thread read pool into handler; update call site
+- [`telegram_bot_logs_stats.go`](../telegram_bot_logs_stats.go) — add `readDB *sql.DB` to bot struct; update call site
 
 ---
 
@@ -861,14 +869,16 @@ Each component follows the same pattern:
 
 ```go
 func (x *Foo) GetHistoricalData(params...) ([]*Result, error) {
-    if x.db != nil {
+    if x.readDB != nil {
         return x.getHistoricalDataFromDB(params...)
     }
     return x.getHistoricalDataFromFiles(params...)  // existing code, unchanged
 }
 
 func (x *Foo) getHistoricalDataFromDB(params...) ([]*Result, error) {
-    rows, err := x.db.Query(`SELECT ... FROM table WHERE ...`, args...)
+    // Always use readDB (read-only pool) for SELECT queries.
+    // readDB runs concurrently with the write connection via WAL — no serialization.
+    rows, err := x.readDB.Query(`SELECT ... FROM table WHERE ...`, args...)
     if err != nil {
         return nil, err
     }
@@ -888,10 +898,14 @@ func (x *Foo) getHistoricalDataFromDB(params...) ([]*Result, error) {
 ```
 
 Key rules:
-- **Never remove the file-based path** — it remains the fallback for `db == nil` and for
-  historical data predating the DB.
-- **DB mutex**: use `dbMu.RLock()` / `RUnlock()` around reads if the struct has one;
-  otherwise `*sql.DB` is safe for concurrent reads without a mutex.
+- **Always use `readDB` (not `db`) for SELECT queries.** `readDB` is the read-only pool
+  opened with `mode=ro` and `MaxOpenConns=4`. WAL mode allows it to run concurrently with
+  the single write connection. Using `db` for reads would serialize them behind write
+  transactions (including the import goroutine).
+- **Never remove the file-based path** — it remains the fallback for `readDB == nil` and
+  for historical data predating the DB.
+- **DB mutex**: `*sql.DB` is safe for concurrent reads without a mutex — the pool manages
+  connection acquisition internally.
 - **Error handling**: if the DB query fails, log the error and fall back to the file path
   rather than returning an error to the caller. This makes the migration transparent.
 

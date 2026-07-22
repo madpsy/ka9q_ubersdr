@@ -9043,7 +9043,7 @@ func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if ah.dbManager == nil || ah.dbManager.db == nil {
+	if ah.dbManager == nil || ah.dbManager.readDB == nil {
 		http.Error(w, `{"error":"database not available"}`, http.StatusServiceUnavailable)
 		return
 	}
@@ -9085,7 +9085,7 @@ func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := ah.dbManager.db.QueryContext(r.Context(), req.Query)
+	rows, err := ah.dbManager.readDB.QueryContext(r.Context(), req.Query)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -9150,13 +9150,13 @@ func (ah *AdminHandler) HandleDBTables(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if ah.dbManager == nil || ah.dbManager.db == nil {
+	if ah.dbManager == nil || ah.dbManager.readDB == nil {
 		http.Error(w, `{"error":"database not available"}`, http.StatusServiceUnavailable)
 		return
 	}
 
 	// Fetch all user table names and their CREATE SQL from sqlite_master.
-	masterRows, err := ah.dbManager.db.QueryContext(r.Context(),
+	masterRows, err := ah.dbManager.readDB.QueryContext(r.Context(),
 		`SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -9186,12 +9186,12 @@ func (ah *AdminHandler) HandleDBTables(w http.ResponseWriter, r *http.Request) {
 	// For each table, get row count and column names.
 	for i := range tables {
 		// Row count — use COUNT(*); safe because name comes from sqlite_master.
-		countRow := ah.dbManager.db.QueryRowContext(r.Context(),
+		countRow := ah.dbManager.readDB.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM "`+tables[i].Name+`"`)
 		_ = countRow.Scan(&tables[i].RowCount)
 
 		// Column names via PRAGMA table_info.
-		pragmaRows, err := ah.dbManager.db.QueryContext(r.Context(),
+		pragmaRows, err := ah.dbManager.readDB.QueryContext(r.Context(),
 			`PRAGMA table_info("`+tables[i].Name+`")`)
 		if err == nil {
 			for pragmaRows.Next() {

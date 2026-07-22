@@ -41,7 +41,12 @@ import (
 	"time"
 )
 
-const importBatchSize = 10000
+const importBatchSize = 100000
+
+// importSpotsDays limits how far back the spots and cw_spots backfill reaches.
+// Rows older than this many days are skipped — they would be pruned by the
+// retention loop anyway and importing them wastes time and disk space.
+const importSpotsDays = 30
 
 // DBImporter holds the database handle and per-subsystem data directories.
 // All directory fields are optional: an empty string means that subsystem is
@@ -294,6 +299,11 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 		 distance_km, bearing_deg, dbm)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
+	// Compute the earliest date we will import. The directory structure is
+	// <SpotsDir>/<MODE>/YYYY/MM/DD/ so we can skip entire day directories
+	// without opening any files.
+	cutoffDate := time.Now().UTC().AddDate(0, 0, -importSpotsDays).Truncate(24 * time.Hour)
+
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
 		return err
@@ -318,7 +328,26 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 				log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
 				return nil
 			}
-			if d.IsDir() || ctx.Err() != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if d.IsDir() {
+				// The day directory is 3 levels below modeDir: YYYY/MM/DD.
+				// Compute the relative path from modeDir; if it has exactly
+				// 3 components (year/month/day) parse the date and skip the
+				// entire subtree when it predates the cutoff.
+				rel, relErr := filepath.Rel(modeDir, path)
+				if relErr == nil {
+					parts := strings.Split(rel, string(filepath.Separator))
+					if len(parts) == 3 {
+						dayStr := parts[0] + "-" + parts[1] + "-" + parts[2]
+						if dayTime, parseErr := time.Parse("2006-01-02", dayStr); parseErr == nil {
+							if dayTime.Before(cutoffDate) {
+								return filepath.SkipDir // skip entire day subtree
+							}
+						}
+					}
+				}
 				return nil
 			}
 			if !strings.HasSuffix(path, ".csv") {
@@ -386,6 +415,10 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 		 country, cq_zone, itu_zone, continent, distance_km, bearing_deg)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
+	// CW spots directory structure: <CWSpotsDir>/YYYY/MM/DD/<band>.csv
+	// Skip entire day directories that predate the cutoff.
+	cutoffDate := time.Now().UTC().AddDate(0, 0, -importSpotsDays).Truncate(24 * time.Hour)
+
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
 		return err
@@ -397,7 +430,23 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
 			return nil
 		}
-		if d.IsDir() || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if d.IsDir() {
+			// Day directories are 3 levels below CWSpotsDir: YYYY/MM/DD.
+			rel, relErr := filepath.Rel(imp.CWSpotsDir, path)
+			if relErr == nil {
+				parts := strings.Split(rel, string(filepath.Separator))
+				if len(parts) == 3 {
+					dayStr := parts[0] + "-" + parts[1] + "-" + parts[2]
+					if dayTime, parseErr := time.Parse("2006-01-02", dayStr); parseErr == nil {
+						if dayTime.Before(cutoffDate) {
+							return filepath.SkipDir // skip entire day subtree
+						}
+					}
+				}
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".csv") {

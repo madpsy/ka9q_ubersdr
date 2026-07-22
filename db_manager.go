@@ -30,9 +30,13 @@ import (
 )
 
 // DBManager wraps the SQLite database connection and owns the schema lifecycle.
+// db is the single write connection (MaxOpenConns=1); readDB is a separate
+// read-only pool (MaxOpenConns=4) that WAL mode allows to run concurrently
+// with the writer without any Go-level serialization.
 type DBManager struct {
-	db   *sql.DB
-	path string
+	db     *sql.DB // write connection — single conn, all INSERTs/UPDATEs/PRAGMAs
+	readDB *sql.DB // read-only pool — concurrent SELECTs, never blocks writes
+	path   string
 }
 
 // NewDBManager opens (or creates) the SQLite database at the given path,
@@ -84,13 +88,41 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 		return nil, fmt.Errorf("db_manager: init schema: %w", err)
 	}
 
-	log.Printf("[DB] opened %s", dbPath)
+	// Read-only connection pool — WAL mode allows many concurrent readers
+	// alongside the single writer without any Go-level serialization.
+	// Each connection gets its own OS file descriptor; SQLite WAL handles
+	// snapshot isolation so readers never see a partial write transaction.
+	readDB, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("db_manager: open read pool %q: %w", dbPath, err)
+	}
+	readDB.SetMaxOpenConns(4)
+	readDB.SetMaxIdleConns(4)
+	// busy_timeout is still useful on the read pool: readers can briefly block
+	// during a WAL checkpoint. 5 s matches the write connection setting.
+	if _, err := readDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		_ = db.Close()
+		_ = readDB.Close()
+		return nil, fmt.Errorf("db_manager: read pool busy_timeout: %w", err)
+	}
+	mgr.readDB = readDB
+
+	log.Printf("[DB] opened %s (write×1 + read×4)", dbPath)
 	return mgr, nil
 }
 
-// DB returns the underlying *sql.DB for use by subsystem managers.
+// DB returns the write *sql.DB. Use this for all INSERT/UPDATE/DELETE/PRAGMA
+// operations. Only one connection is open; all writers are serialized here.
 func (m *DBManager) DB() *sql.DB {
 	return m.db
+}
+
+// ReadDB returns the read-only *sql.DB pool. Use this for all SELECT queries.
+// WAL mode allows up to 4 concurrent reads alongside the single write
+// connection with no serialization delay.
+func (m *DBManager) ReadDB() *sql.DB {
+	return m.readDB
 }
 
 // RetentionConfig holds per-table retention periods in days.
@@ -209,8 +241,11 @@ func (m *DBManager) pruneTable(table string, cutoff int64, days int) bool {
 	return total > 0
 }
 
-// Close closes the database connection.
+// Close closes both the write connection and the read-only pool.
 func (m *DBManager) Close() error {
+	if m.readDB != nil {
+		_ = m.readDB.Close()
+	}
 	if m.db != nil {
 		log.Printf("[DB] closing %s", m.path)
 		return m.db.Close()

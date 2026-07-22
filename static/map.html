@@ -1383,9 +1383,16 @@
             const renderWithMUF = () => render() + mufExtra;
 
             const marker = L.marker([lat, lon], { icon: flagIcon(pin, 'click-marker') })
-                .bindPopup(renderWithMUF());
+                .bindPopup(renderWithMUF(), { autoPan: true });
             marker.on('popupopen', () => marker.setPopupContent(renderWithMUF()));
             searchLayer.addLayer(marker);
+
+            // Open the popup only after the pan/zoom animation finishes so
+            // Leaflet's auto-pan can keep it fully on screen.  Without this the
+            // popup is positioned before the map has settled and can end up
+            // clipped at the top.
+            const openAfterMove = () => marker.openPopup();
+            map.once('moveend', openAfterMove);
 
             if (bounds) {
                 searchLayer.addLayer(L.rectangle(
@@ -1399,9 +1406,7 @@
                 map.setView([lat, lon], Math.max(map.getZoom(), 6));
             }
 
-            marker.openPopup();
-
-            // Append MUF data once it arrives
+            // Append MUF data once it arrives; update the popup if already open
             mufExtra = await mufPromise;
             if (mufExtra && marker.isPopupOpen()) {
                 marker.setPopupContent(renderWithMUF());

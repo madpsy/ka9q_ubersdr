@@ -1098,7 +1098,7 @@
             // mufExtra is captured in the closure so subsequent opens also show it.
             let mufExtra = '';
             const renderWithMUF = () => renderReceiver(desc, rx, gps, weather) + mufExtra;
-            mufExtra = await fetchMUFSnippet(gps.lat, gps.lon);
+            mufExtra = await fetchMUFSnippet(gps.lat, gps.lon, true);
             if (mufExtra) {
                 rxMarker.setPopupContent(renderWithMUF());
                 rxMarker.off('popupopen');
@@ -2177,11 +2177,12 @@
 
         // Fetch MUF data for a point and return a compact 2-column HTML snippet
         // to append to a popup.  Returns '' on any failure so callers can always
-        // concatenate.  When rxLocation is known, also fetches the path MUF.
-        async function fetchMUFSnippet(lat, lon) {
+        // concatenate.  When rxLocation is known, also fetches the path MUF,
+        // unless skipPath is true (used for the instance's own marker).
+        async function fetchMUFSnippet(lat, lon, skipPath) {
             if (!mufAvailable) return '';
             try {
-                const hasHome = rxLocation != null;
+                const hasHome = rxLocation != null && !skipPath;
                 const pointURL = `${MUF_COLLECTOR}/api/ionosonde/muf?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
                 const requests = [fetch(pointURL)];
                 if (hasHome) {

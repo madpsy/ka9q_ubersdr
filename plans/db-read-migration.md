@@ -28,92 +28,56 @@ path with DB queries, keeping the file write path intact as a fallback/backup.
 
 ---
 
-## Component 1 — `chat_messages` table
+## Component 1 — `chat_messages` table ✅ MIGRATED
 
 **DB table**: `chat_messages(id, ts, source_ip, username, message, country, country_code)`
-**Current read files**: [`chat_logs_api.go`](../chat_logs_api.go) · [`chat_logger.go`](../chat_logger.go)
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### DB access pattern for this component
+### What was done
 
-`HandleChatLogs` is a method on `AdminHandler`, which already has `dbManager *DBManager`
-(field added in the dual-write phase). The package-level `readChatLogs(dataDir, filter)` function
-should gain a `readDB *sql.DB` parameter: `readChatLogs(dataDir string, readDB *sql.DB, filter *ChatLogFilter)`.
-When `readDB != nil`, use the DB path; otherwise fall back to the file walk.
-In `HandleChatLogs`, pass `ah.dbManager.ReadDB()` as the `readDB` argument.
+All three read operations and the write path were migrated. CSV file infrastructure removed entirely — no fallback, no dual-write.
 
-`ChatLogger` already has a `db *sql.DB` field (added for dual-write). Add a `readDB *sql.DB`
-field alongside it. Pass `dbManager.ReadDB()` at construction for read queries.
+#### 1.1 `HandleChatLogs` — `/admin/chat-logs` (GET) ✅
 
-### Operations to migrate
-
-#### 1.1 `HandleChatLogs` — `/admin/chat-logs` (GET)
-
-**Current**: [`readChatLogs()`](../chat_logs_api.go:158) walks `YYYY/MM/DD/chat.csv` files day by day,
-applies IP/nickname/message filters in Go, sorts descending, truncates to limit.
-
-**SQL replacement**:
+`readChatLogs()` replaced by `readChatLogsFromDB()` using `ah.dbManager.ReadDB()` directly:
 ```sql
 SELECT ts, source_ip, username, message, country, country_code
 FROM chat_messages
-WHERE ts >= ?          -- filter.StartDate.Unix()
-  AND ts <  ?          -- filter.EndDate.Add(24h).Unix()
-  AND (? = '' OR source_ip LIKE '%' || ? || '%')   -- IP partial match
-  AND (? = '' OR LOWER(username) LIKE '%' || LOWER(?) || '%')  -- nickname
-  AND (? = '' OR LOWER(message)  LIKE '%' || LOWER(?) || '%')  -- message
-ORDER BY ts DESC
-LIMIT ?                -- filter.Limit
+WHERE ts >= ? AND ts < ?
+  [AND source_ip LIKE ?]
+  [AND LOWER(username) LIKE ?]
+  [AND LOWER(message) LIKE ?]
+ORDER BY ts DESC LIMIT ?
 ```
+Guard changed from `!ah.config.Chat.LogToCSV` to `ah.dbManager.ReadDB() == nil`.
 
-**Notes**: SQLite `LIKE` is case-insensitive for ASCII by default, matching the existing
-`strings.ToLower` behaviour. The `EndDate` bound should be `EndDate + 24h` to include
-the full last day (current code iterates through `EndDate` inclusive).
+#### 1.2 `LoadRecentMessages` — startup chat seed ✅
 
-**File to change**: [`chat_logs_api.go`](../chat_logs_api.go) — add `readDB *sql.DB` parameter to
-`readChatLogs()`; add DB query path inside; keep file walk as fallback when `readDB == nil`.
-In `HandleChatLogs`, pass `ah.dbManager.ReadDB()` as the `readDB` argument.
+DB SELECT with `ts >= now-maxDays*24h ORDER BY ts ASC LIMIT maxMessages*2`; banned IPs filtered in Go after query.
 
----
+#### 1.3 `GetLastKnownIPForUser` — reverse IP lookup ✅
 
-#### 1.2 `LoadRecentMessages` — startup chat seed
+Single `QueryRow`: `SELECT source_ip FROM chat_messages WHERE LOWER(username) = ? AND source_ip != '' AND ts >= ? ORDER BY ts DESC LIMIT 1`
 
-**Current**: [`chat_logger.go:LoadRecentMessages()`](../chat_logger.go:183) walks back up to
-`maxDays` day-files, reads all rows, filters banned IPs, returns last `maxMessages`.
+#### Write path ✅
 
-**SQL replacement**:
-```sql
-SELECT ts, source_ip, username, message
-FROM chat_messages
-WHERE ts >= ?          -- now - maxDays*24h
-ORDER BY ts ASC
-LIMIT ?                -- maxMessages (take tail = most recent)
-```
+`LogMessage()` now does a direct SQLite INSERT only. `getOrCreateWriter()`, `rotateFile()` equivalent removed. `openFile`, `csvWriter`, `currentDay`, `fileMu` removed from struct. `Close()` is a no-op.
 
-Since there is no `banned_ips` table in the DB, filter banned IPs in Go after the query
-(same as today, just operating on DB rows instead of CSV rows).
+### Wiring chain
 
-**File to change**: [`chat_logger.go`](../chat_logger.go) — use `cl.readDB` field for the
-DB read path in `LoadRecentMessages()`; fall back to file walk when `cl.readDB == nil`.
+`main.go` → `dxClusterWsHandler.SetReadDB()` → `ChatManager.SetReadDB()` → `ChatLogger.SetReadDB()`
 
----
+### Config changes
 
-#### 1.3 `GetLastKnownIPForUser` — reverse IP lookup
+- `LogToCSV bool` removed from `ChatConfig` in [`config.go`](../config.go)
+- `DataDir string` retained for [`db_import.go`](../db_import.go) (one-time historical CSV backfill)
+- `log_to_csv` and `data_dir` removed from [`config/config.yaml.example`](../config/config.yaml.example) chat section
+- `DataDir` resolution in [`main.go`](../main.go) no longer gated on `LogToCSV`
 
-**Current**: [`chat_logger.go:GetLastKnownIPForUser()`](../chat_logger.go:332) walks back 30 days
-of CSV files via `findLastIPInDayFile()`, returns the most recent `source_ip` for a given
-username (case-insensitive).
+### Imports removed
 
-**SQL replacement**:
-```sql
-SELECT source_ip
-FROM chat_messages
-WHERE LOWER(username) = LOWER(?)
-  AND source_ip != ''
-ORDER BY ts DESC
-LIMIT 1
-```
-
-**File to change**: [`chat_logger.go`](../chat_logger.go) — use `cl.readDB` field; replace
-file walk with DB query when `cl.readDB != nil`.
+From [`chat_logger.go`](../chat_logger.go): `encoding/csv`, `io`, `os`, `path/filepath`, `sync`
+From [`chat_logs_api.go`](../chat_logs_api.go): `encoding/csv`, `io`, `os`, `path/filepath`, `sort`
 
 ---
 

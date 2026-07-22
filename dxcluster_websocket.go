@@ -92,11 +92,19 @@ type DXClusterWebSocketHandler struct {
 	dxThroughputMu sync.RWMutex
 }
 
-// SetDB wires the SQLite database into the DX cluster WebSocket handler for dual-write.
+// SetDB wires the SQLite write connection into the DX cluster WebSocket handler.
 // It propagates the DB handle to the inner ChatManager → ChatLogger.
 func (h *DXClusterWebSocketHandler) SetDB(db *sql.DB) {
 	if h.chatManager != nil {
 		h.chatManager.SetDB(db)
+	}
+}
+
+// SetReadDB wires the SQLite read-only pool into the DX cluster WebSocket handler.
+// It propagates the readDB handle to the inner ChatManager → ChatLogger.
+func (h *DXClusterWebSocketHandler) SetReadDB(readDB *sql.DB) {
+	if h.chatManager != nil {
+		h.chatManager.SetReadDB(readDB)
 	}
 }
 
@@ -133,15 +141,15 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 	// Initialize chat manager if enabled (configured message buffer and limits)
 	if chatConfig.Enabled {
 		// Initialize chat logger
-		chatLogger, err := NewChatLogger(chatConfig.DataDir, chatConfig.LogToCSV)
+		chatLogger, err := NewChatLogger(chatConfig.DataDir, chatConfig.Enabled)
 		if err != nil {
 			log.Printf("Chat: Failed to initialize logger: %v", err)
 			chatLogger = nil // Continue without logging
 		}
 
 		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher, adminConfig, chatConfig, ipBanManager)
-		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v, MQTT: %v",
-			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV, mqttPublisher != nil)
+		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, MQTT: %v",
+			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, mqttPublisher != nil)
 	}
 
 	// Register spot handler to broadcast to all clients

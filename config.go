@@ -521,8 +521,7 @@ type ChatConfig struct {
 	RateLimitPerSecond           int    `yaml:"rate_limit_per_second"`             // Maximum messages per second per user (default: 2)
 	RateLimitPerMinute           int    `yaml:"rate_limit_per_minute"`             // Maximum messages per minute per user (default: 30)
 	UpdateRateLimitPerSecond     int    `yaml:"update_rate_limit_per_second"`      // Maximum user updates per second per user (default: 4)
-	LogToCSV                     bool   `yaml:"log_to_csv"`                        // Enable CSV logging of chat messages (default: true)
-	DataDir                      string `yaml:"data_dir"`                          // Directory to store CSV chat log files (default: "chat")
+	DataDir                      string `yaml:"data_dir"`                          // Directory containing legacy CSV files for one-time DB import (db_import.go)
 	OwnerCallsignFromAdminIPOnly *bool  `yaml:"owner_callsign_from_admin_ip_only"` // Restrict owner callsign to admin IPs only (default: true)
 	WelcomeMessage               string `yaml:"welcome_message"`                   // Optional welcome message sent to new clients (empty = disabled)
 }

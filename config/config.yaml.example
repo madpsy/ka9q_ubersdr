@@ -894,21 +894,8 @@ chat:
   # Recommended: 5-10 for normal usage
   update_rate_limit_per_second: 10
   
-  # Enable CSV logging of chat messages
-  # When enabled, stores all messages to CSV files for historical analysis
-  # Logs include: timestamp, source IP, username, and message text
-  # Default: true (enabled by default)
-  log_to_csv: true
-  
-  # Directory to store CSV chat log files (one file per day)
-  # If relative path (no leading /), will be created relative to working directory
-  # Default: "chat" (creates ./chat/)
-  # Absolute paths are also supported
-  # Files are organized as: data_dir/YYYY/MM/DD/chat.csv
-  # Example structure:
-  #   chat/2026/01/09/chat.csv
-  #   chat/2026/01/10/chat.csv
-  data_dir: "chat"
+  # Historical chat messages are stored in the SQLite database (ubersdr.db).
+  # The log_to_csv and data_dir options are no longer used.
 
   # Restrict owner callsign as username to admin IPs only (default: true)
   # When enabled, only users connecting from admin->allowed_ips can use the

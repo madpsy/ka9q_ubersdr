@@ -95,11 +95,36 @@ type ChatManager struct {
 	notifyFn func(ChatEvent)
 }
 
-// SetDB wires the SQLite database into the chat manager for dual-write.
+// SetDB wires the SQLite write connection into the chat manager.
 // It propagates the DB handle to the inner ChatLogger.
 func (cm *ChatManager) SetDB(db *sql.DB) {
 	if cm.chatLogger != nil {
 		cm.chatLogger.SetDB(db)
+	}
+}
+
+// SetReadDB wires the SQLite read-only pool into the chat manager.
+// It propagates the readDB handle to the inner ChatLogger, then seeds the
+// message buffer from the DB (replaces the old CSV-based startup seed).
+func (cm *ChatManager) SetReadDB(readDB *sql.DB) {
+	if cm.chatLogger != nil {
+		cm.chatLogger.SetReadDB(readDB)
+	}
+	// Seed the message buffer now that readDB is available.
+	cm.seedMessagesFromDB()
+}
+
+// seedMessagesFromDB loads recent messages from the DB into the message buffer.
+func (cm *ChatManager) seedMessagesFromDB() {
+	if cm.chatLogger == nil {
+		return
+	}
+	seeded := cm.chatLogger.LoadRecentMessages(cm.maxMessages, 7, nil)
+	if len(seeded) > 0 {
+		cm.messageBufferMu.Lock()
+		cm.messageBuffer = append(cm.messageBuffer, seeded...)
+		cm.messageBufferMu.Unlock()
+		log.Printf("Chat: Seeded %d message(s) from DB into buffer", len(seeded))
 	}
 }
 
@@ -148,16 +173,6 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 			Username:  username,
 			Message:   chatConfig.WelcomeMessage,
 			Timestamp: time.Now().UTC(),
-		}
-	}
-
-	// Seed the message buffer from persistent logs on startup (up to 7 days back)
-	if chatLogger != nil {
-		seeded := chatLogger.LoadRecentMessages(maxMessages, 7, ipBanManager)
-		if len(seeded) > 0 {
-			cm.messageBufferMu.Lock()
-			cm.messageBuffer = append(cm.messageBuffer, seeded...)
-			cm.messageBufferMu.Unlock()
 		}
 	}
 

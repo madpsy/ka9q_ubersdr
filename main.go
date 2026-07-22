@@ -1365,11 +1365,10 @@ func main() {
 		}
 	}
 
-	// Set chat data directory relative to config directory (same pattern as spaceweather/noisefloor)
-	if config.Chat.Enabled && config.Chat.LogToCSV && config.Chat.DataDir == "" {
+	// Resolve DataDir for the historical CSV importer (db_import.go).
+	if config.Chat.DataDir == "" {
 		config.Chat.DataDir = *configDir + "/chat"
-	} else if config.Chat.Enabled && config.Chat.LogToCSV && !strings.HasPrefix(config.Chat.DataDir, "/") {
-		// If relative path, make it relative to config directory
+	} else if !strings.HasPrefix(config.Chat.DataDir, "/") {
 		config.Chat.DataDir = *configDir + "/" + config.Chat.DataDir
 	}
 
@@ -1398,6 +1397,7 @@ func main() {
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, mqttPublisher, receiverLocator, config.Chat, &config.Admin)
 	dxClusterWsHandler.SetDB(dbManager.DB())
+	dxClusterWsHandler.SetReadDB(dbManager.ReadDB())
 
 	// Initialize FreeDV Reporter activity monitor (view-only connection to qso.freedv.org)
 	if config.FreeDVReporter.Enabled {

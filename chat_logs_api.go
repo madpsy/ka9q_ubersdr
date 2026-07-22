@@ -1,15 +1,11 @@
 package main
 
 import (
-	"encoding/csv"
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +31,7 @@ type ChatLogFilter struct {
 	Limit     int
 }
 
-// HandleChatLogs returns chat logs with optional filtering
+// HandleChatLogs returns chat logs with optional filtering from the SQLite database.
 // Query parameters:
 //   - start: Start date in YYYY-MM-DD format (default: today)
 //   - end: End date in YYYY-MM-DD format (default: today)
@@ -51,15 +47,8 @@ func (ah *AdminHandler) HandleChatLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if chat logging is enabled
-	if !ah.config.Chat.LogToCSV {
-		http.Error(w, "Chat logging is not enabled", http.StatusServiceUnavailable)
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"error":   "not_enabled",
-			"message": "Chat logging is not enabled in configuration",
-		}); err != nil {
-			log.Printf("Error encoding response: %v", err)
-		}
+	if ah.dbManager == nil || ah.dbManager.ReadDB() == nil {
+		http.Error(w, "Chat logs are not available (database not configured)", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -70,8 +59,8 @@ func (ah *AdminHandler) HandleChatLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read and filter logs
-	logs, err := readChatLogs(ah.config.Chat.DataDir, filter)
+	// Read and filter logs from DB
+	logs, err := readChatLogsFromDB(ah.dbManager.ReadDB(), filter)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read chat logs: %v", err), http.StatusInternalServerError)
 		return
@@ -154,164 +143,55 @@ func parseChatLogFilter(r *http.Request) (*ChatLogFilter, error) {
 	return filter, nil
 }
 
-// readChatLogs reads and filters chat logs from disk
-func readChatLogs(dataDir string, filter *ChatLogFilter) ([]ChatLogEntry, error) {
-	var allLogs []ChatLogEntry
+// readChatLogsFromDB reads and filters chat logs from the SQLite database.
+// Results are returned in reverse-chronological order (most recent first).
+func readChatLogsFromDB(db *sql.DB, filter *ChatLogFilter) ([]ChatLogEntry, error) {
+	startTS := filter.StartDate.Unix()
+	// endDate is inclusive — include the full day
+	endTS := filter.EndDate.Add(24 * time.Hour).Unix()
 
-	// Iterate through each day in the date range
-	currentDate := filter.StartDate
-	for !currentDate.After(filter.EndDate) {
-		// Build file path: dataDir/YYYY/MM/DD/chat.csv
-		filePath := filepath.Join(
-			dataDir,
-			fmt.Sprintf("%04d", currentDate.Year()),
-			fmt.Sprintf("%02d", currentDate.Month()),
-			fmt.Sprintf("%02d", currentDate.Day()),
-			"chat.csv",
-		)
+	query := `SELECT ts, source_ip, username, message, country, country_code
+	          FROM chat_messages
+	          WHERE ts >= ? AND ts < ?`
+	args := []interface{}{startTS, endTS}
 
-		// Read logs from this file
-		dayLogs, err := readChatLogFile(filePath, filter)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// File doesn't exist for this day - skip
-				currentDate = currentDate.Add(24 * time.Hour)
-				continue
-			}
-			return nil, fmt.Errorf("failed to read %s: %w", filePath, err)
-		}
-
-		allLogs = append(allLogs, dayLogs...)
-
-		// Check if we've hit the limit
-		if len(allLogs) >= filter.Limit {
-			allLogs = allLogs[:filter.Limit]
-			break
-		}
-
-		currentDate = currentDate.Add(24 * time.Hour)
+	if filter.IP != "" {
+		query += " AND source_ip LIKE ?"
+		args = append(args, "%"+filter.IP+"%")
+	}
+	if filter.Nickname != "" {
+		query += " AND LOWER(username) LIKE ?"
+		args = append(args, "%"+strings.ToLower(filter.Nickname)+"%")
+	}
+	if filter.Message != "" {
+		query += " AND LOWER(message) LIKE ?"
+		args = append(args, "%"+strings.ToLower(filter.Message)+"%")
 	}
 
-	// Sort by timestamp (most recent first)
-	sort.Slice(allLogs, func(i, j int) bool {
-		return allLogs[i].Timestamp.After(allLogs[j].Timestamp)
-	})
+	query += " ORDER BY ts DESC LIMIT ?"
+	args = append(args, filter.Limit)
 
-	return allLogs, nil
-}
-
-// readChatLogFile reads and filters a single chat log CSV file
-func readChatLogFile(filePath string, filter *ChatLogFilter) ([]ChatLogEntry, error) {
-	file, err := os.Open(filePath)
+	rows, err := db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("chat_messages query error: %w", err)
 	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	// Allow variable number of fields per record for backward compatibility
-	reader.FieldsPerRecord = -1
-
-	// Read header
-	header, err := reader.Read()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read header: %w", err)
-	}
-
-	// Validate header - support both old (4 columns) and new (6 columns) formats
-	if len(header) == 6 {
-		expectedHeader := []string{"timestamp", "source_ip", "username", "message", "country", "country_code"}
-		for i, h := range header {
-			if h != expectedHeader[i] {
-				return nil, fmt.Errorf("invalid header format")
-			}
-		}
-	} else if len(header) == 4 {
-		expectedHeader := []string{"timestamp", "source_ip", "username", "message"}
-		for i, h := range header {
-			if h != expectedHeader[i] {
-				return nil, fmt.Errorf("invalid header format")
-			}
-		}
-	} else {
-		return nil, fmt.Errorf("invalid header format: expected 4 or 6 columns, got %d", len(header))
-	}
+	defer rows.Close()
 
 	var logs []ChatLogEntry
-
-	// Read all records
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Printf("Warning: error reading CSV record: %v", err)
+	for rows.Next() {
+		var ts int64
+		var entry ChatLogEntry
+		if err := rows.Scan(&ts, &entry.SourceIP, &entry.Username, &entry.Message,
+			&entry.Country, &entry.CountryCode); err != nil {
+			log.Printf("Warning: chat_messages scan error: %v", err)
 			continue
 		}
-
-		// Support both old (4 columns) and new (6 columns) formats
-		if len(record) != 4 && len(record) != 6 {
-			log.Printf("Warning: invalid record length: %d (expected 4 or 6)", len(record))
-			continue
-		}
-
-		// Parse timestamp
-		timestamp, err := time.Parse(time.RFC3339, record[0])
-		if err != nil {
-			log.Printf("Warning: invalid timestamp: %v", err)
-			continue
-		}
-
-		entry := ChatLogEntry{
-			Timestamp: timestamp,
-			SourceIP:  record[1],
-			Username:  record[2],
-			Message:   record[3],
-		}
-
-		// Add country fields if present (new format)
-		if len(record) == 6 {
-			entry.Country = record[4]
-			entry.CountryCode = record[5]
-		}
-
-		// Apply filters
-		if !matchesChatFilter(entry, filter) {
-			continue
-		}
-
+		entry.Timestamp = time.Unix(ts, 0).UTC()
 		logs = append(logs, entry)
-
-		// Check limit
-		if len(logs) >= filter.Limit {
-			break
-		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return logs, nil
-}
-
-// matchesChatFilter checks if a log entry matches the filter criteria
-func matchesChatFilter(entry ChatLogEntry, filter *ChatLogFilter) bool {
-	// IP filter (partial match)
-	if filter.IP != "" && !strings.Contains(entry.SourceIP, filter.IP) {
-		return false
-	}
-
-	// Nickname filter (case-insensitive partial match)
-	if filter.Nickname != "" {
-		if !strings.Contains(strings.ToLower(entry.Username), strings.ToLower(filter.Nickname)) {
-			return false
-		}
-	}
-
-	// Message filter (case-insensitive partial match)
-	if filter.Message != "" {
-		if !strings.Contains(strings.ToLower(entry.Message), strings.ToLower(filter.Message)) {
-			return false
-		}
-	}
-
-	return true
 }

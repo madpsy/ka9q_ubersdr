@@ -653,21 +653,19 @@ benefits. The Telegram bot struct needs a `db *sql.DB` field added and wired fro
 
 ---
 
-## Component 6 — `space_weather` table
+## Component 6 — `space_weather` table ✅ MIGRATED
 
-**DB table**: `space_weather(id, ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality, forecast_*, day_*, night_*)`  
-**Current read files**: [`space_weather.go`](../space_weather.go) · handlers in [`main.go`](../main.go)
+**DB table**: `space_weather(id, ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality, forecast_*, day_*, night_*)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### Operations to migrate
+### What was done
 
-#### 6.1 `GetHistoricalData` — `/space-weather/historical` (GET)
+All three read operations and the write path were migrated in a single pass. CSV file
+infrastructure was removed entirely — no fallback, no dual-write.
 
-**Current**: [`space_weather.go:GetHistoricalData()`](../space_weather.go:960) walks
-`YYYY/MM/spaceweather-YYYY-MM-DD.csv` files, parses 37-column CSV records. Supports:
-- `targetTime` — single closest-record lookup via `findClosestRecord()`
-- `fromTime`/`toTime` — time-of-day range filter via `filterByTimeRangeMultiDay()`
+#### 6.1 `GetHistoricalData` — `/space-weather/historical` (GET) ✅
 
-**SQL replacement** — fetch date range from DB, then apply existing Go filter functions:
+Replaced file-walking CSV parser with `getHistoricalDataFromDB()`:
 ```sql
 SELECT ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz,
        propagation_quality,
@@ -679,51 +677,44 @@ SELECT ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz,
        night_160m, night_80m, night_60m, night_40m, night_30m,
        night_20m, night_17m, night_15m, night_12m, night_10m
 FROM space_weather
-WHERE ts >= ?    -- fromDate.Unix()
-  AND ts <  ?    -- toDate+1day.Unix()
+WHERE ts >= ? AND ts < ?
 ORDER BY ts ASC
 LIMIT 10000
 ```
+`findClosestRecord()` and `filterByTimeRangeMultiDay()` retained as Go-side post-filters.
+Returns error if `readDB == nil` (no fallback to files).
 
-After fetching rows, apply the existing Go helper functions unchanged:
-- `findClosestRecord(allRecords, targetTime)` for single-record closest-match
-- `filterByTimeRangeMultiDay(allRecords, fromDate, toDate, fromTime, toTime)` for time-of-day range
+#### 6.2 `GetAvailableDates` — `/space-weather/dates` (GET) ✅
 
-Each DB row must be converted to `*SpaceWeatherData` by scanning columns and calling
-`buildForecastSummary()` to reconstruct the `Forecast.Summary` field (same logic as
-`parseCSVRecord()`).
-
----
-
-#### 6.2 `GetAvailableDates` — `/space-weather/dates` (GET)
-
-**Current**: [`space_weather.go:GetAvailableDates()`](../space_weather.go:1335) walks
-`YYYY/MM/` directory tree looking for `spaceweather-*.csv` files.
-
-**SQL replacement**:
+Replaced directory tree walk with:
 ```sql
 SELECT DISTINCT DATE(ts, 'unixepoch') AS date
 FROM space_weather
 ORDER BY date DESC
 ```
+Returns error if `readDB == nil`.
 
----
+#### 6.3 `GetHistoricalCSV` — `/space-weather/csv` (GET) ✅
 
-#### 6.3 `GetHistoricalCSV` — `/space-weather/csv` (GET)
+Now delegates to the DB-backed `GetHistoricalData()` and serialises the
+`[]*SpaceWeatherData` slice to CSV text with a fixed 37-column header.
+No raw file reads.
 
-**Current**: [`space_weather.go:GetHistoricalCSV()`](../space_weather.go:1402) reads raw CSV
-files for a date range, optionally filters by time range, returns CSV string with header.
-Called from [`main.go`](../main.go:5697).
+#### Write path ✅
 
-**Migration**: Once `GetHistoricalData()` is migrated to DB, `GetHistoricalCSV()` can call
-the DB-backed `GetHistoricalData()` and format the `[]*SpaceWeatherData` slice as CSV.
-Alternatively, keep reading from files for this raw-export endpoint (lowest risk).
+`logToCSV()` and `rotateCSVFile()` replaced by `logToDB()` — SQLite INSERT only.
+`currentFile`, `csvWriter`, `currentDate`, `fileMu` removed from struct.
+`Stop()` no longer closes any file handle.
+`NewSpaceWeatherMonitor()` no longer calls `os.MkdirAll`.
 
----
+### Config changes
 
-**Files to change**: [`space_weather.go`](../space_weather.go) — add DB read path to
-`GetHistoricalData()` and `GetAvailableDates()`. `GetHistoricalCSV()` can be migrated
-as a follow-on. Keep file fallback when `db == nil`.
+- `LogToCSV bool` removed from `SpaceWeatherConfig` in [`config.go`](../config.go)
+- `DataDir string` retained in config solely for [`db_import.go`](../db_import.go) (one-time historical CSV backfill tool)
+- `log_to_csv` and `data_dir` removed from [`config/config.yaml.example`](../config/config.yaml.example)
+- Handler guards in [`main.go`](../main.go) and [`decoder_band_predictions.go`](../decoder_band_predictions.go) changed from `!swm.config.LogToCSV` → `swm.readDB == nil`
+- `LogToCSV`/`DataDir` removed from `SpaceWeatherDiagnostics` in [`space_weather_health.go`](../space_weather_health.go)
+- `LogToCSV` gate removed from disk-usage check in [`admin.go`](../admin.go)
 
 ---
 

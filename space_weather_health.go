@@ -21,8 +21,6 @@ type SpaceWeatherHealthStatus struct {
 type SpaceWeatherDiagnostics struct {
 	Enabled         bool      `json:"enabled"`
 	PollIntervalSec int       `json:"poll_interval_sec"`
-	LogToCSV        bool      `json:"log_to_csv"`
-	DataDir         string    `json:"data_dir"`
 	LastUpdate      time.Time `json:"last_update"`
 	TimeSinceUpdate string    `json:"time_since_update"`
 	HasData         bool      `json:"has_data"`
@@ -109,8 +107,6 @@ func (swm *SpaceWeatherMonitor) GetStartupDiagnostics() *SpaceWeatherDiagnostics
 	diag := &SpaceWeatherDiagnostics{
 		Enabled:         swm.config.Enabled,
 		PollIntervalSec: swm.config.PollIntervalSec,
-		LogToCSV:        swm.config.LogToCSV,
-		DataDir:         swm.config.DataDir,
 		HasData:         data != nil && !data.LastUpdate.IsZero(),
 	}
 

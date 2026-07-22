@@ -4965,8 +4965,8 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Space weather directory
-	if ah.config.SpaceWeather.Enabled && ah.config.SpaceWeather.LogToCSV && ah.config.SpaceWeather.DataDir != "" {
+	// Space weather directory (legacy CSV files, used by the one-time DB importer)
+	if ah.config.SpaceWeather.Enabled && ah.config.SpaceWeather.DataDir != "" {
 		if _, err := os.Stat(ah.config.SpaceWeather.DataDir); err == nil {
 			duCmd := exec.Command("du", "-sh", ah.config.SpaceWeather.DataDir)
 			if duOutput, err := duCmd.CombinedOutput(); err == nil {

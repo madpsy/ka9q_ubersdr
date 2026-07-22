@@ -1309,11 +1309,11 @@ func main() {
 	}
 
 	// Initialize space weather monitor
-	// Set data directory relative to config directory
-	if config.SpaceWeather.LogToCSV && config.SpaceWeather.DataDir == "" {
+	// Resolve DataDir for the historical CSV importer (db_import.go).
+	// DataDir points to old CSV files that may need to be imported into the DB.
+	if config.SpaceWeather.DataDir == "" {
 		config.SpaceWeather.DataDir = *configDir + "/spaceweather"
-	} else if config.SpaceWeather.LogToCSV && !strings.HasPrefix(config.SpaceWeather.DataDir, "/") {
-		// If relative path, make it relative to config directory
+	} else if !strings.HasPrefix(config.SpaceWeather.DataDir, "/") {
 		config.SpaceWeather.DataDir = *configDir + "/" + config.SpaceWeather.DataDir
 	}
 
@@ -1326,6 +1326,7 @@ func main() {
 	}
 	defer spaceWeatherMonitor.Stop()
 	spaceWeatherMonitor.SetDB(dbManager.DB())
+	spaceWeatherMonitor.SetReadDB(dbManager.ReadDB())
 
 	// Initialize EiBi shortwave broadcast schedule
 	eibiSchedule := NewEiBiSchedule(&config.EiBi)
@@ -5534,10 +5535,10 @@ func handleSpaceWeatherHistory(w http.ResponseWriter, r *http.Request, swm *Spac
 		return
 	}
 
-	if !swm.config.LogToCSV {
+	if swm.readDB == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Space weather CSV logging is not enabled",
+			"error": "Space weather historical data is not available (database not configured)",
 		})
 		return
 	}
@@ -5626,10 +5627,10 @@ func handleSpaceWeatherDates(w http.ResponseWriter, r *http.Request, swm *SpaceW
 		return
 	}
 
-	if !swm.config.LogToCSV {
+	if swm.readDB == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Space weather CSV logging is not enabled",
+			"error": "Space weather historical data is not available (database not configured)",
 		})
 		return
 	}
@@ -5680,11 +5681,11 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 		return
 	}
 
-	if !swm.config.LogToCSV {
+	if swm.readDB == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Space weather CSV logging is not enabled",
+			"error": "Space weather historical data is not available (database not configured)",
 		})
 		return
 	}

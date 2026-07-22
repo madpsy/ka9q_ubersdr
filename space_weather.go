@@ -3,14 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,19 +27,22 @@ type SpaceWeatherMonitor struct {
 	updateHandlers []func(newData, prevData *SpaceWeatherData)
 	handlerMu      sync.RWMutex
 
-	// CSV logging
-	currentFile *os.File
-	csvWriter   *csv.Writer
-	currentDate string
-	fileMu      sync.Mutex
-
-	// SQLite (dual-write alongside CSV; nil when DB not available)
-	db *sql.DB
+	// SQLite write connection (INSERT) and read-only pool (SELECT).
+	// Both are nil when the DB is not configured.
+	db     *sql.DB
+	readDB *sql.DB
 }
 
-// SetDB wires the SQLite database into the space weather monitor for dual-write.
+// SetDB wires the SQLite write connection into the space weather monitor.
 func (swm *SpaceWeatherMonitor) SetDB(db *sql.DB) {
 	swm.db = db
+}
+
+// SetReadDB wires the SQLite read-only pool into the space weather monitor.
+// Must be called after SetDB. Once set, all read operations (GetHistoricalData,
+// GetAvailableDates, GetHistoricalCSV) use the DB instead of CSV files.
+func (swm *SpaceWeatherMonitor) SetReadDB(readDB *sql.DB) {
+	swm.readDB = readDB
 }
 
 // OnUpdate registers a callback that is called after each successful space
@@ -153,13 +152,6 @@ func NewSpaceWeatherMonitor(config *SpaceWeatherConfig, prometheusMetrics *Prome
 		},
 	}
 
-	// Create data directory if CSV logging is enabled
-	if config.LogToCSV && config.DataDir != "" {
-		if err := os.MkdirAll(config.DataDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create space weather data directory: %w", err)
-		}
-	}
-
 	return swm, nil
 }
 
@@ -188,16 +180,6 @@ func (swm *SpaceWeatherMonitor) Stop() {
 	if swm.cancel != nil {
 		swm.cancel()
 	}
-
-	// Close CSV file if open
-	swm.fileMu.Lock()
-	if swm.currentFile != nil {
-		if err := swm.currentFile.Close(); err != nil {
-			log.Printf("Error closing space weather CSV file: %v", err)
-		}
-	}
-	swm.fileMu.Unlock()
-
 	log.Println("Space weather monitor stopped")
 }
 
@@ -296,10 +278,10 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 		swm.prometheusMetrics.UpdateSpaceWeather(data)
 	}
 
-	// Log to CSV if enabled
-	if swm.config.LogToCSV && swm.config.DataDir != "" {
-		if err := swm.logToCSV(data); err != nil {
-			log.Printf("Error logging space weather to CSV: %v", err)
+	// Log to DB if available
+	if swm.db != nil {
+		if err := swm.logToDB(data); err != nil {
+			log.Printf("Error logging space weather to DB: %v", err)
 		}
 	}
 
@@ -748,148 +730,58 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool, forecast
 	return conditions
 }
 
-// logToCSV writes space weather data to CSV file and, if a database is wired
-// in, also inserts into the space_weather table.
-func (swm *SpaceWeatherMonitor) logToCSV(data *SpaceWeatherData) error {
-	// CSV write under mutex — released before the DB INSERT so a slow/locked
-	// database never blocks other goroutines waiting on fileMu.
-	swm.fileMu.Lock()
-
-	// Check if we need to rotate to a new file
-	dateStr := data.LastUpdate.Format("2006-01-02")
-	if dateStr != swm.currentDate {
-		if err := swm.rotateCSVFile(dateStr); err != nil {
-			swm.fileMu.Unlock()
-			return err
+// logToDB inserts space weather data into the SQLite space_weather table.
+func (swm *SpaceWeatherMonitor) logToDB(data *SpaceWeatherData) error {
+	// Helper to get a band condition or nil
+	dayBand := func(b string) interface{} {
+		if v, ok := data.BandConditionsDay[b]; ok && v != "" {
+			return v
 		}
+		return nil
+	}
+	nightBand := func(b string) interface{} {
+		if v, ok := data.BandConditionsNight[b]; ok && v != "" {
+			return v
+		}
+		return nil
 	}
 
-	// Get writer
-	if swm.csvWriter == nil {
-		swm.fileMu.Unlock()
-		return fmt.Errorf("CSV writer not initialized")
-	}
-
-	// Prepare CSV record
-	record := []string{
-		data.Timestamp,
-		fmt.Sprintf("%.1f", data.SolarFlux),
-		fmt.Sprintf("%d", data.KIndex),
-		data.KIndexStatus,
-		fmt.Sprintf("%d", data.AIndex),
-		fmt.Sprintf("%.2f", data.SolarWindBz),
-		data.PropagationQuality,
-	}
-
-	// Add forecast data if available
+	// Forecast fields — nil when no forecast
+	var fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb interface{}
+	var fSScale, fSText, fSProb, fSummary interface{}
 	if data.Forecast != nil {
-		record = append(record,
-			data.Forecast.GScale,
-			data.Forecast.GText,
-			data.Forecast.RScale,
-			data.Forecast.RText,
-			data.Forecast.RMinorProb,
-			data.Forecast.RMajorProb,
-			data.Forecast.SScale,
-			data.Forecast.SText,
-			data.Forecast.SProb,
-			data.Forecast.Summary,
-		)
-	} else {
-		// Add empty values if no forecast
-		record = append(record, "", "", "", "", "", "", "", "", "", "")
+		fGScale = nullableStr(data.Forecast.GScale)
+		fGText = nullableStr(data.Forecast.GText)
+		fRScale = nullableStr(data.Forecast.RScale)
+		fRText = nullableStr(data.Forecast.RText)
+		fRMinorProb = nullableStr(data.Forecast.RMinorProb)
+		fRMajorProb = nullableStr(data.Forecast.RMajorProb)
+		fSScale = nullableStr(data.Forecast.SScale)
+		fSText = nullableStr(data.Forecast.SText)
+		fSProb = nullableStr(data.Forecast.SProb)
+		fSummary = nullableStr(data.Forecast.Summary)
 	}
 
-	// Add band conditions (day)
-	for _, band := range []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"} {
-		if cond, ok := data.BandConditionsDay[band]; ok {
-			record = append(record, cond)
-		} else {
-			record = append(record, "")
-		}
+	_, err := swm.db.Exec(
+		`INSERT INTO space_weather
+		 (ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality,
+		  forecast_g_scale, forecast_g_text,
+		  forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
+		  forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
+		  day_160m, day_80m, day_60m, day_40m, day_30m, day_20m, day_17m, day_15m, day_12m, day_10m,
+		  night_160m, night_80m, night_60m, night_40m, night_30m, night_20m, night_17m, night_15m, night_12m, night_10m)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		data.LastUpdate.Unix(),
+		data.SolarFlux, data.KIndex, nullableStr(data.KIndexStatus), data.AIndex, data.SolarWindBz, nullableStr(data.PropagationQuality),
+		fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb, fSScale, fSText, fSProb, fSummary,
+		dayBand("160m"), dayBand("80m"), dayBand("60m"), dayBand("40m"), dayBand("30m"),
+		dayBand("20m"), dayBand("17m"), dayBand("15m"), dayBand("12m"), dayBand("10m"),
+		nightBand("160m"), nightBand("80m"), nightBand("60m"), nightBand("40m"), nightBand("30m"),
+		nightBand("20m"), nightBand("17m"), nightBand("15m"), nightBand("12m"), nightBand("10m"),
+	)
+	if err != nil {
+		return fmt.Errorf("[DB] space_weather insert: %w", err)
 	}
-
-	// Add band conditions (night)
-	for _, band := range []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"} {
-		if cond, ok := data.BandConditionsNight[band]; ok {
-			record = append(record, cond)
-		} else {
-			record = append(record, "")
-		}
-	}
-
-	// Write record
-	if err := swm.csvWriter.Write(record); err != nil {
-		swm.fileMu.Unlock()
-		return err
-	}
-
-	// Flush after each write
-	swm.csvWriter.Flush()
-	csvErr := swm.csvWriter.Error()
-
-	// Release the mutex before the DB INSERT — a slow or locked database must
-	// never block other goroutines that need fileMu for CSV rotation/writes.
-	swm.fileMu.Unlock()
-
-	if csvErr != nil {
-		return csvErr
-	}
-
-	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
-	if swm.db != nil {
-		// Helper to get a band condition or nil
-		dayBand := func(b string) interface{} {
-			if v, ok := data.BandConditionsDay[b]; ok && v != "" {
-				return v
-			}
-			return nil
-		}
-		nightBand := func(b string) interface{} {
-			if v, ok := data.BandConditionsNight[b]; ok && v != "" {
-				return v
-			}
-			return nil
-		}
-
-		// Forecast fields — nil when no forecast
-		var fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb interface{}
-		var fSScale, fSText, fSProb, fSummary interface{}
-		if data.Forecast != nil {
-			fGScale = nullableStr(data.Forecast.GScale)
-			fGText = nullableStr(data.Forecast.GText)
-			fRScale = nullableStr(data.Forecast.RScale)
-			fRText = nullableStr(data.Forecast.RText)
-			fRMinorProb = nullableStr(data.Forecast.RMinorProb)
-			fRMajorProb = nullableStr(data.Forecast.RMajorProb)
-			fSScale = nullableStr(data.Forecast.SScale)
-			fSText = nullableStr(data.Forecast.SText)
-			fSProb = nullableStr(data.Forecast.SProb)
-			fSummary = nullableStr(data.Forecast.Summary)
-		}
-
-		_, dbErr := swm.db.Exec(
-			`INSERT INTO space_weather
-			 (ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality,
-			  forecast_g_scale, forecast_g_text,
-			  forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
-			  forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
-			  day_160m, day_80m, day_60m, day_40m, day_30m, day_20m, day_17m, day_15m, day_12m, day_10m,
-			  night_160m, night_80m, night_60m, night_40m, night_30m, night_20m, night_17m, night_15m, night_12m, night_10m)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			data.LastUpdate.Unix(),
-			data.SolarFlux, data.KIndex, nullableStr(data.KIndexStatus), data.AIndex, data.SolarWindBz, nullableStr(data.PropagationQuality),
-			fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb, fSScale, fSText, fSProb, fSummary,
-			dayBand("160m"), dayBand("80m"), dayBand("60m"), dayBand("40m"), dayBand("30m"),
-			dayBand("20m"), dayBand("17m"), dayBand("15m"), dayBand("12m"), dayBand("10m"),
-			nightBand("160m"), nightBand("80m"), nightBand("60m"), nightBand("40m"), nightBand("30m"),
-			nightBand("20m"), nightBand("17m"), nightBand("15m"), nightBand("12m"), nightBand("10m"),
-		)
-		if dbErr != nil {
-			log.Printf("[DB] space_weather insert error: %v", dbErr)
-		}
-	}
-
 	return nil
 }
 
@@ -902,81 +794,20 @@ func nullableStr(s string) interface{} {
 	return s
 }
 
-// rotateCSVFile creates a new CSV file for the specified date
-func (swm *SpaceWeatherMonitor) rotateCSVFile(dateStr string) error {
-	// Close current file if open
-	if swm.currentFile != nil {
-		if err := swm.currentFile.Close(); err != nil {
-			log.Printf("Warning: error closing previous CSV file: %v", err)
-		}
-	}
-
-	// Parse date to create year/month directory structure
-	t, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return fmt.Errorf("invalid date format: %w", err)
-	}
-
-	// Create directory path: base_dir/YYYY/MM/
-	dirPath := filepath.Join(
-		swm.config.DataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-	)
-
-	// Create directory structure if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return fmt.Errorf("failed to create directory structure: %w", err)
-	}
-
-	// Create file: base_dir/YYYY/MM/spaceweather-YYYY-MM-DD.csv
-	filename := filepath.Join(dirPath, fmt.Sprintf("spaceweather-%s.csv", dateStr))
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-
-	// Check if file is new (needs header)
-	stat, _ := file.Stat()
-	needsHeader := stat.Size() == 0
-
-	swm.currentFile = file
-	swm.csvWriter = csv.NewWriter(file)
-	swm.currentDate = dateStr
-
-	// Write header if new file
-	if needsHeader {
-		header := []string{
-			"timestamp", "solar_flux", "k_index", "k_index_status", "a_index",
-			"solar_wind_bz", "propagation_quality",
-			"g_scale", "g_text", "r_scale", "r_text", "r_minor_prob", "r_major_prob",
-			"s_scale", "s_text", "s_prob", "forecast_summary",
-			"band_160m_day", "band_80m_day", "band_60m_day", "band_40m_day", "band_30m_day",
-			"band_20m_day", "band_17m_day", "band_15m_day", "band_12m_day", "band_10m_day",
-			"band_160m_night", "band_80m_night", "band_60m_night", "band_40m_night", "band_30m_night",
-			"band_20m_night", "band_17m_night", "band_15m_night", "band_12m_night", "band_10m_night",
-		}
-		if err := swm.csvWriter.Write(header); err != nil {
-			return fmt.Errorf("failed to write CSV header: %w", err)
-		}
-		swm.csvWriter.Flush()
-		log.Printf("Created new space weather log file: %s", filename)
-	}
-
-	return nil
-}
-
-// GetHistoricalData reads historical space weather data from CSV and reconstructs it
+// GetHistoricalData returns historical space weather records for the given date range
+// from the SQLite database.
+//
 // Parameters:
-// - fromDate: Required start date in YYYY-MM-DD format
-// - toDate: Optional end date in YYYY-MM-DD format (if empty, uses fromDate)
-// - targetTime: Optional time to find closest record (HH:MM:SS or HH:MM or RFC3339) - only works with single day
-// - fromTime: Optional start time for range query (RFC3339 or HH:MM:SS)
-// - toTime: Optional end time for range query (RFC3339 or HH:MM:SS)
-// Returns up to 10,000 records
+//   - fromDate: Required start date in YYYY-MM-DD format
+//   - toDate: Optional end date in YYYY-MM-DD format (if empty, uses fromDate)
+//   - targetTime: Optional time to find closest record (HH:MM:SS or HH:MM or RFC3339) - only works with single day
+//   - fromTime: Optional start time for range query (RFC3339 or HH:MM:SS)
+//   - toTime: Optional end time for range query (RFC3339 or HH:MM:SS)
+//
+// Returns up to 10,000 records.
 func (swm *SpaceWeatherMonitor) GetHistoricalData(fromDate string, toDate string, targetTime string, fromTime string, toTime string) ([]*SpaceWeatherData, error) {
-	if !swm.config.LogToCSV || swm.config.DataDir == "" {
-		return nil, fmt.Errorf("CSV logging is not enabled")
+	if swm.readDB == nil {
+		return nil, fmt.Errorf("space weather historical data is not available (database not configured)")
 	}
 
 	// If toDate is empty, use fromDate (single day query)
@@ -984,85 +815,147 @@ func (swm *SpaceWeatherMonitor) GetHistoricalData(fromDate string, toDate string
 		toDate = fromDate
 	}
 
-	// Parse dates
 	startDate, err := time.Parse("2006-01-02", fromDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid from_date format (use YYYY-MM-DD): %w", err)
 	}
-
 	endDate, err := time.Parse("2006-01-02", toDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid to_date format (use YYYY-MM-DD): %w", err)
 	}
-
-	// Ensure startDate <= endDate
 	if startDate.After(endDate) {
 		return nil, fmt.Errorf("from_date must be before or equal to to_date")
 	}
 
-	// Collect all records from date range
-	allRecords := make([]*SpaceWeatherData, 0)
+	return swm.getHistoricalDataFromDB(startDate, endDate, targetTime, fromTime, toTime, fromDate, toDate)
+}
 
-	// Iterate through each date in the range
-	currentDate := startDate
-	for !currentDate.After(endDate) {
-		dateStr := currentDate.Format("2006-01-02")
+// getHistoricalDataFromDB fetches space weather records from the SQLite DB.
+func (swm *SpaceWeatherMonitor) getHistoricalDataFromDB(startDate, endDate time.Time, targetTime, fromTime, toTime, fromDateStr, toDateStr string) ([]*SpaceWeatherData, error) {
+	fromTS := startDate.UTC().Unix()
+	toTS := endDate.Add(24 * time.Hour).UTC().Unix()
 
-		// Build file path for this date
-		filename := filepath.Join(
-			swm.config.DataDir,
-			fmt.Sprintf("%04d", currentDate.Year()),
-			fmt.Sprintf("%02d", currentDate.Month()),
-			fmt.Sprintf("spaceweather-%s.csv", dateStr),
-		)
+	rows, err := swm.readDB.Query(`
+		SELECT ts, solar_flux, k_index, k_index_status, a_index, solar_wind_bz, propagation_quality,
+		       forecast_g_scale, forecast_g_text,
+		       forecast_r_scale, forecast_r_text, forecast_r_minor_prob, forecast_r_major_prob,
+		       forecast_s_scale, forecast_s_text, forecast_s_prob, forecast_summary,
+		       day_160m, day_80m, day_60m, day_40m, day_30m, day_20m, day_17m, day_15m, day_12m, day_10m,
+		       night_160m, night_80m, night_60m, night_40m, night_30m, night_20m, night_17m, night_15m, night_12m, night_10m
+		FROM space_weather
+		WHERE ts >= ? AND ts < ?
+		ORDER BY ts ASC
+		LIMIT 10000`,
+		fromTS, toTS,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("space_weather DB query: %w", err)
+	}
+	defer rows.Close()
 
-		// Try to open file (may not exist for all dates)
-		file, err := os.Open(filename)
-		if err != nil {
-			// Skip missing files silently
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
+	bands := []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+
+	var allRecords []*SpaceWeatherData
+	for rows.Next() {
+		var ts int64
+		var solarFlux, solarWindBz float64
+		var kIndex, aIndex int
+		var kIndexStatus, propQuality sql.NullString
+		var fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb sql.NullString
+		var fSScale, fSText, fSProb, fSummary sql.NullString
+		dayCols := make([]sql.NullString, 10)
+		nightCols := make([]sql.NullString, 10)
+
+		dest := []interface{}{
+			&ts, &solarFlux, &kIndex, &kIndexStatus, &aIndex, &solarWindBz, &propQuality,
+			&fGScale, &fGText, &fRScale, &fRText, &fRMinorProb, &fRMajorProb,
+			&fSScale, &fSText, &fSProb, &fSummary,
+		}
+		for i := range dayCols {
+			dest = append(dest, &dayCols[i])
+		}
+		for i := range nightCols {
+			dest = append(dest, &nightCols[i])
 		}
 
-		// Read CSV
-		reader := csv.NewReader(file)
-		records, err := reader.ReadAll()
-		file.Close()
-
-		if err != nil {
-			log.Printf("Warning: failed to read %s: %v", filename, err)
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("space_weather DB scan: %w", err)
 		}
 
-		if len(records) < 2 {
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
+		t := time.Unix(ts, 0).UTC()
+		d := &SpaceWeatherData{
+			LastUpdate:          t,
+			Timestamp:           t.Format(time.RFC3339),
+			SolarFlux:           solarFlux,
+			KIndex:              kIndex,
+			KIndexStatus:        kIndexStatus.String,
+			AIndex:              aIndex,
+			SolarWindBz:         solarWindBz,
+			PropagationQuality:  propQuality.String,
+			BandConditionsDay:   make(map[string]string),
+			BandConditionsNight: make(map[string]string),
 		}
 
-		// Skip header and parse records
-		for _, record := range records[1:] {
-			if len(record) < 37 {
-				continue
+		for i, band := range bands {
+			if dayCols[i].Valid && dayCols[i].String != "" {
+				d.BandConditionsDay[band] = dayCols[i].String
 			}
-
-			data, err := swm.parseCSVRecord(record)
-			if err != nil {
-				continue
+			if nightCols[i].Valid && nightCols[i].String != "" {
+				d.BandConditionsNight[band] = nightCols[i].String
 			}
-
-			allRecords = append(allRecords, data)
 		}
 
-		currentDate = currentDate.AddDate(0, 0, 1)
+		// Reconstruct forecast using same logic as parseCSVRecord / fetchForecast
+		forecast := &ForecastData{
+			GScale:     fGScale.String,
+			GText:      fGText.String,
+			RScale:     fRScale.String,
+			RText:      fRText.String,
+			RMinorProb: fRMinorProb.String,
+			RMajorProb: fRMajorProb.String,
+			SScale:     fSScale.String,
+			SText:      fSText.String,
+			SProb:      fSProb.String,
+			Summary:    fSummary.String,
+		}
+		if forecast.GScale != "" && forecast.GScale != "0" {
+			forecast.GeomagneticStorm = fmt.Sprintf("G%s - %s", forecast.GScale, capitalizeFirst(forecast.GText))
+		} else {
+			forecast.GeomagneticStorm = "None expected"
+		}
+		if forecast.RMinorProb != "" {
+			forecast.RadioBlackout = fmt.Sprintf("%s%% chance of R1+ events", forecast.RMinorProb)
+			if forecast.RMajorProb != "" && forecast.RMajorProb != "0" {
+				forecast.RadioBlackout += fmt.Sprintf(", %s%% chance of R3+", forecast.RMajorProb)
+			}
+		} else {
+			forecast.RadioBlackout = "None expected"
+		}
+		if forecast.SProb != "" && forecast.SProb != "0" {
+			forecast.SolarRadiation = fmt.Sprintf("%s%% chance of S1+ event", forecast.SProb)
+		} else {
+			forecast.SolarRadiation = "None expected"
+		}
+		forecast.Summary = buildForecastSummary(forecast)
+		d.Forecast = forecast
+
+		allRecords = append(allRecords, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("space_weather DB rows: %w", err)
 	}
 
 	if len(allRecords) == 0 {
 		return nil, fmt.Errorf("no data found for date range")
 	}
 
-	// If targetTime is specified (only valid for single day), find the closest record
-	if targetTime != "" && fromDate == toDate {
+	return swm.applyTimeFilters(allRecords, targetTime, fromTime, toTime, fromDateStr, toDateStr)
+}
+
+// applyTimeFilters applies targetTime / fromTime / toTime filters to a slice of records
+// and enforces the 10,000-record cap. Shared by both DB and file paths.
+func (swm *SpaceWeatherMonitor) applyTimeFilters(allRecords []*SpaceWeatherData, targetTime, fromTime, toTime, fromDateStr, toDateStr string) ([]*SpaceWeatherData, error) {
+	if targetTime != "" && fromDateStr == toDateStr {
 		closest, err := swm.findClosestRecord(allRecords, targetTime)
 		if err != nil {
 			return nil, err
@@ -1070,20 +963,17 @@ func (swm *SpaceWeatherMonitor) GetHistoricalData(fromDate string, toDate string
 		return []*SpaceWeatherData{closest}, nil
 	}
 
-	// If fromTime and toTime are specified, filter by time range
 	if fromTime != "" || toTime != "" {
-		filtered, err := swm.filterByTimeRangeMultiDay(allRecords, fromDate, toDate, fromTime, toTime)
+		filtered, err := swm.filterByTimeRangeMultiDay(allRecords, fromDateStr, toDateStr, fromTime, toTime)
 		if err != nil {
 			return nil, err
 		}
 		allRecords = filtered
 	}
 
-	// Limit to 10,000 records
 	if len(allRecords) > 10000 {
 		allRecords = allRecords[:10000]
 	}
-
 	return allRecords, nil
 }
 
@@ -1132,50 +1022,6 @@ func (swm *SpaceWeatherMonitor) findClosestRecord(records []*SpaceWeatherData, t
 	}
 
 	return closest, nil
-}
-
-// filterByTimeRange filters records to those within the specified time range (single day)
-func (swm *SpaceWeatherMonitor) filterByTimeRange(records []*SpaceWeatherData, date string, fromTimeStr string, toTimeStr string) ([]*SpaceWeatherData, error) {
-	if len(records) == 0 {
-		return records, nil
-	}
-
-	var fromTime, toTime time.Time
-	var err error
-
-	// Parse fromTime if provided
-	if fromTimeStr != "" {
-		fromTime, err = swm.parseTimeWithDate(fromTimeStr, date)
-		if err != nil {
-			return nil, fmt.Errorf("invalid from_time format: %w", err)
-		}
-	} else {
-		// Default to start of day
-		fromTime, _ = time.Parse("2006-01-02", date)
-	}
-
-	// Parse toTime if provided
-	if toTimeStr != "" {
-		toTime, err = swm.parseTimeWithDate(toTimeStr, date)
-		if err != nil {
-			return nil, fmt.Errorf("invalid to_time format: %w", err)
-		}
-	} else {
-		// Default to end of day
-		toTime, _ = time.Parse("2006-01-02", date)
-		toTime = toTime.Add(24 * time.Hour).Add(-time.Second)
-	}
-
-	// Filter records within the time range
-	filtered := make([]*SpaceWeatherData, 0)
-	for _, record := range records {
-		if (record.LastUpdate.Equal(fromTime) || record.LastUpdate.After(fromTime)) &&
-			(record.LastUpdate.Equal(toTime) || record.LastUpdate.Before(toTime)) {
-			filtered = append(filtered, record)
-		}
-	}
-
-	return filtered, nil
 }
 
 // filterByTimeRangeMultiDay filters records across multiple days with optional time constraints
@@ -1245,294 +1091,93 @@ func (swm *SpaceWeatherMonitor) parseTimeWithDate(timeStr string, date string) (
 	return time.Time{}, fmt.Errorf("invalid time format (use RFC3339, HH:MM:SS, or HH:MM)")
 }
 
-// parseCSVRecord parses a single CSV record into SpaceWeatherData
-// Reconstructs forecast text using the same logic as live data
-func (swm *SpaceWeatherMonitor) parseCSVRecord(record []string) (*SpaceWeatherData, error) {
-	// Parse timestamp
-	timestamp, err := time.Parse(time.RFC3339, record[0])
-	if err != nil {
-		return nil, fmt.Errorf("invalid timestamp: %w", err)
-	}
-
-	data := &SpaceWeatherData{
-		Timestamp:           record[0],
-		LastUpdate:          timestamp,
-		BandConditionsDay:   make(map[string]string),
-		BandConditionsNight: make(map[string]string),
-	}
-
-	// Parse core metrics
-	fmt.Sscanf(record[1], "%f", &data.SolarFlux)
-	fmt.Sscanf(record[2], "%d", &data.KIndex)
-	data.KIndexStatus = record[3]
-	fmt.Sscanf(record[4], "%d", &data.AIndex)
-	fmt.Sscanf(record[5], "%f", &data.SolarWindBz)
-	data.PropagationQuality = record[6]
-
-	// Parse forecast data and reconstruct text using same logic
-	forecast := &ForecastData{
-		GScale:     record[7],
-		GText:      record[8],
-		RScale:     record[9],
-		RText:      record[10],
-		RMinorProb: record[11],
-		RMajorProb: record[12],
-		SScale:     record[13],
-		SText:      record[14],
-		SProb:      record[15],
-		Summary:    record[16],
-	}
-
-	// Reconstruct forecast text using same logic as fetchForecast()
-	// Geomagnetic storm
-	if forecast.GScale != "" && forecast.GScale != "0" {
-		forecast.GeomagneticStorm = fmt.Sprintf("G%s - %s", forecast.GScale,
-			capitalizeFirst(forecast.GText))
-	} else {
-		forecast.GeomagneticStorm = "None expected"
-	}
-
-	// Radio blackout
-	if forecast.RMinorProb != "" {
-		forecast.RadioBlackout = fmt.Sprintf("%s%% chance of R1+ events", forecast.RMinorProb)
-		if forecast.RMajorProb != "" && forecast.RMajorProb != "0" {
-			forecast.RadioBlackout += fmt.Sprintf(", %s%% chance of R3+", forecast.RMajorProb)
-		}
-	} else {
-		forecast.RadioBlackout = "None expected"
-	}
-
-	// Solar radiation
-	if forecast.SProb != "" && forecast.SProb != "0" {
-		forecast.SolarRadiation = fmt.Sprintf("%s%% chance of S1+ event", forecast.SProb)
-	} else {
-		forecast.SolarRadiation = "None expected"
-	}
-
-	// Reconstruct summary using same logic
-	forecast.Summary = buildForecastSummary(forecast)
-
-	data.Forecast = forecast
-
-	// Parse band conditions (day)
-	bands := []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
-	for i, band := range bands {
-		if record[17+i] != "" {
-			data.BandConditionsDay[band] = record[17+i]
-		}
-	}
-
-	// Parse band conditions (night)
-	for i, band := range bands {
-		if record[27+i] != "" {
-			data.BandConditionsNight[band] = record[27+i]
-		}
-	}
-
-	return data, nil
-}
-
 // GetAvailableDates returns a list of dates for which historical data is available
+// from the SQLite database.
 func (swm *SpaceWeatherMonitor) GetAvailableDates() ([]string, error) {
-	if !swm.config.LogToCSV || swm.config.DataDir == "" {
-		return nil, fmt.Errorf("CSV logging is not enabled")
+	if swm.readDB == nil {
+		return nil, fmt.Errorf("space weather historical data is not available (database not configured)")
 	}
 
-	dateMap := make(map[string]bool)
-
-	// Walk through year directories
-	yearDirs, err := os.ReadDir(swm.config.DataDir)
+	rows, err := swm.readDB.Query(`
+		SELECT DISTINCT DATE(ts, 'unixepoch') AS date
+		FROM space_weather
+		ORDER BY date DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read data directory: %w", err)
+		return nil, fmt.Errorf("space_weather dates DB query: %w", err)
 	}
+	defer rows.Close()
 
-	for _, yearDir := range yearDirs {
-		if !yearDir.IsDir() {
-			continue
+	var dates []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("space_weather dates DB scan: %w", err)
 		}
-		year := yearDir.Name()
-
-		// Walk through month directories
-		monthPath := filepath.Join(swm.config.DataDir, year)
-		monthDirs, err := os.ReadDir(monthPath)
-		if err != nil {
-			continue
-		}
-
-		for _, monthDir := range monthDirs {
-			if !monthDir.IsDir() {
-				continue
-			}
-			month := monthDir.Name()
-
-			// Look for CSV files in month directory
-			csvPath := filepath.Join(monthPath, month)
-			files, err := os.ReadDir(csvPath)
-			if err != nil {
-				continue
-			}
-
-			for _, file := range files {
-				if !file.IsDir() && filepath.Ext(file.Name()) == ".csv" {
-					// Extract date from filename: spaceweather-YYYY-MM-DD.csv
-					name := file.Name()
-					if len(name) > 13 && name[:13] == "spaceweather-" {
-						date := name[13 : len(name)-4] // Remove "spaceweather-" prefix and ".csv" suffix
-						dateMap[date] = true
-					}
-				}
-			}
-		}
+		dates = append(dates, d)
 	}
-
-	// Convert map to sorted slice
-	dates := make([]string, 0, len(dateMap))
-	for date := range dateMap {
-		dates = append(dates, date)
-	}
-
-	// Sort dates in descending order (newest first)
-	sort.Slice(dates, func(i, j int) bool {
-		return dates[i] > dates[j]
-	})
-
-	return dates, nil
+	return dates, rows.Err()
 }
 
-// GetHistoricalCSV reads the raw CSV file(s) for a given date range and optionally filters by time range
-// Returns the CSV content as a string with header
+// GetHistoricalCSV returns historical space weather data formatted as CSV.
+// Uses GetHistoricalData (DB-first) and serialises the result to CSV text.
 func (swm *SpaceWeatherMonitor) GetHistoricalCSV(fromDate string, toDate string, fromTime string, toTime string) (string, error) {
-	if !swm.config.LogToCSV || swm.config.DataDir == "" {
-		return "", fmt.Errorf("CSV logging is not enabled")
-	}
-
-	// If toDate is empty, use fromDate (single day query)
-	if toDate == "" {
-		toDate = fromDate
-	}
-
-	// Parse dates
-	startDate, err := time.Parse("2006-01-02", fromDate)
+	records, err := swm.GetHistoricalData(fromDate, toDate, "", fromTime, toTime)
 	if err != nil {
-		return "", fmt.Errorf("invalid from_date format (use YYYY-MM-DD): %w", err)
+		return "", err
 	}
 
-	endDate, err := time.Parse("2006-01-02", toDate)
-	if err != nil {
-		return "", fmt.Errorf("invalid to_date format (use YYYY-MM-DD): %w", err)
+	// CSV header matches the original file format
+	header := []string{
+		"timestamp", "solar_flux", "k_index", "k_index_status", "a_index",
+		"solar_wind_bz", "propagation_quality",
+		"g_scale", "g_text", "r_scale", "r_text", "r_minor_prob", "r_major_prob",
+		"s_scale", "s_text", "s_prob", "forecast_summary",
+		"band_160m_day", "band_80m_day", "band_60m_day", "band_40m_day", "band_30m_day",
+		"band_20m_day", "band_17m_day", "band_15m_day", "band_12m_day", "band_10m_day",
+		"band_160m_night", "band_80m_night", "band_60m_night", "band_40m_night", "band_30m_night",
+		"band_20m_night", "band_17m_night", "band_15m_night", "band_12m_night", "band_10m_night",
 	}
 
-	// Ensure startDate <= endDate
-	if startDate.After(endDate) {
-		return "", fmt.Errorf("from_date must be before or equal to to_date")
+	bands := []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+
+	rows := [][]string{header}
+	for _, d := range records {
+		var fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb string
+		var fSScale, fSText, fSProb, fSummary string
+		if d.Forecast != nil {
+			fGScale = d.Forecast.GScale
+			fGText = d.Forecast.GText
+			fRScale = d.Forecast.RScale
+			fRText = d.Forecast.RText
+			fRMinorProb = d.Forecast.RMinorProb
+			fRMajorProb = d.Forecast.RMajorProb
+			fSScale = d.Forecast.SScale
+			fSText = d.Forecast.SText
+			fSProb = d.Forecast.SProb
+			fSummary = d.Forecast.Summary
+		}
+
+		row := []string{
+			d.Timestamp,
+			fmt.Sprintf("%.1f", d.SolarFlux),
+			fmt.Sprintf("%d", d.KIndex),
+			d.KIndexStatus,
+			fmt.Sprintf("%d", d.AIndex),
+			fmt.Sprintf("%.2f", d.SolarWindBz),
+			d.PropagationQuality,
+			fGScale, fGText, fRScale, fRText, fRMinorProb, fRMajorProb,
+			fSScale, fSText, fSProb, fSummary,
+		}
+		for _, band := range bands {
+			row = append(row, d.BandConditionsDay[band])
+		}
+		for _, band := range bands {
+			row = append(row, d.BandConditionsNight[band])
+		}
+		rows = append(rows, row)
 	}
 
-	// Collect all records from date range
-	var allRecords [][]string
-	var header []string
-
-	// Iterate through each date in the range
-	currentDate := startDate
-	for !currentDate.After(endDate) {
-		dateStr := currentDate.Format("2006-01-02")
-
-		// Build file path for this date
-		filename := filepath.Join(
-			swm.config.DataDir,
-			fmt.Sprintf("%04d", currentDate.Year()),
-			fmt.Sprintf("%02d", currentDate.Month()),
-			fmt.Sprintf("spaceweather-%s.csv", dateStr),
-		)
-
-		// Try to open file
-		file, err := os.Open(filename)
-		if err != nil {
-			// Skip missing files silently
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Read CSV
-		reader := csv.NewReader(file)
-		records, err := reader.ReadAll()
-		file.Close()
-
-		if err != nil {
-			log.Printf("Warning: failed to read %s: %v", filename, err)
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		if len(records) < 1 {
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Save header from first file
-		if header == nil {
-			header = records[0]
-		}
-
-		// Add data records (skip header)
-		if len(records) > 1 {
-			allRecords = append(allRecords, records[1:]...)
-		}
-
-		currentDate = currentDate.AddDate(0, 0, 1)
-	}
-
-	if len(allRecords) == 0 {
-		return "", fmt.Errorf("no data found for date range")
-	}
-
-	// If no time filtering, return all records
-	if fromTime == "" && toTime == "" {
-		result := [][]string{header}
-		result = append(result, allRecords...)
-		return swm.recordsToCSV(result), nil
-	}
-
-	// Filter by time range
-	var fromTimeParsed, toTimeParsed time.Time
-
-	if fromTime != "" {
-		fromTimeParsed, err = swm.parseTimeWithDate(fromTime, fromDate)
-		if err != nil {
-			return "", fmt.Errorf("invalid from_time format: %w", err)
-		}
-	} else {
-		fromTimeParsed, _ = time.Parse("2006-01-02", fromDate)
-	}
-
-	if toTime != "" {
-		toTimeParsed, err = swm.parseTimeWithDate(toTime, toDate)
-		if err != nil {
-			return "", fmt.Errorf("invalid to_time format: %w", err)
-		}
-	} else {
-		toTimeParsed, _ = time.Parse("2006-01-02", toDate)
-		toTimeParsed = toTimeParsed.Add(24 * time.Hour).Add(-time.Second)
-	}
-
-	// Filter records (keep header + filtered data)
-	filteredRecords := [][]string{header}
-	for _, record := range allRecords {
-		if len(record) < 1 {
-			continue
-		}
-
-		timestamp, err := time.Parse(time.RFC3339, record[0])
-		if err != nil {
-			continue
-		}
-
-		if (timestamp.Equal(fromTimeParsed) || timestamp.After(fromTimeParsed)) &&
-			(timestamp.Equal(toTimeParsed) || timestamp.Before(toTimeParsed)) {
-			filteredRecords = append(filteredRecords, record)
-		}
-	}
-
-	return swm.recordsToCSV(filteredRecords), nil
+	return swm.recordsToCSV(rows), nil
 }
 
 // recordsToCSV converts CSV records to a CSV string

@@ -258,7 +258,7 @@ func getHistoricalSpaceWeatherForHours(
 
 	result := make(map[int]spaceWeatherData)
 
-	if swm == nil || !swm.config.LogToCSV {
+	if swm == nil || swm.readDB == nil {
 		return result
 	}
 

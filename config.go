@@ -531,8 +531,7 @@ type ChatConfig struct {
 type SpaceWeatherConfig struct {
 	Enabled         bool   `yaml:"enabled"`           // Enable/disable space weather monitoring
 	PollIntervalSec int    `yaml:"poll_interval_sec"` // Seconds between API polls (recommended: 900 = 15 minutes)
-	DataDir         string `yaml:"data_dir"`          // Directory to store CSV files
-	LogToCSV        bool   `yaml:"log_to_csv"`        // Enable CSV logging
+	DataDir         string `yaml:"data_dir"`          // Directory containing legacy CSV files for one-time DB import
 }
 
 // InstanceReportingConfig contains settings for reporting to central instance registry

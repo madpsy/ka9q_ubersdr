@@ -51,6 +51,20 @@ const importBatchSize = 100000
 // retention loop anyway and importing them wastes time and disk space.
 const importSpotsDays = 30
 
+// importStatsDays limits how far back the WSPR/PSK/RBN stats backfill reaches.
+//
+// Unlike the spots directories, the stats tree was never pruned on disk — the
+// old file-based StatsLogger had no cleanup loop — so it holds every snapshot
+// since the instance was installed. Importing all of it is by far the most
+// expensive part of the backfill: a single hourly WSPR snapshot expands to a
+// full leaderboard per window (~150k rows/day).
+//
+// 30 matches statsMaxDays, the largest range the /api/stats/* history
+// endpoints will serve, so anything older cannot be read back anyway. It also
+// matches the default database.stats_retention_days, meaning older rows would
+// be deleted by the first prune pass regardless.
+const importStatsDays = 30
+
 // DBImporter holds the database handle and per-subsystem data directories.
 // All directory fields are optional: an empty string means that subsystem is
 // not configured and its import is skipped.
@@ -161,6 +175,36 @@ func (imp *DBImporter) tableIsEmpty(table string) (bool, error) {
 	// Table name is not user-supplied; safe to interpolate.
 	err := imp.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n)
 	return n == 0, err
+}
+
+// dayDirBefore reports whether path is a YYYY/MM/DD day directory under root
+// whose date precedes cutoff.
+//
+// All the dated import trees nest exactly three levels below their root, so a
+// walk can call this on every directory and return filepath.SkipDir to discard
+// a whole day without opening any files. Paths that are not three levels deep,
+// or whose components do not parse as a date, return false so the walk
+// continues — an unrecognised layout must never silently skip data.
+func dayDirBefore(root, path string, cutoff time.Time) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 {
+		return false
+	}
+	day, err := time.Parse("2006-01-02", parts[0]+"-"+parts[1]+"-"+parts[2])
+	if err != nil {
+		return false
+	}
+	return day.Before(cutoff)
+}
+
+// importCutoff returns the earliest day that will be imported: midnight UTC,
+// days before today.
+func importCutoff(days int) time.Time {
+	return time.Now().UTC().AddDate(0, 0, -days).Truncate(24 * time.Hour)
 }
 
 // beginBatch starts a transaction for a batch of INSERTs.
@@ -326,7 +370,7 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 	// Compute the earliest date we will import. The directory structure is
 	// <SpotsDir>/<MODE>/YYYY/MM/DD/ so we can skip entire day directories
 	// without opening any files.
-	cutoffDate := time.Now().UTC().AddDate(0, 0, -importSpotsDays).Truncate(24 * time.Hour)
+	cutoffDate := importCutoff(importSpotsDays)
 
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
@@ -357,20 +401,8 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 			}
 			if d.IsDir() {
 				// The day directory is 3 levels below modeDir: YYYY/MM/DD.
-				// Compute the relative path from modeDir; if it has exactly
-				// 3 components (year/month/day) parse the date and skip the
-				// entire subtree when it predates the cutoff.
-				rel, relErr := filepath.Rel(modeDir, path)
-				if relErr == nil {
-					parts := strings.Split(rel, string(filepath.Separator))
-					if len(parts) == 3 {
-						dayStr := parts[0] + "-" + parts[1] + "-" + parts[2]
-						if dayTime, parseErr := time.Parse("2006-01-02", dayStr); parseErr == nil {
-							if dayTime.Before(cutoffDate) {
-								return filepath.SkipDir // skip entire day subtree
-							}
-						}
-					}
+				if dayDirBefore(modeDir, path, cutoffDate) {
+					return filepath.SkipDir // skip entire day subtree
 				}
 				return nil
 			}
@@ -441,7 +473,7 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 
 	// CW spots directory structure: <CWSpotsDir>/YYYY/MM/DD/<band>.csv
 	// Skip entire day directories that predate the cutoff.
-	cutoffDate := time.Now().UTC().AddDate(0, 0, -importSpotsDays).Truncate(24 * time.Hour)
+	cutoffDate := importCutoff(importSpotsDays)
 
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
@@ -459,17 +491,8 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 		}
 		if d.IsDir() {
 			// Day directories are 3 levels below CWSpotsDir: YYYY/MM/DD.
-			rel, relErr := filepath.Rel(imp.CWSpotsDir, path)
-			if relErr == nil {
-				parts := strings.Split(rel, string(filepath.Separator))
-				if len(parts) == 3 {
-					dayStr := parts[0] + "-" + parts[1] + "-" + parts[2]
-					if dayTime, parseErr := time.Parse("2006-01-02", dayStr); parseErr == nil {
-						if dayTime.Before(cutoffDate) {
-							return filepath.SkipDir // skip entire day subtree
-						}
-					}
-				}
+			if dayDirBefore(imp.CWSpotsDir, path, cutoffDate) {
+				return filepath.SkipDir // skip entire day subtree
 			}
 			return nil
 		}
@@ -954,18 +977,29 @@ func (imp *DBImporter) importWSPRRank(ctx context.Context) error {
 		bands, uniques, gross, dupes, versions
 	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
+	// Directory structure: <StatsDir>/wspr/YYYY/MM/DD/rolling_24h.jsonl
+	// Day directories older than the cutoff are skipped wholesale.
+	root := filepath.Join(imp.StatsDir, "wspr")
+	cutoffDate := importCutoff(importStatsDays)
+
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
 		return err
 	}
 	count, total := 0, 0
 
-	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "wspr"), func(path string, d os.DirEntry, werr error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, werr error) error {
 		if werr != nil {
 			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
 			return nil
 		}
-		if d.IsDir() || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if dayDirBefore(root, path, cutoffDate) {
+				return filepath.SkipDir // skip entire day subtree
+			}
 			return nil
 		}
 		if filepath.Base(path) != "rolling_24h.jsonl" {
@@ -1046,18 +1080,29 @@ func (imp *DBImporter) importPSKRank(ctx context.Context) error {
 	) VALUES (?,?,?,?,?,?,?)`
 	const swStmt = `INSERT OR IGNORE INTO psk_software (ts, callsign, name, version) VALUES (?,?,?,?)`
 
+	// Directory structure: <StatsDir>/psk/YYYY/MM/DD/report_result.jsonl
+	// Day directories older than the cutoff are skipped wholesale.
+	root := filepath.Join(imp.StatsDir, "psk")
+	cutoffDate := importCutoff(importStatsDays)
+
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
 		return err
 	}
 	count, total := 0, 0
 
-	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "psk"), func(path string, d os.DirEntry, werr error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, werr error) error {
 		if werr != nil {
 			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
 			return nil
 		}
-		if d.IsDir() || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if dayDirBefore(root, path, cutoffDate) {
+				return filepath.SkipDir // skip entire day subtree
+			}
 			return nil
 		}
 		if filepath.Base(path) != "report_result.jsonl" {
@@ -1133,18 +1178,29 @@ func (imp *DBImporter) importRBN(ctx context.Context) error {
 		ts, source_comment, callsign, epoch_date, spot_count
 	) VALUES (?,?,?,?,?)`
 
+	// Directory structure: <StatsDir>/rbn/YYYY/MM/DD/{skew,statistics}.jsonl
+	// Day directories older than the cutoff are skipped wholesale.
+	root := filepath.Join(imp.StatsDir, "rbn")
+	cutoffDate := importCutoff(importStatsDays)
+
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
 		return err
 	}
 	count, total := 0, 0
 
-	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "rbn"), func(path string, d os.DirEntry, werr error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, werr error) error {
 		if werr != nil {
 			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
 			return nil
 		}
-		if d.IsDir() || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if dayDirBefore(root, path, cutoffDate) {
+				return filepath.SkipDir // skip entire day subtree
+			}
 			return nil
 		}
 		base := filepath.Base(path)

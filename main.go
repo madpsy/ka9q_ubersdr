@@ -529,11 +529,12 @@ func main() {
 	dbManager.StartRetentionLoop(mainCtx, RetentionConfig{
 		SessionsDays: config.Server.SessionActivityLogRetentionDays,
 		SpotsDays:    config.Decoder.SpotsLogMaxAgeDays,
-		// StatsDays, CWSpotsDays, ChatDays, NoiseFloorDays: no config field yet — 0 = unlimited.
-		// StatsDays is left unlimited deliberately: the DB is now the only copy
-		// of the leaderboard history. Setting it to statsMaxDays+5 would cap
-		// wspr_rank_rows growth (~150k rows/day) at the point where the
-		// /api/stats/* range limit already makes older rows unreachable.
+		// Stats tables carry ~150k rows/day and the /api/stats/* endpoints
+		// refuse ranges longer than statsMaxDays, so rows past the retention
+		// window are unreachable anyway. Defaults to 30 days; 0 keeps forever.
+		StatsDays: config.Database.GetStatsRetentionDays(),
+		// CWSpotsDays, ChatDays, NoiseFloorDays, SpaceWeatherDays: no config
+		// field yet — 0 = unlimited.
 	})
 
 	// Load notifications configuration from notifications.yaml if it exists

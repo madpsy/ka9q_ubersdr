@@ -26,6 +26,7 @@ type Config struct {
 	Prometheus         PrometheusConfig          `yaml:"prometheus"`
 	MQTT               MQTTConfig                `yaml:"mqtt"`
 	Logging            LoggingConfig             `yaml:"logging"`
+	Database           DatabaseConfig            `yaml:"database"`
 	DXCluster          DXClusterConfig           `yaml:"dxcluster"`
 	FreeDVReporter     FreeDVReporterConfig      `yaml:"freedv_reporter"`
 	Chat               ChatConfig                `yaml:"chat"`
@@ -474,6 +475,29 @@ func (sc SpectrogramConfig) IsEnabled() bool {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+}
+
+// DatabaseConfig contains retention settings for the SQLite database.
+// Retention is applied by the DB pruning loop (see DBManager.StartRetentionLoop),
+// which runs once at startup and then hourly.
+type DatabaseConfig struct {
+	// StatsRetentionDays is how many days of WSPR/PSK/RBN leaderboard history
+	// to keep in the stats tables (wspr_rank_*, psk_*, rbn_*).
+	//
+	// A pointer so an explicit 0 ("keep forever") is distinguishable from the
+	// field being absent, which selects the default.
+	// Default: 30. Set to 0 to keep forever.
+	StatsRetentionDays *int `yaml:"stats_retention_days"`
+}
+
+// GetStatsRetentionDays returns the configured stats retention in days,
+// falling back to the 30-day default when the option is not set.
+// A return value of 0 means "keep forever" and is honoured by the prune loop.
+func (dc DatabaseConfig) GetStatsRetentionDays() int {
+	if dc.StatsRetentionDays == nil {
+		return 30
+	}
+	return *dc.StatsRetentionDays
 }
 
 // DXClusterConfig contains DX cluster connection settings

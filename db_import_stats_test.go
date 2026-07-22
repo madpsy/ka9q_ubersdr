@@ -35,7 +35,10 @@ func writeLegacyJSONL(t *testing.T, statsDir, source, name string, ts time.Time,
 // an instance upgrading from the file-based stats logger.
 func TestStatsBackfillFromJSONL(t *testing.T) {
 	statsDir := t.TempDir()
-	ts := time.Date(2026, 7, 22, 11, 0, 0, 0, time.UTC)
+	// Relative to now, not a fixed date: the importers skip day directories
+	// older than importStatsDays, so a hardcoded timestamp would silently stop
+	// being imported once it aged past the cutoff.
+	ts := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Hour)
 
 	// Phase 1 — lay down the legacy tree.
 	writeLegacyJSONL(t, statsDir, "wspr", "rolling_24h.jsonl", ts, &WSPRRankResponse{
@@ -144,6 +147,107 @@ func TestStatsBackfillFromJSONL(t *testing.T) {
 	}
 	if len(again) != 1 || len(again[0].Rolling24h.Data) != 1 {
 		t.Errorf("re-import duplicated rows: %d snapshots, %d rows", len(again), len(again[0].Rolling24h.Data))
+	}
+}
+
+// TestStatsBackfillSkipsOldDays verifies the importStatsDays cutoff: day
+// directories older than the window are skipped without being opened, matching
+// the behaviour the spots importers already had. Without this the backfill
+// walks every snapshot since the instance was installed — the stats tree was
+// never pruned on disk — only for the retention loop to delete the old rows.
+func TestStatsBackfillSkipsOldDays(t *testing.T) {
+	statsDir := t.TempDir()
+	now := time.Now().UTC()
+
+	recent := now.Add(-24 * time.Hour).Truncate(time.Hour)
+	old := now.AddDate(0, 0, -(importStatsDays + 5)).Truncate(time.Hour)
+
+	// Two snapshots per source: one inside the window, one well outside it.
+	for _, ts := range []time.Time{recent, old} {
+		writeLegacyJSONL(t, statsDir, "wspr", "rolling_24h.jsonl", ts, &WSPRRankResponse{
+			GeneratedAt: ts,
+			Rolling24h: WSPRRankWindow{
+				FetchedAt: ts, Rows: 1,
+				Data: []WSPRRankRow{{RxSign: "G0ABC", RxLoc: "IO91", Unique: 9}},
+			},
+		})
+		writeLegacyJSONL(t, statsDir, "psk", "report_result.jsonl", ts, &PSKRankData{
+			FetchedAt:    ts,
+			ReportResult: PSKMonitorsByBand{"20m": {{Callsign: "G0ABC", Day: 5, Week: 30}}},
+		})
+		writeLegacyJSONL(t, statsDir, "rbn", "skew.jsonl", ts, rbnSkewRecord{
+			FetchedAt: ts,
+			Entries:   []RBNSkewEntry{{Callsign: "G0ABC", Skew: -1.5}},
+		})
+	}
+
+	mgr, err := NewDBManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDBManager: %v", err)
+	}
+	defer mgr.Close()
+
+	imp := &DBImporter{db: mgr.DB(), StatsDir: statsDir}
+	for name, fn := range map[string]func(context.Context) error{
+		"wspr": imp.importWSPRRank,
+		"psk":  imp.importPSKRank,
+		"rbn":  imp.importRBN,
+	} {
+		if err := fn(context.Background()); err != nil {
+			t.Fatalf("import %s: %v", name, err)
+		}
+	}
+
+	// Each table must hold exactly the recent snapshot and nothing older.
+	for _, c := range []struct{ table, tsCol string }{
+		{"wspr_rank_rows", "ts"},
+		{"psk_rank_entries", "ts"},
+		{"rbn_skew", "ts"},
+	} {
+		var n int
+		if err := mgr.DB().QueryRow(
+			`SELECT COUNT(*) FROM `+c.table+` WHERE `+c.tsCol+` = ?`, old.Unix()).Scan(&n); err != nil {
+			t.Fatalf("count old %s: %v", c.table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s: imported %d row(s) from %s, which is older than the %d-day cutoff",
+				c.table, n, old.Format("2006-01-02"), importStatsDays)
+		}
+
+		if err := mgr.DB().QueryRow(
+			`SELECT COUNT(*) FROM `+c.table+` WHERE `+c.tsCol+` = ?`, recent.Unix()).Scan(&n); err != nil {
+			t.Fatalf("count recent %s: %v", c.table, err)
+		}
+		if n == 0 {
+			t.Errorf("%s: the in-window snapshot from %s was not imported",
+				c.table, recent.Format("2006-01-02"))
+		}
+	}
+}
+
+// dayDirBefore must only skip real YYYY/MM/DD directories. Anything it does not
+// recognise has to be walked, or an unexpected layout would silently drop data.
+func TestDayDirBefore(t *testing.T) {
+	root := filepath.Join("stats", "wspr")
+	cutoff := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		path string
+		want bool
+		why  string
+	}{
+		{filepath.Join(root, "2026", "06", "30"), true, "day before cutoff"},
+		{filepath.Join(root, "2026", "07", "01"), false, "day on cutoff is kept"},
+		{filepath.Join(root, "2026", "07", "22"), false, "day after cutoff"},
+		{filepath.Join(root, "2026"), false, "year dir — not deep enough to judge"},
+		{filepath.Join(root, "2026", "06"), false, "month dir — not deep enough to judge"},
+		{filepath.Join(root, "2026", "06", "30", "extra"), false, "deeper than a day dir"},
+		{filepath.Join(root, "not", "a", "date"), false, "unparseable components"},
+	}
+	for _, c := range cases {
+		if got := dayDirBefore(root, c.path, cutoff); got != c.want {
+			t.Errorf("dayDirBefore(%q) = %v, want %v — %s", c.path, got, c.want, c.why)
+		}
 	}
 }
 

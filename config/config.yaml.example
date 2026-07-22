@@ -771,6 +771,33 @@ logging:
   # Log format: text, json
   format: "text"
 
+# Database settings
+#
+# UberSDR stores its history (spots, sessions, chat, noise floor, decoder
+# metrics and the WSPR/PSK/RBN leaderboards) in a single SQLite database.
+# A pruning loop runs once at startup and then hourly, deleting rows older
+# than the retention period configured for each subsystem.
+#
+# Retention for spots and session activity is configured elsewhere:
+#   decoder.spots_log_max_age_days              (decoder.yaml)
+#   server.session_activity_log_retention_days  (this file)
+#
+database:
+  # Number of days of WSPR/PSK/RBN leaderboard history to keep.
+  # Covers the stats tables: wspr_rank_windows, wspr_rank_rows,
+  # psk_rank_snapshots, psk_rank_entries, psk_software, rbn_skew, rbn_stats.
+  #
+  # These tables are by far the largest in the database — a WSPR snapshot is
+  # taken hourly and each one holds a full leaderboard, adding roughly 150,000
+  # rows per day. The /api/stats/* history endpoints reject any query spanning
+  # more than 30 days, so rows older than that cannot be read back regardless
+  # of this setting; raising it above 30 grows the database without making the
+  # extra history reachable through the API.
+  #
+  # Set to 0 to keep all leaderboard history forever (unbounded growth).
+  # Default: 30
+  stats_retention_days: 30
+
 # DX Cluster settings
 dxcluster:
   # Enable DX cluster connection

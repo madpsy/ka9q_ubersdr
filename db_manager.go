@@ -608,6 +608,20 @@ func (m *DBManager) initSchema() error {
 		// versions are stored as JSON TEXT. Normalising them would multiply
 		// the row count by ~10 (one row per receiver per band per hour) for
 		// data that is only ever read back as a whole row.
+		//
+		// Indexes: none beyond the UNIQUE constraints. Both tables are only
+		// ever queried as `WHERE ts >= ? AND ts < ?` with an ORDER BY that the
+		// UNIQUE index already satisfies — UNIQUE(ts, window_name, rank_pos)
+		// serves `ORDER BY ts, window_name, rank_pos` (loadWSPRSnapshots) with
+		// no sort, and also serves the retention DELETE and MAX(ts). Adding a
+		// separate (ts) or (ts, window_name, rank_pos) index only duplicates
+		// it: wspr_rank_rows takes ~150k inserts/day, so every extra B-tree is
+		// paid on every one of them.
+		//
+		// An rx_sign index would be dead weight too — the callsign filter on
+		// /api/stats/wspr-rank is applied in Go after the whole range is
+		// loaded (extractWSPRWindowRank), never in SQL. If that filter is ever
+		// pushed down, the index to add is (rx_sign, ts), not (rx_sign).
 		// ----------------------------------------------------------------
 		{
 			"wspr_rank_windows",
@@ -622,7 +636,6 @@ func (m *DBManager) initSchema() error {
 				UNIQUE(ts, window_name)
 			)`,
 		},
-		{"wspr_rank_windows_idx_ts", `CREATE INDEX IF NOT EXISTS wspr_rank_windows_idx_ts ON wspr_rank_windows(ts)`},
 		{
 			"wspr_rank_rows",
 			`CREATE TABLE IF NOT EXISTS wspr_rank_rows (
@@ -643,9 +656,6 @@ func (m *DBManager) initSchema() error {
 				UNIQUE(ts, window_name, rank_pos)
 			)`,
 		},
-		{"wspr_rank_rows_idx_ts", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_ts      ON wspr_rank_rows(ts)`},
-		{"wspr_rank_rows_idx_rx_sign", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_rx_sign ON wspr_rank_rows(rx_sign)`},
-		{"wspr_rank_rows_idx_ts_window", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_ts_window ON wspr_rank_rows(ts, window_name, rank_pos)`},
 
 		// ----------------------------------------------------------------
 		// psk_rank_snapshots / psk_rank_entries / psk_software
@@ -662,6 +672,13 @@ func (m *DBManager) initSchema() error {
 		// As with WSPR, the snapshot envelope is its own table so a failed
 		// fetch (zero entries, non-empty error) still round-trips.
 		// ts is PSKRankData.FetchedAt on all three tables.
+		//
+		// Indexes: none beyond the UNIQUE constraints, for the same reasons as
+		// the WSPR tables. UNIQUE(ts, result_type, band, rank_pos) satisfies
+		// loadPSKSnapshots' `ORDER BY ts, result_type, band, rank_pos` without
+		// a sort, and UNIQUE(ts, callsign, name, version) covers psk_software's
+		// `ORDER BY ts, callsign, name`. The callsign filter is applied in Go
+		// (stats_psk_history.go), so a callsign index is never consulted.
 		// ----------------------------------------------------------------
 		{
 			"psk_rank_snapshots",
@@ -672,7 +689,6 @@ func (m *DBManager) initSchema() error {
 				error      TEXT                      -- non-empty when the scrape failed
 			)`,
 		},
-		{"psk_rank_snapshots_idx_ts", `CREATE INDEX IF NOT EXISTS psk_rank_snapshots_idx_ts ON psk_rank_snapshots(ts)`},
 		{
 			"psk_rank_entries",
 			`CREATE TABLE IF NOT EXISTS psk_rank_entries (
@@ -687,9 +703,6 @@ func (m *DBManager) initSchema() error {
 				UNIQUE(ts, result_type, band, rank_pos)
 			)`,
 		},
-		{"psk_rank_entries_idx_ts", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_ts       ON psk_rank_entries(ts)`},
-		{"psk_rank_entries_idx_callsign", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_callsign ON psk_rank_entries(callsign)`},
-		{"psk_rank_entries_idx_ts_type", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_ts_type  ON psk_rank_entries(ts, result_type, band, rank_pos)`},
 		{
 			"psk_software",
 			`CREATE TABLE IF NOT EXISTS psk_software (
@@ -701,8 +714,6 @@ func (m *DBManager) initSchema() error {
 				UNIQUE(ts, callsign, name, version)
 			)`,
 		},
-		{"psk_software_idx_ts", `CREATE INDEX IF NOT EXISTS psk_software_idx_ts       ON psk_software(ts)`},
-		{"psk_software_idx_callsign", `CREATE INDEX IF NOT EXISTS psk_software_idx_callsign ON psk_software(callsign)`},
 
 		// ----------------------------------------------------------------
 		// rbn_skew / rbn_stats
@@ -719,6 +730,15 @@ func (m *DBManager) initSchema() error {
 		// source_comment (the "# Calculated …" header line) is denormalised
 		// onto every row — it is per-snapshot, but carrying it avoids a join
 		// for what is a single short string.
+		//
+		// Indexes: unlike the WSPR and PSK tables these DO keep a standalone
+		// (ts) index, and it is not redundant with UNIQUE(ts, callsign).
+		// readRBNFromDB orders by `ts, id`; a (ts) index yields that directly
+		// (entries with equal keys are stored in rowid order), whereas the
+		// UNIQUE index orders by callsign within a ts and forces a sort —
+		// EXPLAIN QUERY PLAN reports "USE TEMP B-TREE FOR LAST TERM OF ORDER
+		// BY" without it. A callsign index is not needed: nothing filters on
+		// callsign in SQL.
 		// ----------------------------------------------------------------
 		{
 			"rbn_skew",
@@ -734,7 +754,6 @@ func (m *DBManager) initSchema() error {
 			)`,
 		},
 		{"rbn_skew_idx_ts", `CREATE INDEX IF NOT EXISTS rbn_skew_idx_ts       ON rbn_skew(ts)`},
-		{"rbn_skew_idx_callsign", `CREATE INDEX IF NOT EXISTS rbn_skew_idx_callsign ON rbn_skew(callsign)`},
 		{
 			"rbn_stats",
 			`CREATE TABLE IF NOT EXISTS rbn_stats (
@@ -748,7 +767,6 @@ func (m *DBManager) initSchema() error {
 			)`,
 		},
 		{"rbn_stats_idx_ts", `CREATE INDEX IF NOT EXISTS rbn_stats_idx_ts       ON rbn_stats(ts)`},
-		{"rbn_stats_idx_callsign", `CREATE INDEX IF NOT EXISTS rbn_stats_idx_callsign ON rbn_stats(callsign)`},
 	}
 
 	for _, s := range stmts {

@@ -3686,8 +3686,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                                 </div>
                                 <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;margin-left:auto;" onclick="dbCopyBrowseAsSQL()">📋 Copy as SQL</button>
                             </div>
-                            <!-- Schema info (collapsible) -->
-                            <div id="dbSchemaBar" style="display:none;background:#f0f4ff;border:1px solid #c5cae9;border-radius:5px;padding:8px 12px;font-size:11px;font-family:monospace;color:#3949ab;flex-shrink:0;white-space:pre-wrap;word-break:break-all;"></div>
+                            <!-- Schema info (collapsible, collapsed by default) -->
+                            <details id="dbSchemaBar" style="display:none;background:#f0f4ff;border:1px solid #c5cae9;border-radius:5px;flex-shrink:0;">
+                                <summary style="padding:6px 12px;font-size:11px;font-weight:700;color:#3949ab;cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
+                                    <span id="dbSchemaBarArrow">▶</span> Schema
+                                </summary>
+                                <pre id="dbSchemaBarContent" style="margin:0;padding:8px 12px 10px;font-size:11px;font-family:monospace;color:#3949ab;white-space:pre-wrap;word-break:break-all;border-top:1px solid #c5cae9;"></pre>
+                            </details>
                             <!-- Results table -->
                             <div style="flex:1;overflow:auto;border:1px solid #e0e0e0;border-radius:5px;background:#fff;min-height:0;">
                                 <div id="dbBrowseResults" style="min-width:max-content;">
@@ -27627,11 +27632,16 @@ const tooltipLine2 = timeStr;
                         if (tableInfo.columns.includes('ts')) {
                             sortSel.value = 'ts';
                         }
-                        // Show schema bar
+                        // Show schema bar (collapsed by default; content goes in the <pre> inside <details>)
                         const schemaBar = document.getElementById('dbSchemaBar');
                         if (tableInfo.schema) {
-                            schemaBar.textContent = tableInfo.schema;
+                            document.getElementById('dbSchemaBarContent').textContent = tableInfo.schema;
+                            schemaBar.removeAttribute('open'); // always start collapsed when switching tables
+                            document.getElementById('dbSchemaBarArrow').textContent = '▶';
                             schemaBar.style.display = 'block';
+                            schemaBar.ontoggle = () => {
+                                document.getElementById('dbSchemaBarArrow').textContent = schemaBar.open ? '▼' : '▶';
+                            };
                         } else {
                             schemaBar.style.display = 'none';
                         }

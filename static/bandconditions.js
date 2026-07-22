@@ -71,12 +71,12 @@ class BandConditionsMonitor {
                     this.location = data.receiver.location;
                 }
 
-                // Store timezone info if available
-                if (data.timezone) {
-                    this.timezone = data.timezone;
+                // Store timezone info if available (nested under receiver)
+                if (data.receiver && data.receiver.timezone) {
+                    this.timezone = data.receiver.timezone;
                 }
-                if (typeof data.timezone_offset === 'number') {
-                    this.timezoneOffset = data.timezone_offset;
+                if (data.receiver && typeof data.receiver.timezone_offset === 'number') {
+                    this.timezoneOffset = data.receiver.timezone_offset;
                 }
 
                 // Update receiver name in subtitle

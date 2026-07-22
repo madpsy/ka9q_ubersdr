@@ -75,15 +75,17 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 		dir      string
 		importFn func(context.Context) error
 	}
+	// Import order: small/fast tables first so they are available quickly,
+	// spots and cw_spots last because they are the largest tables.
 	all := []tableImport{
 		{"chat_messages", imp.ChatDir, imp.importChat},
 		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
-		{"spots", imp.SpotsDir, imp.importSpots},
-		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
 		{"sessions", imp.SessionsDir, imp.importSessions},
 		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
 		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
 		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
+		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
+		{"spots", imp.SpotsDir, imp.importSpots},
 	}
 
 	// Determine which tables need importing NOW, before any live writers start.

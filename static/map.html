@@ -2175,9 +2175,9 @@
             if (checkbox.checked) applyMUFToggle(true);
         }
 
-        // Fetch MUF data for a point and return an HTML snippet to append to a
-        // popup.  Returns '' on any failure so callers can always concatenate.
-        // When rxLocation is known, also fetches the path MUF from the receiver.
+        // Fetch MUF data for a point and return a compact 2-column HTML snippet
+        // to append to a popup.  Returns '' on any failure so callers can always
+        // concatenate.  When rxLocation is known, also fetches the path MUF.
         async function fetchMUFSnippet(lat, lon) {
             if (!mufAvailable) return '';
             try {
@@ -2196,35 +2196,57 @@
 
                 const pt = (await pointResp.json()).point;
                 const [r, g, b] = mufViridisRGB(pt.muf_3000_mhz);
-                const swatch = `rgb(${r},${g},${b})`;
+
+                // Helper: one compact key/value line inside a column
+                const kv = (k, v, dim) =>
+                    `<div style="display:flex;justify-content:space-between;gap:8px;` +
+                    `font-size:10.5px;${dim ? 'opacity:0.7;' : ''}">` +
+                    `<span>${k}</span><span style="font-weight:600;">${v}</span></div>`;
+
+                // Left column — point ionosphere values
+                let leftCol =
+                    `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">` +
+                    `<span style="width:10px;height:10px;border-radius:2px;` +
+                    `background:rgb(${r},${g},${b});border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
+                    `<span style="font-size:13px;font-weight:700;">${pt.muf_3000_mhz.toFixed(1)}</span>` +
+                    `<span style="font-size:9px;opacity:0.65;">MHz MUF</span>` +
+                    `</div>` +
+                    kv('foF2', `${pt.fof2_mhz.toFixed(2)} MHz`) +
+                    kv('hmF2', `${Math.round(pt.hmf2_km)} km`, true);
 
                 let html =
-                    `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.3);">` +
-                    `<div style="font-weight:700;margin-bottom:4px;font-size:11px;">Ionosphere</div>` +
-                    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">` +
-                    `<span style="width:11px;height:11px;border-radius:2px;background:${swatch};` +
-                    `border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
-                    `<span style="font-size:14px;font-weight:700;">${pt.muf_3000_mhz.toFixed(1)} MHz</span>` +
-                    `<span style="opacity:0.65;font-size:10px;">MUF (3000 km)</span>` +
-                    `</div>` +
-                    _mufRow('foF2', `${pt.fof2_mhz.toFixed(2)} MHz`) +
-                    _mufRow('hmF2', `${Math.round(pt.hmf2_km)} km`, { dim: true });
+                    `<div style="margin-top:8px;padding-top:6px;` +
+                    `border-top:1px solid rgba(128,128,128,0.3);font-size:10.5px;">` +
+                    `<div style="font-weight:700;font-size:10px;letter-spacing:0.03em;` +
+                    `margin-bottom:4px;opacity:0.75;text-transform:uppercase;">Ionosphere</div>`;
 
                 if (pathResp && pathResp.ok) {
                     const p = await pathResp.json();
                     const [pr, pg, pb] = mufViridisRGB(p.muf_mhz);
-                    html +=
-                        `<div style="margin-top:5px;font-weight:700;font-size:11px;">` +
-                        `Path from ${esc(rxLocation.ident)}</div>` +
-                        `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">` +
-                        `<span style="width:11px;height:11px;border-radius:2px;background:rgb(${pr},${pg},${pb});` +
-                        `border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
-                        `<span style="font-size:14px;font-weight:700;">${p.muf_mhz.toFixed(1)} MHz</span>` +
-                        `<span style="opacity:0.65;font-size:10px;">path MUF</span>` +
+
+                    // Right column — path values
+                    const rightCol =
+                        `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">` +
+                        `<span style="width:10px;height:10px;border-radius:2px;` +
+                        `background:rgb(${pr},${pg},${pb});border:1px solid rgba(0,0,0,0.3);flex-shrink:0;"></span>` +
+                        `<span style="font-size:13px;font-weight:700;">${p.muf_mhz.toFixed(1)}</span>` +
+                        `<span style="font-size:9px;opacity:0.65;">MHz path</span>` +
                         `</div>` +
-                        _mufRow('Distance', `${Math.round(p.distance_km).toLocaleString()} km`) +
-                        _mufRow('Bearing', `${Math.round(p.bearing_deg)}°`) +
-                        _mufRow('Takeoff', `${p.elevation_deg.toFixed(1)}°`, { dim: true });
+                        kv('Dist', `${Math.round(p.distance_km).toLocaleString()} km`) +
+                        kv('Brg', `${Math.round(p.bearing_deg)}°`) +
+                        kv('Tkoff', `${p.elevation_deg.toFixed(1)}°`, true);
+
+                    // Two columns side by side, separated by a hairline
+                    html +=
+                        `<div style="display:grid;grid-template-columns:1fr 1px 1fr;gap:0 6px;">` +
+                        `<div>${leftCol}</div>` +
+                        `<div style="background:rgba(128,128,128,0.3);"></div>` +
+                        `<div><div style="font-size:9px;opacity:0.6;margin-bottom:3px;">` +
+                        `from ${esc(rxLocation.ident)}</div>${rightCol}</div>` +
+                        `</div>`;
+                } else {
+                    // No path — single column
+                    html += leftCol;
                 }
 
                 html += `</div>`;

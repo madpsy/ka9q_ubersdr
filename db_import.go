@@ -41,7 +41,7 @@ import (
 	"time"
 )
 
-const importBatchSize = 1000
+const importBatchSize = 10000
 
 // DBImporter holds the database handle and per-subsystem data directories.
 // All directory fields are optional: an empty string means that subsystem is

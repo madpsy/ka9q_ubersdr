@@ -51,6 +51,15 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 		return nil, fmt.Errorf("db_manager: open %q: %w", dbPath, err)
 	}
 
+	// SQLite only supports one writer at a time. Limiting the pool to a single
+	// connection ensures all callers share the same connection (and therefore
+	// the same PRAGMA settings, including busy_timeout). Without this, Go's
+	// database/sql opens additional connections that do not inherit PRAGMAs
+	// set on the initial connection, causing immediate SQLITE_BUSY failures
+	// instead of the configured retry behaviour.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	// SQLite is not safe for concurrent writers from multiple OS threads unless
 	// WAL mode is used. WAL allows one writer + many concurrent readers.
 	pragmas := []string{

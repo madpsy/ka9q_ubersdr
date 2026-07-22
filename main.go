@@ -1221,21 +1221,6 @@ func main() {
 		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/" + cwskimmerConfig.MetricsSummaryDataDir
 	}
 
-	// Start historical DB backfill — runs in background, only when a table is empty.
-	// All data directory paths are fully resolved by this point.
-	dbImporter := &DBImporter{
-		db:                dbManager.DB(),
-		ChatDir:           config.Chat.DataDir,
-		NoiseFloorDir:     config.NoiseFloor.DataDir,
-		SpotsDir:          config.Decoder.SpotsLogDataDir,
-		CWSpotsDir:        cwskimmerConfig.SpotsLogDataDir,
-		SessionsDir:       config.Server.SessionActivityLogDir,
-		SpaceWeatherDir:   config.SpaceWeather.DataDir,
-		DecoderMetricsDir: config.Decoder.MetricsLogDataDir,
-		CWMetricsDir:      cwskimmerConfig.MetricsLogDataDir,
-	}
-	dbImporter.RunImportIfEmpty(mainCtx)
-
 	// Initialize CW Skimmer client
 	var cwSkimmer *CWSkimmerClient
 	if cwskimmerConfig.Enabled {
@@ -1386,6 +1371,23 @@ func main() {
 		// If relative path, make it relative to config directory
 		config.Chat.DataDir = *configDir + "/" + config.Chat.DataDir
 	}
+
+	// Start historical DB backfill — runs in background, only when a table is empty.
+	// Placed here because config.Chat.DataDir (the last data dir to be resolved) is
+	// set just above. All other dirs (noise_floor, spots, cw_spots, sessions,
+	// space_weather, decoder/cw metrics) were resolved earlier in main().
+	dbImporter := &DBImporter{
+		db:                dbManager.DB(),
+		ChatDir:           config.Chat.DataDir,
+		NoiseFloorDir:     config.NoiseFloor.DataDir,
+		SpotsDir:          config.Decoder.SpotsLogDataDir,
+		CWSpotsDir:        cwskimmerConfig.SpotsLogDataDir,
+		SessionsDir:       config.Server.SessionActivityLogDir,
+		SpaceWeatherDir:   config.SpaceWeather.DataDir,
+		DecoderMetricsDir: config.Decoder.MetricsLogDataDir,
+		CWMetricsDir:      cwskimmerConfig.MetricsLogDataDir,
+	}
+	dbImporter.RunImportIfEmpty(mainCtx)
 
 	// Initialize DX cluster WebSocket handler
 	// Pass receiver locator from decoder config for distance/bearing calculation

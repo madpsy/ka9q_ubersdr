@@ -990,7 +990,7 @@ function setupSquelchKnob() {
 // frequency by TUNE_STEP_HZ; on channel-based radios the shift is kept as an
 // offset from the channel frequency so channel up/down keeps working.
 const TUNE_DETENT_DEG = 15;   // 24 detents per revolution
-const TUNE_STEP_HZ = 100;
+const TUNE_STEP_HZ = 50;
 const TUNE_OFFSET_LIMIT = 5000;
 
 let tuneRotation = 0;

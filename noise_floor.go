@@ -544,6 +544,15 @@ func (nfm *NoiseFloorMonitor) Stop() {
 			nfm.sessions.mu.Unlock()
 
 			// Close spectrum channel safely (check if not already closed)
+			//
+			// MAY NEED FIXING: this close can panic the *sender*, not this
+			// goroutine — user_spectrum.go routeSpectrumToSession() sends into
+			// this channel because the wide-band session is registered in
+			// ssrcToSession, and its Done is nil so the sender's select guard can
+			// never fire. The recover() below only protects against a double-close
+			// here. Same class of bug as the "panic: send on closed channel" of
+			// 2026-07-21; see the note in session.go DestroySession() for the
+			// reasoning and the fix applied there.
 			if nfm.wideBandSpectrum.SpectrumChan != nil {
 				// Use defer/recover to handle potential double-close
 				func() {
@@ -572,6 +581,11 @@ func (nfm *NoiseFloorMonitor) Stop() {
 			nfm.sessions.mu.Unlock()
 
 			// Close spectrum channel safely (check if not already closed)
+			//
+			// MAY NEED FIXING: same issue as the wide-band close above — this can
+			// panic user_spectrum.go routeSpectrumToSession() rather than this
+			// goroutine, and bandSpectrum's session has a nil Done so the sender's
+			// select guard cannot protect it. See session.go DestroySession().
 			if bandSpectrum.SpectrumChan != nil {
 				// Use defer/recover to handle potential double-close
 				func() {

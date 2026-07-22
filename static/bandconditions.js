@@ -930,4 +930,426 @@ class BandConditionsMonitor {
 // Initialize when DOM is ready
 document.addEventListener("DOMContentLoaded", () => {
     new BandConditionsMonitor();
+    new MUFMap();
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUF Map — shown above the space weather forecast when the collector's
+// ionosonde endpoints are reachable (all three return HTTP 200).
+//
+// Endpoints probed (all on https://instances.ubersdr.org):
+//   GET /api/ionosonde/mufd.png      — viridis raster overlay
+//   GET /api/ionosonde/mufd.geojson  — contour LineStrings
+//   GET /api/ionosonde/stations.json — per-ionosonde dots + map timestamp
+//
+// The instance's own location (from /api/description) is plotted as a marker
+// and its local MUF(3000) is fetched from /api/ionosonde/muf?lat=…&lon=…
+// ─────────────────────────────────────────────────────────────────────────────
+
+class MUFMap {
+    constructor() {
+        this.COLLECTOR = 'https://instances.ubersdr.org';
+        this.REFRESH_MS = 15 * 60 * 1000; // 15 min — matches collector poll
+        this.map = null;
+        this.layerGroup = null;
+        this.pngObjectURL = null;
+        this.instanceLat = null;
+        this.instanceLon = null;
+        this.instanceCallsign = null;
+        this.refreshTimer = null;
+
+        // Viridis colour stops (32-entry subset matching instances.js)
+        this.VIRIDIS_STOPS = [
+            [68,1,84],[71,13,96],[72,24,106],[72,36,117],
+            [71,46,124],[69,56,130],[66,65,134],[62,76,138],
+            [58,84,140],[54,93,141],[50,101,142],[46,109,142],
+            [43,117,142],[40,125,142],[37,132,142],[34,140,141],
+            [31,148,140],[30,156,137],[32,163,134],[37,171,130],
+            [46,179,124],[58,186,118],[72,193,110],[88,199,101],
+            [105,205,91],[127,211,78],[147,215,65],[168,219,52],
+            [189,223,38],[213,226,26],[234,229,26],[253,231,37],
+        ];
+
+        // Contour level → viridis colour (matching instances.js MUF_LEVEL_COLOURS)
+        this.LEVEL_COLOURS = {
+            5.3:  '#462d7c',
+            7.0:  '#3a538b',
+            10.1: '#277d8e',
+            14.0: '#1fa286',
+            18.0: '#3ebc73',
+            21.0: '#62ca5f',
+            24.8: '#92d741',
+            28.0: '#b7dd29',
+        };
+
+        this.init();
+    }
+
+    // ── Colour helpers ────────────────────────────────────────────────────────
+
+    /** Map a MUF value (MHz) to [r,g,b] via viridis + LogNorm(4,35). */
+    viridisRGB(mufd) {
+        const MIN = 4.0, MAX = 35.0;
+        let t = (Math.log(mufd) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN));
+        if (!isFinite(t) || t < 0) t = 0;
+        if (t > 1) t = 1;
+        const pos = t * (this.VIRIDIS_STOPS.length - 1);
+        const i0 = Math.min(Math.floor(pos), this.VIRIDIS_STOPS.length - 1);
+        const i1 = Math.min(i0 + 1, this.VIRIDIS_STOPS.length - 1);
+        const f = pos - i0;
+        const a = this.VIRIDIS_STOPS[i0], b = this.VIRIDIS_STOPS[i1];
+        return [
+            Math.round(a[0] * (1 - f) + b[0] * f),
+            Math.round(a[1] * (1 - f) + b[1] * f),
+            Math.round(a[2] * (1 - f) + b[2] * f),
+        ];
+    }
+
+    /** Normalised [0,1] position along the LogNorm(4,35) scale. */
+    scaleFraction(mhz) {
+        const MIN = 4.0, MAX = 35.0;
+        let t = (Math.log(mhz) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN));
+        if (!isFinite(t) || t < 0) t = 0;
+        if (t > 1) t = 1;
+        return t;
+    }
+
+    /** Closest defined contour colour for a given level. */
+    levelColour(level) {
+        const levels = Object.keys(this.LEVEL_COLOURS).map(Number);
+        let closest = levels[0], minDiff = Math.abs(level - closest);
+        for (const l of levels) {
+            const d = Math.abs(level - l);
+            if (d < minDiff) { minDiff = d; closest = l; }
+        }
+        return this.LEVEL_COLOURS[closest] || '#888888';
+    }
+
+    // ── Endpoint probe ────────────────────────────────────────────────────────
+
+    /**
+     * HEAD-probe all three ionosonde endpoints.
+     * Returns true only if every one responds with HTTP 200.
+     */
+    async probeEndpoints() {
+        const urls = [
+            `${this.COLLECTOR}/api/ionosonde/mufd.png`,
+            `${this.COLLECTOR}/api/ionosonde/mufd.geojson`,
+            `${this.COLLECTOR}/api/ionosonde/stations.json`,
+        ];
+        try {
+            const results = await Promise.all(
+                urls.map(u => fetch(u, { method: 'HEAD' }).then(r => r.ok).catch(() => false))
+            );
+            return results.every(Boolean);
+        } catch {
+            return false;
+        }
+    }
+
+    // ── Initialisation ────────────────────────────────────────────────────────
+
+    async init() {
+        // Probe endpoints first — bail silently if unavailable
+        const available = await this.probeEndpoints();
+        if (!available) return;
+
+        // Fetch instance location from /api/description
+        try {
+            const r = await fetch('/api/description');
+            if (r.ok) {
+                const d = await r.json();
+                if (d.receiver && d.receiver.gps) {
+                    this.instanceLat = d.receiver.gps.lat;
+                    this.instanceLon = d.receiver.gps.lon;
+                }
+                if (d.receiver && d.receiver.callsign) {
+                    this.instanceCallsign = d.receiver.callsign;
+                }
+            }
+        } catch { /* location unavailable — map still shown without marker */ }
+
+        // Show the section and build the map
+        const section = document.getElementById('muf-map-section');
+        if (section) section.style.display = 'block';
+
+        this.buildLegend();
+        this.initMap();
+        await this.loadLayer();
+
+        // Refresh every 15 minutes
+        this.refreshTimer = setInterval(() => this.loadLayer(), this.REFRESH_MS);
+    }
+
+    // ── Legend ────────────────────────────────────────────────────────────────
+
+    buildLegend() {
+        const barEl = document.getElementById('muf-legend-bar');
+        const labelsEl = document.getElementById('muf-legend-labels');
+        if (!barEl || !labelsEl) return;
+
+        // Build CSS gradient from viridis stops
+        const stops = this.VIRIDIS_STOPS.map((c, i) => {
+            const pct = (i / (this.VIRIDIS_STOPS.length - 1) * 100).toFixed(2);
+            return `rgb(${c[0]},${c[1]},${c[2]}) ${pct}%`;
+        }).join(',');
+        barEl.style.background = `linear-gradient(to right, ${stops})`;
+
+        // Notches + labels at each contour level
+        const levels = Object.keys(this.LEVEL_COLOURS).map(Number).sort((a, b) => a - b);
+        let notchHtml = '', labelHtml = '';
+        const halo = '0 0 3px rgba(0,0,0,0.9),0 0 2px rgba(0,0,0,0.9)';
+
+        for (const l of levels) {
+            const pct = (this.scaleFraction(l) * 100).toFixed(2);
+            notchHtml += `<span style="position:absolute;left:${pct}%;top:-2px;bottom:-2px;width:1px;margin-left:-0.5px;background:rgba(255,255,255,0.8);"></span>`;
+            labelHtml += `<span style="position:absolute;left:${pct}%;transform:translateX(-50%);font-size:9px;font-weight:700;color:#fff;white-space:nowrap;text-shadow:${halo};">${l}</span>`;
+        }
+        // End-caps
+        const capStyle = `position:absolute;font-size:8px;font-weight:600;color:rgba(255,255,255,0.65);text-shadow:${halo};`;
+        labelHtml += `<span style="${capStyle}left:0;top:1px;">4</span>`;
+        labelHtml += `<span style="${capStyle}right:0;top:1px;">35</span>`;
+
+        barEl.innerHTML = notchHtml;
+        labelsEl.innerHTML = labelHtml;
+    }
+
+    // ── Leaflet map ───────────────────────────────────────────────────────────
+
+    initMap() {
+        if (this.map) return;
+        this.map = L.map('muf-map', {
+            center: [20, 0],
+            zoom: 2,
+            zoomControl: true,
+            attributionControl: true,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 10,
+        }).addTo(this.map);
+    }
+
+    // ── Layer load ────────────────────────────────────────────────────────────
+
+    async loadLayer() {
+        if (!this.map) return;
+
+        // Remove previous layer group
+        if (this.layerGroup) {
+            this.map.removeLayer(this.layerGroup);
+            this.layerGroup = null;
+        }
+        // Revoke previous PNG blob URL
+        if (this.pngObjectURL) {
+            URL.revokeObjectURL(this.pngObjectURL);
+            this.pngObjectURL = null;
+        }
+
+        try {
+            const [pngResp, geojsonResp, stationsResp] = await Promise.all([
+                fetch(`${this.COLLECTOR}/api/ionosonde/mufd.png`),
+                fetch(`${this.COLLECTOR}/api/ionosonde/mufd.geojson`),
+                fetch(`${this.COLLECTOR}/api/ionosonde/stations.json`),
+            ]);
+
+            // All three must be 200 — if any fail, hide the section and bail
+            if (!pngResp.ok || !geojsonResp.ok || !stationsResp.ok) {
+                this.hideSection();
+                return;
+            }
+
+            const [geojson, stationsPayload] = await Promise.all([
+                geojsonResp.json(),
+                stationsResp.json(),
+            ]);
+
+            const group = L.layerGroup();
+
+            // ── Raster PNG overlay ────────────────────────────────────────────
+            const pngBlob = await pngResp.blob();
+            this.pngObjectURL = URL.createObjectURL(pngBlob);
+            const MERCATOR_MAX_LAT = 85.0511287798066;
+            const overlay = L.imageOverlay(this.pngObjectURL, [
+                [-MERCATOR_MAX_LAT, -180],
+                [ MERCATOR_MAX_LAT,  180],
+            ], {
+                opacity: 1.0,
+                interactive: false,
+                zIndex: 200,
+            });
+            overlay.on('load', () => {
+                const el = overlay.getElement();
+                if (el) el.style.imageRendering = 'auto';
+            });
+            overlay.addTo(group);
+
+            // ── GeoJSON contour lines ─────────────────────────────────────────
+            L.geoJSON(geojson, {
+                style: (feature) => ({
+                    color: this.levelColour(feature.properties && feature.properties.level),
+                    weight: 1.5,
+                    opacity: 0.85,
+                    fill: false,
+                }),
+                onEachFeature: (feature, layer) => {
+                    const level = feature.properties && feature.properties.level;
+                    if (level != null) {
+                        layer.bindTooltip(`MUF ${level} MHz`, { sticky: true });
+                    }
+                },
+            }).addTo(group);
+
+            // Inline frequency labels — one per level on the longest segment
+            const longestByLevel = {};
+            for (const feature of geojson.features) {
+                const level = feature.properties && feature.properties.level;
+                if (level == null) continue;
+                const coords = feature.geometry && feature.geometry.coordinates;
+                if (!coords || coords.length < 2) continue;
+                if (!longestByLevel[level] || coords.length > longestByLevel[level].coords.length) {
+                    longestByLevel[level] = { coords, level };
+                }
+            }
+            for (const { coords, level } of Object.values(longestByLevel)) {
+                const mid = coords[Math.floor(coords.length / 2)];
+                if (!mid) continue;
+                const colour = this.levelColour(level);
+                L.marker([mid[1], mid[0]], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: `<span style="font-size:10px;font-weight:bold;color:${colour};background:rgba(255,255,255,0.75);padding:0 2px;border-radius:2px;white-space:nowrap;pointer-events:none;">${Math.round(level)} MHz</span>`,
+                        iconAnchor: [16, 7],
+                    }),
+                    interactive: false,
+                    keyboard: false,
+                }).addTo(group);
+            }
+
+            // ── Ionosonde station dots ────────────────────────────────────────
+            const stations = stationsPayload.stations || [];
+            let mapTS = stationsPayload.ts || null;
+
+            for (const s of stations) {
+                const [r, g, b] = this.viridisRGB(s.mufd);
+                const alpha = Math.min(1, 0.35 + 0.6 * (s.cs || 0));
+                const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+                const fg = lum > 0.55 ? '#111' : '#fff';
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div style="width:22px;height:22px;border-radius:50%;background:rgba(${r},${g},${b},${alpha.toFixed(2)});border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 3px rgba(0,0,0,0.5);color:${fg};font-size:10px;font-weight:700;line-height:22px;text-align:center;">${Math.round(s.mufd)}</div>`,
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11],
+                });
+                const age = Math.max(0, Math.round((Date.now() / 1000 - s.time) / 60));
+                const extra = [];
+                if (s.fof2 != null) extra.push(`foF2 ${s.fof2.toFixed(2)} MHz`);
+                if (s.hmf2 != null) extra.push(`hmF2 ${Math.round(s.hmf2)} km`);
+                L.marker([s.lat, s.lon], { icon, keyboard: false })
+                    .bindTooltip(
+                        `<b>${s.name}</b>${s.code ? ` (${s.code})` : ''}<br>` +
+                        `MUF ${s.mufd.toFixed(1)} MHz` +
+                        (extra.length ? `<br>${extra.join('<br>')}` : '') +
+                        `<br>${s.source} · ${age} min ago · cs ${s.cs.toFixed(2)}`
+                    )
+                    .addTo(group);
+            }
+
+            // ── Instance marker + local MUF ───────────────────────────────────
+            if (this.instanceLat != null && this.instanceLon != null) {
+                // Fetch the point MUF for this instance's location
+                let localMUF = null;
+                try {
+                    const mufResp = await fetch(
+                        `${this.COLLECTOR}/api/ionosonde/muf` +
+                        `?lat=${this.instanceLat.toFixed(4)}&lon=${this.instanceLon.toFixed(4)}`
+                    );
+                    if (mufResp.ok) {
+                        const mufData = await mufResp.json();
+                        localMUF = mufData.point && mufData.point.muf_3000_mhz;
+                    }
+                } catch { /* non-fatal */ }
+
+                const label = this.instanceCallsign || 'SDR';
+                const mufText = localMUF != null ? `${localMUF.toFixed(1)} MHz` : '';
+                const [mr, mg, mb] = localMUF != null ? this.viridisRGB(localMUF) : [255, 152, 0];
+                const markerHtml = `
+                    <div style="position:relative;text-align:center;">
+                        <div style="
+                            background:rgba(${mr},${mg},${mb},0.9);
+                            color:#fff;
+                            font-size:10px;
+                            font-weight:700;
+                            padding:2px 5px;
+                            border-radius:3px;
+                            white-space:nowrap;
+                            border:1px solid rgba(255,255,255,0.7);
+                            box-shadow:0 1px 4px rgba(0,0,0,0.5);
+                            margin-bottom:2px;
+                            text-shadow:0 0 2px rgba(0,0,0,0.6);
+                        ">${label}${mufText ? ` · ${mufText}` : ''}</div>
+                        <div style="
+                            width:0;height:0;
+                            border-left:6px solid transparent;
+                            border-right:6px solid transparent;
+                            border-top:8px solid rgba(${mr},${mg},${mb},0.9);
+                            margin:0 auto;
+                        "></div>
+                    </div>`;
+
+                // Measure label width approximately (10px font, ~6px/char)
+                const approxW = Math.max(60, (label.length + (mufText ? mufText.length + 3 : 0)) * 6 + 10);
+                const approxH = 28;
+
+                L.marker([this.instanceLat, this.instanceLon], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: markerHtml,
+                        iconSize: [approxW, approxH + 8],
+                        iconAnchor: [approxW / 2, approxH + 8],
+                        popupAnchor: [0, -(approxH + 8)],
+                    }),
+                    zIndexOffset: 1000,
+                    keyboard: false,
+                })
+                .bindTooltip(
+                    `<b>${label}</b><br>` +
+                    (mufText ? `MUF (3000 km): ${mufText}<br>` : '') +
+                    `${this.instanceLat.toFixed(4)}°, ${this.instanceLon.toFixed(4)}°`
+                )
+                .addTo(group);
+            }
+
+            this.layerGroup = group;
+            group.addTo(this.map);
+
+            // ── Timestamp label ───────────────────────────────────────────────
+            this.updateTimestamp(mapTS);
+
+        } catch (err) {
+            console.warn('MUFMap: failed to load layer:', err);
+            this.hideSection();
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    updateTimestamp(ts) {
+        const el = document.getElementById('muf-map-timestamp');
+        if (!el) return;
+        if (!ts) { el.textContent = ''; return; }
+        const d = new Date(ts * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mm = String(d.getUTCMinutes()).padStart(2, '0');
+        const ageMin = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+        const ageText = ageMin < 60
+            ? `${ageMin} min ago`
+            : `${Math.floor(ageMin / 60)}h ${ageMin % 60}m ago`;
+        el.textContent = `· Data ${hh}:${mm} UTC · ${ageText}`;
+    }
+
+    hideSection() {
+        const section = document.getElementById('muf-map-section');
+        if (section) section.style.display = 'none';
+    }
+}

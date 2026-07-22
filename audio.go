@@ -262,9 +262,13 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 		SampleRate:   session.SampleRate,
 	}
 
-	// Send audio packet to session's channel
-	// Check session.Done first to avoid race condition with DestroySession()
-	// which closes Done before closing AudioChan
+	// Send audio packet to session's channel.
+	//
+	// The Done guard is necessary but NOT sufficient on its own: select picks at
+	// random among ready cases, and a send on a closed channel counts as ready,
+	// so it can win over Done and panic. This is where the "panic: send on closed
+	// channel" of 2026-07-21 landed. What actually makes this safe is that
+	// DestroySession() no longer closes AudioChan — see the note there.
 	select {
 	case <-session.Done:
 		// Session is being destroyed, skip this packet

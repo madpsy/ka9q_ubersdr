@@ -279,6 +279,75 @@
   }
   #dxc-send:hover { background: rgba(23,162,184,0.75); }
 
+  /* ── Callsign prompt modal ── */
+  #dxc-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9600;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.55);
+    cursor: default;
+  }
+  #dxc-modal.dxc-modal-open { display: flex; }
+  #dxc-modal-box {
+    background: rgba(52, 73, 94, 0.96);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    border-left: 3px solid rgba(23,162,184,0.7);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    padding: 14px 16px;
+    min-width: 240px;
+  }
+  #dxc-modal-title {
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 8px;
+  }
+  #dxc-modal-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 4px 6px;
+  }
+  #dxc-modal-input:focus { outline: none; border-color: rgba(23,162,184,0.8); }
+  #dxc-modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  #dxc-modal-buttons button {
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  #dxc-modal-ok {
+    background: rgba(23,162,184,0.5) !important;
+    border-color: rgba(23,162,184,0.7) !important;
+  }
+  #dxc-modal-ok:hover { background: rgba(23,162,184,0.75) !important; }
+  #dxc-modal-cancel:hover { background: rgba(255,255,255,0.15); }
+
   /* ── Resize handle ── */
   #dxc-resize {
     position: absolute;
@@ -319,9 +388,10 @@
   }
 
   @media (max-width: 768px) {
-    #dxc-widget { display: none !important; }
+    #dxc-widget, #dxc-modal { display: none !important; }
   }
-  html.is-mobile #dxc-widget { display: none !important; }
+  html.is-mobile #dxc-widget,
+  html.is-mobile #dxc-modal { display: none !important; }
 </style>
 
 <div id="dxc-widget" style="display:none;">
@@ -352,6 +422,10 @@
     <button class="dxc-qbtn" data-cmd="show/time">time</button>
     <button class="dxc-qbtn" data-cmd="set/dxcluster"
             title="Enable upstream DX Cluster feed (set/dxcluster)">upstream</button>
+    <button class="dxc-qbtn" data-prompt="sh/qrz"
+            title="Look up a callsign (sh/qrz &lt;call&gt;)">qrz</button>
+    <button class="dxc-qbtn" data-prompt="sh/dx"
+            title="Show spots for a callsign (sh/dx &lt;call&gt;)">check call</button>
     <button class="dxc-qbtn" data-cmd="help">help</button>
   </div>
 
@@ -363,6 +437,20 @@
   </div>
 
   <div id="dxc-resize" title="Drag to resize"></div>
+</div>
+
+<!-- Callsign prompt for the qrz / check-call quick buttons. Lives outside the
+     widget so dragging, collapsing and the widget's own show/hide don't affect it. -->
+<div id="dxc-modal">
+  <div id="dxc-modal-box">
+    <div id="dxc-modal-title">Callsign</div>
+    <input id="dxc-modal-input" type="text" maxlength="16" autocomplete="off"
+           spellcheck="false" placeholder="e.g. G1TLH">
+    <div id="dxc-modal-buttons">
+      <button id="dxc-modal-cancel" type="button">Cancel</button>
+      <button id="dxc-modal-ok" type="button">Send</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -398,6 +486,11 @@
   var inputEl     = document.getElementById('dxc-input');
   var sendEl      = document.getElementById('dxc-send');
   var resizeEl    = document.getElementById('dxc-resize');
+  var modalEl     = document.getElementById('dxc-modal');
+  var modalTitle  = document.getElementById('dxc-modal-title');
+  var modalInput  = document.getElementById('dxc-modal-input');
+  var modalOk     = document.getElementById('dxc-modal-ok');
+  var modalCancel = document.getElementById('dxc-modal-cancel');
 
   var dismissed   = false;
   var ws          = null;
@@ -503,6 +596,7 @@
     connectEl.disabled         = state;
     disconnectEl.style.display = state ? '' : 'none';
     if (state) inputEl.focus();
+    else closeCallsignModal();
   }
 
   function buildWsUrl() {
@@ -712,7 +806,49 @@
 
   quickEl.addEventListener('click', function (e) {
     var btn = e.target.closest('.dxc-qbtn');
-    if (btn) sendCommand(btn.getAttribute('data-cmd'));
+    if (!btn) return;
+    var prompt = btn.getAttribute('data-prompt');
+    if (prompt) { openCallsignModal(prompt, btn.textContent.trim()); return; }
+    sendCommand(btn.getAttribute('data-cmd'));
+  });
+
+  // ── Callsign prompt modal ───────────────────────────────────────────
+  // Used by the quick buttons that need an argument: the chosen command is
+  // remembered while the modal is open and sent as "<cmd> <callsign>".
+  var modalCmd = '';
+
+  function openCallsignModal(cmd, label) {
+    modalCmd = cmd;
+    modalTitle.textContent = (label || 'Callsign') + ' — ' + cmd;
+    modalInput.value = (callsignEl.value || '').trim().toUpperCase();
+    modalEl.classList.add('dxc-modal-open');
+    modalInput.focus();
+    modalInput.select();
+  }
+
+  function closeCallsignModal() {
+    modalEl.classList.remove('dxc-modal-open');
+    modalCmd = '';
+  }
+
+  function submitCallsignModal() {
+    var call = (modalInput.value || '').trim().toUpperCase();
+    if (!call) { modalInput.focus(); return; }
+    var cmd = modalCmd;
+    closeCallsignModal();
+    sendCommand(cmd + ' ' + call);
+  }
+
+  modalOk.addEventListener('click', submitCallsignModal);
+  modalCancel.addEventListener('click', closeCallsignModal);
+  modalEl.addEventListener('click', function (e) {
+    if (e.target === modalEl) closeCallsignModal();   // click the backdrop to dismiss
+  });
+  modalInput.addEventListener('keydown', function (e) {
+    // Keep the host page's global key handlers out of the modal input.
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); submitCallsignModal(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeCallsignModal(); }
   });
 
   // ── Collapse / expand ───────────────────────────────────────────────

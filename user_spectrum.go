@@ -879,6 +879,13 @@ func (usm *UserSpectrumManager) sendSpectrumToSession(session *Session, data []f
 		}
 
 		// Send session-specific data.
+		//
+		// The Done guard is not sufficient on its own: select picks at random
+		// among ready cases and a send on a closed channel counts as ready, so
+		// whoever owns the session must not close SpectrumChan. DestroySession()
+		// no longer does; the noise_floor.go and frequency_reference.go monitors
+		// still do on stop/restart, and their sessions leave Done nil so this
+		// guard cannot fire for them at all. See session.go DestroySession().
 		select {
 		case <-session.Done:
 			return

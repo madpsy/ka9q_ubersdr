@@ -1772,18 +1772,57 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 	session.dspInsertMu.Unlock()
 
-	// Close appropriate channel based on session type
-	if session.IsSpectrum {
-		// Spectrum sessions use SpectrumChan
-		if session.SpectrumChan != nil {
-			close(session.SpectrumChan)
-		}
-	} else {
-		// Audio sessions use AudioChan
-		if session.AudioChan != nil {
-			close(session.AudioChan)
-		}
-	}
+	// Deliberately do NOT close AudioChan/SpectrumChan.
+	//
+	// In relation to a "panic: send on closed channel" observed once on
+	// 2026-07-21 at audio.go routeAudio(), during teardown of two sessions.
+	//
+	// The senders (routeAudio in audio.go, routeSpectrumToSession in
+	// user_spectrum.go) are long-lived shared goroutines that outlive every
+	// session, so they cannot close these channels themselves and cannot be
+	// synchronised against. They guard the send with a select on Done, but
+	// select picks at random among ready cases and a send on a closed channel
+	// counts as ready — so a packet in flight for a just-destroyed session
+	// panicked instead of taking the guard. The race window is narrow (the
+	// session is removed from ssrcToSession above, long before this point),
+	// which is why it took hundreds of hours to surface.
+	//
+	// Done (closed above) is the shutdown signal, and every reader of these
+	// channels already selects on it and does the same thing there as it did
+	// on the closed-channel !ok branch, so nothing depends on the close. The
+	// channels are garbage collected along with the session.
+	//
+	// NOT FIXED HERE — the same pattern still exists at these sites, which close
+	// a SpectrumChan belonging to a session they registered directly into
+	// ssrcToSession, so user_spectrum.go routeSpectrumToSession() sends into them
+	// too:
+	//
+	//	noise_floor.go        close(nfm.wideBandSpectrum.SpectrumChan)
+	//	noise_floor.go        close(bandSpectrum.SpectrumChan)  (per-band loop)
+	//	frequency_reference.go  close(frm.refSpectrum.SpectrumChan)
+	//
+	// Those are worse than the case fixed here: their sessions leave Done nil, so
+	// the sender's `case <-session.Done` is a nil channel that can never become
+	// ready and provides no protection at all. The recover() wrapped around each
+	// close guards the closer against a double-close; it does nothing for the
+	// sending goroutine, which panics in its own stack. They fire on noise-floor /
+	// frequency-reference monitor stop and restart rather than on session churn,
+	// so the exposure is much less frequent. Fix is the same: drop the close and
+	// let the monitor's own shutdown signal stop its reader.
+	//
+	// Previous code, retained in case this needs to be reverted:
+	//
+	//	if session.IsSpectrum {
+	//		// Spectrum sessions use SpectrumChan
+	//		if session.SpectrumChan != nil {
+	//			close(session.SpectrumChan)
+	//		}
+	//	} else {
+	//		// Audio sessions use AudioChan
+	//		if session.AudioChan != nil {
+	//			close(session.AudioChan)
+	//		}
+	//	}
 
 	userID := session.UserSessionID
 	if len(userID) > 8 {

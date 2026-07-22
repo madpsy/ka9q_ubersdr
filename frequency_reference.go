@@ -240,6 +240,14 @@ func (frm *FrequencyReferenceMonitor) Stop() {
 		frm.sessions.mu.Unlock()
 
 		// Close spectrum channel safely (check if not already closed)
+		//
+		// MAY NEED FIXING: this close can panic the *sender*, not this goroutine —
+		// user_spectrum.go routeSpectrumToSession() sends into this channel because
+		// refSpectrum's session is registered in ssrcToSession above, and its Done
+		// is nil so the sender's select guard can never fire. The recover() below
+		// only protects against a double-close here. Same class of bug as the
+		// "panic: send on closed channel" of 2026-07-21; see the note in
+		// session.go DestroySession() for the reasoning and the fix applied there.
 		if frm.refSpectrum.SpectrumChan != nil {
 			// Use defer/recover to handle potential double-close
 			func() {

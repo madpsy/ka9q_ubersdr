@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -139,7 +140,7 @@ type CallsignStats struct {
 }
 
 // handleDecodeMetrics serves comprehensive decode metrics
-func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecoder, readDB *sql.DB, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -261,17 +262,17 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	response.Summary.TimeWindow.End = endTime
 	response.Summary.TimeWindow.Start = startTime
 
-	// Always try to read from files if metrics logging is enabled
-	// This ensures we have data even after restarts or for time ranges with sparse in-memory data
+	// Read metrics from DB for the requested time range.
+	// This ensures we have data even after restarts or for time ranges with sparse in-memory data.
 	var fileSnapshots map[string][]MetricsSnapshot
-	if md.metricsLogger != nil && md.metricsLogger.enabled {
-		log.Printf("Reading metrics from files for time range: %v to %v", startTime, endTime)
+	if readDB != nil {
+		log.Printf("Reading metrics from DB for time range: %v to %v", startTime, endTime)
 		var err error
-		fileSnapshots, err = md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
+		fileSnapshots, err = ReadMetricsFromDB(readDB, startTime, endTime, mode, band)
 		if err != nil {
-			log.Printf("Warning: error reading metrics from files: %v", err)
+			log.Printf("Warning: error reading metrics from DB: %v", err)
 		} else {
-			log.Printf("Loaded %d mode-band combinations from files", len(fileSnapshots))
+			log.Printf("Loaded %d mode-band combinations from DB", len(fileSnapshots))
 		}
 	}
 
@@ -1075,7 +1076,7 @@ func generateTimeSeriesFromSnapshotsOnly(combinations []struct{ Mode, Band strin
 
 // handleDecodeRatesAll serves decode rates for all decoder bands in a single response
 // This endpoint uses the summary aggregator's hourly breakdown to provide accurate per-hour decode rates
-func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecoder, readDB *sql.DB, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return

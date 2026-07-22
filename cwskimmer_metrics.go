@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -513,7 +509,7 @@ func (cm *CWSkimmerMetrics) getWPMStatsLocked(band string, minutes int) (avgWPM 
 	return avgWPM, minWPM, maxWPM
 }
 
-// WriteMetricsSnapshot writes current metrics to disk (JSON Lines format)
+// WriteMetricsSnapshot writes current metrics to SQLite
 func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 	if !cm.metricsLogEnabled {
 		return nil
@@ -524,47 +520,14 @@ func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 
 	now := time.Now()
 
+	cm.dbMu.Lock()
+	db := cm.db
+	cm.dbMu.Unlock()
+
 	// Write snapshot for each active band
 	for band := range cm.spotsByBand {
 		snapshot := cm.createSnapshotLocked(band, now)
 
-		// Create directory structure: metrics_dir/YYYY/MM/DD/
-		dirPath := filepath.Join(
-			cm.metricsLogDataDir,
-			fmt.Sprintf("%04d", now.Year()),
-			fmt.Sprintf("%02d", now.Month()),
-			fmt.Sprintf("%02d", now.Day()),
-		)
-
-		if err := os.MkdirAll(dirPath, 0755); err != nil {
-			return fmt.Errorf("failed to create metrics directory: %w", err)
-		}
-
-		// File: metrics_dir/YYYY/MM/DD/BAND.jsonl
-		filename := filepath.Join(dirPath, fmt.Sprintf("%s.jsonl", band))
-
-		// Open file in append mode
-		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open metrics file: %w", err)
-		}
-
-		// Write JSON line
-		encoder := json.NewEncoder(file)
-		if err := encoder.Encode(snapshot); err != nil {
-			file.Close()
-			return fmt.Errorf("failed to write metrics snapshot: %w", err)
-		}
-
-		// Close file and check for errors
-		if err := file.Close(); err != nil {
-			return fmt.Errorf("failed to close metrics file: %w", err)
-		}
-
-		// Dual-write to SQLite (best-effort — never blocks or fails the JSONL write)
-		cm.dbMu.Lock()
-		db := cm.db
-		cm.dbMu.Unlock()
 		if db != nil {
 			_, dbErr := db.Exec(`
 				INSERT INTO cw_metrics (
@@ -596,6 +559,65 @@ func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 
 	cm.lastMetricsWrite = now
 	return nil
+}
+
+// ReadCWMetricsFromDB reads CW metrics snapshots from SQLite for a given time range.
+// Returns snapshots grouped by band, matching the old ReadMetricsFromFiles return type.
+func ReadCWMetricsFromDB(db *sql.DB, startTime, endTime time.Time, filterBand string) (map[string][]CWMetricsSnapshot, error) {
+	if db == nil {
+		return nil, nil
+	}
+
+	rows, err := db.Query(`
+		SELECT ts, band,
+		       spots_1h, spots_24h,
+		       unique_calls_1h, unique_calls_24h,
+		       spots_per_hour, callsigns_per_hour, activity_score,
+		       wpm_avg_1m, wpm_min_1m, wpm_max_1m,
+		       wpm_avg_5m, wpm_min_5m, wpm_max_5m,
+		       wpm_avg_10m, wpm_min_10m, wpm_max_10m
+		FROM cw_metrics
+		WHERE ts >= ?
+		  AND ts <= ?
+		  AND (? = '' OR band = ?)
+		ORDER BY ts ASC`,
+		startTime.Unix(), endTime.Unix(),
+		filterBand, filterBand,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]CWMetricsSnapshot)
+
+	for rows.Next() {
+		var ts int64
+		var s CWMetricsSnapshot
+
+		err := rows.Scan(
+			&ts, &s.Band,
+			&s.SpotCounts.Last1Hour, &s.SpotCounts.Last24Hour,
+			&s.UniqueCallsigns.Last1Hour, &s.UniqueCallsigns.Last24Hour,
+			&s.Activity.SpotsPerHour, &s.Activity.CallsignsPerHour, &s.Activity.ActivityScore,
+			&s.WPMStats.Last1Min.AvgWPM, &s.WPMStats.Last1Min.MinWPM, &s.WPMStats.Last1Min.MaxWPM,
+			&s.WPMStats.Last5Min.AvgWPM, &s.WPMStats.Last5Min.MinWPM, &s.WPMStats.Last5Min.MaxWPM,
+			&s.WPMStats.Last10Min.AvgWPM, &s.WPMStats.Last10Min.MinWPM, &s.WPMStats.Last10Min.MaxWPM,
+		)
+		if err != nil {
+			log.Printf("[cw_metrics] scan error: %v", err)
+			continue
+		}
+
+		s.Timestamp = time.Unix(ts, 0)
+		result[s.Band] = append(result[s.Band], s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return result, nil
 }
 
 // createSnapshotLocked creates a metrics snapshot for a band.
@@ -708,102 +730,4 @@ func (cm *CWSkimmerMetrics) UpdateSummaries() error {
 
 	// Write summaries to disk if needed (rate-limited to once per minute)
 	return cm.summaryAggregator.WriteIfNeeded()
-}
-
-// ReadMetricsFromFiles reads CW metrics snapshots from files for a given time range
-// Returns snapshots grouped by band
-func (cm *CWSkimmerMetrics) ReadMetricsFromFiles(startTime, endTime time.Time) (map[string][]CWMetricsSnapshot, error) {
-	if !cm.metricsLogEnabled {
-		return nil, nil
-	}
-
-	result := make(map[string][]CWMetricsSnapshot)
-
-	// Determine which dates to read
-	currentDate := startTime
-	for currentDate.Before(endTime) || currentDate.Equal(endTime) {
-		// Build directory path for this date
-		dirPath := filepath.Join(
-			cm.metricsLogDataDir,
-			fmt.Sprintf("%04d", currentDate.Year()),
-			fmt.Sprintf("%02d", currentDate.Month()),
-			fmt.Sprintf("%02d", currentDate.Day()),
-		)
-
-		// Check if directory exists
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			// Skip to next day
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Read all .jsonl files in this directory
-		files, err := filepath.Glob(filepath.Join(dirPath, "*.jsonl"))
-		if err != nil {
-			log.Printf("Warning: error reading CW metrics directory %s: %v", dirPath, err)
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Read each file
-		for _, filePath := range files {
-			snapshots, err := cm.readSnapshotsFromFile(filePath, startTime, endTime)
-			if err != nil {
-				log.Printf("Warning: error reading CW metrics from %s: %v", filePath, err)
-				continue
-			}
-
-			// Group by band
-			for _, snapshot := range snapshots {
-				result[snapshot.Band] = append(result[snapshot.Band], snapshot)
-			}
-		}
-
-		// Move to next day
-		currentDate = currentDate.AddDate(0, 0, 1)
-	}
-
-	return result, nil
-}
-
-// readSnapshotsFromFile reads CW metrics snapshots from a single file within the time range.
-// Uses bufio.Scanner + json.Unmarshal per line to avoid the json.NewDecoder infinite-loop
-// bug where a malformed token causes Decode() to retry the same position forever.
-func (cm *CWSkimmerMetrics) readSnapshotsFromFile(filePath string, startTime, endTime time.Time) ([]CWMetricsSnapshot, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var snapshots []CWMetricsSnapshot
-
-	// Use a 1 MiB scanner buffer to handle long JSON lines safely.
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var snapshot CWMetricsSnapshot
-		if err := json.Unmarshal(line, &snapshot); err != nil {
-			// Skip malformed lines and continue to the next
-			continue
-		}
-
-		// Only include snapshots within the time range
-		if (snapshot.Timestamp.Equal(startTime) || snapshot.Timestamp.After(startTime)) &&
-			(snapshot.Timestamp.Equal(endTime) || snapshot.Timestamp.Before(endTime)) {
-			snapshots = append(snapshots, snapshot)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return snapshots, fmt.Errorf("error reading metrics file: %w", err)
-	}
-
-	return snapshots, nil
 }

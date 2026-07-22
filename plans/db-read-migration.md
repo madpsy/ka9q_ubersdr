@@ -522,96 +522,93 @@ No raw file reads.
 
 ---
 
-## Component 7 — `decoder_metrics` table
+## Component 7 — `decoder_metrics` table ✅ MIGRATED
 
-**DB table**: `decoder_metrics(id, ts, mode, band, band_name, decodes_1h…24h, dpc_1m…60m, unique_calls_1h…24h, exec_avg/min/max_1m/5m, decodes_per_hour, callsigns_per_hour, activity_score)`  
-**Current read files**: [`decoder_metrics_log.go`](../decoder_metrics_log.go) · [`decoder_metrics_api.go`](../decoder_metrics_api.go)
+**DB table**: `decoder_metrics(id, ts, mode, band, band_name, decodes_1h…24h, dpc_1m…60m, unique_calls_1h…24h, exec_avg/min/max_1m/5m, decodes_per_hour, callsigns_per_hour, activity_score)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### Operations to migrate
+### What was done
 
-#### 7.1 `ReadMetricsFromFiles` — used by `/decoder-metrics` (GET)
+#### Write path ✅
+`MetricsLogger.writeSnapshot()` now writes exclusively to SQLite via `db.Exec(INSERT INTO decoder_metrics ...)`. File write, `getOrCreateFile()`, `CleanupOldFiles()`, `loadMetricsFromFile()`, `readSnapshotsFromFile()` all removed.
 
-**Current**: [`decoder_metrics_log.go:ReadMetricsFromFiles()`](../decoder_metrics_log.go:520)
-walks `YYYY/MM/DD/MODE-BAND.jsonl` files, returns `map[string][]MetricsSnapshot` grouped
-by `mode:band`.
-
-**SQL replacement**:
+#### Read path ✅ — `ReadMetricsFromDB(db *sql.DB, startTime, endTime time.Time, filterMode, filterBand string)`
 ```sql
-SELECT ts, mode, band, band_name,
-       decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
-       dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
-       unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
-       exec_avg_1m, exec_min_1m, exec_max_1m,
-       exec_avg_5m, exec_min_5m, exec_max_5m,
+SELECT ts, mode, band, band_name, decodes_1h…24h, dpc_1m…60m,
+       unique_calls_1h…24h, exec_avg/min/max_1m/5m,
        decodes_per_hour, callsigns_per_hour, activity_score
 FROM decoder_metrics
-WHERE ts >= ?              -- startTime.Unix()
-  AND ts <= ?              -- endTime.Unix()
+WHERE ts >= ? AND ts <= ?
   AND (? = '' OR mode = ?)
   AND (? = '' OR band = ?)
 ORDER BY ts ASC
 ```
+Returns `map[string][]MetricsSnapshot` grouped by `mode:band`, matching the old return type.
 
-Group results by `mode:band` key in Go to match the existing return type.
+#### 7.1 `/decoder-metrics` (GET) ✅
+`handleDecodeMetrics` now accepts `readDB *sql.DB` and calls `ReadMetricsFromDB(readDB, ...)` instead of `md.metricsLogger.ReadMetricsFromFiles(...)`.
 
----
-
-#### 7.2 `LoadRecentMetrics` — startup warm-up
-
-**Current**: [`decoder_metrics_log.go:LoadRecentMetrics()`](../decoder_metrics_log.go:406)
-reads the last 24h of JSONL files to restore `DigitalDecodeMetrics` in-memory state.
-
-**SQL replacement**:
+#### 7.2 `LoadRecentMetrics` — startup warm-up ✅
+`MetricsLogger.LoadRecentMetrics(db *sql.DB, dm *DigitalDecodeMetrics)` now queries:
 ```sql
-SELECT ts, mode, band, exec_avg_1m
-FROM decoder_metrics
-WHERE ts >= ?    -- now - 24h
-ORDER BY ts ASC
+SELECT ts, mode, band, exec_avg_1m FROM decoder_metrics WHERE ts >= ? ORDER BY ts ASC
 ```
+Called from `MultiDecoder.Start()` after `SetReadDB()` is wired.
 
-Then call `dm.RecordExecutionTime(mode, band, execTime)` for each row, same as today.
+#### 7.3 `/decoder/rates/all` (GET) ✅
+`handleDecodeRatesAll` now accepts `readDB *sql.DB` (passed through for future use; currently uses in-memory summary aggregator).
+
+### Config changes
+- Removed `metrics_log_data_dir` from `config/decoder.yaml.example` — no longer needed (metrics go to SQLite)
+- `metrics_log_enabled` and `metrics_log_interval_secs` retained (control write cadence to DB)
+
+### Imports removed from `decoder_metrics_log.go`
+- `bufio`, `encoding/json`, `os`, `path/filepath` — all removed
+- Retained: `database/sql`, `fmt`, `log`, `sync`, `time`
+
+### Wiring chain
+`main.go` → `multiDecoder.SetReadDB(dbManager.ReadDB())` → `md.readDB` → used in `Start()` for `LoadRecentMetrics`
+`main.go` → `handleDecodeMetrics(w, r, md, dbManager.ReadDB(), ...)` → `ReadMetricsFromDB(readDB, ...)`
 
 ---
 
-**Files to change**: [`decoder_metrics_log.go`](../decoder_metrics_log.go) — add DB read path
-to `ReadMetricsFromFiles()` and `LoadRecentMetrics()`.
+## Component 8 — `cw_metrics` table ✅ MIGRATED
 
----
+**DB table**: `cw_metrics(id, ts, band, spots_1h, spots_24h, unique_calls_1h, unique_calls_24h, spots_per_hour, callsigns_per_hour, activity_score, wpm_avg/min/max_1m/5m/10m)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-## Component 8 — `cw_metrics` table
+### What was done
 
-**DB table**: `cw_metrics(id, ts, band, spots_1h, spots_24h, unique_calls_1h, unique_calls_24h, spots_per_hour, callsigns_per_hour, activity_score, wpm_avg/min/max_1m/5m/10m)`  
-**Current read files**: [`cwskimmer_metrics.go`](../cwskimmer_metrics.go) · [`decoder_metrics_api.go`](../decoder_metrics_api.go)
+#### Write path ✅
+`CWSkimmerMetrics.WriteMetricsSnapshot()` now writes exclusively to SQLite via `db.Exec(INSERT INTO cw_metrics ...)`. File write (`os.OpenFile`, `os.MkdirAll`, `filepath.Join`, `json.NewEncoder`) removed.
 
-### Operations to migrate
-
-#### 8.1 `ReadMetricsFromFiles` — used by CW metrics API
-
-**Current**: [`cwskimmer_metrics.go:ReadMetricsFromFiles()`](../cwskimmer_metrics.go:715)
-walks `YYYY/MM/DD/BAND.jsonl` files, returns `map[string][]CWMetricsSnapshot` grouped by band.
-
-**SQL replacement**:
+#### Read path ✅ — `ReadCWMetricsFromDB(db *sql.DB, startTime, endTime time.Time, filterBand string)`
 ```sql
-SELECT ts, band,
-       spots_1h, spots_24h,
-       unique_calls_1h, unique_calls_24h,
+SELECT ts, band, spots_1h, spots_24h, unique_calls_1h, unique_calls_24h,
        spots_per_hour, callsigns_per_hour, activity_score,
        wpm_avg_1m, wpm_min_1m, wpm_max_1m,
        wpm_avg_5m, wpm_min_5m, wpm_max_5m,
        wpm_avg_10m, wpm_min_10m, wpm_max_10m
 FROM cw_metrics
-WHERE ts >= ?              -- startTime.Unix()
-  AND ts <= ?              -- endTime.Unix()
+WHERE ts >= ? AND ts <= ?
   AND (? = '' OR band = ?)
 ORDER BY ts ASC
 ```
+Returns `map[string][]CWMetricsSnapshot` grouped by band, matching the old return type.
 
-Group results by `band` key in Go to match the existing return type.
+#### 8.1 `/cwskimmer/metrics` (GET) ✅
+`handleCWMetrics` now accepts `readDB *sql.DB` and calls `ReadCWMetricsFromDB(readDB, startTime, endTime, band)` instead of `cwSkimmer.metrics.ReadMetricsFromFiles(...)`.
 
----
+### Config changes
+- Removed `metrics_log_data_dir` from `config/cwskimmer.yaml.example` — no longer needed
+- `metrics_log_enabled` and `metrics_log_interval_secs` retained (control write cadence to DB)
 
-**Files to change**: [`cwskimmer_metrics.go`](../cwskimmer_metrics.go) — add DB read path
-to `ReadMetricsFromFiles()`.
+### Imports removed from `cwskimmer_metrics.go`
+- `bufio`, `encoding/json`, `os`, `path/filepath` — all removed
+- Retained: `database/sql`, `fmt`, `log`, `sync`, `time`
+
+### Wiring chain
+`main.go` → `handleCWMetrics(w, r, cwSkimmer, dbManager.ReadDB(), ...)` → `ReadCWMetricsFromDB(readDB, ...)`
 
 ---
 

@@ -4925,16 +4925,6 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	// Get data directory sizes using du -sh
 	dataDirs := make(map[string]string)
 
-	// Decoder metrics directory
-	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsLogDataDir != "" {
-		if _, err := os.Stat(ah.config.Decoder.MetricsLogDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsLogDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["decoder_metrics"] = string(duOutput)
-			}
-		}
-	}
-
 	// Decoder spots directory
 	if ah.config.Decoder.Enabled && ah.config.Decoder.SpotsLogEnabled && ah.config.Decoder.SpotsLogDataDir != "" {
 		if _, err := os.Stat(ah.config.Decoder.SpotsLogDataDir); err == nil {
@@ -4981,16 +4971,6 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.SpotsLogDataDir)
 			if duOutput, err := duCmd.CombinedOutput(); err == nil {
 				dataDirs["cwskimmer_spots"] = string(duOutput)
-			}
-		}
-	}
-
-	// CW Skimmer metrics directory
-	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsLogDataDir != "" {
-		if _, err := os.Stat(ah.cwSkimmerConfig.MetricsLogDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsLogDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["cwskimmer_metrics"] = string(duOutput)
 			}
 		}
 	}

@@ -2,27 +2,17 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
 
-// MetricsLogger handles JSON Lines logging of decoder metrics
-// Logs metrics snapshots to separate files organized by year/month/day/band
+// MetricsLogger handles logging of decoder metrics to SQLite
 type MetricsLogger struct {
-	dataDir string
-
-	// SQLite dual-write (optional)
+	// SQLite write connection
 	db   *sql.DB
 	dbMu sync.Mutex
-
-	// JSON Lines logging (one file per mode-band combination per day)
-	openFiles map[string]*os.File // key: mode-band/date
-	fileMu    sync.Mutex
 
 	// Control
 	enabled       bool
@@ -30,14 +20,14 @@ type MetricsLogger struct {
 	lastWrite     time.Time
 }
 
-// SetDB wires the SQLite database for dual-write. Safe to call at any time.
+// SetDB wires the SQLite database for write. Safe to call at any time.
 func (ml *MetricsLogger) SetDB(db *sql.DB) {
 	ml.dbMu.Lock()
 	ml.db = db
 	ml.dbMu.Unlock()
 }
 
-// MetricsSnapshot represents a single metrics snapshot for JSON Lines output
+// MetricsSnapshot represents a single metrics snapshot
 type MetricsSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
 	Mode      string    `json:"mode"`
@@ -104,17 +94,10 @@ func NewMetricsLogger(dataDir string, enabled bool, writeInterval time.Duration)
 		return &MetricsLogger{enabled: false}, nil
 	}
 
-	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create metrics log directory: %w", err)
-	}
-
 	ml := &MetricsLogger{
-		dataDir:       dataDir,
 		enabled:       true,
 		writeInterval: writeInterval,
 		lastWrite:     time.Now(),
-		openFiles:     make(map[string]*os.File),
 	}
 
 	return ml, nil
@@ -133,9 +116,6 @@ func (ml *MetricsLogger) WriteMetrics(dm *DigitalDecodeMetrics) error {
 	if !ml.enabled || dm == nil {
 		return nil
 	}
-
-	ml.fileMu.Lock()
-	defer ml.fileMu.Unlock()
 
 	now := time.Now()
 	ml.lastWrite = now
@@ -231,374 +211,177 @@ func (ml *MetricsLogger) createSnapshot(dm *DigitalDecodeMetrics, mode, band str
 	return snapshot
 }
 
-// writeSnapshot writes a single metrics snapshot to the appropriate file
-// File path structure: base_dir/YYYY/MM/DD/MODE-BAND.jsonl
+// writeSnapshot writes a single metrics snapshot to SQLite
 func (ml *MetricsLogger) writeSnapshot(snapshot *MetricsSnapshot) error {
-	// Get or create file for this mode-band/date combination
-	file, err := ml.getOrCreateFile(snapshot)
-	if err != nil {
-		return err
-	}
-
-	// Marshal snapshot to JSON
-	jsonData, err := json.Marshal(snapshot)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics snapshot: %w", err)
-	}
-
-	// Write JSON line
-	if _, err := file.Write(jsonData); err != nil {
-		return err
-	}
-	if _, err := file.Write([]byte("\n")); err != nil {
-		return err
-	}
-
-	// Sync to ensure data is written to disk
-	if err := file.Sync(); err != nil {
-		return err
-	}
-
-	// Dual-write to SQLite (best-effort — never blocks or fails the CSV write)
 	ml.dbMu.Lock()
 	db := ml.db
 	ml.dbMu.Unlock()
-	if db != nil {
-		_, dbErr := db.Exec(`
-			INSERT INTO decoder_metrics (
-				ts, mode, band, band_name,
-				decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
-				dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
-				unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
-				exec_avg_1m, exec_min_1m, exec_max_1m,
-				exec_avg_5m, exec_min_5m, exec_max_5m,
-				decodes_per_hour, callsigns_per_hour, activity_score
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			snapshot.Timestamp.Unix(),
-			snapshot.Mode, snapshot.Band, snapshot.BandName,
-			snapshot.DecodeCounts.Last1Hour, snapshot.DecodeCounts.Last3Hours,
-			snapshot.DecodeCounts.Last6Hours, snapshot.DecodeCounts.Last12Hours,
-			snapshot.DecodeCounts.Last24Hours,
-			snapshot.DecodesPerCycle.Last1Min, snapshot.DecodesPerCycle.Last5Min,
-			snapshot.DecodesPerCycle.Last15Min, snapshot.DecodesPerCycle.Last30Min,
-			snapshot.DecodesPerCycle.Last60Min,
-			snapshot.UniqueCallsigns.Last1Hour, snapshot.UniqueCallsigns.Last3Hours,
-			snapshot.UniqueCallsigns.Last6Hours, snapshot.UniqueCallsigns.Last12Hours,
-			snapshot.UniqueCallsigns.Last24Hours,
-			snapshot.ExecutionTime.Last1Min.Avg, snapshot.ExecutionTime.Last1Min.Min,
-			snapshot.ExecutionTime.Last1Min.Max,
-			snapshot.ExecutionTime.Last5Min.Avg, snapshot.ExecutionTime.Last5Min.Min,
-			snapshot.ExecutionTime.Last5Min.Max,
-			snapshot.Activity.DecodesPerHour, snapshot.Activity.CallsignsPerHour,
-			snapshot.Activity.ActivityScore,
-		)
-		if dbErr != nil {
-			log.Printf("[decoder_metrics] db insert error: %v", dbErr)
-		}
+
+	if db == nil {
+		return nil
 	}
 
-	return nil
-}
-
-// getOrCreateFile gets or creates a file for the given snapshot
-// File path structure: base_dir/YYYY/MM/DD/MODE-BAND.jsonl
-func (ml *MetricsLogger) getOrCreateFile(snapshot *MetricsSnapshot) (*os.File, error) {
-	// Create a unique key for this mode-band/date combination
-	dateStr := snapshot.Timestamp.Format("2006-01-02")
-	key := fmt.Sprintf("%s-%s/%s", snapshot.Mode, snapshot.Band, dateStr)
-
-	// Check if we already have a file for this combination
-	if file, exists := ml.openFiles[key]; exists {
-		return file, nil
-	}
-
-	// Parse date to create year/month/day directory structure
-	t := snapshot.Timestamp
-
-	// Create directory path: base_dir/YYYY/MM/DD/
-	dirPath := filepath.Join(
-		ml.dataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
+	_, err := db.Exec(`
+		INSERT INTO decoder_metrics (
+			ts, mode, band, band_name,
+			decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
+			dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
+			unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
+			exec_avg_1m, exec_min_1m, exec_max_1m,
+			exec_avg_5m, exec_min_5m, exec_max_5m,
+			decodes_per_hour, callsigns_per_hour, activity_score
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		snapshot.Timestamp.Unix(),
+		snapshot.Mode, snapshot.Band, snapshot.BandName,
+		snapshot.DecodeCounts.Last1Hour, snapshot.DecodeCounts.Last3Hours,
+		snapshot.DecodeCounts.Last6Hours, snapshot.DecodeCounts.Last12Hours,
+		snapshot.DecodeCounts.Last24Hours,
+		snapshot.DecodesPerCycle.Last1Min, snapshot.DecodesPerCycle.Last5Min,
+		snapshot.DecodesPerCycle.Last15Min, snapshot.DecodesPerCycle.Last30Min,
+		snapshot.DecodesPerCycle.Last60Min,
+		snapshot.UniqueCallsigns.Last1Hour, snapshot.UniqueCallsigns.Last3Hours,
+		snapshot.UniqueCallsigns.Last6Hours, snapshot.UniqueCallsigns.Last12Hours,
+		snapshot.UniqueCallsigns.Last24Hours,
+		snapshot.ExecutionTime.Last1Min.Avg, snapshot.ExecutionTime.Last1Min.Min,
+		snapshot.ExecutionTime.Last1Min.Max,
+		snapshot.ExecutionTime.Last5Min.Avg, snapshot.ExecutionTime.Last5Min.Min,
+		snapshot.ExecutionTime.Last5Min.Max,
+		snapshot.Activity.DecodesPerHour, snapshot.Activity.CallsignsPerHour,
+		snapshot.Activity.ActivityScore,
 	)
-
-	// Create directory structure if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory structure: %w", err)
-	}
-
-	// Create file: base_dir/YYYY/MM/DD/MODE-BAND.jsonl
-	filename := filepath.Join(dirPath, fmt.Sprintf("%s-%s.jsonl", snapshot.Mode, snapshot.Band))
-
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("db insert error: %w", err)
 	}
 
-	// Store file
-	ml.openFiles[key] = file
-
-	return file, nil
+	return nil
 }
 
-// Close closes all open files
+// Close is a no-op kept for API compatibility.
 func (ml *MetricsLogger) Close() error {
-	if !ml.enabled {
-		return nil
-	}
-
-	ml.fileMu.Lock()
-	defer ml.fileMu.Unlock()
-
-	// Close all open files
-	for key, file := range ml.openFiles {
-		if err := file.Close(); err != nil {
-			log.Printf("Warning: error closing metrics file %s: %v", key, err)
-		}
-	}
-
-	// Clear map
-	ml.openFiles = make(map[string]*os.File)
-
 	return nil
 }
 
-// CleanupOldFiles closes files that are no longer for today
-// This should be called periodically (e.g., once per day) to prevent keeping old files open
-func (ml *MetricsLogger) CleanupOldFiles() error {
-	if !ml.enabled {
+// LoadRecentMetrics reads recent metrics from SQLite and populates in-memory metrics.
+// Reads the last 24 hours to restore DigitalDecodeMetrics state after a restart.
+func (ml *MetricsLogger) LoadRecentMetrics(db *sql.DB, dm *DigitalDecodeMetrics) error {
+	if !ml.enabled || dm == nil || db == nil {
 		return nil
 	}
 
-	ml.fileMu.Lock()
-	defer ml.fileMu.Unlock()
+	startTime := time.Now().Add(-24 * time.Hour)
 
-	today := time.Now().Format("2006-01-02")
-	filesToClose := make([]string, 0)
+	log.Printf("Loading recent metrics from DB (last 24 hours)...")
 
-	// Find files that are not for today
-	for key := range ml.openFiles {
-		// Key format is "MODE-BAND/YYYY-MM-DD"
-		// Extract date from key
-		parts := filepath.SplitList(key)
-		if len(parts) > 0 {
-			dateStr := parts[len(parts)-1]
-			if dateStr != today {
-				filesToClose = append(filesToClose, key)
-			}
-		}
-	}
-
-	// Close old files
-	for _, key := range filesToClose {
-		if file, exists := ml.openFiles[key]; exists {
-			if err := file.Close(); err != nil {
-				log.Printf("Warning: error closing old metrics file %s: %v", key, err)
-			}
-			delete(ml.openFiles, key)
-		}
-	}
-
-	return nil
-}
-
-// LoadRecentMetrics reads recent metrics from JSON Lines files and populates in-memory metrics
-// Reads files from the last 24 hours to restore state after a restart
-func (ml *MetricsLogger) LoadRecentMetrics(dm *DigitalDecodeMetrics) error {
-	if !ml.enabled || dm == nil {
-		return nil
-	}
-
-	now := time.Now()
-	startTime := now.Add(-24 * time.Hour)
-
-	log.Printf("Loading recent metrics from files (last 24 hours)...")
-
-	// Determine which dates to check (today and yesterday)
-	dates := []time.Time{now, now.AddDate(0, 0, -1)}
-	if startTime.Day() != now.AddDate(0, 0, -1).Day() {
-		// If 24 hours ago spans 3 days, add the day before yesterday
-		dates = append(dates, now.AddDate(0, 0, -2))
-	}
-
-	totalSnapshots := 0
-	for _, date := range dates {
-		// Build directory path for this date
-		dirPath := filepath.Join(
-			ml.dataDir,
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", date.Month()),
-			fmt.Sprintf("%02d", date.Day()),
-		)
-
-		// Check if directory exists
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			continue
-		}
-
-		// Read all .jsonl files in this directory
-		files, err := filepath.Glob(filepath.Join(dirPath, "*.jsonl"))
-		if err != nil {
-			log.Printf("Warning: error reading metrics directory %s: %v", dirPath, err)
-			continue
-		}
-
-		for _, filePath := range files {
-			count, err := ml.loadMetricsFromFile(filePath, dm, startTime)
-			if err != nil {
-				log.Printf("Warning: error loading metrics from %s: %v", filePath, err)
-				continue
-			}
-			totalSnapshots += count
-		}
-	}
-
-	if totalSnapshots > 0 {
-		log.Printf("Loaded %d metric snapshots from files", totalSnapshots)
-	} else {
-		log.Printf("No recent metrics found in files")
-	}
-
-	return nil
-}
-
-// loadMetricsFromFile reads metrics from a single JSON Lines file
-func (ml *MetricsLogger) loadMetricsFromFile(filePath string, dm *DigitalDecodeMetrics, startTime time.Time) (int, error) {
-	file, err := os.Open(filePath)
+	rows, err := db.Query(`
+		SELECT ts, mode, band, exec_avg_1m
+		FROM decoder_metrics
+		WHERE ts >= ?
+		ORDER BY ts ASC`,
+		startTime.Unix(),
+	)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("query error: %w", err)
 	}
-	defer file.Close()
+	defer rows.Close()
 
-	decoder := json.NewDecoder(file)
 	count := 0
-	lineNum := 0
-	maxErrors := 10 // Stop after 10 consecutive errors to prevent infinite loops
+	for rows.Next() {
+		var ts int64
+		var mode, band string
+		var execAvg1m float64
 
-	consecutiveErrors := 0
-	for {
-		lineNum++
-		var snapshot MetricsSnapshot
-		if err := decoder.Decode(&snapshot); err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			// Skip malformed lines but track consecutive errors
-			consecutiveErrors++
-			if consecutiveErrors >= maxErrors {
-				log.Printf("Warning: too many consecutive errors (%d) in %s at line %d, skipping rest of file", consecutiveErrors, filePath, lineNum)
-				break
-			}
+		if err := rows.Scan(&ts, &mode, &band, &execAvg1m); err != nil {
+			log.Printf("[decoder_metrics] scan error: %v", err)
 			continue
 		}
 
-		// Reset consecutive error counter on successful decode
-		consecutiveErrors = 0
-
-		// Only load snapshots from the last 24 hours
-		if snapshot.Timestamp.Before(startTime) {
-			continue
+		if execAvg1m > 0 {
+			execTime := time.Duration(execAvg1m * float64(time.Second))
+			dm.RecordExecutionTime(mode, band, execTime)
 		}
-
-		// Restore execution time data points
-		// We'll add data points at the snapshot timestamp with the recorded values
-		if dm != nil && snapshot.ExecutionTime.Last1Min.Avg > 0 {
-			// Create a synthetic execution time entry
-			execTime := time.Duration(snapshot.ExecutionTime.Last1Min.Avg * float64(time.Second))
-			dm.RecordExecutionTime(snapshot.Mode, snapshot.Band, execTime)
-		}
-
 		count++
 	}
 
-	return count, nil
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows error: %w", err)
+	}
+
+	if count > 0 {
+		log.Printf("Loaded %d metric snapshots from DB", count)
+	} else {
+		log.Printf("No recent metrics found in DB")
+	}
+
+	return nil
 }
 
-// ReadMetricsFromFiles reads metrics snapshots from files for a given time range
-// Returns snapshots grouped by mode-band combination
-func (ml *MetricsLogger) ReadMetricsFromFiles(startTime, endTime time.Time) (map[string][]MetricsSnapshot, error) {
-	if !ml.enabled {
+// ReadMetricsFromDB reads metrics snapshots from SQLite for a given time range.
+// Returns snapshots grouped by "mode:band" key, matching the old ReadMetricsFromFiles return type.
+func ReadMetricsFromDB(db *sql.DB, startTime, endTime time.Time, filterMode, filterBand string) (map[string][]MetricsSnapshot, error) {
+	if db == nil {
 		return nil, nil
 	}
 
+	rows, err := db.Query(`
+		SELECT ts, mode, band, band_name,
+		       decodes_1h, decodes_3h, decodes_6h, decodes_12h, decodes_24h,
+		       dpc_1m, dpc_5m, dpc_15m, dpc_30m, dpc_60m,
+		       unique_calls_1h, unique_calls_3h, unique_calls_6h, unique_calls_12h, unique_calls_24h,
+		       exec_avg_1m, exec_min_1m, exec_max_1m,
+		       exec_avg_5m, exec_min_5m, exec_max_5m,
+		       decodes_per_hour, callsigns_per_hour, activity_score
+		FROM decoder_metrics
+		WHERE ts >= ?
+		  AND ts <= ?
+		  AND (? = '' OR mode = ?)
+		  AND (? = '' OR band = ?)
+		ORDER BY ts ASC`,
+		startTime.Unix(), endTime.Unix(),
+		filterMode, filterMode,
+		filterBand, filterBand,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+	defer rows.Close()
+
 	result := make(map[string][]MetricsSnapshot)
 
-	// Determine which dates to read
-	currentDate := startTime
-	for currentDate.Before(endTime) || currentDate.Equal(endTime) {
-		// Build directory path for this date
-		dirPath := filepath.Join(
-			ml.dataDir,
-			fmt.Sprintf("%04d", currentDate.Year()),
-			fmt.Sprintf("%02d", currentDate.Month()),
-			fmt.Sprintf("%02d", currentDate.Day()),
+	for rows.Next() {
+		var ts int64
+		var s MetricsSnapshot
+
+		err := rows.Scan(
+			&ts, &s.Mode, &s.Band, &s.BandName,
+			&s.DecodeCounts.Last1Hour, &s.DecodeCounts.Last3Hours,
+			&s.DecodeCounts.Last6Hours, &s.DecodeCounts.Last12Hours,
+			&s.DecodeCounts.Last24Hours,
+			&s.DecodesPerCycle.Last1Min, &s.DecodesPerCycle.Last5Min,
+			&s.DecodesPerCycle.Last15Min, &s.DecodesPerCycle.Last30Min,
+			&s.DecodesPerCycle.Last60Min,
+			&s.UniqueCallsigns.Last1Hour, &s.UniqueCallsigns.Last3Hours,
+			&s.UniqueCallsigns.Last6Hours, &s.UniqueCallsigns.Last12Hours,
+			&s.UniqueCallsigns.Last24Hours,
+			&s.ExecutionTime.Last1Min.Avg, &s.ExecutionTime.Last1Min.Min,
+			&s.ExecutionTime.Last1Min.Max,
+			&s.ExecutionTime.Last5Min.Avg, &s.ExecutionTime.Last5Min.Min,
+			&s.ExecutionTime.Last5Min.Max,
+			&s.Activity.DecodesPerHour, &s.Activity.CallsignsPerHour,
+			&s.Activity.ActivityScore,
 		)
-
-		// Check if directory exists
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			// Skip to next day
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
-
-		// Read all .jsonl files in this directory
-		files, err := filepath.Glob(filepath.Join(dirPath, "*.jsonl"))
 		if err != nil {
-			log.Printf("Warning: error reading metrics directory %s: %v", dirPath, err)
-			currentDate = currentDate.AddDate(0, 0, 1)
+			log.Printf("[decoder_metrics] scan error: %v", err)
 			continue
 		}
 
-		// Read each file
-		for _, filePath := range files {
-			snapshots, err := ml.readSnapshotsFromFile(filePath, startTime, endTime)
-			if err != nil {
-				log.Printf("Warning: error reading metrics from %s: %v", filePath, err)
-				continue
-			}
+		s.Timestamp = time.Unix(ts, 0)
+		key := fmt.Sprintf("%s:%s", s.Mode, s.Band)
+		result[key] = append(result[key], s)
+	}
 
-			// Group by mode-band
-			for _, snapshot := range snapshots {
-				key := fmt.Sprintf("%s:%s", snapshot.Mode, snapshot.Band)
-				result[key] = append(result[key], snapshot)
-			}
-		}
-
-		// Move to next day
-		currentDate = currentDate.AddDate(0, 0, 1)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
 	return result, nil
-}
-
-// readSnapshotsFromFile reads snapshots from a single file within the time range
-func (ml *MetricsLogger) readSnapshotsFromFile(filePath string, startTime, endTime time.Time) ([]MetricsSnapshot, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var snapshots []MetricsSnapshot
-	decoder := json.NewDecoder(file)
-
-	for {
-		var snapshot MetricsSnapshot
-		if err := decoder.Decode(&snapshot); err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			// Skip malformed lines
-			continue
-		}
-
-		// Only include snapshots within the time range
-		if (snapshot.Timestamp.Equal(startTime) || snapshot.Timestamp.After(startTime)) &&
-			(snapshot.Timestamp.Equal(endTime) || snapshot.Timestamp.Before(endTime)) {
-			snapshots = append(snapshots, snapshot)
-		}
-	}
-
-	return snapshots, nil
 }

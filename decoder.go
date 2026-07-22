@@ -33,13 +33,16 @@ type MultiDecoder struct {
 	// CSV logger
 	spotsLogger *SpotsLogger
 
-	// Metrics logger (JSON Lines)
+	// Metrics logger (DB-backed)
 	metricsLogger         *MetricsLogger
 	metricsFirstWriteDone bool
 	metricsFirstWriteMu   sync.Mutex
 
 	// Metrics summary aggregator
 	summaryAggregator *MetricsSummaryAggregator
+
+	// Read-only DB for metrics queries
+	readDB *sql.DB
 
 	// Statistics
 	stats *DecoderStats
@@ -60,7 +63,7 @@ type MultiDecoder struct {
 	callbackMu       sync.RWMutex
 }
 
-// SetDB wires the SQLite database into the multi-decoder for dual-write.
+// SetDB wires the SQLite write database into the multi-decoder.
 // It propagates the DB handle to the inner SpotsLogger and MetricsLogger.
 func (md *MultiDecoder) SetDB(db *sql.DB) {
 	if md.spotsLogger != nil {
@@ -69,6 +72,11 @@ func (md *MultiDecoder) SetDB(db *sql.DB) {
 	if md.metricsLogger != nil {
 		md.metricsLogger.SetDB(db)
 	}
+}
+
+// SetReadDB wires the read-only SQLite connection for metrics queries.
+func (md *MultiDecoder) SetReadDB(db *sql.DB) {
+	md.readDB = db
 }
 
 // NewMultiDecoder creates a new multi-decoder instance
@@ -159,8 +167,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		}
 	}
 
-	// Initialize metrics logger (JSON Lines format)
-	// Path resolution is handled in main.go before this is called
+	// Initialize metrics logger (SQLite-backed)
 	if config.MetricsLogEnabled {
 		writeInterval := time.Duration(config.MetricsLogIntervalSecs) * time.Second
 		if writeInterval == 0 {
@@ -171,16 +178,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 			return nil, fmt.Errorf("failed to initialize metrics logger: %w", err)
 		}
 		md.metricsLogger = logger
-		log.Printf("Metrics JSON Lines logging enabled: %s (interval: %v)", config.MetricsLogDataDir, writeInterval)
-
-		// Load recent metrics from files to restore state after restart
-		var digitalMetrics *DigitalDecodeMetrics
-		if prometheusMetrics != nil {
-			digitalMetrics = prometheusMetrics.digitalMetrics
-		}
-		if err := logger.LoadRecentMetrics(digitalMetrics); err != nil {
-			log.Printf("Warning: failed to load recent metrics from files: %v", err)
-		}
+		log.Printf("Metrics logging enabled (SQLite, interval: %v)", writeInterval)
 
 		// Initialize metrics summary aggregator
 		// Path resolution is handled in main.go before this is called
@@ -231,6 +229,18 @@ func (md *MultiDecoder) Start() error {
 	for _, band := range md.decoderBands {
 		md.wg.Add(1)
 		go md.bandMonitorLoop(band)
+	}
+
+	// Load recent metrics from DB to restore in-memory state after restart.
+	// readDB must be set via SetReadDB before Start() is called.
+	if md.metricsLogger != nil && md.readDB != nil {
+		var digitalMetrics *DigitalDecodeMetrics
+		if md.prometheusMetrics != nil {
+			digitalMetrics = md.prometheusMetrics.digitalMetrics
+		}
+		if err := md.metricsLogger.LoadRecentMetrics(md.readDB, digitalMetrics); err != nil {
+			log.Printf("Warning: failed to load recent metrics from DB: %v", err)
+		}
 	}
 
 	// Start metrics logger periodic write goroutine

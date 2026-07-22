@@ -25,14 +25,9 @@ spots_log_data_dir: "cwskimmer_spots"  # Directory for CSV files (relative or ab
                                         # Files organized as: cwskimmer_spots/YYYY/MM/DD/bandname.csv
                                         # Example: cwskimmer_spots/2024/11/24/20m.csv
 
-# Metrics Logging (JSON Lines format for time-series data)
+# Metrics Logging (stored in SQLite DB — no files written)
 # Logs CW Skimmer performance metrics (spot counts, WPM stats, etc.)
 metrics_log_enabled: true
-metrics_log_data_dir: "cwskimmer_metrics"  # Directory for metrics files (relative or absolute)
-                                            # If relative: relative to current working directory
-                                            # If absolute: used as-is (e.g., /var/log/cwskimmer_metrics)
-                                            # Files organized as: cwskimmer_metrics/YYYY/MM/DD/BAND.jsonl
-                                            # Example: cwskimmer_metrics/2024/11/24/20m.jsonl
 metrics_log_interval_secs: 300              # Write interval in seconds (default: 300 = 5 minutes)
                                             # Metrics snapshots written at this interval for all active bands
 

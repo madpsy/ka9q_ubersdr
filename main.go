@@ -968,6 +968,7 @@ func main() {
 	}
 	if multiDecoder != nil {
 		multiDecoder.SetDB(dbManager.DB())
+		multiDecoder.SetReadDB(dbManager.ReadDB())
 	}
 	// Note: multiDecoder.Start() will be called later after dxClusterWsHandler is initialized
 
@@ -2732,7 +2733,7 @@ func main() {
 		handleDecoderSpotsAnalyticsHourly(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/decoder/metrics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleDecodeMetrics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+		handleDecodeMetrics(w, r, multiDecoder, dbManager.ReadDB(), ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/decoder/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecodeMetricsSummary(w, r, multiDecoder, ipBanManager, summaryRateLimiter)
@@ -2741,7 +2742,7 @@ func main() {
 		handleDecoderBandNames(w, r, multiDecoder, ipBanManager)
 	})
 	http.HandleFunc("/api/decoder/rates/all", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleDecodeRatesAll(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+		handleDecodeRatesAll(w, r, multiDecoder, dbManager.ReadDB(), ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/wspr/phone-prediction", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleWSPRPhonePrediction(w, r, multiDecoder, ipBanManager, fftRateLimiter)
@@ -2787,7 +2788,7 @@ func main() {
 		handleCWSpotsCSVAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
 	}))
 	http.HandleFunc("/api/cwskimmer/metrics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleCWMetrics(w, r, cwSkimmer, ipBanManager, fftRateLimiter)
+		handleCWMetrics(w, r, cwSkimmer, dbManager.ReadDB(), ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/cwskimmer/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWMetricsSummary(w, r, cwSkimmer, ipBanManager, summaryRateLimiter)

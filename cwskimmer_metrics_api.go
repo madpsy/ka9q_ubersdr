@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -101,7 +102,7 @@ type CWWPMBucketData struct {
 }
 
 // handleCWMetrics serves comprehensive CW spot metrics
-func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, readDB *sql.DB, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -211,27 +212,21 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 	response.Summary.TimeWindow.Start = startTime
 	response.Summary.TimeWindow.End = endTime
 
-	// Always try to read from files if metrics logging is enabled
-	// This ensures we have data even after restarts or for time ranges with sparse in-memory data
-	// ReadMetricsFromFiles will return nil if logging is not enabled
-	log.Printf("Reading CW metrics from files for time range: %v to %v", startTime, endTime)
-	fileSnapshots, err := cwSkimmer.metrics.ReadMetricsFromFiles(startTime, endTime)
-	if err != nil {
-		log.Printf("Warning: error reading CW metrics from files: %v", err)
-	} else if fileSnapshots != nil {
-		log.Printf("Loaded %d bands from CW metrics files", len(fileSnapshots))
-		for band, snapshots := range fileSnapshots {
-			log.Printf("  Band %s: %d snapshots", band, len(snapshots))
-			if len(snapshots) > 0 {
-				log.Printf("    First snapshot: %v (Last24h: %d)", snapshots[0].Timestamp.Format("2006-01-02 15:04:05"), snapshots[0].SpotCounts.Last24Hour)
-				log.Printf("    Last snapshot: %v (Last24h: %d)", snapshots[len(snapshots)-1].Timestamp.Format("2006-01-02 15:04:05"), snapshots[len(snapshots)-1].SpotCounts.Last24Hour)
-			}
+	// Read CW metrics from DB for the requested time range.
+	// This ensures we have data even after restarts or for time ranges with sparse in-memory data.
+	var fileSnapshots map[string][]CWMetricsSnapshot
+	if readDB != nil {
+		log.Printf("Reading CW metrics from DB for time range: %v to %v", startTime, endTime)
+		var err error
+		fileSnapshots, err = ReadCWMetricsFromDB(readDB, startTime, endTime, band)
+		if err != nil {
+			log.Printf("Warning: error reading CW metrics from DB: %v", err)
+		} else {
+			log.Printf("Loaded %d bands from CW metrics DB", len(fileSnapshots))
 		}
-	} else {
-		log.Printf("fileSnapshots is nil - metrics logging may not be enabled")
 	}
 
-	// Get all bands from in-memory data
+	// Get all bands from in-memory data (fileSnapshots variable reused below)
 	bands := cwSkimmer.metrics.GetAllBands()
 	log.Printf("Found %d bands in memory", len(bands))
 

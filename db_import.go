@@ -25,6 +25,9 @@ package main
 //	space_weather  ← <spaceWeatherDir>/YYYY/MM/spaceweather-YYYY-MM-DD.csv
 //	decoder_metrics← <decoderMetricsDir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
 //	cw_metrics     ← <cwMetricsDir>/YYYY/MM/DD/<BAND>.jsonl
+//	wspr_rank_*    ← <statsDir>/wspr/YYYY/MM/DD/rolling_24h.jsonl
+//	psk_rank_*     ← <statsDir>/psk/YYYY/MM/DD/report_result.jsonl
+//	rbn_skew/_stats← <statsDir>/rbn/YYYY/MM/DD/{skew,statistics}.jsonl
 
 import (
 	"bufio"
@@ -62,6 +65,41 @@ type DBImporter struct {
 	SpaceWeatherDir   string // space_weather: <dir>/YYYY/MM/spaceweather-YYYY-MM-DD.csv
 	DecoderMetricsDir string // decoder_metrics: <dir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
 	CWMetricsDir      string // cw_metrics:    <dir>/YYYY/MM/DD/<BAND>.jsonl
+	StatsDir          string // wspr/psk/rbn stats root: <dir>/{wspr,psk,rbn}/YYYY/MM/DD/*.jsonl
+}
+
+// tableImport binds a table to the directory it is backfilled from and the
+// function that does the work.
+type tableImport struct {
+	table    string
+	dir      string
+	importFn func(context.Context) error
+}
+
+// dbImportOrder returns the backfill sequence. Small/fast tables come first so
+// they are available quickly; cw_spots and spots are deliberately LAST because
+// they are by far the largest tables and everything queued behind them would
+// otherwise wait hours.
+func dbImportOrder(imp *DBImporter) []tableImport {
+	return []tableImport{
+		{"chat_messages", imp.ChatDir, imp.importChat},
+		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
+		{"sessions", imp.SessionsDir, imp.importSessions},
+		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
+		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
+		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
+		// Stats share one root directory; each importer walks its own subtree.
+		// importRBN fills both rbn_skew and rbn_stats, so only rbn_skew is
+		// checked — they are always written together.
+		// These sit ahead of the spots imports: the stats tables are the sole
+		// source for /api/stats/* now that the JSONL writers are gone, so the
+		// history page stays blank until they land.
+		{"rbn_skew", imp.StatsDir, imp.importRBN},
+		{"psk_rank_snapshots", imp.StatsDir, imp.importPSKRank},
+		{"wspr_rank_windows", imp.StatsDir, imp.importWSPRRank},
+		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
+		{"spots", imp.SpotsDir, imp.importSpots},
+	}
 }
 
 // RunImportIfEmpty checks each table synchronously (before live writers start),
@@ -70,23 +108,7 @@ type DBImporter struct {
 // The empty check MUST happen synchronously so that live writes arriving after
 // startup cannot cause a table to appear non-empty before the decision is made.
 func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
-	type tableImport struct {
-		table    string
-		dir      string
-		importFn func(context.Context) error
-	}
-	// Import order: small/fast tables first so they are available quickly,
-	// spots and cw_spots last because they are the largest tables.
-	all := []tableImport{
-		{"chat_messages", imp.ChatDir, imp.importChat},
-		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
-		{"sessions", imp.SessionsDir, imp.importSessions},
-		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
-		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
-		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
-		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
-		{"spots", imp.SpotsDir, imp.importSpots},
-	}
+	all := dbImportOrder(imp)
 
 	// Determine which tables need importing NOW, before any live writers start.
 	var toImport []tableImport
@@ -911,7 +933,288 @@ func readCSV(path string, fn func(rec []string) error) error {
 // Lines that exceed the scanner buffer are logged and skipped; scanner errors
 // (e.g. I/O errors mid-file) are logged and the function returns nil so the
 // walk continues with the next file.
+// ─────────────────────────────────────────────────────────────────────────────
+// wspr_rank_windows / wspr_rank_rows  ← <StatsDir>/wspr/YYYY/MM/DD/rolling_24h.jsonl
+//
+// Each line is a full JSON WSPRRankResponse containing all three windows, so
+// only rolling_24h.jsonl is read — yesterday.jsonl and today.jsonl hold byte-
+// identical copies (see StatsLogger.WriteWSPR).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// statsMaxJSONLine caps line length for the stats importers. A WSPRRankResponse
+// with three populated leaderboards is the largest record the project writes.
+const statsMaxJSONLine = 32 * 1024 * 1024
+
+func (imp *DBImporter) importWSPRRank(ctx context.Context) error {
+	const winStmt = `INSERT OR IGNORE INTO wspr_rank_windows (
+		ts, window_name, fetched_at, fetched_ms, row_count, error
+	) VALUES (?,?,?,?,?,?)`
+	const rowStmt = `INSERT OR IGNORE INTO wspr_rank_rows (
+		ts, window_name, rank_pos, rx_sign, rx_loc, raw, dupe, unique_count,
+		bands, uniques, gross, dupes, versions
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+
+	tx, err := imp.beginBatch(ctx)
+	if err != nil {
+		return err
+	}
+	count, total := 0, 0
+
+	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "wspr"), func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
+			return nil
+		}
+		if d.IsDir() || ctx.Err() != nil {
+			return nil
+		}
+		if filepath.Base(path) != "rolling_24h.jsonl" {
+			return nil
+		}
+
+		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
+			var resp WSPRRankResponse
+			if err := json.Unmarshal(line, &resp); err != nil {
+				return nil // malformed line — skip
+			}
+			if resp.GeneratedAt.IsZero() {
+				return nil
+			}
+			ts := resp.GeneratedAt.UTC().Unix()
+
+			for _, name := range wsprWindowNames {
+				win := wsprWindowPtr(&resp, name)
+				if win == nil {
+					continue
+				}
+				var fetchedAt interface{}
+				if !win.FetchedAt.IsZero() {
+					fetchedAt = win.FetchedAt.UTC().Unix()
+				}
+				if _, err := tx.ExecContext(ctx, winStmt,
+					ts, name, fetchedAt, win.FetchedMs, win.Rows, win.Error); err != nil {
+					return err
+				}
+				for i, row := range win.Data {
+					if _, err := tx.ExecContext(ctx, rowStmt,
+						ts, name, i, row.RxSign, row.RxLoc,
+						int64(row.Raw), int64(row.Dupe), int64(row.Unique),
+						marshalJSONCol(row.Bands), marshalJSONCol(row.Uniques),
+						marshalJSONCol(row.Gross), marshalJSONCol(row.Dupes),
+						marshalJSONCol(row.Versions),
+					); err != nil {
+						return err
+					}
+					var txErr error
+					tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "wspr_rank_rows")
+					if txErr != nil {
+						return txErr
+					}
+				}
+			}
+			return nil
+		}); ferr != nil {
+			log.Printf("[DB import] error processing %s: %v (skipping file)", path, ferr)
+		}
+		return nil
+	})
+
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("[DB import] wspr_rank_rows: inserted %d rows total", total)
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// psk_rank_snapshots / psk_rank_entries / psk_software
+//   ← <StatsDir>/psk/YYYY/MM/DD/report_result.jsonl
+//
+// Each line is a full JSON PSKRankData holding both result maps, so only
+// report_result.jsonl is read — country_result.jsonl is an identical copy
+// (see StatsLogger.WritePSK).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (imp *DBImporter) importPSKRank(ctx context.Context) error {
+	const snapStmt = `INSERT OR IGNORE INTO psk_rank_snapshots (ts, fetched_ms, error) VALUES (?,?,?)`
+	const entStmt = `INSERT OR IGNORE INTO psk_rank_entries (
+		ts, result_type, band, rank_pos, callsign, day_count, week_count
+	) VALUES (?,?,?,?,?,?,?)`
+	const swStmt = `INSERT OR IGNORE INTO psk_software (ts, callsign, name, version) VALUES (?,?,?,?)`
+
+	tx, err := imp.beginBatch(ctx)
+	if err != nil {
+		return err
+	}
+	count, total := 0, 0
+
+	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "psk"), func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
+			return nil
+		}
+		if d.IsDir() || ctx.Err() != nil {
+			return nil
+		}
+		if filepath.Base(path) != "report_result.jsonl" {
+			return nil
+		}
+
+		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
+			var data PSKRankData
+			if err := json.Unmarshal(line, &data); err != nil {
+				return nil
+			}
+			if data.FetchedAt.IsZero() {
+				return nil
+			}
+			ts := data.FetchedAt.UTC().Unix()
+
+			if _, err := tx.ExecContext(ctx, snapStmt, ts, data.FetchedMs, data.Error); err != nil {
+				return err
+			}
+			for resultType, byBand := range pskResultTypes(&data) {
+				for band, entries := range byBand {
+					for i, e := range entries {
+						if _, err := tx.ExecContext(ctx, entStmt,
+							ts, resultType, band, i, e.Callsign, e.Day, e.Week); err != nil {
+							return err
+						}
+						var txErr error
+						tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "psk_rank_entries")
+						if txErr != nil {
+							return txErr
+						}
+					}
+				}
+			}
+			for callsign, list := range data.SoftwareInUse {
+				for _, sw := range list {
+					if _, err := tx.ExecContext(ctx, swStmt, ts, callsign, sw.Name, sw.Version); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); ferr != nil {
+			log.Printf("[DB import] error processing %s: %v (skipping file)", path, ferr)
+		}
+		return nil
+	})
+
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("[DB import] psk_rank_entries: inserted %d rows total", total)
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rbn_skew / rbn_stats  ← <StatsDir>/rbn/YYYY/MM/DD/{skew,statistics}.jsonl
+//
+// Each file holds a single line (the writer truncates on every fetch), so one
+// day yields at most one snapshot per file. Both tables are filled by this one
+// importer; it is registered against rbn_skew in RunImportIfEmpty.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (imp *DBImporter) importRBN(ctx context.Context) error {
+	const skewStmt = `INSERT OR IGNORE INTO rbn_skew (
+		ts, source_comment, callsign, skew, spots, correction_factor
+	) VALUES (?,?,?,?,?,?)`
+	const statsStmt = `INSERT OR IGNORE INTO rbn_stats (
+		ts, source_comment, callsign, epoch_date, spot_count
+	) VALUES (?,?,?,?,?)`
+
+	tx, err := imp.beginBatch(ctx)
+	if err != nil {
+		return err
+	}
+	count, total := 0, 0
+
+	err = filepath.WalkDir(filepath.Join(imp.StatsDir, "rbn"), func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
+			return nil
+		}
+		if d.IsDir() || ctx.Err() != nil {
+			return nil
+		}
+		base := filepath.Base(path)
+		if base != "skew.jsonl" && base != "statistics.jsonl" {
+			return nil
+		}
+
+		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
+			if base == "skew.jsonl" {
+				var rec rbnSkewRecord
+				if err := json.Unmarshal(line, &rec); err != nil || rec.FetchedAt.IsZero() {
+					return nil
+				}
+				ts := rec.FetchedAt.UTC().Unix()
+				for _, e := range rec.Entries {
+					if _, err := tx.ExecContext(ctx, skewStmt,
+						ts, rec.SourceComment, e.Callsign, e.Skew, e.Spots, e.CorrectionFactor); err != nil {
+						return err
+					}
+					var txErr error
+					tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "rbn_skew")
+					if txErr != nil {
+						return txErr
+					}
+				}
+				return nil
+			}
+
+			var rec rbnStatsRecord
+			if err := json.Unmarshal(line, &rec); err != nil || rec.FetchedAt.IsZero() {
+				return nil
+			}
+			ts := rec.FetchedAt.UTC().Unix()
+			for _, e := range rec.Entries {
+				if _, err := tx.ExecContext(ctx, statsStmt,
+					ts, rec.SourceComment, e.Callsign, e.EpochDate, e.SpotCount); err != nil {
+					return err
+				}
+				var txErr error
+				tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "rbn_stats")
+				if txErr != nil {
+					return txErr
+				}
+			}
+			return nil
+		}); ferr != nil {
+			log.Printf("[DB import] error processing %s: %v (skipping file)", path, ferr)
+		}
+		return nil
+	})
+
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("[DB import] rbn_skew/rbn_stats: inserted %d rows total", total)
+	return nil
+}
+
 func readJSONL(path string, fn func(line []byte) error) error {
+	return readJSONLMax(path, 1024*1024, fn) // 1 MiB max line
+}
+
+// readJSONLMax is readJSONL with an explicit maximum line length. The stats
+// importers need a much larger cap: a single WSPRRankResponse line holds three
+// full leaderboards and runs to several MiB.
+func readJSONLMax(path string, maxLine int, fn func(line []byte) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -919,7 +1222,7 @@ func readJSONL(path string, fn func(line []byte) error) error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MiB max line
+	scanner.Buffer(make([]byte, 64*1024), maxLine)
 	skipped := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()

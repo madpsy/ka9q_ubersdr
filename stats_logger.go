@@ -1,12 +1,8 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
+	"database/sql"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,322 +10,143 @@ import (
 // statsMaxDays is the maximum date range allowed for a single history query.
 const statsMaxDays = 30
 
-// stats_logger.go — JSONL persistence for WSPR, PSK and RBN fetched stats.
+// stats_logger.go — SQLite persistence for WSPR, PSK and RBN fetched stats.
 //
-// File layout (all under baseDir):
+// Backs the leaderboard panels of static/stats_history.html via the
+// /api/stats/{wspr-rank,psk-rank,rbn} endpoints.
 //
-//	wspr/YYYY/MM/DD/rolling_24h.jsonl   — one WSPRRankResponse appended per hourly fetch
-//	wspr/YYYY/MM/DD/yesterday.jsonl
-//	wspr/YYYY/MM/DD/today.jsonl
+// Tables (see db_manager.go initSchema for full column lists):
 //
-//	psk/YYYY/MM/DD/report_result.jsonl  — one PSKRankData appended per hourly fetch
-//	psk/YYYY/MM/DD/country_result.jsonl
+//	wspr_rank_windows / wspr_rank_rows                    — one WSPRRankResponse per hourly fetch
+//	psk_rank_snapshots / psk_rank_entries / psk_software  — one PSKRankData per hourly fetch
+//	rbn_skew / rbn_stats                                  — one snapshot per UTC day
 //
-//	rbn/YYYY/MM/DD/skew.jsonl           — one record written (truncated) per daily fetch
-//	rbn/YYYY/MM/DD/statistics.jsonl
+// The read/write SQL lives in stats_logger_db.go; this file holds the public
+// surface plus the shared query-parameter parsing.
 //
-// WSPR and PSK files use O_APPEND — each hourly fetch adds a line.
-// RBN files use O_TRUNC — each successful daily fetch overwrites the file.
-// On startup, LoadLatest* reads the last line of today's (or yesterday's) file
-// and seeds the in-memory cache so the UI is populated immediately.
+// This subsystem previously wrote JSONL files under <configDir>/stats. Those
+// writes are gone — db_import.go backfills the existing trees into SQLite once,
+// on the first start after upgrading, and nothing reads them afterwards.
 
-// StatsLogger persists fetched stats for WSPR, PSK and RBN to JSONL files.
+// StatsLogger persists fetched stats for WSPR, PSK and RBN to SQLite.
+//
+// Both connections are attached after construction (main.go) because DBManager
+// and the fetchers are wired up at different points during startup. Until they
+// are set, every method is a no-op: writes are dropped and reads return nothing,
+// which is the correct behaviour when no database is configured.
 type StatsLogger struct {
-	baseDir string
-	enabled bool
+	db     *sql.DB // write connection — nil until SetDB is called
+	readDB *sql.DB // read-only pool — nil until SetReadDB is called
 }
 
-// NewStatsLogger creates a StatsLogger rooted at baseDir.
-// If enabled is false all methods are no-ops.
-func NewStatsLogger(baseDir string, enabled bool) (*StatsLogger, error) {
-	if !enabled {
-		return &StatsLogger{enabled: false}, nil
+// NewStatsLogger creates a StatsLogger. It has no state of its own; call
+// SetDB/SetReadDB to make it functional.
+func NewStatsLogger() *StatsLogger {
+	return &StatsLogger{}
+}
+
+// SetDB attaches the write connection used by the Write* methods.
+func (sl *StatsLogger) SetDB(db *sql.DB) {
+	if sl != nil {
+		sl.db = db
 	}
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return nil, fmt.Errorf("stats_logger: create base dir %s: %w", baseDir, err)
+}
+
+// SetReadDB attaches the read-only pool used by the Read*/LoadLatest* methods.
+func (sl *StatsLogger) SetReadDB(db *sql.DB) {
+	if sl != nil {
+		sl.readDB = db
 	}
-	return &StatsLogger{baseDir: baseDir, enabled: true}, nil
 }
 
 // ---- WSPR ---------------------------------------------------------------
 
-// WriteWSPR appends the full WSPRRankResponse to today's WSPR JSONL files.
-// Three files are written (rolling_24h, yesterday, today) — all containing
-// the same full response — so that LoadLatestWSPR only needs to read one.
+// WriteWSPR persists the full WSPRRankResponse — all three windows and their
+// leaderboard rows — as one snapshot keyed on GeneratedAt.
 func (sl *StatsLogger) WriteWSPR(resp *WSPRRankResponse) {
-	if !sl.enabled || resp == nil {
+	if resp == nil {
 		return
 	}
 	now := resp.GeneratedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	for _, name := range []string{"rolling_24h", "yesterday", "today"} {
-		if err := sl.appendJSONL("wspr", name+".jsonl", now, resp); err != nil {
-			log.Printf("[StatsLogger] WriteWSPR %s: %v", name, err)
-		}
-	}
+	sl.writeWSPRToDB(resp, now)
 }
 
-// LoadLatestWSPR reads the most recent WSPRRankResponse from disk.
-// It tries today's file first, then yesterday's.
+// LoadLatestWSPR reads the most recent WSPRRankResponse.
 // Returns nil if no data is found.
 func (sl *StatsLogger) LoadLatestWSPR() *WSPRRankResponse {
-	if !sl.enabled {
-		return nil
-	}
-	// We only need one file — all three windows are stored in every file.
-	for _, t := range sl.candidateDays() {
-		path := sl.filePath("wspr", "rolling_24h.jsonl", t)
-		var resp WSPRRankResponse
-		if sl.readLastLine(path, &resp) {
-			log.Printf("[StatsLogger] Loaded WSPR cache from %s (generated_at=%s)", path, resp.GeneratedAt.Format(time.RFC3339))
-			return &resp
-		}
-	}
-	return nil
+	return sl.loadLatestWSPRFromDB()
 }
 
 // ---- PSK ----------------------------------------------------------------
 
-// pskTableRecord is the envelope written to each PSK JSONL file.
-type pskTableRecord struct {
-	FetchedAt time.Time   `json:"fetched_at"`
-	Data      PSKRankData `json:"data"`
-}
-
-// WritePSK appends the PSKRankData to today's PSK JSONL files
-// (one file per table: report_result, country_result).
+// WritePSK persists the PSKRankData as one snapshot keyed on FetchedAt.
 func (sl *StatsLogger) WritePSK(data *PSKRankData) {
-	if !sl.enabled || data == nil {
+	if data == nil {
 		return
 	}
 	now := data.FetchedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-
-	for _, name := range []string{"report_result", "country_result"} {
-		if err := sl.appendJSONL("psk", name+".jsonl", now, data); err != nil {
-			log.Printf("[StatsLogger] WritePSK %s: %v", name, err)
-		}
-	}
+	sl.writePSKToDB(data, now)
 }
 
-// LoadLatestPSK reads the most recent PSKRankData from disk.
+// LoadLatestPSK reads the most recent PSKRankData.
 // Returns nil if no data is found.
 func (sl *StatsLogger) LoadLatestPSK() *PSKRankData {
-	if !sl.enabled {
-		return nil
-	}
-	for _, t := range sl.candidateDays() {
-		path := sl.filePath("psk", "report_result.jsonl", t)
-		var data PSKRankData
-		if sl.readLastLine(path, &data) {
-			log.Printf("[StatsLogger] Loaded PSK cache from %s (fetched_at=%s)", path, data.FetchedAt.Format(time.RFC3339))
-			return &data
-		}
-	}
-	return nil
+	return sl.loadLatestPSKFromDB()
 }
 
 // ---- RBN ----------------------------------------------------------------
 
-// rbnSkewRecord is the envelope written to rbn/YYYY/MM/DD/skew.jsonl.
+// rbnSkewRecord is the RBN skew snapshot envelope. It is the shape published
+// over MQTT (mqtt_publisher.go) and the shape of the legacy skew.jsonl lines
+// parsed by db_import.go.
 type rbnSkewRecord struct {
 	FetchedAt     time.Time      `json:"fetched_at"`
 	SourceComment string         `json:"source_comment"`
 	Entries       []RBNSkewEntry `json:"entries"`
 }
 
-// rbnStatsRecord is the envelope written to rbn/YYYY/MM/DD/statistics.jsonl.
+// rbnStatsRecord is the RBN statistics snapshot envelope — see rbnSkewRecord.
 type rbnStatsRecord struct {
 	FetchedAt     time.Time            `json:"fetched_at"`
 	SourceComment string               `json:"source_comment"`
 	Entries       []RBNStatisticsEntry `json:"entries"`
 }
 
-// WriteRBNSkew overwrites today's RBN skew JSONL file with the current data.
-// The file is truncated on each successful write (daily snapshot semantics).
+// WriteRBNSkew replaces the day's RBN skew snapshot with the current data.
+// RBN publishes once per day, so each write supersedes the day's previous rows.
 func (sl *StatsLogger) WriteRBNSkew(entries map[string]RBNSkewEntry, comment string, fetchedAt time.Time) {
-	if !sl.enabled {
-		return
-	}
 	slice := make([]RBNSkewEntry, 0, len(entries))
 	for _, e := range entries {
 		slice = append(slice, e)
 	}
-	rec := rbnSkewRecord{
-		FetchedAt:     fetchedAt,
-		SourceComment: comment,
-		Entries:       slice,
-	}
-	if err := sl.overwriteJSONL("rbn", "skew.jsonl", fetchedAt, rec); err != nil {
-		log.Printf("[StatsLogger] WriteRBNSkew: %v", err)
-	}
+	sl.writeRBNSkewToDB(slice, comment, fetchedAt)
 }
 
-// WriteRBNStats overwrites today's RBN statistics JSONL file with the current data.
+// WriteRBNStats replaces the day's RBN statistics snapshot with the current data.
 func (sl *StatsLogger) WriteRBNStats(entries map[string]RBNStatisticsEntry, comment string, fetchedAt time.Time) {
-	if !sl.enabled {
-		return
-	}
 	slice := make([]RBNStatisticsEntry, 0, len(entries))
 	for _, e := range entries {
 		slice = append(slice, e)
 	}
-	rec := rbnStatsRecord{
-		FetchedAt:     fetchedAt,
-		SourceComment: comment,
-		Entries:       slice,
-	}
-	if err := sl.overwriteJSONL("rbn", "statistics.jsonl", fetchedAt, rec); err != nil {
-		log.Printf("[StatsLogger] WriteRBNStats: %v", err)
-	}
+	sl.writeRBNStatsToDB(slice, comment, fetchedAt)
 }
 
-// LoadLatestRBNSkew reads the most recent RBN skew snapshot from disk.
-// Returns nil map if no data is found.
+// LoadLatestRBNSkew reads the most recent RBN skew snapshot, keyed by callsign.
+// Returns a nil map if no data is found.
 func (sl *StatsLogger) LoadLatestRBNSkew() (map[string]RBNSkewEntry, string, *time.Time) {
-	if !sl.enabled {
-		return nil, "", nil
-	}
-	for _, t := range sl.candidateDays() {
-		path := sl.filePath("rbn", "skew.jsonl", t)
-		var rec rbnSkewRecord
-		if sl.readLastLine(path, &rec) {
-			m := make(map[string]RBNSkewEntry, len(rec.Entries))
-			for _, e := range rec.Entries {
-				m[e.Callsign] = e
-			}
-			log.Printf("[StatsLogger] Loaded RBN skew from %s (%d entries)", path, len(m))
-			return m, rec.SourceComment, &rec.FetchedAt
-		}
-	}
-	return nil, "", nil
+	return sl.loadLatestRBNSkewFromDB()
 }
 
-// LoadLatestRBNStats reads the most recent RBN statistics snapshot from disk.
-// Returns nil map if no data is found.
+// LoadLatestRBNStats reads the most recent RBN statistics snapshot, keyed by
+// callsign. Returns a nil map if no data is found.
 func (sl *StatsLogger) LoadLatestRBNStats() (map[string]RBNStatisticsEntry, string, *time.Time) {
-	if !sl.enabled {
-		return nil, "", nil
-	}
-	for _, t := range sl.candidateDays() {
-		path := sl.filePath("rbn", "statistics.jsonl", t)
-		var rec rbnStatsRecord
-		if sl.readLastLine(path, &rec) {
-			m := make(map[string]RBNStatisticsEntry, len(rec.Entries))
-			for _, e := range rec.Entries {
-				m[e.Callsign] = e
-			}
-			log.Printf("[StatsLogger] Loaded RBN statistics from %s (%d entries)", path, len(m))
-			return m, rec.SourceComment, &rec.FetchedAt
-		}
-	}
-	return nil, "", nil
-}
-
-// ---- helpers ------------------------------------------------------------
-
-// candidateDays returns [today, yesterday] in UTC — the two days to probe
-// when looking for the most recent persisted data.
-func (sl *StatsLogger) candidateDays() []time.Time {
-	now := time.Now().UTC()
-	return []time.Time{now, now.AddDate(0, 0, -1)}
-}
-
-// filePath builds the full path for source/filename on the given day.
-// Layout: baseDir/source/YYYY/MM/DD/filename
-func (sl *StatsLogger) filePath(source, filename string, t time.Time) string {
-	return filepath.Join(
-		sl.baseDir,
-		source,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", int(t.Month())),
-		fmt.Sprintf("%02d", t.Day()),
-		filename,
-	)
-}
-
-// ensureDir creates the directory for the given file path if it does not exist.
-func ensureDir(path string) error {
-	return os.MkdirAll(filepath.Dir(path), 0755)
-}
-
-// appendJSONL marshals v as a single JSON line and appends it to the file
-// at source/YYYY/MM/DD/filename (creating directories as needed).
-func (sl *StatsLogger) appendJSONL(source, filename string, t time.Time, v interface{}) error {
-	path := sl.filePath(source, filename, t)
-	if err := ensureDir(path); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	data = append(data, '\n')
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-// overwriteJSONL marshals v as a single JSON line and writes it as the sole
-// content of source/YYYY/MM/DD/filename, truncating any previous content.
-func (sl *StatsLogger) overwriteJSONL(source, filename string, t time.Time, v interface{}) error {
-	path := sl.filePath(source, filename, t)
-	if err := ensureDir(path); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	data = append(data, '\n')
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-// readLastLine reads the last non-empty line of path and unmarshals it into v.
-// Returns false if the file does not exist, is empty, or cannot be parsed.
-func (sl *StatsLogger) readLastLine(path string, v interface{}) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false // file not found is normal on first run
-	}
-	defer f.Close()
-
-	var lastLine string
-	scanner := bufio.NewScanner(f)
-	// Allow lines up to 16 MiB (WSPR response can be large)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 16*1024*1024)
-	for scanner.Scan() {
-		if line := scanner.Text(); line != "" {
-			lastLine = line
-		}
-	}
-	if lastLine == "" {
-		return false
-	}
-	if err := json.Unmarshal([]byte(lastLine), v); err != nil {
-		log.Printf("[StatsLogger] readLastLine %s: unmarshal error: %v", path, err)
-		return false
-	}
-	return true
+	return sl.loadLatestRBNStatsFromDB()
 }
 
 // ---- date-range query helpers -------------------------------------------
@@ -425,81 +242,24 @@ func ParseStatsQueryParams(q map[string][]string) (StatsQueryParams, string) {
 	return p, ""
 }
 
-// dateRange returns a slice of UTC midnight times from from to to (inclusive).
-func dateRange(from, to time.Time) []time.Time {
-	var days []time.Time
-	cur := from
-	for !cur.After(to) {
-		days = append(days, cur)
-		cur = cur.AddDate(0, 0, 1)
-	}
-	return days
-}
-
 // ---- Read* methods -------------------------------------------------------
 
-// ReadWSPR reads all WSPRRankResponse records from the rolling_24h JSONL files
-// for the given date range.  Each line in each file is one record.
+// ReadWSPR returns every WSPRRankResponse snapshot in the given date range,
+// oldest first.
 func (sl *StatsLogger) ReadWSPR(p StatsQueryParams) ([]WSPRRankResponse, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("stats logging is not enabled")
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
 	}
-	var out []WSPRRankResponse
-	for _, day := range dateRange(p.FromDate, p.ToDate) {
-		path := sl.filePath("wspr", "rolling_24h.jsonl", day)
-		f, err := os.Open(path)
-		if err != nil {
-			continue // no data for this day
-		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 16*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				continue
-			}
-			var resp WSPRRankResponse
-			if err := json.Unmarshal([]byte(line), &resp); err != nil {
-				continue
-			}
-			out = append(out, resp)
-		}
-		f.Close()
-	}
-	return out, nil
+	return sl.readWSPRFromDB(p)
 }
 
-// ReadPSK reads all PSKRankData records from the report_result JSONL files
-// for the given date range.
+// ReadPSK returns every PSKRankData snapshot in the given date range,
+// oldest first.
 func (sl *StatsLogger) ReadPSK(p StatsQueryParams) ([]PSKRankData, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("stats logging is not enabled")
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
 	}
-	var out []PSKRankData
-	for _, day := range dateRange(p.FromDate, p.ToDate) {
-		path := sl.filePath("psk", "report_result.jsonl", day)
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 16*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				continue
-			}
-			var data PSKRankData
-			if err := json.Unmarshal([]byte(line), &data); err != nil {
-				continue
-			}
-			out = append(out, data)
-		}
-		f.Close()
-	}
-	return out, nil
+	return sl.readPSKFromDB(p)
 }
 
 // RBNHistoryRecord is one day's RBN snapshot returned by ReadRBN.
@@ -510,38 +270,11 @@ type RBNHistoryRecord struct {
 	StatsEntries  []RBNStatisticsEntry `json:"stats_entries,omitempty"`
 }
 
-// ReadRBN reads all RBN daily snapshots for the given date range.
-// Skew and statistics are merged into a single RBNHistoryRecord per day.
+// ReadRBN returns one merged skew+statistics record per UTC day in the given
+// date range, oldest first.
 func (sl *StatsLogger) ReadRBN(p StatsQueryParams) ([]RBNHistoryRecord, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("stats logging is not enabled")
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
 	}
-	var out []RBNHistoryRecord
-	for _, day := range dateRange(p.FromDate, p.ToDate) {
-		var rec RBNHistoryRecord
-
-		skewPath := sl.filePath("rbn", "skew.jsonl", day)
-		var skewRec rbnSkewRecord
-		if sl.readLastLine(skewPath, &skewRec) {
-			rec.FetchedAt = skewRec.FetchedAt
-			rec.SourceComment = skewRec.SourceComment
-			rec.SkewEntries = skewRec.Entries
-		}
-
-		statsPath := sl.filePath("rbn", "statistics.jsonl", day)
-		var statsRec rbnStatsRecord
-		if sl.readLastLine(statsPath, &statsRec) {
-			if rec.FetchedAt.IsZero() {
-				rec.FetchedAt = statsRec.FetchedAt
-				rec.SourceComment = statsRec.SourceComment
-			}
-			rec.StatsEntries = statsRec.Entries
-		}
-
-		if rec.FetchedAt.IsZero() {
-			continue // no data for this day
-		}
-		out = append(out, rec)
-	}
-	return out, nil
+	return sl.readRBNFromDB(p)
 }

@@ -612,6 +612,196 @@ Returns `map[string][]CWMetricsSnapshot` grouped by band, matching the old retur
 
 ---
 
+## Component 9 — `wspr_rank_windows` / `wspr_rank_rows` tables ✅ MIGRATED
+
+**DB tables**:
+`wspr_rank_windows(id, ts, window_name, fetched_at, fetched_ms, row_count, error)`
+`wspr_rank_rows(id, ts, window_name, rank_pos, rx_sign, rx_loc, raw, dupe, unique_count, bands, uniques, gross, dupes, versions)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
+
+These back the WSPR leaderboard panel of [`static/stats_history.html`](../static/stats_history.html)
+via `GET /api/stats/wspr-rank`.
+
+### Schema notes
+
+- Unlike `sessions`, the snapshot envelope is a **separate table**, not denormalised onto
+  every row. A window can legitimately have zero rows — a failed fetch still carries
+  `fetched_ms` and `error` that the API response must reproduce, and there would be no
+  row to carry them on.
+- `ts` is `WSPRRankResponse.GeneratedAt` on **both** tables, so date-range queries and
+  retention pruning work on either without a join.
+- `rank_pos` is the 0-based array position. Rank is derived from position throughout the
+  read path (`extractWSPRWindowRank` uses `targetIdx + 1`), so ordering must be preserved
+  exactly — hence the explicit column rather than relying on insertion order.
+- The parallel per-band arrays (`bands`/`uniques`/`gross`/`dupes`) and `versions` are
+  stored as JSON TEXT. Normalising them would multiply row count by ~10 (one row per
+  receiver per band per hour) for data only ever read back as a whole row.
+- Column names avoid SQLite keywords: `window_name`, `row_count`, `unique_count`,
+  `rank_pos`.
+
+### What was done
+
+#### 9.1 `ReadWSPR` — `/api/stats/wspr-rank` (GET) ✅
+
+`readWSPRFromDB()` → `loadWSPRSnapshots()` in [`stats_logger_db.go`](../stats_logger_db.go).
+Two passes: envelopes first (establishing which snapshots exist and their order), then
+rows `ORDER BY ts, window_name, rank_pos`. Returns an error if `readDB == nil`.
+
+#### 9.2 `LoadLatestWSPR` — startup cache seed ✅
+
+`SELECT MAX(ts) FROM wspr_rank_windows`, then the same assembly routine with `ts = ?`.
+
+#### Write path ✅
+
+`WriteWSPR` delegates to `writeWSPRToDB()` — SQLite only. The whole snapshot (three
+windows + all rows) goes in one transaction, preceded by a `DELETE … WHERE ts = ?` so a
+re-write at the same `generated_at` replaces rather than duplicates.
+
+---
+
+## Component 10 — `psk_rank_snapshots` / `psk_rank_entries` / `psk_software` tables ✅ MIGRATED
+
+**DB tables**:
+`psk_rank_snapshots(id, ts, fetched_ms, error)`
+`psk_rank_entries(id, ts, result_type, band, rank_pos, callsign, day_count, week_count)`
+`psk_software(id, ts, callsign, name, version)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
+
+Backs the PSKReporter leaderboard panel via `GET /api/stats/psk-rank`.
+
+### Schema notes
+
+- `PSKRankData` holds two `band → []PSKMonitorEntry` maps. Both flatten into
+  `psk_rank_entries`; `result_type` is `"report"` (reportResult) or `"country"`
+  (countryResult).
+- Separate envelope table for the same reason as Component 9: a failed scrape has zero
+  entries but a non-empty `error`.
+- `rank_pos` preserves array order — `computeCallsignRank` derives rank from position.
+
+### What was done
+
+#### 10.1 `ReadPSK` — `/api/stats/psk-rank` (GET) ✅
+
+`readPSKFromDB()` → `loadPSKSnapshots()`: three queries (snapshots, entries, software),
+stitched by `ts`. Entries ordered `ts, result_type, band, rank_pos`.
+
+#### 10.2 `LoadLatestPSK` — startup cache seed ✅
+
+`SELECT MAX(ts) FROM psk_rank_snapshots` + the same assembly routine.
+
+#### Write path ✅
+
+`WritePSK` delegates to `writePSKToDB()` — SQLite only; one transaction, `DELETE … WHERE
+ts = ?` across all three tables first.
+
+---
+
+## Component 11 — `rbn_skew` / `rbn_stats` tables ✅ MIGRATED
+
+**DB tables**:
+`rbn_skew(id, ts, source_comment, callsign, skew, spots, correction_factor)`
+`rbn_stats(id, ts, source_comment, callsign, epoch_date, spot_count)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
+
+Backs the RBN skimmer panel via `GET /api/stats/rbn`.
+
+### Schema notes
+
+- Both sources are flat CSV rows from sm7iun.se fetched once per day, so these are fully
+  normalised — no JSON columns.
+- RBN publishes once per day (the old JSONL writer used `O_TRUNC` for this reason). The
+  DB writer deletes the day's rows (`ts >= dayStart AND ts < dayEnd`) before inserting, so
+  there is exactly one snapshot per day and `ReadRBN`'s one-record-per-day contract holds.
+- `source_comment` (the `# Calculated …` header line) is denormalised onto every row — a
+  single short string, not worth a join.
+
+### What was done
+
+#### 11.1 `ReadRBN` — `/api/stats/rbn` (GET) ✅
+
+`readRBNFromDB()` queries both tables over the date range and merges them into one
+`RBNHistoryRecord` per UTC day, matching the file path's per-day semantics.
+
+#### 11.2 `LoadLatestRBNSkew` / `LoadLatestRBNStats` — startup cache seed ✅
+
+`SELECT MAX(ts)` on the respective table, then all rows at that `ts`, rebuilt into the
+`map[callsign]Entry` shape `RBNDataStore` expects.
+
+#### Write path ✅
+
+`WriteRBNSkew` / `WriteRBNStats` delegate to `writeRBNSkewToDB()` /
+`writeRBNStatsToDB()` — SQLite only.
+
+---
+
+## Components 9–11 — shared wiring
+
+### Wiring chain
+
+`main.go` → `statsLogger.SetDB(dbManager.DB())` + `statsLogger.SetReadDB(dbManager.ReadDB())`
+→ `handleWSPRRankHistory` / `handlePSKRankHistory` / `handleRBNHistory` (unchanged — they
+call `sl.Read*` as before).
+
+### File path removal
+
+[`stats_logger.go`](../stats_logger.go) lost `appendJSONL`, `overwriteJSONL`,
+`readLastLine`, `filePath`, `ensureDir`, `candidateDays` and `dateRange`, along with the
+`baseDir`/`enabled` fields and the `bufio`/`os`/`path/filepath`/`encoding/json` imports.
+`NewStatsLogger()` now takes no arguments and returns no error.
+
+`rbnSkewRecord` / `rbnStatsRecord` stay — [`mqtt_publisher.go`](../mqtt_publisher.go)
+publishes those shapes, and [`db_import.go`](../db_import.go) parses the legacy files
+into them.
+
+`statsLogDir` (`<configDir>/stats`) survives in [`main.go`](../main.go) solely as
+`DBImporter.StatsDir`, mirroring how `config.Chat.DataDir` was retained in Component 1.
+Nothing writes there any more; the existing trees are left on disk untouched.
+
+### Historical backfill
+
+[`db_import.go`](../db_import.go) gained `StatsDir` plus `importWSPRRank`, `importPSKRank`
+and `importRBN`, registered against `wspr_rank_windows`, `psk_rank_snapshots` and
+`rbn_skew` respectively (`importRBN` fills both RBN tables — they are always written
+together, so only `rbn_skew` is emptiness-checked).
+
+**Import order**: the table list moved out of `RunImportIfEmpty` into `dbImportOrder()` so
+it can be asserted in a test. The three stats imports sit **after** the other small tables
+but **before** `cw_spots` and `spots`, which remain last by design. This ordering is now
+load-bearing rather than cosmetic: with the JSONL readers gone, the stats tables are the
+only source for `/api/stats/*`, so the history page stays blank until they land — queueing
+them behind a multi-hour spots backfill would be visible to users.
+
+Only `rolling_24h.jsonl` and `report_result.jsonl` are read: `WriteWSPR` and `WritePSK`
+write byte-identical copies to the sibling files, so reading them all would triple the
+work for no extra data.
+
+`readJSONLMax` was added because a single `WSPRRankResponse` line holds three full
+leaderboards and exceeds `readJSONL`'s 1 MiB cap; the stats importers use 32 MiB.
+
+### Retention
+
+`RetentionConfig.StatsDays` prunes all seven tables, and is left at **0 (unlimited)** in
+[`main.go`](../main.go) — matching every other table with no config field, and deliberate
+now that the DB is the only copy of the leaderboard archive.
+
+Worth revisiting: `wspr_rank_rows` grows by roughly 150k rows/day (≈3 windows × ~2k
+receivers × 24 fetches). Since `ParseStatsQueryParams` rejects ranges longer than
+`statsMaxDays`, rows older than 30 days are already unreachable through the API, so
+`statsMaxDays + 5` is the natural cap if disk becomes a concern.
+
+### Tests
+
+[`stats_logger_db_test.go`](../stats_logger_db_test.go) — round-trip through a real
+SQLite file for all three sources, asserting `reflect.DeepEqual` against the original
+struct so the API shape is provably unchanged. Covers a zero-row window with an error,
+rewrite-at-same-timestamp replacement, RBN same-day replacement, and date-range bounds.
+
+[`db_import_stats_test.go`](../db_import_stats_test.go) — lays down a legacy JSONL tree,
+backfills, reads back through the DB, and re-runs the import to confirm idempotency. Also
+asserts the stats imports are ordered ahead of `cw_spots`/`spots`.
+
+---
+
 ## Implementation strategy
 
 ### Recommended order — ranked easiest to hardest

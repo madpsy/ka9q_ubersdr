@@ -14,6 +14,9 @@ package main
 //	spots         — replaces decoder spots CSV (SpotRecord / DecodeInfo)
 //	cw_spots      — replaces CW skimmer spots CSV (CWSkimmerSpot)
 //	noise_floor   — replaces noise floor CSV (BandMeasurement)
+//	wspr_rank_*   — replaces stats/wspr JSONL (WSPRRankResponse)
+//	psk_rank_*    — replaces stats/psk JSONL (PSKRankData)
+//	rbn_skew/_stats — replaces stats/rbn JSONL (RBNSkewEntry / RBNStatisticsEntry)
 //
 // WAL mode is enabled so concurrent readers never block the single writer.
 
@@ -141,6 +144,9 @@ type RetentionConfig struct {
 	NoiseFloorDays int
 	// SpaceWeather: no config field yet — 0 = unlimited
 	SpaceWeatherDays int
+	// Stats (WSPR/PSK/RBN leaderboards): the history endpoints refuse ranges
+	// longer than statsMaxDays, so anything older is unreachable via the API.
+	StatsDays int
 }
 
 // retentionInterval is how often the retention loop runs after the initial
@@ -188,6 +194,14 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 		{"chat_messages", cfg.ChatDays},
 		{"noise_floor", cfg.NoiseFloorDays},
 		{"space_weather", cfg.SpaceWeatherDays},
+		// Stats tables all carry ts, so each prunes independently.
+		{"wspr_rank_rows", cfg.StatsDays},
+		{"wspr_rank_windows", cfg.StatsDays},
+		{"psk_rank_entries", cfg.StatsDays},
+		{"psk_software", cfg.StatsDays},
+		{"psk_rank_snapshots", cfg.StatsDays},
+		{"rbn_skew", cfg.StatsDays},
+		{"rbn_stats", cfg.StatsDays},
 	}
 	anyDeleted := false
 	for _, r := range rules {
@@ -570,6 +584,171 @@ func (m *DBManager) initSchema() error {
 		{"cw_metrics_idx_ts", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_ts   ON cw_metrics(ts)`},
 		{"cw_metrics_idx_band", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_band ON cw_metrics(band)`},
 		{"cw_metrics_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_metrics_idx_ts_band ON cw_metrics(ts, band)`},
+
+		// ----------------------------------------------------------------
+		// wspr_rank_windows / wspr_rank_rows
+		//
+		// Replaces: <statsDir>/wspr/YYYY/MM/DD/rolling_24h.jsonl
+		// Source structs: WSPRRankResponse → WSPRRankWindow → WSPRRankRow
+		//
+		// One WSPRRankResponse (written hourly) holds three windows
+		// (rolling_24h, yesterday, today), each with its own fetch metadata
+		// and a leaderboard of receivers. The window envelope goes in
+		// wspr_rank_windows and the leaderboard rows in wspr_rank_rows.
+		//
+		// A separate envelope table (rather than denormalising onto every
+		// row as sessions does) is required because a window can legitimately
+		// have zero rows — a failed fetch still carries fetched_ms and error
+		// that the API response must reproduce.
+		//
+		// ts is WSPRRankResponse.GeneratedAt on BOTH tables so that date-range
+		// queries and retention pruning work on either without a join.
+		//
+		// The per-band parallel arrays (bands/uniques/gross/dupes) and
+		// versions are stored as JSON TEXT. Normalising them would multiply
+		// the row count by ~10 (one row per receiver per band per hour) for
+		// data that is only ever read back as a whole row.
+		// ----------------------------------------------------------------
+		{
+			"wspr_rank_windows",
+			`CREATE TABLE IF NOT EXISTS wspr_rank_windows (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC (WSPRRankResponse.GeneratedAt)
+				window_name  TEXT    NOT NULL,  -- "rolling_24h" | "yesterday" | "today"
+				fetched_at   INTEGER,           -- Unix seconds UTC (WSPRRankWindow.FetchedAt)
+				fetched_ms   INTEGER,           -- round-trip duration of the wspr.live query
+				row_count    INTEGER,           -- WSPRRankWindow.Rows as reported by the source
+				error        TEXT,              -- non-empty when the window's fetch failed
+				UNIQUE(ts, window_name)
+			)`,
+		},
+		{"wspr_rank_windows_idx_ts", `CREATE INDEX IF NOT EXISTS wspr_rank_windows_idx_ts ON wspr_rank_windows(ts)`},
+		{
+			"wspr_rank_rows",
+			`CREATE TABLE IF NOT EXISTS wspr_rank_rows (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC — matches wspr_rank_windows.ts
+				window_name  TEXT    NOT NULL,  -- "rolling_24h" | "yesterday" | "today"
+				rank_pos     INTEGER NOT NULL,  -- 0-based position in the source array; preserves order
+				rx_sign      TEXT    NOT NULL,  -- receiver callsign
+				rx_loc       TEXT,              -- Maidenhead locator
+				raw          INTEGER,           -- total spots
+				dupe         INTEGER,           -- duplicate spots
+				unique_count INTEGER,           -- unique spots (WSPRRankRow.Unique)
+				bands        TEXT,              -- JSON array of int16 metres
+				uniques      TEXT,              -- JSON array of uint64, parallel to bands
+				gross        TEXT,              -- JSON array of uint64, parallel to bands
+				dupes        TEXT,              -- JSON array of uint64, parallel to bands
+				versions     TEXT,              -- JSON array of client version strings
+				UNIQUE(ts, window_name, rank_pos)
+			)`,
+		},
+		{"wspr_rank_rows_idx_ts", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_ts      ON wspr_rank_rows(ts)`},
+		{"wspr_rank_rows_idx_rx_sign", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_rx_sign ON wspr_rank_rows(rx_sign)`},
+		{"wspr_rank_rows_idx_ts_window", `CREATE INDEX IF NOT EXISTS wspr_rank_rows_idx_ts_window ON wspr_rank_rows(ts, window_name, rank_pos)`},
+
+		// ----------------------------------------------------------------
+		// psk_rank_snapshots / psk_rank_entries / psk_software
+		//
+		// Replaces: <statsDir>/psk/YYYY/MM/DD/report_result.jsonl
+		// Source struct: PSKRankData (psk_rank.go)
+		//
+		// PSKRankData holds two band→[]PSKMonitorEntry maps (reportResult and
+		// countryResult) plus a callsign→software map, all from one hourly
+		// scrape of pskreporter.info. The two maps are flattened into
+		// psk_rank_entries with result_type distinguishing them; the software
+		// map becomes psk_software.
+		//
+		// As with WSPR, the snapshot envelope is its own table so a failed
+		// fetch (zero entries, non-empty error) still round-trips.
+		// ts is PSKRankData.FetchedAt on all three tables.
+		// ----------------------------------------------------------------
+		{
+			"psk_rank_snapshots",
+			`CREATE TABLE IF NOT EXISTS psk_rank_snapshots (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts         INTEGER NOT NULL UNIQUE,  -- Unix seconds UTC (PSKRankData.FetchedAt)
+				fetched_ms INTEGER,                  -- scrape duration in milliseconds
+				error      TEXT                      -- non-empty when the scrape failed
+			)`,
+		},
+		{"psk_rank_snapshots_idx_ts", `CREATE INDEX IF NOT EXISTS psk_rank_snapshots_idx_ts ON psk_rank_snapshots(ts)`},
+		{
+			"psk_rank_entries",
+			`CREATE TABLE IF NOT EXISTS psk_rank_entries (
+				id          INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts          INTEGER NOT NULL,  -- Unix seconds UTC — matches psk_rank_snapshots.ts
+				result_type TEXT    NOT NULL,  -- "report" (reportResult) | "country" (countryResult)
+				band        TEXT    NOT NULL,  -- e.g. "20m", "All"
+				rank_pos    INTEGER NOT NULL,  -- 0-based position within the band array; preserves order
+				callsign    TEXT    NOT NULL,
+				day_count   INTEGER,           -- last 24 h count (PSKMonitorEntry.Day)
+				week_count  INTEGER,           -- last 7 days count (PSKMonitorEntry.Week)
+				UNIQUE(ts, result_type, band, rank_pos)
+			)`,
+		},
+		{"psk_rank_entries_idx_ts", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_ts       ON psk_rank_entries(ts)`},
+		{"psk_rank_entries_idx_callsign", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_callsign ON psk_rank_entries(callsign)`},
+		{"psk_rank_entries_idx_ts_type", `CREATE INDEX IF NOT EXISTS psk_rank_entries_idx_ts_type  ON psk_rank_entries(ts, result_type, band, rank_pos)`},
+		{
+			"psk_software",
+			`CREATE TABLE IF NOT EXISTS psk_software (
+				id       INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts       INTEGER NOT NULL,  -- Unix seconds UTC — matches psk_rank_snapshots.ts
+				callsign TEXT    NOT NULL,  -- UPPER-cased, as stored in PSKRankData.SoftwareInUse
+				name     TEXT    NOT NULL,  -- canonical software name, e.g. "UberSDR"
+				version  TEXT,              -- version suffix; empty when the detail row had none
+				UNIQUE(ts, callsign, name, version)
+			)`,
+		},
+		{"psk_software_idx_ts", `CREATE INDEX IF NOT EXISTS psk_software_idx_ts       ON psk_software(ts)`},
+		{"psk_software_idx_callsign", `CREATE INDEX IF NOT EXISTS psk_software_idx_callsign ON psk_software(callsign)`},
+
+		// ----------------------------------------------------------------
+		// rbn_skew / rbn_stats
+		//
+		// Replaces: <statsDir>/rbn/YYYY/MM/DD/skew.jsonl
+		//           <statsDir>/rbn/YYYY/MM/DD/statistics.jsonl
+		// Source structs: RBNSkewEntry / RBNStatisticsEntry (rbn_data.go)
+		//
+		// Both are flat CSV rows from sm7iun.se, fetched once per day. The
+		// JSONL writer truncates the day's file on each successful fetch;
+		// the DB writer mirrors that by deleting the day's rows first, so
+		// there is exactly one snapshot per UTC day.
+		//
+		// source_comment (the "# Calculated …" header line) is denormalised
+		// onto every row — it is per-snapshot, but carrying it avoids a join
+		// for what is a single short string.
+		// ----------------------------------------------------------------
+		{
+			"rbn_skew",
+			`CREATE TABLE IF NOT EXISTS rbn_skew (
+				id                INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts                INTEGER NOT NULL,  -- Unix seconds UTC (fetch time)
+				source_comment    TEXT,              -- CSV header comment line
+				callsign          TEXT    NOT NULL,
+				skew              REAL,              -- frequency skew in Hz
+				spots             INTEGER,           -- spot count the skew was derived from
+				correction_factor REAL,
+				UNIQUE(ts, callsign)
+			)`,
+		},
+		{"rbn_skew_idx_ts", `CREATE INDEX IF NOT EXISTS rbn_skew_idx_ts       ON rbn_skew(ts)`},
+		{"rbn_skew_idx_callsign", `CREATE INDEX IF NOT EXISTS rbn_skew_idx_callsign ON rbn_skew(callsign)`},
+		{
+			"rbn_stats",
+			`CREATE TABLE IF NOT EXISTS rbn_stats (
+				id             INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts             INTEGER NOT NULL,  -- Unix seconds UTC (fetch time)
+				source_comment TEXT,              -- CSV header comment line
+				callsign       TEXT    NOT NULL,
+				epoch_date     INTEGER,           -- epoch day number as published by RBN
+				spot_count     INTEGER,
+				UNIQUE(ts, callsign)
+			)`,
+		},
+		{"rbn_stats_idx_ts", `CREATE INDEX IF NOT EXISTS rbn_stats_idx_ts       ON rbn_stats(ts)`},
+		{"rbn_stats_idx_callsign", `CREATE INDEX IF NOT EXISTS rbn_stats_idx_callsign ON rbn_stats(callsign)`},
 	}
 
 	for _, s := range stmts {

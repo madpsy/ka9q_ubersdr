@@ -529,7 +529,11 @@ func main() {
 	dbManager.StartRetentionLoop(mainCtx, RetentionConfig{
 		SessionsDays: config.Server.SessionActivityLogRetentionDays,
 		SpotsDays:    config.Decoder.SpotsLogMaxAgeDays,
-		// CWSpotsDays, ChatDays, NoiseFloorDays, SpaceWeatherDays: no config field yet — 0 = unlimited
+		// StatsDays, CWSpotsDays, ChatDays, NoiseFloorDays: no config field yet — 0 = unlimited.
+		// StatsDays is left unlimited deliberately: the DB is now the only copy
+		// of the leaderboard history. Setting it to statsMaxDays+5 would cap
+		// wspr_rank_rows growth (~150k rows/day) at the point where the
+		// /api/stats/* range limit already makes older rows unreachable.
 	})
 
 	// Load notifications configuration from notifications.yaml if it exists
@@ -1376,8 +1380,13 @@ func main() {
 	// Placed here because config.Chat.DataDir (the last data dir to be resolved) is
 	// set just above. All other dirs (noise_floor, spots, cw_spots, sessions,
 	// space_weather, decoder/cw metrics) were resolved earlier in main().
+	// Root of the WSPR/PSK/RBN stats JSONL tree — same value StatsLogger is
+	// constructed with further down; declared here so the importer can see it.
+	statsLogDir := *configDir + "/stats"
+
 	dbImporter := &DBImporter{
 		db:                dbManager.DB(),
+		StatsDir:          statsLogDir,
 		ChatDir:           config.Chat.DataDir,
 		NoiseFloorDir:     config.NoiseFloor.DataDir,
 		SpotsDir:          config.Decoder.SpotsLogDataDir,
@@ -2308,16 +2317,13 @@ func main() {
 	rbnFetcher := NewRBNDataFetcher(rbnStore, cwskimmerConfig)
 
 	// Initialize stats logger for WSPR / PSK / RBN fetched-data persistence.
-	// Default directory: <configDir>/stats — always enabled (no config flag needed,
-	// the overhead is negligible: a few KB per day).
-	statsLogDir := *configDir + "/stats"
-	statsLogger, err := NewStatsLogger(statsLogDir, true)
-	if err != nil {
-		log.Printf("[StatsLogger] Failed to initialise (stats will not be persisted): %v", err)
-		statsLogger = nil
-	} else {
-		log.Printf("[StatsLogger] Persisting WSPR/PSK/RBN stats to %s", statsLogDir)
-	}
+	// Always enabled (no config flag needed, the overhead is negligible: a few
+	// KB per day). Historical JSONL under statsLogDir is backfilled once by
+	// dbImporter above; nothing writes there any more.
+	statsLogger := NewStatsLogger()
+	statsLogger.SetDB(dbManager.DB())
+	statsLogger.SetReadDB(dbManager.ReadDB())
+	log.Printf("[StatsLogger] Persisting WSPR/PSK/RBN stats to SQLite")
 
 	rbnFetcher.SetStatsLogger(statsLogger)
 	if mqttPublisher != nil {

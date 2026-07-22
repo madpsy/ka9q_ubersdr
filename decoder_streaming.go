@@ -75,7 +75,12 @@ type StreamingDecoder struct {
 	lastSkippedCycles       int       // Track skipped cycles to detect when they increment
 	lastSkippedCyclesChange time.Time // Track when skipped cycles last changed
 	lastDecodeStatsTime     time.Time // Track when we last received DecodeStats
+	droppedDecodes          int       // Decodes dropped since the last drop warning (stdout reader goroutine only)
+	lastDropLogTime         time.Time // When the last drop warning was logged
 }
+
+// dropWarningInterval limits how often "result channel full" warnings are logged per band
+const dropWarningInterval = 30 * time.Second
 
 // NewStreamingDecoder creates and starts a streaming decoder process
 // binaryPath: path to the decoder binary
@@ -375,7 +380,15 @@ func (sd *StreamingDecoder) readStdout() {
 		case sd.resultChan <- decode:
 			// Successfully sent
 		default:
-			log.Printf("Warning: result channel full for %s, dropping decode", sd.band.Config.Name)
+			// Rate-limit the warning: log at most once per interval per band,
+			// reporting how many decodes were dropped in that window
+			sd.droppedDecodes++
+			if time.Since(sd.lastDropLogTime) >= dropWarningInterval {
+				log.Printf("Warning: result channel full for %s, dropped %d decode(s) in the last %v",
+					sd.band.Config.Name, sd.droppedDecodes, dropWarningInterval)
+				sd.droppedDecodes = 0
+				sd.lastDropLogTime = time.Now()
+			}
 		}
 	}
 

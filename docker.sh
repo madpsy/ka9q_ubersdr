@@ -14,6 +14,9 @@ NO_GIT=false
 PLATFORM="linux/amd64,linux/arm64"   # default: both arches
 PUSH_OR_LOAD="--push"                 # default: push to registry
 CUSTOM_TAG=""
+SKIP_SCAN=false
+TRIVY_IMAGE="aquasec/trivy:latest"
+TRIVY_SEVERITY="HIGH,CRITICAL"
 
 for arg in "$@"; do
     case $arg in
@@ -47,6 +50,10 @@ for arg in "$@"; do
             NO_GIT=true
             echo "Running in --no-git mode (will skip git commit and push)"
             ;;
+        --no-scan)
+            SKIP_SCAN=true
+            echo "Running in --no-scan mode (will skip Trivy vulnerability scan)"
+            ;;
         --amd64)
             PLATFORM="linux/amd64"
             PUSH_OR_LOAD="--load"
@@ -63,11 +70,69 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--tag=<value>] [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--amd64] [--arm64]"
+            echo "Usage: $0 [--tag=<value>] [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--no-scan] [--amd64] [--arm64]"
             exit 1
             ;;
     esac
 done
+
+# Scan an image with Trivy for known vulnerabilities.
+#
+# Advisory only: this reports findings but NEVER fails the build or blocks the
+# push/git steps. Every failure mode (no network, Docker Hub rate limit, Trivy
+# image unavailable, vuln DB download failure, scan timeout) is caught and
+# downgraded to a warning, so an offline build still succeeds.
+scan_image() {
+    local image_ref="$1"
+    local socket_args=()
+    local platform_args=()
+
+    if [ "$SKIP_SCAN" = true ]; then
+        return 0
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "Trivy vulnerability scan: $image_ref"
+    echo "=========================================="
+
+    # Pull Trivy up front so an unavailable image is a clean skip rather than a
+    # confusing scan failure. Quiet on success; the warning below covers failure.
+    if ! docker pull --quiet "$TRIVY_IMAGE" >/dev/null 2>&1; then
+        echo "WARNING: Could not pull $TRIVY_IMAGE - skipping vulnerability scan"
+        echo "         (build is unaffected; scan is advisory only)"
+        return 0
+    fi
+
+    # Images built with --load exist only in the local Docker daemon, so Trivy
+    # needs the socket to read them. Registry images (--push) are fetched
+    # directly and need no socket access.
+    if [ "$PUSH_OR_LOAD" = "--load" ]; then
+        socket_args=(-v /var/run/docker.sock:/var/run/docker.sock)
+    else
+        # Pin the arch explicitly: a multi-arch tag would otherwise default to
+        # amd64, and an arm64-only push has no amd64 manifest to scan at all.
+        platform_args=(--platform "${PLATFORM%%,*}")
+    fi
+
+    # A named volume caches the ~100MB vuln DB between runs.
+    # --exit-code is left at 0 so findings never fail the build.
+    if ! docker run --rm \
+        "${socket_args[@]}" \
+        -v trivy-cache:/root/.cache/ \
+        "$TRIVY_IMAGE" image \
+        "${platform_args[@]}" \
+        --scanners vuln \
+        --severity "$TRIVY_SEVERITY" \
+        --exit-code 0 \
+        --timeout 10m \
+        "$image_ref"; then
+        echo "WARNING: Trivy scan did not complete for $image_ref"
+        echo "         (build is unaffected; scan is advisory only)"
+    fi
+
+    return 0
+}
 
 echo "Ensure version.go has been version bumped"
 echo "Current version: $VERSION"
@@ -196,6 +261,12 @@ fi
 
 echo "UberSDR build and push successful!"
 
+if [ -n "$CUSTOM_TAG" ]; then
+    scan_image "$IMAGE:$CUSTOM_TAG"
+else
+    scan_image "$IMAGE:$VERSION"
+fi
+
 # Build Fluent Bit image with version tag (only if --fluent-bit flag is set)
 if [ "$BUILD_FLUENT_BIT" = true ]; then
     if [ -n "$CUSTOM_TAG" ]; then
@@ -217,6 +288,12 @@ if [ "$BUILD_FLUENT_BIT" = true ]; then
         exit 1
     fi
     echo "Fluent Bit build and push successful!"
+
+    if [ -n "$CUSTOM_TAG" ]; then
+        scan_image "$FLUENT_BIT_IMAGE:$CUSTOM_TAG"
+    else
+        scan_image "$FLUENT_BIT_IMAGE:$VERSION"
+    fi
 else
     echo "Skipping Fluent Bit build (use --fluent-bit flag to build)"
 fi

@@ -17,3 +17,4 @@ tools/__pycache__
 clients/galactic_unicorn/firmware/config.py
 # Downloaded UF2 firmware files
 clients/galactic_unicorn/firmware/*.uf2
+plans

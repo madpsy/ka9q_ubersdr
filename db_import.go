@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -83,6 +84,14 @@ type DBImporter struct {
 	// Metrics summary roots: <dir>/{daily,weekly,monthly,yearly}/…/*-summary.json
 	DecoderSummaryDir string // decoder_metrics_summary: <MODE>-<BAND>-summary.json
 	CWSummaryDir      string // cw_metrics_summary:      <BAND>-summary.json
+
+	// migrationDone is closed once the backfill has removed at least one source
+	// directory, signalling that the process should restart onto the DB-only
+	// paths. Created lazily so the zero value of DBImporter stays usable and so
+	// the accessor and the closer agree on one channel whatever the call order.
+	migrationOnce sync.Once
+	migrationDone chan struct{}
+	restartOnce   sync.Once
 
 	// SummaryHooks maps a summary table to the live aggregator that owns it.
 	// The two summary aggregators start up before this importer runs, read an
@@ -237,8 +246,31 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 			log.Printf("[DB import] backfill interrupted — leaving source directories in place")
 			return
 		}
-		imp.cleanupImportedDirs(dirOK)
+		if removed := imp.cleanupImportedDirs(dirOK); removed > 0 {
+			// The migrated trees are gone; whoever is listening restarts the
+			// process so it comes back up reading only from SQLite.
+			log.Printf("[DB import] %d source director(ies) removed — requesting restart", removed)
+			imp.restartOnce.Do(func() { close(imp.restartChan()) })
+		}
 	}()
+}
+
+// RestartRequested returns a channel that is closed once the backfill has
+// finished AND removed at least one migrated source directory. It never fires
+// when the import was aborted, when every directory was kept because an import
+// failed, or when the directories were already gone.
+//
+// Closing happens whether or not anyone is listening yet, so a caller wired up
+// later in startup (the admin handler is built long after the importer starts)
+// still observes it.
+func (imp *DBImporter) RestartRequested() <-chan struct{} {
+	return imp.restartChan()
+}
+
+// restartChan lazily creates the migration-complete channel.
+func (imp *DBImporter) restartChan() chan struct{} {
+	imp.migrationOnce.Do(func() { imp.migrationDone = make(chan struct{}) })
+	return imp.migrationDone
 }
 
 // cleanupImportedDirs removes each source data directory whose imports all
@@ -248,7 +280,11 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 // so a subsequent startup can retry the backfill from the intact files.
 // Directories shared by multiple importers (StatsDir) are removed only when
 // every importer that read from them succeeded.
-func (imp *DBImporter) cleanupImportedDirs(dirOK map[string]bool) {
+//
+// Returns the number of directories actually removed from disk — the caller
+// uses it to decide whether a restart is warranted.
+func (imp *DBImporter) cleanupImportedDirs(dirOK map[string]bool) int {
+	removed := 0
 	// Deduplicate: StatsDir appears three times in the import list.
 	seen := make(map[string]bool)
 	for dir, ok := range dirOK {
@@ -266,8 +302,11 @@ func (imp *DBImporter) cleanupImportedDirs(dirOK map[string]bool) {
 		log.Printf("[DB import] removing migrated source directory %s", dir)
 		if err := os.RemoveAll(dir); err != nil {
 			log.Printf("[DB import] WARNING: failed to remove %s: %v", dir, err)
+			continue
 		}
+		removed++
 	}
+	return removed
 }
 
 // tableIsEmpty returns true when COUNT(*) == 0 for the named table.

@@ -2446,6 +2446,20 @@ func main() {
 	// Wire IP ban manager so the /banned bot command can list, add, and remove bans.
 	notifManager.SetIPBanManager(ipBanManager)
 
+	// Restart once the historical file→SQLite backfill has deleted the migrated
+	// source directories, so the process comes back up reading only from the
+	// database. Wired here rather than next to RunImportIfEmpty because
+	// adminHandler (which owns the shutdown sequence) does not exist yet at that
+	// point; the signal is a closed channel, so a backfill that finished before
+	// this goroutine starts is still observed.
+	go func() {
+		select {
+		case <-dbImporter.RestartRequested():
+			adminHandler.restartForMigration()
+		case <-mainCtx.Done():
+		}
+	}()
+
 	// Start system monitor health notifier — polls subsystems every 30s and fires
 	// SystemMonitorEvent notifications on healthy↔unhealthy transitions.
 	{

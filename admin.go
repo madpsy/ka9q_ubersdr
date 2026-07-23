@@ -440,7 +440,25 @@ func (ah *AdminHandler) GetEnabledPublicAddonNames() []string {
 // restartServer triggers a server restart after a short delay
 // It properly shuts down all components before exiting
 func (ah *AdminHandler) restartServer() {
-	log.Println("Server restart requested via admin API...")
+	ah.restartServerReason("restart")
+}
+
+// restartForMigration restarts the server after the one-time file→SQLite
+// backfill has deleted the migrated source directories. The process comes back
+// up reading exclusively from the database.
+//
+// This is the only restart the server initiates on its own, so it is logged
+// distinctly and reported to notifiers as reason "migration" rather than the
+// operator-triggered "restart".
+func (ah *AdminHandler) restartForMigration() {
+	log.Println("Historical data migration complete — source directories removed, restarting server...")
+	ah.restartServerReason("migration")
+}
+
+// restartServerReason is restartServer with an explicit reason for the
+// shutdown notification published to Telegram/webhook notifiers.
+func (ah *AdminHandler) restartServerReason(reason string) {
+	log.Printf("Server restart requested (reason: %s)...", reason)
 	go func() {
 		time.Sleep(1 * time.Second) // Give time for HTTP response to be sent
 		log.Println("Shutting down all components before restart...")
@@ -453,7 +471,7 @@ func (ah *AdminHandler) restartServer() {
 				Callsign:  ah.config.Admin.Callsign,
 				Name:      ah.config.Admin.Name,
 				Component: "shutdown",
-				Reason:    "restart",
+				Reason:    reason,
 			})
 		}
 

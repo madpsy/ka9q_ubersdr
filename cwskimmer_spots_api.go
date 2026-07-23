@@ -48,10 +48,12 @@ type CWSpotRecord struct {
 // GetCWHistoricalSpots reads historical CW spots from the cw_spots SQLite table.
 // callsigns is a set of uppercase callsigns to match; an empty map means no filter.
 //
-// The ctyDatabase parameter is retained for API compatibility but is no longer
-// used: latitude/longitude are populated at write time and stored directly in
-// the cw_spots table.
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, _ *CTYDatabase) ([]CWSpotRecord, error) {
+// Latitude/longitude are normally populated at write time and stored directly
+// in the cw_spots table. Rows imported from the pre-database CSV files have no
+// coordinates (the CSVs never carried them), so ctyDatabase is used as a
+// read-time fallback for those rows — matching the behaviour of the old
+// file-based reader.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
 	if sl.readDB == nil {
 		return nil, fmt.Errorf("CW spots database is not available")
 	}
@@ -201,6 +203,20 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 			v := lon.Float64
 			spot.Longitude = &v
 		}
+		// Fallback for rows without a stored position: CSV-imported rows have
+		// NULL lat/lon, and live rows whose callsign resolved to nothing store
+		// 0/0 (the columns are plain float64 on the write path). Both are
+		// filled in from CTY.dat here, as the file-based reader used to do.
+		if !hasPosition(spot.Latitude, spot.Longitude) && ctyDatabase != nil {
+			if info := ctyDatabase.LookupCallsignFull(dxCall); info != nil {
+				// CTY.dat coordinates are already standard East-positive.
+				ctyLat, ctyLon := info.Latitude, info.Longitude
+				if ctyLat != 0 || ctyLon != 0 {
+					spot.Latitude = &ctyLat
+					spot.Longitude = &ctyLon
+				}
+			}
+		}
 		if dist.Valid {
 			v := dist.Float64
 			spot.DistanceKm = &v
@@ -225,6 +241,16 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 	}
 
 	return allSpots, nil
+}
+
+// hasPosition reports whether a spot carries usable coordinates. A stored
+// 0/0 counts as "no position": it is what the write path records when a
+// callsign resolves to nothing, and 0°N 0°E is open ocean for CW purposes.
+func hasPosition(lat, lon *float64) bool {
+	if lat == nil || lon == nil {
+		return false
+	}
+	return *lat != 0 || *lon != 0
 }
 
 // parseHourMinToMinutes converts a "HH:MM" string to minutes-of-day. Returns

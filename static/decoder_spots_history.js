@@ -1476,6 +1476,27 @@
             renderCallsignModalTable();
         });
 
+        // "View decodes" button inside map popups. Delegated, because Leaflet
+        // rebuilds popup DOM on demand.
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.popup-view-decodes');
+            if (!btn) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const { callsign, band, mode } = btn.dataset;
+
+            // Prefer the full spot the marker was built from, so the modal gets
+            // country/locator too; fall back to what the button carries.
+            let spot = null;
+            if (spotsMap && spotsMap.markers) {
+                const entry = spotsMap.markers.get(`${callsign}-${band}-${mode}`);
+                if (entry) spot = entry.spot;
+            }
+            openCallsignModal(spot || { callsign, band, mode });
+        });
+
         // Sortable headers inside the modal table
         document.getElementById('callsignModalTable').addEventListener('click', function(e) {
             const th = e.target.closest('th.modal-sortable');
@@ -1581,17 +1602,16 @@
     }
 
     function updateCallsignModalSortIndicators() {
+        // Same convention as the main table: sort-asc/sort-desc drive the arrow
         document.querySelectorAll('#callsignModalTable th.modal-sortable').forEach(th => {
-            const arrows = th.querySelector('.sort-arrows');
-            if (!arrows) return;
-            if (th.dataset.column === modalSortColumn) {
-                arrows.textContent = modalSortDirection === 'asc' ? '↑' : '↓';
-                th.classList.add('sorted');
-            } else {
-                arrows.textContent = '⇅';
-                th.classList.remove('sorted');
-            }
+            th.classList.remove('sort-asc', 'sort-desc');
         });
+
+        const currentTh = document.querySelector(
+            `#callsignModalTable th.modal-sortable[data-column="${modalSortColumn}"]`);
+        if (currentTh) {
+            currentTh.classList.add(modalSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
     }
 
     // Scroll the page to the map section and open the popup for a spot.
@@ -1729,15 +1749,11 @@
         const bands = new Set();
         const modes = new Set();
         let bestSNR = null;
-        let maxDistance = null;
 
         spots.forEach(s => {
             if (s.band) bands.add(s.band);
             if (s.mode) modes.add(s.mode);
             if (typeof s.snr === 'number' && (bestSNR === null || s.snr > bestSNR)) bestSNR = s.snr;
-            if (typeof s.distance_km === 'number' && (maxDistance === null || s.distance_km > maxDistance)) {
-                maxDistance = s.distance_km;
-            }
         });
 
         const timeFmt = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
@@ -1760,10 +1776,6 @@
             <div class="stat-card">
                 <div class="stat-value">${bestSNR === null ? '-' : (bestSNR >= 0 ? '+' + bestSNR : bestSNR) + ' dB'}</div>
                 <div class="stat-label">Best SNR</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${maxDistance === null ? '-' : maxDistance.toFixed(0) + ' km'}</div>
-                <div class="stat-label">Max Distance</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${first} – ${last}</div>

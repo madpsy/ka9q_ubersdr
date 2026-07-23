@@ -355,9 +355,8 @@ class DecoderSpotsHistoryMap {
             const marker = L.marker([adjustedLat, adjustedLon], { icon });
 
             // Create popup content
-            const popupContent = this.createPopupContent(spot);
-            marker.bindPopup(popupContent);
-            marker.bindTooltip(popupContent, {
+            marker.bindPopup(this.createPopupContent(spot, true));
+            marker.bindTooltip(this.createPopupContent(spot), {
                 direction: 'top',
                 offset: [0, -10]
             });
@@ -400,15 +399,28 @@ class DecoderSpotsHistoryMap {
      * @param {object} spot - Spot data
      * @returns {string} - HTML content
      */
-    createPopupContent(spot) {
+    createPopupContent(spot, includeActions = false) {
         const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
             hour12: false,
             timeZone: 'UTC'
         });
 
+        // "View decodes" is only rendered for popups — tooltips are not
+        // interactive, so a button there could never be clicked.
+        const viewDecodesBtn = includeActions ? `
+            <button type="button" class="popup-view-decodes"
+                    data-callsign="${spot.callsign}"
+                    data-band="${spot.band}"
+                    data-mode="${spot.mode || 'CW'}"
+                    title="Show all decodes for this callsign">View decodes</button>
+        ` : '';
+
         let content = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">
-                <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${this.flagForCountry(spot.country)}${spot.callsign}</a></b><br>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${this.flagForCountry(spot.country)}${spot.callsign}</a></b>
+                    ${viewDecodesBtn}
+                </div>
         `;
 
         if (spot.country) {

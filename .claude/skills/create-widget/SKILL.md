@@ -1507,6 +1507,16 @@ curl -s "${hdr[@]}" "$BASE/admin/widgets/version?widget_id=$WID&version=$VER" \
 
 # 4. --- edit widgets-custom/editing.widget.html here ---
 
+# 4b. If the widget is PUBLIC, stop and confirm before pushing — the update goes
+#     live to every instance that has it enabled, immediately.
+if [ "$(jq -r '.is_public // false' <<<"$META")" = "true" ]; then
+  USERS=$(curl -s "${hdr[@]}" "$BASE/admin/widgets/public-with-instances" \
+          | jq --arg id "$WID" '[.widgets[] | select(.widget_id==$id) | .enabled_by // []][0] | length')
+  echo "⚠  '$(jq -r .name <<<"$META")' is PUBLIC and enabled by ${USERS:-?} instance(s)."
+  echo "   Saving publishes this change to the whole community right away. Confirm before continuing."
+  # → get explicit user confirmation here; only then run step 5.
+fi
+
 # 5. push the edited HTML back, preserving name/description/is_public
 jq -n --arg id "$WID" \
       --arg name "$(jq -r .name <<<"$META")" \
@@ -1518,9 +1528,17 @@ jq -n --arg id "$WID" \
     "${hdr[@]}" -H 'Content-Type: application/json' --data-binary @-
 ```
 
+> **Editing a public widget requires explicit confirmation before you submit.**
+> Once `is_public` is true, **every** `update` is a new version that goes live to
+> the entire community immediately — there is no staging. Before pushing a change
+> to a public widget you MUST: (1) tell the user it's public and how many other
+> instances have it enabled (`public-with-instances` → `enabled_by`), and (2) get
+> a clear yes. If they want to experiment first, suggest making it private
+> (`is_public:false`) or working on a clone, then republishing when happy. A
+> private widget needs no such confirmation — its edits affect only this instance.
+
 If the widget is already enabled on the instance, the update refreshes its
-cached copy automatically — reload the SDR page to see the change. If it's public,
-re-read the community caveat below before pushing.
+cached copy automatically — reload the SDR page to see the change.
 
 ### Enable it on this instance
 

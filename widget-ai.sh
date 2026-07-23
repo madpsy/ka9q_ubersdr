@@ -2,27 +2,31 @@
 #
 # widget-ai.sh — AI-assisted UberSDR widget authoring.
 #
-# Spins up Claude Code in a throwaway working directory pre-loaded with the
-# create-widget skill and the reference widgets, then hands you an interactive
+# Installs Claude Code (first run), refreshes the create-widget skill from the
+# repo into your personal skills dir, then drops you into an interactive Claude
 # session to CREATE a new widget or EDIT one of your existing (custom/cloned)
-# widgets. All persistence happens through the instance admin API — the working
-# directory is ephemeral and deleted on exit.
+# widgets. All persistence happens through the instance admin API.
+#
+#   • The skill lives at ~/.claude/skills/create-widget/SKILL.md — persistent and
+#     refreshed on every launch, so you can inspect it and plain `claude` sees it.
+#   • Reference widgets + scratch files live in a throwaway temp dir (removed on
+#     exit) — the real widgets live on your instance behind the admin API.
 #
 # Intended to be launched from the UberSDR gotty web terminal.
 #
 #   Env overrides:
-#     UBERSDR_DIR    installed instance dir holding get-password.sh + the
-#                    pre-staged skill fallback   (default: $HOME/ubersdr)
+#     UBERSDR_DIR    installed instance dir holding get-password.sh  (default: $HOME/ubersdr)
 #     BASE           admin API base URL          (default: http://localhost:8080)
-#     BRANCH         git branch to pull the skill from   (default: main)
+#     BRANCH         git branch to pull from     (default: main)
 
 set -euo pipefail
 
 REPO="madpsy/ka9q_ubersdr"
 BRANCH="${BRANCH:-main}"
-SKILL_SUBDIR=".claude/skills/create-widget"
+RAW="https://raw.githubusercontent.com/$REPO/refs/heads/$BRANCH"
 UBERSDR_DIR="${UBERSDR_DIR:-$HOME/ubersdr}"
 BASE="${BASE:-http://localhost:8080}"
+SKILL_DIR="$HOME/.claude/skills/create-widget"
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -52,32 +56,43 @@ fi
 command -v claude >/dev/null 2>&1 || die "Claude Code install failed — is $HOME/.local/bin on PATH?"
 
 # ---------------------------------------------------------------------------
-# 2. Ephemeral working directory (cleaned up on exit).
+# 2. Refresh the create-widget skill into the personal skills dir.
+#    Persistent (survives exit, inspectable, visible to plain `claude`); the
+#    previous copy is used if the network is down.
+# ---------------------------------------------------------------------------
+mkdir -p "$SKILL_DIR"
+if curl -fsSL --max-time 20 "$RAW/.claude/skills/create-widget/SKILL.md" -o "$SKILL_DIR/SKILL.md.tmp"; then
+  mv "$SKILL_DIR/SKILL.md.tmp" "$SKILL_DIR/SKILL.md"
+  say "Widget skill up to date:  $SKILL_DIR/SKILL.md"
+else
+  rm -f "$SKILL_DIR/SKILL.md.tmp"
+  [ -f "$SKILL_DIR/SKILL.md" ] \
+    && say "Offline — using previously fetched skill: $SKILL_DIR/SKILL.md" \
+    || die "Could not fetch the widget skill from the repo and no local copy exists."
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Ephemeral working dir: reference widgets + scratch + session permissions.
 # ---------------------------------------------------------------------------
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/widget-ai.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT INT TERM
-mkdir -p "$WORK/$SKILL_SUBDIR" "$WORK/widgets" "$WORK/widgets-custom" "$WORK/.claude"
+mkdir -p "$WORK/widgets" "$WORK/widgets-custom" "$WORK/.claude"
 
-# ---------------------------------------------------------------------------
-# 3. Load the skill + reference widgets: latest from GitHub, else pre-staged.
-# ---------------------------------------------------------------------------
+# Reference widgets are helpful for CREATE; editing via the API works without
+# them, so this is best-effort.
 if curl -fsSL --max-time 20 "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" \
-     | tar -xz -C "$WORK" --strip-components=1 \
-         "ka9q_ubersdr-$BRANCH/$SKILL_SUBDIR" \
-         "ka9q_ubersdr-$BRANCH/widgets" 2>/dev/null; then
-  say "Loaded latest widget skill from GitHub."
+     | tar -xz -C "$WORK" --strip-components=1 "ka9q_ubersdr-$BRANCH/widgets" 2>/dev/null; then
+  say "Reference widgets loaded ($(ls "$WORK/widgets" | wc -l) files)."
 else
-  say "GitHub unreachable — falling back to the pre-staged skill copy."
-  cp -r "$UBERSDR_DIR/widget-skill/.claude/." "$WORK/.claude/" 2>/dev/null || true
-  cp -r "$UBERSDR_DIR/widget-skill/widgets/." "$WORK/widgets/"   2>/dev/null || true
+  echo "  (reference widgets unavailable — creating from scratch still works)"
 fi
-[ -f "$WORK/$SKILL_SUBDIR/SKILL.md" ] || \
-  die "Widget skill unavailable (no network and no pre-staged copy at $UBERSDR_DIR/widget-skill)."
 
 # ---------------------------------------------------------------------------
-# 4. Pre-fetch the admin password so Claude never has to shell out to sudo.
-#    Best-effort: if it fails, the skill still knows how to run get-password.sh.
+# 4. Pre-fetch the admin password HERE (in the TTY, where sudo can prompt) and
+#    export it, so Claude authenticates via $UBERSDR_ADMIN_PASSWORD and never
+#    has to run sudo from its non-interactive shell. The path is absolute, so
+#    cwd (the temp dir) is irrelevant.
 # ---------------------------------------------------------------------------
 export BASE
 if [ -x "$UBERSDR_DIR/get-password.sh" ]; then
@@ -86,14 +101,16 @@ if [ -x "$UBERSDR_DIR/get-password.sh" ]; then
     export UBERSDR_ADMIN_PASSWORD="$PW"
     say "Admin credentials loaded into the session."
   else
-    echo "  (could not read the admin password automatically — Claude will run get-password.sh when needed)"
+    echo "  (could not read the admin password automatically — Claude will run $UBERSDR_DIR/get-password.sh when needed)"
   fi
+else
+  echo "  (note: $UBERSDR_DIR/get-password.sh not found — set UBERSDR_ADMIN_PASSWORD manually if the API returns 401)"
 fi
 
 # ---------------------------------------------------------------------------
 # 5. Permission allowlist so the API workflow doesn't prompt on every command.
 # ---------------------------------------------------------------------------
-cat > "$WORK/.claude/settings.json" <<'JSON'
+cat > "$WORK/.claude/settings.json" <<JSON
 {
   "permissions": {
     "defaultMode": "acceptEdits",
@@ -104,6 +121,7 @@ cat > "$WORK/.claude/settings.json" <<'JSON'
       "Bash(cat:*)",
       "Bash(ls:*)",
       "Bash(echo:*)",
+      "Bash($UBERSDR_DIR/get-password.sh)",
       "Read",
       "Write",
       "Edit"
@@ -123,10 +141,10 @@ cat <<EOF
   ├───────────────────────────────────────────────────────────┤
   │  Just tell Claude what you want, e.g.                      │
   │    • "Create a widget that shows the current UTC sunrise"  │
-  │    • "Edit my callsign lookup widget to add a copy button" │
+  │    • "List my widgets" / "Edit my callsign lookup widget"  │
   │                                                            │
-  │  Changes are saved to your instance via the admin API.     │
-  │  This folder is temporary and removed when you exit.       │
+  │  Your widgets live on your instance (admin API), not here. │
+  │  This scratch folder is removed when you exit.             │
   └───────────────────────────────────────────────────────────┘
 
 EOF

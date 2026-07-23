@@ -1,6 +1,6 @@
 ---
 name: create-widget
-description: Create a widget for the UberSDR web SDR interface — a self-contained HTML fragment (style + markup + script) injected into the host page, NOT a full HTML document. Use this whenever building, adding, or editing an UberSDR widget. New user-created widgets live in widgets-custom/*.widget.html; the widgets/ directory holds the bundled reference implementations.
+description: Create, list, or edit widgets for the UberSDR web SDR interface — a widget is a self-contained HTML fragment (style + markup + script) injected into the host page, NOT a full HTML document. Use this whenever building, adding, listing, or editing UberSDR widgets, including requests like "list my widgets" or "edit my <X> widget". A user's existing widgets live on their instance and are managed through the admin API (GET /admin/widgets/mine), not as local files; the widgets/ directory only holds bundled reference implementations to read for examples.
 ---
 
 # Skill: Create a UberSDR Widget
@@ -25,6 +25,16 @@ description: Create a widget for the UberSDR web SDR interface — a self-contai
 > match to what you're building (see the table below) and copy its structure.
 > Do not write a widget from memory or from this document alone when a concrete
 > example exists.
+
+> **The user's widgets live on the instance, NOT on local disk.**
+> When asked *"what widgets do I have?"*, *"list my widgets"*, or *"edit my
+> &lt;X&gt; widget"*, the source of truth is the admin API —
+> `GET /admin/widgets/mine` (see *Submitting & editing widgets via the admin
+> API*). **Never** answer from the local `widgets-custom/` folder: in the
+> `widget-ai.sh` assistant that folder is empty scratch space, so an empty folder
+> says **nothing** about what the user actually has. Always query the API before
+> concluding anything about existing widgets, and match the user's wording
+> fuzzily against `name`/`description`.
 
 ### Reference widgets to read (in `widgets/`)
 

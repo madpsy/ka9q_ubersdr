@@ -657,17 +657,6 @@ echo "Fetching widget-ai.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/widget-ai.sh -o "$ACTUAL_HOME/ubersdr/widget-ai.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/widget-ai.sh"
 
-echo "Staging widget authoring skill (create-widget) + reference widgets..."
-mkdir -p "$ACTUAL_HOME/ubersdr/widget-skill"
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/archive/refs/heads/main.tar.gz \
-     | tar -xz -C "$ACTUAL_HOME/ubersdr/widget-skill" --strip-components=1 \
-         "ka9q_ubersdr-main/.claude/skills/create-widget" \
-         "ka9q_ubersdr-main/widgets" 2>/dev/null; then
-    echo "  ...widget skill staged (offline fallback for widget-ai.sh)"
-else
-    echo "  ...skipped (could not fetch skill archive; widget-ai.sh will fetch it at runtime)"
-fi
-
 echo "Fetching restart-ubersdr.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/restart-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"

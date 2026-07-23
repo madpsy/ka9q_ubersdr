@@ -162,6 +162,7 @@ func getWSPRSpotsCached(sl *SpotsLogger) ([]SpotRecord, error) {
 		"",     // callsign
 		"",     // locator
 		"",     // continent
+		"",     // country
 		"",     // direction
 		fromDate,
 		toDate,

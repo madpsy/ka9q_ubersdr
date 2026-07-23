@@ -57,7 +57,7 @@ func TestDecoderSpotsRoundTrip(t *testing.T) {
 	day := base.Format("2006-01-02")
 
 	// --- no filters ---
-	spots, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
+	spots, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
 	if err != nil {
 		t.Fatalf("GetHistoricalSpots: %v", err)
 	}
@@ -94,9 +94,9 @@ func TestDecoderSpotsRoundTrip(t *testing.T) {
 	}
 
 	// --- filter dimensions ---
-	check := func(label string, want int, mode, band, name, cs, loc, cont, dir, st, et string, locOnly bool, minDist float64, minSNR int) {
+	check := func(label string, want int, mode, band, name, cs, loc, cont, ctry, dir, st, et string, locOnly bool, minDist float64, minSNR int) {
 		t.Helper()
-		s, err := sl.GetHistoricalSpots(mode, band, name, cs, loc, cont, dir, day, day, st, et, false, locOnly, minDist, minSNR)
+		s, err := sl.GetHistoricalSpots(mode, band, name, cs, loc, cont, ctry, dir, day, day, st, et, false, locOnly, minDist, minSNR)
 		if err != nil {
 			t.Fatalf("%s: %v", label, err)
 		}
@@ -104,25 +104,27 @@ func TestDecoderSpotsRoundTrip(t *testing.T) {
 			t.Errorf("%s: expected %d, got %d", label, want, len(s))
 		}
 	}
-	check("mode FT8", 1, "FT8", "", "", "", "", "", "", "", "", false, 0, -999)
-	check("mode WSPR", 0, "WSPR", "", "", "", "", "", "", "", "", false, 0, -999)
-	check("band 20m", 1, "", "20m", "", "", "", "", "", "", "", false, 0, -999)
-	check("band 40m", 0, "", "40m", "", "", "", "", "", "", "", false, 0, -999)
-	check("name 20m_FT8", 1, "", "", "20m_FT8", "", "", "", "", "", "", false, 0, -999)
-	check("callsign K1ABC", 1, "", "", "", "K1ABC", "", "", "", "", "", false, 0, -999)
-	check("callsign W9XYZ", 0, "", "", "", "W9XYZ", "", "", "", "", "", false, 0, -999)
-	check("locator FN42", 1, "", "", "", "", "FN42", "", "", "", "", false, 0, -999)
-	check("continent NA", 1, "", "", "", "", "", "NA", "", "", "", false, 0, -999)
-	check("continent EU", 0, "", "", "", "", "", "EU", "", "", "", false, 0, -999)
-	check("locatorsOnly", 1, "", "", "", "", "", "", "", "", "", true, 0, -999)
-	check("minDist 4000", 1, "", "", "", "", "", "", "", "", "", false, 4000, -999)
-	check("minDist 6000", 0, "", "", "", "", "", "", "", "", "", false, 6000, -999)
-	check("minSNR -20", 1, "", "", "", "", "", "", "", "", "", false, 0, -20)
-	check("minSNR 0", 0, "", "", "", "", "", "", "", "", "", false, 0, 0)
-	check("direction E", 1, "", "", "", "", "", "", "E", "", "", false, 0, -999)
-	check("direction W", 0, "", "", "", "", "", "", "W", "", "", false, 0, -999)
-	check("time 14:00-15:00", 1, "", "", "", "", "", "", "", "14:00", "15:00", false, 0, -999)
-	check("time 15:00-16:00", 0, "", "", "", "", "", "", "", "15:00", "16:00", false, 0, -999)
+	check("mode FT8", 1, "FT8", "", "", "", "", "", "", "", "", "", false, 0, -999)
+	check("mode WSPR", 0, "WSPR", "", "", "", "", "", "", "", "", "", false, 0, -999)
+	check("band 20m", 1, "", "20m", "", "", "", "", "", "", "", "", false, 0, -999)
+	check("band 40m", 0, "", "40m", "", "", "", "", "", "", "", "", false, 0, -999)
+	check("name 20m_FT8", 1, "", "", "20m_FT8", "", "", "", "", "", "", "", false, 0, -999)
+	check("callsign K1ABC", 1, "", "", "", "K1ABC", "", "", "", "", "", "", false, 0, -999)
+	check("callsign W9XYZ", 0, "", "", "", "W9XYZ", "", "", "", "", "", "", false, 0, -999)
+	check("locator FN42", 1, "", "", "", "", "FN42", "", "", "", "", "", false, 0, -999)
+	check("continent NA", 1, "", "", "", "", "", "NA", "", "", "", "", false, 0, -999)
+	check("continent EU", 0, "", "", "", "", "", "EU", "", "", "", "", false, 0, -999)
+	check("country United States", 1, "", "", "", "", "", "", "United States", "", "", "", false, 0, -999)
+	check("country England", 0, "", "", "", "", "", "", "England", "", "", "", false, 0, -999)
+	check("locatorsOnly", 1, "", "", "", "", "", "", "", "", "", "", true, 0, -999)
+	check("minDist 4000", 1, "", "", "", "", "", "", "", "", "", "", false, 4000, -999)
+	check("minDist 6000", 0, "", "", "", "", "", "", "", "", "", "", false, 6000, -999)
+	check("minSNR -20", 1, "", "", "", "", "", "", "", "", "", "", false, 0, -20)
+	check("minSNR 0", 0, "", "", "", "", "", "", "", "", "", "", false, 0, 0)
+	check("direction E", 1, "", "", "", "", "", "", "", "E", "", "", false, 0, -999)
+	check("direction W", 0, "", "", "", "", "", "", "", "W", "", "", false, 0, -999)
+	check("time 14:00-15:00", 1, "", "", "", "", "", "", "", "", "14:00", "15:00", false, 0, -999)
+	check("time 15:00-16:00", 0, "", "", "", "", "", "", "", "", "15:00", "16:00", false, 0, -999)
 
 	// --- GetAvailableDates / GetAvailableNames ---
 	dates, err := sl.GetAvailableDates()
@@ -141,7 +143,7 @@ func TestDecoderSpotsRoundTrip(t *testing.T) {
 	}
 
 	// --- GetHistoricalCSV ---
-	csv, err := sl.GetHistoricalCSV("", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
+	csv, err := sl.GetHistoricalCSV("", "", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
 	if err != nil {
 		t.Fatalf("GetHistoricalCSV: %v", err)
 	}
@@ -182,7 +184,7 @@ func TestDecoderSpotsDedup(t *testing.T) {
 	}
 
 	// Without dedup: all 3.
-	all, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
+	all, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +193,7 @@ func TestDecoderSpotsDedup(t *testing.T) {
 	}
 
 	// With dedup: 1, and it must be the latest (12:30).
-	deduped, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", day, day, "", "", true, false, 0, -999)
+	deduped, err := sl.GetHistoricalSpots("", "", "", "", "", "", "", "", day, day, "", "", true, false, 0, -999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +232,7 @@ func TestDecoderSpotsWSPRDbmAndNulls(t *testing.T) {
 	}
 
 	day := base.Format("2006-01-02")
-	spots, err := sl.GetHistoricalSpots("WSPR", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
+	spots, err := sl.GetHistoricalSpots("WSPR", "", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
 	if err != nil {
 		t.Fatalf("GetHistoricalSpots: %v", err)
 	}
@@ -263,7 +265,7 @@ func TestDecoderSpotsWSPRDbmAndNulls(t *testing.T) {
 	if err := sl.LogSpot(ft8); err != nil {
 		t.Fatal(err)
 	}
-	ft8spots, err := sl.GetHistoricalSpots("FT8", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
+	ft8spots, err := sl.GetHistoricalSpots("FT8", "", "", "", "", "", "", "", day, day, "", "", false, false, 0, -999)
 	if err != nil {
 		t.Fatal(err)
 	}

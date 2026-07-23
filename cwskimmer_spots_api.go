@@ -42,18 +42,23 @@ type CWSpotRecord struct {
 	Longitude  *float64 `json:"longitude,omitempty"`
 	DistanceKm *float64 `json:"distance_km,omitempty"`
 	BearingDeg *float64 `json:"bearing_deg,omitempty"`
-	Name       string   `json:"name"` // Band name from file
+	Name       string   `json:"name"`       // Band name from file
+	SeenCount  int      `json:"seen_count"` // Raw spots collapsed into this row (1 when not deduplicating)
 }
 
 // GetCWHistoricalSpots reads historical CW spots from the cw_spots SQLite table.
 // callsigns is a set of uppercase callsigns to match; an empty map means no filter.
+//
+// When deduplicate is true, rows are collapsed to one per callsign+band+UTC day,
+// keeping the latest timestamp; SeenCount reports how many raw spots each
+// surviving row stands for.
 //
 // Latitude/longitude are normally populated at write time and stored directly
 // in the cw_spots table. Rows imported from the pre-database CSV files have no
 // coordinates (the CSVs never carried them), so ctyDatabase is used as a
 // read-time fallback for those rows — matching the behaviour of the old
 // file-based reader.
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate bool, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
 	if sl.readDB == nil {
 		return nil, fmt.Errorf("CW spots database is not available")
 	}
@@ -117,6 +122,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 		args = append(args, continent)
 	}
 
+	if country != "" {
+		conditions = append(conditions, "country = ?")
+		args = append(args, country)
+	}
+
 	if minDistanceKm > 0 {
 		conditions = append(conditions, "distance_km IS NOT NULL AND distance_km >= ?")
 		args = append(args, minDistanceKm)
@@ -157,6 +167,10 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 	defer rows.Close()
 
 	allSpots := make([]CWSpotRecord, 0)
+	// For deduplication: key = callsign|band|date, value = latest spot.
+	seenSpots := make(map[string]CWSpotRecord)
+	seenCounts := make(map[string]int)
+
 	for rows.Next() {
 		var (
 			ts        int64
@@ -234,10 +248,40 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 			}
 		}
 
+		if deduplicate {
+			// Dedup key: callsign+band+date (UTC day). The same callsign on a
+			// different band or day stays distinct. Keep the later timestamp.
+			dedupKey := fmt.Sprintf("%s|%s|%s", spot.Callsign, spot.Band,
+				time.Unix(ts, 0).UTC().Format("2006-01-02"))
+			seenCounts[dedupKey]++
+			if existing, exists := seenSpots[dedupKey]; exists {
+				if spot.Timestamp > existing.Timestamp {
+					seenSpots[dedupKey] = spot
+				}
+				continue
+			}
+			seenSpots[dedupKey] = spot
+			continue
+		}
+
+		spot.SeenCount = 1
 		allSpots = append(allSpots, spot)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("cw_spots row iteration failed: %w", err)
+	}
+
+	// If deduplication was enabled, collect the deduplicated spots.
+	if deduplicate {
+		for key, spot := range seenSpots {
+			spot.SeenCount = seenCounts[key]
+			allSpots = append(allSpots, spot)
+		}
+
+		// Dedup uses a map, which loses the query's ts DESC ordering.
+		sort.Slice(allSpots, func(i, j int) bool {
+			return allSpots[i].Timestamp > allSpots[j].Timestamp
+		})
 	}
 
 	return allSpots, nil
@@ -314,9 +358,9 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
 
 // GetCWHistoricalCSV returns historical CW spots data as CSV string.
 // callsigns is a set of uppercase callsigns to match; an empty map means no filter.
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetCWHistoricalSpots(band, name, callsigns, continent, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase)
+	spots, err := sl.GetCWHistoricalSpots(band, name, callsigns, continent, country, direction, fromDate, toDate, startTime, endTime, true, minDistanceKm, minSNR, ctyDatabase)
 	if err != nil {
 		return "", err
 	}
@@ -416,6 +460,7 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 	band := r.URL.Query().Get("band")
 	name := r.URL.Query().Get("name")
 	continent := r.URL.Query().Get("continent")
+	country := r.URL.Query().Get("country")
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
@@ -454,12 +499,27 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 		}
 	}
 
+	// Spots are deduplicated to one row per callsign+band+day by default. The
+	// opt-out requires a callsign: without one it would return every raw spot
+	// for the whole period.
+	deduplicate := true
+	if v := r.URL.Query().Get("deduplicate"); v == "false" || v == "0" {
+		if len(callsigns) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "deduplicate=false requires a callsign parameter",
+			})
+			return
+		}
+		deduplicate = false
+	}
+
 	// Build a stable rate-limit key from the sorted callsign set
 	callsignKey := sortedCallsignKey(callsigns)
 
 	// Check rate limit
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("cw-spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsignKey, continent, direction, fromDate, toDate, startTime, minSNR)
+	rateLimitKey := fmt.Sprintf("cw-spots-%s-%s-%s-%s-%s-%s-%s-%s-%s-%d-%t", band, name, callsignKey, continent, country, direction, fromDate, toDate, startTime, minSNR, deduplicate)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -470,8 +530,8 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 
 	// Get spots
 	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpots(
-		band, name, callsigns, continent, direction,
-		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
+		band, name, callsigns, continent, country, direction,
+		fromDate, toDate, startTime, endTime, deduplicate, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -602,6 +662,7 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 	band := r.URL.Query().Get("band")
 	name := r.URL.Query().Get("name")
 	continent := r.URL.Query().Get("continent")
+	country := r.URL.Query().Get("country")
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
@@ -658,7 +719,7 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 
 	// Get CSV data
 	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSV(
-		band, name, callsigns, continent, direction,
+		band, name, callsigns, continent, country, direction,
 		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {

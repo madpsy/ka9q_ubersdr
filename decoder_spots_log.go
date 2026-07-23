@@ -178,6 +178,7 @@ func (sl *SpotsLogger) Close() error {
 // - callsign: Filter by exact callsign match - empty for all callsigns
 // - locator: Filter by exact locator match - empty for all locators
 // - continent: Filter by continent code (AF, AS, EU, NA, OC, SA, AN) - empty for all
+// - country: Filter by exact CTY country name (as returned by /api/cty/countries) - empty for all
 // - direction: Filter by cardinal direction (N, NE, E, SE, S, SW, W, NW) - empty for all
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
@@ -187,7 +188,7 @@ func (sl *SpotsLogger) Close() error {
 // - locatorsOnly: If true, only return spots that have a locator
 // - minDistanceKm: Minimum distance in km (0 = no filter)
 // - minSNR: Minimum SNR in dB (-999 = no filter)
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) ([]SpotRecord, error) {
 	if sl.readDB == nil {
 		return nil, fmt.Errorf("spots database is not available")
 	}
@@ -249,6 +250,10 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 	if continent != "" {
 		conditions = append(conditions, "continent = ?")
 		args = append(args, continent)
+	}
+	if country != "" {
+		conditions = append(conditions, "country = ?")
+		args = append(args, country)
 	}
 	if locatorsOnly {
 		conditions = append(conditions, "locator != ''")
@@ -450,9 +455,9 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 
 // GetHistoricalCSV returns historical spots data as CSV string
 // Parameters match GetHistoricalSpots for filtering
-func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
+func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
 	if err != nil {
 		return "", err
 	}
@@ -598,6 +603,7 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 		"",              // callsign - all callsigns
 		"",              // locator - all locators
 		filterContinent, // continent filter
+		filterCountry,   // country filter
 		"",              // direction - all directions
 		fromDate,
 		toDate,
@@ -610,17 +616,6 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by country if specified
-	if filterCountry != "" {
-		filtered := make([]SpotRecord, 0)
-		for _, spot := range spots {
-			if spot.Country == filterCountry {
-				filtered = append(filtered, spot)
-			}
-		}
-		spots = filtered
 	}
 
 	// Filter by time window (only keep spots within the hours range)
@@ -1030,6 +1025,7 @@ func (sl *SpotsLogger) GetSpotsAnalyticsHourly(filterCountry, filterContinent, f
 		"",              // callsign - all callsigns
 		"",              // locator - all locators
 		filterContinent, // continent filter
+		filterCountry,   // country filter
 		"",              // direction - all directions
 		fromDate,
 		toDate,
@@ -1042,17 +1038,6 @@ func (sl *SpotsLogger) GetSpotsAnalyticsHourly(filterCountry, filterContinent, f
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by country if specified
-	if filterCountry != "" {
-		filtered := make([]SpotRecord, 0)
-		for _, spot := range spots {
-			if spot.Country == filterCountry {
-				filtered = append(filtered, spot)
-			}
-		}
-		spots = filtered
 	}
 
 	// Filter by time window (only keep spots within the hours range)

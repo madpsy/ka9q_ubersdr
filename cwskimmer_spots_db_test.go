@@ -68,7 +68,7 @@ func TestCWSpotsRoundTrip(t *testing.T) {
 	day := base.Format("2006-01-02")
 
 	// --- GetCWHistoricalSpots: no filters ---
-	spots, err := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 0, -999, nil)
+	spots, err := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 0, -999, nil)
 	if err != nil {
 		t.Fatalf("GetCWHistoricalSpots: %v", err)
 	}
@@ -112,63 +112,71 @@ func TestCWSpotsRoundTrip(t *testing.T) {
 	}
 
 	// --- band filter (match / no match) ---
-	if s, _ := sl.GetCWHistoricalSpots("20m", "", nil, "", "", day, day, "", "", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("20m", "", nil, "", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("band=20m expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("40m", "", nil, "", "", day, day, "", "", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("40m", "", nil, "", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("band=40m expected 0, got %d", len(s))
 	}
 
 	// --- name filter (maps to band) ---
-	if s, _ := sl.GetCWHistoricalSpots("", "20m", nil, "", "", day, day, "", "", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "20m", nil, "", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("name=20m expected 1, got %d", len(s))
 	}
 
 	// --- callsign set filter ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", map[string]bool{"G3ABC": true}, "", "", day, day, "", "", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", map[string]bool{"G3ABC": true}, "", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("callsign G3ABC expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", map[string]bool{"K1AA": true}, "", "", day, day, "", "", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", map[string]bool{"K1AA": true}, "", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("callsign K1AA expected 0, got %d", len(s))
 	}
 
 	// --- continent filter ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "EU", "", day, day, "", "", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "EU", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("continent EU expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "NA", "", day, day, "", "", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "NA", "", "", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("continent NA expected 0, got %d", len(s))
 	}
 
+	// --- country filter ---
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "England", "", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
+		t.Errorf("country England expected 1, got %d", len(s))
+	}
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "Germany", "", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
+		t.Errorf("country Germany expected 0, got %d", len(s))
+	}
+
 	// --- minDistanceKm filter ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 1000, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 1000, -999, nil); len(s) != 1 {
 		t.Errorf("minDist 1000 expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 2000, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 2000, -999, nil); len(s) != 0 {
 		t.Errorf("minDist 2000 expected 0, got %d", len(s))
 	}
 
 	// --- minSNR filter ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 0, 10, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 0, 10, nil); len(s) != 1 {
 		t.Errorf("minSNR 10 expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 0, 30, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 0, 30, nil); len(s) != 0 {
 		t.Errorf("minSNR 30 expected 0, got %d", len(s))
 	}
 
 	// --- direction filter (bearing 45 = NE) ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "NE", day, day, "", "", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "NE", day, day, "", "", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("direction NE expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "SW", day, day, "", "", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "SW", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("direction SW expected 0, got %d", len(s))
 	}
 
 	// --- time-of-day filter (spot at 12:30 UTC) ---
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "12:00", "13:00", 0, -999, nil); len(s) != 1 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "12:00", "13:00", false, 0, -999, nil); len(s) != 1 {
 		t.Errorf("time 12:00-13:00 expected 1, got %d", len(s))
 	}
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "13:00", "14:00", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "13:00", "14:00", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("time 13:00-14:00 expected 0, got %d", len(s))
 	}
 
@@ -191,7 +199,7 @@ func TestCWSpotsRoundTrip(t *testing.T) {
 	}
 
 	// --- GetCWHistoricalCSV (rides on GetCWHistoricalSpots) ---
-	csv, err := sl.GetCWHistoricalCSV("", "", nil, "", "", day, day, "", "", 0, -999, nil)
+	csv, err := sl.GetCWHistoricalCSV("", "", nil, "", "", "", day, day, "", "", 0, -999, nil)
 	if err != nil {
 		t.Fatalf("GetCWHistoricalCSV: %v", err)
 	}
@@ -222,7 +230,7 @@ func TestCWSpotsNullableColumns(t *testing.T) {
 	sl.insertForTest(t, spot)
 
 	day := base.Format("2006-01-02")
-	spots, err := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 0, -999, nil)
+	spots, err := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 0, -999, nil)
 	if err != nil {
 		t.Fatalf("GetCWHistoricalSpots: %v", err)
 	}
@@ -237,11 +245,80 @@ func TestCWSpotsNullableColumns(t *testing.T) {
 	}
 
 	// A distance filter must exclude rows with NULL distance.
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", day, day, "", "", 100, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 100, -999, nil); len(s) != 0 {
 		t.Errorf("minDist with NULL distance expected 0, got %d", len(s))
 	}
 	// A direction filter must exclude rows with NULL bearing.
-	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "N", day, day, "", "", 0, -999, nil); len(s) != 0 {
+	if s, _ := sl.GetCWHistoricalSpots("", "", nil, "", "", "N", day, day, "", "", false, 0, -999, nil); len(s) != 0 {
 		t.Errorf("direction with NULL bearing expected 0, got %d", len(s))
+	}
+}
+
+// TestCWSpotsDeduplication verifies that repeat spots of the same callsign on
+// the same band collapse to one row carrying a SeenCount, that a different band
+// stays distinct, and that the raw path returns every row.
+func TestCWSpotsDeduplication(t *testing.T) {
+	sl := newTestCWSpotsLogger(t)
+
+	base := time.Date(2025, 7, 4, 9, 0, 0, 0, time.UTC)
+	mk := func(band string, freq float64, offsetMin int, snr int) *CWSkimmerSpot {
+		return &CWSkimmerSpot{
+			Frequency: freq,
+			DXCall:    "G3ABC",
+			SNR:       snr,
+			WPM:       25,
+			Mode:      "CW",
+			Time:      base.Add(time.Duration(offsetMin) * time.Minute),
+			Band:      band,
+			Country:   "England",
+			Continent: "EU",
+		}
+	}
+	// Three spots on 20m, one on 40m.
+	sl.insertForTest(t, mk("20m", 14025000, 0, 10))
+	sl.insertForTest(t, mk("20m", 14025000, 5, 15))
+	sl.insertForTest(t, mk("20m", 14025000, 10, 12))
+	sl.insertForTest(t, mk("40m", 7025000, 2, 8))
+
+	day := base.Format("2006-01-02")
+
+	raw, err := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", false, 0, -999, nil)
+	if err != nil {
+		t.Fatalf("raw: %v", err)
+	}
+	if len(raw) != 4 {
+		t.Fatalf("raw expected 4 spots, got %d", len(raw))
+	}
+	for _, s := range raw {
+		if s.SeenCount != 1 {
+			t.Errorf("raw SeenCount = %d, want 1", s.SeenCount)
+		}
+	}
+
+	deduped, err := sl.GetCWHistoricalSpots("", "", nil, "", "", "", day, day, "", "", true, 0, -999, nil)
+	if err != nil {
+		t.Fatalf("deduped: %v", err)
+	}
+	if len(deduped) != 2 {
+		t.Fatalf("deduped expected 2 spots (20m + 40m), got %d", len(deduped))
+	}
+
+	byBand := map[string]CWSpotRecord{}
+	for _, s := range deduped {
+		byBand[s.Band] = s
+	}
+	if got := byBand["20m"].SeenCount; got != 3 {
+		t.Errorf("20m SeenCount = %d, want 3", got)
+	}
+	if got := byBand["40m"].SeenCount; got != 1 {
+		t.Errorf("40m SeenCount = %d, want 1", got)
+	}
+	// Dedup keeps the latest spot of the group.
+	if want := base.Add(10 * time.Minute).Format(time.RFC3339); byBand["20m"].Timestamp != want {
+		t.Errorf("20m Timestamp = %q, want %q (latest of group)", byBand["20m"].Timestamp, want)
+	}
+	// Newest first overall.
+	if deduped[0].Timestamp < deduped[1].Timestamp {
+		t.Errorf("deduped not sorted newest-first: %v", deduped)
 	}
 }

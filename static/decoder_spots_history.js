@@ -58,10 +58,32 @@
                         ctyCountryMap.set(entry.name, entry.country_code);
                     }
                 });
+                populateCountrySelect(countries);
             }
         } catch (e) {
             console.warn('[Decoder Spots History] Failed to load CTY countries:', e);
         }
+    }
+
+    // Populate the top Country filter from the CTY entity list. The API already
+    // returns them sorted by name, and spots.country stores the same entity
+    // name, so the value can be sent through as an exact match.
+    function populateCountrySelect(countries) {
+        const select = document.getElementById('country-select');
+        if (!select) return;
+
+        const current = select.value;
+        select.innerHTML = '<option value="">All Countries</option>';
+
+        countries.forEach(entry => {
+            if (!entry.name) return;
+            const option = document.createElement('option');
+            option.value = entry.name;
+            option.textContent = `${digHistIso2ToFlag(entry.country_code)}${entry.name}`;
+            select.appendChild(option);
+        });
+
+        select.value = current;
     }
 
     // Common HF band names (excluding VHF/UHF)
@@ -382,7 +404,7 @@
             modeSelect, bandSelect, nameSelect, callsignInput, locatorInput,
             startTimeInput, endTimeInput,
             document.getElementById('continent-select'),
-            document.getElementById('direction-select'),
+            document.getElementById('country-select'),
             document.getElementById('min-distance-select'),
             document.getElementById('min-snr-select')
         ];
@@ -469,7 +491,7 @@
         document.getElementById('start-time-input').value = '';
         document.getElementById('end-time-input').value = '';
         document.getElementById('continent-select').value = '';
-        document.getElementById('direction-select').value = '';
+        document.getElementById('country-select').value = '';
         document.getElementById('min-distance-select').value = '0';
         document.getElementById('min-snr-select').value = '-999';
 
@@ -702,7 +724,7 @@
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
-        const direction = document.getElementById('direction-select').value;
+        const country = document.getElementById('country-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
 
@@ -735,7 +757,7 @@
             if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
             if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
             if (continent) url += `&continent=${continent}`;
-            if (direction) url += `&direction=${direction}`;
+            if (country) url += `&country=${encodeURIComponent(country)}`;
             if (minDistance && parseFloat(minDistance) > 0) {
                 url += `&min_distance=${minDistance}`;
             }
@@ -1946,7 +1968,7 @@
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
-        const direction = document.getElementById('direction-select').value;
+        const country = document.getElementById('country-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
 
@@ -1959,7 +1981,7 @@
         if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
         if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
         if (continent) url += `&continent=${continent}`;
-        if (direction) url += `&direction=${direction}`;
+        if (country) url += `&country=${encodeURIComponent(country)}`;
         if (minDistance && parseFloat(minDistance) > 0) {
             url += `&min_distance=${minDistance}`;
         }

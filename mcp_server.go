@@ -419,7 +419,7 @@ func (m *MCPServer) handleGetDecoderSpots(ctx context.Context, request mcp.CallT
 	endTime := ""
 
 	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
-		mode, "", "", "", "", "", "",
+		mode, "", "", "", "", "", "", "",
 		fromDate, toDate, startTime, endTime,
 		true, true, 0, -999,
 	)
@@ -701,7 +701,7 @@ func (m *MCPServer) handleGetBandConditions(ctx context.Context, request mcp.Cal
 		endTime := toTime.Format("15:04")
 
 		spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
-			"", "", "", "", "", "", "",
+			"", "", "", "", "", "", "", "",
 			fromDate, toDate, startTime, endTime,
 			true, true, 0, -999,
 		)

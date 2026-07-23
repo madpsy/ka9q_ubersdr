@@ -17,6 +17,21 @@
     let spotsMap = null; // Map instance
     let ctyCountryMap = new Map(); // country name -> ISO2 code
 
+    // Date/time period used for the currently loaded data (reused by the
+    // per-callsign spot history modal so it covers the same period)
+    let lastQueryPeriod = null;
+
+    // Callsign spot history modal state
+    let modalCallsign = null;
+    let modalSpots = [];
+    let modalPage = 1;
+    let modalPerPage = 25;
+    let modalRefSpot = null; // spot the modal was opened from (used by "Show on Map")
+    let modalRequestId = 0;
+    let modalSortColumn = 'timestamp';
+    let modalSortDirection = 'desc';
+    let modalFilters = { search: '', band: '', name: '', minSNR: -999 };
+
     function cwHistIso2ToFlag(code) {
         if (!code || code.length !== 2) return '';
         return String.fromCodePoint(
@@ -42,10 +57,31 @@
                         ctyCountryMap.set(entry.name, entry.country_code);
                     }
                 });
+                populateCountrySelect(countries);
             }
         } catch (e) {
             console.warn('[CW Spots History] Failed to load CTY countries:', e);
         }
+    }
+
+    // Populate the top Country filter from the CTY entity list. cw_spots.country
+    // stores the same entity name, so the value is sent through as exact match.
+    function populateCountrySelect(countries) {
+        const select = document.getElementById('country-select');
+        if (!select) return;
+
+        const current = select.value;
+        select.innerHTML = '<option value="">All Countries</option>';
+
+        countries.forEach(entry => {
+            if (!entry.name) return;
+            const option = document.createElement('option');
+            option.value = entry.name;
+            option.textContent = `${cwHistIso2ToFlag(entry.country_code)}${entry.name}`;
+            select.appendChild(option);
+        });
+
+        select.value = current;
     }
 
     // Common HF band names (excluding VHF/UHF)
@@ -68,6 +104,7 @@
     document.addEventListener('DOMContentLoaded', function() {
         initializeDatePicker();
         initializeControls();
+        initializeCallsignModal();
         initializeMap();
         loadCTYCountries();
         loadAvailableDates().then(() => {
@@ -349,7 +386,8 @@
         // Add click handlers to sortable table headers
         document.addEventListener('click', function(e) {
             const th = e.target.closest('th.sortable');
-            if (th && currentData) {
+            // Modal table headers are handled separately by the modal itself
+            if (th && !th.classList.contains('modal-sortable') && currentData) {
                 const column = th.dataset.column;
                 if (sortColumn === column) {
                     // Toggle direction if same column
@@ -393,6 +431,7 @@
         document.getElementById('start-time-input').value = '';
         document.getElementById('end-time-input').value = '';
         document.getElementById('continent-select').value = '';
+        document.getElementById('country-select').value = '';
         document.getElementById('direction-select').value = '';
         document.getElementById('min-distance-select').value = '0';
         document.getElementById('min-snr-select').value = '-999';
@@ -600,6 +639,7 @@
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
+        const country = document.getElementById('country-select').value;
         const direction = document.getElementById('direction-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
@@ -623,6 +663,7 @@
             if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
             if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
             if (continent) url += `&continent=${continent}`;
+            if (country) url += `&country=${encodeURIComponent(country)}`;
             if (direction) url += `&direction=${direction}`;
             if (minDistance && parseFloat(minDistance) > 0) {
                 url += `&min_distance=${minDistance}`;
@@ -631,8 +672,11 @@
                 url += `&min_snr=${minSNR}`;
             }
 
+            // Remember the period so the callsign history modal can reuse it
+            lastQueryPeriod = { date: selectedDate, startTime: startTime, endTime: endTime };
+
             const response = await fetch(url);
-            
+
             // Handle 204 No Content response (no spots found)
             if (response.status === 204) {
                 showStatus('No CW spots found for the selected criteria', 'error');
@@ -892,29 +936,19 @@
                 <td>${bearingText}</td>
                 <td>${spot.country || '-'}</td>
                 <td>${spot.continent ? (continentNames[spot.continent] || spot.continent) : '-'}</td>
+                <td style="text-align: right;">${spot.seen_count || 1}</td>
             `;
             
             // Add click handler to row (but not on callsign link)
             row.style.cursor = 'pointer';
+            row.title = 'Click for full spot history for this callsign';
             row.addEventListener('click', function(e) {
                 // Don't trigger if clicking on the callsign link
                 if (e.target.closest('.callsign-link')) {
                     return;
                 }
 
-                // Open the spot on the map
-                if (spotsMap && (spot.latitude !== undefined && spot.longitude !== undefined)) {
-                    // Scroll to map section
-                    const mapSection = document.getElementById('map-section');
-                    if (mapSection) {
-                        mapSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-
-                    // Open popup after scroll animation
-                    setTimeout(() => {
-                        spotsMap.openSpotPopup(spot.callsign, spot.band, 'CW');
-                    }, 500);
-                }
+                openCallsignModal(spot);
             });
             
             tbody.appendChild(row);
@@ -999,6 +1033,10 @@
                 case 'continent':
                     aVal = a.continent || '';
                     bVal = b.continent || '';
+                    break;
+                case 'seen_count':
+                    aVal = a.seen_count || 1;
+                    bVal = b.seen_count || 1;
                     break;
                 default:
                     return 0;
@@ -1272,6 +1310,505 @@
         return stats;
     }
 
+    // ---------------------------------------------------------------------
+    // Callsign spot history modal
+    // ---------------------------------------------------------------------
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    function initializeCallsignModal() {
+        const overlay = document.getElementById('callsignModalOverlay');
+        if (!overlay) return;
+
+        document.getElementById('callsignModalClose').addEventListener('click', closeCallsignModal);
+        document.getElementById('callsignModalCloseBtn').addEventListener('click', closeCallsignModal);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeCallsignModal();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && overlay.classList.contains('active')) {
+                closeCallsignModal();
+            }
+        });
+
+        document.getElementById('callsignModalShowMap').addEventListener('click', () => {
+            const spot = modalRefSpot;
+            closeCallsignModal();
+            showSpotOnMap(spot);
+        });
+
+        document.getElementById('callsign-records-per-page').addEventListener('change', function() {
+            modalPerPage = this.value === 'all' ? Infinity : parseInt(this.value);
+            modalPage = 1;
+            renderCallsignModalTable();
+        });
+
+        // Filter controls — all client side, the modal already holds every spot
+        document.getElementById('callsign-modal-search').addEventListener('input', function() {
+            modalFilters.search = this.value.trim().toLowerCase();
+            modalPage = 1;
+            renderCallsignModalTable();
+        });
+
+        ['band', 'name'].forEach(key => {
+            document.getElementById(`callsign-modal-${key}`).addEventListener('change', function() {
+                modalFilters[key] = this.value;
+                modalPage = 1;
+                renderCallsignModalTable();
+            });
+        });
+
+        document.getElementById('callsign-modal-min-snr').addEventListener('change', function() {
+            modalFilters.minSNR = parseInt(this.value);
+            modalPage = 1;
+            renderCallsignModalTable();
+        });
+
+        document.getElementById('callsign-modal-clear-filters').addEventListener('click', () => {
+            resetCallsignModalFilters();
+            renderCallsignModalTable();
+        });
+
+        // "View decodes" button inside map popups. Delegated, because Leaflet
+        // rebuilds popup DOM on demand.
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.popup-view-decodes');
+            if (!btn) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const { callsign, band, mode } = btn.dataset;
+
+            // Prefer the full spot the marker was built from, so the modal gets
+            // country/coords too; fall back to what the button carries.
+            let spot = null;
+            if (spotsMap && spotsMap.markers) {
+                const entry = spotsMap.markers.get(`${callsign}-${band}-${mode}`);
+                if (entry) spot = entry.spot;
+            }
+            openCallsignModal(spot || { callsign, band });
+        });
+
+        // Sortable headers inside the modal table
+        document.getElementById('callsignModalTable').addEventListener('click', function(e) {
+            const th = e.target.closest('th.modal-sortable');
+            if (!th) return;
+            const column = th.dataset.column;
+            if (modalSortColumn === column) {
+                modalSortDirection = modalSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                modalSortColumn = column;
+                modalSortDirection = 'asc';
+            }
+            modalPage = 1;
+            renderCallsignModalTable();
+        });
+    }
+
+    function resetCallsignModalFilters() {
+        modalFilters = { search: '', band: '', name: '', minSNR: -999 };
+        modalPage = 1;
+
+        const searchInput = document.getElementById('callsign-modal-search');
+        if (searchInput) searchInput.value = '';
+        ['band', 'name'].forEach(key => {
+            const el = document.getElementById(`callsign-modal-${key}`);
+            if (el) el.value = '';
+        });
+        const snrEl = document.getElementById('callsign-modal-min-snr');
+        if (snrEl) snrEl.value = '-999';
+    }
+
+    // Populate the band/name dropdowns from the spots actually returned
+    function populateCallsignModalFilterOptions() {
+        const fill = (id, values) => {
+            const select = document.getElementById(id);
+            if (!select) return;
+            const current = select.value;
+            select.innerHTML = '<option value="">All</option>';
+            values.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                select.appendChild(opt);
+            });
+            select.value = values.includes(current) ? current : '';
+        };
+
+        const uniqueSorted = (key) =>
+            [...new Set(modalSpots.map(s => s[key]).filter(Boolean))].sort();
+
+        fill('callsign-modal-band', uniqueSorted('band'));
+        fill('callsign-modal-name', uniqueSorted('name'));
+    }
+
+    function getFilteredModalSpots() {
+        let spots = modalSpots;
+        const f = modalFilters;
+
+        if (f.band) spots = spots.filter(s => s.band === f.band);
+        if (f.name) spots = spots.filter(s => s.name === f.name);
+        if (f.minSNR > -999) spots = spots.filter(s => typeof s.snr === 'number' && s.snr >= f.minSNR);
+
+        if (f.search) {
+            spots = spots.filter(s => {
+                const continent = s.continent ? (continentNames[s.continent] || s.continent) : '';
+                return [s.comment, s.band, s.name, s.country, continent, s.callsign, s.wpm]
+                    .some(v => v != null && String(v).toLowerCase().includes(f.search));
+            });
+        }
+
+        return sortModalSpots(spots.slice());
+    }
+
+    function sortModalSpots(spots) {
+        const dir = modalSortDirection === 'asc' ? 1 : -1;
+        const col = modalSortColumn;
+
+        return spots.sort((a, b) => {
+            let av = a[col];
+            let bv = b[col];
+
+            if (col === 'timestamp') {
+                return (new Date(av) - new Date(bv)) * dir;
+            }
+            // Numeric columns (distance/bearing may be missing — sort those last)
+            if (typeof av === 'number' || typeof bv === 'number') {
+                if (av == null) return 1;
+                if (bv == null) return -1;
+                return (av - bv) * dir;
+            }
+            av = (av || '').toString().toLowerCase();
+            bv = (bv || '').toString().toLowerCase();
+            if (av === bv) return 0;
+            return av < bv ? -dir : dir;
+        });
+    }
+
+    function updateCallsignModalSortIndicators() {
+        // Same convention as the main table: sort-asc/sort-desc drive the arrow
+        document.querySelectorAll('#callsignModalTable th.modal-sortable').forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+        });
+
+        const currentTh = document.querySelector(
+            `#callsignModalTable th.modal-sortable[data-column="${modalSortColumn}"]`);
+        if (currentTh) {
+            currentTh.classList.add(modalSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    }
+
+    // Scroll the page to the map section and open the popup for a spot.
+    // Safe to call while the modal overlay is up — the overlay is fixed, so the
+    // page scrolls underneath it and the map is in view once the modal closes.
+    function showSpotOnMap(spot) {
+        if (!spotsMap || !spot) return;
+        if (spot.latitude === undefined || spot.longitude === undefined) return;
+
+        const mapSection = document.getElementById('map-section');
+        if (mapSection) {
+            mapSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // Open popup after the scroll animation
+        setTimeout(() => {
+            spotsMap.openSpotPopup(spot.callsign, spot.band, 'CW');
+        }, 500);
+    }
+
+    function closeCallsignModal() {
+        const overlay = document.getElementById('callsignModalOverlay');
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+        modalRequestId++; // invalidate any in-flight fetch
+    }
+
+    function setCallsignModalStatus(message) {
+        const status = document.getElementById('callsignModalStatus');
+        const content = document.getElementById('callsignModalContent');
+        if (message) {
+            status.textContent = message;
+            status.style.display = 'block';
+            content.style.display = 'none';
+        } else {
+            status.style.display = 'none';
+            content.style.display = 'block';
+        }
+    }
+
+    async function openCallsignModal(spot) {
+        const overlay = document.getElementById('callsignModalOverlay');
+        if (!overlay) return;
+
+        modalCallsign = spot.callsign;
+        modalRefSpot = spot;
+        modalSpots = [];
+        modalPage = 1;
+        modalSortColumn = 'timestamp';
+        modalSortDirection = 'desc';
+        resetCallsignModalFilters();
+
+        const period = lastQueryPeriod || { date: selectedDate, startTime: '', endTime: '' };
+        if (!period.date) {
+            return;
+        }
+
+        document.getElementById('callsignModalTitle').innerHTML =
+            `${flagForCountry(spot.country)}${escapeHtml(spot.callsign)}`;
+
+        let periodText = period.date;
+        if (period.startTime || period.endTime) {
+            periodText += ` ${period.startTime || '00:00'}–${period.endTime || '23:59'} UTC`;
+        } else {
+            periodText += ' (full day, UTC)';
+        }
+        document.getElementById('callsignModalSubtitle').textContent =
+            `All CW spots • ${periodText}`;
+
+        const qrzLink = document.getElementById('callsignModalQrz');
+        qrzLink.href = `https://www.qrz.com/db/${encodeURIComponent(spot.callsign)}`;
+
+        const hasCoords = spot.latitude !== undefined && spot.longitude !== undefined;
+        document.getElementById('callsignModalShowMap').style.display =
+            (spotsMap && hasCoords) ? 'inline-block' : 'none';
+
+        overlay.classList.add('active');
+        setCallsignModalStatus('Loading spot history…');
+
+        // Move the page behind the overlay to the map and open this spot's popup,
+        // so dismissing the modal leaves the user on the map as before.
+        showSpotOnMap(spot);
+
+        const requestId = ++modalRequestId;
+
+        try {
+            let url = `/api/cwskimmer/spots?date=${encodeURIComponent(period.date)}` +
+                      `&callsign=${encodeURIComponent(spot.callsign)}` +
+                      `&deduplicate=false`;
+            if (period.startTime) url += `&start_time=${encodeURIComponent(period.startTime)}`;
+            if (period.endTime) url += `&end_time=${encodeURIComponent(period.endTime)}`;
+
+            const response = await fetch(url);
+
+            // Ignore responses for a modal that has since been closed/reopened
+            if (requestId !== modalRequestId) return;
+
+            if (response.status === 204) {
+                setCallsignModalStatus('No spots found for this callsign in the selected period');
+                return;
+            }
+            if (response.status === 429) {
+                setCallsignModalStatus('Rate limit exceeded. Please wait a couple of seconds and try again.');
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (requestId !== modalRequestId) return;
+
+            modalSpots = (data.spots || []).slice().sort((a, b) =>
+                new Date(b.timestamp) - new Date(a.timestamp));
+
+            if (modalSpots.length === 0) {
+                setCallsignModalStatus('No spots found for this callsign in the selected period');
+                return;
+            }
+
+            setCallsignModalStatus(null);
+            renderCallsignModalStats();
+            populateCallsignModalFilterOptions();
+            renderCallsignModalTable();
+        } catch (error) {
+            if (requestId !== modalRequestId) return;
+            console.error('Error loading callsign spot history:', error);
+            setCallsignModalStatus(`Error loading spot history: ${error.message}`);
+        }
+    }
+
+    function renderCallsignModalStats() {
+        const statsGrid = document.getElementById('callsignModalStats');
+        const spots = modalSpots;
+
+        const bands = new Set();
+        let bestSNR = null;
+        let wpmTotal = 0;
+        let wpmCount = 0;
+
+        spots.forEach(s => {
+            if (s.band) bands.add(s.band);
+            if (typeof s.snr === 'number' && (bestSNR === null || s.snr > bestSNR)) bestSNR = s.snr;
+            if (typeof s.wpm === 'number' && s.wpm > 0) {
+                wpmTotal += s.wpm;
+                wpmCount++;
+            }
+        });
+
+        const timeFmt = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+        const last = new Date(spots[0].timestamp).toLocaleTimeString('en-US', timeFmt);
+        const first = new Date(spots[spots.length - 1].timestamp).toLocaleTimeString('en-US', timeFmt);
+
+        statsGrid.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value">${spots.length}</div>
+                <div class="stat-label">Total Spots</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${bands.size}</div>
+                <div class="stat-label">Bands (${escapeHtml([...bands].join(', '))})</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${bestSNR === null ? '-' : (bestSNR >= 0 ? '+' + bestSNR : bestSNR) + ' dB'}</div>
+                <div class="stat-label">Best SNR</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${wpmCount ? Math.round(wpmTotal / wpmCount) : '-'}</div>
+                <div class="stat-label">Avg WPM</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${first} &ndash; ${last}</div>
+                <div class="stat-label">First / Last Heard</div>
+            </div>
+        `;
+    }
+
+    function renderCallsignModalTable() {
+        const tbody = document.getElementById('callsignModalTbody');
+        const spots = getFilteredModalSpots();
+        const total = spots.length;
+        const totalPages = modalPerPage === Infinity ? 1 : Math.max(1, Math.ceil(total / modalPerPage));
+
+        if (modalPage > totalPages) modalPage = totalPages;
+
+        const startIdx = modalPerPage === Infinity ? 0 : (modalPage - 1) * modalPerPage;
+        const endIdx = modalPerPage === Infinity ? total : Math.min(startIdx + modalPerPage, total);
+        const pageSpots = spots.slice(startIdx, endIdx);
+
+        updateCallsignModalSortIndicators();
+
+        tbody.innerHTML = '';
+
+        if (total === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="12" style="text-align: center; padding: 20px; opacity: 0.7;">No spots match the current filters</td>`;
+            tbody.appendChild(row);
+        }
+
+        pageSpots.forEach(spot => {
+            const row = document.createElement('tr');
+
+            const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+
+            const snrClass = spot.snr >= 0 ? 'snr-positive' : 'snr-negative';
+            const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+            const freqMHz = (spot.frequency / 1000000).toFixed(4);
+            const distanceText = spot.distance_km ? `${spot.distance_km.toFixed(0)} km` : '-';
+            const bearingText = spot.bearing_deg ? `${spot.bearing_deg.toFixed(0)}°` : '-';
+
+            row.innerHTML = `
+                <td>${time}</td>
+                <td>${escapeHtml(spot.band)}</td>
+                <td>${escapeHtml(spot.name) || '-'}</td>
+                <td><strong>${flagForCountry(spot.country)}${escapeHtml(spot.callsign)}</strong></td>
+                <td class="${snrClass}">${snrText} dB</td>
+                <td>${freqMHz} MHz</td>
+                <td>${spot.wpm || '-'}</td>
+                <td>${distanceText}</td>
+                <td>${bearingText}</td>
+                <td>${escapeHtml(spot.country) || '-'}</td>
+                <td>${spot.continent ? escapeHtml(continentNames[spot.continent] || spot.continent) : '-'}</td>
+                <td style="font-family: ui-monospace, 'Courier New', monospace; font-size: 0.9em; line-height: 1.4;">${escapeHtml(spot.comment) || '-'}</td>
+            `;
+
+            tbody.appendChild(row);
+        });
+
+        // Pagination info
+        const pageInfo = document.getElementById('callsignModalPageInfo');
+        if (total === 0) {
+            pageInfo.textContent = `0 of ${modalSpots.length} spots`;
+        } else if (total === modalSpots.length) {
+            pageInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
+        } else {
+            pageInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${total} (filtered from ${modalSpots.length})`;
+        }
+
+        renderCallsignModalPageButtons(totalPages);
+    }
+
+    function renderCallsignModalPageButtons(totalPages) {
+        const container = document.getElementById('callsignModalPageButtons');
+        container.innerHTML = '';
+
+        if (totalPages <= 1) return;
+
+        const addButton = (label, page, disabled, active) => {
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            btn.disabled = !!disabled;
+            if (active) btn.classList.add('active');
+            if (!disabled && !active) {
+                btn.addEventListener('click', () => {
+                    modalPage = page;
+                    renderCallsignModalTable();
+                });
+            } else if (active) {
+                btn.disabled = true;
+            }
+            container.appendChild(btn);
+        };
+
+        addButton('‹ Prev', modalPage - 1, modalPage === 1, false);
+
+        // Show a window of pages around the current one
+        const windowSize = 5;
+        let start = Math.max(1, modalPage - Math.floor(windowSize / 2));
+        let end = Math.min(totalPages, start + windowSize - 1);
+        start = Math.max(1, end - windowSize + 1);
+
+        if (start > 1) {
+            addButton('1', 1, false, modalPage === 1);
+            if (start > 2) {
+                const dots = document.createElement('span');
+                dots.textContent = '…';
+                dots.style.padding = '5px';
+                container.appendChild(dots);
+            }
+        }
+
+        for (let p = start; p <= end; p++) {
+            addButton(String(p), p, false, p === modalPage);
+        }
+
+        if (end < totalPages) {
+            if (end < totalPages - 1) {
+                const dots = document.createElement('span');
+                dots.textContent = '…';
+                dots.style.padding = '5px';
+                container.appendChild(dots);
+            }
+            addButton(String(totalPages), totalPages, false, modalPage === totalPages);
+        }
+
+        addButton('Next ›', modalPage + 1, modalPage === totalPages, false);
+    }
+
     function showStatus(message, type, showSpinner = false) {
         const status = document.getElementById('status');
         status.className = 'status';
@@ -1298,6 +1835,7 @@
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
+        const country = document.getElementById('country-select').value;
         const direction = document.getElementById('direction-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
@@ -1308,6 +1846,7 @@
         if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
         if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
         if (continent) url += `&continent=${continent}`;
+        if (country) url += `&country=${encodeURIComponent(country)}`;
         if (direction) url += `&direction=${direction}`;
         if (minDistance && parseFloat(minDistance) > 0) {
             url += `&min_distance=${minDistance}`;

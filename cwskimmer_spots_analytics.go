@@ -24,28 +24,19 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalytics(filterCountry string, filter
 		"",                // name - all names
 		map[string]bool{}, // callsigns - no filter (all callsigns)
 		filterContinent,   // continent filter
+		filterCountry,     // country filter
 		"",                // direction - all directions
 		fromDate,
 		toDate,
-		"", // startTime - no time filter
-		"", // endTime - no time filter
-		0,  // minDistanceKm
+		"",    // startTime - no time filter
+		"",    // endTime - no time filter
+		false, // deduplicate - analytics counts every spot
+		0,     // minDistanceKm
 		minSNR,
 		ctyDatabase,
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by country if specified
-	if filterCountry != "" {
-		filtered := make([]CWSpotRecord, 0)
-		for _, spot := range spots {
-			if spot.Country == filterCountry {
-				filtered = append(filtered, spot)
-			}
-		}
-		spots = filtered
 	}
 
 	// Filter by time window (only keep spots within the hours range)
@@ -319,28 +310,19 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalyticsHourly(filterCountry string, 
 		"",                // name - all names
 		map[string]bool{}, // callsigns - no filter (all callsigns)
 		filterContinent,   // continent filter
+		filterCountry,     // country filter
 		"",                // direction - all directions
 		fromDate,
 		toDate,
-		"", // startTime - no time filter
-		"", // endTime - no time filter
-		0,  // minDistanceKm
+		"",    // startTime - no time filter
+		"",    // endTime - no time filter
+		false, // deduplicate - analytics counts every spot
+		0,     // minDistanceKm
 		minSNR,
 		ctyDatabase,
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by country if specified
-	if filterCountry != "" {
-		filtered := make([]CWSpotRecord, 0)
-		for _, spot := range spots {
-			if spot.Country == filterCountry {
-				filtered = append(filtered, spot)
-			}
-		}
-		spots = filtered
 	}
 
 	// Filter by time window (only keep spots within the hours range)

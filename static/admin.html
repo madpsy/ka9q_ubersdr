@@ -3644,7 +3644,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                                 style="padding:10px 20px;border:none;border-bottom:3px solid #3949ab;background:transparent;font-size:13px;font-weight:600;color:#3949ab;cursor:pointer;">
                                 📋 Browse
                             </button>
-                            <button id="dbTabQuery" onclick="dbSwitchTab('query')"
+                            <button id="dbTabQuery" onclick="dbSwitchTab('query')" oncontextmenu="return dbToggleWriteMode(event);"
                                 style="padding:10px 20px;border:none;border-bottom:3px solid transparent;background:transparent;font-size:13px;font-weight:600;color:#888;cursor:pointer;">
                                 ⌨️ Query
                             </button>
@@ -3731,15 +3731,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                             <!-- SQL input -->
                             <div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
                                 <div style="display:flex;align-items:center;gap:8px;">
-                                    <label style="font-size:12px;font-weight:600;color:#444;">SQL <span style="font-weight:400;color:#888;">(SELECT / PRAGMA / EXPLAIN only)</span></label>
+                                    <label style="font-size:12px;font-weight:600;color:#444;">SQL <span id="dbSqlModeHint" style="font-weight:400;color:#888;">(SELECT / PRAGMA / EXPLAIN only)</span></label>
                                     <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:auto;" onclick="dbCopyQueryAsSQL()">📋 Copy SQL</button>
                                 </div>
                                 <textarea id="dbQueryInput" rows="4"
                                     style="font-family:'Courier New',Courier,monospace;font-size:13px;padding:10px;border:1px solid #ccc;border-radius:5px;resize:vertical;width:100%;box-sizing:border-box;"
                                     placeholder="SELECT * FROM spots ORDER BY ts DESC LIMIT 50"
                                     onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){runDBQuery();}"></textarea>
+                                <div id="dbWriteWarning" style="display:none;font-size:12px;font-weight:600;color:#c62828;background:#ffebee;border:1px solid #ef9a9a;border-radius:5px;padding:7px 10px;">
+                                    ⚠️ Write mode is armed — statements run unrestricted against the live database. Right-click the Query tab to disarm.
+                                </div>
                                 <div style="display:flex;gap:8px;align-items:center;">
-                                    <button class="btn" onclick="runDBQuery()" style="background:#3949ab;border-color:#3949ab;">▶ Run <small style="opacity:.8;">(Ctrl+Enter)</small></button>
+                                    <button id="dbRunBtn" class="btn" onclick="runDBQuery()" style="background:#3949ab;border-color:#3949ab;">▶ Run <small style="opacity:.8;">(Ctrl+Enter)</small></button>
                                     <button class="btn btn-secondary" style="font-size:12px;" onclick="document.getElementById('dbQueryInput').value='';dbClearQueryResults();">Clear</button>
                                     <span id="dbQueryMeta" style="font-size:12px;color:#888;margin-left:4px;"></span>
                                 </div>
@@ -27582,12 +27585,20 @@ const tooltipLine2 = timeStr;
 
         function openDBQueryModal() {
             document.getElementById('dbQueryModal').style.display = 'flex';
+            // Write mode never survives a reopen — it must be re-armed each time.
+            dbWriteMode = false;
+            dbApplyWriteModeStyling();
             dbLoadTables();
         }
 
         function closeDBQueryModal() {
             document.getElementById('dbQueryModal').style.display = 'none';
         }
+
+        // Unrestricted (write) query mode. Off by default and reset every time the
+        // modal is opened — there is deliberately no visible control for it. It is
+        // armed by right-clicking the Query tab itself and confirming.
+        let dbWriteMode = false;
 
         function dbSwitchTab(tab) {
             const isBrowse = tab === 'browse';
@@ -27599,6 +27610,76 @@ const tooltipLine2 = timeStr;
             browseBtn.style.color = isBrowse ? '#3949ab' : '#888';
             queryBtn.style.borderBottomColor  = isBrowse ? 'transparent' : '#3949ab';
             queryBtn.style.color  = isBrowse ? '#888' : '#3949ab';
+            dbApplyWriteModeStyling();
+        }
+
+        // Right-click handler on the Query tab. Returns false to suppress the
+        // browser context menu.
+        function dbToggleWriteMode(event) {
+            event.preventDefault();
+
+            if (dbWriteMode) {
+                dbWriteMode = false;
+                dbSwitchTab('query');
+                showAlert('Write mode disarmed — queries are read-only again', 'info');
+                return false;
+            }
+
+            const ok = confirm(
+                '⚠️  UNRESTRICTED QUERY MODE\n\n' +
+                'This removes the read-only restriction. INSERT, UPDATE, DELETE, DROP ' +
+                'and any other statement will run directly against the live database ' +
+                'on the write connection.\n\n' +
+                'There is no undo, no confirmation per statement, and no backup taken. ' +
+                'You can corrupt or destroy your data, and the running server may not ' +
+                'notice until it fails.\n\n' +
+                'If you break it, that\'s on you.\n\n' +
+                'Arm write mode?'
+            );
+            if (!ok) return false;
+
+            dbWriteMode = true;
+            dbSwitchTab('query');
+            showAlert('Write mode ARMED — right-click the Query tab again to disarm', 'error');
+            return false;
+        }
+
+        // Recolours the Query tab and the Run button while armed, so the state is
+        // impossible to miss once you are in it.
+        function dbApplyWriteModeStyling() {
+            const queryBtn = document.getElementById('dbTabQuery');
+            const runBtn   = document.getElementById('dbRunBtn');
+            const warnEl   = document.getElementById('dbWriteWarning');
+            const hintEl   = document.getElementById('dbSqlModeHint');
+            if (!queryBtn) return;
+
+            if (hintEl) {
+                hintEl.textContent = dbWriteMode
+                    ? '(unrestricted — any statement)'
+                    : '(SELECT / PRAGMA / EXPLAIN only)';
+                hintEl.style.color = dbWriteMode ? '#c62828' : '#888';
+            }
+
+            const active = queryBtn.style.borderBottomColor !== 'transparent';
+            if (dbWriteMode) {
+                queryBtn.textContent = '⚠️ Query (WRITE)';
+                queryBtn.style.color = '#c62828';
+                if (active) queryBtn.style.borderBottomColor = '#c62828';
+                if (runBtn) {
+                    runBtn.style.background = '#c62828';
+                    runBtn.style.borderColor = '#c62828';
+                }
+                if (warnEl) warnEl.style.display = 'block';
+            } else {
+                queryBtn.textContent = '⌨️ Query';
+                queryBtn.style.color = active ? '#3949ab' : '#888';
+                if (active) queryBtn.style.borderBottomColor = '#3949ab';
+                if (runBtn) {
+                    runBtn.style.background = '#3949ab';
+                    runBtn.style.borderColor = '#3949ab';
+                }
+                if (warnEl) warnEl.style.display = 'none';
+            }
         }
 
         async function dbLoadTables() {
@@ -27823,7 +27904,7 @@ const tooltipLine2 = timeStr;
                 const resp = await authenticatedFetch('/admin/db-query', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({query: sql}),
+                    body: JSON.stringify({query: sql, allow_writes: dbWriteMode}),
                 });
                 const elapsed = Date.now() - t0;
                 const data = await resp.json();

@@ -8941,14 +8941,23 @@ func (ah *AdminHandler) HandleDSPHealth(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// HandleDBQuery executes a read-only SQL query against the SQLite database and
-// returns the results as JSON. Only SELECT statements are permitted; any query
-// that begins with a keyword other than SELECT (after stripping comments and
-// whitespace) is rejected with HTTP 400.
+// HandleDBQuery executes a SQL query against the SQLite database and returns
+// the results as JSON. By default only SELECT/PRAGMA/EXPLAIN are permitted;
+// anything else is rejected with HTTP 400 and the query runs on the read-only
+// connection.
+//
+// Setting "allow_writes" lifts that restriction and runs the statement on the
+// write connection instead. It is deliberately not exposed by any normal
+// control in the admin UI — the operator has to arm it explicitly and accept
+// that arbitrary DDL/DML against the live database is on them. Every armed
+// request is logged with the calling IP and the statement.
 //
 // Route: POST /admin/db-query  (protected by AuthMiddleware)
-// Request body: {"query": "SELECT ..."}
+// Request body: {"query": "SELECT ...", "allow_writes": false}
 // Response:     {"columns": [...], "rows": [{col: val, ...}, ...]}
+//
+// A write statement that returns no rows responds with a single synthetic row
+// carrying rows_affected / last_insert_id, so the UI has something to render.
 func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -8960,7 +8969,8 @@ func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Query string `json:"query"`
+		Query       string `json:"query"`
+		AllowWrites bool   `json:"allow_writes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -8989,14 +8999,60 @@ func (ah *AdminHandler) HandleDBQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	upper := strings.ToUpper(trimmed)
-	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "PRAGMA") && !strings.HasPrefix(upper, "EXPLAIN") {
+	readOnlyStmt := strings.HasPrefix(upper, "SELECT") ||
+		strings.HasPrefix(upper, "PRAGMA") ||
+		strings.HasPrefix(upper, "EXPLAIN") ||
+		strings.HasPrefix(upper, "WITH")
+
+	if !readOnlyStmt && !req.AllowWrites {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "only SELECT, PRAGMA, and EXPLAIN queries are allowed"})
 		return
 	}
 
+	if req.AllowWrites {
+		if ah.dbManager.db == nil {
+			http.Error(w, `{"error":"write connection not available"}`, http.StatusServiceUnavailable)
+			return
+		}
+		log.Printf("[ADMIN] UNRESTRICTED DB QUERY from %s: %s", getClientIP(r), req.Query)
+	}
+
+	// Route on the statement, not on the arming flag. The write handle is a
+	// single shared connection (SetMaxOpenConns(1)) used by every live writer —
+	// spot logging, metrics, summary flushes — so parking a long analytical
+	// SELECT on it would stall all of them for the duration. Reads therefore go
+	// to the 4-connection read pool even while write mode is armed; WAL gives
+	// them a consistent snapshot that already includes any committed write.
+	if req.AllowWrites && !readOnlyStmt {
+		res, err := ah.dbManager.db.ExecContext(r.Context(), req.Query)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		affected, _ := res.RowsAffected()
+		lastID, _ := res.LastInsertId()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"columns": []string{"rows_affected", "last_insert_id"},
+			"rows": []map[string]any{{
+				"rows_affected":  affected,
+				"last_insert_id": lastID,
+			}},
+		})
+		return
+	}
+
 	rows, err := ah.dbManager.readDB.QueryContext(r.Context(), req.Query)
+	// A leading WITH is classified read-only above, but SQLite also accepts
+	// `WITH … INSERT/UPDATE/DELETE`, which the read pool rejects because it is
+	// opened mode=ro. When write mode is armed, retry those on the writer
+	// rather than reporting a confusing "readonly database" error.
+	if err != nil && req.AllowWrites && strings.Contains(strings.ToLower(err.Error()), "readonly") {
+		rows, err = ah.dbManager.db.QueryContext(r.Context(), req.Query)
+	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

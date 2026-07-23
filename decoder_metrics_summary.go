@@ -32,6 +32,15 @@ type MetricsSummaryAggregator struct {
 	writeInterval time.Duration
 	lastWrite     time.Time
 	writeMu       sync.Mutex
+
+	// importHold suppresses flushes while db_import.go is still backfilling
+	// decoder_metrics_summary from the legacy JSON tree. Without it the
+	// aggregator — which started from an empty table — would upsert its
+	// history-less in-memory summaries over the rows the backfill is about
+	// to insert (or has just inserted), permanently losing every pre-migration
+	// month in the yearly breakdowns. Cleared by MergeImportedSummaries or
+	// ReleaseImportHold. Guarded by writeMu.
+	importHold bool
 }
 
 // SetDB wires the SQLite write connection and read pool, then loads existing
@@ -129,6 +138,9 @@ func (msa *MetricsSummaryAggregator) WriteIfNeeded() error {
 	if msa.db == nil {
 		return nil // DB not available
 	}
+	if msa.importHold {
+		return nil // historical backfill still in flight; see importHold
+	}
 	if time.Since(msa.lastWrite) < msa.writeInterval {
 		return nil // Not time yet
 	}
@@ -152,6 +164,132 @@ func (msa *MetricsSummaryAggregator) WriteIfNeeded() error {
 	}
 
 	return nil
+}
+
+// HoldWritesForImport blocks flushes to decoder_metrics_summary until the
+// historical backfill has finished and been merged in. Called synchronously by
+// DBImporter.RunImportIfEmpty when the table is queued for backfill, before any
+// flush can have run.
+func (msa *MetricsSummaryAggregator) HoldWritesForImport() {
+	msa.writeMu.Lock()
+	msa.importHold = true
+	msa.writeMu.Unlock()
+}
+
+// ReleaseImportHold re-enables flushes without merging. Used when the backfill
+// failed or was aborted — the legacy source tree is left in place for a retry,
+// and live aggregation must not stay frozen in the meantime.
+func (msa *MetricsSummaryAggregator) ReleaseImportHold() {
+	msa.writeMu.Lock()
+	msa.importHold = false
+	msa.writeMu.Unlock()
+}
+
+// MergeImportedSummaries folds the just-backfilled historical rows into the
+// in-memory summaries and releases the write hold.
+//
+// The arithmetic is additive and correct by construction: an imported row holds
+// everything up to the migration, while the matching in-memory summary was
+// built from zero at startup and holds only what has been decoded since. Unique
+// callsign counts are the exception — the callsign sets are not persisted, so
+// the two cannot be unioned and the larger of the two is kept.
+func (msa *MetricsSummaryAggregator) MergeImportedSummaries() {
+	defer msa.ReleaseImportHold()
+
+	if msa.readDB == nil {
+		return
+	}
+	now := time.Now()
+	merged := 0
+	for _, period := range []string{"day", "week", "month", "year"} {
+		imported, err := msa.ReadAllSummaries(period, now)
+		if err != nil {
+			log.Printf("Warning: failed to read backfilled %s decoder summaries: %v", period, err)
+			continue
+		}
+
+		msa.mu.Lock()
+		for i := range imported {
+			key := msa.getSummaryKey(&imported[i])
+			live, exists := msa.summaries[key]
+			if !exists {
+				summaryCopy := imported[i]
+				summaryCopy.callsignSet = make(map[string]bool)
+				if summaryCopy.ProcessedHours == nil {
+					summaryCopy.ProcessedHours = make(map[string]bool)
+				}
+				msa.summaries[key] = &summaryCopy
+				merged++
+				continue
+			}
+			mergeMetricsSummary(live, &imported[i])
+			merged++
+		}
+		msa.mu.Unlock()
+	}
+	log.Printf("[DB import] decoder_metrics_summary: merged %d backfilled summaries into live aggregation", merged)
+}
+
+// mergeMetricsSummary adds the imported summary's totals and breakdowns into
+// the live one. Must be called with msa.mu held.
+func mergeMetricsSummary(live, imported *MetricsSummary) {
+	live.TotalSpots += imported.TotalSpots
+	if imported.UniqueCallsigns > live.UniqueCallsigns {
+		live.UniqueCallsigns = imported.UniqueCallsigns
+	}
+	if imported.PeakSpotsPerHour > live.PeakSpotsPerHour {
+		live.PeakSpotsPerHour = imported.PeakSpotsPerHour
+	}
+
+	// Hourly breakdown is a fixed 24-slot array indexed by hour.
+	for _, h := range imported.HourlyBreakdown {
+		if h.Hour < 0 || h.Hour >= len(live.HourlyBreakdown) {
+			continue
+		}
+		live.HourlyBreakdown[h.Hour].Spots += h.Spots
+		if h.UniqueCallsigns > live.HourlyBreakdown[h.Hour].UniqueCallsigns {
+			live.HourlyBreakdown[h.Hour].UniqueCallsigns = h.UniqueCallsigns
+		}
+	}
+
+	for _, d := range imported.DailyBreakdown {
+		found := false
+		for i := range live.DailyBreakdown {
+			if live.DailyBreakdown[i].Date == d.Date {
+				live.DailyBreakdown[i].Spots += d.Spots
+				if d.UniqueCallsigns > live.DailyBreakdown[i].UniqueCallsigns {
+					live.DailyBreakdown[i].UniqueCallsigns = d.UniqueCallsigns
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			live.DailyBreakdown = append(live.DailyBreakdown, d)
+		}
+	}
+
+	for _, m := range imported.MonthlyBreakdown {
+		found := false
+		for i := range live.MonthlyBreakdown {
+			if live.MonthlyBreakdown[i].Month == m.Month {
+				live.MonthlyBreakdown[i].Spots += m.Spots
+				if m.UniqueCallsigns > live.MonthlyBreakdown[i].UniqueCallsigns {
+					live.MonthlyBreakdown[i].UniqueCallsigns = m.UniqueCallsigns
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			live.MonthlyBreakdown = append(live.MonthlyBreakdown, m)
+		}
+	}
+
+	if duration := live.EndTime.Sub(live.StartTime).Hours(); duration > 0 {
+		live.AvgSpotsPerHour = float64(live.TotalSpots) / duration
+	}
+	live.LastUpdated = time.Now()
 }
 
 // incrementSummary increments the count for a specific summary period

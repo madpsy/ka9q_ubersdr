@@ -27,6 +27,12 @@ type CWMetricsSummaryAggregator struct {
 	writeInterval time.Duration
 	lastWrite     time.Time
 	writeMu       sync.Mutex
+
+	// importHold suppresses flushes while db_import.go is still backfilling
+	// cw_metrics_summary from the legacy JSON tree. See the identical field on
+	// MetricsSummaryAggregator for why: without it the aggregator overwrites
+	// the backfilled rows with history-less ones. Guarded by writeMu.
+	importHold bool
 }
 
 // SetDB wires the SQLite write connection and read pool, then loads existing
@@ -129,6 +135,9 @@ func (msa *CWMetricsSummaryAggregator) WriteIfNeeded() error {
 	if msa.db == nil {
 		return nil // DB not available
 	}
+	if msa.importHold {
+		return nil // historical backfill still in flight; see importHold
+	}
 	if time.Since(msa.lastWrite) < msa.writeInterval {
 		return nil // Not time yet
 	}
@@ -152,6 +161,147 @@ func (msa *CWMetricsSummaryAggregator) WriteIfNeeded() error {
 	}
 
 	return nil
+}
+
+// HoldWritesForImport blocks flushes to cw_metrics_summary until the historical
+// backfill has finished and been merged in.
+func (msa *CWMetricsSummaryAggregator) HoldWritesForImport() {
+	msa.writeMu.Lock()
+	msa.importHold = true
+	msa.writeMu.Unlock()
+}
+
+// ReleaseImportHold re-enables flushes without merging, for when the backfill
+// failed or was aborted.
+func (msa *CWMetricsSummaryAggregator) ReleaseImportHold() {
+	msa.writeMu.Lock()
+	msa.importHold = false
+	msa.writeMu.Unlock()
+}
+
+// MergeImportedSummaries folds the just-backfilled historical rows into the
+// in-memory summaries and releases the write hold. Totals and breakdowns add;
+// unique callsign counts take the larger of the two (the callsign sets are not
+// persisted, so they cannot be unioned), and WPM averages are recombined
+// weighted by spot count.
+func (msa *CWMetricsSummaryAggregator) MergeImportedSummaries() {
+	defer msa.ReleaseImportHold()
+
+	if msa.readDB == nil {
+		return
+	}
+	now := time.Now()
+	merged := 0
+	for _, period := range []string{"day", "week", "month", "year"} {
+		imported, err := msa.ReadAllSummaries(period, now)
+		if err != nil {
+			log.Printf("Warning: failed to read backfilled %s CW summaries: %v", period, err)
+			continue
+		}
+
+		msa.mu.Lock()
+		for i := range imported {
+			key := msa.getSummaryKey(&imported[i])
+			live, exists := msa.summaries[key]
+			if !exists {
+				summaryCopy := imported[i]
+				summaryCopy.callsignSet = make(map[string]bool)
+				msa.summaries[key] = &summaryCopy
+				merged++
+				continue
+			}
+			mergeCWMetricsSummary(live, &imported[i])
+			merged++
+		}
+		msa.mu.Unlock()
+	}
+	log.Printf("[DB import] cw_metrics_summary: merged %d backfilled summaries into live aggregation", merged)
+}
+
+// mergeCWMetricsSummary adds the imported summary's totals and breakdowns into
+// the live one. Must be called with msa.mu held.
+func mergeCWMetricsSummary(live, imported *CWMetricsSummary) {
+	// Recombine the WPM average weighted by spot count before TotalSpots moves.
+	if total := live.TotalSpots + imported.TotalSpots; total > 0 && imported.AvgWPM > 0 {
+		live.AvgWPM = (live.AvgWPM*float64(live.TotalSpots) + imported.AvgWPM*float64(imported.TotalSpots)) / float64(total)
+	}
+
+	live.TotalSpots += imported.TotalSpots
+	if imported.UniqueCallsigns > live.UniqueCallsigns {
+		live.UniqueCallsigns = imported.UniqueCallsigns
+	}
+	if imported.PeakSpotsPerHour > live.PeakSpotsPerHour {
+		live.PeakSpotsPerHour = imported.PeakSpotsPerHour
+	}
+	if imported.MinWPM > 0 && (live.MinWPM == 0 || imported.MinWPM < live.MinWPM) {
+		live.MinWPM = imported.MinWPM
+	}
+	if imported.MaxWPM > live.MaxWPM {
+		live.MaxWPM = imported.MaxWPM
+	}
+
+	for _, h := range imported.HourlyBreakdown {
+		if h.Hour < 0 || h.Hour >= len(live.HourlyBreakdown) {
+			continue
+		}
+		slot := &live.HourlyBreakdown[h.Hour]
+		if total := slot.Spots + h.Spots; total > 0 && h.AvgWPM > 0 {
+			slot.AvgWPM = (slot.AvgWPM*float64(slot.Spots) + h.AvgWPM*float64(h.Spots)) / float64(total)
+		}
+		slot.Spots += h.Spots
+		if h.UniqueCallsigns > slot.UniqueCallsigns {
+			slot.UniqueCallsigns = h.UniqueCallsigns
+		}
+	}
+
+	for _, d := range imported.DailyBreakdown {
+		found := false
+		for i := range live.DailyBreakdown {
+			if live.DailyBreakdown[i].Date != d.Date {
+				continue
+			}
+			slot := &live.DailyBreakdown[i]
+			if total := slot.Spots + d.Spots; total > 0 && d.AvgWPM > 0 {
+				slot.AvgWPM = (slot.AvgWPM*float64(slot.Spots) + d.AvgWPM*float64(d.Spots)) / float64(total)
+			}
+			slot.Spots += d.Spots
+			if d.UniqueCallsigns > slot.UniqueCallsigns {
+				slot.UniqueCallsigns = d.UniqueCallsigns
+			}
+			found = true
+			break
+		}
+		if !found {
+			live.DailyBreakdown = append(live.DailyBreakdown, d)
+		}
+	}
+
+	for _, m := range imported.MonthlyBreakdown {
+		found := false
+		for i := range live.MonthlyBreakdown {
+			if live.MonthlyBreakdown[i].Month != m.Month {
+				continue
+			}
+			slot := &live.MonthlyBreakdown[i]
+			if total := slot.Spots + m.Spots; total > 0 && m.AvgWPM > 0 {
+				slot.AvgWPM = (slot.AvgWPM*float64(slot.Spots) + m.AvgWPM*float64(m.Spots)) / float64(total)
+			}
+			slot.Spots += m.Spots
+			if m.UniqueCallsigns > slot.UniqueCallsigns {
+				slot.UniqueCallsigns = m.UniqueCallsigns
+			}
+			found = true
+			break
+		}
+		if !found {
+			live.MonthlyBreakdown = append(live.MonthlyBreakdown, m)
+		}
+	}
+
+	if duration := live.EndTime.Sub(live.StartTime).Hours(); duration > 0 {
+		live.AvgSpotsPerHour = float64(live.TotalSpots) / duration
+	}
+	live.LastUpdated = time.Now()
 }
 
 // incrementSummary increments the count for a specific summary period

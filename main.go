@@ -1399,6 +1399,15 @@ func main() {
 		CWMetricsDir:      cwskimmerConfig.MetricsLogDataDir,
 		DecoderSummaryDir: config.Decoder.MetricsSummaryDataDir,
 		CWSummaryDir:      cwskimmerConfig.MetricsSummaryDataDir,
+		SummaryHooks:      make(map[string]SummaryImportHook),
+	}
+	// Let the summary aggregators suspend persistence while their tables are
+	// backfilled, so live aggregation cannot overwrite the historical rows.
+	if multiDecoder != nil && multiDecoder.summaryAggregator != nil {
+		dbImporter.SummaryHooks["decoder_metrics_summary"] = multiDecoder.summaryAggregator
+	}
+	if cwSkimmer != nil && cwSkimmer.metrics != nil && cwSkimmer.metrics.summaryAggregator != nil {
+		dbImporter.SummaryHooks["cw_metrics_summary"] = cwSkimmer.metrics.summaryAggregator
 	}
 	dbImporter.RunImportIfEmpty(mainCtx)
 

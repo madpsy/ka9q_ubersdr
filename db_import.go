@@ -83,6 +83,22 @@ type DBImporter struct {
 	// Metrics summary roots: <dir>/{daily,weekly,monthly,yearly}/…/*-summary.json
 	DecoderSummaryDir string // decoder_metrics_summary: <MODE>-<BAND>-summary.json
 	CWSummaryDir      string // cw_metrics_summary:      <BAND>-summary.json
+
+	// SummaryHooks maps a summary table to the live aggregator that owns it.
+	// The two summary aggregators start up before this importer runs, read an
+	// empty table, and would then upsert their history-less in-memory summaries
+	// over the rows backfilled here — silently dropping every pre-migration
+	// month from the yearly/monthly breakdowns. The hook freezes those writes
+	// for the duration of the backfill and merges the result in afterwards.
+	SummaryHooks map[string]SummaryImportHook
+}
+
+// SummaryImportHook is implemented by the metrics summary aggregators so the
+// importer can suspend their persistence while backfilling the table they own.
+type SummaryImportHook interface {
+	HoldWritesForImport()
+	MergeImportedSummaries()
+	ReleaseImportHold()
 }
 
 // tableImport binds a table to the directory it is backfilled from and the
@@ -148,6 +164,11 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 			continue
 		}
 		log.Printf("[DB import] %s is empty — queued for backfill from %s", t.table, t.dir)
+		// Freeze the owning aggregator's writes here, in the synchronous phase,
+		// so no flush can land between this decision and the backfill.
+		if hook := imp.SummaryHooks[t.table]; hook != nil {
+			hook.HoldWritesForImport()
+		}
 		toImport = append(toImport, t)
 	}
 
@@ -169,6 +190,15 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 		dirSeen := make(map[string]bool) // dir → appeared in toImport
 		aborted := false
 
+		// Any aggregator still frozen when this goroutine exits — because its
+		// import was skipped by an abort, or panicked — must be thawed, or it
+		// would never persist again.
+		defer func() {
+			for _, hook := range imp.SummaryHooks {
+				hook.ReleaseImportHold()
+			}
+		}()
+
 		for _, t := range toImport {
 			if ctx.Err() != nil {
 				aborted = true
@@ -180,11 +210,22 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 			}
 			log.Printf("[DB import] %s: starting backfill", t.table)
 			start := time.Now()
-			if err := t.importFn(ctx); err != nil {
+			err := t.importFn(ctx)
+			if err != nil {
 				log.Printf("[DB import] %s backfill error: %v", t.table, err)
 				dirOK[t.dir] = false // keep the source dir for a future retry
 			} else {
 				log.Printf("[DB import] %s backfill complete in %v", t.table, time.Since(start).Round(time.Millisecond))
+			}
+			// Hand the backfilled rows to the live aggregator (or thaw it on
+			// failure) as soon as this table is done, rather than waiting for
+			// the slow spots imports queued behind it.
+			if hook := imp.SummaryHooks[t.table]; hook != nil {
+				if err != nil {
+					hook.ReleaseImportHold()
+				} else {
+					hook.MergeImportedSummaries()
+				}
 			}
 		}
 

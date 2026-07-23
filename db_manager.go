@@ -411,6 +411,11 @@ func (m *DBManager) initSchema() error {
 		{"spots_idx_mode_band", `CREATE INDEX IF NOT EXISTS spots_idx_mode_band   ON spots(mode, band)`},
 		{"spots_idx_callsign", `CREATE INDEX IF NOT EXISTS spots_idx_callsign    ON spots(callsign)`},
 		{"spots_idx_ts_mode", `CREATE INDEX IF NOT EXISTS spots_idx_ts_mode     ON spots(ts, mode)`},
+		// Expression index: lets DISTINCT DATE(ts,'unixepoch') … ORDER BY date DESC
+		// use an index scan instead of a full table scan (fixes /api/decoder/spots/dates timeout).
+		{"spots_idx_date", `CREATE INDEX IF NOT EXISTS spots_idx_date         ON spots (DATE(ts, 'unixepoch') DESC)`},
+		// Partial index on decoder_name for GetAvailableNames (no index existed before).
+		{"spots_idx_decoder_name", `CREATE INDEX IF NOT EXISTS spots_idx_decoder_name ON spots (decoder_name) WHERE decoder_name IS NOT NULL AND decoder_name != ''`},
 
 		// ----------------------------------------------------------------
 		// cw_spots
@@ -456,6 +461,9 @@ func (m *DBManager) initSchema() error {
 		{"cw_spots_idx_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_band     ON cw_spots(band)`},
 		{"cw_spots_idx_dx_call", `CREATE INDEX IF NOT EXISTS cw_spots_idx_dx_call  ON cw_spots(dx_call)`},
 		{"cw_spots_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts_band  ON cw_spots(ts, band)`},
+		// Expression index: lets DISTINCT DATE(ts,'unixepoch') … ORDER BY date DESC
+		// use an index scan instead of a full table scan (fixes /api/cwskimmer/spots/dates timeout).
+		{"cw_spots_idx_date", `CREATE INDEX IF NOT EXISTS cw_spots_idx_date    ON cw_spots (DATE(ts, 'unixepoch') DESC)`},
 
 		// ----------------------------------------------------------------
 		// noise_floor

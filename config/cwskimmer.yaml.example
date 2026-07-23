@@ -35,14 +35,14 @@ metrics_log_interval_secs: 300              # Write interval in seconds (default
 # Forward spots to the Reverse Beacon Network (default: true)
 rbn_spots: true
 
-# Callsign lookup enrichment (default: false)
+# Callsign lookup enrichment (default: true)
 # When enabled, spot coordinates come from the configured callsign lookup
 # provider (e.g. QRZ.com) instead of the CTY database. QRZ returns the
 # operator's actual location, whereas CTY only knows the DXCC entity centroid
 # (i.e. roughly the country centre). Falls back to CTY automatically when the
 # lookup provider is disabled, unreachable, or has no record/coordinates.
 # Requires lookup_services to be enabled and configured in config.yaml.
-callsign_lookup_enabled: false
+callsign_lookup_enabled: true
 
 # PSKReporter configuration
 pskreporter_enabled: false

@@ -52,6 +52,10 @@
                     <label>Callsign <span class="label-hint">(optional)</span></label>
                     <input type="text" id="callsign-input" placeholder="e.g. MM3PSY" maxlength="10" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
                 </div>
+                <div class="control-group">
+                    <label>Compare with <span class="label-hint">(optional)</span></label>
+                    <input type="text" id="callsign2-input" placeholder="2nd callsign" maxlength="10" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
+                </div>
                 <div class="control-group sw-toggle-group">
                     <label class="sw-toggle-label">
                         <input type="checkbox" id="sw-overlay">
@@ -91,6 +95,26 @@
                 <div class="chart-wrap"><canvas id="wspr-rank-chart"></canvas></div>
             </div>
             <div id="wspr-no-data" class="no-data hidden">No WSPR data found for the selected period.</div>
+
+            <!-- Point-in-time snapshot — independent of the Load Data controls -->
+            <div class="chart-card" id="wspr-at-card">
+                <h2>Leaderboard at a Point in Time <span class="callsign-label" id="wspr-at-drift"></span></h2>
+                <div class="at-hint">Replays the full wspr.live receiver leaderboard from the snapshot nearest the chosen time. Snapshots are hourly; the top 200 receivers are shown.</div>
+                <div class="control-row at-controls">
+                    <div class="control-group">
+                        <label>Date &amp; time <span class="label-hint">(UTC)</span></label>
+                        <input type="datetime-local" id="wspr-at-input" step="60">
+                    </div>
+                    <div class="control-group btn-group">
+                        <button id="wspr-at-btn" class="btn-primary">Show State</button>
+                    </div>
+                </div>
+                <div class="band-selector" id="wspr-at-selector">
+                    <!-- populated dynamically -->
+                </div>
+                <div id="wspr-at-status" class="status-bar hidden"></div>
+                <div id="wspr-at-tables" class="rank-tables"></div>
+            </div>
         </div>
 
         <!-- ── PSK tab ──────────────────────────────────────────────────── -->
@@ -119,6 +143,26 @@
                 <div class="chart-wrap"><canvas id="psk-full-chart"></canvas></div>
             </div>
             <div id="psk-no-data" class="no-data hidden">No PSK data found for the selected period.</div>
+
+            <!-- Point-in-time snapshot — independent of the Load Data controls -->
+            <div class="chart-card" id="psk-at-card">
+                <h2>Leaderboard at a Point in Time <span class="callsign-label" id="psk-at-drift"></span></h2>
+                <div class="at-hint">Replays the complete PSKReporter leaderboard from the snapshot nearest the chosen time. Snapshots are hourly.</div>
+                <div class="control-row at-controls">
+                    <div class="control-group">
+                        <label>Date &amp; time <span class="label-hint">(UTC)</span></label>
+                        <input type="datetime-local" id="psk-at-input" step="60">
+                    </div>
+                    <div class="control-group btn-group">
+                        <button id="psk-at-btn" class="btn-primary">Show State</button>
+                    </div>
+                </div>
+                <div class="band-selector" id="psk-at-selector">
+                    <!-- populated dynamically -->
+                </div>
+                <div id="psk-at-status" class="status-bar hidden"></div>
+                <div id="psk-at-tables" class="rank-tables"></div>
+            </div>
         </div>
 
         <!-- ── RBN tab ──────────────────────────────────────────────────── -->
@@ -138,6 +182,23 @@
                 <div class="chart-wrap"><canvas id="rbn-skew-chart"></canvas></div>
             </div>
             <div id="rbn-no-data" class="no-data hidden">No RBN data found for the selected period.</div>
+
+            <!-- Point-in-time snapshot — independent of the Load Data controls -->
+            <div class="chart-card" id="rbn-at-card">
+                <h2>Skimmers at a Point in Time <span class="callsign-label" id="rbn-at-drift"></span></h2>
+                <div class="at-hint">Replays the full RBN skimmer list from the snapshot nearest the chosen time. RBN publishes once per UTC day, so the match is day-grained; the top 200 skimmers are shown.</div>
+                <div class="control-row at-controls">
+                    <div class="control-group">
+                        <label>Date &amp; time <span class="label-hint">(UTC)</span></label>
+                        <input type="datetime-local" id="rbn-at-input" step="60">
+                    </div>
+                    <div class="control-group btn-group">
+                        <button id="rbn-at-btn" class="btn-primary">Show State</button>
+                    </div>
+                </div>
+                <div id="rbn-at-status" class="status-bar hidden"></div>
+                <div id="rbn-at-tables" class="rank-tables"></div>
+            </div>
         </div>
     </div>
 

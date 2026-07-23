@@ -204,6 +204,21 @@ func enrichWithSoftware(src PSKMonitorsByBand, sw map[string][]PSKSoftwareEntry)
 	return out
 }
 
+// countUberSDRReporters counts unique callsigns in sw that run at least one
+// piece of UberSDR software.
+func countUberSDRReporters(sw map[string][]PSKSoftwareEntry) int {
+	total := 0
+	for _, entries := range sw {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name, "UberSDR") {
+				total++
+				break // count each callsign once
+			}
+		}
+	}
+	return total
+}
+
 // parseSoftwareInUse extracts a map of UPPER-CASE callsign → []PSKSoftwareEntry
 // from the #software_in_use HTML table in the PSKReporter stats page.
 //
@@ -660,16 +675,7 @@ func (ah *AdminHandler) HandlePSKRank(w http.ResponseWriter, r *http.Request) {
 		return enrichWithSoftware(filterPSKByBand(src, band), sw)
 	}
 
-	// Count unique callsigns that have at least one UberSDR software entry.
-	uberSdrTotal := 0
-	for _, entries := range sw {
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name, "UberSDR") {
-				uberSdrTotal++
-				break // count each callsign once
-			}
-		}
-	}
+	uberSdrTotal := countUberSDRReporters(sw)
 
 	type pskRankResponse struct {
 		FetchedAt     time.Time                 `json:"fetched_at"`

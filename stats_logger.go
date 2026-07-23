@@ -153,9 +153,10 @@ func (sl *StatsLogger) LoadLatestRBNStats() (map[string]RBNStatisticsEntry, stri
 
 // StatsQueryParams holds the validated, normalised parameters for a history query.
 type StatsQueryParams struct {
-	FromDate time.Time // start of range (UTC midnight)
-	ToDate   time.Time // end of range (UTC midnight, inclusive)
-	Callsign string    // upper-cased, empty = no filter
+	FromDate  time.Time // start of range (UTC midnight)
+	ToDate    time.Time // end of range (UTC midnight, inclusive)
+	Callsign  string    // upper-cased, empty = no filter
+	Callsign2 string    // optional second station to compare against Callsign; requires Callsign
 }
 
 // ParseStatsQueryParams validates and normalises the query parameters shared by
@@ -167,6 +168,8 @@ type StatsQueryParams struct {
 //	from_date — YYYY-MM-DD            (overridden by period)
 //	to_date   — YYYY-MM-DD            (defaults to from_date; overridden by period)
 //	callsign  — alphanumeric, max 10 chars (case-insensitive)
+//	callsign2 — optional second callsign to compare against the first. Same
+//	            validation; requires callsign and must differ from it.
 //
 // Returns an error string (non-empty) when validation fails.
 func ParseStatsQueryParams(q map[string][]string) (StatsQueryParams, string) {
@@ -226,20 +229,45 @@ func ParseStatsQueryParams(q map[string][]string) (StatsQueryParams, string) {
 		return p, fmt.Sprintf("date range too large — maximum is %d days", statsMaxDays)
 	}
 
-	// callsign filter
-	cs := strings.ToUpper(get("callsign"))
-	if cs != "" {
-		if len(cs) > 10 {
-			return p, "callsign too long — maximum 10 characters"
+	// callsign filters
+	cs, errMsg := validateCallsignParam(get("callsign"), "callsign")
+	if errMsg != "" {
+		return p, errMsg
+	}
+	cs2, errMsg := validateCallsignParam(get("callsign2"), "callsign2")
+	if errMsg != "" {
+		return p, errMsg
+	}
+	if cs2 != "" {
+		if cs == "" {
+			return p, "callsign2 requires callsign — it selects a second station to compare against the first"
 		}
-		for _, c := range cs {
-			if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '-') {
-				return p, "invalid callsign — only alphanumeric characters, '/' and '-' are allowed"
-			}
+		if cs2 == cs {
+			return p, "callsign2 must differ from callsign"
 		}
 	}
 	p.Callsign = cs
+	p.Callsign2 = cs2
 	return p, ""
+}
+
+// validateCallsignParam upper-cases and validates one callsign query value.
+// An empty value is valid and means "no filter". name appears in error text so
+// the caller learns which parameter was rejected.
+func validateCallsignParam(raw, name string) (string, string) {
+	cs := strings.ToUpper(raw)
+	if cs == "" {
+		return "", ""
+	}
+	if len(cs) > 10 {
+		return "", name + " too long — maximum 10 characters"
+	}
+	for _, c := range cs {
+		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '-') {
+			return "", "invalid " + name + " — only alphanumeric characters, '/' and '-' are allowed"
+		}
+	}
+	return cs, ""
 }
 
 // ---- Read* methods -------------------------------------------------------
@@ -262,6 +290,26 @@ func (sl *StatsLogger) ReadPSK(p StatsQueryParams) ([]PSKRankData, error) {
 	return sl.readPSKFromDB(p)
 }
 
+// ReadWSPRAt returns the single WSPRRankResponse snapshot nearest to at,
+// searching both backwards and forwards up to window. Returns (nil, nil) when
+// the database holds no snapshot inside that window.
+func (sl *StatsLogger) ReadWSPRAt(at time.Time, window time.Duration) (*WSPRRankResponse, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
+	}
+	return sl.readWSPRAtFromDB(at, window)
+}
+
+// ReadPSKAt returns the single PSKRankData snapshot nearest to at, searching
+// both backwards and forwards up to window. Returns (nil, nil) when the
+// database holds no snapshot inside that window.
+func (sl *StatsLogger) ReadPSKAt(at time.Time, window time.Duration) (*PSKRankData, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
+	}
+	return sl.readPSKAtFromDB(at, window)
+}
+
 // RBNHistoryRecord is one day's RBN snapshot returned by ReadRBN.
 type RBNHistoryRecord struct {
 	FetchedAt     time.Time            `json:"fetched_at"`
@@ -277,4 +325,14 @@ func (sl *StatsLogger) ReadRBN(p StatsQueryParams) ([]RBNHistoryRecord, error) {
 		return nil, fmt.Errorf("stats database is not available")
 	}
 	return sl.readRBNFromDB(p)
+}
+
+// ReadRBNAt returns the single day record nearest to at, searching both
+// backwards and forwards up to window. RBN is fetched once per UTC day, so the
+// match is day-grained. Returns (nil, nil) when nothing falls inside window.
+func (sl *StatsLogger) ReadRBNAt(at time.Time, window time.Duration) (*RBNHistoryRecord, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, fmt.Errorf("stats database is not available")
+	}
+	return sl.readRBNAtFromDB(at, window)
 }

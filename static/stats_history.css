@@ -227,6 +227,87 @@ h1 {
     border-color: #63b3ed;
 }
 
+/* ── Point-in-time leaderboard tables ──────────────────────────────────── */
+.at-hint {
+    font-size: 0.82em;
+    color: #a0aec0;
+    margin-bottom: 12px;
+    max-width: 70ch;
+}
+
+.rank-table-note {
+    font-size: 0.78em;
+    color: #a0aec0;
+    margin-bottom: 6px;
+}
+
+.at-controls {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: 14px;
+}
+
+.at-controls .btn-primary { padding: 8px 18px; }
+
+.rank-tables {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+}
+
+.rank-table-wrap h3 {
+    font-size: 0.92em;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-bottom: 8px;
+}
+
+/* Long band lists scroll inside the card rather than stretching the page. */
+.rank-table-scroll {
+    max-height: 420px;
+    overflow: auto;
+}
+
+table.rank-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84em;
+}
+
+table.rank-table th {
+    position: sticky;
+    top: 0;
+    background: #1f2740;
+    color: #a0aec0;
+    font-weight: 600;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    white-space: nowrap;
+}
+
+table.rank-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: #e0e0e0;
+}
+
+table.rank-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.rank-table td.rank { color: #a0aec0; width: 3em; }
+table.rank-table td.software { color: #9aa5b1; font-size: 0.92em; }
+table.rank-table tbody tr:hover { background: rgba(255,255,255,0.05); }
+table.rank-table tbody tr.is-station { background: rgba(99,179,237,0.14); }
+table.rank-table tbody tr.is-station td { color: #90cdf4; }
+table.rank-table tbody tr.is-ubersdr td.software { color: #68d391; }
+
+.rank-band-heading {
+    color: #63b3ed;
+    font-weight: 600;
+    background: rgba(99,179,237,0.08);
+}
+
 /* ── No-data message ───────────────────────────────────────────────────── */
 .no-data {
     text-align: center;
@@ -335,6 +416,15 @@ h1 {
     color: #718096;
     white-space: nowrap;
     margin-right: 2px;
+}
+
+/* Callsign heading in front of a station's pills when comparing two stations. */
+.summary-station {
+    font-weight: 700;
+    font-size: 0.86em;
+    color: #63b3ed;
+    letter-spacing: 0.03em;
+    margin-right: 4px;
 }
 
 .summary-pill {

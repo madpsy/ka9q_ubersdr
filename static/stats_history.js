@@ -115,6 +115,7 @@ const state = {
     activeTab: 'psk',
     stationCallsign: '',   // from /api/description receiver.callsign
     callsign: '',          // user-entered filter
+    callsign2: '',         // optional second station to compare against callsign
 
     // chart refs
     charts: {
@@ -138,10 +139,17 @@ const state = {
     pskCountriesBand:  'All',
     pskFullBand:       'All',
 
+    // point-in-time (?at=) snapshots
+    pskAtBand:     'All',          // active band chip on the PSK card
+    wsprAtWindow:  'rolling_24h',  // active window chip on the WSPR card
+
     // raw fetched data
     wsprData: null,
     pskData:  null,
     rbnData:  null,
+
+    // last ?at= response per source, or null
+    atData: { psk: null, wspr: null, rbn: null },
 
     // space weather overlay
     swData:   null,   // array of SpaceWeatherData records, or null if unavailable
@@ -305,6 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindTabs();
     bindControls();
     bindWindowTabs();
+    bindAtCards();
     setDefaultDates();
     // Apply URL ?callsign= param before description fetch so it takes priority.
     applyURLParams();
@@ -330,6 +339,13 @@ function applyURLParams() {
         if (inp) inp.value = cs;
         // Mark as URL-supplied so loadDescription won't overwrite it.
         state._urlCallsign = cs;
+    }
+
+    // ?callsign2= makes a two-station comparison shareable as a link.
+    const cs2 = (params.get('callsign2') || '').trim().toUpperCase();
+    if (cs2) {
+        const inp2 = document.getElementById('callsign2-input');
+        if (inp2) inp2.value = cs2;
     }
 }
 
@@ -414,8 +430,10 @@ function bindControls() {
 
     document.getElementById('load-btn').addEventListener('click', loadAll);
 
-    document.getElementById('callsign-input').addEventListener('keydown', e => {
-        if (e.key === 'Enter') loadAll();
+    ['callsign-input', 'callsign2-input'].forEach(id => {
+        document.getElementById(id).addEventListener('keydown', e => {
+            if (e.key === 'Enter') loadAll();
+        });
     });
 
     // SW overlay checkbox: re-run loadAll so SW data is fetched (or dropped) and
@@ -455,7 +473,20 @@ function buildParams() {
     // uppercase display in the input.  We still uppercase here so local label
     // comparisons (e.g. filterWSPRRankWindowByCallsign) work correctly.
     const cs     = document.getElementById('callsign-input').value.trim().toUpperCase();
+    const cs2    = document.getElementById('callsign2-input').value.trim().toUpperCase();
     state.callsign = cs; // always uppercase
+
+    // Mirror the backend's rules (ParseStatsQueryParams) so the user gets the
+    // reason here rather than a 400 from the API.
+    if (cs2 && !cs) {
+        setStatus('Enter a primary callsign to compare against.', 'error');
+        return null;
+    }
+    if (cs2 && cs2 === cs) {
+        setStatus('The compare-with callsign must differ from the primary callsign.', 'error');
+        return null;
+    }
+    state.callsign2 = cs2;
 
     const params = new URLSearchParams();
     if (period !== 'custom') {
@@ -468,6 +499,7 @@ function buildParams() {
         if (to) params.set('to_date', to);
     }
     if (cs) params.set('callsign', cs);
+    if (state.callsign2) params.set('callsign2', state.callsign2);
     return params;
 }
 
@@ -510,6 +542,7 @@ async function loadAll() {
         renderRBN(rbnJson);
 
         let statusMsg = `Loaded — WSPR: ${wsprJson.count} snapshots · PSK: ${pskJson.count} snapshots · RBN: ${rbnJson.count} days`;
+        if (comparing()) statusMsg += ` · comparing ${state.callsign} vs ${state.callsign2}`;
         if (swEnabled) {
             statusMsg += swRecords.length > 0
                 ? ` · ☀️ SW: ${swRecords.length} records`
@@ -530,6 +563,66 @@ function setStatus(msg, cls = '') {
     el.className = 'status-bar' + (cls ? ` ${cls}` : '');
 }
 
+// ── Two-callsign comparison helpers ───────────────────────────────────────
+//
+// When a second callsign is set, every callsign-mode chart carries one series
+// per station. The primary keeps the colour it had on its own; the comparison
+// station gets a contrasting one, and both series are labelled with the
+// callsign so the legend is unambiguous.
+
+const CMP_PRIMARY   = PALETTE[0];  // blue   — primary station, value series
+const CMP_PRIMARY_R = PALETTE[3];  // red    — primary station, rank series
+const CMP_SECOND    = PALETTE[1];  // green  — comparison station, value series
+const CMP_SECOND_R  = PALETTE[4];  // purple — comparison station, rank series
+
+/** True when a distinct second callsign is active. */
+function comparing() {
+    return !!(state.callsign && state.callsign2);
+}
+
+/**
+ * Label a series. In comparison mode the callsign is prefixed so two otherwise
+ * identical series ("Rank", "Rank") stay distinguishable.
+ */
+function seriesLabel(base, callsign) {
+    return comparing() ? `${callsign} ${base}` : base;
+}
+
+/** Suffix for a chart heading: "— G0ABC" or "— G0ABC vs M0XYZ". */
+function callsignHeading() {
+    if (!state.callsign) return '';
+    return comparing() ? `— ${state.callsign} vs ${state.callsign2}` : `— ${state.callsign}`;
+}
+
+/**
+ * Wrap one or two per-station summary fragments. With a single station the
+ * fragment is returned untouched, so the existing single-callsign bar is
+ * unchanged; with two, each is prefixed by its callsign.
+ */
+function joinSummaries(fragments) {
+    const present = fragments.filter(f => f.html);
+    if (present.length === 0) return '';
+    if (present.length === 1 && !comparing()) return present[0].html;
+    return present
+        .map(f => `<span class="summary-group summary-station">${escHtml(f.callsign)}</span>${f.html}`)
+        .join('<span class="summary-divider"></span>');
+}
+
+/** Line-series defaults shared by every comparison chart. */
+function cmpSeries(label, data, color, opts = {}) {
+    return {
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: color + '33',
+        tension: 0.3,
+        fill: false,
+        pointRadius: 3,
+        spanGaps: true,   // a station missing from one snapshot must not split the line
+        ...opts,
+    };
+}
+
 // ── Awards helpers ────────────────────────────────────────────────────────
 
 const MEDAL_CLASS = ['gold', 'silver', 'bronze'];
@@ -541,8 +634,10 @@ const MEDAL_EMOJI = ['🥇', '🥈', '🥉'];
  *
  * @param {string} containerId
  * @param {Array}  badges  - [{rank (1-3), text, priority (lower = first within same rank)}]
+ * @param {string} [stationLabel] - callsign to name the bar after; used when a
+ *        comparison is active, since the medals belong to the primary station.
  */
-function renderAwards(containerId, badges) {
+function renderAwards(containerId, badges, stationLabel) {
     const el = document.getElementById(containerId);
     if (!el) return;
 
@@ -561,6 +656,10 @@ function renderAwards(containerId, badges) {
         const em  = MEDAL_EMOJI[b.rank - 1];
         return `<span class="award-badge ${cls}">${em} ${escHtml(b.text)}</span>`;
     });
+
+    if (stationLabel) {
+        parts.unshift(`<span class="awards-bar-label">${escHtml(stationLabel)}</span>`);
+    }
 
     el.innerHTML = parts.join('');
     el.classList.remove('hidden');
@@ -630,7 +729,7 @@ function renderWSPRAwards(data) {
         }
     });
 
-    renderAwards('wspr-awards', badges);
+    renderAwards('wspr-awards', badges, comparing() ? state.callsign : '');
 }
 
 /**
@@ -658,15 +757,12 @@ function renderWSPRSummary(data) {
         return m ? parseInt(m[1], 10) : 9999;
     };
 
-    let html = '';
-
-    if (cs) {
-        // Callsign mode: per-window overall + per-band breakdown
-        if (!latest?.callsign_rank) { el.classList.add('hidden'); return; }
-
+    // One station's per-window rows, or '' when it has no data in any window.
+    const stationHTML = (rank) => {
+        if (!rank) return '';
         const sections = [];
         WINDOWS.forEach(win => {
-            const w = latest.callsign_rank[win];
+            const w = rank[win];
             if (!w) return;
 
             // Overall row
@@ -696,9 +792,17 @@ function renderWSPRSummary(data) {
 
             sections.push(winHtml);
         });
+        return sections.join('<span class="summary-divider"></span>');
+    };
 
-        if (!sections.length) { el.classList.add('hidden'); return; }
-        html = sections.join('<span class="summary-divider"></span>');
+    let html = '';
+
+    if (cs) {
+        html = joinSummaries([
+            { callsign: cs,              html: stationHTML(latest?.callsign_rank) },
+            { callsign: state.callsign2, html: stationHTML(latest?.callsign_rank2) },
+        ]);
+        if (!html) { el.classList.add('hidden'); return; }
     } else {
         // Full mode: sum all rows across windows
         const groups = [];
@@ -727,16 +831,23 @@ function getWSPRWindow(snap, win) {
     return snap[win] || null;
 }
 
+/** The comparison station's window data for a snapshot, or null. */
+function getWSPRWindow2(snap, win) {
+    return snap.callsign_rank2 ? (snap.callsign_rank2[win] || null) : null;
+}
+
 function renderWSPRUnique(data) {
     const win = state.wsprUniqueWin;
     const cs  = state.callsign;
 
-    // In callsign mode, collect all bands present across all snapshots for this window.
+    // In callsign mode, collect all bands present across all snapshots for this
+    // window — for both stations, so the chips cover either one.
     if (cs) {
         const bandSet = new Set(['All']);
         for (const snap of data.snapshots) {
-            const w = getWSPRWindow(snap, win);
-            if (w?.bands) w.bands.forEach(b => bandSet.add(b));
+            for (const w of [getWSPRWindow(snap, win), getWSPRWindow2(snap, win)]) {
+                if (w?.bands) w.bands.forEach(b => bandSet.add(b));
+            }
         }
         const bands = ['All', ...[...bandSet].filter(b => b !== 'All')];
 
@@ -748,7 +859,7 @@ function renderWSPRUnique(data) {
             renderWSPRUnique(data);
         });
         document.getElementById('wspr-band-selector').classList.remove('hidden');
-        document.getElementById('wspr-unique-label').textContent = `— ${cs}`;
+        document.getElementById('wspr-unique-label').textContent = callsignHeading();
     } else {
         document.getElementById('wspr-band-selector').innerHTML = '';
         document.getElementById('wspr-band-selector').classList.add('hidden');
@@ -759,24 +870,36 @@ function renderWSPRUnique(data) {
     const isoLabels  = [];   // raw ISO timestamps for SW lookup
     const uniqueVals = [];
     const rawVals    = [];
+    const uniqueVals2 = [];
+    const rawVals2    = [];
+
+    const band = state.wsprUniqueBand;
+    const isBandFiltered = cs && band !== 'All';
+
+    // One station's [unique, raw] for a window, honouring the band selector.
+    const valuesFor = (w) => {
+        if (!w) return [null, null];
+        if (band === 'All') return [w.unique ?? null, w.raw ?? null];
+        return [w.band_uniques?.[band] ?? null, null]; // raw is not available per-band
+    };
 
     for (const snap of data.snapshots) {
         const w = getWSPRWindow(snap, win);
-        if (!w) continue;
+        // In callsign mode a snapshot may hold only the comparison station, so
+        // it is kept as long as either has data — otherwise the axes diverge.
+        const w2 = getWSPRWindow2(snap, win);
+        if (!w && !w2) continue;
+
         labels.push(fmtTime(snap.generated_at));
         isoLabels.push(snap.generated_at);
 
         if (cs) {
-            const band = state.wsprUniqueBand;
-            if (band === 'All') {
-                uniqueVals.push(w.unique ?? null);
-                rawVals.push(w.raw ?? null);
-            } else {
-                // Per-band unique from band_uniques map.
-                const u = w.band_uniques?.[band] ?? null;
-                uniqueVals.push(u);
-                rawVals.push(null); // raw not available per-band
-            }
+            const [u, r]   = valuesFor(w);
+            const [u2, r2] = valuesFor(w2);
+            uniqueVals.push(u);
+            rawVals.push(r);
+            uniqueVals2.push(u2);
+            rawVals2.push(r2);
         } else {
             // Full window: sum all rows.
             const rows = w.data || [];
@@ -785,20 +908,27 @@ function renderWSPRUnique(data) {
         }
     }
 
-    const isBandFiltered = cs && state.wsprUniqueBand !== 'All';
-    const datasets = cs
-        ? isBandFiltered
-            ? [
-                { label: `${state.wsprUniqueBand} Unique`, data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3, yAxisID: 'y' },
-              ]
-            : [
-                { label: 'Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'y' },
-                { label: 'Raw',    data: rawVals,    borderColor: PALETTE[1], backgroundColor: PALETTE[1]+'33', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y' },
-              ]
-        : [
-            { label: 'Total Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'y' },
-            { label: 'Total Raw',    data: rawVals,    borderColor: PALETTE[2], backgroundColor: PALETTE[2]+'22', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y' },
-          ];
+    let datasets;
+    if (!cs) {
+        datasets = [
+            cmpSeries('Total Unique', uniqueVals, PALETTE[0], { fill: true }),
+            cmpSeries('Total Raw',    rawVals,    PALETTE[2]),
+        ];
+    } else {
+        const uniqueLabel = isBandFiltered ? `${band} Unique` : 'Unique';
+        datasets = [cmpSeries(seriesLabel(uniqueLabel, cs), uniqueVals, CMP_PRIMARY, { fill: !comparing() })];
+        if (!isBandFiltered) {
+            datasets.push(cmpSeries(seriesLabel('Raw', cs), rawVals, PALETTE[2]));
+        }
+        if (comparing()) {
+            datasets.push(cmpSeries(seriesLabel(uniqueLabel, state.callsign2), uniqueVals2, CMP_SECOND,
+                { borderDash: [6, 3] }));
+            if (!isBandFiltered) {
+                datasets.push(cmpSeries(seriesLabel('Raw', state.callsign2), rawVals2, PALETTE[5],
+                    { borderDash: [6, 3] }));
+            }
+        }
+    }
 
     const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     if (swEnabled) {
@@ -840,30 +970,30 @@ function renderWSPRRank(data) {
         return;
     }
     rankCard.classList.remove('hidden');
-    document.getElementById('wspr-rank-label').textContent = cs ? `— ${cs}` : '';
+    document.getElementById('wspr-rank-label').textContent = callsignHeading();
 
     const labels    = [];
     const isoLabels = [];   // raw ISO timestamps for SW lookup
     const ranks     = [];
+    const ranks2    = [];
 
     for (const snap of data.snapshots) {
-        const w = getWSPRWindow(snap, win);
-        if (!w) continue;
+        const w  = getWSPRWindow(snap, win);
+        const w2 = getWSPRWindow2(snap, win);
+        if (!w && !w2) continue;
         labels.push(fmtTime(snap.generated_at));
         isoLabels.push(snap.generated_at);
-        ranks.push(w.rank ?? null);
+        ranks.push(w?.rank ?? null);
+        ranks2.push(w2?.rank ?? null);
     }
 
-    const datasets = [{
-        label: 'Rank',
-        data: ranks,
-        borderColor: PALETTE[3],
-        backgroundColor: PALETTE[3]+'33',
-        tension: 0.3,
-        fill: true,
-        pointRadius: 3,
-        yAxisID: 'y',
-    }];
+    const datasets = [
+        cmpSeries(seriesLabel('Rank', cs), ranks, CMP_PRIMARY_R, { fill: !comparing(), pointRadius: 3 }),
+    ];
+    if (comparing()) {
+        datasets.push(cmpSeries(seriesLabel('Rank', state.callsign2), ranks2, CMP_SECOND_R,
+            { borderDash: [6, 3] }));
+    }
 
     const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     if (swEnabled) {
@@ -951,7 +1081,7 @@ function renderPSKAwards(data) {
             });
     }
 
-    renderAwards('psk-awards', badges);
+    renderAwards('psk-awards', badges, comparing() ? state.callsign : '');
 }
 
 /**
@@ -977,43 +1107,33 @@ function renderPSKSummary(data) {
     };
     const sortBands = bands => [...bands].sort((a, b) => bandOrder(a) - bandOrder(b));
 
+    // One station's Reports + Countries rows, or '' when it has no data.
+    const stationHTML = (cr) => {
+        if (!cr) return '';
+        const row = (src, label) => {
+            if (!src || !Object.keys(src).length) return '';
+            let parts = '';
+            for (const band of sortBands(Object.keys(src))) {
+                const v = src[band];
+                if (!v) continue;
+                let inner = `<span class="pill-key">${band}</span>`;
+                if (v.day  != null) inner += `<span class="pill-val">${v.day.toLocaleString()}</span>`;
+                if (v.rank != null) inner += `<span class="pill-rank">#${v.rank}</span>`;
+                parts += `<span class="summary-pill">${inner}</span>`;
+            }
+            return parts ? `<span class="summary-group"><span class="summary-label">${label}</span>${parts}</span>` : '';
+        };
+        const reports   = row(cr.reports,   'Reports');
+        const countries = row(cr.countries, 'Countries');
+        if (reports && countries) return reports + '<span class="summary-divider"></span>' + countries;
+        return reports || countries;
+    };
+
     if (cs) {
-        const cr = latest?.callsign_rank;
-        if (!cr) { el.classList.add('hidden'); return; }
-
-        let html = '';
-
-        // Reports row
-        if (cr.reports && Object.keys(cr.reports).length) {
-            const bands = sortBands(Object.keys(cr.reports));
-            let parts = '';
-            for (const band of bands) {
-                const v = cr.reports[band];
-                if (!v) continue;
-                let inner = `<span class="pill-key">${band}</span>`;
-                if (v.day  != null) inner += `<span class="pill-val">${v.day.toLocaleString()}</span>`;
-                if (v.rank != null) inner += `<span class="pill-rank">#${v.rank}</span>`;
-                parts += `<span class="summary-pill">${inner}</span>`;
-            }
-            if (parts) html += `<span class="summary-group"><span class="summary-label">Reports</span>${parts}</span>`;
-        }
-
-        // Countries row
-        if (cr.countries && Object.keys(cr.countries).length) {
-            if (html) html += '<span class="summary-divider"></span>';
-            const bands = sortBands(Object.keys(cr.countries));
-            let parts = '';
-            for (const band of bands) {
-                const v = cr.countries[band];
-                if (!v) continue;
-                let inner = `<span class="pill-key">${band}</span>`;
-                if (v.day  != null) inner += `<span class="pill-val">${v.day.toLocaleString()}</span>`;
-                if (v.rank != null) inner += `<span class="pill-rank">#${v.rank}</span>`;
-                parts += `<span class="summary-pill">${inner}</span>`;
-            }
-            if (parts) html += `<span class="summary-group"><span class="summary-label">Countries</span>${parts}</span>`;
-        }
-
+        const html = joinSummaries([
+            { callsign: cs,              html: stationHTML(latest?.callsign_rank) },
+            { callsign: state.callsign2, html: stationHTML(latest?.callsign_rank2) },
+        ]);
         if (!html) { el.classList.add('hidden'); return; }
         el.innerHTML = html;
         el.classList.remove('hidden');
@@ -1059,13 +1179,15 @@ function renderPSK(data) {
         document.getElementById('psk-full-card').classList.add('hidden');
 
         // Collect all bands present across all snapshots
+        // Union both stations' bands so the chips cover either one.
         const reportBands   = new Set();
         const countryBands  = new Set();
         for (const snap of data.snapshots) {
-            const cr = snap.callsign_rank;
-            if (!cr) continue;
-            Object.keys(cr.reports   || {}).forEach(b => reportBands.add(b));
-            Object.keys(cr.countries || {}).forEach(b => countryBands.add(b));
+            for (const cr of [snap.callsign_rank, snap.callsign_rank2]) {
+                if (!cr) continue;
+                Object.keys(cr.reports   || {}).forEach(b => reportBands.add(b));
+                Object.keys(cr.countries || {}).forEach(b => countryBands.add(b));
+            }
         }
 
         const rBands = [...reportBands].sort(pskBandSort);
@@ -1081,8 +1203,8 @@ function renderPSK(data) {
         renderPSKRankChart(data, 'reports',   rBands);
         renderPSKRankChart(data, 'countries', cBands);
 
-        document.getElementById('psk-reports-label').textContent   = `— ${cs}`;
-        document.getElementById('psk-countries-label').textContent = `— ${cs}`;
+        document.getElementById('psk-reports-label').textContent   = callsignHeading();
+        document.getElementById('psk-countries-label').textContent = callsignHeading();
     } else {
         // Full mode: top reporters bar chart from latest snapshot
         document.getElementById('psk-full-card').classList.remove('hidden');
@@ -1108,6 +1230,348 @@ function renderPSK(data) {
     }
 }
 
+// ── Point-in-time snapshots (?at=) ────────────────────────────────────────
+//
+// Each of the three sources stores complete snapshots, so the backend can
+// replay the whole leaderboard as it stood at a chosen instant (?at=…). This
+// section drives one such card per tab. It is independent of the Load Data
+// controls above: the card fetches only its own source.
+
+// Matches the datetime-local value shape ("YYYY-MM-DDTHH:MM", optional :SS).
+// The backend validates the same value again; this only avoids a pointless
+// round trip when the field is empty or a browser hands back something odd.
+const RE_AT_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+
+// Rows requested per table. The backend caps this at 1000.
+const AT_ROW_LIMIT = 200;
+
+// wspr.live reports bands as integer metres; mirror of wsprBandOrder in
+// wspr_rank.go so the Bands column can show names.
+const WSPR_METRES_NAME = {
+    '-1': 'LF', '0': 'MF', '1': '160m', '3': '80m', '5': '60m', '7': '40m',
+    '10': '30m', '13': '22m', '14': '20m', '18': '17m', '21': '15m',
+    '24': '12m', '28': '10m', '50': '6m', '70': '4m', '144': '2m',
+    '432': '70cm', '1296': '23cm',
+};
+
+const AT_SOURCES = {
+    psk:  { endpoint: '/api/stats/psk-rank',  render: renderPSKAt,  snapshotTime: j => j.fetched_at },
+    wspr: { endpoint: '/api/stats/wspr-rank', render: renderWSPRAt, snapshotTime: j => j.generated_at },
+    rbn:  { endpoint: '/api/stats/rbn',       render: renderRBNAt,  snapshotTime: j => j.fetched_at },
+};
+
+/** Format an offset in seconds as a human phrase relative to the request. */
+function fmtAtDrift(offsetSeconds) {
+    const s = Math.abs(offsetSeconds);
+    if (s < 60) return 'exact match';
+    const mins  = Math.round(s / 60);
+    const label = mins < 90 ? `${mins} min` : `${(mins / 60).toFixed(1)} h`;
+    return offsetSeconds < 0 ? `${label} earlier` : `${label} later`;
+}
+
+/** "2026-07-22T12:00:00Z" → "2026-07-22 12:00:00 UTC" */
+function fmtAtStamp(iso) {
+    return String(iso || '').replace('T', ' ').replace('Z', ' UTC');
+}
+
+/** Set one card's own status line. */
+function setAtStatus(src, msg, cls = '') {
+    const el = document.getElementById(`${src}-at-status`);
+    if (!el) return;
+    if (!msg) { el.classList.add('hidden'); el.textContent = ''; return; }
+    el.textContent = msg;
+    el.className = 'status-bar' + (cls ? ` ${cls}` : '');
+    el.classList.remove('hidden');
+}
+
+/** Bind one card's input and button, pre-filling the current UTC hour. */
+function bindAtCard(src) {
+    const btn = document.getElementById(`${src}-at-btn`);
+    const inp = document.getElementById(`${src}-at-input`);
+    if (!btn || !inp) return;
+
+    if (!inp.value) {
+        const now = new Date();
+        now.setUTCMinutes(0, 0, 0);
+        inp.value = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM, UTC
+    }
+    btn.addEventListener('click', () => loadAt(src));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') loadAt(src); });
+}
+
+function bindAtCards() {
+    Object.keys(AT_SOURCES).forEach(bindAtCard);
+}
+
+async function loadAt(src) {
+    const cfg = AT_SOURCES[src];
+    const inp = document.getElementById(`${src}-at-input`);
+    const btn = document.getElementById(`${src}-at-btn`);
+    const raw = (inp.value || '').trim();
+
+    if (!RE_AT_LOCAL.test(raw)) {
+        setAtStatus(src, 'Please choose a date and time.', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    setAtStatus(src, 'Loading snapshot…', 'loading');
+    try {
+        // The field is labelled UTC and the backend parses a bare timestamp as
+        // UTC, so the value is sent through unchanged.
+        const params = new URLSearchParams({ at: raw });
+        if (src !== 'psk') params.set('limit', String(AT_ROW_LIMIT));
+
+        const res  = await fetch(`${cfg.endpoint}?${params}`);
+        const json = await res.json();
+        if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+
+        state.atData[src] = json;
+        cfg.render(json);
+
+        const stamp = fmtAtStamp(cfg.snapshotTime(json));
+        document.getElementById(`${src}-at-drift`).textContent = `— ${stamp}`;
+        setAtStatus(src, `Snapshot ${stamp} — ${fmtAtDrift(json.offset_seconds)}`, 'success');
+    } catch (e) {
+        state.atData[src] = null;
+        clearAtCard(src);
+        setAtStatus(src, `Error: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function clearAtCard(src) {
+    const tables = document.getElementById(`${src}-at-tables`);
+    if (tables) tables.innerHTML = '';
+    const sel = document.getElementById(`${src}-at-selector`);
+    if (sel) sel.innerHTML = '';
+    const drift = document.getElementById(`${src}-at-drift`);
+    if (drift) drift.textContent = '';
+}
+
+/** Render a list of table specs into a card, or a placeholder when all empty. */
+function renderAtTables(src, specs, emptyMsg) {
+    const host = document.getElementById(`${src}-at-tables`);
+    host.innerHTML = '';
+    let rendered = 0;
+    for (const spec of specs) {
+        if (!Array.isArray(spec.rows) || spec.rows.length === 0) continue;
+        host.appendChild(buildRankTable(spec.title, spec.rows, spec.columns, spec.note));
+        rendered++;
+    }
+    if (rendered === 0) {
+        const p = document.createElement('div');
+        p.className = 'no-data';
+        p.textContent = emptyMsg;
+        host.appendChild(p);
+    }
+}
+
+// ── PSK point-in-time ─────────────────────────────────────────────────────
+
+function renderPSKAt(json) {
+    const bands = new Set();
+    Object.keys(json.report_result  || {}).forEach(b => bands.add(b));
+    Object.keys(json.country_result || {}).forEach(b => bands.add(b));
+    const sorted = [...bands].sort(pskBandSort);
+
+    if (!sorted.includes(state.pskAtBand)) {
+        state.pskAtBand = sorted.includes('All') ? 'All' : (sorted[0] || 'All');
+    }
+
+    buildBandSelector('psk-at-selector', sorted, state.pskAtBand, b => {
+        state.pskAtBand = b;
+        renderPSKAtTables(json);
+    });
+
+    renderPSKAtTables(json);
+}
+
+function pskAtColumns(valueLabel) {
+    return [
+        { label: '#',                  cls: 'rank',     text: (e, i) => String(i + 1) },
+        { label: 'Callsign',           cls: 'call',     text: e => e.callsign || '' },
+        { label: `${valueLabel} 24h`,  cls: 'num',      text: e => (e.day  || 0).toLocaleString() },
+        { label: `${valueLabel} 7d`,   cls: 'num',      text: e => (e.week || 0).toLocaleString() },
+        { label: 'Software',           cls: 'software', text: e => fmtSoftware(e.software) },
+    ];
+}
+
+function fmtSoftware(list) {
+    return (list || []).map(s => s.version ? `${s.name} ${s.version}` : s.name).join(', ');
+}
+
+function renderPSKAtTables(json) {
+    const band = state.pskAtBand;
+    renderAtTables('psk', [
+        {
+            title:   `Top Monitors by Reports — ${band}`,
+            rows:    (json.report_result  || {})[band],
+            columns: pskAtColumns('Reports'),
+        },
+        {
+            title:   `Top Monitors by Countries — ${band}`,
+            rows:    (json.country_result || {})[band],
+            columns: pskAtColumns('Countries'),
+        },
+    ], `No entries for ${band} in this snapshot.`);
+}
+
+// ── WSPR point-in-time ────────────────────────────────────────────────────
+
+const WSPR_AT_WINDOWS = [
+    ['rolling_24h', 'Rolling 24h'],
+    ['yesterday',   'Yesterday'],
+    ['today',       'Today'],
+];
+
+function renderWSPRAt(json) {
+    const present = WSPR_AT_WINDOWS.filter(([key]) => json[key]).map(([key]) => key);
+    if (!present.includes(state.wsprAtWindow)) state.wsprAtWindow = present[0] || 'rolling_24h';
+
+    const labels = present.map(k => (WSPR_AT_WINDOWS.find(([key]) => key === k) || [k, k])[1]);
+    const activeLabel = labels[present.indexOf(state.wsprAtWindow)];
+
+    buildBandSelector('wspr-at-selector', labels, activeLabel, label => {
+        state.wsprAtWindow = present[labels.indexOf(label)];
+        renderWSPRAtTables(json);
+    });
+
+    renderWSPRAtTables(json);
+}
+
+function fmtWSPRBands(row) {
+    const metres  = row.bands   || [];
+    const uniques = row.uniques || [];
+    return metres
+        .map((m, i) => `${WSPR_METRES_NAME[String(m)] || `${m}m`} ${(uniques[i] || 0).toLocaleString()}`)
+        .join(', ');
+}
+
+function renderWSPRAtTables(json) {
+    const key = state.wsprAtWindow;
+    const win = json[key] || {};
+    const label = (WSPR_AT_WINDOWS.find(([k]) => k === key) || [key, key])[1];
+
+    let note = '';
+    if (win.total_rows && win.data && win.total_rows > win.data.length) {
+        note = `Showing top ${win.data.length} of ${win.total_rows.toLocaleString()} receivers.`;
+    }
+
+    renderAtTables('wspr', [{
+        title: `Receivers — ${label}`,
+        rows:  win.data,
+        note,
+        columns: [
+            { label: '#',        cls: 'rank', text: (r, i) => String(i + 1) },
+            { label: 'Callsign', cls: 'call', text: r => r.rx_sign || '' },
+            { label: 'Locator',  cls: 'call', text: r => r.rx_loc  || '' },
+            { label: 'Unique',   cls: 'num',  text: r => (r.unique || 0).toLocaleString() },
+            { label: 'Raw',      cls: 'num',  text: r => (r.raw    || 0).toLocaleString() },
+            { label: 'Dupe',     cls: 'num',  text: r => (r.dupe   || 0).toLocaleString() },
+            { label: 'Bands',    cls: 'software', text: fmtWSPRBands },
+        ],
+    }], `No receiver data in the ${label} window of this snapshot.`);
+}
+
+// ── RBN point-in-time ─────────────────────────────────────────────────────
+
+function renderRBNAt(json) {
+    const noteFor = (shown, total) =>
+        total > shown ? `Showing top ${shown} of ${total.toLocaleString()} skimmers.` : '';
+
+    renderAtTables('rbn', [
+        {
+            title: 'Skimmers by Spot Count',
+            rows:  json.stats_entries,
+            note:  noteFor((json.stats_entries || []).length, json.total_stats_entries || 0),
+            columns: [
+                { label: '#',        cls: 'rank', text: (e, i) => String(i + 1) },
+                { label: 'Callsign', cls: 'call', text: e => e.callsign || '' },
+                { label: 'Spots',    cls: 'num',  text: e => (e.spot_count || 0).toLocaleString() },
+            ],
+        },
+        {
+            title: 'Frequency Skew (largest first)',
+            rows:  json.skew_entries,
+            note:  noteFor((json.skew_entries || []).length, json.total_skew_entries || 0),
+            columns: [
+                { label: '#',          cls: 'rank', text: (e, i) => String(i + 1) },
+                { label: 'Callsign',   cls: 'call', text: e => e.callsign || '' },
+                { label: 'Skew (Hz)',  cls: 'num',  text: e => (e.skew ?? 0).toFixed(2) },
+                { label: 'Spots',      cls: 'num',  text: e => (e.spots || 0).toLocaleString() },
+                { label: 'Correction', cls: 'num',  text: e => (e.correction_factor ?? 0).toFixed(6) },
+            ],
+        },
+    ], 'No skimmer data in this snapshot.');
+}
+
+// ── Shared table builder ──────────────────────────────────────────────────
+
+/**
+ * Build one ranking table from a column spec. Every cell is filled via
+ * textContent — callsigns, locators and software strings originate from
+ * third-party sources and are never treated as markup.
+ */
+function buildRankTable(title, rows, columns, note) {
+    const wrap = document.createElement('div');
+    wrap.className = 'rank-table-wrap';
+
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    wrap.appendChild(h3);
+
+    if (note) {
+        const p = document.createElement('div');
+        p.className = 'rank-table-note';
+        p.textContent = note;
+        wrap.appendChild(p);
+    }
+
+    const scroll = document.createElement('div');
+    scroll.className = 'rank-table-scroll';
+
+    const table = document.createElement('table');
+    table.className = 'rank-table';
+
+    const thead = document.createElement('thead');
+    const hrow  = document.createElement('tr');
+    columns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col.label;
+        if (col.cls === 'num') th.style.textAlign = 'right';
+        hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const station = (state.callsign || state.stationCallsign || '').toUpperCase();
+
+    rows.forEach((row, i) => {
+        const tr = document.createElement('tr');
+        const call = (row.callsign || row.rx_sign || '').toUpperCase();
+        if (station && call === station) tr.classList.add('is-station');
+        if ((row.software || []).some(s => (s.name || '').startsWith('UberSDR'))) {
+            tr.classList.add('is-ubersdr');
+        }
+        columns.forEach(col => {
+            const td = document.createElement('td');
+            td.className = col.cls;
+            td.textContent = col.text(row, i);
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+    return wrap;
+}
+
+
 function buildBandSelector(containerId, bands, activeBand, onChange) {
     const el = document.getElementById(containerId);
     el.innerHTML = '';
@@ -1129,29 +1593,50 @@ function renderPSKRankChart(data, table, bands) {
     const chartId    = table === 'reports' ? 'psk-reports-chart' : 'psk-countries-chart';
     const chartKey   = table === 'reports' ? 'pskReports' : 'pskCountries';
 
-    const labels = [];
-    const ranks  = [];
-    const days   = [];
+    // Labels come from every returned snapshot, not just the ones holding a
+    // match: with two stations a snapshot may carry either or both, and the
+    // series must stay aligned on one time axis. Missing values become null.
+    const labels    = [];
+    const isoLabels = [];
+    const ranks     = [];
+    const days      = [];
+    const ranks2    = [];
+    const days2     = [];
+
+    const pick = (cr) => {
+        if (!cr) return null;
+        const src = table === 'reports' ? cr.reports : cr.countries;
+        return src?.[activeBand] ?? null;
+    };
 
     for (const snap of data.snapshots) {
-        const cr = snap.callsign_rank;
-        if (!cr) continue;
-        const src = table === 'reports' ? cr.reports : cr.countries;
-        const entry = src?.[activeBand];
         labels.push(fmtTime(snap.fetched_at));
-        ranks.push(entry?.rank ?? null);
-        days.push(entry?.day  ?? null);
-    }
+        isoLabels.push(snap.fetched_at);
 
-    const isoLabels = data.snapshots
-        .filter(snap => snap.callsign_rank)
-        .map(snap => snap.fetched_at);
+        const a = pick(snap.callsign_rank);
+        ranks.push(a?.rank ?? null);
+        days.push(a?.day ?? null);
+
+        const b = pick(snap.callsign_rank2);
+        ranks2.push(b?.rank ?? null);
+        days2.push(b?.day ?? null);
+    }
 
     const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     const datasets = [
-        { label: 'Rank',      data: ranks, borderColor: PALETTE[3], backgroundColor: PALETTE[3]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'yRank' },
-        { label: 'Day count', data: days,  borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'22', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'yCount' },
+        cmpSeries(seriesLabel('Rank', state.callsign), ranks, CMP_PRIMARY_R,
+            { fill: !comparing(), yAxisID: 'yRank' }),
+        cmpSeries(seriesLabel('Day count', state.callsign), days, CMP_PRIMARY,
+            { yAxisID: 'yCount' }),
     ];
+    if (comparing()) {
+        datasets.push(
+            cmpSeries(seriesLabel('Rank', state.callsign2), ranks2, CMP_SECOND_R,
+                { yAxisID: 'yRank', borderDash: [6, 3] }),
+            cmpSeries(seriesLabel('Day count', state.callsign2), days2, CMP_SECOND,
+                { yAxisID: 'yCount', borderDash: [6, 3] }),
+        );
+    }
     if (swEnabled) {
         const lookup = buildSWLookup(state.swData);
         datasets.push(makeKIndexDataset(isoLabels, lookup));
@@ -1284,7 +1769,7 @@ function renderRBNAwards(data) {
         return;
     }
 
-    renderAwards('rbn-awards', [{ rank, text: 'Spot count', priority: 0 }]);
+    renderAwards('rbn-awards', [{ rank, text: 'Spot count', priority: 0 }], comparing() ? state.callsign : '');
 }
 
 /**
@@ -1301,25 +1786,28 @@ function renderRBNSummary(data) {
     const pill = (key, val, extraClass = '') =>
         `<span class="summary-pill"><span class="pill-key">${key}</span><span class="pill-val${extraClass ? ' ' + extraClass : ''}">${val}</span></span>`;
 
-    if (cs) {
-        const cd = latest?.callsign_data;
-        if (!cd) { el.classList.add('hidden'); return; }
+    // One station's pills, or '' when it has neither spots nor a rank.
+    const stationHTML = (cd) => {
+        if (!cd) return '';
+        const spotCount = cd.statistics?.spot_count;
+        if (!spotCount && !cd.stats_rank) return '';
 
         let html = '<span class="summary-group">';
-        const spotCount = cd.statistics?.spot_count;
         if (spotCount != null) html += pill('Spots', spotCount.toLocaleString());
         if (cd.stats_rank > 0) html += pill('Rank', `#${cd.stats_rank}`, 'pill-rank');
-
-        // Latest skew value
-        const skewEntry = cd.skew;
-        if (skewEntry?.skew != null) {
-            const skewVal = skewEntry.skew;
-            const skewStr = (skewVal >= 0 ? '+' : '') + skewVal.toFixed(2) + ' Hz';
-            html += pill('Skew', skewStr);
+        if (cd.skew?.skew != null) {
+            const skewVal = cd.skew.skew;
+            html += pill('Skew', (skewVal >= 0 ? '+' : '') + skewVal.toFixed(2) + ' Hz');
         }
-        html += '</span>';
+        return html + '</span>';
+    };
 
-        if (!spotCount && !cd.stats_rank) { el.classList.add('hidden'); return; }
+    if (cs) {
+        const html = joinSummaries([
+            { callsign: cs,              html: stationHTML(latest?.callsign_data) },
+            { callsign: state.callsign2, html: stationHTML(latest?.callsign_data2) },
+        ]);
+        if (!html) { el.classList.add('hidden'); return; }
         el.innerHTML = html;
         el.classList.remove('hidden');
     } else {
@@ -1348,25 +1836,32 @@ function renderRBN(data) {
 
     const cs = state.callsign;
 
-    const labels     = [];
-    const spotCounts = [];
-    const ranks      = [];
-    const skewLabels = [];
-    const skewVals   = [];
+    const labels      = [];
+    const isoLabels   = [];
+    const spotCounts  = [];
+    const ranks       = [];
+    const spotCounts2 = [];
+    const ranks2      = [];
 
     for (const snap of data.snapshots) {
         const label = fmtDate(snap.fetched_at);
 
         if (cs) {
-            // Callsign mode
-            const cd = snap.callsign_data;
-            if (!cd) continue;
+            // Callsign mode. A day is kept when either station reported, so
+            // both series stay on the same axis; the absent one gets a null.
+            const cd  = snap.callsign_data;
+            const cd2 = snap.callsign_data2;
+            if (!cd && !cd2) continue;
             labels.push(label);
-            spotCounts.push(cd.statistics?.spot_count ?? null);
-            ranks.push(cd.stats_rank > 0 ? cd.stats_rank : null);
+            isoLabels.push(snap.fetched_at);
+            spotCounts.push(cd?.statistics?.spot_count ?? null);
+            ranks.push(cd?.stats_rank > 0 ? cd.stats_rank : null);
+            spotCounts2.push(cd2?.statistics?.spot_count ?? null);
+            ranks2.push(cd2?.stats_rank > 0 ? cd2.stats_rank : null);
         } else {
             // Full mode: sum all spot counts
             labels.push(label);
+            isoLabels.push(snap.fetched_at);
             const total = (snap.stats_entries || []).reduce((s, e) => s + (e.spot_count || 0), 0);
             spotCounts.push(total);
             ranks.push(null);
@@ -1375,21 +1870,14 @@ function renderRBN(data) {
 
     // Spot count chart
     {
-        const datasets = [{
-            label: cs ? `${cs} spot count` : 'Total spot count',
-            data: spotCounts,
-            borderColor: PALETTE[0],
-            backgroundColor: PALETTE[0]+'33',
-            tension: 0.3,
-            fill: true,
-            pointRadius: 4,
-            yAxisID: 'y',
-        }];
-
-        // Build ISO timestamp array parallel to labels for SW lookup
-        const isoLabels = data.snapshots
-            .filter(snap => cs ? !!snap.callsign_data : true)
-            .map(snap => snap.fetched_at);
+        const datasets = [
+            cmpSeries(cs ? seriesLabel('spot count', cs) : 'Total spot count',
+                spotCounts, CMP_PRIMARY, { fill: !comparing(), pointRadius: 4, yAxisID: 'y' }),
+        ];
+        if (comparing()) {
+            datasets.push(cmpSeries(seriesLabel('spot count', state.callsign2), spotCounts2,
+                CMP_SECOND, { pointRadius: 4, yAxisID: 'y', borderDash: [6, 3] }));
+        }
 
         const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
         if (swEnabled) {
@@ -1418,28 +1906,23 @@ function renderRBN(data) {
                 },
             },
         });
-        document.getElementById('rbn-spots-label').textContent = cs ? `— ${cs}` : '';
+        document.getElementById('rbn-spots-label').textContent = callsignHeading();
     }
 
     // Rank chart (callsign mode only)
     const rankCard = document.getElementById('rbn-rank-chart').closest('.chart-card');
     if (cs) {
         rankCard.classList.remove('hidden');
-        document.getElementById('rbn-rank-label').textContent = `— ${cs}`;
-        const isoLabels = data.snapshots
-            .filter(snap => !!snap.callsign_data)
-            .map(snap => snap.fetched_at);
+        document.getElementById('rbn-rank-label').textContent = callsignHeading();
         const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
-        const datasets = [{
-            label: 'Rank',
-            data: ranks,
-            borderColor: PALETTE[3],
-            backgroundColor: PALETTE[3]+'33',
-            tension: 0.3,
-            fill: true,
-            pointRadius: 4,
-            yAxisID: 'y',
-        }];
+        const datasets = [
+            cmpSeries(seriesLabel('Rank', cs), ranks, CMP_PRIMARY_R,
+                { fill: !comparing(), pointRadius: 4, yAxisID: 'y' }),
+        ];
+        if (comparing()) {
+            datasets.push(cmpSeries(seriesLabel('Rank', state.callsign2), ranks2, CMP_SECOND_R,
+                { pointRadius: 4, yAxisID: 'y', borderDash: [6, 3] }));
+        }
         if (swEnabled) {
             const lookup = buildSWLookup(state.swData);
             datasets.push(makeSFIDataset(isoLabels, lookup, 'ySFI'));
@@ -1479,23 +1962,29 @@ function renderRBN(data) {
         // Callsign mode: skew over time as a line chart
         const skewLabels = [];
         const skewVals   = [];
+        const skewVals2  = [];
+        const skewOf = (cd) => {
+            const e = cd?.skew;
+            return (e && typeof e.skew === 'number') ? e.skew : null;
+        };
         for (const snap of data.snapshots) {
-            const skewEntry = snap.callsign_data?.skew;
-            if (skewEntry == null) continue;
+            const a = skewOf(snap.callsign_data);
+            const b = skewOf(snap.callsign_data2);
+            if (a == null && b == null) continue;
             skewLabels.push(fmtDate(snap.fetched_at));
-            skewVals.push(typeof skewEntry.skew === 'number' ? skewEntry.skew : null);
+            skewVals.push(a);
+            skewVals2.push(b);
         }
         if (skewLabels.length) {
             skewCard.classList.remove('hidden');
-            const datasets = [{
-                label: `${cs} skew (Hz)`,
-                data: skewVals,
-                borderColor: PALETTE[4],
-                backgroundColor: PALETTE[4]+'33',
-                tension: 0.3,
-                fill: true,
-                pointRadius: 4,
-            }];
+            const datasets = [
+                cmpSeries(seriesLabel('skew (Hz)', cs), skewVals, PALETTE[4],
+                    { fill: !comparing(), pointRadius: 4 }),
+            ];
+            if (comparing()) {
+                datasets.push(cmpSeries(seriesLabel('skew (Hz)', state.callsign2), skewVals2,
+                    PALETTE[5], { pointRadius: 4, borderDash: [6, 3] }));
+            }
             state.charts.rbnSkew = new Chart(ctx, makeChartConfig(skewLabels, datasets, 'Skew (Hz)'));
         } else {
             skewCard.classList.add('hidden');

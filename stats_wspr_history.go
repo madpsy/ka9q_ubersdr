@@ -9,11 +9,17 @@ import (
 
 // stats_wspr_history.go — public GET /api/stats/wspr-rank history endpoint.
 //
-// Returns a time-series of WSPRRankResponse snapshots from the on-disk JSONL
-// store.  Supports fixed period shorthands and explicit date ranges, with an
-// optional callsign filter.
+// Two mutually exclusive modes:
 //
-// Query parameters:
+// 1. History (default) — a time-series of WSPRRankResponse snapshots over a
+//    date range, with an optional callsign filter.
+//
+// 2. Point-in-time (?at=…) — the complete leaderboard state as it stood at a
+//    given instant, reconstructed from the snapshot nearest that time. Each
+//    stored snapshot holds all three windows in full rank order, so this is an
+//    exact replay of what wspr.live returned for that fetch.
+//
+// Query parameters — history mode:
 //
 //	period    — "24h" | "7d" | "30d"
 //	from_date — YYYY-MM-DD  (alternative to period)
@@ -21,10 +27,124 @@ import (
 //	callsign  — case-insensitive; when set, only rank data is returned per
 //	            snapshot (full data arrays are omitted) and snapshots where
 //	            the callsign is not found are skipped.
+//	callsign2 — optional second station to compare against callsign. Its rank
+//	            data is returned alongside as callsign_rank2, and a snapshot is
+//	            kept when either station appears in it.
 //
-// Maximum range: 30 days per request.
+// Query parameters — point-in-time mode (see stats_at.go):
+//
+//	at        — the instant of interest, UTC. The snapshot nearest that time
+//	            (within ±wsprAtSearchWindow) is returned with its drift.
+//	window    — "rolling_24h" | "yesterday" | "today" | "all" (default: all)
+//	limit     — rows per window, 1…1000 (default 100)
+//	callsign  — rejected; the response is the whole leaderboard by definition.
+//
+// Maximum range: 30 days per request (history mode).
 // Authentication: none (public endpoint).
 // Rate limiting: shared FFTRateLimiter (same as decoder spots).
+
+// ── Point-in-time (?at=) ──────────────────────────────────────────────────
+
+// wsprAtWindow is one window inside a point-in-time response: the stored
+// leaderboard, truncated to the requested row limit.
+type wsprAtWindow struct {
+	FetchedAt string        `json:"fetched_at"`
+	FetchedMs int64         `json:"fetched_ms"`
+	Rows      int           `json:"rows"`       // row count as reported by wspr.live
+	TotalRows int           `json:"total_rows"` // rows stored in this snapshot, before the limit
+	Data      []WSPRRankRow `json:"data"`
+	Error     string        `json:"error,omitempty"`
+}
+
+// wsprAtResponse is the point-in-time (?at=) response body.
+type wsprAtResponse struct {
+	statsAtCommon
+	GeneratedAt string        `json:"generated_at"`
+	Rolling24h  *wsprAtWindow `json:"rolling_24h,omitempty"`
+	Yesterday   *wsprAtWindow `json:"yesterday,omitempty"`
+	Today       *wsprAtWindow `json:"today,omitempty"`
+}
+
+// buildWSPRAtWindow converts a stored window into its response form.
+func buildWSPRAtWindow(win WSPRRankWindow, limit int) *wsprAtWindow {
+	data, total := truncateAt(win.Data, limit)
+	return &wsprAtWindow{
+		FetchedAt: formatStatsAtTime(win.FetchedAt),
+		FetchedMs: win.FetchedMs,
+		Rows:      win.Rows,
+		TotalRows: total,
+		Data:      data,
+		Error:     win.Error,
+	}
+}
+
+// handleWSPRRankAt serves the ?at= point-in-time branch of GET
+// /api/stats/wspr-rank. The caller has already handled bans, rate limiting and
+// the nil-sl check.
+//
+// A WSPR snapshot holds every receiver wspr.live returned for each of the
+// three windows — thousands of rows — so the response is capped by ?limit=
+// (default 100, max 1000). The rows are stored in rank order, so truncation
+// yields the top N and total_rows reports what was left out.
+func handleWSPRRankAt(w http.ResponseWriter, r *http.Request, sl *StatsLogger, rawAt string) {
+	q := r.URL.Query()
+
+	if rejectCallsignWithAt(w, r) {
+		return
+	}
+
+	at, errMsg := parseStatsAtParam(rawAt)
+	if errMsg != "" {
+		writeStatsError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	limit, errMsg := parseStatsAtLimit(strings.TrimSpace(q.Get("limit")))
+	if errMsg != "" {
+		writeStatsError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	winName := strings.ToLower(strings.TrimSpace(q.Get("window")))
+	switch winName {
+	case "", "all":
+		winName = "all"
+	case "rolling_24h", "yesterday", "today":
+		// valid
+	default:
+		writeStatsError(w, http.StatusBadRequest,
+			"invalid window — accepted values: rolling_24h, yesterday, today, all")
+		return
+	}
+
+	resp, err := sl.ReadWSPRAt(at, wsprAtSearchWindow)
+	if err != nil {
+		writeStatsError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if resp == nil {
+		writeStatsAtNotFound(w, "WSPR", at, wsprAtSearchWindow)
+		return
+	}
+
+	out := wsprAtResponse{
+		statsAtCommon: newStatsAtCommon(at, resp.GeneratedAt, wsprAtSearchWindow, limit),
+		GeneratedAt:   formatStatsAtTime(resp.GeneratedAt),
+	}
+	if winName == "all" || winName == "rolling_24h" {
+		out.Rolling24h = buildWSPRAtWindow(resp.Rolling24h, limit)
+	}
+	if winName == "all" || winName == "yesterday" {
+		out.Yesterday = buildWSPRAtWindow(resp.Yesterday, limit)
+	}
+	if winName == "all" || winName == "today" {
+		out.Today = buildWSPRAtWindow(resp.Today, limit)
+	}
+
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		log.Printf("[StatsWSPR] encode at-response error: %v", err)
+	}
+}
 
 // wsprHistorySnapshot is one entry in the history response.
 // When callsign is set, only the rank fields are populated.
@@ -38,6 +158,27 @@ type wsprHistorySnapshot struct {
 
 	// Callsign-filtered rank data — only present when callsign filter is active.
 	CallsignRank *wsprCallsignRank `json:"callsign_rank,omitempty"`
+
+	// Second callsign's rank data — only present when callsign2 is set and that
+	// station appears in this snapshot.
+	CallsignRank2 *wsprCallsignRank `json:"callsign_rank2,omitempty"`
+}
+
+// wsprRankFor returns the rank of callsign across the three windows, or nil
+// when it appears in none of them.
+func wsprRankFor(resp WSPRRankResponse, callsign string) *wsprCallsignRank {
+	if callsign == "" {
+		return nil
+	}
+	cr := &wsprCallsignRank{
+		Rolling24h: extractWSPRWindowRank(resp.Rolling24h, callsign),
+		Yesterday:  extractWSPRWindowRank(resp.Yesterday, callsign),
+		Today:      extractWSPRWindowRank(resp.Today, callsign),
+	}
+	if cr.Rolling24h == nil && cr.Yesterday == nil && cr.Today == nil {
+		return nil
+	}
+	return cr
 }
 
 // wsprCallsignRank holds the rank of a single callsign across the three windows.
@@ -174,6 +315,13 @@ func handleWSPRRankHistory(w http.ResponseWriter, r *http.Request, sl *StatsLogg
 		return
 	}
 
+	// Point-in-time mode takes precedence over the date-range parameters, which
+	// it does not use at all.
+	if rawAt := strings.TrimSpace(r.URL.Query().Get("at")); rawAt != "" {
+		handleWSPRRankAt(w, r, sl, rawAt)
+		return
+	}
+
 	params, errMsg := ParseStatsQueryParams(map[string][]string(r.URL.Query()))
 	if errMsg != "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -195,16 +343,14 @@ func handleWSPRRankHistory(w http.ResponseWriter, r *http.Request, sl *StatsLogg
 		}
 
 		if params.Callsign != "" {
-			// Callsign filter: return only rank data; skip snapshots with no match.
-			cr := &wsprCallsignRank{
-				Rolling24h: extractWSPRWindowRank(resp.Rolling24h, params.Callsign),
-				Yesterday:  extractWSPRWindowRank(resp.Yesterday, params.Callsign),
-				Today:      extractWSPRWindowRank(resp.Today, params.Callsign),
+			// Callsign filter: return rank data for one or both stations. The
+			// snapshot is kept when either is present, so a comparison keeps
+			// its time axis aligned even where one station is missing.
+			snap.CallsignRank = wsprRankFor(resp, params.Callsign)
+			snap.CallsignRank2 = wsprRankFor(resp, params.Callsign2)
+			if snap.CallsignRank == nil && snap.CallsignRank2 == nil {
+				continue // neither callsign is in this snapshot
 			}
-			if cr.Rolling24h == nil && cr.Yesterday == nil && cr.Today == nil {
-				continue // callsign not in this snapshot
-			}
-			snap.CallsignRank = cr
 		} else {
 			// No filter: return full window data.
 			r24 := resp.Rolling24h
@@ -226,6 +372,9 @@ func handleWSPRRankHistory(w http.ResponseWriter, r *http.Request, sl *StatsLogg
 	}
 	if params.Callsign != "" {
 		out["callsign"] = params.Callsign
+	}
+	if params.Callsign2 != "" {
+		out["callsign2"] = params.Callsign2
 	}
 
 	if err := json.NewEncoder(w).Encode(out); err != nil {

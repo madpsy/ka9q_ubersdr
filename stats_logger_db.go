@@ -171,6 +171,42 @@ func (sl *StatsLogger) readWSPRFromDB(p StatsQueryParams) ([]WSPRRankResponse, e
 	return sl.loadWSPRSnapshots(`ts >= ? AND ts < ?`, from, to)
 }
 
+// readWSPRAtFromDB returns the snapshot whose ts is closest to target, provided
+// it falls within ±window. Returns (nil, nil) when no snapshot qualifies.
+//
+// Like the PSK equivalent, the candidate scan is an abs() sort over the
+// envelope table — three rows per hourly fetch, so a few thousand at the
+// default retention.
+func (sl *StatsLogger) readWSPRAtFromDB(target time.Time, window time.Duration) (*WSPRRankResponse, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, nil
+	}
+	want := target.UTC().Unix()
+	slack := int64(window / time.Second)
+
+	var ts sql.NullInt64
+	err := sl.readDB.QueryRow(`
+		SELECT ts FROM wspr_rank_windows
+		WHERE ts >= ? AND ts <= ?
+		ORDER BY abs(ts - ?)
+		LIMIT 1`, want-slack, want+slack, want).Scan(&ts)
+	if err == sql.ErrNoRows || (err == nil && !ts.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("nearest wspr snapshot: %w", err)
+	}
+
+	out, err := sl.loadWSPRSnapshots(`ts = ?`, ts.Int64)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
+}
+
 // loadLatestWSPRFromDB returns the most recent snapshot, or nil when the
 // tables are empty or no DB is attached.
 func (sl *StatsLogger) loadLatestWSPRFromDB() *WSPRRankResponse {
@@ -403,6 +439,42 @@ func (sl *StatsLogger) readPSKFromDB(p StatsQueryParams) ([]PSKRankData, error) 
 	}
 	from, to := rangeBounds(p)
 	return sl.loadPSKSnapshots(`ts >= ? AND ts < ?`, from, to)
+}
+
+// readPSKAtFromDB returns the snapshot whose ts is closest to target, provided
+// it falls within ±window. Returns (nil, nil) when no snapshot qualifies.
+//
+// The candidate scan is an unindexed abs() sort over psk_rank_snapshots, which
+// holds one row per hourly fetch (~720 rows at the default 30-day retention),
+// so the full scan is cheaper than the index lookups it would replace.
+func (sl *StatsLogger) readPSKAtFromDB(target time.Time, window time.Duration) (*PSKRankData, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, nil
+	}
+	want := target.UTC().Unix()
+	slack := int64(window / time.Second)
+
+	var ts sql.NullInt64
+	err := sl.readDB.QueryRow(`
+		SELECT ts FROM psk_rank_snapshots
+		WHERE ts >= ? AND ts <= ?
+		ORDER BY abs(ts - ?)
+		LIMIT 1`, want-slack, want+slack, want).Scan(&ts)
+	if err == sql.ErrNoRows || (err == nil && !ts.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("nearest psk snapshot: %w", err)
+	}
+
+	out, err := sl.loadPSKSnapshots(`ts = ?`, ts.Int64)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
 }
 
 // loadLatestPSKFromDB returns the most recent snapshot, or nil when the tables
@@ -649,6 +721,50 @@ type rbnDaySnapshot struct {
 	day     int64 // UTC midnight, used only for ordering
 	rec     RBNHistoryRecord
 	haveAny bool
+}
+
+// readRBNAtFromDB returns the day record whose fetch timestamp is closest to
+// target, provided it falls within ±window. Returns (nil, nil) when no
+// snapshot qualifies.
+//
+// RBN is fetched once per UTC day, so the match is coarse by construction —
+// the caller is expected to surface the drift rather than imply the data is
+// hour-accurate. The candidate timestamps come from both tables because a day
+// may legitimately have skew rows, stats rows, or both.
+func (sl *StatsLogger) readRBNAtFromDB(target time.Time, window time.Duration) (*RBNHistoryRecord, error) {
+	if sl == nil || sl.readDB == nil {
+		return nil, nil
+	}
+	want := target.UTC().Unix()
+	slack := int64(window / time.Second)
+
+	var ts sql.NullInt64
+	err := sl.readDB.QueryRow(`
+		SELECT ts FROM (
+			SELECT ts FROM rbn_skew  WHERE ts >= ? AND ts <= ?
+			UNION
+			SELECT ts FROM rbn_stats WHERE ts >= ? AND ts <= ?
+		)
+		ORDER BY abs(ts - ?)
+		LIMIT 1`, want-slack, want+slack, want-slack, want+slack, want).Scan(&ts)
+	if err == sql.ErrNoRows || (err == nil && !ts.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("nearest rbn snapshot: %w", err)
+	}
+
+	// Reuse the day-merging read path for the UTC day the match falls in.
+	day := time.Unix(ts.Int64, 0).UTC()
+	day = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
+	recs, err := sl.readRBNFromDB(StatsQueryParams{FromDate: day, ToDate: day})
+	if err != nil {
+		return nil, err
+	}
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	return &recs[0], nil
 }
 
 // readRBNFromDB returns one merged skew+statistics record per UTC day in p's

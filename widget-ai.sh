@@ -28,6 +28,13 @@ UBERSDR_DIR="${UBERSDR_DIR:-$HOME/ubersdr}"
 BASE="${BASE:-http://localhost:8080}"
 SKILL_DIR="$HOME/.claude/skills/create-widget"
 
+# The widget workflow is almost entirely piped curl/jq commands, which the
+# per-command permission matcher can't allowlist cleanly — so by default we run
+# Claude in a no-prompt mode. This is an owner-operated tool in a throwaway dir
+# talking to your own admin API. Set WIDGET_AI_PERMISSION_MODE=default (or
+# acceptEdits) to restore normal prompting.
+PERM_MODE="${WIDGET_AI_PERMISSION_MODE:-bypassPermissions}"
+
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
@@ -150,4 +157,5 @@ cat <<EOF
 EOF
 
 # Not exec'd, so the cleanup trap still fires when Claude exits.
-claude "$@" || true
+# --permission-mode avoids a prompt on every piped curl/jq command (see PERM_MODE).
+claude --permission-mode "$PERM_MODE" "$@" || true

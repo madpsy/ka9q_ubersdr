@@ -79,12 +79,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Ephemeral working dir: reference widgets + scratch + session permissions.
+# 3. Ephemeral working dir: reference widgets + scratch space.
 # ---------------------------------------------------------------------------
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/widget-ai.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT INT TERM
-mkdir -p "$WORK/widgets" "$WORK/widgets-custom" "$WORK/.claude"
+mkdir -p "$WORK/widgets" "$WORK/widgets-custom"
 
 # Reference widgets are helpful for CREATE; editing via the API works without
 # them, so this is best-effort.
@@ -115,30 +115,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Permission allowlist so the API workflow doesn't prompt on every command.
-# ---------------------------------------------------------------------------
-cat > "$WORK/.claude/settings.json" <<JSON
-{
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": [
-      "Bash(curl:*)",
-      "Bash(jq:*)",
-      "Bash(awk:*)",
-      "Bash(cat:*)",
-      "Bash(ls:*)",
-      "Bash(echo:*)",
-      "Bash($UBERSDR_DIR/get-password.sh)",
-      "Read",
-      "Write",
-      "Edit"
-    ]
-  }
-}
-JSON
-
-# ---------------------------------------------------------------------------
-# 6. Hand over to an interactive Claude session in the working dir.
+# 5. Hand over to an interactive Claude session in the working dir.
+#    Permissions are handled by --permission-mode (see PERM_MODE), not a
+#    settings.json allowlist — the piped curl/jq recipes can't be matched
+#    cleanly by per-command rules.
 # ---------------------------------------------------------------------------
 cd "$WORK"
 cat <<EOF

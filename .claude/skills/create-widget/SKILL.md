@@ -1390,6 +1390,15 @@ public is an extra, optional step for sharing with the community.
 
 ### Create a new widget
 
+**Every new widget needs a `name` and a `description` — establish them before
+calling `create`, don't invent silent placeholders.** Propose a short, specific
+`name` (e.g. *"UTC Sunrise Clock"*) and a one-line `description` derived from what
+the user asked for, and confirm them in a sentence — *"I'll call it 'UTC Sunrise
+Clock' — a widget showing the next UTC sunrise. OK?"* — before submitting. Only
+stop to ask outright if the request is too vague to name. The `name` is what the
+user (and, if public, the whole community) sees in the widget list, so make it
+descriptive, not `my_thing`.
+
 ```bash
 PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
 BASE="http://localhost:8080"

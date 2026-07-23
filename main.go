@@ -2414,6 +2414,8 @@ func main() {
 	if cwskimmerConfig != nil {
 		notifManager.SetCWSkimmerCallsign(cwskimmerConfig.Callsign)
 	}
+	// Wire the CW skimmer config so /beacons can gate on it being enabled.
+	notifManager.SetCWSkimmerConfig(cwskimmerConfig)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
 	// Wire admin handler into instance reporter so addon proxy names are always read
 	// from the live, authoritative source (avoids pointer-divergence after admin UI edits).

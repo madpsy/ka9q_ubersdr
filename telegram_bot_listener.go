@@ -83,7 +83,8 @@ type TelegramBotListener struct {
 	config           *Config                    // nil until wired; used by /info
 	instanceReporter *InstanceReporter          // nil until wired; used by /info (public URL)
 	ipBanManager     *IPBanManager              // nil until wired; used by /banned
-	readDB           *sql.DB                    // nil until wired; used by /stats (session activity)
+	readDB           *sql.DB                    // nil until wired; used by /stats (session activity), /beacons (beacon spots)
+	cwSkimmerConfig  *CWSkimmerConfig           // nil if CW skimmer not configured; used by /beacons
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -882,6 +883,8 @@ type TelegramListenerRegistry struct {
 	config            *Config                    // nil until wired; used by /info
 	instanceReporter  *InstanceReporter          // nil until wired; used by /info (public URL)
 	ipBanManager      *IPBanManager              // nil until wired; used by /banned
+	readDB            *sql.DB                    // nil until wired; used by /stats and /beacons
+	cwSkimmerConfig   *CWSkimmerConfig           // nil if CW skimmer not configured; used by /beacons
 	receiverCallsign  string                     // from config.Decoder.ReceiverCallsign
 	cwSkimmerCallsign string                     // from cwskimmerConfig.Callsign
 }
@@ -1061,8 +1064,20 @@ func (r *TelegramListenerRegistry) SetChatManager(h *ChatManager) {
 func (r *TelegramListenerRegistry) SetReadDB(db *sql.DB) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.readDB = db
 	for _, l := range r.listeners {
 		l.readDB = db
+	}
+}
+
+// SetCWSkimmerConfig wires the CW skimmer config into all current and future
+// listeners so /beacons can tell whether the skimmer is enabled.
+func (r *TelegramListenerRegistry) SetCWSkimmerConfig(c *CWSkimmerConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cwSkimmerConfig = c
+	for _, l := range r.listeners {
+		l.cwSkimmerConfig = c
 	}
 }
 
@@ -1148,6 +1163,8 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.config = r.config
 		l.instanceReporter = r.instanceReporter
 		l.ipBanManager = r.ipBanManager
+		l.readDB = r.readDB
+		l.cwSkimmerConfig = r.cwSkimmerConfig
 		l.Start()
 		r.listeners[name] = l
 	}

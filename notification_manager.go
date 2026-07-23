@@ -442,6 +442,17 @@ func (m *NotificationManager) SetCWSkimmerCallsign(cs string) {
 	}
 }
 
+// SetCWSkimmerConfig wires the CW skimmer config into the listener registry
+// so that the /beacons bot command can report whether the skimmer is enabled.
+func (m *NotificationManager) SetCWSkimmerConfig(c *CWSkimmerConfig) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetCWSkimmerConfig(c)
+	}
+}
+
 // SetConfig wires the server config into the listener registry
 // so that the /info bot command can report receiver details.
 func (m *NotificationManager) SetConfig(c *Config) {

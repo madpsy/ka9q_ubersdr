@@ -11,11 +11,27 @@ description: Create, list, or edit widgets for the UberSDR web SDR interface —
 > and a `<script>` block — these are injected verbatim into the host page, which
 > already provides the full document shell.
 
-> **Four things every widget MUST have, no exceptions:**
+> **Four things a standard floating-panel widget MUST have:**
 > 1. A **visible ✕ close button** in the header — users must always be able to dismiss a widget
 > 2. A **collapse/expand arrow** to the **left of the title** — collapses the widget to just its title bar; the collapsed/expanded state is persisted to `localStorage`
 > 3. **Mobile hiding** — CSS `@media` + `html.is-mobile` + JS guard
 > 4. **Drag-to-reposition** with `localStorage` persistence
+>
+> **These apply to the common case: a draggable titled panel/window.** They are
+> **not** universal laws — some widgets aren't panels. A **behavioural** widget
+> (changes host behaviour, adds a keyboard shortcut, plays audio — no persistent
+> UI) or a **fixed control** (a small menu/button anchored in a corner, a status
+> badge) should apply only the requirements that make sense. Judgement rule:
+> - Has a **title bar** → give it the close button **and** collapse arrow (a
+>   title bar without them is jarring).
+> - Is **draggable / free-floating** → persist its position; if it's
+>   intentionally anchored to a fixed spot, skip drag.
+> - Renders **any visible UI** → still handle mobile deliberately (hide it, or
+>   make it mobile-appropriate) and give the user *some* way to dismiss/disable
+>   it. A purely behavioural widget with no UI needs none of the four.
+>
+> When you skip one of the four, it should be a deliberate choice that fits the
+> widget's form — not an omission. Say briefly why in the widget's header comment.
 
 > **ALWAYS start by reading the reference widgets in `widgets/`.**
 > Before writing any new widget, **read at least one or two existing widgets in
@@ -299,9 +315,11 @@ values exactly unless you have a strong reason to deviate.
 <span id="mywidget-close" title="Dismiss">&#x2715;</span>
 ```
 
-### Mobile hiding (mandatory)
+### Mobile hiding (standard panels)
 
-Every widget **must** hide itself on narrow screens and real mobile devices:
+A floating-panel widget **must** hide itself on narrow screens and real mobile
+devices (see the scoping note at the top — a behavioural or intentionally
+mobile-appropriate widget handles this differently):
 
 ```css
 @media (max-width: 768px) {
@@ -405,11 +423,14 @@ header.addEventListener('mousedown', function (e) {
 
 ---
 
-## Close / dismiss pattern (mandatory)
+## Close / dismiss pattern (widgets with UI)
 
-**Every widget must have a visible ✕ close button.** Users must always be able
-to dismiss a widget without reloading the page. The button goes in the header,
-top-right corner, using the standard close button CSS (see "Header bar" above).
+**Any widget that renders a panel must have a visible ✕ close button.** Users
+must always be able to dismiss a widget without reloading the page. The button
+goes in the header, top-right corner, using the standard close button CSS (see
+"Header bar" above). *(A purely behavioural widget with no visible UI has nothing
+to close — see the scoping note at the top; but anything the user can see needs
+a way to dismiss or disable it.)*
 
 The `dismissed` flag prevents the widget from reappearing after the user closes
 it — any event listener, poll, or service-availability callback that would
@@ -444,11 +465,14 @@ widget.style.display = '';
 
 ---
 
-## Collapse / expand arrow (mandatory)
+## Collapse / expand arrow (titled panels)
 
-**Every widget must have a collapse/expand arrow immediately to the LEFT of the
-title.** Clicking it collapses the widget down to just its title bar (hiding the
-body); clicking again restores it. This is separate from the ✕ close button:
+**Any widget with a title bar must have a collapse/expand arrow immediately to
+the LEFT of the title.** Clicking it collapses the widget down to just its title
+bar (hiding the body); clicking again restores it. *(A widget with no title
+bar — a fixed corner menu, a status badge, a behavioural widget — has nothing to
+collapse; see the scoping note at the top. If it has a title bar, it needs the
+arrow.)* This is separate from the ✕ close button:
 collapse **hides the body but keeps the widget alive** (no disconnect, no
 `dismissed` flag, background work keeps running), whereas close dismisses it.
 
@@ -1237,11 +1261,13 @@ Before showing interactive controls, check `window.instanceDescription`:
 
 ## Checklist before publishing
 
-**Non-negotiable (widget will be rejected without these):**
-- [ ] **✕ Close button** in the header — `dismissed` flag checked everywhere the widget could reappear
-- [ ] **Collapse/expand arrow** left of the title — collapses to the title bar; state persisted to `<slug>_widget_collapsed` and restored on load; excluded from the drag-start guard
-- [ ] **Mobile hiding** — `@media (max-width: 768px)` + `html.is-mobile` CSS + JS guard
-- [ ] **Drag-to-reposition** — `mousedown`/`mousemove`/`mouseup` + `localStorage` persistence
+**Standard floating-panel widget — non-negotiable for this form (see the scoping
+note at the top; a behavioural or fixed-control widget applies only what fits its
+form, and states in its header comment which it deliberately omits):**
+- [ ] **✕ Close button** in the header — `dismissed` flag checked everywhere the widget could reappear *(any widget with visible UI)*
+- [ ] **Collapse/expand arrow** left of the title — collapses to the title bar; state persisted to `<slug>_widget_collapsed` and restored on load; excluded from the drag-start guard *(any widget with a title bar)*
+- [ ] **Mobile hiding** — `@media (max-width: 768px)` + `html.is-mobile` CSS + JS guard *(any widget with visible UI)*
+- [ ] **Drag-to-reposition** — `mousedown`/`mousemove`/`mouseup` + `localStorage` persistence *(free-floating widgets; skip if intentionally anchored)*
 
 **Structure & safety:**
 - [ ] **Read a reference widget in `widgets/`** that's closest to this one and followed its patterns

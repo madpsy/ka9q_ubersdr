@@ -9,8 +9,9 @@
 #
 #   • The skill lives at ~/.claude/skills/create-widget/SKILL.md — persistent and
 #     refreshed on every launch, so you can inspect it and plain `claude` sees it.
-#   • Reference widgets + scratch files live in a throwaway temp dir (removed on
-#     exit) — the real widgets live on your instance behind the admin API.
+#   • Reference widgets + scratch files live in a stable work dir that is wiped
+#     clean at the start of each launch — the real widgets live on your instance
+#     behind the admin API, so nothing here needs to persist.
 #
 # Intended to be launched from the UberSDR gotty web terminal.
 #
@@ -79,11 +80,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Ephemeral working dir: reference widgets + scratch space.
+# 3. Working dir: reference widgets + scratch space.
+#    STABLE path (not mktemp) so Claude's folder-trust prompt only appears on
+#    the very first launch and is then remembered — trust is keyed to the path.
+#    Wiped at the start of every launch, so each session still begins clean.
 # ---------------------------------------------------------------------------
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/widget-ai.XXXXXX")"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT INT TERM
+WORK="${WIDGET_AI_WORKDIR:-$HOME/.cache/widget-ai}"
+rm -rf "$WORK"
 mkdir -p "$WORK/widgets" "$WORK/widgets-custom"
 
 # Reference widgets are helpful for CREATE; editing via the API works without
@@ -131,11 +134,11 @@ cat <<EOF
   │    • "List my widgets" / "Edit my callsign lookup widget"  │
   │                                                            │
   │  Your widgets live on your instance (admin API), not here. │
-  │  This scratch folder is removed when you exit.             │
+  │  This scratch folder is wiped clean on each launch.        │
   └───────────────────────────────────────────────────────────┘
 
 EOF
 
-# Not exec'd, so the cleanup trap still fires when Claude exits.
 # --permission-mode avoids a prompt on every piped curl/jq command (see PERM_MODE).
+# The work dir is wiped at the next launch's start, so no exit cleanup is needed.
 claude --permission-mode "$PERM_MODE" "$@" || true

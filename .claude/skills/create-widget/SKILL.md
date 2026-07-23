@@ -1281,6 +1281,251 @@ admin UI:
 
 ---
 
+## Submitting & editing widgets via the admin API
+
+Everything the admin UI does is also available as a small REST API on the same
+host, so you can create, update, enable, and version widgets from a shell
+(e.g. the built-in gotty web terminal) without touching a browser. The
+`html_content` field carries exactly the fragment you'd save to
+`widgets-custom/<slug>.widget.html`.
+
+> **Scope: this applies to *custom* and *cloned* widgets only** — widgets the
+> instance **owns** and that appear in `GET /admin/widgets/mine`:
+> - **Custom** — ones you authored here (`create`).
+> - **Cloned** — a community widget you copied into your own instance; the clone
+>   is a new widget you own, so it becomes editable.
+>
+> It does **not** cover the **built-in bundled widgets** (the reference
+> implementations shipped in `widgets/`) or **community widgets authored by
+> someone else** — you don't own those, they aren't in `mine`, and `update` will
+> not touch them. To change one, create a new widget or clone it first.
+
+### Authentication — `X-Admin-Password` header
+
+Non-browser clients authenticate with an **`X-Admin-Password: <password>`**
+request header (no session cookie, no login round-trip). The password is the
+`admin.password` value from the instance config.
+
+**First check the environment** — when launched via `widget-ai.sh` the password
+and base URL are already exported, so prefer them and skip `sudo` entirely:
+
+```bash
+PW="${UBERSDR_ADMIN_PASSWORD:-}"          # set by widget-ai.sh
+BASE="${BASE:-http://localhost:8080}"     # admin listener (server.listen port)
+```
+
+If `$UBERSDR_ADMIN_PASSWORD` is empty, fall back to the helper script, which
+reads the password out of the running instance's `config.yaml` (inside the
+Docker config volume) and prints an `Admin Password: <value>` line. It uses
+`sudo` internally to read the protected volume, so the host must allow sudo:
+
+```bash
+# Installed location on a hub host (repo path: ./get-password.sh)
+[ -n "$PW" ] || PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+```
+
+The base URL is the admin listener (the `server.listen` port, `8080` by default
+— the same host/port as `admin.html`).
+
+> **Requests are IP-gated.** The admin endpoints also enforce
+> `admin.allowed_ips`. Calls from the local host / gotty terminal are normally
+> fine; a remote IP that isn't allow-listed gets `403 Forbidden` before the
+> password is even checked.
+
+> **Collector registration required.** Create/update/delete/versions proxy to
+> the collector and need instance reporting enabled and registered. If it isn't,
+> you'll get `400` with
+> `{"error":"Widget features require instance reporting to be enabled and registered with the collector"}`.
+
+### Endpoints
+
+All paths are under `$BASE`. Send `Content-Type: application/json` and the
+`X-Admin-Password` header on every call.
+
+| Action | Method | Path | Body / query |
+|---|---|---|---|
+| List **my** widgets | `GET` | `/admin/widgets/mine` | — → `{"widgets":[{widget_id,name,description,is_public,version,…}]}` |
+| List **public** widgets | `GET` | `/admin/widgets/public` | optional `?callsign=` / `?instance_id=` |
+| **Create** | `POST` | `/admin/widgets/create` | `{name, description, html_content, is_public}` → `{widget_id,…}` |
+| **Update** | `POST` | `/admin/widgets/update` | `{widget_id, name, description, html_content, is_public}` |
+| **Delete** | `POST` | `/admin/widgets/delete` | `{widget_id}` |
+| List **versions** | `GET` | `/admin/widgets/versions` | `?widget_id=<id>` → `{"versions":[…]}` |
+| Get a **version's content** | `GET` | `/admin/widgets/version` | `?widget_id=<id>&version=<n>` |
+| Get **enabled** list | `GET` | `/admin/widgets/enabled` | — → `{enabled:[…],count,max_allowed}` |
+| Set **enabled** list | `POST` | `/admin/widgets/enabled` | `{"enabled":["id1","id2",…]}` (full replace, max 10) |
+
+### Two independent things: *enabled* vs *public*
+
+These are orthogonal — don't conflate them:
+
+- **Enabled** controls whether the widget renders **on your own SDR page**. You
+  toggle it with `/admin/widgets/enabled`. A **private** widget you own can be
+  enabled on your instance perfectly well — **you do NOT need to make a widget
+  public to use it yourself.**
+- **Public** (`is_public: true`) publishes the widget to the collector's
+  **community catalog** (the shared registry), where **other** instance owners
+  can discover it in their admin **Community Widgets** list and enable (or clone)
+  it. `is_public: false` keeps it owned by your instance only — it never appears
+  in anyone else's catalog. Either way the widget is stored on the collector
+  (that's what powers versioning); public only controls **discoverability by
+  others**.
+
+So the normal "just for me" flow is: **create (private) → enable**. Making it
+public is an extra, optional step for sharing with the community.
+
+> ⚠️ **Editing a public widget is a community-visible action.** Once a widget is
+> public, every `update` you push becomes a new version that is **live to the
+> whole community immediately**. For experimenting, keep it private (or clone)
+> and only flip it public once you're happy.
+
+### Create a new widget
+
+```bash
+PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+BASE="http://localhost:8080"
+
+# html_content is the widget fragment; use --rawfile to load it from a file
+WID="$(jq -n --rawfile html widgets-custom/my_thing.widget.html \
+        '{name:"My Thing", description:"Does a thing", html_content:$html, is_public:false}' \
+      | curl -s -X POST "$BASE/admin/widgets/create" \
+          -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' \
+          --data-binary @- \
+      | jq -r .widget_id)"
+echo "Created $WID"
+```
+
+### Edit an existing widget ("edit my widget xyz")
+
+When the user says *"edit my widget &lt;name&gt;"*, you must first **pull the
+current live source down** — the `/admin/widgets/mine` list carries only metadata
+(`widget_id`, `name`, `description`, `is_public`, `version`), **not**
+`html_content`. The HTML lives in the widget's versions. The full round-trip is:
+
+#### Resolving *which* widget they mean
+
+The user will describe the widget loosely (*"my callsign lookup widget"*), not by
+its exact stored `name`. Resolve it, don't guess:
+
+- **Scope:** *"my widget"* = something in `GET /admin/widgets/mine` (a widget
+  **this instance created**). It is **not** the bundled reference implementations
+  in `widgets/` (those are read-only examples, not on the instance), and **not**
+  a community widget authored by someone else (to change one of those you'd clone
+  it first). If `mine` has nothing matching, say so — don't edit an unrelated
+  widget or start from a `widgets/` reference and pretend it's theirs.
+- **Match fuzzily:** compare the user's words as a **case-insensitive substring**
+  against each entry's `name` **and** `description`, not by exact equality.
+- **Disambiguate:** **exactly one** match → proceed. **Zero** → tell them and
+  list what `mine` does contain. **Several** → show the candidates (name +
+  description) and ask which one before touching anything.
+
+1. **Resolve the request → `widget_id`** via `GET /admin/widgets/mine` (fuzzy
+   match as above).
+2. **Find the latest version** via `GET /admin/widgets/versions?widget_id=…`
+   (the list is newest-first, so element `[0]` is current).
+3. **Fetch that version's `html_content`** via
+   `GET /admin/widgets/version?widget_id=…&version=…`.
+4. **Edit the HTML** (locally, e.g. save it to `widgets-custom/<slug>.widget.html`
+   so you can apply the normal widget conventions and re-read it).
+5. **Push** with `POST /admin/widgets/update`, re-sending the **full** field set
+   (`update` overwrites name/description/html/visibility together — omit a field
+   and it's blanked). Each push creates a new version, so rollback is always
+   possible.
+
+```bash
+PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+BASE="http://localhost:8080"
+Q="callsign lookup"                   # the user's loose description
+
+hdr=(-H "X-Admin-Password: $PW")
+
+# 1. fuzzy-resolve the request → the matching widget's metadata.
+#    Case-insensitive substring over name + description.
+MINE=$(curl -s "${hdr[@]}" "$BASE/admin/widgets/mine")
+MATCHES=$(jq -c --arg q "$Q" '
+  [ .widgets[]
+    | select(((.name + " " + (.description // "")) | ascii_downcase)
+             | contains($q | ascii_downcase)) ]' <<<"$MINE")
+N=$(jq 'length' <<<"$MATCHES")
+if   [ "$N" -eq 0 ]; then
+  echo "No widget of yours matches \"$Q\". You have:"; jq -r '.widgets[].name' <<<"$MINE"; exit 1
+elif [ "$N" -gt 1 ]; then
+  echo "Multiple matches — pick one:"; jq -r '.[] | "  - \(.name): \(.description // "")"' <<<"$MATCHES"; exit 1
+fi
+META=$(jq -c '.[0]' <<<"$MATCHES")
+WID=$(jq -r .widget_id <<<"$META")
+
+# 2 + 3. latest version → current html_content, saved to a local file
+VER=$(curl -s "${hdr[@]}" "$BASE/admin/widgets/versions?widget_id=$WID" \
+      | jq -r '.versions[0].version')
+curl -s "${hdr[@]}" "$BASE/admin/widgets/version?widget_id=$WID&version=$VER" \
+  | jq -r '.html_content' > widgets-custom/editing.widget.html
+
+# 4. --- edit widgets-custom/editing.widget.html here ---
+
+# 5. push the edited HTML back, preserving name/description/is_public
+jq -n --arg id "$WID" \
+      --arg name "$(jq -r .name <<<"$META")" \
+      --arg desc "$(jq -r '.description // ""' <<<"$META")" \
+      --argjson pub "$(jq -r '.is_public // false' <<<"$META")" \
+      --rawfile html widgets-custom/editing.widget.html \
+   '{widget_id:$id, name:$name, description:$desc, html_content:$html, is_public:$pub}' \
+| curl -s -X POST "$BASE/admin/widgets/update" \
+    "${hdr[@]}" -H 'Content-Type: application/json' --data-binary @-
+```
+
+If the widget is already enabled on the instance, the update refreshes its
+cached copy automatically — reload the SDR page to see the change. If it's public,
+re-read the community caveat below before pushing.
+
+### Enable it on this instance
+
+A widget must be **enabled** to appear on the SDR page. The enabled list is
+**replaced wholesale** by `POST /admin/widgets/enabled` (max 10), so read the
+current list, append your id, and post the union:
+
+```bash
+NEW=$(curl -s "$BASE/admin/widgets/enabled" -H "X-Admin-Password: $PW" \
+      | jq -c --arg id "$WID" '[.enabled[].widget_id] + [$id] | unique')
+curl -s -X POST "$BASE/admin/widgets/enabled" \
+     -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' \
+     -d "{\"enabled\": $NEW}"
+```
+
+Reload the SDR page and the widget renders. Enabling a **private** widget you
+own works exactly the same — no need to publish it first.
+
+### Make it public — or private again
+
+Publishing to the community catalog is just `is_public: true` on an `update`
+(there's no separate endpoint). Send the **full** field set — `update` replaces
+name/description/html/visibility together, so re-send `html_content` too, or you'll
+blank it:
+
+```bash
+# Publish to the community catalog (discoverable + enable-able by other instances)
+jq -n --arg id "$WID" --rawfile html widgets-custom/my_thing.widget.html \
+   '{widget_id:$id, name:"My Thing", description:"Does a thing",
+     html_content:$html, is_public:true}' \
+| curl -s -X POST "$BASE/admin/widgets/update" \
+    -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' --data-binary @-
+```
+
+Flip `is_public` back to `false` the same way to **unpublish** — it disappears
+from other instances' community list (instances that already enabled it keep
+their cached copy until they refresh). To confirm what's currently public and
+who's using it, `GET /admin/widgets/public-with-instances` returns each catalog
+widget with an `enabled_by` array of instances.
+
+Remember the caveat above: while a widget is public, **every** `update` is
+immediately live to everyone who has it enabled. Iterate privately, publish when
+ready.
+
+To roll back a bad change, inspect `/admin/widgets/versions?widget_id=$WID`,
+fetch an old version's `html_content` from `/admin/widgets/version?...`, and
+`update` with it.
+
+---
+
 ## Minimal widget template
 
 Use this as a starting point for a new widget:

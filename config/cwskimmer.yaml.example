@@ -16,14 +16,9 @@ callsign: "N0CALL"
 reconnect_delay: 5  # Seconds between reconnection attempts
 keepalive_delay: 60 # Seconds between keep-alive messages (5 minutes)
 
-# CSV Logging
-# Logs all CW spots to CSV files organized by date/band
+# Spot logging
+# All CW spots are persisted to the SQLite database (cw_spots table).
 spots_log_enabled: true
-spots_log_data_dir: "cwskimmer_spots"  # Directory for CSV files (relative or absolute)
-                                        # If relative: relative to current working directory
-                                        # If absolute: used as-is (e.g., /var/log/cwskimmer_spots)
-                                        # Files organized as: cwskimmer_spots/YYYY/MM/DD/bandname.csv
-                                        # Example: cwskimmer_spots/2024/11/24/20m.csv
 
 # Metrics Logging (stored in SQLite DB — no files written)
 # Logs CW Skimmer performance metrics (spot counts, WPM stats, etc.)
@@ -63,8 +58,8 @@ pskreporter_antenna: "Loop"     # Antenna description (optional)
 # 1. CW Skimmer must be running and configured to accept telnet connections
 #    on the specified host:port
 #
-# 2. CSV logging (if enabled):
-#    - Logs all spots to: spots_log_dir/YYYY/MM/DD/bandname.csv
+# 2. Spot logging (if enabled):
+#    - Persists all spots to the SQLite database (cw_spots table)
 #    - Independent of PSKReporter reporting
 #    - Includes: timestamp, callsign, SNR, frequency, band, WPM, comment, country, zones, distance, bearing
 #

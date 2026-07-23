@@ -1,12 +1,10 @@
 package main
 
 import (
-	"encoding/csv"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,11 +45,15 @@ type CWSpotRecord struct {
 	Name       string   `json:"name"` // Band name from file
 }
 
-// GetCWHistoricalSpots reads historical CW spots from CSV files.
+// GetCWHistoricalSpots reads historical CW spots from the cw_spots SQLite table.
 // callsigns is a set of uppercase callsigns to match; an empty map means no filter.
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("CW spots logging is not enabled")
+//
+// The ctyDatabase parameter is retained for API compatibility but is no longer
+// used: latitude/longitude are populated at write time and stored directly in
+// the cw_spots table.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, _ *CTYDatabase) ([]CWSpotRecord, error) {
+	if sl.readDB == nil {
+		return nil, fmt.Errorf("CW spots database is not available")
 	}
 
 	// If toDate is empty, use fromDate (single day query)
@@ -75,357 +77,213 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 		return nil, fmt.Errorf("from_date must be before or equal to to_date")
 	}
 
-	// Collect all spots
-	allSpots := make([]CWSpotRecord, 0)
+	// Build the query dynamically. The date range is a half-open interval
+	// [startOfFromDate, startOfDayAfterToDate) in UTC Unix seconds so it matches
+	// the old per-day file semantics.
+	startTS := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, time.UTC).Unix()
+	endTS := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1).Unix()
 
-	// Iterate through each date in the range
-	currentDate := startDate
-	for !currentDate.After(endDate) {
-		dateStr := currentDate.Format("2006-01-02")
+	var conditions []string
+	var args []interface{}
 
-		spots, err := sl.readCWSpotsForDate(name, dateStr)
-		if err != nil {
-			// Skip if file doesn't exist
-			currentDate = currentDate.AddDate(0, 0, 1)
-			continue
-		}
+	conditions = append(conditions, "ts >= ? AND ts < ?")
+	args = append(args, startTS, endTS)
 
-		// Add spots with filtering and enrich with lat/lon
-		for _, spot := range spots {
-			// Enrich with latitude/longitude from CTY.dat
-			if ctyDatabase != nil {
-				if info := ctyDatabase.LookupCallsignFull(spot.Callsign); info != nil {
-					// CTY.dat longitude is now correctly parsed in standard East-positive format
-					lat := info.Latitude
-					lon := info.Longitude
-					spot.Latitude = &lat
-					spot.Longitude = &lon
-				}
-			}
-
-			// Filter by time range if specified
-			if startTime != "" || endTime != "" {
-				spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
-				if err != nil {
-					continue
-				}
-				spotHourMin := spotTime.Format("15:04")
-
-				if startTime != "" && spotHourMin < startTime {
-					continue
-				}
-				if endTime != "" && spotHourMin > endTime {
-					continue
-				}
-			}
-
-			// Filter by band if specified
-			if band != "" && spot.Band != band {
-				continue
-			}
-
-			// Filter by callsign set if specified
-			if len(callsigns) > 0 && !callsigns[spot.Callsign] {
-				continue
-			}
-
-			// Filter by continent if specified
-			if continent != "" && spot.Continent != continent {
-				continue
-			}
-
-			// Filter by minimum distance if specified
-			if minDistanceKm > 0 {
-				if spot.DistanceKm == nil || *spot.DistanceKm < minDistanceKm {
-					continue
-				}
-			}
-
-			// Filter by direction if specified
-			if direction != "" {
-				if spot.BearingDeg == nil || !matchesDirection(*spot.BearingDeg, direction) {
-					continue
-				}
-			}
-
-			// Filter by minimum SNR if specified
-			if minSNR > -999 {
-				if spot.SNR < minSNR {
-					continue
-				}
-			}
-
-			allSpots = append(allSpots, spot)
-		}
-
-		currentDate = currentDate.AddDate(0, 0, 1)
+	// name filter maps to the band column (the file-based "name" was the band
+	// CSV filename); band and name are functionally the same dimension here.
+	if band != "" {
+		conditions = append(conditions, "band = ?")
+		args = append(args, band)
 	}
-
-	// Sort spots by timestamp in descending order (newest first)
-	sort.Slice(allSpots, func(i, j int) bool {
-		return allSpots[i].Timestamp > allSpots[j].Timestamp
-	})
-
-	return allSpots, nil
-}
-
-// readCWSpotsForDate reads CW spots for a specific date
-func (sl *CWSkimmerSpotsLogger) readCWSpotsForDate(name, dateStr string) ([]CWSpotRecord, error) {
-	// Parse date to get year/month/day
-	t, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build directory path: base_dir/YYYY/MM/DD/
-	dirPath := filepath.Join(
-		sl.dataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
-	)
-
-	// Check if directory exists
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no data for date %s", dateStr)
-	}
-
-	// If name is specified, read only that name's file
 	if name != "" {
-		return sl.readCWNameFile(dirPath, name)
+		conditions = append(conditions, "band = ?")
+		args = append(args, name)
 	}
 
-	// Otherwise, read all CSV files in the directory
-	files, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, err
+	// Callsign set filter → dx_call IN (?,?,...)
+	if len(callsigns) > 0 {
+		placeholders := make([]string, 0, len(callsigns))
+		for cs := range callsigns {
+			placeholders = append(placeholders, "?")
+			args = append(args, cs)
+		}
+		conditions = append(conditions, "dx_call IN ("+strings.Join(placeholders, ",")+")")
 	}
+
+	if continent != "" {
+		conditions = append(conditions, "continent = ?")
+		args = append(args, continent)
+	}
+
+	if minDistanceKm > 0 {
+		conditions = append(conditions, "distance_km IS NOT NULL AND distance_km >= ?")
+		args = append(args, minDistanceKm)
+	}
+
+	if minSNR > -999 {
+		conditions = append(conditions, "snr >= ?")
+		args = append(args, minSNR)
+	}
+
+	// Time-of-day filter (HH:MM in UTC). Compute minutes-of-day in SQL.
+	if startTime != "" {
+		if mins, ok := parseHourMinToMinutes(startTime); ok {
+			conditions = append(conditions,
+				"(CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60 + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER)) >= ?")
+			args = append(args, mins)
+		}
+	}
+	if endTime != "" {
+		if mins, ok := parseHourMinToMinutes(endTime); ok {
+			conditions = append(conditions,
+				"(CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60 + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER)) <= ?")
+			args = append(args, mins)
+		}
+	}
+
+	query := `SELECT ts, dx_call, snr, frequency, band, wpm, comment,
+	                 country, cq_zone, itu_zone, continent,
+	                 latitude, longitude, distance_km, bearing_deg
+	          FROM cw_spots
+	          WHERE ` + strings.Join(conditions, " AND ") + `
+	          ORDER BY ts DESC`
+
+	rows, err := sl.readDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("cw_spots query failed: %w", err)
+	}
+	defer rows.Close()
 
 	allSpots := make([]CWSpotRecord, 0)
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".csv" {
-			continue
-		}
-
-		bandName := file.Name()[:len(file.Name())-4] // Remove .csv extension
-		spots, err := sl.readCWNameFile(dirPath, bandName)
-		if err != nil {
-			continue
-		}
-		allSpots = append(allSpots, spots...)
-	}
-
-	return allSpots, nil
-}
-
-// readCWNameFile reads a single band CSV file
-func (sl *CWSkimmerSpotsLogger) readCWNameFile(dirPath, bandName string) ([]CWSpotRecord, error) {
-	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", bandName))
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-
-	if len(records) < 2 {
-		return nil, nil // No data (only header or empty)
-	}
-
-	// Parse records (skip header)
-	spots := make([]CWSpotRecord, 0, len(records)-1)
-	for _, record := range records[1:] {
-		if len(record) < 11 {
-			continue
+	for rows.Next() {
+		var (
+			ts        int64
+			dxCall    string
+			snr       int
+			frequency float64 // stored as REAL (Hz); matches CWSkimmerSpot.Frequency
+			bandCol   string
+			wpm       int
+			comment   string
+			country   string
+			cqZone    int
+			ituZone   int
+			cont      string
+			lat       sql.NullFloat64
+			lon       sql.NullFloat64
+			dist      sql.NullFloat64
+			bearing   sql.NullFloat64
+		)
+		if err := rows.Scan(&ts, &dxCall, &snr, &frequency, &bandCol, &wpm, &comment,
+			&country, &cqZone, &ituZone, &cont,
+			&lat, &lon, &dist, &bearing); err != nil {
+			return nil, fmt.Errorf("cw_spots scan failed: %w", err)
 		}
 
 		spot := CWSpotRecord{
-			Timestamp: record[0],
-			Callsign:  record[1],
-			Band:      record[4],
-			Comment:   record[6],
-			Country:   record[7],
-			Continent: record[10],
-			Name:      bandName,
+			Timestamp: time.Unix(ts, 0).UTC().Format(time.RFC3339),
+			Callsign:  dxCall,
+			SNR:       snr,
+			Frequency: uint64(frequency), // truncate Hz to integer, matching the CSV "%.0f" path
+			Band:      bandCol,
+			WPM:       wpm,
+			Comment:   comment,
+			Country:   country,
+			CQZone:    cqZone,
+			ITUZone:   ituZone,
+			Continent: cont,
+			Name:      bandCol, // "name" is the band, matching the file-based path
+		}
+		if lat.Valid {
+			v := lat.Float64
+			spot.Latitude = &v
+		}
+		if lon.Valid {
+			v := lon.Float64
+			spot.Longitude = &v
+		}
+		if dist.Valid {
+			v := dist.Float64
+			spot.DistanceKm = &v
+		}
+		if bearing.Valid {
+			v := bearing.Float64
+			spot.BearingDeg = &v
 		}
 
-		// Parse numeric fields
-		fmt.Sscanf(record[2], "%d", &spot.SNR)
-		fmt.Sscanf(record[3], "%d", &spot.Frequency)
-		fmt.Sscanf(record[5], "%d", &spot.WPM)
-		fmt.Sscanf(record[8], "%d", &spot.CQZone)
-		fmt.Sscanf(record[9], "%d", &spot.ITUZone)
-
-		// Parse distance and bearing if present
-		if len(record) >= 13 {
-			if record[11] != "" {
-				var dist float64
-				if _, err := fmt.Sscanf(record[11], "%f", &dist); err == nil {
-					spot.DistanceKm = &dist
-				}
-			}
-			if record[12] != "" {
-				var bearing float64
-				if _, err := fmt.Sscanf(record[12], "%f", &bearing); err == nil {
-					spot.BearingDeg = &bearing
-				}
+		// Direction filter — SQLite has no bearing-to-compass function, so it is
+		// applied in Go against the bearing_deg column.
+		if direction != "" {
+			if spot.BearingDeg == nil || !matchesDirection(*spot.BearingDeg, direction) {
+				continue
 			}
 		}
 
-		spots = append(spots, spot)
+		allSpots = append(allSpots, spot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cw_spots row iteration failed: %w", err)
 	}
 
-	return spots, nil
+	return allSpots, nil
+}
+
+// parseHourMinToMinutes converts a "HH:MM" string to minutes-of-day. Returns
+// false if the string is not a valid time.
+func parseHourMinToMinutes(hm string) (int, bool) {
+	t, err := time.Parse("15:04", hm)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
 }
 
 // GetCWAvailableDates returns a list of dates for which CW spot data is available
 func (sl *CWSkimmerSpotsLogger) GetCWAvailableDates() ([]string, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("CW spots logging is not enabled")
+	if sl.readDB == nil {
+		return nil, fmt.Errorf("CW spots database is not available")
 	}
 
-	dateMap := make(map[string]bool)
-
-	// Walk through year directories
-	yearDirs, err := os.ReadDir(sl.dataDir)
+	rows, err := sl.readDB.Query(
+		`SELECT DISTINCT DATE(ts, 'unixepoch') AS date FROM cw_spots ORDER BY date DESC`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cw_spots dates query failed: %w", err)
 	}
+	defer rows.Close()
 
-	for _, yearDir := range yearDirs {
-		if !yearDir.IsDir() {
-			continue
+	dates := make([]string, 0)
+	for rows.Next() {
+		var date string
+		if err := rows.Scan(&date); err != nil {
+			return nil, fmt.Errorf("cw_spots dates scan failed: %w", err)
 		}
-		year := yearDir.Name()
-
-		// Walk through month directories
-		monthPath := filepath.Join(sl.dataDir, year)
-		monthDirs, err := os.ReadDir(monthPath)
-		if err != nil {
-			continue
-		}
-
-		for _, monthDir := range monthDirs {
-			if !monthDir.IsDir() {
-				continue
-			}
-			month := monthDir.Name()
-
-			// Walk through day directories
-			dayPath := filepath.Join(monthPath, month)
-			dayDirs, err := os.ReadDir(dayPath)
-			if err != nil {
-				continue
-			}
-
-			for _, dayDir := range dayDirs {
-				if !dayDir.IsDir() {
-					continue
-				}
-				day := dayDir.Name()
-
-				// Construct date string
-				dateStr := fmt.Sprintf("%s-%s-%s", year, month, day)
-				dateMap[dateStr] = true
-			}
-		}
-	}
-
-	// Convert map to sorted slice
-	dates := make([]string, 0, len(dateMap))
-	for date := range dateMap {
 		dates = append(dates, date)
 	}
-
-	// Sort dates in descending order (newest first)
-	sort.Slice(dates, func(i, j int) bool {
-		return dates[i] > dates[j]
-	})
-
-	return dates, nil
+	return dates, rows.Err()
 }
 
-// GetCWAvailableNames returns a list of unique band names that have CW spot data
+// GetCWAvailableNames returns a list of unique band names that have CW spot data.
+// The "name" dimension maps to the band column in the DB.
 func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
-	if !sl.enabled {
-		return nil, fmt.Errorf("CW spots logging is not enabled")
+	if sl.readDB == nil {
+		return nil, fmt.Errorf("CW spots database is not available")
 	}
 
-	nameMap := make(map[string]bool)
-
-	// Walk through year directories
-	yearDirs, err := os.ReadDir(sl.dataDir)
+	rows, err := sl.readDB.Query(
+		`SELECT DISTINCT band FROM cw_spots WHERE band IS NOT NULL AND band != '' ORDER BY band ASC`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cw_spots names query failed: %w", err)
 	}
+	defer rows.Close()
 
-	for _, yearDir := range yearDirs {
-		if !yearDir.IsDir() {
-			continue
+	names := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("cw_spots names scan failed: %w", err)
 		}
-		year := yearDir.Name()
-
-		// Walk through month directories
-		monthPath := filepath.Join(sl.dataDir, year)
-		monthDirs, err := os.ReadDir(monthPath)
-		if err != nil {
-			continue
-		}
-
-		for _, monthDir := range monthDirs {
-			if !monthDir.IsDir() {
-				continue
-			}
-			month := monthDir.Name()
-
-			// Walk through day directories
-			dayPath := filepath.Join(monthPath, month)
-			dayDirs, err := os.ReadDir(dayPath)
-			if err != nil {
-				continue
-			}
-
-			for _, dayDir := range dayDirs {
-				if !dayDir.IsDir() {
-					continue
-				}
-				day := dayDir.Name()
-
-				// Read CSV files in this day directory
-				csvPath := filepath.Join(dayPath, day)
-				csvFiles, err := os.ReadDir(csvPath)
-				if err != nil {
-					continue
-				}
-
-				for _, csvFile := range csvFiles {
-					if csvFile.IsDir() || filepath.Ext(csvFile.Name()) != ".csv" {
-						continue
-					}
-					// Extract name from filename (remove .csv extension)
-					name := csvFile.Name()[:len(csvFile.Name())-4]
-					nameMap[name] = true
-				}
-			}
-		}
-	}
-
-	// Convert map to sorted slice
-	names := make([]string, 0, len(nameMap))
-	for name := range nameMap {
 		names = append(names, name)
 	}
-
-	// Sort names alphabetically
-	sort.Strings(names)
-
-	return names, nil
+	return names, rows.Err()
 }
 
 // GetCWHistoricalCSV returns historical CW spots data as CSV string.

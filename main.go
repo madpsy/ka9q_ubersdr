@@ -1273,6 +1273,7 @@ func main() {
 			} else {
 				cwSkimmer.SetSpotsLogger(spotsLogger)
 				spotsLogger.SetDB(dbManager.DB())
+				spotsLogger.SetReadDB(dbManager.ReadDB())
 				defer spotsLogger.Close()
 				log.Printf("CW Skimmer spots logging enabled to: %s", cwskimmerConfig.SpotsLogDataDir)
 			}

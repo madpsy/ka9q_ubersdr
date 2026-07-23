@@ -74,9 +74,12 @@ func (md *MultiDecoder) SetDB(db *sql.DB) {
 	}
 }
 
-// SetReadDB wires the read-only SQLite connection for metrics queries.
+// SetReadDB wires the read-only SQLite connection for metrics and spots queries.
 func (md *MultiDecoder) SetReadDB(db *sql.DB) {
 	md.readDB = db
+	if md.spotsLogger != nil {
+		md.spotsLogger.SetReadDB(db)
+	}
 }
 
 // NewMultiDecoder creates a new multi-decoder instance
@@ -161,9 +164,9 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		}
 		md.spotsLogger = logger
 		if config.SpotsLogMaxAgeDays > 0 {
-			log.Printf("Spots CSV logging enabled: %s (cleanup: %d days)", config.SpotsLogDataDir, config.SpotsLogMaxAgeDays)
+			log.Printf("Spots logging enabled to SQLite (DB retention: %d days)", config.SpotsLogMaxAgeDays)
 		} else {
-			log.Printf("Spots CSV logging enabled: %s (no cleanup)", config.SpotsLogDataDir)
+			log.Printf("Spots logging enabled to SQLite (no retention limit)")
 		}
 	}
 

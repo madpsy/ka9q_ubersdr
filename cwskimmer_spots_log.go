@@ -2,24 +2,18 @@ package main
 
 import (
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
-	"time"
 )
 
-// CWSkimmerSpotsLogger handles CSV logging of CW Skimmer spots
-// Logs spots to separate CSV files organized by date/band with CW-specific fields
+// CWSkimmerSpotsLogger persists CW Skimmer spots to SQLite.
+// Spots are written to the cw_spots table; there is no file-based path.
 type CWSkimmerSpotsLogger struct {
+	// dataDir is retained solely so db_import.go can backfill historical CSV
+	// files written before the SQLite migration. Nothing is written here at
+	// runtime any more.
 	dataDir string
-
-	// CSV logging (one file per date/band combination)
-	openFiles  map[string]*os.File    // key: date/band
-	csvWriters map[string]*csv.Writer // key: date/band
-	fileMu     sync.Mutex
 
 	// Async logging
 	logChan  chan *CWSkimmerSpot
@@ -29,13 +23,21 @@ type CWSkimmerSpotsLogger struct {
 	// Control
 	enabled bool
 
-	// SQLite (dual-write alongside CSV; nil when DB not available)
+	// SQLite write connection (single-writer pool). nil when DB not available.
 	db *sql.DB
+
+	// SQLite read-only connection pool. Used for all SELECT queries.
+	readDB *sql.DB
 }
 
-// SetDB wires the SQLite database into the CW skimmer spots logger for dual-write.
+// SetDB wires the SQLite write connection into the CW skimmer spots logger.
 func (sl *CWSkimmerSpotsLogger) SetDB(db *sql.DB) {
 	sl.db = db
+}
+
+// SetReadDB wires the SQLite read-only pool used for all SELECT queries.
+func (sl *CWSkimmerSpotsLogger) SetReadDB(readDB *sql.DB) {
+	sl.readDB = readDB
 }
 
 // NewCWSkimmerSpotsLogger creates a new CW Skimmer spots logger
@@ -44,18 +46,11 @@ func NewCWSkimmerSpotsLogger(dataDir string, enabled bool) (*CWSkimmerSpotsLogge
 		return &CWSkimmerSpotsLogger{enabled: false}, nil
 	}
 
-	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create CW Skimmer spots log directory: %w", err)
-	}
-
 	sl := &CWSkimmerSpotsLogger{
-		dataDir:    dataDir,
-		enabled:    true,
-		openFiles:  make(map[string]*os.File),
-		csvWriters: make(map[string]*csv.Writer),
-		logChan:    make(chan *CWSkimmerSpot, 1000), // Buffered channel for async logging
-		stopChan:   make(chan struct{}),
+		dataDir:  dataDir,
+		enabled:  true,
+		logChan:  make(chan *CWSkimmerSpot, 1000), // Buffered channel for async logging
+		stopChan: make(chan struct{}),
 	}
 
 	// Start async logging goroutine
@@ -83,7 +78,7 @@ func (sl *CWSkimmerSpotsLogger) LogSpot(spot *CWSkimmerSpot) error {
 	}
 }
 
-// logWorker processes spots from the channel and writes them to disk
+// logWorker processes spots from the channel and writes them to the database
 func (sl *CWSkimmerSpotsLogger) logWorker() {
 	defer sl.wg.Done()
 
@@ -109,169 +104,53 @@ func (sl *CWSkimmerSpotsLogger) logWorker() {
 	}
 }
 
-// writeSpot writes a CW Skimmer spot to the appropriate CSV file (internal, called by logWorker)
+// writeSpot writes a CW Skimmer spot to the cw_spots table (internal, called by logWorker)
 func (sl *CWSkimmerSpotsLogger) writeSpot(spot *CWSkimmerSpot) error {
-	// CSV write under mutex — released before the DB INSERT so a slow/locked
-	// database never blocks the log worker goroutine's fileMu.
-	sl.fileMu.Lock()
-
-	// Get or create the CSV writer for this date/band combination
-	writer, err := sl.getOrCreateWriter(spot)
-	if err != nil {
-		sl.fileMu.Unlock()
-		return err
+	if sl.db == nil {
+		return nil
 	}
 
-	// Format optional float pointers
-	distanceStr := ""
-	if spot.DistanceKm != nil {
-		distanceStr = fmt.Sprintf("%.1f", *spot.DistanceKm)
-	}
-	bearingStr := ""
-	if spot.BearingDeg != nil {
-		bearingStr = fmt.Sprintf("%.1f", *spot.BearingDeg)
-	}
-
-	// Write CSV record
-	record := []string{
-		spot.Time.Format(time.RFC3339),
+	_, err := sl.db.Exec(
+		`INSERT INTO cw_spots
+		 (ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment,
+		  country, country_code, cq_zone, itu_zone, continent,
+		  latitude, longitude, distance_km, bearing_deg,
+		  op_name, state, grid, geoloc, tz_iana, loc_source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		spot.Time.Unix(),
 		spot.DXCall,
-		fmt.Sprintf("%d", spot.SNR),
-		fmt.Sprintf("%.0f", spot.Frequency), // Frequency in Hz
+		spot.Spotter,
+		spot.SNR,
+		spot.Frequency,
 		spot.Band,
-		fmt.Sprintf("%d", spot.WPM),
-		spot.Comment, // CQ, DE, or empty
+		spot.WPM,
+		spot.Mode,
+		spot.Comment,
 		spot.Country,
-		fmt.Sprintf("%d", spot.CQZone),
-		fmt.Sprintf("%d", spot.ITUZone),
+		spot.CountryCode,
+		spot.CQZone,
+		spot.ITUZone,
 		spot.Continent,
-		distanceStr,
-		bearingStr,
-	}
-
-	if err := writer.Write(record); err != nil {
-		sl.fileMu.Unlock()
+		spot.Latitude,
+		spot.Longitude,
+		spot.DistanceKm, // *float64 — nil becomes NULL
+		spot.BearingDeg, // *float64 — nil becomes NULL
+		spot.Name,
+		spot.State,
+		spot.Grid,
+		spot.GeoLoc,
+		spot.Timezone,
+		spot.LocSource,
+	)
+	if err != nil {
+		log.Printf("[DB] cw_spots insert error: %v", err)
 		return err
-	}
-
-	// Flush after each write to ensure data is saved
-	writer.Flush()
-	csvErr := writer.Error()
-
-	// Release the mutex before the DB INSERT — a slow or locked database must
-	// never block the log worker goroutine holding fileMu.
-	sl.fileMu.Unlock()
-
-	if csvErr != nil {
-		return csvErr
-	}
-
-	// Dual-write to SQLite (non-fatal — CSV is the source of truth for now)
-	if sl.db != nil {
-		_, dbErr := sl.db.Exec(
-			`INSERT INTO cw_spots
-			 (ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment,
-			  country, country_code, cq_zone, itu_zone, continent,
-			  latitude, longitude, distance_km, bearing_deg,
-			  op_name, state, grid, geoloc, tz_iana, loc_source)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			spot.Time.Unix(),
-			spot.DXCall,
-			spot.Spotter,
-			spot.SNR,
-			spot.Frequency,
-			spot.Band,
-			spot.WPM,
-			spot.Mode,
-			spot.Comment,
-			spot.Country,
-			spot.CountryCode,
-			spot.CQZone,
-			spot.ITUZone,
-			spot.Continent,
-			spot.Latitude,
-			spot.Longitude,
-			spot.DistanceKm, // *float64 — nil becomes NULL
-			spot.BearingDeg, // *float64 — nil becomes NULL
-			spot.Name,
-			spot.State,
-			spot.Grid,
-			spot.GeoLoc,
-			spot.Timezone,
-			spot.LocSource,
-		)
-		if dbErr != nil {
-			log.Printf("[DB] cw_spots insert error: %v", dbErr)
-		}
 	}
 
 	return nil
 }
 
-// getOrCreateWriter gets or creates a CSV writer for the given spot
-// File path structure: base_dir/YYYY/MM/DD/bandname.csv
-func (sl *CWSkimmerSpotsLogger) getOrCreateWriter(spot *CWSkimmerSpot) (*csv.Writer, error) {
-	// Create a unique key for this date/band combination
-	dateStr := spot.Time.Format("2006-01-02")
-	key := fmt.Sprintf("%s/%s", dateStr, spot.Band)
-
-	// Check if we already have a writer for this combination
-	if writer, exists := sl.csvWriters[key]; exists {
-		return writer, nil
-	}
-
-	// Parse date to create year/month/day directory structure
-	t := spot.Time
-
-	// Create directory path: base_dir/YYYY/MM/DD/
-	dirPath := filepath.Join(
-		sl.dataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
-	)
-
-	// Create directory structure if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory structure: %w", err)
-	}
-
-	// Create file: base_dir/YYYY/MM/DD/bandname.csv
-	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", spot.Band))
-
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if file is new (needs header)
-	stat, _ := file.Stat()
-	needsHeader := stat.Size() == 0
-
-	// Create CSV writer
-	writer := csv.NewWriter(file)
-
-	// Store file and writer
-	sl.openFiles[key] = file
-	sl.csvWriters[key] = writer
-
-	// Write header if new file
-	if needsHeader {
-		header := []string{
-			"timestamp", "callsign", "snr", "frequency", "band", "wpm",
-			"comment", "country", "cq_zone", "itu_zone", "continent",
-			"distance_km", "bearing_deg",
-		}
-		if err := writer.Write(header); err != nil {
-			return nil, fmt.Errorf("failed to write CSV header: %w", err)
-		}
-		writer.Flush()
-	}
-
-	return writer, nil
-}
-
-// Close closes all open CSV files and stops the async worker
+// Close stops the async worker and drains any pending spots.
 func (sl *CWSkimmerSpotsLogger) Close() error {
 	if !sl.enabled {
 		return nil
@@ -282,20 +161,6 @@ func (sl *CWSkimmerSpotsLogger) Close() error {
 
 	// Wait for worker to finish processing remaining spots
 	sl.wg.Wait()
-
-	sl.fileMu.Lock()
-	defer sl.fileMu.Unlock()
-
-	// Close all open files
-	for key, file := range sl.openFiles {
-		if err := file.Close(); err != nil {
-			log.Printf("Warning: error closing CW Skimmer spots CSV file %s: %v", key, err)
-		}
-	}
-
-	// Clear maps
-	sl.openFiles = make(map[string]*os.File)
-	sl.csvWriters = make(map[string]*csv.Writer)
 
 	return nil
 }

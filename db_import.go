@@ -154,19 +154,74 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 	// is not blocked. The decision of WHICH tables to import was already made
 	// above, so live writes arriving now cannot affect it.
 	go func() {
+		// Track, per source directory, whether every import that reads from it
+		// succeeded. A directory is only deleted once ALL of its imports
+		// finished without error and the context was never cancelled — a
+		// directory shared by several importers (e.g. StatsDir feeds rbn/psk/
+		// wspr) must not be removed until the last of them is done. This is why
+		// deletion is deferred to the very end rather than done per-table.
+		dirOK := make(map[string]bool)   // dir → all imports so far succeeded
+		dirSeen := make(map[string]bool) // dir → appeared in toImport
+		aborted := false
+
 		for _, t := range toImport {
 			if ctx.Err() != nil {
-				return
+				aborted = true
+				break
+			}
+			if !dirSeen[t.dir] {
+				dirSeen[t.dir] = true
+				dirOK[t.dir] = true // optimistic; cleared on any failure below
 			}
 			log.Printf("[DB import] %s: starting backfill", t.table)
 			start := time.Now()
 			if err := t.importFn(ctx); err != nil {
 				log.Printf("[DB import] %s backfill error: %v", t.table, err)
+				dirOK[t.dir] = false // keep the source dir for a future retry
 			} else {
 				log.Printf("[DB import] %s backfill complete in %v", t.table, time.Since(start).Round(time.Millisecond))
 			}
 		}
+
+		// Deferred, all-at-once cleanup: only after every queued import has run
+		// (and none were aborted) do we remove the source directories whose
+		// imports all succeeded. Historical file trees are then fully replaced
+		// by the SQLite database.
+		if aborted || ctx.Err() != nil {
+			log.Printf("[DB import] backfill interrupted — leaving source directories in place")
+			return
+		}
+		imp.cleanupImportedDirs(dirOK)
 	}()
+}
+
+// cleanupImportedDirs removes each source data directory whose imports all
+// completed successfully. Called once, after every queued import has run.
+//
+// A directory is skipped (kept on disk) if any import reading from it failed,
+// so a subsequent startup can retry the backfill from the intact files.
+// Directories shared by multiple importers (StatsDir) are removed only when
+// every importer that read from them succeeded.
+func (imp *DBImporter) cleanupImportedDirs(dirOK map[string]bool) {
+	// Deduplicate: StatsDir appears three times in the import list.
+	seen := make(map[string]bool)
+	for dir, ok := range dirOK {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if !ok {
+			log.Printf("[DB import] keeping %s — one or more imports from it did not succeed", dir)
+			continue
+		}
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue // already gone
+		}
+		log.Printf("[DB import] removing migrated source directory %s", dir)
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("[DB import] WARNING: failed to remove %s: %v", dir, err)
+		}
+	}
 }
 
 // tableIsEmpty returns true when COUNT(*) == 0 for the named table.

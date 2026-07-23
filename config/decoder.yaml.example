@@ -53,21 +53,15 @@ decoder:
   wsprnet_callsign: ""                    # Optional: Override callsign for WSPRNet (if empty, uses receiver_callsign)
                                           # Use this if you want different callsigns for PSKReporter and WSPRNet
 
-  # CSV Logging (independent of reporting services)
-  # Logs all decoded spots to CSV files organized by mode/date/band
-  spots_log_enabled: true              # Enable CSV logging of all spots
-  spots_log_data_dir: "decoder_spots" # Directory for CSV files (relative or absolute, default: data_dir/spots)
-                                       # If relative: relative to current working directory
-                                       # If absolute: used as-is (e.g., /var/log/decoder_spots)
-                                       # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
-                                       # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
+  # Spot logging (independent of reporting services)
+  # All decoded spots are persisted to the SQLite database (spots table).
+  spots_log_enabled: true              # Enable logging of all spots to the database
   spots_log_locators_only: true        # Only log/show spots with valid grid locators (default: true)
                                        # When false, logs and shows all spots including those without locators
-                                       # Applies to both CSV logging and history view
-  spots_log_max_age_days: 90           # Maximum age of spots log files in days (default: 90)
-                                       # Files older than this will be automatically deleted
-                                       # Cleanup runs once per hour
-                                       # Set to 0 to disable automatic cleanup
+                                       # Applies to both logging and history view
+  spots_log_max_age_days: 90           # DB retention for the spots table, in days (default: 90)
+                                       # Rows older than this are pruned by the DB retention loop
+                                       # Set to 0 to keep forever (no pruning)
 
   # Metrics Logging (stored in SQLite DB — no files written)
   # Logs decoder performance metrics (decode counts, execution times, etc.)
@@ -368,10 +362,11 @@ decoder:
 # 2. Each enabled band creates a dedicated audio channel
 #    consuming ~12 kHz bandwidth
 #
-# 3. CSV logging (if enabled):
-#    - Logs all spots to: spots_log_dir/YYYY/MM/DD/spots.csv
+# 3. Spot logging (if enabled):
+#    - Persists all spots to the SQLite database (spots table)
 #    - Independent of PSKReporter/WSPRNet reporting
 #    - Includes: timestamp, mode, callsign, locator, SNR, frequency, message, country, zones
+#    - Retention controlled by spots_log_max_age_days (DB pruning)
 #
 # 4. WAV files are stored in:
 #    - decoder_data/<frequency>/YYMMDD_HHMMSS.wav (for FT8/FT4/WSPR)

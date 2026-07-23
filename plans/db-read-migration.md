@@ -124,10 +124,80 @@ All five read operations and the write path were migrated. CSV file infrastructu
 
 ---
 
-## Component 3 — `spots` table (decoder spots)
+## Component 3 — `spots` table (decoder spots) ✅ MIGRATED
 
-**DB table**: `spots(id, ts, mode, decoder_name, callsign, locator, snr, frequency, band, message, country, cq_zone, itu_zone, continent, distance_km, bearing_deg, dbm)`  
-**Current read files**: [`decoder_spots_log.go`](../decoder_spots_log.go) · [`main.go`](../main.go)
+**DB table**: `spots(id, ts, mode, decoder_name, callsign, locator, snr, frequency, band, message, country, cq_zone, itu_zone, continent, distance_km, bearing_deg, dbm)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
+
+### What was done
+
+All read operations and the write path were migrated in [`decoder_spots_log.go`](../decoder_spots_log.go).
+CSV file infrastructure removed entirely — no fallback, no dual-write.
+
+#### 3.1 `GetHistoricalSpots` ✅
+
+Replaced the per-day × per-mode file walk with a single dynamic DB query against
+`sl.readDB`, building `WHERE` conditions per active filter: half-open UTC date range,
+`mode`, `band`, `decoder_name` (the "name" dimension), `callsign`, `locator`, `continent`,
+`locator != ''` (locatorsOnly), `distance_km >= ?`, `snr >= ?`, and time-of-day via
+`strftime` minutes-of-day. `ORDER BY ts DESC`.
+- **Direction filter** applied in Go via `matchesDirection` (no SQL bearing function).
+- **Deduplication** preserved exactly in Go: keep the row with the later RFC3339 timestamp
+  per `(callsign, locator, band, mode, UTC-date)` — identical string-comparison semantics to
+  the old code.
+- **Row scan**: `ts`→RFC3339 `Timestamp`; `frequency` INTEGER→`uint64`; nullable
+  `distance_km`/`bearing_deg`→`*float64` via `sql.NullFloat64`; nullable `dbm`→`*int` via
+  `sql.NullInt64`; `Name` from `decoder_name`.
+
+#### 3.2 `GetAvailableDates` ✅ — `SELECT DISTINCT DATE(ts,'unixepoch') … ORDER BY date DESC`
+
+#### 3.3 `GetAvailableNames` ✅ — `SELECT DISTINCT decoder_name … ORDER BY decoder_name ASC`
+
+#### 3.4 `GetHistoricalCSV` ✅ — unchanged; rides on the DB-backed `GetHistoricalSpots`
+
+#### 3.5 / 3.6 Analytics ✅ — Option B: `GetSpotsAnalytics`/`GetSpotsAnalyticsHourly` and
+`getWSPRSpotsCached`/`computeWSPRSummaryByBand` all call `GetHistoricalSpots`, so they
+inherit the DB path with no changes. (`getTopCallsigns` is an empty stub.)
+
+#### Write path ✅
+
+`LogSpot` now does a direct SQLite INSERT only. Removed `getOrCreateWriter`, the CSV read
+helpers `readSpotsForDate`/`readNameFile`, the file cleanup goroutine
+(`cleanupLoop`/`cleanupOldFiles`/`isDirEmpty`), and the `openFiles`/`csvWriters`/`fileMu`/
+`stopClean`/`maxAgeDays` fields. `Close()` is a no-op; `NewSpotsLogger` no longer calls
+`os.MkdirAll`.
+
+### Struct & wiring
+
+- Added `readDB *sql.DB` + `SetReadDB()`. `MultiDecoder.SetReadDB` in
+  [`decoder.go`](../decoder.go) now forwards to the spots logger; `main.go` already calls it.
+- `dataDir` retained solely for [`db_import.go`](../db_import.go) historical backfill.
+
+### Config & retention
+
+- `spots_log_data_dir` removed from [`config/decoder.yaml.example`](../config/decoder.yaml.example)
+  (`SpotsLogDataDir` struct field kept for `db_import.go`; `main.go` still resolves a default path).
+- `spots_log_enabled` and `spots_log_locators_only` kept.
+- `spots_log_max_age_days` kept — now drives **DB** pruning via
+  `RetentionConfig.SpotsDays` in [`main.go`](../main.go); the hourly file-cleanup loop is gone.
+- CW spots (Component 4): `spots_log_data_dir` also removed from
+  [`config/cwskimmer.yaml.example`](../config/cwskimmer.yaml.example) (`cw_spots` retention is
+  `CWSpotsDays` = 0/unlimited, no config field, per precedent).
+
+### Imports removed from `decoder_spots_log.go`
+
+`encoding/csv`, `os`, `path/filepath`, `sync`. Retained: `database/sql`, `fmt`, `log`,
+`sort`, `strings`, `time`.
+
+### Tests
+
+[`decoder_spots_db_test.go`](../decoder_spots_db_test.go) — real-SQLite round trips covering
+every filter dimension, the dedup "keep latest" rule, WSPR `dbm` round-trip, and NULL
+distance/bearing/dbm scanning back as nil pointers.
+
+---
+
+### Original migration spec (for reference)
 
 ### Operations to migrate
 
@@ -301,119 +371,107 @@ Keep file fallback when `db == nil`.
 
 ---
 
-## Component 4 — `cw_spots` table
+## Component 4 — `cw_spots` table ✅ MIGRATED
 
-**DB table**: `cw_spots(id, ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment, country, country_code, cq_zone, itu_zone, continent, latitude, longitude, distance_km, bearing_deg, op_name, state, grid, geoloc, tz_iana, loc_source)`  
-**Current read files**: [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) · [`cwskimmer_spots_log.go`](../cwskimmer_spots_log.go)
+**DB table**: `cw_spots(id, ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment, country, country_code, cq_zone, itu_zone, continent, latitude, longitude, distance_km, bearing_deg, op_name, state, grid, geoloc, tz_iana, loc_source)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
 
-### Operations to migrate
+### What was done
 
-#### 4.1 `GetCWHistoricalSpots` — `/cw-spots` (GET)
+All three read operations and the write path were migrated. CSV file infrastructure removed entirely — no fallback, no dual-write.
 
-**Current**: [`cwskimmer_spots_api.go:GetCWHistoricalSpots()`](../cwskimmer_spots_api.go:52)
-walks `YYYY/MM/DD/<band>.csv` files, applies filters, enriches with CTY lat/lon.
+#### 4.1 `GetCWHistoricalSpots` — `/cw-spots` (GET) ✅
 
-**SQL replacement**:
-```sql
-SELECT ts, dx_call, spotter, snr, frequency, band, wpm, mode, comment,
-       country, country_code, cq_zone, itu_zone, continent,
-       latitude, longitude, distance_km, bearing_deg,
-       op_name, state, grid, geoloc, tz_iana, loc_source
-FROM cw_spots
-WHERE ts >= ?                          -- fromDate.Unix()
-  AND ts <  ?                          -- toDate+1day.Unix()
-  AND (? = '' OR band = ?)             -- band filter
-  AND (? = '' OR dx_call = ?)          -- callsign exact match (or IN set)
-  AND (? = '' OR continent = ?)        -- continent
-  AND (? = 0  OR distance_km >= ?)     -- minDistanceKm
-  AND (? = -999 OR snr >= ?)           -- minSNR
-  AND (? = '' OR (                     -- time-of-day startTime
-        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
-      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) >= ?
-  ))
-  AND (? = '' OR (                     -- time-of-day endTime
-        CAST(strftime('%H', ts, 'unixepoch') AS INTEGER) * 60
-      + CAST(strftime('%M', ts, 'unixepoch') AS INTEGER) <= ?
-  ))
-ORDER BY ts DESC
-```
-
-**Callsign set filter**: When `callsigns` is a non-empty map, generate
-`dx_call IN (?,?,?)` with one placeholder per callsign.
-
-**CTY lat/lon enrichment**: The `latitude`/`longitude` columns in `cw_spots` are already
-populated at write time from CTY lookup. No post-query enrichment needed.
-
----
-
-#### 4.2 CW spots analytics — `/cw-spots/analytics` (GET)
-
-**Current**: [`cwskimmer_spots_analytics.go`](../cwskimmer_spots_analytics.go) calls
-`GetCWHistoricalSpots()` then aggregates in Go.
-
-**SQL replacement** (same Option B approach as decoder spots analytics):
-Replace the data source with a DB query, keep Go aggregation logic.
+Replaced the `YYYY/MM/DD/<band>.csv` file walk with a single dynamic DB query against
+[`sl.readDB`](../cwskimmer_spots_api.go). Conditions are appended per active filter:
 
 ```sql
-SELECT ts, dx_call, snr, frequency, band, wpm, country, continent,
+SELECT ts, dx_call, snr, frequency, band, wpm, comment,
+       country, cq_zone, itu_zone, continent,
        latitude, longitude, distance_km, bearing_deg
 FROM cw_spots
-WHERE ts >= ?
-  AND ts <  ?
-  AND (? = '' OR band = ?)
-  AND (? = '' OR continent = ?)
-  AND snr >= ?
+WHERE ts >= ? AND ts < ?          -- [startOfFromDate, startOfDayAfterToDate) UTC
+  [AND band = ?]                  -- band filter
+  [AND band = ?]                  -- name filter (maps to band; same dimension)
+  [AND dx_call IN (?,…)]          -- callsign set
+  [AND continent = ?]
+  [AND distance_km IS NOT NULL AND distance_km >= ?]
+  [AND snr >= ?]
+  [AND (CAST(strftime('%H',ts,'unixepoch') AS INT)*60
+      + CAST(strftime('%M',ts,'unixepoch') AS INT)) >= ?]   -- startTime HH:MM
+  [AND (… same expression …) <= ?]                          -- endTime HH:MM
 ORDER BY ts DESC
 ```
 
----
+- **Callsign set filter**: non-empty `callsigns` map generates `dx_call IN (?,…)` with one
+  placeholder per callsign.
+- **Read-time CTY re-lookup removed (not enrichment)**: the old file path re-ran
+  `ctyDatabase.LookupCallsignFull()` on every read *only because the CSV never stored
+  lat/lon*. The DB does: [`enrichSpot()`](../cwskimmer.go:657) populates
+  `latitude`/`longitude` (CTY centroid, optionally overridden by a precise QRZ position)
+  and `distance_km`/`bearing_deg` at write time, and those are read straight from the
+  columns. Re-looking-up on read would be a regression — it would clobber the more
+  accurate QRZ position with the CTY centroid. The `ctyDatabase *CTYDatabase` parameter
+  is retained (renamed to `_`) so callers and the `GetCWHistoricalCSV`/analytics
+  signatures stay identical. The **live** DX-cluster map spots use a separate path
+  ([`BroadcastCWSpot`](../dxcluster_websocket.go:837)) and are unaffected by this change.
+- **Direction filter** (4.x): SQLite has no bearing-to-compass function, so it is applied
+  in Go via `matchesDirection(*spot.BearingDeg, direction)` after the row scan.
+- **Row scan**: `ts` (Unix seconds) → RFC3339 `Timestamp`; nullable `latitude`,
+  `longitude`, `distance_km`, `bearing_deg` scanned via `sql.NullFloat64` → `*float64`;
+  `Name` set from the `band` column (matching the file path where the CSV filename was the
+  band).
+- New helper `parseHourMinToMinutes()` converts `"HH:MM"` to minutes-of-day for the
+  time-of-day predicates.
 
-#### 4.3 `GetCWAvailableDates` — `/cw-spots/dates` (GET)
+#### 4.2 CW spots analytics — `/cw-spots/analytics` (GET) ✅
 
-**Current**: [`cwskimmer_spots_api.go:GetCWAvailableDates()`](../cwskimmer_spots_api.go:288)
-walks `YYYY/MM/DD/` directory tree.
+Option B: [`cwskimmer_spots_analytics.go`](../cwskimmer_spots_analytics.go) is unchanged —
+both `GetCWSpotsAnalytics()` and `GetCWSpotsAnalyticsHourly()` call `GetCWHistoricalSpots()`,
+so they inherit the DB path automatically. The Go aggregation logic is untouched.
 
-**SQL replacement**:
+#### 4.3 `GetCWAvailableDates` — `/cw-spots/dates` (GET) ✅
+
+Directory walk replaced with:
 ```sql
-SELECT DISTINCT DATE(ts, 'unixepoch') AS date
-FROM cw_spots
-ORDER BY date DESC
+SELECT DISTINCT DATE(ts, 'unixepoch') AS date FROM cw_spots ORDER BY date DESC
 ```
 
----
+#### 4.4 `GetCWAvailableNames` — `/cw-spots/names` (GET) ✅
 
-#### 4.4 `GetCWAvailableNames` — `/cw-spots/names` (GET)
-
-**Current**: [`cwskimmer_spots_api.go:GetCWAvailableNames()`](../cwskimmer_spots_api.go:354)
-walks `YYYY/MM/DD/` directory tree collecting `.csv` filenames (band names, e.g. "20m", "40m").
-The "name" in this context is the **band** (the CSV filename without extension).
-
-**SQL replacement** — distinct bands that have CW spot data:
+Directory walk replaced with (the "name" dimension is the band):
 ```sql
-SELECT DISTINCT band
-FROM cw_spots
-WHERE band IS NOT NULL AND band != ''
-ORDER BY band ASC
+SELECT DISTINCT band FROM cw_spots WHERE band IS NOT NULL AND band != '' ORDER BY band ASC
 ```
 
-**Note**: Confirmed from [`db_manager.go`](../db_manager.go:313) schema — `cw_spots` has a
-`band` column (e.g. "20m") and a `spotter` column (skimmer callsign). The file-based
-`GetCWAvailableNames()` returns band names from filenames, which maps to `band` in the DB.
+#### 4.5 CW spots CSV export — `/cw-spots/csv` (GET) ✅
 
----
+`GetCWHistoricalCSV()` is unchanged — it delegates to the now DB-backed
+`GetCWHistoricalSpots()` and formats the result as CSV.
 
-#### 4.5 CW spots CSV export — `/cw-spots/csv` (GET)
+#### Write path ✅
 
-**Current**: [`cwskimmer_spots_api.go:GetCWHistoricalCSV()`](../cwskimmer_spots_api.go:433)
-calls `GetCWHistoricalSpots()` then formats as CSV.
+`writeSpot()` now does a direct SQLite INSERT only. `getOrCreateWriter()`, the CSV read
+helpers `readCWSpotsForDate()`/`readCWNameFile()`, and the `openFiles`/`csvWriters`/`fileMu`
+struct fields were removed. `Close()` now only stops the async worker (no file handles).
+`NewCWSkimmerSpotsLogger()` no longer calls `os.MkdirAll`.
 
-**Migration**: Automatically benefits once `GetCWHistoricalSpots()` is migrated to DB.
+### Struct changes
 
----
+- Added: `readDB *sql.DB` + `SetReadDB()` method
+- Removed: `openFiles`, `csvWriters`, `fileMu` (CSV infrastructure)
+- `dataDir` retained solely for [`db_import.go`](../db_import.go) historical CSV backfill
 
-**Files to change**: [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go) — add DB read path
-to `GetCWHistoricalSpots()`, `GetCWAvailableDates()`, `GetCWAvailableNames()`.
-[`cwskimmer_spots_analytics.go`](../cwskimmer_spots_analytics.go) — replace data source.
+### Wiring chain
+
+`main.go` → `spotsLogger.SetDB(dbManager.DB())` + `spotsLogger.SetReadDB(dbManager.ReadDB())`
+
+### Imports removed
+
+From [`cwskimmer_spots_api.go`](../cwskimmer_spots_api.go): `encoding/csv`, `os`,
+`path/filepath` (added `database/sql` for `sql.NullFloat64`).
+From [`cwskimmer_spots_log.go`](../cwskimmer_spots_log.go): `encoding/csv`, `os`,
+`path/filepath`, `time`.
 
 ---
 
@@ -777,6 +835,28 @@ work for no extra data.
 
 `readJSONLMax` was added because a single `WSPRRankResponse` line holds three full
 leaderboards and exceeds `readJSONL`'s 1 MiB cap; the stats importers use 32 MiB.
+
+### Post-migration source-directory cleanup
+
+Once the backfill has run, the legacy file trees are redundant — the SQLite database is
+the sole source of truth for every read path. `RunImportIfEmpty` therefore deletes the
+migrated source directories via `cleanupImportedDirs`, with these guarantees:
+
+- **All-at-once, deferred**: deletion happens only after *every* queued import in the
+  background goroutine has finished, not per-table. A directory shared by several importers
+  (`StatsDir` feeds `rbn`, `psk` and `wspr`) is only removed once the last of them succeeds.
+- **Success-gated**: a directory is kept if *any* import reading from it returned an error,
+  or if the context was cancelled mid-run, so a later startup can retry the backfill from
+  the intact files. `dirOK[dir]` starts optimistic and is cleared on the first failure.
+- **Only migrated dirs**: a directory is a deletion candidate only if it was in `toImport`
+  — i.e. its table was empty and the directory existed. Tables that already had data (so
+  their import was skipped) never have their directory touched.
+- `os.RemoveAll` removes the whole tree, including day directories older than
+  `importSpotsDays`/`importStatsDays` that were intentionally *not* imported: those rows are
+  unreachable through the API (retention / `statsMaxDays` caps) so the files are dead weight.
+
+Covered by [`db_import_cleanup_test.go`](../db_import_cleanup_test.go) (delete-on-success,
+keep-on-failure, shared-dir partial failure, missing/empty dir no-ops).
 
 ### Retention
 

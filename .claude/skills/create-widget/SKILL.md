@@ -1525,16 +1525,30 @@ re-read the community caveat below before pushing.
 ### Enable it on this instance
 
 A widget must be **enabled** to appear on the SDR page. The enabled list is
-**replaced wholesale** by `POST /admin/widgets/enabled` (max 10), so read the
-current list, append your id, and post the union:
+**replaced wholesale** by `POST /admin/widgets/enabled`, and there's a hard cap
+of **10 enabled at once** — don't hardcode it, read `max_allowed` from the GET
+response (`{"enabled":[…], "count":N, "max_allowed":10}`). Posting more than the
+cap fails with `400 "Too many widgets: maximum 10 enabled at once"`.
+
+Read the current list, append your id, post the union — and check the cap first:
 
 ```bash
-NEW=$(curl -s "$BASE/admin/widgets/enabled" -H "X-Admin-Password: $PW" \
-      | jq -c --arg id "$WID" '[.enabled[].widget_id] + [$id] | unique')
-curl -s -X POST "$BASE/admin/widgets/enabled" \
-     -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' \
-     -d "{\"enabled\": $NEW}"
+ENABLED=$(curl -s "$BASE/admin/widgets/enabled" -H "X-Admin-Password: $PW")
+MAX=$(jq -r .max_allowed <<<"$ENABLED")
+NEW=$(jq -c --arg id "$WID" '[.enabled[].widget_id] + [$id] | unique' <<<"$ENABLED")
+if [ "$(jq length <<<"$NEW")" -gt "$MAX" ]; then
+  echo "At the $MAX-widget cap. Currently enabled:"; jq -r '.enabled[] | "  - \(.name) (\(.widget_id))"' <<<"$ENABLED"
+  echo "Ask the user which one to disable, then post the list without it (plus the new id)."
+else
+  curl -s -X POST "$BASE/admin/widgets/enabled" \
+       -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' \
+       -d "{\"enabled\": $NEW}"
+fi
 ```
+
+If already at the cap, **don't silently drop one** — tell the user they're at
+`max_allowed`, list what's enabled, and ask which to disable (i.e. post the union
+minus that id). To disable a widget, just post the enabled list without it.
 
 Reload the SDR page and the widget renders. Enabling a **private** widget you
 own works exactly the same — no need to publish it first.
@@ -1568,6 +1582,44 @@ ready.
 To roll back a bad change, inspect `/admin/widgets/versions?widget_id=$WID`,
 fetch an old version's `html_content` from `/admin/widgets/version?...`, and
 `update` with it.
+
+### Delete a widget — confirm first, and mind public widgets
+
+Deletion is **destructive and not a versioned change** — `POST
+/admin/widgets/delete` (body `{widget_id}`) removes the widget and all its
+versions from the collector, and also strips it from this instance's enabled
+list/cache. There's no undo. **Always confirm with the user before deleting**,
+naming the widget you're about to remove.
+
+**If the widget is public, be extra careful — other instances may have it
+enabled and will lose it.** Before deleting a public widget, check who's using
+it and warn accordingly:
+
+```bash
+# How many OTHER instances have this public widget enabled?
+USERS=$(curl -s "$BASE/admin/widgets/public-with-instances" -H "X-Admin-Password: $PW" \
+        | jq --arg id "$WID" '[.widgets[] | select(.widget_id==$id) | .enabled_by // []][0] | length')
+echo "$WID is enabled by $USERS instance(s)."
+```
+
+Guidance for the assistant:
+- **Private widget:** confirm once (*"Delete 'My Thing'? This can't be undone. — yes/no"*), then delete.
+- **Public widget with `enabled_by` > 0 (or > 1, counting yourself):** do **not**
+  delete on a casual request. Explain that deleting removes it for everyone still
+  using it, and offer the softer alternative — **make it private** (`update` with
+  `is_public:false`), which pulls it from the community catalog without destroying
+  it. Only delete if the user explicitly confirms after that warning.
+
+```bash
+# Delete (only after the confirmation above)
+curl -s -X POST "$BASE/admin/widgets/delete" \
+     -H "X-Admin-Password: $PW" -H 'Content-Type: application/json' \
+     -d "{\"widget_id\": \"$WID\"}"
+```
+
+Never delete a widget the user didn't clearly point at — resolve the name to a
+single `widget_id` (see the fuzzy-match rules), and if unsure which they meant,
+ask rather than guess.
 
 ---
 

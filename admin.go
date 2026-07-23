@@ -4898,6 +4898,21 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		stats["uptime"] = fmt.Sprintf("Error: %v", err)
 	}
 
+	// SQLite database size accounting (page_count/page_size/freelist_count).
+	if ah.dbManager != nil {
+		if dbStats, err := ah.dbManager.SizeStats(); err == nil {
+			stats["database"] = map[string]interface{}{
+				"path":           dbStats.Path,
+				"page_count":     dbStats.PageCount,
+				"page_size":      dbStats.PageSize,
+				"freelist_count": dbStats.FreelistCount,
+				"total_bytes":    dbStats.TotalBytes,
+				"used_bytes":     dbStats.UsedBytes,
+				"free_bytes":     dbStats.FreeBytes,
+			}
+		}
+	}
+
 	// Get CPU temperature from hwmon subsystem (AMD k10temp / Intel coretemp)
 	if tempC, driver, err := getCPUTemperature(); err == nil {
 		stats["cpu_temperature"] = map[string]interface{}{
@@ -4922,78 +4937,14 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		stats["memory"] = fmt.Sprintf("Error: %v", err)
 	}
 
-	// Get data directory sizes using du -sh
+	// Get data directory sizes using du -sh.
+	//
+	// Note: the spots, noise floor, space weather, cw_spots, session activity,
+	// and metrics summary directories are intentionally NOT reported here —
+	// those subsystems have been migrated to SQLite and their legacy file trees
+	// are removed by the one-time DB importer after backfill. Only directories
+	// that are still written at runtime remain below.
 	dataDirs := make(map[string]string)
-
-	// Decoder spots directory
-	if ah.config.Decoder.Enabled && ah.config.Decoder.SpotsLogEnabled && ah.config.Decoder.SpotsLogDataDir != "" {
-		if _, err := os.Stat(ah.config.Decoder.SpotsLogDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.Decoder.SpotsLogDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["decoder_spots"] = string(duOutput)
-			}
-		}
-	}
-
-	// Decoder metrics summary directory
-	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsSummaryDataDir != "" {
-		if _, err := os.Stat(ah.config.Decoder.MetricsSummaryDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsSummaryDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["decoder_summary"] = string(duOutput)
-			}
-		}
-	}
-
-	// Noise floor directory
-	if ah.config.NoiseFloor.Enabled && ah.config.NoiseFloor.DataDir != "" {
-		if _, err := os.Stat(ah.config.NoiseFloor.DataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.NoiseFloor.DataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["noisefloor"] = string(duOutput)
-			}
-		}
-	}
-
-	// Space weather directory (legacy CSV files, used by the one-time DB importer)
-	if ah.config.SpaceWeather.Enabled && ah.config.SpaceWeather.DataDir != "" {
-		if _, err := os.Stat(ah.config.SpaceWeather.DataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.SpaceWeather.DataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["spaceweather"] = string(duOutput)
-			}
-		}
-	}
-
-	// CW Skimmer spots directory
-	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.SpotsLogEnabled && ah.cwSkimmerConfig.SpotsLogDataDir != "" {
-		if _, err := os.Stat(ah.cwSkimmerConfig.SpotsLogDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.SpotsLogDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["cwskimmer_spots"] = string(duOutput)
-			}
-		}
-	}
-
-	// CW Skimmer summaries directory
-	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsSummaryDataDir != "" {
-		if _, err := os.Stat(ah.cwSkimmerConfig.MetricsSummaryDataDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsSummaryDataDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["cwskimmer_summaries"] = string(duOutput)
-			}
-		}
-	}
-
-	// Session activity directory (legacy JSONL files, used by the one-time DB importer)
-	if ah.config.Server.SessionActivityLogDir != "" {
-		if _, err := os.Stat(ah.config.Server.SessionActivityLogDir); err == nil {
-			duCmd := exec.Command("du", "-sh", ah.config.Server.SessionActivityLogDir)
-			if duOutput, err := duCmd.CombinedOutput(); err == nil {
-				dataDirs["session_activity"] = string(duOutput)
-			}
-		}
-	}
 
 	// Web log file (in the same directory as session_activity)
 	if ah.config.Server.LogFile != "" && ah.config.Server.SessionActivityLogDir != "" {

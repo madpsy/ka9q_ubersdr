@@ -41,6 +41,9 @@ type MultiDecoder struct {
 	// Metrics summary aggregator
 	summaryAggregator *MetricsSummaryAggregator
 
+	// Write DB (single-writer pool), stored so SetReadDB can hand both handles
+	// to the summary aggregator once the read pool is also known.
+	db *sql.DB
 	// Read-only DB for metrics queries
 	readDB *sql.DB
 
@@ -65,7 +68,10 @@ type MultiDecoder struct {
 
 // SetDB wires the SQLite write database into the multi-decoder.
 // It propagates the DB handle to the inner SpotsLogger and MetricsLogger.
+// The summary aggregator receives both handles via md.readDB in SetReadDB;
+// SetDB stores the write handle for it to pick up there.
 func (md *MultiDecoder) SetDB(db *sql.DB) {
+	md.db = db
 	if md.spotsLogger != nil {
 		md.spotsLogger.SetDB(db)
 	}
@@ -75,10 +81,15 @@ func (md *MultiDecoder) SetDB(db *sql.DB) {
 }
 
 // SetReadDB wires the read-only SQLite connection for metrics and spots queries.
+// It also completes the summary aggregator wiring (write + read handles), which
+// triggers a load of existing summaries from the DB.
 func (md *MultiDecoder) SetReadDB(db *sql.DB) {
 	md.readDB = db
 	if md.spotsLogger != nil {
 		md.spotsLogger.SetReadDB(db)
+	}
+	if md.summaryAggregator != nil {
+		md.summaryAggregator.SetDB(md.db, db)
 	}
 }
 

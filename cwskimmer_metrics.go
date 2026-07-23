@@ -40,11 +40,16 @@ type CWSkimmerMetrics struct {
 	mu sync.RWMutex
 }
 
-// SetDB wires the SQLite database for dual-write. Safe to call at any time.
-func (cm *CWSkimmerMetrics) SetDB(db *sql.DB) {
+// SetDB wires the SQLite write connection and read pool. Safe to call at any
+// time. The read pool is forwarded to the summary aggregator (together with the
+// write connection), which triggers a load of existing summaries from the DB.
+func (cm *CWSkimmerMetrics) SetDB(db, readDB *sql.DB) {
 	cm.dbMu.Lock()
 	cm.db = db
 	cm.dbMu.Unlock()
+	if cm.summaryAggregator != nil {
+		cm.summaryAggregator.SetDB(db, readDB)
+	}
 }
 
 // SpotEvent represents a single CW spot event for time-series tracking

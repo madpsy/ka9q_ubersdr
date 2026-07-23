@@ -1,28 +1,42 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
 
-// CWMetricsSummaryAggregator handles aggregation of CW metrics into time-period summaries
+// CWMetricsSummaryAggregator aggregates CW metrics into time-period summaries in
+// memory and periodically persists them to the cw_metrics_summary SQLite table.
 type CWMetricsSummaryAggregator struct {
-	metricsDir string
+	// summaryDir is retained only for db_import.go historical backfill.
 	summaryDir string
 
 	// In-memory summaries (key: "band:period:date")
 	summaries map[string]*CWMetricsSummary
 	mu        sync.RWMutex
 
-	// File write control
+	// DB persistence
+	db     *sql.DB // write connection
+	readDB *sql.DB // read-only pool
+
+	// Periodic flush control
 	writeInterval time.Duration
 	lastWrite     time.Time
 	writeMu       sync.Mutex
+}
+
+// SetDB wires the SQLite write connection and read pool, then loads existing
+// summaries for the current periods into memory.
+func (msa *CWMetricsSummaryAggregator) SetDB(db, readDB *sql.DB) {
+	msa.db = db
+	msa.readDB = readDB
+	if err := msa.loadExistingSummaries(); err != nil {
+		log.Printf("Warning: failed to load existing CW summaries: %v", err)
+	}
 }
 
 // CWMetricsSummary represents aggregated CW metrics for a specific time period
@@ -81,26 +95,17 @@ type CWMonthlyStats struct {
 	AvgWPM          float64 `json:"avg_wpm"`
 }
 
-// NewCWMetricsSummaryAggregator creates a new CW summary aggregator
-func NewCWMetricsSummaryAggregator(metricsDir, summaryDir string) (*CWMetricsSummaryAggregator, error) {
-	// Create summary directory if it doesn't exist
-	if err := os.MkdirAll(summaryDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create summary directory: %w", err)
-	}
-
+// NewCWMetricsSummaryAggregator creates a new CW summary aggregator.
+// metricsDir is retained for signature compatibility but unused; summaryDir is
+// kept only for db_import.go historical backfill. Existing summaries load from
+// the DB once SetDB() is called.
+func NewCWMetricsSummaryAggregator(_ /*metricsDir*/, summaryDir string) (*CWMetricsSummaryAggregator, error) {
 	msa := &CWMetricsSummaryAggregator{
-		metricsDir:    metricsDir,
 		summaryDir:    summaryDir,
 		summaries:     make(map[string]*CWMetricsSummary),
-		writeInterval: 1 * time.Minute, // Write to disk every minute
+		writeInterval: 1 * time.Minute, // Flush to DB at most once per minute
 		lastWrite:     time.Now(),
 	}
-
-	// Load existing summaries from disk
-	if err := msa.loadExistingSummaries(); err != nil {
-		log.Printf("Warning: failed to load existing CW summaries: %v", err)
-	}
-
 	return msa, nil
 }
 
@@ -116,11 +121,14 @@ func (msa *CWMetricsSummaryAggregator) RecordSpot(band, callsign string, wpm int
 	msa.incrementSummary(band, callsign, wpm, "year", timestamp)
 }
 
-// WriteIfNeeded writes summaries to disk if enough time has passed
+// WriteIfNeeded flushes summaries to the DB if enough time has passed.
 func (msa *CWMetricsSummaryAggregator) WriteIfNeeded() error {
 	msa.writeMu.Lock()
 	defer msa.writeMu.Unlock()
 
+	if msa.db == nil {
+		return nil // DB not available
+	}
 	if time.Since(msa.lastWrite) < msa.writeInterval {
 		return nil // Not time yet
 	}
@@ -291,24 +299,17 @@ func (msa *CWMetricsSummaryAggregator) incrementSummary(band, callsign string, w
 	}
 }
 
-// loadExistingSummaries loads all existing summary files from disk into memory
+// loadExistingSummaries loads the current day/week/month/year summaries from
+// the DB into memory so aggregation resumes across restarts.
 func (msa *CWMetricsSummaryAggregator) loadExistingSummaries() error {
-	now := time.Now()
-
-	periods := []struct {
-		name string
-		date time.Time
-	}{
-		{"day", now},
-		{"week", now},
-		{"month", now},
-		{"year", now},
+	if msa.readDB == nil {
+		return nil
 	}
-
-	for _, p := range periods {
-		summaries, err := msa.ReadAllSummaries(p.name, p.date)
+	now := time.Now()
+	for _, period := range []string{"day", "week", "month", "year"} {
+		summaries, err := msa.ReadAllSummaries(period, now)
 		if err != nil {
-			log.Printf("Warning: failed to load %s CW summaries: %v", p.name, err)
+			log.Printf("Warning: failed to load %s CW summaries: %v", period, err)
 			continue
 		}
 
@@ -325,7 +326,7 @@ func (msa *CWMetricsSummaryAggregator) loadExistingSummaries() error {
 	return nil
 }
 
-// getSummaryKey generates a unique key for a summary
+// getSummaryKey generates a unique in-memory key for a summary.
 func (msa *CWMetricsSummaryAggregator) getSummaryKey(summary *CWMetricsSummary) string {
 	switch summary.Period {
 	case "day":
@@ -342,159 +343,65 @@ func (msa *CWMetricsSummaryAggregator) getSummaryKey(summary *CWMetricsSummary) 
 	}
 }
 
-// getSummaryFilePath returns the file path for a summary
-func (msa *CWMetricsSummaryAggregator) getSummaryFilePath(band, period string, startTime time.Time) string {
-	var dirPath string
-
-	switch period {
-	case "day":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"daily",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", startTime.Month()),
-			fmt.Sprintf("%02d", startTime.Day()),
-		)
-	case "week":
-		_, week := startTime.ISOWeek()
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"weekly",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", week),
-		)
-	case "month":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"monthly",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", startTime.Month()),
-		)
-	case "year":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"yearly",
-			fmt.Sprintf("%04d", startTime.Year()),
-		)
-	}
-
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		log.Printf("Warning: failed to create CW summary directory %s: %v", dirPath, err)
-	}
-
-	filename := fmt.Sprintf("%s-summary.json", band)
-	return filepath.Join(dirPath, filename)
-}
-
-// saveSummary saves a summary to disk
+// saveSummary upserts a summary into the cw_metrics_summary table.
+// (summaryPeriodKey is shared with the decoder aggregator in the same package.)
 func (msa *CWMetricsSummaryAggregator) saveSummary(summary *CWMetricsSummary) error {
-	filePath := msa.getSummaryFilePath(summary.Band, summary.Period, summary.StartTime)
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(summary, "", "  ")
+	if msa.db == nil {
+		return nil
+	}
+	data, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("failed to marshal summary: %w", err)
 	}
-
-	// Write to temp file first
-	tempPath := filePath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write summary: %w", err)
+	periodKey := summaryPeriodKey(summary.Period, summary.StartTime)
+	_, err = msa.db.Exec(
+		`INSERT INTO cw_metrics_summary
+		   (ts, band, period, period_key, end_ts, updated_ts, data)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(band, period, period_key)
+		 DO UPDATE SET end_ts = excluded.end_ts,
+		               updated_ts = excluded.updated_ts,
+		               data = excluded.data`,
+		summary.StartTime.Unix(), summary.Band, summary.Period, periodKey,
+		summary.EndTime.Unix(), summary.LastUpdated.Unix(), string(data),
+	)
+	if err != nil {
+		return fmt.Errorf("cw_metrics_summary upsert: %w", err)
 	}
-
-	// Atomic rename
-	if err := os.Rename(tempPath, filePath); err != nil {
-		return fmt.Errorf("failed to rename summary: %w", err)
-	}
-
 	return nil
 }
 
-// ReadSummary reads a summary from disk
-func (msa *CWMetricsSummaryAggregator) ReadSummary(band, period string, date time.Time) (*CWMetricsSummary, error) {
-	filePath := msa.getSummaryFilePath(band, period, date)
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var summary CWMetricsSummary
-	if err := json.Unmarshal(data, &summary); err != nil {
-		return nil, err
-	}
-
-	return &summary, nil
-}
-
-// ReadAllSummaries reads all summaries for a given period and date
+// ReadAllSummaries reads all summaries for a given period whose time window
+// contains date, from the cw_metrics_summary table.
 func (msa *CWMetricsSummaryAggregator) ReadAllSummaries(period string, date time.Time) ([]CWMetricsSummary, error) {
-	var dirPath string
-
-	switch period {
-	case "day":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"daily",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", date.Month()),
-			fmt.Sprintf("%02d", date.Day()),
-		)
-	case "week":
-		_, week := date.ISOWeek()
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"weekly",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", week),
-		)
-	case "month":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"monthly",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", date.Month()),
-		)
-	case "year":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"yearly",
-			fmt.Sprintf("%04d", date.Year()),
-		)
-	default:
-		return nil, fmt.Errorf("invalid period: %s", period)
-	}
-
-	// Check if directory exists
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+	if msa.readDB == nil {
 		return []CWMetricsSummary{}, nil
 	}
-
-	// Read all summary files
-	files, err := filepath.Glob(filepath.Join(dirPath, "*-summary.json"))
+	target := date.Unix()
+	rows, err := msa.readDB.Query(
+		`SELECT data FROM cw_metrics_summary
+		 WHERE period = ? AND ts <= ? AND end_ts > ?`,
+		period, target, target,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cw_metrics_summary query: %w", err)
 	}
+	defer rows.Close()
 
-	summaries := make([]CWMetricsSummary, 0, len(files))
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			log.Printf("Warning: error reading CW summary file %s: %v", file, err)
-			continue
+	summaries := make([]CWMetricsSummary, 0)
+	for rows.Next() {
+		var blob string
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("cw_metrics_summary scan: %w", err)
 		}
-
 		var summary CWMetricsSummary
-		if err := json.Unmarshal(data, &summary); err != nil {
-			log.Printf("Warning: error unmarshaling CW summary file %s: %v", file, err)
+		if err := json.Unmarshal([]byte(blob), &summary); err != nil {
+			log.Printf("Warning: error unmarshaling CW summary: %v", err)
 			continue
 		}
-
 		summaries = append(summaries, summary)
 	}
-
-	return summaries, nil
+	return summaries, rows.Err()
 }
 
 // GetAllSummariesFromMemory returns all summaries for a given period and date from memory

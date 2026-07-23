@@ -1245,7 +1245,7 @@ func main() {
 			)
 			cwSkimmer.SetMetrics(cwMetrics)
 			if dbManager != nil {
-				cwMetrics.SetDB(dbManager.db)
+				cwMetrics.SetDB(dbManager.DB(), dbManager.ReadDB())
 			}
 			cwMetrics.StartPeriodicTasks()
 			log.Printf("CW Skimmer metrics logging enabled: dir=%s, interval=%ds",
@@ -1397,6 +1397,8 @@ func main() {
 		SpaceWeatherDir:   config.SpaceWeather.DataDir,
 		DecoderMetricsDir: config.Decoder.MetricsLogDataDir,
 		CWMetricsDir:      cwskimmerConfig.MetricsLogDataDir,
+		DecoderSummaryDir: config.Decoder.MetricsSummaryDataDir,
+		CWSummaryDir:      cwskimmerConfig.MetricsSummaryDataDir,
 	}
 	dbImporter.RunImportIfEmpty(mainCtx)
 

@@ -128,6 +128,39 @@ func (m *DBManager) ReadDB() *sql.DB {
 	return m.readDB
 }
 
+// DBSizeStats holds the byte accounting of the SQLite database file, derived
+// from the page_count / page_size / freelist_count pragmas.
+type DBSizeStats struct {
+	Path          string `json:"path"`
+	PageCount     int64  `json:"page_count"`
+	PageSize      int64  `json:"page_size"`
+	FreelistCount int64  `json:"freelist_count"`
+	TotalBytes    int64  `json:"total_bytes"` // page_count * page_size
+	UsedBytes     int64  `json:"used_bytes"`  // (page_count - freelist_count) * page_size
+	FreeBytes     int64  `json:"free_bytes"`  // freelist_count * page_size
+}
+
+// SizeStats reports the SQLite file's page accounting. Returns nil when the DB
+// is unavailable.
+func (m *DBManager) SizeStats() (*DBSizeStats, error) {
+	if m == nil || m.readDB == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+	var s DBSizeStats
+	s.Path = m.path
+	err := m.readDB.QueryRow(`
+		SELECT page_count, page_size, freelist_count,
+		       page_count * page_size                         AS total_bytes,
+		       (page_count - freelist_count) * page_size      AS used_bytes,
+		       freelist_count * page_size                     AS free_bytes
+		FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count()`).
+		Scan(&s.PageCount, &s.PageSize, &s.FreelistCount, &s.TotalBytes, &s.UsedBytes, &s.FreeBytes)
+	if err != nil {
+		return nil, fmt.Errorf("db size stats: %w", err)
+	}
+	return &s, nil
+}
+
 // RetentionConfig holds per-table retention periods in days.
 // A value of 0 means "keep forever" (no automatic pruning for that table).
 // Tables with no corresponding config field default to 0 (unlimited).
@@ -147,6 +180,11 @@ type RetentionConfig struct {
 	// Stats (WSPR/PSK/RBN leaderboards): the history endpoints refuse ranges
 	// longer than statsMaxDays, so anything older is unreachable via the API.
 	StatsDays int
+	// DecoderMetricsSummary: no config field yet — 0 = unlimited. Summaries are
+	// tiny (a handful of rows per band/period) so keeping them forever is cheap.
+	DecoderMetricsSummaryDays int
+	// CWMetricsSummary: no config field yet — 0 = unlimited.
+	CWMetricsSummaryDays int
 }
 
 // retentionInterval is how often the retention loop runs after the initial
@@ -202,6 +240,8 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 		{"psk_rank_snapshots", cfg.StatsDays},
 		{"rbn_skew", cfg.StatsDays},
 		{"rbn_stats", cfg.StatsDays},
+		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays},
+		{"cw_metrics_summary", cfg.CWMetricsSummaryDays},
 	}
 	anyDeleted := false
 	for _, r := range rules {
@@ -767,6 +807,57 @@ func (m *DBManager) initSchema() error {
 			)`,
 		},
 		{"rbn_stats_idx_ts", `CREATE INDEX IF NOT EXISTS rbn_stats_idx_ts       ON rbn_stats(ts)`},
+
+		// ----------------------------------------------------------------
+		// decoder_metrics_summary
+		//
+		// Replaces: <summaryDir>/{daily,weekly,monthly,yearly}/…/<MODE>-<BAND>-summary.json
+		// One row per (mode, band, period, period_key) time-period summary.
+		// The full MetricsSummary struct (including hourly/daily/monthly
+		// breakdown arrays) is stored as a JSON blob in `data`; the scalar
+		// columns exist only for range queries and retention pruning.
+		// Source struct: MetricsSummary
+		// ----------------------------------------------------------------
+		{
+			"decoder_metrics_summary",
+			`CREATE TABLE IF NOT EXISTS decoder_metrics_summary (
+				id          INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts          INTEGER NOT NULL,           -- StartTime, Unix seconds UTC (named ts for retention pruning)
+				mode        TEXT    NOT NULL,
+				band        TEXT    NOT NULL,
+				period      TEXT    NOT NULL,           -- "day" | "week" | "month" | "year"
+				period_key  TEXT    NOT NULL,           -- e.g. "2025-01-14", "2025-W03", "2025-01", "2025"
+				end_ts      INTEGER NOT NULL,           -- EndTime, Unix seconds UTC
+				updated_ts  INTEGER NOT NULL,           -- LastUpdated, Unix seconds UTC
+				data        TEXT    NOT NULL,           -- full MetricsSummary as JSON
+				UNIQUE(mode, band, period, period_key)
+			)`,
+		},
+		{"decoder_metrics_summary_idx_lookup", `CREATE INDEX IF NOT EXISTS decoder_metrics_summary_idx_lookup ON decoder_metrics_summary(period, ts, end_ts)`},
+
+		// ----------------------------------------------------------------
+		// cw_metrics_summary
+		//
+		// Replaces: <summaryDir>/{daily,weekly,monthly,yearly}/…/<BAND>-summary.json
+		// One row per (band, period, period_key). CW summaries have no mode
+		// dimension. Full CWMetricsSummary struct stored as JSON in `data`.
+		// Source struct: CWMetricsSummary
+		// ----------------------------------------------------------------
+		{
+			"cw_metrics_summary",
+			`CREATE TABLE IF NOT EXISTS cw_metrics_summary (
+				id          INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts          INTEGER NOT NULL,           -- StartTime, Unix seconds UTC (named ts for retention pruning)
+				band        TEXT    NOT NULL,
+				period      TEXT    NOT NULL,           -- "day" | "week" | "month" | "year"
+				period_key  TEXT    NOT NULL,
+				end_ts      INTEGER NOT NULL,
+				updated_ts  INTEGER NOT NULL,
+				data        TEXT    NOT NULL,           -- full CWMetricsSummary as JSON
+				UNIQUE(band, period, period_key)
+			)`,
+		},
+		{"cw_metrics_summary_idx_lookup", `CREATE INDEX IF NOT EXISTS cw_metrics_summary_idx_lookup ON cw_metrics_summary(period, ts, end_ts)`},
 	}
 
 	for _, s := range stmts {

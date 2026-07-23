@@ -994,3 +994,76 @@ The import script should:
 - Parse each file using the same CSV/JSON parsing logic
 - INSERT with `ON CONFLICT DO NOTHING` to be idempotent
 - Process oldest files first so retention pruning doesn't immediately delete them
+
+---
+
+## Component 12 — `decoder_metrics_summary` / `cw_metrics_summary` tables ✅ MIGRATED
+
+**DB tables**:
+`decoder_metrics_summary(id, ts, mode, band, period, period_key, end_ts, updated_ts, data)`
+`cw_metrics_summary(id, ts, band, period, period_key, end_ts, updated_ts, data)`
+**Status**: Fully migrated to SQLite. No file reads or writes at runtime.
+
+The pre-aggregated day/week/month/year metrics summaries behind the
+`/decoder-metrics/*` and `/cwskimmer/metrics/*` summary panels. Previously written
+as `<summaryDir>/{daily,weekly,monthly,yearly}/…/<MODE>-<BAND>-summary.json`
+(decoder) and `…/<BAND>-summary.json` (CW).
+
+### Design
+
+- Summaries stay **aggregated in memory** (event-driven via `RecordDecode` /
+  `RecordSpot`) exactly as before — only the *persistence* changed. `WriteIfNeeded`
+  still flushes at most once per minute but now upserts to SQLite instead of
+  writing JSON files.
+- Each summary is **one row**, keyed `UNIQUE(mode, band, period, period_key)`
+  (decoder) / `UNIQUE(band, period, period_key)` (CW), with the full
+  `MetricsSummary` / `CWMetricsSummary` struct — including the hourly/daily/monthly
+  breakdown arrays — serialised into the `data` JSON column. Scalar columns
+  (`ts` = StartTime, `end_ts`, `updated_ts`) exist for range queries + retention.
+- `ts` (not `start_ts`) is the retention column so `pruneTable`'s hardcoded
+  `WHERE ts < ?` works unchanged.
+- `saveSummary` → `INSERT … ON CONFLICT … DO UPDATE`. `ReadAllSummaries` →
+  `SELECT data WHERE period = ? AND ts <= ? AND end_ts > ?` (the window containing
+  the requested date). `loadExistingSummaries` (from `SetDB`) seeds the in-memory
+  maps for the current day/week/month/year on startup.
+- File I/O removed: `getSummaryFilePath`, `ReadSummary`, `os`/`path/filepath`
+  imports, and the `os.MkdirAll` in both constructors. `metricsDir` field dropped;
+  `summaryDir` retained only for [`db_import.go`](../db_import.go).
+- Shared helper `summaryPeriodKey(period, startTime)` derives the `period_key`
+  ("2025-01-14", "2025-W03", "2025-01", "2025").
+
+### Wiring
+
+`MultiDecoder.SetReadDB` now also calls `summaryAggregator.SetDB(md.db, readDB)`
+(md.db captured in `SetDB`). `CWSkimmerMetrics.SetDB(db, readDB)` gained the read
+handle and forwards both to its aggregator; `main.go` passes `dbManager.ReadDB()`.
+
+### Retention
+
+`RetentionConfig.DecoderMetricsSummaryDays` / `CWMetricsSummaryDays` added, both 0
+(unlimited) — summaries are tiny (a few rows per band/period).
+
+### Historical backfill
+
+[`db_import.go`](../db_import.go) gained `DecoderSummaryDir` / `CWSummaryDir` plus
+`importDecoderSummary` / `importCWSummary`, which walk the legacy `*-summary.json`
+trees, parse each file into its struct, derive `period_key`, and `INSERT OR IGNORE`.
+Registered in `dbImportOrder` after the stats imports and before `cw_spots`/`spots`;
+the directories are removed by the post-import `cleanupImportedDirs` like every
+other migrated tree.
+
+### Config & admin disk report
+
+- `metrics_summary_data_dir` removed from both example configs (struct field
+  `MetricsSummaryDataDir` retained for `db_import.go`; `main.go` still resolves a
+  default path).
+- `decoder_summary` / `cwskimmer_summaries` removed from the admin **System tab**
+  disk-usage report ([`admin.go`](../admin.go), [`static/admin.html`](../static/admin.html)) —
+  only `web_log` and `spectrogram` remain (the sole directories still written at runtime).
+
+### Tests
+
+[`metrics_summary_db_test.go`](../metrics_summary_db_test.go) — record → flush →
+DB read-back for both aggregators, asserting totals, hourly breakdown, WPM
+min/max/avg, upsert idempotency (re-flush updates the same row), and
+`summaryPeriodKey` for all four periods.

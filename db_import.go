@@ -80,6 +80,9 @@ type DBImporter struct {
 	DecoderMetricsDir string // decoder_metrics: <dir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
 	CWMetricsDir      string // cw_metrics:    <dir>/YYYY/MM/DD/<BAND>.jsonl
 	StatsDir          string // wspr/psk/rbn stats root: <dir>/{wspr,psk,rbn}/YYYY/MM/DD/*.jsonl
+	// Metrics summary roots: <dir>/{daily,weekly,monthly,yearly}/…/*-summary.json
+	DecoderSummaryDir string // decoder_metrics_summary: <MODE>-<BAND>-summary.json
+	CWSummaryDir      string // cw_metrics_summary:      <BAND>-summary.json
 }
 
 // tableImport binds a table to the directory it is backfilled from and the
@@ -111,6 +114,8 @@ func dbImportOrder(imp *DBImporter) []tableImport {
 		{"rbn_skew", imp.StatsDir, imp.importRBN},
 		{"psk_rank_snapshots", imp.StatsDir, imp.importPSKRank},
 		{"wspr_rank_windows", imp.StatsDir, imp.importWSPRRank},
+		{"decoder_metrics_summary", imp.DecoderSummaryDir, imp.importDecoderSummary},
+		{"cw_metrics_summary", imp.CWSummaryDir, imp.importCWSummary},
 		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
 		{"spots", imp.SpotsDir, imp.importSpots},
 	}
@@ -1424,4 +1429,108 @@ func nullableInt(s string) interface{} {
 		return nil
 	}
 	return v
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// decoder_metrics_summary ← <DecoderSummaryDir>/{daily,weekly,monthly,yearly}/…/<MODE>-<BAND>-summary.json
+// cw_metrics_summary      ← <CWSummaryDir>/{daily,weekly,monthly,yearly}/…/<BAND>-summary.json
+//
+// Each legacy summary file holds one full MetricsSummary / CWMetricsSummary as
+// JSON. The whole struct is stored verbatim in the `data` column; scalar
+// columns (ts, end_ts, updated_ts, mode/band/period/period_key) are derived
+// from the parsed struct. INSERT OR IGNORE keeps the backfill idempotent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (imp *DBImporter) importDecoderSummary(ctx context.Context) error {
+	const stmt = `INSERT OR IGNORE INTO decoder_metrics_summary
+		(ts, mode, band, period, period_key, end_ts, updated_ts, data)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+	total := 0
+	err := filepath.WalkDir(imp.DecoderSummaryDir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return nil // skip unreadable entries
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "-summary.json") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("[DB import] decoder_metrics_summary: read %s: %v", path, err)
+			return nil
+		}
+		var s MetricsSummary
+		if err := json.Unmarshal(raw, &s); err != nil {
+			log.Printf("[DB import] decoder_metrics_summary: parse %s: %v", path, err)
+			return nil
+		}
+		if s.Period == "" || s.Mode == "" || s.Band == "" {
+			return nil // not a valid summary file
+		}
+		periodKey := summaryPeriodKey(s.Period, s.StartTime)
+		if _, err := imp.db.Exec(stmt,
+			s.StartTime.Unix(), s.Mode, s.Band, s.Period, periodKey,
+			s.EndTime.Unix(), s.LastUpdated.Unix(), string(raw),
+		); err != nil {
+			log.Printf("[DB import] decoder_metrics_summary: insert %s: %v", path, err)
+			return nil
+		}
+		total++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("[DB import] decoder_metrics_summary: inserted %d rows total", total)
+	return nil
+}
+
+func (imp *DBImporter) importCWSummary(ctx context.Context) error {
+	const stmt = `INSERT OR IGNORE INTO cw_metrics_summary
+		(ts, band, period, period_key, end_ts, updated_ts, data)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`
+
+	total := 0
+	err := filepath.WalkDir(imp.CWSummaryDir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "-summary.json") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("[DB import] cw_metrics_summary: read %s: %v", path, err)
+			return nil
+		}
+		var s CWMetricsSummary
+		if err := json.Unmarshal(raw, &s); err != nil {
+			log.Printf("[DB import] cw_metrics_summary: parse %s: %v", path, err)
+			return nil
+		}
+		if s.Period == "" || s.Band == "" {
+			return nil
+		}
+		periodKey := summaryPeriodKey(s.Period, s.StartTime)
+		if _, err := imp.db.Exec(stmt,
+			s.StartTime.Unix(), s.Band, s.Period, periodKey,
+			s.EndTime.Unix(), s.LastUpdated.Unix(), string(raw),
+		); err != nil {
+			log.Printf("[DB import] cw_metrics_summary: insert %s: %v", path, err)
+			return nil
+		}
+		total++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("[DB import] cw_metrics_summary: inserted %d rows total", total)
+	return nil
 }

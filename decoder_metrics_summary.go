@@ -1,19 +1,21 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
 
-// MetricsSummaryAggregator handles aggregation of metrics into time-period summaries
-// Uses event-driven updates with periodic file writes
+// MetricsSummaryAggregator handles aggregation of metrics into time-period summaries.
+// Summaries are aggregated in memory (event-driven) and periodically persisted to
+// the decoder_metrics_summary SQLite table.
 type MetricsSummaryAggregator struct {
-	metricsDir string
+	// summaryDir is retained only so db_import.go can backfill legacy JSON
+	// summary files written before the SQLite migration. Nothing is written
+	// here at runtime any more.
 	summaryDir string
 
 	metricsLogger *MetricsLogger
@@ -22,10 +24,24 @@ type MetricsSummaryAggregator struct {
 	summaries map[string]*MetricsSummary
 	mu        sync.RWMutex
 
-	// File write control
+	// DB persistence
+	db     *sql.DB // write connection
+	readDB *sql.DB // read-only pool
+
+	// Periodic flush control
 	writeInterval time.Duration
 	lastWrite     time.Time
 	writeMu       sync.Mutex
+}
+
+// SetDB wires the SQLite write connection and read pool, then loads existing
+// summaries for the current periods into memory.
+func (msa *MetricsSummaryAggregator) SetDB(db, readDB *sql.DB) {
+	msa.db = db
+	msa.readDB = readDB
+	if err := msa.loadExistingSummaries(); err != nil {
+		log.Printf("Warning: failed to load existing decoder summaries: %v", err)
+	}
 }
 
 // MetricsSummary represents aggregated metrics for a specific time period
@@ -77,27 +93,18 @@ type MonthlyStats struct {
 	UniqueCallsigns int    `json:"unique_callsigns"`
 }
 
-// NewMetricsSummaryAggregator creates a new summary aggregator
-func NewMetricsSummaryAggregator(metricsDir, summaryDir string, metricsLogger *MetricsLogger) (*MetricsSummaryAggregator, error) {
-	// Create summary directory if it doesn't exist
-	if err := os.MkdirAll(summaryDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create summary directory: %w", err)
-	}
-
+// NewMetricsSummaryAggregator creates a new summary aggregator.
+// The metricsDir parameter is retained for signature compatibility but unused;
+// summaryDir is kept only for db_import.go historical backfill. Existing
+// summaries are loaded from the DB later, once SetDB() is called.
+func NewMetricsSummaryAggregator(_ /*metricsDir*/, summaryDir string, metricsLogger *MetricsLogger) (*MetricsSummaryAggregator, error) {
 	msa := &MetricsSummaryAggregator{
-		metricsDir:    metricsDir,
 		summaryDir:    summaryDir,
 		metricsLogger: metricsLogger,
 		summaries:     make(map[string]*MetricsSummary),
-		writeInterval: 1 * time.Minute, // Write to disk every minute
+		writeInterval: 1 * time.Minute, // Flush to DB at most once per minute
 		lastWrite:     time.Now(),
 	}
-
-	// Load existing summaries from disk
-	if err := msa.loadExistingSummaries(); err != nil {
-		log.Printf("Warning: failed to load existing summaries: %v", err)
-	}
-
 	return msa, nil
 }
 
@@ -114,11 +121,14 @@ func (msa *MetricsSummaryAggregator) RecordDecode(mode, band string, timestamp t
 	msa.incrementSummary(mode, band, "year", timestamp, 1)
 }
 
-// WriteIfNeeded writes summaries to disk if enough time has passed
+// WriteIfNeeded flushes summaries to the DB if enough time has passed.
 func (msa *MetricsSummaryAggregator) WriteIfNeeded() error {
 	msa.writeMu.Lock()
 	defer msa.writeMu.Unlock()
 
+	if msa.db == nil {
+		return nil // DB not available
+	}
 	if time.Since(msa.lastWrite) < msa.writeInterval {
 		return nil // Not time yet
 	}
@@ -260,32 +270,23 @@ func (msa *MetricsSummaryAggregator) incrementSummary(mode, band, period string,
 	}
 }
 
-// loadExistingSummaries loads all existing summary files from disk into memory
+// loadExistingSummaries loads the current day/week/month/year summaries from
+// the DB into memory so aggregation resumes across restarts.
 func (msa *MetricsSummaryAggregator) loadExistingSummaries() error {
-	// Load summaries for current day, week, month, and year
-	now := time.Now()
-
-	periods := []struct {
-		name string
-		date time.Time
-	}{
-		{"day", now},
-		{"week", now},
-		{"month", now},
-		{"year", now},
+	if msa.readDB == nil {
+		return nil
 	}
-
-	for _, p := range periods {
-		summaries, err := msa.ReadAllSummaries(p.name, p.date)
+	now := time.Now()
+	for _, period := range []string{"day", "week", "month", "year"} {
+		summaries, err := msa.ReadAllSummaries(period, now)
 		if err != nil {
-			log.Printf("Warning: failed to load %s summaries: %v", p.name, err)
+			log.Printf("Warning: failed to load %s summaries: %v", period, err)
 			continue
 		}
 
 		msa.mu.Lock()
 		for _, summary := range summaries {
 			key := msa.getSummaryKey(&summary)
-			// Make a copy and store it
 			summaryCopy := summary
 			summaryCopy.callsignSet = make(map[string]bool)
 			if summaryCopy.ProcessedHours == nil {
@@ -299,7 +300,7 @@ func (msa *MetricsSummaryAggregator) loadExistingSummaries() error {
 	return nil
 }
 
-// getSummaryKey generates a unique key for a summary
+// getSummaryKey generates a unique in-memory key for a summary.
 func (msa *MetricsSummaryAggregator) getSummaryKey(summary *MetricsSummary) string {
 	switch summary.Period {
 	case "day":
@@ -316,159 +317,82 @@ func (msa *MetricsSummaryAggregator) getSummaryKey(summary *MetricsSummary) stri
 	}
 }
 
-// getSummaryFilePath returns the file path for a summary
-func (msa *MetricsSummaryAggregator) getSummaryFilePath(mode, band, period string, startTime time.Time) string {
-	var dirPath string
-
+// summaryPeriodKey derives the DB period_key column from a summary's period
+// and start time (matching the in-memory key suffix used in incrementSummary).
+func summaryPeriodKey(period string, startTime time.Time) string {
 	switch period {
 	case "day":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"daily",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", startTime.Month()),
-			fmt.Sprintf("%02d", startTime.Day()),
-		)
+		return startTime.Format("2006-01-02")
 	case "week":
-		_, week := startTime.ISOWeek()
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"weekly",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", week),
-		)
+		year, week := startTime.ISOWeek()
+		return fmt.Sprintf("%d-W%02d", year, week)
 	case "month":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"monthly",
-			fmt.Sprintf("%04d", startTime.Year()),
-			fmt.Sprintf("%02d", startTime.Month()),
-		)
+		return startTime.Format("2006-01")
 	case "year":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"yearly",
-			fmt.Sprintf("%04d", startTime.Year()),
-		)
+		return fmt.Sprintf("%d", startTime.Year())
+	default:
+		return startTime.Format("2006-01-02")
 	}
-
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		log.Printf("Warning: failed to create summary directory %s: %v", dirPath, err)
-	}
-
-	filename := fmt.Sprintf("%s-%s-summary.json", mode, band)
-	return filepath.Join(dirPath, filename)
 }
 
-// saveSummary saves a summary to disk
+// saveSummary upserts a summary into the decoder_metrics_summary table.
 func (msa *MetricsSummaryAggregator) saveSummary(summary *MetricsSummary) error {
-	filePath := msa.getSummaryFilePath(summary.Mode, summary.Band, summary.Period, summary.StartTime)
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(summary, "", "  ")
+	if msa.db == nil {
+		return nil
+	}
+	data, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("failed to marshal summary: %w", err)
 	}
-
-	// Write to temp file first
-	tempPath := filePath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write summary: %w", err)
+	periodKey := summaryPeriodKey(summary.Period, summary.StartTime)
+	_, err = msa.db.Exec(
+		`INSERT INTO decoder_metrics_summary
+		   (ts, mode, band, period, period_key, end_ts, updated_ts, data)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(mode, band, period, period_key)
+		 DO UPDATE SET end_ts = excluded.end_ts,
+		               updated_ts = excluded.updated_ts,
+		               data = excluded.data`,
+		summary.StartTime.Unix(), summary.Mode, summary.Band, summary.Period, periodKey,
+		summary.EndTime.Unix(), summary.LastUpdated.Unix(), string(data),
+	)
+	if err != nil {
+		return fmt.Errorf("decoder_metrics_summary upsert: %w", err)
 	}
-
-	// Atomic rename
-	if err := os.Rename(tempPath, filePath); err != nil {
-		return fmt.Errorf("failed to rename summary: %w", err)
-	}
-
 	return nil
 }
 
-// ReadSummary reads a summary from disk
-func (msa *MetricsSummaryAggregator) ReadSummary(mode, band, period string, date time.Time) (*MetricsSummary, error) {
-	filePath := msa.getSummaryFilePath(mode, band, period, date)
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var summary MetricsSummary
-	if err := json.Unmarshal(data, &summary); err != nil {
-		return nil, err
-	}
-
-	return &summary, nil
-}
-
-// ReadAllSummaries reads all summaries for a given period and date
+// ReadAllSummaries reads all summaries for a given period whose time window
+// contains date, from the decoder_metrics_summary table.
 func (msa *MetricsSummaryAggregator) ReadAllSummaries(period string, date time.Time) ([]MetricsSummary, error) {
-	var dirPath string
-
-	switch period {
-	case "day":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"daily",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", date.Month()),
-			fmt.Sprintf("%02d", date.Day()),
-		)
-	case "week":
-		_, week := date.ISOWeek()
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"weekly",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", week),
-		)
-	case "month":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"monthly",
-			fmt.Sprintf("%04d", date.Year()),
-			fmt.Sprintf("%02d", date.Month()),
-		)
-	case "year":
-		dirPath = filepath.Join(
-			msa.summaryDir,
-			"yearly",
-			fmt.Sprintf("%04d", date.Year()),
-		)
-	default:
-		return nil, fmt.Errorf("invalid period: %s", period)
-	}
-
-	// Check if directory exists
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+	if msa.readDB == nil {
 		return []MetricsSummary{}, nil
 	}
-
-	// Read all summary files
-	files, err := filepath.Glob(filepath.Join(dirPath, "*-summary.json"))
+	target := date.Unix()
+	rows, err := msa.readDB.Query(
+		`SELECT data FROM decoder_metrics_summary
+		 WHERE period = ? AND ts <= ? AND end_ts > ?`,
+		period, target, target,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoder_metrics_summary query: %w", err)
 	}
+	defer rows.Close()
 
-	summaries := make([]MetricsSummary, 0, len(files))
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			log.Printf("Warning: error reading summary file %s: %v", file, err)
-			continue
+	summaries := make([]MetricsSummary, 0)
+	for rows.Next() {
+		var blob string
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("decoder_metrics_summary scan: %w", err)
 		}
-
 		var summary MetricsSummary
-		if err := json.Unmarshal(data, &summary); err != nil {
-			log.Printf("Warning: error unmarshaling summary file %s: %v", file, err)
+		if err := json.Unmarshal([]byte(blob), &summary); err != nil {
+			log.Printf("Warning: error unmarshaling decoder summary: %v", err)
 			continue
 		}
-
 		summaries = append(summaries, summary)
 	}
-
-	return summaries, nil
+	return summaries, rows.Err()
 }
 
 // GetAllSummariesFromMemory returns all summaries for a given period and date from memory

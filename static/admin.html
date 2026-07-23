@@ -17847,6 +17847,7 @@ const tooltipLine2 = timeStr;
             const sections = [
                 { title: 'UberSDR Process', key: 'ubersdr', icon: '🚀' },
                 { title: 'System Uptime', key: 'uptime', icon: '⏱️' },
+                { title: 'Database', key: 'database', icon: '🗄️' },
                 { title: 'System Time', key: 'system_time', icon: '🕐' },
                 { title: 'Disk Usage', key: 'disk', icon: '💾' },
                 { title: 'Memory Usage', key: 'memory', icon: '🧠' }
@@ -17887,6 +17888,39 @@ const tooltipLine2 = timeStr;
                     goroutinesDiv.innerHTML = `<strong>Goroutines:</strong> ${goroutines}`;
                     infoDiv.appendChild(goroutinesDiv);
 
+                    sectionDiv.appendChild(infoDiv);
+                } else if (section.key === 'database') {
+                    // SQLite database size accounting (page_count/page_size/freelist_count)
+                    const db = stats.database;
+                    const infoDiv = document.createElement('div');
+                    infoDiv.style.background = '#fff';
+                    infoDiv.style.padding = '15px';
+                    infoDiv.style.borderRadius = '5px';
+                    if (!db) {
+                        infoDiv.textContent = 'Database not available';
+                    } else {
+                        // Human-readable byte formatter (1024-based).
+                        const fmtBytes = (n) => {
+                            if (n === null || n === undefined) return 'N/A';
+                            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                            let v = n, i = 0;
+                            while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+                            return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+                        };
+                        const rows = [
+                            ['File', db.path || 'N/A'],
+                            ['Total size', `${fmtBytes(db.total_bytes)} (${(db.total_bytes || 0).toLocaleString()} bytes)`],
+                            ['Used', `${fmtBytes(db.used_bytes)} (${(db.used_bytes || 0).toLocaleString()} bytes)`],
+                            ['Free (reclaimable)', `${fmtBytes(db.free_bytes)} (${(db.free_bytes || 0).toLocaleString()} bytes)`],
+                            ['Pages', `${(db.page_count || 0).toLocaleString()} × ${fmtBytes(db.page_size)} (${db.freelist_count || 0} on freelist)`],
+                        ];
+                        rows.forEach(([label, value]) => {
+                            const row = document.createElement('div');
+                            row.style.marginBottom = '8px';
+                            row.innerHTML = `<strong>${label}:</strong> ${value}`;
+                            infoDiv.appendChild(row);
+                        });
+                    }
                     sectionDiv.appendChild(infoDiv);
                 } else {
                     const pre = document.createElement('pre');
@@ -17975,16 +18009,11 @@ const tooltipLine2 = timeStr;
                 title.textContent = '📁 Data Directory Sizes';
                 dataDirSection.appendChild(title);
 
+                // Only directories still written at runtime are reported by the
+                // backend. Spots, noise floor, space weather, cw_spots, session
+                // activity, and metrics summaries were migrated to SQLite and
+                // their file trees are removed by the one-time DB importer.
                 const dirLabels = {
-                    'decoder_metrics': 'Decoder Metrics',
-                    'decoder_spots': 'Decoder Spots',
-                    'decoder_summary': 'Decoder Summary',
-                    'cwskimmer_metrics': 'CW Skimmer Metrics',
-                    'cwskimmer_spots': 'CW Skimmer Spots',
-                    'cwskimmer_summaries': 'CW Skimmer Summaries',
-                    'noisefloor': 'Noise Floor',
-                    'spaceweather': 'Space Weather',
-                    'session_activity': 'Session Activity',
                     'web_log': 'Web Log',
                     'spectrogram': 'Spectrogram'
                 };

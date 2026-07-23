@@ -27,13 +27,9 @@ metrics_log_interval_secs: 300              # Write interval in seconds (default
                                             # Metrics snapshots written at this interval for all active bands
 
 # Metrics Summary (Pre-aggregated time-series summaries)
-# Aggregates metrics into daily/weekly/monthly/yearly summaries for fast retrieval
-metrics_summary_data_dir: "cwskimmer_summaries"  # Directory for summary files (relative or absolute)
-                                                  # If relative: relative to current working directory
-                                                  # If absolute: used as-is (e.g., /var/log/cwskimmer_summaries)
-                                                  # Files organized as: cwskimmer_summaries/{daily,weekly,monthly,yearly}/YYYY/MM/DD/BAND-summary.json
-                                                  # Example: cwskimmer_summaries/daily/2024/11/24/20m-summary.json
-                                                  # Updated every minute for fast API responses
+# Aggregates metrics into daily/weekly/monthly/yearly summaries for fast
+# retrieval. Summaries are persisted to the SQLite database
+# (cw_metrics_summary table); there is no on-disk summary directory.
 
 # RBN Spots
 # Forward spots to the Reverse Beacon Network (default: true)

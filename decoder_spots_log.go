@@ -54,7 +54,8 @@ type SpotRecord struct {
 	BearingDeg *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
 	DBm        *int     `json:"dbm,omitempty"`         // Transmitter power in dBm (WSPR only)
 	Mode       string   `json:"mode"`
-	Name       string   `json:"name"` // Decoder config band name
+	Name       string   `json:"name"`       // Decoder config band name
+	SeenCount  int      `json:"seen_count"` // Raw decodes collapsed into this row (1 when not deduplicating)
 }
 
 // formatOptionalFloat formats an optional float64 pointer for CSV output
@@ -292,6 +293,8 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 	allSpots := make([]SpotRecord, 0)
 	// For deduplication: key = callsign|locator|band|mode|date, value = latest spot.
 	seenSpots := make(map[string]SpotRecord)
+	// Raw decodes collapsed into each dedup key, reported as SeenCount.
+	seenCounts := make(map[string]int)
 
 	for rows.Next() {
 		var (
@@ -361,6 +364,7 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 			// timestamp, matching the old string comparison on RFC3339 values.
 			dateStr := utc.Format("2006-01-02")
 			dedupKey := fmt.Sprintf("%s|%s|%s|%s|%s", spot.Callsign, spot.Locator, spot.Band, spot.Mode, dateStr)
+			seenCounts[dedupKey]++
 			if existing, exists := seenSpots[dedupKey]; exists {
 				if spot.Timestamp > existing.Timestamp {
 					seenSpots[dedupKey] = spot
@@ -371,6 +375,7 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 			continue
 		}
 
+		spot.SeenCount = 1
 		allSpots = append(allSpots, spot)
 	}
 	if err := rows.Err(); err != nil {
@@ -379,7 +384,8 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 
 	// If deduplication was enabled, collect the deduplicated spots.
 	if deduplicate {
-		for _, spot := range seenSpots {
+		for key, spot := range seenSpots {
+			spot.SeenCount = seenCounts[key]
 			allSpots = append(allSpots, spot)
 		}
 	}

@@ -1022,7 +1022,7 @@
                 <td>${bearingText}</td>
                 <td>${spot.country || '-'}</td>
                 <td>${spot.continent ? (continentNames[spot.continent] || spot.continent) : '-'}</td>
-                <td style="font-family: ui-monospace, 'Courier New', monospace; font-size: 0.9em; line-height: 1.4;">${spot.message || '-'}</td>
+                <td style="text-align: right;">${spot.seen_count || 1}</td>
             `;
             
             // Add click handler to row (but not on callsign link)
@@ -1115,6 +1115,10 @@
                 case 'continent':
                     aVal = a.continent || '';
                     bVal = b.continent || '';
+                    break;
+                case 'seen_count':
+                    aVal = a.seen_count || 1;
+                    bVal = b.seen_count || 1;
                     break;
                 default:
                     return 0;

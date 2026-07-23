@@ -507,3 +507,174 @@ h1 {
     background: transparent !important;
     border: none !important;
 }
+/* Callsign spot history modal */
+.callsign-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.callsign-modal-overlay.active {
+    display: flex;
+}
+
+.callsign-modal {
+    background: rgba(30, 35, 55, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: 1200px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.callsign-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 15px;
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.callsign-modal-header h3 {
+    font-size: 1.3em;
+    margin: 0;
+}
+
+.callsign-modal-subtitle {
+    font-size: 0.9em;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+
+.callsign-modal-body {
+    padding: 15px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.callsign-modal-status {
+    text-align: center;
+    padding: 25px;
+    opacity: 0.85;
+}
+
+.callsign-modal-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}
+
+.callsign-modal-pagination select {
+    padding: 5px 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: white;
+}
+
+.callsign-modal-pagination button {
+    padding: 5px 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+}
+
+.callsign-modal-pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.callsign-modal-pagination button.active {
+    background: rgba(33, 150, 243, 0.8);
+    font-weight: bold;
+}
+
+.callsign-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.callsign-modal-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 0.95em;
+}
+
+@media (max-width: 768px) {
+    .callsign-modal {
+        max-height: 95vh;
+    }
+
+    .callsign-modal-body {
+        padding: 10px;
+    }
+}
+
+.callsign-modal-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}
+
+.callsign-modal-filter {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.95em;
+}
+
+.callsign-modal-filter label {
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+}
+
+.callsign-modal-filter input[type="text"],
+.callsign-modal-filter select {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: white;
+}
+
+#callsignModalTable th.modal-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+#callsignModalTable th.modal-sortable:hover {
+    background: rgba(255, 255, 255, 0.1);
+}

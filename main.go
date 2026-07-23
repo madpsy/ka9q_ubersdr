@@ -5820,9 +5820,17 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 		return
 	}
 
-	// Hardcode deduplication and locators only to true
+	// Deduplication and locators-only default to the historical behaviour, but
+	// can be disabled explicitly. The per-callsign spot history view needs every
+	// individual spot, including ones without a locator.
 	deduplicate := true
+	if v := r.URL.Query().Get("deduplicate"); v == "false" || v == "0" {
+		deduplicate = false
+	}
 	locatorsOnly := md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly
+	if v := r.URL.Query().Get("locators_only"); v == "false" || v == "0" {
+		locatorsOnly = false
+	}
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64
@@ -5842,7 +5850,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", mode, band, name, callsign, locator, continent, direction, fromDate, minSNR)
+	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s-%s-%s-%s-%s-%d-%t-%t", mode, band, name, callsign, locator, continent, direction, fromDate, minSNR, deduplicate, locatorsOnly)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{

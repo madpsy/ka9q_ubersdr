@@ -270,6 +270,116 @@
         </div>
     </div>
 
+    <!-- Callsign Spot History Modal -->
+    <div id="callsignModalOverlay" class="callsign-modal-overlay">
+        <div class="callsign-modal" role="dialog" aria-modal="true" aria-labelledby="callsignModalTitle">
+            <div class="callsign-modal-header">
+                <div>
+                    <h3 id="callsignModalTitle">Spot History</h3>
+                    <div class="callsign-modal-subtitle" id="callsignModalSubtitle"></div>
+                </div>
+                <button id="callsignModalClose" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+
+            <div class="callsign-modal-body">
+                <div class="callsign-modal-status" id="callsignModalStatus">Loading…</div>
+
+                <div class="callsign-modal-content" id="callsignModalContent" style="display: none;">
+                    <div class="stats-grid" id="callsignModalStats"></div>
+
+                    <div class="callsign-modal-filters">
+                        <div class="callsign-modal-filter">
+                            <label for="callsign-modal-search">Search:</label>
+                            <input type="text" id="callsign-modal-search" placeholder="Message/locator/band/mode/country" style="min-width: 240px;">
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label for="callsign-modal-mode">Mode:</label>
+                            <select id="callsign-modal-mode"><option value="">All</option></select>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label for="callsign-modal-band">Band:</label>
+                            <select id="callsign-modal-band"><option value="">All</option></select>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label for="callsign-modal-name">Name:</label>
+                            <select id="callsign-modal-name"><option value="">All</option></select>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label for="callsign-modal-min-snr">Min SNR:</label>
+                            <select id="callsign-modal-min-snr">
+                                <option value="-999">Any</option>
+                                <option value="-20">-20 dB</option>
+                                <option value="-10">-10 dB</option>
+                                <option value="0">0 dB</option>
+                                <option value="10">+10 dB</option>
+                                <option value="20">+20 dB</option>
+                            </select>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                <input type="checkbox" id="callsign-modal-cq-only" style="cursor: pointer;">
+                                <span>CQ Only</span>
+                            </label>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                <input type="checkbox" id="callsign-modal-with-locator" style="cursor: pointer;">
+                                <span>Has Locator</span>
+                            </label>
+                        </div>
+                        <div class="callsign-modal-filter">
+                            <button id="callsign-modal-clear-filters" class="callsign-modal-btn" style="background: #FF9800; padding: 6px 12px;">Clear</button>
+                        </div>
+                    </div>
+
+                    <div class="callsign-modal-pagination">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="callsign-records-per-page">Per page:</label>
+                            <select id="callsign-records-per-page">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="all">All</option>
+                            </select>
+                            <span id="callsignModalPageInfo" style="color: rgba(255,255,255,0.7);"></span>
+                        </div>
+                        <div id="callsignModalPageButtons" style="display: flex; gap: 5px; flex-wrap: wrap;"></div>
+                    </div>
+
+                    <div class="spots-table-container">
+                        <table class="spots-table" id="callsignModalTable">
+                            <thead>
+                                <tr>
+                                    <th class="sortable modal-sortable" data-column="timestamp">Time <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="mode">Mode <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="band">Band <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="name">Name <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="callsign">Callsign <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="locator">Locator <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="snr">SNR <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="frequency">Frequency <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="distance_km">Distance <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="bearing_deg">Bearing <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="country">Country <span class="sort-arrows">⇅</span></th>
+                                    <th class="sortable modal-sortable" data-column="continent">Continent <span class="sort-arrows">⇅</span></th>
+                                    <th>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody id="callsignModalTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="callsign-modal-footer">
+                <a id="callsignModalQrz" href="#" target="_blank" class="callsign-modal-btn" style="background: #607D8B; text-decoration: none;">QRZ</a>
+                <button id="callsignModalShowMap" class="callsign-modal-btn" style="background: #4CAF50;">Show on Map</button>
+                <button id="callsignModalCloseBtn" class="callsign-modal-btn" style="background: #757575;">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>

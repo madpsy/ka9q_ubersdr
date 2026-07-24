@@ -1,7 +1,19 @@
 #!/bin/bash
 
 # Script to extract admin password from UberSDR config
+#
+# Usage:
+#   get-password.sh            Human-readable output (password, admin URL, warnings)
+#   get-password.sh --short    Print only the raw password to stdout (for scripting,
+#                              e.g. curl -H "X-Admin-Password: $(get-password.sh --short)")
 CONFIG_PATH="/var/lib/docker/volumes/ubersdr_ubersdr-config/_data/config.yaml"
+
+SHORT=0
+case "${1:-}" in
+    --short|-s) SHORT=1 ;;
+    "")         ;;
+    *) echo "Unknown option: $1" >&2; echo "Usage: $0 [--short]" >&2; exit 2 ;;
+esac
 
 # Check if config file exists (using sudo since it's in a protected directory)
 if ! sudo test -f "$CONFIG_PATH"; then
@@ -26,6 +38,16 @@ PASSWORD=$(sudo awk '
 if [ -z "$PASSWORD" ]; then
     echo "Error: Could not extract password from config file" >&2
     exit 1
+fi
+
+# Short mode: emit only the raw password (no banner). The default-value check
+# is still surfaced on stderr, but we exit 0 so callers always capture the value.
+if [ "$SHORT" -eq 1 ]; then
+    printf '%s\n' "$PASSWORD"
+    if [ "$PASSWORD" = "mypassword" ]; then
+        echo "WARNING: admin password is still the default 'mypassword'." >&2
+    fi
+    exit 0
 fi
 
 echo ""

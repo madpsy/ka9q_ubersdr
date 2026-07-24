@@ -113,7 +113,7 @@ fi
 # ---------------------------------------------------------------------------
 export BASE
 if [ -x "$UBERSDR_DIR/get-password.sh" ]; then
-  PW="$("$UBERSDR_DIR/get-password.sh" 2>/dev/null | awk -F': ' '/^Admin Password:/{print $2}')" || true
+  PW="$("$UBERSDR_DIR/get-password.sh" --short 2>/dev/null)" || true
   if [ -n "${PW:-}" ]; then
     export UBERSDR_ADMIN_PASSWORD="$PW"
     say "Admin credentials loaded into the session."

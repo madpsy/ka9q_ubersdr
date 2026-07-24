@@ -1371,13 +1371,19 @@ BASE="${BASE:-http://localhost:8080}"     # admin listener (server.listen port)
 
 If `$UBERSDR_ADMIN_PASSWORD` is empty, fall back to the helper script, which
 reads the password out of the running instance's `config.yaml` (inside the
-Docker config volume) and prints an `Admin Password: <value>` line. It uses
+Docker config volume). Call it with `--short` to get just the raw password on
+stdout (without `--short` it prints a human-readable banner instead). It uses
 `sudo` internally to read the protected volume, so the host must allow sudo:
 
 ```bash
 # Installed location on a hub host (repo path: ./get-password.sh)
-[ -n "$PW" ] || PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+[ -n "$PW" ] || PW="$(~/ubersdr/get-password.sh --short)"
 ```
+
+> Prefer `$UBERSDR_ADMIN_PASSWORD` for the actual API calls — it's already the
+> raw password and needs no sudo. Only run `get-password.sh --short` as the
+> one-time fallback above; don't inline it into every `curl` (that re-runs
+> `sudo` per request, and Claude's non-interactive shell can't answer a prompt).
 
 The base URL is the admin listener (the `server.listen` port, `8080` by default
 — the same host/port as `admin.html`).
@@ -1446,7 +1452,7 @@ user (and, if public, the whole community) sees in the widget list, so make it
 descriptive, not `my_thing`.
 
 ```bash
-PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+PW="${UBERSDR_ADMIN_PASSWORD:-$(~/ubersdr/get-password.sh --short)}"
 BASE="http://localhost:8080"
 
 # html_content is the widget fragment; use --rawfile to load it from a file
@@ -1497,7 +1503,7 @@ its exact stored `name`. Resolve it, don't guess:
    possible.
 
 ```bash
-PW="$(~/ubersdr/get-password.sh | awk -F': ' '/^Admin Password:/{print $2}')"
+PW="${UBERSDR_ADMIN_PASSWORD:-$(~/ubersdr/get-password.sh --short)}"
 BASE="http://localhost:8080"
 Q="callsign lookup"                   # the user's loose description
 

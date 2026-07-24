@@ -140,12 +140,8 @@ do_start() {
 
   # Ensure the image is available.
   if ! image_present; then
-    warn "Image $IMAGE is not present locally."
-    printf '  Pull it now? [Y/n]: '; read -r ans
-    case "${ans:-Y}" in
-      [nN]*) die "Cannot start without the image.";;
-      *)     say "Pulling $IMAGE…"; compose pull "$SERVICE";;
-    esac
+    say "Image $IMAGE is not present locally — pulling it…"
+    compose pull "$SERVICE"
   fi
 
   # Resolve the admin password (never printed).
@@ -203,6 +199,12 @@ menu() {
     printf   '%s║  UberSDR Widget AI                            ║%s\n' "$C_CYAN" "$C_RST"
     printf   '%s╚══════════════════════════════════════════════╝%s\n' "$C_CYAN" "$C_RST"
     printf   '  Status: %b\n\n' "$(status_line)"
+    printf '%s' "$C_DIM"
+    printf   '  Runs in the background as the "%s" session — if you close this\n' "$SESSION"
+    printf   '  window it keeps running. Reattach any time from the UberSDR Admin\n'
+    printf   '  page: click the ▾ arrow next to the Terminal button (top of the\n'
+    printf   '  page) and choose "%s".\n' "$SESSION"
+    printf '%s\n' "$C_RST"
     if session_running; then
       printf '    1) Attach to running session\n'
     else

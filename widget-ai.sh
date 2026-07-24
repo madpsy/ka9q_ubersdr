@@ -199,6 +199,9 @@ menu() {
     printf   '%s║  UberSDR Widget AI                           ║%s\n' "$C_CYAN" "$C_RST"
     printf   '%s╚══════════════════════════════════════════════╝%s\n' "$C_CYAN" "$C_RST"
     printf   '  Status: %b\n\n' "$(status_line)"
+    printf   '%s%s⚠ A paid Claude subscription is required.%s\n' "$C_BOLD" "$C_YELLOW" "$C_RST"
+    printf   '%s  Anthropic does not permit Free-tier access to the\n' "$C_YELLOW"
+    printf   '  Claude Code CLI that powers this assistant.%s\n\n' "$C_RST"
     printf '%s' "$C_DIM"
     printf   '  Runs in the background as the "%s" session — if you close this\n' "$SESSION"
     printf   '  window it keeps running. Reattach any time from the UberSDR Admin\n'

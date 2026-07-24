@@ -418,6 +418,48 @@ services:
         fluentd-async: "true"
         tag: "ubersdr-leobodnar"
 
+  # AI Widget Assistant — sandboxed Claude Code for authoring widgets.
+  # NOT started by `docker compose up` (the `manual` profile excludes it); it is
+  # launched on demand by widget-ai.sh / `docker compose run --rm widget-ai`.
+  # Runs locked down: non-root, read-only root fs, no host mounts, dropped caps.
+  widget-ai:
+    image: madpsy/ubersdr-claude:latest
+    profiles:
+      - manual
+
+    networks:
+      - sdr-network
+
+    # Interactive session.
+    stdin_open: true
+    tty: true
+
+    # Sandbox hardening — Claude runs with bypassed per-command prompts, so the
+    # container itself is the security boundary.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpu_shares: 512
+    pids_limit: 512
+
+    tmpfs:
+      - /tmp
+
+    volumes:
+      # Only writable path — persists the Claude login between runs.
+      - widget-ai-home:/home/node
+
+    environment:
+      # Admin API password, passed through as a single env var (no config volume).
+      - UBERSDR_ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # Admin API base — the main UberSDR service on the shared network.
+      - BASE=http://ubersdr:8080
+      # Optional: run headless with an API key instead of interactive login.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TZ=${TZ:-UTC}
+
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:
@@ -436,4 +478,5 @@ volumes:
   caddy-config:
   caddy-shared:
   tunnel-client-config:
+  widget-ai-home:
   # Note: updater directory is bind-mounted from host (./updater)

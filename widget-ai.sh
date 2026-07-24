@@ -1,156 +1,237 @@
 #!/usr/bin/env bash
 #
-# widget-ai.sh — AI-assisted UberSDR widget authoring.
+# widget-ai.sh — manage the UberSDR Widget AI assistant container.
 #
-# Installs Claude Code (first run), refreshes the create-widget skill from the
-# repo into your personal skills dir, then drops you into an interactive Claude
-# session to CREATE a new widget or EDIT one of your existing (custom/cloned)
-# widgets. All persistence happens through the instance admin API.
+# The AI widget assistant runs Claude Code inside the sandboxed
+# `madpsy/ubersdr-claude` container (defined as the manually-started `widget-ai`
+# service in docker-compose.yml). This script is the host-side manager: it
+# starts / stops that container, reports its running state, and attaches you to
+# an interactive session.
 #
-#   • The skill lives at ~/.claude/skills/create-widget/SKILL.md — persistent and
-#     refreshed on every launch, so you can inspect it and plain `claude` sees it.
-#   • Reference widgets + scratch files live in a stable work dir that is wiped
-#     clean at the start of each launch — the real widgets live on your instance
-#     behind the admin API, so nothing here needs to persist.
+# The interactive session runs inside a detached tmux session named "Widget AI",
+# so closing the terminal window only DETACHES — the assistant keeps running and
+# you can reattach later (menu → Start / attach, or the Terminal ▾ dropdown).
 #
-# Intended to be launched from the UberSDR gotty web terminal.
+# Intended to be launched from the UberSDR gotty web terminal
+# (Admin → UI → ✨ AI Widget Assistant), but also usable directly:
+#
+#   ./widget-ai.sh                 # interactive menu
+#   ./widget-ai.sh start           # start / attach
+#   ./widget-ai.sh stop            # stop the container
+#   ./widget-ai.sh status          # print state and exit
+#   ./widget-ai.sh update          # pull the latest image
 #
 #   Env overrides:
-#     UBERSDR_DIR    installed instance dir holding get-password.sh  (default: $HOME/ubersdr)
-#     BASE           admin API base URL          (default: http://localhost:8080)
-#     BRANCH         git branch to pull from     (default: main)
+#     UBERSDR_DIR        installed instance dir (holds docker-compose.yml,
+#                        get-password.sh)                 (default: $HOME/ubersdr)
+#     COMPOSE_FILE       path to the compose file         (default: $UBERSDR_DIR/docker-compose.yml)
+#     WIDGET_AI_IMAGE    container image                  (default: madpsy/ubersdr-claude:latest)
+#     ADMIN_PASSWORD     admin API password; if unset the script resolves it
+#                        from the running instance (never printed)
 
 set -euo pipefail
 
-REPO="madpsy/ka9q_ubersdr"
-BRANCH="${BRANCH:-main}"
-RAW="https://raw.githubusercontent.com/$REPO/refs/heads/$BRANCH"
 UBERSDR_DIR="${UBERSDR_DIR:-$HOME/ubersdr}"
-BASE="${BASE:-http://localhost:8080}"
-SKILL_DIR="$HOME/.claude/skills/create-widget"
-
-# The widget workflow is almost entirely piped curl/jq commands, which the
-# per-command permission matcher can't allowlist cleanly — so by default we run
-# Claude in a no-prompt mode. This is an owner-operated tool in a throwaway dir
-# talking to your own admin API. Set WIDGET_AI_PERMISSION_MODE=default (or
-# acceptEdits) to restore normal prompting.
-PERM_MODE="${WIDGET_AI_PERMISSION_MODE:-bypassPermissions}"
-
-# Initial prompt that seeds the interactive session when no prompt is passed on
-# the command line. Override with WIDGET_AI_PROMPT, or pass your own as an arg.
-INIT_PROMPT="${WIDGET_AI_PROMPT:-Ensure the UberSDR widgets skill is loaded, then list some of the available community widgets (name + short description) I could enable or clone.}"
-
-say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
-die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+COMPOSE_FILE="${COMPOSE_FILE:-$UBERSDR_DIR/docker-compose.yml}"
+SERVICE="${WIDGET_AI_SERVICE:-widget-ai}"
+PROFILE="${WIDGET_AI_PROFILE:-manual}"
+CONTAINER="${WIDGET_AI_CONTAINER:-ubersdr-claude}"
+MAIN_CONTAINER="${UBERSDR_CONTAINER:-ka9q_ubersdr}"
+SESSION="${WIDGET_AI_SESSION:-Widget AI}"
+IMAGE="${WIDGET_AI_IMAGE:-madpsy/ubersdr-claude:latest}"
 
 # ---------------------------------------------------------------------------
-# 1. Prerequisites: claude, plus curl/tar/jq (API recipes) and git (optional —
-#    lets the skill shallow-clone the repo to inspect the frontend).
+# Output helpers
 # ---------------------------------------------------------------------------
-command -v curl >/dev/null 2>&1 || die "curl is required but not installed."
-command -v tar  >/dev/null 2>&1 || die "tar is required but not installed."
-
-# jq is required by the API workflow; git is a nice-to-have for deeper inspection.
-MISSING=()
-command -v jq  >/dev/null 2>&1 || MISSING+=(jq)
-command -v git >/dev/null 2>&1 || MISSING+=(git)
-if [ "${#MISSING[@]}" -gt 0 ]; then
-  say "Installing missing tools: ${MISSING[*]}…"
-  command -v apt-get >/dev/null 2>&1 && { sudo apt-get update -qq && sudo apt-get install -y "${MISSING[@]}" || true; }
-  command -v jq  >/dev/null 2>&1 || echo "  (warning: jq still missing — the API recipes won't run cleanly)"
-  command -v git >/dev/null 2>&1 || echo "  (note: git missing — the skill just can't clone the repo for a deeper look)"
-fi
-
-# Claude Code — install on first use via the official native installer.
-export PATH="$HOME/.local/bin:$PATH"
-if ! command -v claude >/dev/null 2>&1; then
-  say "Installing Claude Code…"
-  curl -fsSL https://claude.ai/install.sh | bash
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-command -v claude >/dev/null 2>&1 || die "Claude Code install failed — is $HOME/.local/bin on PATH?"
-
-# ---------------------------------------------------------------------------
-# 2. Refresh the create-widget skill into the personal skills dir.
-#    Persistent (survives exit, inspectable, visible to plain `claude`); the
-#    previous copy is used if the network is down.
-# ---------------------------------------------------------------------------
-mkdir -p "$SKILL_DIR"
-if curl -fsSL --max-time 20 "$RAW/.claude/skills/create-widget/SKILL.md" -o "$SKILL_DIR/SKILL.md.tmp"; then
-  mv "$SKILL_DIR/SKILL.md.tmp" "$SKILL_DIR/SKILL.md"
-  say "Widget skill up to date:  $SKILL_DIR/SKILL.md"
+if [ -t 1 ]; then
+  C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
+  C_RED=$'\033[31m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
 else
-  rm -f "$SKILL_DIR/SKILL.md.tmp"
-  [ -f "$SKILL_DIR/SKILL.md" ] \
-    && say "Offline — using previously fetched skill: $SKILL_DIR/SKILL.md" \
-    || die "Could not fetch the widget skill from the repo and no local copy exists."
+  C_CYAN=; C_GREEN=; C_YELLOW=; C_RED=; C_DIM=; C_BOLD=; C_RST=
 fi
+say()  { printf '%s▸ %s%s\n' "$C_CYAN" "$*" "$C_RST"; }
+ok()   { printf '%s✓ %s%s\n' "$C_GREEN" "$*" "$C_RST"; }
+warn() { printf '%s! %s%s\n' "$C_YELLOW" "$*" "$C_RST" >&2; }
+die()  { printf '%s✗ %s%s\n' "$C_RED" "$*" "$C_RST" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 3. Working dir: reference widgets + scratch space.
-#    STABLE path (not mktemp) so Claude's folder-trust prompt only appears on
-#    the very first launch and is then remembered — trust is keyed to the path.
-#    Wiped at the start of every launch, so each session still begins clean.
+# Prerequisites
 # ---------------------------------------------------------------------------
-WORK="${WIDGET_AI_WORKDIR:-$HOME/.cache/widget-ai}"
-rm -rf "$WORK"
-mkdir -p "$WORK/widgets" "$WORK/widgets-custom"
+command -v docker >/dev/null 2>&1 || die "docker is required but not installed."
+docker compose version >/dev/null 2>&1 || die "the docker compose plugin is required but not available."
+command -v tmux >/dev/null 2>&1 || die "tmux is required but not installed (sudo apt install -y tmux)."
+[ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE (set COMPOSE_FILE or UBERSDR_DIR)."
 
-# Reference widgets are helpful for CREATE; editing via the API works without
-# them, so this is best-effort.
-if curl -fsSL --max-time 20 "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" \
-     | tar -xz -C "$WORK" --strip-components=1 "ka9q_ubersdr-$BRANCH/widgets" 2>/dev/null; then
-  say "Reference widgets loaded ($(ls "$WORK/widgets" | wc -l) files)."
-else
-  echo "  (reference widgets unavailable — creating from scratch still works)"
-fi
+compose() { docker compose --profile "$PROFILE" -f "$COMPOSE_FILE" "$@"; }
 
 # ---------------------------------------------------------------------------
-# 4. Pre-fetch the admin password HERE (in the TTY, where sudo can prompt) and
-#    export it, so Claude authenticates via $UBERSDR_ADMIN_PASSWORD and never
-#    has to run sudo from its non-interactive shell. The path is absolute, so
-#    cwd (the temp dir) is irrelevant.
+# State detection
 # ---------------------------------------------------------------------------
-export BASE
-if [ -x "$UBERSDR_DIR/get-password.sh" ]; then
-  PW="$("$UBERSDR_DIR/get-password.sh" --short 2>/dev/null)" || true
-  if [ -n "${PW:-}" ]; then
-    export UBERSDR_ADMIN_PASSWORD="$PW"
-    say "Admin credentials loaded into the session."
-  else
-    echo "  (could not read the admin password automatically — Claude will run $UBERSDR_DIR/get-password.sh when needed)"
+session_running()   { tmux has-session -t "$SESSION" 2>/dev/null; }
+container_running() { [ -n "$(docker ps -q -f "name=^/${CONTAINER}$" 2>/dev/null)" ]; }
+image_present()     { docker image inspect "$IMAGE" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# Admin password resolution.
+#   Order: existing $ADMIN_PASSWORD → the running main container's env →
+#   get-password.sh (sudo). The value is NEVER printed; on success we only say
+#   that credentials were loaded. Callers get it via the exported var.
+# ---------------------------------------------------------------------------
+resolve_admin_password() {
+  if [ -n "${ADMIN_PASSWORD:-}" ]; then return 0; fi
+  local pw=""
+  # The main UberSDR container already holds the password in its environment.
+  pw="$(docker exec "$MAIN_CONTAINER" printenv ADMIN_PASSWORD 2>/dev/null || true)"
+  # Fall back to the helper that reads it out of the config volume (uses sudo).
+  if [ -z "$pw" ] && [ -x "$UBERSDR_DIR/get-password.sh" ]; then
+    pw="$("$UBERSDR_DIR/get-password.sh" --short 2>/dev/null || true)"
   fi
-else
-  echo "  (note: $UBERSDR_DIR/get-password.sh not found — set UBERSDR_ADMIN_PASSWORD manually if the API returns 401)"
-fi
+  if [ -n "$pw" ]; then
+    export ADMIN_PASSWORD="$pw"
+    return 0
+  fi
+  return 1
+}
+
+# Write the resolved password to a private (0600) env-file for
+# `docker compose --env-file`, so compose can substitute ${ADMIN_PASSWORD} into
+# the service env WITHOUT the value ever appearing on a command line / in `ps`.
+# Prints the env-file path on stdout. Empty ADMIN_PASSWORD is written as blank.
+make_env_file() {
+  local ef
+  ef="$(mktemp "${TMPDIR:-/tmp}/widget-ai.XXXXXX.env")"
+  chmod 600 "$ef"
+  printf 'ADMIN_PASSWORD=%s\n' "${ADMIN_PASSWORD:-}" > "$ef"
+  printf '%s' "$ef"
+}
 
 # ---------------------------------------------------------------------------
-# 5. Hand over to an interactive Claude session in the working dir.
-#    Permissions are handled by --permission-mode (see PERM_MODE), not a
-#    settings.json allowlist — the piped curl/jq recipes can't be matched
-#    cleanly by per-command rules.
+# Status
 # ---------------------------------------------------------------------------
-cd "$WORK"
-cat <<EOF
+status_line() {
+  if session_running || container_running; then
+    printf '%s● running%s' "$C_GREEN" "$C_RST"
+  else
+    printf '%s○ stopped%s' "$C_DIM" "$C_RST"
+  fi
+}
 
-  ┌───────────────────────────────────────────────────────────┐
-  │  UberSDR Widget Assistant                                  │
-  ├───────────────────────────────────────────────────────────┤
-  │  Just tell Claude what you want, e.g.                      │
-  │    • "Create a widget that shows the current UTC sunrise"  │
-  │    • "List my widgets" / "Edit my callsign lookup widget"  │
-  │                                                            │
-  │  Your widgets live on your instance (admin API), not here. │
-  │  This scratch folder is wiped clean on each launch.        │
-  └───────────────────────────────────────────────────────────┘
+do_status() {
+  printf '\n%sWidget AI — status%s\n' "$C_BOLD" "$C_RST"
+  printf '  image      %s  ' "$IMAGE"
+  image_present && ok "present" || warn "not pulled (menu → Update image)"
+  printf '  container  %s  ' "$CONTAINER"
+  container_running && ok "running" || printf '%s○ not running%s\n' "$C_DIM" "$C_RST"
+  printf '  session    %-12s  ' "\"$SESSION\""
+  session_running && ok "attached/detached (alive)" || printf '%s○ none%s\n' "$C_DIM" "$C_RST"
+  printf '\n'
+}
 
-EOF
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+do_start() {
+  # Already alive → just reattach.
+  if session_running; then
+    say "Reattaching to the running \"$SESSION\" session…"
+    tmux attach -t "$SESSION"
+    return 0
+  fi
 
-# --permission-mode avoids a prompt on every piped curl/jq command (see PERM_MODE).
-# The work dir is wiped at the next launch's start, so no exit cleanup is needed.
-# With no CLI args, seed the session with INIT_PROMPT; otherwise pass args through.
-if [ "$#" -gt 0 ]; then
-  claude --permission-mode "$PERM_MODE" "$@" || true
-else
-  claude --permission-mode "$PERM_MODE" "$INIT_PROMPT" || true
-fi
+  # Ensure the image is available.
+  if ! image_present; then
+    warn "Image $IMAGE is not present locally."
+    printf '  Pull it now? [Y/n]: '; read -r ans
+    case "${ans:-Y}" in
+      [nN]*) die "Cannot start without the image.";;
+      *)     say "Pulling $IMAGE…"; compose pull "$SERVICE";;
+    esac
+  fi
+
+  # Resolve the admin password (never printed).
+  if resolve_admin_password; then
+    ok "Admin credentials loaded into the session."
+  else
+    warn "Could not resolve the admin password — the assistant's API calls may return 401."
+    warn "Set ADMIN_PASSWORD in the environment, or ensure $MAIN_CONTAINER is running."
+  fi
+
+  local envfile; envfile="$(make_env_file)"
+
+  # Launch the container inside a detached tmux session and attach. The compose
+  # command reads ADMIN_PASSWORD from the private env-file (removed once the run
+  # exits). Closing the window detaches; the session + container keep running.
+  say "Starting the Widget AI container…"
+  tmux new-session -d -s "$SESSION" -n "$SESSION" \
+    "cd '$UBERSDR_DIR' && docker compose --env-file '$envfile' --profile '$PROFILE' -f '$COMPOSE_FILE' run --rm --name '$CONTAINER' '$SERVICE'; \
+     rm -f '$envfile'; \
+     echo; echo '=== Widget AI session ended — press Enter to close ==='; read -r _"
+
+  say "Attaching (detach with Ctrl-b then d; closing the window also detaches)…"
+  sleep 1
+  tmux attach -t "$SESSION"
+}
+
+do_stop() {
+  if ! session_running && ! container_running; then
+    say "Widget AI is not running."
+    return 0
+  fi
+  say "Stopping Widget AI…"
+  # Kill the tmux session first so the attached `compose run` is torn down.
+  if session_running; then tmux kill-session -t "$SESSION" 2>/dev/null || true; fi
+  # Ensure the container is gone (run --rm normally removes it, but be sure).
+  if container_running; then docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; fi
+  ok "Stopped."
+}
+
+do_update() {
+  say "Pulling the latest image ($IMAGE)…"
+  compose pull "$SERVICE"
+  ok "Image up to date."
+  if container_running || session_running; then
+    warn "A session is running — restart it (Stop, then Start) to use the new image."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Interactive menu
+# ---------------------------------------------------------------------------
+menu() {
+  while true; do
+    printf '\n%s╔══════════════════════════════════════════════╗%s\n' "$C_CYAN" "$C_RST"
+    printf   '%s║  UberSDR Widget AI                            ║%s\n' "$C_CYAN" "$C_RST"
+    printf   '%s╚══════════════════════════════════════════════╝%s\n' "$C_CYAN" "$C_RST"
+    printf   '  Status: %b\n\n' "$(status_line)"
+    if session_running; then
+      printf '    1) Attach to running session\n'
+    else
+      printf '    1) Start / attach\n'
+    fi
+    printf   '    2) Stop\n'
+    printf   '    3) Status / details\n'
+    printf   '    4) Update image\n'
+    printf   '    q) Quit\n\n'
+    printf   '  Choose: '; read -r choice
+    case "$choice" in
+      1) do_start ;;
+      2) do_stop ;;
+      3) do_status ;;
+      4) do_update ;;
+      q|Q) exit 0 ;;
+      *) warn "Unknown option: $choice" ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Main — subcommand or interactive
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+  start)  do_start ;;
+  stop)   do_stop ;;
+  status) do_status ;;
+  update) do_update ;;
+  ""|menu) menu ;;
+  *) die "Unknown command: $1 (use: start | stop | status | update, or no argument for the menu)";;
+esac

@@ -1,0 +1,627 @@
+<!--
+  Ham Radio News
+  ==============
+  Shows the latest headlines from ARRL News or RSGB News (switchable via the
+  dropdown in the title bar; choice saved to localStorage), 5 per page with
+  pager controls when the feed has more. Click a headline to open the full
+  story in a new tab. Fetched live via the rss2json.com RSS-to-JSON relay
+  (neither source's own feed sends CORS headers, so it can't be fetched
+  directly from the browser) — a third-party dependency, so results are
+  cached per-source in localStorage and shown immediately on reload while a
+  fresh fetch runs in the background; a failed fetch falls back to the last
+  successful cache instead of an empty widget.
+  Auto-refreshes every 30 minutes. Drag to reposition; position saved in
+  localStorage.
+-->
+
+<style>
+  #hnews-widget {
+    position: fixed;
+    top: 80px;
+    left: 280px;
+    z-index: 9500;
+    pointer-events: auto;
+    width: 220px;
+
+    background: rgba(52, 73, 94, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    line-height: 1.4;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(255,180,60,0.6);
+
+    cursor: grab;
+    user-select: none;
+  }
+
+  #hnews-widget.hnews-dragging {
+    cursor: grabbing;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  #hnews-header {
+    display: flex;
+    align-items: center;
+    padding: 5px 8px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+  }
+
+  #hnews-source-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-right: auto;
+    min-width: 0;
+  }
+
+  #hnews-source {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0 13px 0 0;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+    /* Browsers size a <select>'s closed box by shrink-to-fit on the option
+       text BEFORE the uppercase transform is applied, so the visually
+       transformed (wider) glyphs then get clipped by the control's own
+       edge. A generous min-width gives it headroom instead of a tight fit. */
+    min-width: 88px;
+  }
+  #hnews-source:hover, #hnews-source:focus { color: #fff; }
+  #hnews-source:hover ~ #hnews-source-arrow,
+  #hnews-source:focus ~ #hnews-source-arrow { color: #fff; }
+  #hnews-source option {
+    background: #34495e;
+    color: #fff;
+    text-transform: none;
+    font-weight: normal;
+  }
+
+  /* Decorative dropdown arrow — overlaid on the select's reserved right
+     padding so it's obviously a control, not a static title. pointer-events
+     is off so clicks pass straight through to the <select> underneath. */
+  #hnews-source-arrow {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 8px;
+    line-height: 1;
+    color: rgba(255,255,255,0.6);
+    pointer-events: none;
+  }
+
+  #hnews-collapse {
+    width: 14px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  #hnews-collapse:hover { color: #fff; }
+
+  #hnews-refresh {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    flex-shrink: 0;
+    margin-right: 2px;
+    transition: color 0.15s, background 0.15s, transform 0.4s;
+  }
+  #hnews-refresh:hover { color: #fff; background: rgba(0,0,0,0.3); }
+  #hnews-refresh.hnews-spinning { animation: hnews-spin 0.7s linear infinite; }
+  @keyframes hnews-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  #hnews-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #hnews-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  #hnews-widget.hnews-collapsed > :not(#hnews-header) { display: none !important; }
+  #hnews-widget.hnews-collapsed #hnews-header { border-bottom: none; }
+
+  #hnews-body {
+    padding: 2px 0 4px;
+  }
+
+  #hnews-status {
+    padding: 8px 9px;
+    font-size: 10px;
+    font-weight: normal;
+    color: rgba(255,255,255,0.5);
+    white-space: normal;
+  }
+
+  #hnews-status.hnews-status-error {
+    color: rgba(255,150,120,0.85);
+  }
+
+  .hnews-item {
+    display: block;
+    padding: 6px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .hnews-item:last-child { border-bottom: none; }
+  .hnews-item:hover { background: rgba(255,255,255,0.08); }
+
+  .hnews-item-title {
+    font-size: 10.5px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.92);
+    white-space: normal;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .hnews-item:hover .hnews-item-title { color: #fff; }
+
+  .hnews-item-date {
+    font-size: 9px;
+    font-weight: normal;
+    color: rgba(255,255,255,0.5);
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+
+  #hnews-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 2px 9px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    line-height: 1;
+  }
+
+  .hnews-pager-btn {
+    width: 12px; height: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 7px;
+    color: rgba(255,255,255,0.75);
+    cursor: pointer;
+    border-radius: 3px;
+    flex-shrink: 0;
+    user-select: none;
+    transition: color 0.15s, background 0.15s;
+  }
+  .hnews-pager-btn:hover { color: #fff; background: rgba(255,255,255,0.15); }
+  .hnews-pager-btn.hnews-pager-disabled {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  #hnews-pager-info {
+    font-size: 8px;
+    font-weight: normal;
+    color: #fff;
+    min-width: 30px;
+    text-align: center;
+    line-height: 1;
+  }
+
+  #hnews-stale-note {
+    padding: 4px 9px 6px;
+    font-size: 9px;
+    font-weight: normal;
+    color: rgba(255,180,60,0.75);
+    white-space: normal;
+  }
+
+  @media (max-width: 768px) {
+    #hnews-widget { display: none !important; }
+  }
+  html.is-mobile #hnews-widget { display: none !important; }
+</style>
+
+<div id="hnews-widget" style="display:none;">
+  <div id="hnews-header">
+    <span id="hnews-collapse" title="Collapse">&#x25BE;</span>
+    <span id="hnews-source-wrap">
+      <select id="hnews-source" title="News source">
+        <option value="arrl">ARRL News</option>
+        <option value="rsgb">RSGB News</option>
+      </select>
+      <span id="hnews-source-arrow">&#x25BE;</span>
+    </span>
+    <span id="hnews-refresh" title="Refresh">&#x27F3;</span>
+    <span id="hnews-close" title="Dismiss">&#x2715;</span>
+  </div>
+  <div id="hnews-body">
+    <div id="hnews-status">Loading headlines&hellip;</div>
+    <div id="hnews-list" style="display:none;"></div>
+    <div id="hnews-pager" style="display:none;">
+      <span id="hnews-pager-prev" class="hnews-pager-btn" title="Previous">&#x25C0;</span>
+      <span id="hnews-pager-info">1 / 1</span>
+      <span id="hnews-pager-next" class="hnews-pager-btn" title="Next">&#x25B6;</span>
+    </div>
+    <div id="hnews-stale-note" style="display:none;">Showing last saved headlines &mdash; live refresh unavailable.</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var LS_POS_KEY       = 'hnews_widget_pos';
+  var LS_COLLAPSED_KEY = 'hnews_widget_collapsed';
+  var LS_SOURCE_KEY    = 'hnews_widget_source';
+  var DRAG_THRESHOLD    = 5;
+  var REFRESH_INTERVAL  = 30 * 60 * 1000; // 30 minutes
+
+  // rss2json.com relays each feed to CORS-friendly JSON — see the header
+  // comment for why a direct fetch of either feed doesn't work.
+  var SOURCES = {
+    arrl: { label: 'ARRL News', feedUrl: 'https://www.arrl.org/news/rss' },
+    rsgb: { label: 'RSGB News', feedUrl: 'https://rsgb.org/main/feed/' }
+  };
+
+  function apiUrlFor(source) {
+    // NOTE: rss2json's free tier rejects the `count` parameter without an
+    // API key ("To use this parameter `count` you need a valid api key") —
+    // fetch the full feed and slice to a page client-side instead (below).
+    return 'https://api.rss2json.com/v1/api.json?rss_url=' +
+           encodeURIComponent(SOURCES[source].feedUrl);
+  }
+  function cacheKeyFor(source) {
+    return 'hnews_widget_cache_' + source;
+  }
+
+  var widget         = document.getElementById('hnews-widget');
+  var headerEl        = document.getElementById('hnews-header');
+  var collapseEl       = document.getElementById('hnews-collapse');
+  var sourceSelectEl   = document.getElementById('hnews-source');
+  var refreshEl        = document.getElementById('hnews-refresh');
+  var closeEl          = document.getElementById('hnews-close');
+  var statusEl         = document.getElementById('hnews-status');
+  var listEl           = document.getElementById('hnews-list');
+  var pagerEl          = document.getElementById('hnews-pager');
+  var pagerPrevEl      = document.getElementById('hnews-pager-prev');
+  var pagerNextEl      = document.getElementById('hnews-pager-next');
+  var pagerInfoEl      = document.getElementById('hnews-pager-info');
+  var staleNoteEl      = document.getElementById('hnews-stale-note');
+
+  var PAGE_SIZE = 5;
+  var allItems    = [];
+  var currentPage = 0;
+
+  // ── Source preference: restore, validate, reflect in the dropdown ──────
+  var currentSource = 'arrl';
+  try {
+    var savedSource = localStorage.getItem(LS_SOURCE_KEY);
+    if (savedSource && SOURCES[savedSource]) currentSource = savedSource;
+  } catch (e) { /* ignore */ }
+  sourceSelectEl.value = currentSource;
+
+  var dragState     = null;
+  var wasDragged     = false;
+  var dismissed       = false;
+  var refreshTimer    = null;
+  var refreshInFlight = false;
+
+  function esc(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Position restore ────────────────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var saved = localStorage.getItem(LS_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          widget.style.top  = pos.top  + 'px';
+          widget.style.left = pos.left + 'px';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Drag ─────────────────────────────────────────────────────────────────
+  widget.addEventListener('mousedown', function (e) {
+    if (e.target === collapseEl     || collapseEl.contains(e.target))     return;
+    if (e.target === sourceSelectEl || sourceSelectEl.contains(e.target)) return;
+    if (e.target === refreshEl      || refreshEl.contains(e.target))      return;
+    if (e.target === closeEl        || closeEl.contains(e.target))        return;
+    if (e.target.closest && e.target.closest('.hnews-item')) return;
+    if (e.target.closest && e.target.closest('#hnews-pager')) return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('hnews-dragging');
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy, window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx, window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('hnews-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top,  10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Close ────────────────────────────────────────────────────────────────
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dismissed = true;
+    widget.style.display = 'none';
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  });
+
+  // ── Collapse / expand ───────────────────────────────────────────────────
+  function setCollapsed(state, save) {
+    widget.classList.toggle('hnews-collapsed', state);
+    collapseEl.innerHTML = state ? '&#x25B8;' : '&#x25BE;';
+    collapseEl.title = state ? 'Expand' : 'Collapse';
+    if (save) {
+      try { localStorage.setItem(LS_COLLAPSED_KEY, state ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+  (function restoreCollapsed() {
+    var state = false;
+    try { state = localStorage.getItem(LS_COLLAPSED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setCollapsed(state, false);
+  })();
+  collapseEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('hnews-collapsed'), true);
+  });
+
+  // ── Cache (one slot per source, so switching doesn't show stale data
+  //    from the other feed while the fresh fetch is in flight) ────────────
+  function loadCache(source) {
+    try {
+      var raw = localStorage.getItem(cacheKeyFor(source));
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.items) && parsed.items.length) return parsed;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function saveCache(source, items) {
+    try {
+      localStorage.setItem(cacheKeyFor(source), JSON.stringify({ items: items, ts: Date.now() }));
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────
+  function formatDate(pubDate) {
+    if (!pubDate) return '';
+    var d = new Date(pubDate);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch (e) { return ''; }
+  }
+
+  function totalPages() {
+    return Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
+  }
+
+  // Renders whatever page currentPage points at (clamped), and shows/hides
+  // the pager depending on whether there's more than one page.
+  function renderPage() {
+    var pages = totalPages();
+    if (currentPage >= pages) currentPage = pages - 1;
+    if (currentPage < 0) currentPage = 0;
+
+    var start = currentPage * PAGE_SIZE;
+    var pageItems = allItems.slice(start, start + PAGE_SIZE);
+
+    var html = pageItems.map(function (it) {
+      var dateStr = formatDate(it.pubDate);
+      var datePrefix = dateStr ? '<span class="hnews-item-date">' + esc(dateStr) + '</span>' : '';
+      return '<a class="hnews-item" href="' + esc(it.link) + '" target="_blank" rel="noopener noreferrer">' +
+               '<div class="hnews-item-title">' + datePrefix + esc(it.title) + '</div>' +
+             '</a>';
+    }).join('');
+    listEl.innerHTML = html;
+    listEl.style.display = '';
+    statusEl.style.display = 'none';
+
+    if (pages > 1) {
+      pagerInfoEl.textContent = (currentPage + 1) + ' / ' + pages;
+      pagerPrevEl.classList.toggle('hnews-pager-disabled', currentPage === 0);
+      pagerNextEl.classList.toggle('hnews-pager-disabled', currentPage >= pages - 1);
+      pagerEl.style.display = '';
+    } else {
+      pagerEl.style.display = 'none';
+    }
+  }
+
+  // Replaces the full item set and jumps back to page 1 — used whenever a
+  // fresh fetch or cache load supplies a new list.
+  function setItems(items) {
+    allItems = items;
+    currentPage = 0;
+    renderPage();
+  }
+
+  pagerPrevEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (currentPage > 0) { currentPage--; renderPage(); }
+  });
+  pagerNextEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (currentPage < totalPages() - 1) { currentPage++; renderPage(); }
+  });
+
+  // ── Fetch ────────────────────────────────────────────────────────────────
+  // Captures the source being fetched at call time and re-checks it before
+  // touching the DOM, so a stale response from a feed the user has since
+  // switched away from can never clobber the newer one on screen.
+  function fetchNews() {
+    if (refreshInFlight) return;
+    var source = currentSource;
+    refreshInFlight = true;
+    refreshEl.classList.add('hnews-spinning');
+
+    if (listEl.style.display === 'none' || !listEl.children.length) {
+      statusEl.textContent = 'Loading headlines…';
+      statusEl.className = '';
+      statusEl.style.display = '';
+    }
+
+    fetch(apiUrlFor(source))
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (json) {
+        if (!json || json.status !== 'ok' || !Array.isArray(json.items)) {
+          throw new Error('unexpected response');
+        }
+        // Cap well above what either feed realistically returns (5-10 items)
+        // so pagination has something to page through without letting a
+        // pathological feed balloon the cached payload.
+        var items = json.items.slice(0, 20).map(function (it) {
+          return {
+            title:   (it.title   || '').trim(),
+            link:    (it.link    || '').trim(),
+            pubDate: (it.pubDate || '').trim()
+          };
+        }).filter(function (it) { return it.title && it.link; });
+
+        if (!items.length) throw new Error('no items in feed');
+
+        saveCache(source, items);
+        if (source === currentSource) {
+          setItems(items);
+          staleNoteEl.style.display = 'none';
+        }
+      })
+      .catch(function () {
+        if (source !== currentSource) return; // a newer fetchNews() call owns the display now
+        // Fall back to the last cached headlines if we have any; otherwise
+        // show a plain error. Never leave the widget blank without saying why.
+        var cached = loadCache(source);
+        if (cached && cached.items.length) {
+          setItems(cached.items);
+          staleNoteEl.style.display = '';
+        } else {
+          statusEl.textContent = 'Unable to load news right now.';
+          statusEl.className = 'hnews-status-error';
+          statusEl.style.display = '';
+          listEl.style.display = 'none';
+        }
+      })
+      .finally(function () {
+        refreshInFlight = false;
+        refreshEl.classList.remove('hnews-spinning');
+      });
+  }
+
+  // ── Source switching ────────────────────────────────────────────────────
+  function switchSource(newSource) {
+    if (!SOURCES[newSource] || newSource === currentSource) return;
+    currentSource = newSource;
+    try { localStorage.setItem(LS_SOURCE_KEY, currentSource); } catch (e) { /* ignore */ }
+
+    staleNoteEl.style.display = 'none';
+    var cached = loadCache(currentSource);
+    if (cached) {
+      setItems(cached.items);
+    } else {
+      allItems = [];
+      currentPage = 0;
+      listEl.innerHTML = '';
+      listEl.style.display = 'none';
+      pagerEl.style.display = 'none';
+      statusEl.textContent = 'Loading headlines…';
+      statusEl.className = '';
+      statusEl.style.display = '';
+    }
+    // Force the fetch through even if a request for the previous source is
+    // still in flight — its result will be discarded by the source check.
+    refreshInFlight = false;
+    fetchNews();
+  }
+
+  sourceSelectEl.addEventListener('mousedown', function (e) {
+    e.stopPropagation(); // don't let opening the dropdown start a widget drag
+  });
+  sourceSelectEl.addEventListener('change', function (e) {
+    e.stopPropagation();
+    switchSource(sourceSelectEl.value);
+  });
+
+  refreshEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    fetchNews();
+  });
+
+  // ── Init: paint cache instantly, then fetch fresh ──────────────────────
+  var initialCache = loadCache(currentSource);
+  if (initialCache) {
+    setItems(initialCache.items);
+  }
+  fetchNews();
+
+  refreshTimer = setInterval(function () {
+    if (!dismissed) fetchNews();
+  }, REFRESH_INTERVAL);
+
+  widget.style.display = '';
+
+})();
+</script>

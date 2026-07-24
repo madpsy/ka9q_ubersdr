@@ -196,7 +196,7 @@ do_update() {
 menu() {
   while true; do
     printf '\n%s╔══════════════════════════════════════════════╗%s\n' "$C_CYAN" "$C_RST"
-    printf   '%s║  UberSDR Widget AI                            ║%s\n' "$C_CYAN" "$C_RST"
+    printf   '%s║  UberSDR Widget AI                           ║%s\n' "$C_CYAN" "$C_RST"
     printf   '%s╚══════════════════════════════════════════════╝%s\n' "$C_CYAN" "$C_RST"
     printf   '  Status: %b\n\n' "$(status_line)"
     printf '%s' "$C_DIM"

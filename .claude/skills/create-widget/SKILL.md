@@ -772,6 +772,25 @@ var grid = window.instanceDescription &&
 These are the key globals exposed by `app.js` that widgets can read or call.
 All are optional — guard with `typeof` or existence checks before use.
 
+> **Need more than this reference documents?** The host page's real source — the
+> globals, events, DOM structure, and how widgets are injected — lives in the
+> frontend, which this skill only summarises. When you need the ground truth
+> (e.g. the exact name/shape of a global, an event payload, or a `#id` in the
+> page), **shallow-clone the repo into your working directory** and read it:
+>
+> ```bash
+> git clone --depth 1 https://github.com/madpsy/ka9q_ubersdr
+> # then read the frontend under ka9q_ubersdr/static/:
+> #   static/app.js      — host globals, events, DSP fns, widget wiring (~700 KB; grep it, don't read whole)
+> #   static/index.html  — page shell + where widget fragments are injected
+> #   widgets/*.widget.html — the same reference widgets, if not already present
+> ```
+>
+> Your working dir is scratch (wiped next launch), so cloning there is fine.
+> Prefer `grep`/targeted reads over loading `app.js` whole — it's large. This is
+> for **reading/understanding only**; you still add and edit widgets through the
+> admin API, never by editing files in the clone.
+
 ### State (read-only)
 
 | Global | Type | Description |
@@ -1381,7 +1400,8 @@ All paths are under `$BASE`. Send `Content-Type: application/json` and the
 | Action | Method | Path | Body / query |
 |---|---|---|---|
 | List **my** widgets | `GET` | `/admin/widgets/mine` | — → `{"widgets":[{widget_id,name,description,is_public,version,…}]}` |
-| List **public** widgets | `GET` | `/admin/widgets/public` | optional `?callsign=` / `?instance_id=` |
+| List **public** (community) widgets | `GET` | `/admin/widgets/public` | optional `?callsign=` / `?instance_id=` |
+| List public **with usage** | `GET` | `/admin/widgets/public-with-instances` | adds `enabled_by[]` per widget |
 | **Create** | `POST` | `/admin/widgets/create` | `{name, description, html_content, is_public}` → `{widget_id,…}` |
 | **Update** | `POST` | `/admin/widgets/update` | `{widget_id, name, description, html_content, is_public}` |
 | **Delete** | `POST` | `/admin/widgets/delete` | `{widget_id}` |
@@ -1570,6 +1590,58 @@ minus that id). To disable a widget, just post the enabled list without it.
 
 Reload the SDR page and the widget renders. Enabling a **private** widget you
 own works exactly the same — no need to publish it first.
+
+### Community widgets — browse, inspect, enable, clone
+
+Community widgets are public widgets authored by **other** instance owners. They
+are **not** in `/admin/widgets/mine` (you don't own them). Two endpoints list
+them:
+
+| List | Endpoint | Notes |
+|---|---|---|
+| Community catalog | `GET /admin/widgets/public` | `{"widgets":[…]}`; filter with `?callsign=<call>` or `?instance_id=<uuid>` |
+| …with usage | `GET /admin/widgets/public-with-instances` | same, plus an `enabled_by` array per widget listing which instances have it enabled |
+
+Each listing entry carries `widget_id`, `name`, `description`, `version`,
+`is_public`, and the author's `callsign` / `instance_id` — enough to **answer
+questions** ("who wrote it?", "how popular is it?" via `enabled_by` length,
+"what does it do?" via `description`). For questions about the actual **code**
+(what it does technically, whether it's safe), fetch its source — the
+`versions`/`version` endpoints work for **any** `widget_id`, not just yours:
+
+```bash
+VER=$(curl -s "${hdr[@]}" "$BASE/admin/widgets/versions?widget_id=$CID" | jq -r '.versions[0].version')
+curl -s "${hdr[@]}" "$BASE/admin/widgets/version?widget_id=$CID&version=$VER" | jq -r '.html_content'
+```
+
+**Enable a community widget** — exactly the same `POST /admin/widgets/enabled`
+mechanism as your own (add its `widget_id` to the enabled union; the 10-widget
+cap and read-modify-write rules from *Enable it on this instance* apply):
+
+```bash
+CID="<community widget_id>"
+ENABLED=$(curl -s "${hdr[@]}" "$BASE/admin/widgets/enabled")
+NEW=$(jq -c --arg id "$CID" '[.enabled[].widget_id] + [$id] | unique' <<<"$ENABLED")
+curl -s -X POST "$BASE/admin/widgets/enabled" "${hdr[@]}" \
+     -H 'Content-Type: application/json' -d "{\"enabled\": $NEW}"
+```
+
+**Disable** it the same way — post the enabled list **without** its id.
+
+> **Enable links to the author's live copy; clone makes it yours.**
+> - *Enable* references the author's widget as-is: if they update or delete it,
+>   your instance follows (you get their changes, or it disappears). You can't
+>   edit it — it's not in `mine`.
+> - *Clone* copies its current source into a **new widget you own** so you can
+>   edit it and it won't change under you. There's no clone endpoint — clone =
+>   fetch the latest `html_content` (above) then `create` it (private, name it
+>   `"<original> (Clone)"`). After cloning it appears in `mine` and follows the
+>   normal edit/enable/publish rules.
+
+> **Trust:** community widgets are third-party HTML/JS that runs in the SDR page's
+> context. Before enabling one on a user's behalf — especially unprompted — note
+> that it's authored by someone else; if the user asks "is this safe?", fetch and
+> read the source rather than vouching for it blind.
 
 ### Make it public — or private again
 

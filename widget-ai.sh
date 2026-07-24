@@ -36,22 +36,29 @@ SKILL_DIR="$HOME/.claude/skills/create-widget"
 # acceptEdits) to restore normal prompting.
 PERM_MODE="${WIDGET_AI_PERMISSION_MODE:-bypassPermissions}"
 
+# Initial prompt that seeds the interactive session when no prompt is passed on
+# the command line. Override with WIDGET_AI_PROMPT, or pass your own as an arg.
+INIT_PROMPT="${WIDGET_AI_PROMPT:-Ensure the UberSDR widgets skill is loaded, then list some of the available community widgets (name + short description) I could enable or clone.}"
+
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 1. Prerequisites: claude, plus curl/tar/jq used by the skill's API recipes.
+# 1. Prerequisites: claude, plus curl/tar/jq (API recipes) and git (optional —
+#    lets the skill shallow-clone the repo to inspect the frontend).
 # ---------------------------------------------------------------------------
 command -v curl >/dev/null 2>&1 || die "curl is required but not installed."
 command -v tar  >/dev/null 2>&1 || die "tar is required but not installed."
 
-if ! command -v jq >/dev/null 2>&1; then
-  say "jq not found — attempting install (needed for the widget API workflow)…"
-  if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq && sudo apt-get install -y jq || true
-  fi
-  command -v jq >/dev/null 2>&1 || \
-    echo "  (warning: jq still missing — the API recipes in the skill won't run cleanly)"
+# jq is required by the API workflow; git is a nice-to-have for deeper inspection.
+MISSING=()
+command -v jq  >/dev/null 2>&1 || MISSING+=(jq)
+command -v git >/dev/null 2>&1 || MISSING+=(git)
+if [ "${#MISSING[@]}" -gt 0 ]; then
+  say "Installing missing tools: ${MISSING[*]}…"
+  command -v apt-get >/dev/null 2>&1 && { sudo apt-get update -qq && sudo apt-get install -y "${MISSING[@]}" || true; }
+  command -v jq  >/dev/null 2>&1 || echo "  (warning: jq still missing — the API recipes won't run cleanly)"
+  command -v git >/dev/null 2>&1 || echo "  (note: git missing — the skill just can't clone the repo for a deeper look)"
 fi
 
 # Claude Code — install on first use via the official native installer.
@@ -141,4 +148,9 @@ EOF
 
 # --permission-mode avoids a prompt on every piped curl/jq command (see PERM_MODE).
 # The work dir is wiped at the next launch's start, so no exit cleanup is needed.
-claude --permission-mode "$PERM_MODE" "$@" || true
+# With no CLI args, seed the session with INIT_PROMPT; otherwise pass args through.
+if [ "$#" -gt 0 ]; then
+  claude --permission-mode "$PERM_MODE" "$@" || true
+else
+  claude --permission-mode "$PERM_MODE" "$INIT_PROMPT" || true
+fi

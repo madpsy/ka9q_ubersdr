@@ -74,11 +74,12 @@
     text-transform: uppercase;
     white-space: nowrap;
     cursor: pointer;
-    /* Browsers size a <select>'s closed box by shrink-to-fit on the option
-       text BEFORE the uppercase transform is applied, so the visually
-       transformed (wider) glyphs then get clipped by the control's own
-       edge. A generous min-width gives it headroom instead of a tight fit. */
-    min-width: 88px;
+    /* <select> defaults to box-sizing:border-box in most browsers' UA
+       stylesheets, which would fold the 13px right-padding (reserved for
+       the arrow) into any width we set below — eating into the text area
+       and clipping the label. Pin content-box so the JS-measured width
+       below maps to the text area only, exactly matching the padding. */
+    box-sizing: content-box;
   }
   #hnews-source:hover, #hnews-source:focus { color: #fff; }
   #hnews-source:hover ~ #hnews-source-arrow,
@@ -325,6 +326,42 @@
     if (savedSource && SOURCES[savedSource]) currentSource = savedSource;
   } catch (e) { /* ignore */ }
   sourceSelectEl.value = currentSource;
+
+  // ── Size the select to the widest label, measured exactly as it renders ──
+  // Rather than guessing a width from character counts (fragile across
+  // fonts/weights/letter-spacing and the pre-transform sizing quirk noted
+  // below), render each label off-screen with the select's own computed
+  // font metrics and take the actual pixel width. The probe is appended to
+  // <body> directly (not inside the widget, which starts display:none) so
+  // offsetWidth is real rather than 0.
+  (function sizeSourceSelect() {
+    var probe = document.createElement('span');
+    probe.style.position   = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    var cs = window.getComputedStyle(sourceSelectEl);
+    probe.style.fontFamily    = cs.fontFamily;
+    probe.style.fontSize      = cs.fontSize;
+    probe.style.fontWeight    = cs.fontWeight;
+    probe.style.letterSpacing = cs.letterSpacing;
+    // Match text-transform so the measurement reflects the transformed
+    // (rendered) glyphs, not the raw label text — this is exactly the gap
+    // that trips up the browser's own native <select> box-sizing.
+    probe.style.textTransform = cs.textTransform;
+    document.body.appendChild(probe);
+
+    var maxWidth = 0;
+    Object.keys(SOURCES).forEach(function (key) {
+      probe.textContent = SOURCES[key].label;
+      maxWidth = Math.max(maxWidth, probe.offsetWidth);
+    });
+    document.body.removeChild(probe);
+
+    if (maxWidth > 0) {
+      // +2px rounding safety for subpixel/layout-engine variance.
+      sourceSelectEl.style.width = (maxWidth + 2) + 'px';
+    }
+  })();
 
   var dragState     = null;
   var wasDragged     = false;

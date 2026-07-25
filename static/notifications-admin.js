@@ -9,7 +9,7 @@
 // managed from its own panel on the Channels tab rather than the generic form.
 const SSE_CHANNEL_NAME = 'sse_stream';
 const SSE_STREAM_PATH  = '/api/notifications/stream';
-const SSE_DEFAULTS = { heartbeat: 30, max_clients: 10, max_per_minute: 60 };
+const SSE_DEFAULTS = { heartbeat: 30, max_clients: 10, max_per_minute: 60, dedup: 0 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — filter field definitions per event type
@@ -1102,6 +1102,7 @@ function sseStreamDraft() {
             heartbeat:      ch.sse_heartbeat_seconds || SSE_DEFAULTS.heartbeat,
             max_clients:    ch.sse_max_clients       || SSE_DEFAULTS.max_clients,
             max_per_minute: ch.max_per_minute != null ? ch.max_per_minute : SSE_DEFAULTS.max_per_minute,
+            dedup:          ch.rate_limit_minutes != null ? ch.rate_limit_minutes : SSE_DEFAULTS.dedup,
         };
     }
     return sseDraft;
@@ -1117,6 +1118,8 @@ function captureSSEDraft() {
     d.max_clients    = parseInt(el('sseMaxClients').value, 10) || SSE_DEFAULTS.max_clients;
     const cap        = parseInt(el('sseMaxPerMinute').value, 10);
     d.max_per_minute = isNaN(cap) ? 0 : cap;
+    const dedup      = parseInt(el('sseDedup').value, 10);
+    d.dedup          = isNaN(dedup) ? 0 : dedup;
 }
 
 // sseRulesUsing returns the names of rules that dispatch to the stream.
@@ -1224,6 +1227,11 @@ function renderSSEPanel() {
                     '<div class="form-hint">1&ndash;1000. Default 10.</div>' +
                 '</div>' +
                 '<div class="form-group" style="max-width:170px">' +
+                    '<label>Dedup Window (minutes)</label>' +
+                    '<input type="number" id="sseDedup" value="' + (d.dedup) + '" min="0" max="1440">' +
+                    '<div class="form-hint">Suppress duplicate (same rule+subject) alerts within this window. 0 = no limit.</div>' +
+                '</div>' +
+                '<div class="form-group" style="max-width:170px">' +
                     '<label>Max per Minute</label>' +
                     '<input type="number" id="sseMaxPerMinute" value="' + (d.max_per_minute) + '" min="0" max="10000">' +
                     '<div class="form-hint">Throughput cap. 0 = unlimited.</div>' +
@@ -1244,7 +1252,7 @@ function renderSSEPanel() {
     }
 
     // Keep the draft in step with what the operator types.
-    ['ssePassword', 'sseHeartbeat', 'sseMaxClients', 'sseMaxPerMinute'].forEach(function(id) {
+    ['ssePassword', 'sseHeartbeat', 'sseMaxClients', 'sseMaxPerMinute', 'sseDedup'].forEach(function(id) {
         const input = el(id);
         if (input) input.addEventListener('input', captureSSEDraft);
     });
@@ -1339,6 +1347,9 @@ async function saveSSEStream() {
     if (d.max_clients < 1 || d.max_clients > 1000) {
         showAlert(alertEl, 'error', 'Max subscribers must be between 1 and 1000.', false); return;
     }
+    if (d.dedup < 0 || d.dedup > 1440) {
+        showAlert(alertEl, 'error', 'Dedup window must be between 0 and 1440 minutes.', false); return;
+    }
 
     const existing = localConfig.channels[SSE_CHANNEL_NAME] || {};
     localConfig.channels[SSE_CHANNEL_NAME] = {
@@ -1347,7 +1358,7 @@ async function saveSSEStream() {
         sse_heartbeat_seconds: d.heartbeat,
         sse_max_clients:       d.max_clients,
         sse_connected_clients: existing.sse_connected_clients || 0,
-        rate_limit_minutes:    existing.rate_limit_minutes != null ? existing.rate_limit_minutes : 0,
+        rate_limit_minutes:    d.dedup,
         max_per_minute:        d.max_per_minute,
     };
 

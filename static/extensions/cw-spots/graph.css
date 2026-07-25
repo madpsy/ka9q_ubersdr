@@ -269,6 +269,59 @@ body {
     border-radius: 50%;
     box-sizing: border-box;
     box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+    position: relative; /* containing block for the new-spot ring */
+}
+
+/* A spot that has just arrived pulses a ring for a few seconds. Spots land
+   anywhere on the map, often well away from where you are looking, so the map
+   needs to announce the arrival itself — the chart has time on an axis to do
+   that job, the map does not. The ring takes its colour from the dot's inline
+   SNR border-colour, so the pulse still reads as that spot's signal strength. */
+.cw-map-new .cw-map-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 11px;
+    height: 11px;
+    margin: -5.5px 0 0 -5.5px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2px solid;
+    border-color: inherit; /* the inline SNR colour set on .cw-map-marker */
+    pointer-events: none;  /* the expanded ring must never eat neighbours' clicks */
+    animation: cw-map-new-ring 1.2s ease-out 5;
+}
+
+/* A halo on the dot as well, so a new spot that lands in a dense cluster still
+   shows even when its ring is overdrawn by its neighbours'. Kept as a
+   box-shadow, not a transform, so it cannot compound with the ring's scale. */
+.cw-map-new .cw-map-marker {
+    animation: cw-map-new-dot 1.2s ease-out 5;
+}
+
+@keyframes cw-map-new-ring {
+    0%   { transform: scale(1); opacity: 0.95; }
+    100% { transform: scale(3.6); opacity: 0; }
+}
+
+@keyframes cw-map-new-dot {
+    0%   { box-shadow: 0 0 4px 3px rgba(255, 255, 255, 0.95), 0 0 3px rgba(0, 0, 0, 0.8); }
+    100% { box-shadow: 0 0 3px rgba(0, 0, 0, 0.8); }
+}
+
+/* Reduced motion still needs the "this one is new" signal, just held still
+   rather than pulsed. */
+@media (prefers-reduced-motion: reduce) {
+    .cw-map-new .cw-map-marker,
+    .cw-map-new .cw-map-marker::after {
+        animation: none;
+    }
+
+    .cw-map-new .cw-map-marker::after {
+        transform: scale(2.4);
+        opacity: 0.8;
+    }
 }
 
 /* Callsign label beside each marker — the map's equivalent of the chart's

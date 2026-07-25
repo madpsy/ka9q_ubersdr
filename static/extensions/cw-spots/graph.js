@@ -14,6 +14,13 @@ function cwGraphEsc(value) {
     ));
 }
 
+// How long a freshly added marker keeps pulsing, and how recent a spot must be
+// to earn that pulse. The second guard matters because markers are also added in
+// bulk — first switch to the map, or a band/SNR filter that widens — and a whole
+// screen of pulsing dots would say nothing about what just arrived.
+const CW_MAP_FLASH_MS = 6000;
+const CW_MAP_FLASH_MAX_AGE_MS = 30000;
+
 function cwGraphIso2ToFlag(code) {
     if (!code || code.length !== 2) return '';
     const c = code.toUpperCase();
@@ -50,6 +57,7 @@ class CWSpotsGraph {
         this.mapEnabled = false; // Set from /api/description
         this.map = null; // Leaflet map, lazily created on first switch to map view
         this.mapMarkers = new Map(); // dx_call -> { marker, stamp }, diffed against the filtered set
+        this.mapPrimed = false; // False until the first updateMap has drawn the backlog
         this.description = null; // Cached /api/description payload (gating + receiver marker)
         this.rxMarker = null; // This instance's own location marker
 
@@ -730,10 +738,36 @@ class CWSpotsGraph {
         });
     }
 
+    // Pulse a marker that has just appeared. The class goes on the live DOM
+    // element rather than into markerHtml so it survives none of the icon diffing
+    // — flashUntil is what actually owns the state, and reapplyFlash restores the
+    // class whenever setIcon replaces the element mid-pulse.
+    flashMarker(entry) {
+        entry.flashUntil = Date.now() + CW_MAP_FLASH_MS;
+        entry.marker.setZIndexOffset(500); // ride above the settled dots while pulsing
+        this.reapplyFlash(entry);
+
+        clearTimeout(entry.flashTimer);
+        entry.flashTimer = setTimeout(() => {
+            entry.flashUntil = 0;
+            entry.flashTimer = null;
+            entry.marker.setZIndexOffset(0);
+            const el = entry.marker.getElement();
+            if (el) el.classList.remove('cw-map-new');
+        }, CW_MAP_FLASH_MS);
+    }
+
+    reapplyFlash(entry) {
+        if (!entry.flashUntil || entry.flashUntil <= Date.now()) return;
+        const el = entry.marker.getElement();
+        if (el) el.classList.add('cw-map-new');
+    }
+
     updateMap(spots) {
         if (!this.map) return;
 
         const wanted = this.latestPerStation(spots);
+        const now = Date.now();
 
         for (const [call, spot] of wanted) {
             // Spots without a resolved position can't be mapped at all.
@@ -757,6 +791,7 @@ class CWSpotsGraph {
                 if (html !== existing.html) {
                     existing.marker.setIcon(this.markerIcon(spot, approx));
                     existing.html = html;
+                    this.reapplyFlash(existing); // setIcon threw away the flashing element
                 }
 
                 // Tooltip/popup/tune target only change when the spot does. The
@@ -789,17 +824,28 @@ class CWSpotsGraph {
             marker.on('click', () => this.tuneToSpotClick(spot));
 
             marker.addTo(this.map);
-            this.mapMarkers.set(call, { marker, stamp, html: this.markerHtml(spot, approx) });
+            const entry = { marker, stamp, html: this.markerHtml(spot, approx), flashUntil: 0, flashTimer: null };
+            this.mapMarkers.set(call, entry);
+
+            // Only a genuinely fresh arrival pulses: the backlog drawn on the
+            // first pass, and any spot already stale by the time it lands here,
+            // stay quiet.
+            if (this.mapPrimed && now - stamp < CW_MAP_FLASH_MAX_AGE_MS) {
+                this.flashMarker(entry);
+            }
         }
 
         // Drop markers for stations that no longer pass the filters — aged out,
         // band/SNR filter changed, or the spot list was cleared.
         for (const [call, entry] of this.mapMarkers) {
             if (!wanted.has(call)) {
+                clearTimeout(entry.flashTimer);
                 this.map.removeLayer(entry.marker);
                 this.mapMarkers.delete(call);
             }
         }
+
+        this.mapPrimed = true;
     }
 
     // Marker tooltip/popup content. Deliberately mirrors the chart tooltip

@@ -3425,7 +3425,8 @@ function _startCWSpots() {
 // on every visit.
 
 const _NOTIF_PW_KEY   = 'bandActivity_notifPassword';
-const _NOTIF_MAX      = 4;      // items kept on screen (space under the clocks)
+const _NOTIF_MAX      = 3;      // alerts shown at once in the floating card
+const _NOTIF_TTL_MS   = 5 * 60 * 1000;   // an alert clears itself after 5 minutes
 const _NOTIF_URL      = '/api/notifications/stream';
 
 let _notifSSE       = null;
@@ -3451,22 +3452,35 @@ function _notifUrl(pw) {
     return _NOTIF_URL + '?password=' + encodeURIComponent(pw);
 }
 
-// _notifShow reveals or hides the whole panel. Hiding it changes the topbar
-// height, so the panel grid has to be re-laid out.
+// _notifShow reveals or hides the small indicator beside the clocks. The
+// indicator is all that lives in the topbar — the alerts float below it — so
+// nothing here can change the topbar's height or make it wrap.
 function _notifShow(visible) {
+    const badge = document.getElementById('notif-badge');
+    if (badge) badge.style.display = visible ? 'flex' : 'none';
+    if (!visible) {
+        _notifItems = [];
+        _notifHidePasswordBox();
+        _notifRender();
+    }
+}
+
+// The floating card is only on screen while it has something to say: an alert,
+// or a password box. Otherwise it would permanently cover the top-right panel.
+function _notifSyncCard() {
     const panel = document.getElementById('notif-panel');
+    const auth  = document.getElementById('notif-auth');
     if (!panel) return;
-    const want = visible ? 'flex' : 'none';
-    if (panel.style.display === want) return;
-    panel.style.display = want;
-    scheduleLayout();
+    const authOpen = auth && auth.style.display === 'flex';
+    panel.style.display = (authOpen || _notifItems.length > 0) ? 'flex' : 'none';
 }
 
 function _notifSetState(dotClass, text) {
     const dot = document.getElementById('notif-dot');
-    const st  = document.getElementById('notif-status');
+    const btn = document.getElementById('btn-notif-key');
     if (dot) dot.className = 'notif-dot ' + dotClass;
-    if (st)  st.textContent = text;
+    // The state has no room of its own now — it lives in the badge's tooltip.
+    if (btn) btn.title = 'Notification stream — ' + text;
 }
 
 // _notifAskPassword switches the panel into "enter a password" mode. msg is an
@@ -3488,8 +3502,8 @@ function _notifAskPassword(msg, prefill) {
         msgEl.style.display = 'none';
     }
     if (prefill !== undefined) input.value = prefill;
-    _notifSetState('wait', 'Notifications');
-    scheduleLayout();
+    _notifSetState('wait', 'password required');
+    _notifSyncCard();
 }
 
 function _notifHidePasswordBox() {
@@ -3497,6 +3511,7 @@ function _notifHidePasswordBox() {
     const msgEl = document.getElementById('notif-auth-msg');
     if (auth)  auth.style.display = 'none';
     if (msgEl) msgEl.style.display = 'none';
+    _notifSyncCard();
 }
 
 // _notifPlain turns a rendered notification into a single line of plain text.
@@ -3523,11 +3538,6 @@ function _notifRender() {
     const list = document.getElementById('notif-list');
     if (!list) return;
 
-    if (_notifItems.length === 0) {
-        list.innerHTML = '<div class="notif-empty">No alerts yet</div>';
-        return;
-    }
-
     list.innerHTML = _notifItems.map(function(item) {
         const title = [item.text, item.event ? 'event: ' + item.event : '', item.rule ? 'rule: ' + item.rule : '']
             .filter(Boolean).join('\n');
@@ -3536,6 +3546,19 @@ function _notifRender() {
                    '<span class="notif-text">' + _escHtml(item.text) + '</span>' +
                '</div>';
     }).join('');
+    _notifSyncCard();
+}
+
+// Alerts are transient: the card sits over the top-right band panel, so each
+// item clears itself once it has had time to be read.
+function _notifPrune() {
+    if (_notifItems.length === 0) return;
+    const cutoff = Date.now() - _NOTIF_TTL_MS;
+    const kept = _notifItems.filter(function(it) { return it.at > cutoff; });
+    if (kept.length !== _notifItems.length) {
+        _notifItems = kept;
+        _notifRender();
+    }
 }
 
 function _notifPush(payload) {
@@ -3548,13 +3571,13 @@ function _notifPush(payload) {
     const time = String(when.getUTCHours()).padStart(2, '0') + ':' +
                  String(when.getUTCMinutes()).padStart(2, '0');
 
-    _notifItems.unshift({ time: time, text: text, event: payload.event || '', rule: payload.rule || '' });
+    _notifItems.unshift({
+        time: time, text: text, at: Date.now(),
+        event: payload.event || '', rule: payload.rule || '',
+    });
     if (_notifItems.length > _NOTIF_MAX) _notifItems.length = _NOTIF_MAX;
 
     _notifRender();
-    // A new item can change the topbar height, which changes the space the
-    // 'fit' layout has to work with.
-    scheduleLayout();
 }
 
 function _notifScheduleRetry(ms) {
@@ -3604,13 +3627,13 @@ async function _notifConnect() {
         if (status === 429) {
             _notifShow(true);
             _notifHidePasswordBox();
-            _notifSetState('error', 'Too many attempts');
+            _notifSetState('error', 'too many attempts');
             _notifScheduleRetry(300000);
             return;
         }
         if (status !== 200) {
             _notifShow(true);
-            _notifSetState('error', 'Notifications offline');
+            _notifSetState('error', 'offline');
             _notifScheduleRetry(_notifBackoffMs);
             _notifBackoffMs = Math.min(_notifBackoffMs * 2, 60000);
             return;
@@ -3620,7 +3643,7 @@ async function _notifConnect() {
         _notifSetPassword(pw);
         _notifShow(true);
         _notifHidePasswordBox();
-        _notifSetState('live', 'Notifications');
+        _notifSetState('live', 'connected');
         _notifRender();
         _notifBackoffMs = 5000;
         _notifLastEvent = Date.now();
@@ -3630,13 +3653,13 @@ async function _notifConnect() {
 
         es.addEventListener('notification', function(e) {
             _notifLastEvent = Date.now();
-            _notifSetState('live', 'Notifications');
+            _notifSetState('live', 'connected');
             try { _notifPush(JSON.parse(e.data)); } catch (_) {}
         });
 
         es.addEventListener('heartbeat', function(e) {
             _notifLastEvent = Date.now();
-            _notifSetState('live', 'Notifications');
+            _notifSetState('live', 'connected');
             try {
                 const hb = JSON.parse(e.data);
                 if (hb && hb.interval > 0) _notifHbSec = hb.interval;
@@ -3649,13 +3672,13 @@ async function _notifConnect() {
         // that now returns 401.
         es.addEventListener('closed', function() {
             _notifDisconnect();
-            _notifSetState('wait', 'Reconnecting…');
+            _notifSetState('wait', 'reconnecting');
             _notifScheduleRetry(2000);
         });
 
         es.onerror = function() {
             _notifDisconnect();
-            _notifSetState('error', 'Reconnecting…');
+            _notifSetState('error', 'reconnecting');
             _notifScheduleRetry(_notifBackoffMs);
             _notifBackoffMs = Math.min(_notifBackoffMs * 2, 60000);
         };
@@ -3678,11 +3701,12 @@ function _notifDisconnect() {
 function _notifStartStaleWatch() {
     if (_notifStaleTid !== null) return;
     _notifStaleTid = setInterval(function() {
+        _notifPrune();
         if (!_notifSSE) return;
         const silentMs = Date.now() - _notifLastEvent;
         if (silentMs > _notifHbSec * 2500) {
             _notifDisconnect();
-            _notifSetState('error', 'Reconnecting…');
+            _notifSetState('error', 'reconnecting');
             _notifScheduleRetry(1000);
         }
     }, 10000);
@@ -3699,12 +3723,20 @@ function _startNotifications() {
             if (auth && auth.style.display === 'flex') {
                 // Toggling the box shut returns to whatever the stream was doing.
                 _notifHidePasswordBox();
-                scheduleLayout();
                 return;
             }
             _notifDisconnect();
             _notifAskPassword('', _notifGetPassword());
             if (input) input.focus();
+        });
+    }
+
+    // Clicking the alerts dismisses them — they are also cleared on a timer.
+    const listEl = document.getElementById('notif-list');
+    if (listEl) {
+        listEl.addEventListener('click', function() {
+            _notifItems = [];
+            _notifRender();
         });
     }
 

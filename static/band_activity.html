@@ -1345,9 +1345,6 @@ class BandPanel {
         this._traceKey  = '';
         this._lineGrad  = null;
         this._fillGrad  = null;
-        this._accentFaint = null;
-        this._accentDot   = null;
-        this._accentLabel = null;
 
         // ── Peak marker cache ────────────────────────────────────────────────
         this._peaks        = [];   // [{i, db}] in zoomed-slice coordinates
@@ -2122,12 +2119,6 @@ class BandPanel {
         }
         this._lineGrad = line;
         this._fillGrad = fill;
-
-        // Peak markers take the palette's hot end so they stay visible whatever
-        // the palette, rather than clashing with a fixed blue.
-        this._accentFaint = _traceColor(230, 0.18);
-        this._accentDot   = _traceColor(230, 0.75);
-        this._accentLabel = _traceColor(230, 0.55);
     }
 
     // Cached spectrum background: opaque panel fill + adaptive dB grid + labels.
@@ -2321,7 +2312,7 @@ class BandPanel {
                 const y  = h - ((db - dMin) / dRange) * h;
 
                 // Faint vertical drop-line
-                sCtx.strokeStyle = this._accentFaint;
+                sCtx.strokeStyle = 'rgba(255,255,255,0.18)';
                 sCtx.lineWidth   = 1;
                 sCtx.setLineDash([2, 3]);
                 sCtx.beginPath();
@@ -2331,7 +2322,7 @@ class BandPanel {
                 sCtx.setLineDash([]);
 
                 // Dot at peak tip
-                sCtx.fillStyle = this._accentDot;
+                sCtx.fillStyle = 'rgba(255,255,255,0.9)';
                 sCtx.beginPath();
                 sCtx.arc(x, y, 2.5, 0, Math.PI * 2);
                 sCtx.fill();
@@ -2348,7 +2339,7 @@ class BandPanel {
                 if (lx < 2)          lx = x + 4;
                 if (lx + tw > w - 2) lx = x - tw - 4;
                 const ly = Math.max(10, y - 4);
-                sCtx.fillStyle = this._accentLabel;
+                sCtx.fillStyle = '#ffffff';
                 sCtx.fillText(label, lx, ly);
             }
             sCtx.restore();

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +317,94 @@ func TestHandleNotificationStreamDelivers(t *testing.T) {
 	}
 	if heartbeat == "" {
 		t.Fatal("no heartbeat received on an idle connection")
+	}
+}
+
+// The admin UI has to be able to show a working endpoint URL after a page
+// reload, which means the password must survive the save/reload/save round trip
+// and be readable back through the reveal endpoint. The config endpoint itself
+// must keep reporting only whether a password is set.
+func TestSSEAdminConfigRoundTrip(t *testing.T) {
+	const password = "k7RqmVxpLdTn6Ywb"
+	file := filepath.Join(t.TempDir(), "notifications.yaml")
+
+	nm, err := NewNotificationManager(&NotificationsConfig{
+		Enabled:  true,
+		Channels: map[string]NotificationChannelConfig{},
+	})
+	if err != nil {
+		t.Fatalf("NewNotificationManager: %v", err)
+	}
+	defer notificationSSE.deactivate()
+
+	put := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/admin/notifications/config", strings.NewReader(body))
+		handleNotificationsConfig(rec, req, nm, nil, file)
+		return rec
+	}
+
+	// Enable the stream with a plaintext password, as the admin panel does.
+	rec := put(`{"enabled":true,"channels":{"` + sseChannelName + `":{"type":"sse",` +
+		`"sse_password":"` + password + `","sse_heartbeat_seconds":30,"sse_max_clients":10}},"rules":[]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	// A page reload reads the config: the password must be reported as set, and
+	// must never appear in that response.
+	rec = httptest.NewRecorder()
+	handleNotificationsConfig(rec, httptest.NewRequest(http.MethodGet, "/admin/notifications/config", nil), nm, nil, file)
+	if strings.Contains(rec.Body.String(), password) {
+		t.Error("the config endpoint leaked the stream password")
+	}
+	var cfgResp struct {
+		Channels map[string]struct {
+			SSEPasswordSet bool `json:"sse_password_set"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config response: %v", err)
+	}
+	if !cfgResp.Channels[sseChannelName].SSEPasswordSet {
+		t.Fatal("config response reports no password set — the admin UI would show an empty one")
+	}
+
+	// Saving again with the masked placeholder must keep the stored password.
+	rec = put(`{"enabled":true,"channels":{"` + sseChannelName + `":{"type":"sse",` +
+		`"sse_password":"********","sse_heartbeat_seconds":45,"sse_max_clients":10}},"rules":[]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("masked save: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	if got := nm.Config().Channels[sseChannelName].SSEPassword; got != password {
+		t.Fatalf("password after a masked save = %q, want %q", got, password)
+	}
+	if got := nm.Config().Channels[sseChannelName].SSEHeartbeatSeconds; got != 45 {
+		t.Errorf("heartbeat after a masked save = %d, want 45", got)
+	}
+
+	// The reveal endpoint hands the plaintext back for the endpoint URL.
+	rec = httptest.NewRecorder()
+	handleNotificationsSSEPasswordReveal(rec, httptest.NewRequest(http.MethodGet, "/admin/notifications/sse/password", nil), nm)
+	var reveal struct {
+		Configured bool   `json:"configured"`
+		Password   string `json:"password"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &reveal); err != nil {
+		t.Fatalf("decode reveal response: %v", err)
+	}
+	if !reveal.Configured || reveal.Password != password {
+		t.Fatalf("reveal returned configured=%v password=%q, want true/%q", reveal.Configured, reveal.Password, password)
+	}
+
+	// With the stream removed there is nothing to reveal.
+	if rec = put(`{"enabled":true,"channels":{},"rules":[]}`); rec.Code != http.StatusOK {
+		t.Fatalf("remove: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handleNotificationsSSEPasswordReveal(rec, httptest.NewRequest(http.MethodGet, "/admin/notifications/sse/password", nil), nm)
+	if strings.Contains(rec.Body.String(), password) {
+		t.Errorf("reveal still returns a password after the stream was removed: %s", rec.Body.String())
 	}
 }
 

@@ -337,6 +337,51 @@ func handleNotificationsSSEPassword(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleNotificationsSSEPasswordReveal returns the public SSE stream's current
+// password in plaintext to an authenticated admin.
+//
+// GET /admin/notifications/sse/password
+//
+// Unlike the other channel secrets this one exists to be handed out — the
+// operator has to give it to every subscriber — so the admin UI needs to be able
+// to show a ready-to-use endpoint URL after a page reload. It is deliberately
+// kept out of the main config endpoint: that response is also what the admin UI
+// writes to a downloaded config backup, where a plaintext password has no
+// business being.
+func handleNotificationsSSEPasswordReveal(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+	// Never cached or stored by an intermediary — this is a credential.
+	w.Header().Set("Cache-Control", "no-store")
+
+	if nm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "notification manager not initialised"}) //nolint:errcheck
+		return
+	}
+
+	cfg := nm.Config()
+	if cfg == nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"configured": false}) //nolint:errcheck
+		return
+	}
+
+	ch, ok := cfg.Channels[sseChannelName]
+	if !ok || ch.Type != "sse" || ch.SSEPassword == "" {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"configured": false}) //nolint:errcheck
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"configured":   true,
+		"password":     ch.SSEPassword,
+		"channel_name": sseChannelName,
+		"path":         sseStreamPath,
+	})
+}
+
 // handleNotificationsConfig handles GET and PUT for the notification config.
 //
 // GET /admin/notifications/config

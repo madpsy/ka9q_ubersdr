@@ -2917,6 +2917,9 @@ func main() {
 	http.HandleFunc("/admin/notifications/sse/generate-password", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsSSEPassword(w, r)
 	}))
+	http.HandleFunc("/admin/notifications/sse/password", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsSSEPasswordReveal(w, r, notifManager)
+	}))
 	http.HandleFunc("/admin/notifications/telegram-updates", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleTelegramGetUpdates(w, r)
 	}))

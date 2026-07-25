@@ -68,10 +68,18 @@ body {
 
 #status-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;  /* the right-hand column grows downwards */
     gap: 6px;
     flex: 1;          /* fill remaining space on the first topbar row */
     min-width: 0;
+}
+
+#status-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 1.05em;   /* stay on the clock's line as the column below grows */
 }
 
 #status-text {
@@ -80,8 +88,24 @@ body {
     white-space: nowrap;
 }
 
+/* Right-hand column of the first topbar row: clocks, with the notification
+   feed stacked underneath them in what would otherwise be empty space. */
+#topright {
+    margin-left: auto;   /* push the whole column to the far right */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    min-width: 0;
+}
+
+#clock-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
 #utc-clock {
-    margin-left: auto;   /* push to far right of the status row */
     font-size: 1.05em;
     font-weight: 700;
     line-height: 1;      /* keep layout height the same as surrounding text */
@@ -99,6 +123,127 @@ body {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     letter-spacing: 0.03em;
+}
+
+/* ── Notification feed (under the clocks) ── */
+#notif-panel {
+    display: none;            /* revealed only when the stream is reachable */
+    flex-direction: column;
+    gap: 3px;
+    width: 340px;
+    max-width: 46vw;
+}
+
+#notif-head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    font-size: 0.72em;
+    color: #777;
+}
+#notif-head .notif-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #444;
+    flex-shrink: 0;
+    transition: background 0.4s;
+}
+#notif-head .notif-dot.live  { background: #4caf50; box-shadow: 0 0 5px #4caf5088; }
+#notif-head .notif-dot.error { background: #f44336; }
+#notif-head .notif-dot.wait  { background: #ff9800; }
+
+#btn-notif-key {
+    background: none;
+    border: 1px solid #2a2a36;
+    border-radius: 4px;
+    color: #888;
+    font-size: 0.9em;
+    line-height: 1;
+    padding: 2px 5px;
+    cursor: pointer;
+}
+#btn-notif-key:hover { border-color: #555; color: #ccc; }
+
+#notif-auth {
+    display: none;            /* shown when a password is needed */
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+}
+#notif-auth input {
+    background: #0d0d14;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ddd;
+    padding: 3px 6px;
+    font-size: 0.75em;
+    width: 160px;
+    min-width: 0;
+}
+#notif-auth input:focus { outline: none; border-color: #7ec8e3; }
+#notif-auth button {
+    padding: 3px 9px;
+    border-radius: 4px;
+    border: 1px solid #333;
+    background: #1a1a24;
+    color: #aaa;
+    font-size: 0.72em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#notif-auth button:hover { border-color: #555; color: #ddd; }
+
+#notif-auth-msg {
+    display: none;
+    font-size: 0.7em;
+    color: #e57373;
+    text-align: right;
+}
+
+#notif-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.notif-item {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    background: #15151e;
+    border: 1px solid #262633;
+    border-left: 2px solid #7ec8e3;
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 0.74em;
+    line-height: 1.35;
+    color: #c8c8d0;
+    animation: notifIn 0.35s ease-out;
+}
+.notif-item .notif-time {
+    color: #666;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.notif-item .notif-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;   /* long alerts stay two lines; full text in the tooltip */
+    line-clamp: 2;
+    overflow: hidden;
+    word-break: break-word;
+}
+.notif-empty {
+    font-size: 0.71em;
+    color: #555;
+    text-align: right;
+}
+
+@keyframes notifIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: none; }
 }
 
 /* band selector pills — always on their own row when the topbar wraps */
@@ -599,6 +744,8 @@ body {
 /* ── CW spots grid ── */
 @media (max-width: 767px) {
     #cond-cw-spots { display: none !important; }
+    /* 46vw is unreadably narrow on a phone, where the status row is its own line. */
+    #notif-panel { width: 100%; max-width: none; }
 }
 
 #conditions-bar .cond-cw-spots {
@@ -887,10 +1034,32 @@ body {
         <span id="receiver-location"></span>
     </div>
     <div id="status-row">
-        <div id="status-dot" class="wait"></div>
-        <span id="status-text">Connecting…</span>
-        <span id="utc-clock"></span>
-        <span id="local-clock" style="display:none"></span>
+        <div id="status-left">
+            <div id="status-dot" class="wait"></div>
+            <span id="status-text">Connecting…</span>
+        </div>
+        <div id="topright">
+            <div id="clock-row">
+                <span id="utc-clock"></span>
+                <span id="local-clock" style="display:none"></span>
+            </div>
+            <!-- Notification feed — stays hidden unless the operator has enabled
+                 the public notification stream (the endpoint answers 503 if not). -->
+            <div id="notif-panel">
+                <div id="notif-head">
+                    <span id="notif-dot" class="notif-dot wait"></span>
+                    <span id="notif-status">Notifications</span>
+                    <button id="btn-notif-key" type="button" title="Change the notification password">&#x1F511;</button>
+                </div>
+                <div id="notif-auth">
+                    <input type="password" id="notif-password" placeholder="Notification password"
+                           autocomplete="off" spellcheck="false">
+                    <button id="btn-notif-connect" type="button">Connect</button>
+                </div>
+                <div id="notif-auth-msg"></div>
+                <div id="notif-list"></div>
+            </div>
+        </div>
     </div>
     <div id="band-pills"></div>
     <button id="btn-all">All</button>
@@ -3005,6 +3174,10 @@ function rebuildPanels() {
     // Remove panels for deselected bands
     for (const name of Object.keys(panels)) {
         if (!activeBands.has(name)) {
+            // Audio previewing this band goes with it: the panel carrying the
+            // tuned cursor and the ■ Stop button is about to disappear, so
+            // leaving it playing would strand audio with no way to stop it.
+            if (audioBandName === name) stopAudio();
             panels[name].destroy();
             delete panels[name];
         }
@@ -3262,6 +3435,324 @@ function _startCWSpots() {
     }
 
     connect();
+}
+
+// ── Notification stream ───────────────────────────────────────────────────────
+// Subscribes to /api/notifications/stream — the public, password-protected feed
+// enabled under Notifications → Channels in the admin UI. The endpoint answers
+// 503 when the operator has not enabled it, so the panel stays completely hidden
+// on receivers that don't use it, and 401 when the password is missing or wrong,
+// which is what brings up the password box.
+//
+// The password is kept in localStorage. It is a read-only feed password and this
+// page has nowhere else to keep it, so a subscriber does not have to retype it
+// on every visit.
+
+const _NOTIF_PW_KEY   = 'bandActivity_notifPassword';
+const _NOTIF_MAX      = 4;      // items kept on screen (space under the clocks)
+const _NOTIF_URL      = '/api/notifications/stream';
+
+let _notifSSE       = null;
+let _notifItems     = [];
+let _notifBackoffMs = 5000;     // network-error backoff: 5 s → 60 s
+let _notifRetryTid  = null;
+let _notifLastEvent = 0;        // Date.now() of the last notification/heartbeat
+let _notifHbSec     = 30;       // heartbeat interval reported by the server
+let _notifStaleTid  = null;
+let _notifConnecting = false;
+
+function _notifGetPassword() {
+    try { return localStorage.getItem(_NOTIF_PW_KEY) || ''; } catch (_) { return ''; }
+}
+function _notifSetPassword(pw) {
+    try { localStorage.setItem(_NOTIF_PW_KEY, pw); } catch (_) {}
+}
+function _notifClearPassword() {
+    try { localStorage.removeItem(_NOTIF_PW_KEY); } catch (_) {}
+}
+
+function _notifUrl(pw) {
+    return _NOTIF_URL + '?password=' + encodeURIComponent(pw);
+}
+
+// _notifShow reveals or hides the whole panel. Hiding it changes the topbar
+// height, so the panel grid has to be re-laid out.
+function _notifShow(visible) {
+    const panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    const want = visible ? 'flex' : 'none';
+    if (panel.style.display === want) return;
+    panel.style.display = want;
+    scheduleLayout();
+}
+
+function _notifSetState(dotClass, text) {
+    const dot = document.getElementById('notif-dot');
+    const st  = document.getElementById('notif-status');
+    if (dot) dot.className = 'notif-dot ' + dotClass;
+    if (st)  st.textContent = text;
+}
+
+// _notifAskPassword switches the panel into "enter a password" mode. msg is an
+// optional reason shown above the box (e.g. a rejected password).
+function _notifAskPassword(msg, prefill) {
+    const auth = document.getElementById('notif-auth');
+    const list = document.getElementById('notif-list');
+    const msgEl = document.getElementById('notif-auth-msg');
+    const input = document.getElementById('notif-password');
+    if (!auth || !list || !msgEl || !input) return;
+
+    _notifShow(true);
+    auth.style.display = 'flex';
+    list.innerHTML = '';
+    if (msg) {
+        msgEl.textContent = msg;
+        msgEl.style.display = 'block';
+    } else {
+        msgEl.style.display = 'none';
+    }
+    if (prefill !== undefined) input.value = prefill;
+    _notifSetState('wait', 'Notifications');
+    scheduleLayout();
+}
+
+function _notifHidePasswordBox() {
+    const auth  = document.getElementById('notif-auth');
+    const msgEl = document.getElementById('notif-auth-msg');
+    if (auth)  auth.style.display = 'none';
+    if (msgEl) msgEl.style.display = 'none';
+}
+
+// _notifPlain turns a rendered notification into a single line of plain text.
+// Rule templates are often written with HTML for Telegram, so tags are stripped
+// rather than escaped — otherwise every alert would read "<b>DX</b> spotted".
+function _notifPlain(s) {
+    return String(s == null ? '' : s)
+        .replace(/<br\s*\/?>/gi, ' · ')
+        .replace(/<\/(p|div|li|h\d)>/gi, ' · ')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#0?39;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/\s*[\r\n]+\s*/g, ' · ')
+        .replace(/\s+/g, ' ')
+        .replace(/(\s*·\s*)+$/, '')
+        .trim();
+}
+
+function _notifRender() {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
+
+    if (_notifItems.length === 0) {
+        list.innerHTML = '<div class="notif-empty">No alerts yet</div>';
+        return;
+    }
+
+    list.innerHTML = _notifItems.map(function(item) {
+        const title = [item.text, item.event ? 'event: ' + item.event : '', item.rule ? 'rule: ' + item.rule : '']
+            .filter(Boolean).join('\n');
+        return '<div class="notif-item" title="' + _escHtml(title) + '">' +
+                   '<span class="notif-time">' + _escHtml(item.time) + '</span>' +
+                   '<span class="notif-text">' + _escHtml(item.text) + '</span>' +
+               '</div>';
+    }).join('');
+}
+
+function _notifPush(payload) {
+    const text = _notifPlain(payload.message);
+    if (!text) return;
+
+    // The server timestamp is authoritative; fall back to now if it is missing.
+    let when = new Date(payload.timestamp || Date.now());
+    if (isNaN(when.getTime())) when = new Date();
+    const time = String(when.getUTCHours()).padStart(2, '0') + ':' +
+                 String(when.getUTCMinutes()).padStart(2, '0');
+
+    _notifItems.unshift({ time: time, text: text, event: payload.event || '', rule: payload.rule || '' });
+    if (_notifItems.length > _NOTIF_MAX) _notifItems.length = _NOTIF_MAX;
+
+    _notifRender();
+    // A new item can change the topbar height, which changes the space the
+    // 'fit' layout has to work with.
+    scheduleLayout();
+}
+
+function _notifScheduleRetry(ms) {
+    if (_notifRetryTid !== null) clearTimeout(_notifRetryTid);
+    _notifRetryTid = setTimeout(function() {
+        _notifRetryTid = null;
+        _notifConnect();
+    }, ms);
+}
+
+// _notifProbe asks the endpoint for its status without committing to a stream.
+// EventSource never exposes the HTTP status, so this is the only way to tell
+// "not enabled" (503) from "wrong password" (401) from a network failure.
+async function _notifProbe(pw) {
+    const ctrl = new AbortController();
+    try {
+        const resp = await fetch(_notifUrl(pw), { signal: ctrl.signal, cache: 'no-store' });
+        ctrl.abort();   // headers are all we need; don't consume the stream
+        return resp.status;
+    } catch (_) {
+        ctrl.abort();
+        return 0;       // network error / offline
+    }
+}
+
+async function _notifConnect() {
+    if (_notifSSE || _notifConnecting) return;
+    _notifConnecting = true;
+    try {
+        const pw = _notifGetPassword();
+        const status = await _notifProbe(pw);
+
+        if (status === 503) {
+            // Stream not enabled on this receiver — stay out of the way, but keep
+            // looking in case the operator turns it on while the page is open.
+            _notifShow(false);
+            _notifScheduleRetry(120000);
+            return;
+        }
+        if (status === 401) {
+            // Never retry automatically: each attempt counts against the server's
+            // failed-authentication budget. Wait for the operator to type one.
+            _notifClearPassword();
+            _notifAskPassword(pw ? 'Password rejected — try again.' : '', pw);
+            return;
+        }
+        if (status === 429) {
+            _notifShow(true);
+            _notifHidePasswordBox();
+            _notifSetState('error', 'Too many attempts');
+            _notifScheduleRetry(300000);
+            return;
+        }
+        if (status !== 200) {
+            _notifShow(true);
+            _notifSetState('error', 'Notifications offline');
+            _notifScheduleRetry(_notifBackoffMs);
+            _notifBackoffMs = Math.min(_notifBackoffMs * 2, 60000);
+            return;
+        }
+
+        // Authorised — open the stream.
+        _notifSetPassword(pw);
+        _notifShow(true);
+        _notifHidePasswordBox();
+        _notifSetState('live', 'Notifications');
+        _notifRender();
+        _notifBackoffMs = 5000;
+        _notifLastEvent = Date.now();
+
+        const es = new EventSource(_notifUrl(pw));
+        _notifSSE = es;
+
+        es.addEventListener('notification', function(e) {
+            _notifLastEvent = Date.now();
+            _notifSetState('live', 'Notifications');
+            try { _notifPush(JSON.parse(e.data)); } catch (_) {}
+        });
+
+        es.addEventListener('heartbeat', function(e) {
+            _notifLastEvent = Date.now();
+            _notifSetState('live', 'Notifications');
+            try {
+                const hb = JSON.parse(e.data);
+                if (hb && hb.interval > 0) _notifHbSec = hb.interval;
+            } catch (_) {}
+        });
+
+        // The server closes the stream when the password is rotated or the
+        // channel is disabled. Reconnect through the probe so the new state is
+        // classified properly instead of EventSource silently retrying a URL
+        // that now returns 401.
+        es.addEventListener('closed', function() {
+            _notifDisconnect();
+            _notifSetState('wait', 'Reconnecting…');
+            _notifScheduleRetry(2000);
+        });
+
+        es.onerror = function() {
+            _notifDisconnect();
+            _notifSetState('error', 'Reconnecting…');
+            _notifScheduleRetry(_notifBackoffMs);
+            _notifBackoffMs = Math.min(_notifBackoffMs * 2, 60000);
+        };
+    } finally {
+        _notifConnecting = false;
+    }
+}
+
+function _notifDisconnect() {
+    if (_notifSSE) {
+        _notifSSE.onerror = null;
+        _notifSSE.close();
+        _notifSSE = null;
+    }
+}
+
+// A dead-but-open connection produces no error event, which is exactly what the
+// server's heartbeat exists to expose: no traffic for 2.5 heartbeats means the
+// stream is gone even though the socket still looks fine.
+function _notifStartStaleWatch() {
+    if (_notifStaleTid !== null) return;
+    _notifStaleTid = setInterval(function() {
+        if (!_notifSSE) return;
+        const silentMs = Date.now() - _notifLastEvent;
+        if (silentMs > _notifHbSec * 2500) {
+            _notifDisconnect();
+            _notifSetState('error', 'Reconnecting…');
+            _notifScheduleRetry(1000);
+        }
+    }, 10000);
+}
+
+function _startNotifications() {
+    const keyBtn     = document.getElementById('btn-notif-key');
+    const connectBtn = document.getElementById('btn-notif-connect');
+    const input      = document.getElementById('notif-password');
+
+    if (keyBtn) {
+        keyBtn.addEventListener('click', function() {
+            const auth = document.getElementById('notif-auth');
+            if (auth && auth.style.display === 'flex') {
+                // Toggling the box shut returns to whatever the stream was doing.
+                _notifHidePasswordBox();
+                scheduleLayout();
+                return;
+            }
+            _notifDisconnect();
+            _notifAskPassword('', _notifGetPassword());
+            if (input) input.focus();
+        });
+    }
+
+    function submit() {
+        const pw = (input ? input.value : '').trim();
+        if (!pw) return;
+        _notifSetPassword(pw);
+        _notifHidePasswordBox();
+        _notifSetState('wait', 'Connecting…');
+        _notifBackoffMs = 5000;
+        if (_notifRetryTid !== null) { clearTimeout(_notifRetryTid); _notifRetryTid = null; }
+        _notifDisconnect();
+        _notifConnect();
+    }
+
+    if (connectBtn) connectBtn.addEventListener('click', submit);
+    if (input) {
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        });
+    }
+
+    _notifStartStaleWatch();
+    _notifConnect();
 }
 
 // Hardware status flags — set from /api/description in init()
@@ -4274,6 +4765,8 @@ async function init() {
     _startVoiceTickerTimer();
     // Start CW spots SSE stream (if CW skimmer is enabled)
     _startCWSpots();
+    // Start the notification stream (hidden unless the operator enabled it)
+    _startNotifications();
 }
 
 init();

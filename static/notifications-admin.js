@@ -625,6 +625,15 @@ async function loadConfig() {
         }
         localConfig.channels = merged;
 
+        // The SSE stream password is the one secret the operator has to hand out
+        // rather than keep, so the panel needs the real value to show a usable
+        // endpoint URL after a reload — and a downloaded config stays complete
+        // enough to restore. It is fetched from its own endpoint rather than the
+        // config response, which stays strictly redacted for every other secret.
+        if (localConfig.channels[SSE_CHANNEL_NAME]) {
+            await revealSSEPassword();
+        }
+
         const serverRules = data.rules || [];
         localConfig.rules = serverRules.map(function(sr) {
             return {
@@ -1042,6 +1051,24 @@ function detectWebhookPreset(url) {
 
 var sseDraft = null;
 
+// revealSSEPassword replaces the masked placeholder in the loaded config with
+// the stream's real password. Failing is not fatal — the panel falls back to the
+// "leave blank to keep the current password" behaviour.
+async function revealSSEPassword() {
+    try {
+        const resp = await apiFetch('/admin/notifications/sse/password');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const ch = localConfig.channels[SSE_CHANNEL_NAME];
+        if (ch && data && data.configured && data.password) {
+            ch.sse_password = data.password;
+            sseDraft = null;   // reseed the panel from the revealed password
+        }
+    } catch (err) {
+        if (err.message === 'Redirecting to login') throw err;
+    }
+}
+
 // sseStreamDraft returns the working copy of the stream settings, seeded from
 // the saved channel when one exists.
 function sseStreamDraft() {
@@ -1085,14 +1112,16 @@ function renderSSEPanel() {
     const saved   = localConfig.channels[SSE_CHANNEL_NAME];
     const enabled = !!saved;
     const d       = sseStreamDraft();
-    // The server never returns the password, so a full copy-and-paste URL is
-    // only possible while we still hold the plaintext (just generated or typed).
+    // Normally the plaintext is available — either just typed/generated, or
+    // fetched by revealSSEPassword on load — and the endpoint URL is complete.
+    // If that fetch failed we only know that *a* password is set, and the URL
+    // falls back to a placeholder.
     const havePlaintext = !!d.password;
-    // A stored password is never sent back to this page, so once the stream has
-    // been saved the field is left blank and blank means "keep the current one".
     const hasStoredPassword = !!(saved && saved.sse_password);
-    const shownPassword = havePlaintext ? d.password : '<password>';
-    const endpointURL   = window.location.origin + SSE_STREAM_PATH + '?password=' + encodeURIComponent(shownPassword);
+    // Only a real password gets percent-encoded — encoding the placeholder would
+    // render it as the unreadable %3Cpassword%3E.
+    const endpointURL = window.location.origin + SSE_STREAM_PATH + '?password=' +
+        (havePlaintext ? encodeURIComponent(d.password) : '<password>');
     const subscribers   = (saved && saved.sse_connected_clients) || 0;
     const ruleCount     = sseRulesUsing().length;
 
@@ -1124,7 +1153,7 @@ function renderSSEPanel() {
                       '<div class="form-hint">' +
                           (havePlaintext
                               ? 'Ready to paste into a browser, <code>curl -N</code>, or an <code>EventSource</code>.'
-                              : 'Replace <code>&lt;password&gt;</code> with the password &mdash; it is stored on the server and never sent back to this page.') +
+                              : 'Replace <code>&lt;password&gt;</code> with the password &mdash; it could not be read back from the server just now.') +
                           ' Prefer <code>Authorization: Bearer &lt;password&gt;</code> for scripts: a query string ends up in access logs and browser history.' +
                       '</div>' +
                   '</div>'
@@ -1143,7 +1172,7 @@ function renderSSEPanel() {
                     'At least 12 alphanumeric characters, mixing letters and digits. Only letters, digits and ' +
                     '<code>- . _ ~</code> are allowed, so the password can be passed in a URL unescaped. ' +
                     (hasStoredPassword && !havePlaintext
-                        ? 'The current password is stored on the server and is not shown here &mdash; type or generate a new one to replace it.'
+                        ? 'The current password could not be read back just now &mdash; leave this blank to keep it, or set a new one.'
                         : 'Changing the password disconnects existing subscribers.') +
                 '</div>' +
             '</div>' +

@@ -380,14 +380,19 @@ func (s *notificationSSEStream) broadcast(message, eventType, rule string) int {
 // heartbeatFrame builds the heartbeat event for a client.
 func (s *notificationSSEStream) heartbeatFrame(c *notificationSSEClient) string {
 	payload := struct {
-		Channel     string  `json:"channel"`
-		Timestamp   string  `json:"timestamp"`
+		Channel   string `json:"channel"`
+		Timestamp string `json:"timestamp"`
+		// Interval is the heartbeat period in seconds, so a subscriber can tell
+		// how long silence has to last before the connection is really dead
+		// without hard-coding this server's configuration.
+		Interval    int     `json:"interval"`
 		LastMessage *string `json:"last_message"`
 		Dropped     uint64  `json:"dropped"`
 		Sent        uint64  `json:"sent"`
 	}{
 		Channel:   sseChannelName,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Interval:  int(s.heartbeatInterval() / time.Second),
 		Dropped:   c.dropped.Load(),
 		Sent:      s.totalSent.Load(),
 	}

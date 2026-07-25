@@ -1182,6 +1182,18 @@ function renderSSEPanel() {
                   '</div>'
                 : '') +
 
+            // A ready-made subscriber ships with the server, so point at it
+            // rather than leaving the endpoint URL as the only way in.
+            '<div class="alert alert-info" style="align-items:flex-start">' +
+                '<span>&#x1F514;</span>' +
+                '<span>' +
+                    'The <a href="band_activity.html" target="_blank" rel="noopener"><strong>Band Activity</strong></a> ' +
+                    'page can subscribe to this stream: open it, click the <strong>&#x1F514; bell icon</strong> in the top ' +
+                    'right next to the clock, and enter the password. Alerts then appear there as toasts. ' +
+                    'The password is remembered in that browser, so it only has to be entered once per device.' +
+                '</span>' +
+            '</div>' +
+
             '<div class="form-group">' +
                 '<label>Password ' + (enabled ? '' : '*') + '</label>' +
                 '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +

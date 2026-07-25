@@ -418,7 +418,8 @@ function renderFlowDiagram() {
         if (ei !== undefined) {
             const evCY = eventYs[ei] + eventH / 2;
             const evX2 = COL_X.event + NODE_W.event;
-            parts.push('<g class="flow-edge flow-edge-rule-' + ri + '" data-rule="' + ri + '">');
+            parts.push('<g class="flow-edge flow-edge-rule-' + ri + '" data-rule="' + ri +
+                       '" data-event="' + svgEsc(rule.event) + '">');
             parts.push(svgPath(
                 bezierPath(evX2, evCY, ruleX1, ruleCY),
                 edgeColor, edgeW, edgeOp,
@@ -433,7 +434,8 @@ function renderFlowDiagram() {
             if (ci === undefined) return;
             const chCY = channelYs[ci] + channelHeights[ci] / 2;
             const chX1 = COL_X.channel;
-            parts.push('<g class="flow-edge flow-edge-rule-' + ri + '" data-rule="' + ri + '">');
+            parts.push('<g class="flow-edge flow-edge-rule-' + ri + '" data-rule="' + ri +
+                       '" data-channel="' + svgEsc(chName) + '">');
             parts.push(svgPath(
                 bezierPath(ruleX2, ruleCY, chX1, chCY),
                 edgeColor, edgeW, edgeOp,
@@ -596,33 +598,78 @@ function renderFlowDiagram() {
     const svgEl = container.querySelector('#flowSvg');
     if (!svgEl) return;
 
-    // Rule node hover: highlight connected edges + event + channel nodes
+    // ── Hover highlighting ────────────────────────────────────────────────────
+    // Hovering any node lights up the whole path it takes part in: from a rule
+    // both ways, from an event downstream, from a channel upstream.
+
+    function clearHighlight() {
+        svgEl.querySelectorAll('.flow-highlighted').forEach(function(e) {
+            e.classList.remove('flow-highlighted');
+        });
+    }
+    function mark(el) { if (el) el.classList.add('flow-highlighted'); }
+
+    function ruleNodeEl(ri)      { return svgEl.querySelector('.flow-rule-node[data-rule="' + ri + '"]'); }
+    function eventNodeEl(type)   { return svgEl.querySelector('.flow-event-node[data-event="' + CSS.escape(type) + '"]'); }
+    function channelNodeEl(name) { return svgEl.querySelector('.flow-channel-node[data-channel="' + CSS.escape(name) + '"]'); }
+    function ruleEdges(ri)       { return svgEl.querySelectorAll('.flow-edge-rule-' + ri); }
+
+    function highlightRule(ri) {
+        const rule = ruleNodes[parseInt(ri, 10)];
+        if (!rule) return;
+        mark(ruleNodeEl(ri));
+        ruleEdges(ri).forEach(mark);
+        mark(eventNodeEl(rule.event));
+        (rule.channels || []).forEach(function(chName) { mark(channelNodeEl(chName)); });
+    }
+
+    // Everything this event feeds: its rules, and every channel they reach.
+    function highlightEvent(type) {
+        mark(eventNodeEl(type));
+        ruleNodes.forEach(function(rule, ri) {
+            if (rule.event !== type) return;
+            mark(ruleNodeEl(ri));
+            ruleEdges(ri).forEach(mark);
+            (rule.channels || []).forEach(function(chName) { mark(channelNodeEl(chName)); });
+        });
+    }
+
+    // Everything that feeds this channel: the rules sending to it and their
+    // events. Only the edge into *this* channel is lit — lighting a rule's other
+    // outgoing edges would suggest a connection that isn't there.
+    function highlightChannel(name) {
+        mark(channelNodeEl(name));
+        ruleNodes.forEach(function(rule, ri) {
+            if ((rule.channels || []).indexOf(name) < 0) return;
+            mark(ruleNodeEl(ri));
+            mark(eventNodeEl(rule.event));
+            ruleEdges(ri).forEach(function(edge) {
+                const edgeChannel = edge.getAttribute('data-channel');
+                // No data-channel = the event→rule edge, which is always part of
+                // the path; otherwise only the edge to the hovered channel.
+                if (edgeChannel === null || edgeChannel === name) mark(edge);
+            });
+        });
+    }
+
+    function wireHover(el, highlight) {
+        el.addEventListener('mouseenter', function() { clearHighlight(); highlight(); });
+        el.addEventListener('mouseleave', clearHighlight);
+    }
+
+    svgEl.querySelectorAll('.flow-event-node').forEach(function(evEl) {
+        const type = evEl.getAttribute('data-event');
+        wireHover(evEl, function() { highlightEvent(type); });
+    });
+
+    svgEl.querySelectorAll('.flow-channel-node').forEach(function(chEl) {
+        const name = chEl.getAttribute('data-channel');
+        wireHover(chEl, function() { highlightChannel(name); });
+    });
+
     svgEl.querySelectorAll('.flow-rule-node').forEach(function(ruleEl) {
         const ri = ruleEl.getAttribute('data-rule');
-
-        ruleEl.addEventListener('mouseenter', function() {
-            // Highlight all edges for this rule
-            svgEl.querySelectorAll('.flow-edge-rule-' + ri).forEach(function(e) {
-                e.classList.add('flow-highlighted');
-            });
-            // Highlight connected event node
-            const rule = ruleNodes[parseInt(ri, 10)];
-            if (rule) {
-                const evEl = svgEl.querySelector('.flow-event-node[data-event="' + rule.event + '"]');
-                if (evEl) evEl.classList.add('flow-highlighted');
-                // Highlight connected channel nodes
-                (rule.channels || []).forEach(function(chName) {
-                    const chEl = svgEl.querySelector('.flow-channel-node[data-channel="' + CSS.escape(chName) + '"]');
-                    if (chEl) chEl.classList.add('flow-highlighted');
-                });
-            }
-        });
-
-        ruleEl.addEventListener('mouseleave', function() {
-            svgEl.querySelectorAll('.flow-highlighted').forEach(function(e) {
-                e.classList.remove('flow-highlighted');
-            });
-        });
+        wireHover(ruleEl, function() { highlightRule(ri); });
 
         // Click: switch to Rules tab and open the edit form for this rule
         ruleEl.addEventListener('click', function() {

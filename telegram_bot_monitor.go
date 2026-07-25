@@ -155,6 +155,7 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 			if frontendStatus != nil {
 				payload := buildFrontendStatusPayload(frontendStatus)
 				healthy, _ := payload["healthy"].(bool)
+				feStatus, _ := payload["status"].(string)
 				var issues []string
 				if raw, ok := payload["issues"].([]string); ok {
 					issues = raw
@@ -162,6 +163,7 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 				items = append(items, item{
 					name:   "Frontend (SDR)",
 					ok:     healthy,
+					warn:   feStatus == "warning",
 					issues: issues,
 				})
 			}

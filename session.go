@@ -2865,6 +2865,21 @@ func (sm *SessionManager) GetSessionBySSRC(ssrc uint32) (*Session, bool) {
 	return session, ok
 }
 
+// WidebandSSRC returns the SSRC of the wideband spectrum session (session ID
+// pattern "noisefloor-wideband-XXXXXXXX"), or 0 if it is not running.  This is
+// the channel that carries SDR frontend status such as IF power.
+func (sm *SessionManager) WidebandSSRC() uint32 {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for id, session := range sm.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			return session.SSRC
+		}
+	}
+	return 0
+}
+
 // GetAllSessionsInfo returns information about all active sessions
 func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	sm.mu.RLock()

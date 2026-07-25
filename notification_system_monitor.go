@@ -486,37 +486,43 @@ func BuildSystemHealthProbes(
 		})
 	}
 
-	// SDR frontend probe — checks for A/D overranges and stale status.
-	// Finds the wideband spectrum session and queries radiod for its frontend status.
+	// SDR frontend probe — reports whether radiod is publishing frontend status
+	// for the wideband spectrum channel at all.  Signal-level faults are the
+	// "if_power" probe's job, so the two never alert for the same cause.
 	if sessions != nil {
 		probes = append(probes, systemHealthProbe{
 			component: "sdr_frontend",
 			probe: func() (bool, []string) {
-				var widebandSSRC uint32
-				sessions.mu.RLock()
-				for id, session := range sessions.sessions {
-					if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
-						widebandSSRC = session.SSRC
-						break
-					}
+				widebandSSRC := sessions.WidebandSSRC()
+				if widebandSSRC == 0 {
+					return true, nil // wideband not running — skip
 				}
-				sessions.mu.RUnlock()
+				if sessions.radiod.GetFrontendStatus(widebandSSRC) == nil {
+					return false, []string{"SDR frontend status unavailable (radiod not responding)"}
+				}
+				return true, nil
+			},
+		})
+	}
+
+	// IF power probe — alerts when the wideband channel's IF power leaves its
+	// usable window: too hot risks A/D clipping, too weak points at a dead or
+	// disconnected antenna.  Shares thresholds and wording with the admin UI
+	// and /api/frontend-status via evaluateIFPowerHealth.
+	if sessions != nil {
+		probes = append(probes, systemHealthProbe{
+			component: "if_power",
+			probe: func() (bool, []string) {
+				widebandSSRC := sessions.WidebandSSRC()
 				if widebandSSRC == 0 {
 					return true, nil // wideband not running — skip
 				}
 				fs := sessions.radiod.GetFrontendStatus(widebandSSRC)
 				if fs == nil {
-					return false, []string{"SDR frontend status unavailable (radiod not responding)"}
+					return true, nil // availability is reported by "sdr_frontend"
 				}
-				payload := buildFrontendStatusPayload(fs)
-				healthy, _ := payload["healthy"].(bool)
-				if !healthy {
-					if issueList, ok := payload["issues"].([]string); ok {
-						return false, issueList
-					}
-					return false, []string{"SDR frontend unhealthy"}
-				}
-				return true, nil
+				healthy, _, issues := evaluateIFPowerHealth(fs.IFPower)
+				return healthy, issues
 			},
 		})
 	}

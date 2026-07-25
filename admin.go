@@ -2833,6 +2833,41 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// IF power health thresholds, in dBFS.  These match the colour bands the admin
+// UI applies to the IF Power tile: at or above "hot" is red, below "weak" is
+// yellow, and the range between them is green.
+const (
+	ifPowerHotDBFS  = -10.0 // at or above this the A/D is close to clipping
+	ifPowerWeakDBFS = -30.0 // below this the input is unusually quiet
+)
+
+// evaluateIFPowerHealth judges a wideband IF power reading against the
+// thresholds above.  It returns the healthy flag, a severity ("ok" | "warning"
+// | "critical") and any human-readable issues.
+//
+// This is the single source of truth for IF power health: it backs the
+// frontend-status payload, the "if_power" notification probe, and the
+// monitor-health / Telegram reporters.
+//
+// An unpopulated or invalid reading (-Inf/NaN, or anything at or below the
+// -200 dBFS sentinel) is reported healthy — radiod has simply not sent a usable
+// figure yet, which must not be mistaken for a weak signal.
+func evaluateIFPowerHealth(ifPower float32) (healthy bool, status string, issues []string) {
+	ifp := float64(ifPower)
+	if ifp <= -200 || math.IsNaN(ifp) || math.IsInf(ifp, 0) {
+		return true, "ok", []string{}
+	}
+
+	switch {
+	case ifp >= ifPowerHotDBFS:
+		return false, "critical", []string{fmt.Sprintf("IF power %.1f dBFS is too hot (>= %.0f dBFS) - risk of A/D clipping, reduce RF gain or add attenuation", ifp, ifPowerHotDBFS)}
+	case ifp < ifPowerWeakDBFS:
+		return false, "warning", []string{fmt.Sprintf("IF power %.1f dBFS is weak (< %.0f dBFS) - check antenna connection and RF gain", ifp, ifPowerWeakDBFS)}
+	}
+
+	return true, "ok", []string{}
+}
+
 // buildFrontendStatusPayload converts a FrontendStatus into the JSON-serialisable
 // map that is returned by HandleFrontendStatus and published to MQTT.
 func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]interface{} {
@@ -2877,9 +2912,11 @@ func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]inter
 	}
 
 	// A/D overranges are informational only - they don't affect health status.
-	healthy := true
-	status := "ok"
-	issues := []string{}
+	// IF power does: too hot risks A/D clipping, too weak suggests a
+	// disconnected antenna or a misconfigured gain chain.  Severity is carried
+	// by "status" ("critical" vs "warning"); "healthy" is false for both, which
+	// is the convention the monitor-health and Telegram reporters expect.
+	healthy, status, issues := evaluateIFPowerHealth(frontendStatus.IFPower)
 
 	// Calculate FFT parameters if we have the necessary data
 	var fftSize int

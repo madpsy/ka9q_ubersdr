@@ -185,11 +185,12 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 			if frontendStatus != nil {
 				payload := buildFrontendStatusPayload(frontendStatus)
 				healthy, _ := payload["healthy"].(bool)
+				feStatus, _ := payload["status"].(string)
 				var issues []string
 				if raw, ok := payload["issues"].([]string); ok {
 					issues = raw
 				}
-				add("Frontend (SDR)", healthy, false, issues)
+				add("Frontend (SDR)", healthy, feStatus == "warning", issues)
 			}
 		}
 	}

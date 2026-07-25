@@ -990,11 +990,20 @@ function _availableGridHeight() {
     return window.innerHeight - grid.getBoundingClientRect().top - barH - padY;
 }
 
+// Last layout actually applied, so repeat calls can be skipped.  Sizing a card
+// can itself make the page scrollbar appear or disappear, which changes
+// grid.clientWidth and would otherwise let the layout oscillate between two
+// near-identical solutions every time a timer fires.
+let _lastLayout = null;   // {mode, cols, canvasH}
+const LAYOUT_EPSILON = 8; // px — ignore height changes smaller than this
+
 function applyLayout() {
     const grid = document.getElementById('grid');
     const n    = Object.keys(panels).length;
 
     if (currentLayout === 'auto' || n === 0) {
+        if (_lastLayout === null && !grid.classList.contains('grid-fixed')) return;
+        _lastLayout = null;
         grid.classList.remove('grid-fixed');
         grid.style.removeProperty('--grid-cols');
         grid.style.removeProperty('--spec-h');
@@ -1038,6 +1047,16 @@ function applyLayout() {
     }
 
     canvasH = Math.round(Math.max(MIN_CANVAS_H, Math.min(MAX_CANVAS_H, canvasH)));
+
+    // Nothing meaningful changed → leave the DOM (and the canvases) alone.
+    if (_lastLayout &&
+        _lastLayout.mode === currentLayout &&
+        _lastLayout.cols === cols &&
+        Math.abs(_lastLayout.canvasH - canvasH) < LAYOUT_EPSILON) {
+        return;
+    }
+    _lastLayout = { mode: currentLayout, cols, canvasH };
+
     const specH = Math.round(canvasH * SPEC_FRACTION);
 
     grid.classList.add('grid-fixed');
@@ -1289,10 +1308,22 @@ class BandPanel {
     _resize() {
         const w = this.specCanvas.offsetWidth;
         if (w === 0) return;
+
+        // Assigning canvas.width/height *clears* the canvas, so bail out when the
+        // backing store already matches the CSS size.  Without this, any spurious
+        // relayout (the conditions-bar refresh timers fire every few seconds)
+        // blanks every panel until its next draw — which reads as a flicker.
+        const sH = this.specCanvas.offsetHeight;
+        const wH = this.wfCanvas.offsetHeight;
+        if (this.specCanvas.width  === w  && this.specCanvas.height === sH &&
+            this.wfCanvas.width    === w  && this.wfCanvas.height   === wH) {
+            return;
+        }
+
         this.specCanvas.width  = w;
-        this.specCanvas.height = this.specCanvas.offsetHeight;
+        this.specCanvas.height = sH;
         this.wfCanvas.width    = w;
-        this.wfCanvas.height   = this.wfCanvas.offsetHeight;
+        this.wfCanvas.height   = wH;
         // Overlay spans the full stack height (spec + wf)
         const stackH = this.specCanvas.offsetHeight + this.wfCanvas.offsetHeight;
         this.overlayCanvas.width  = w;

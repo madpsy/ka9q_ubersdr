@@ -6141,6 +6141,22 @@ function setFrequency(freq) {
     }
 }
 
+/**
+ * Server-wide default bin count (config.yaml spectrum.bin_count: 512, 1024 or 2048).
+ * Reported by the server in every spectrum "config" message as defaultBinCount.
+ *
+ * Use this — not spectrumDisplay.binCount — whenever computing a target
+ * binBandwidth for a given span. The live binCount tracks the current view and
+ * the server's deep-zoom path reduces it (down to 256), so using it would make
+ * band-button zooms depend on where the user happened to be zoomed.
+ *
+ * Falls back to the live bin count, then 1024, if no config has arrived yet.
+ */
+function spectrumDefaultBinCount() {
+    if (!spectrumDisplay) return 1024;
+    return spectrumDisplay.defaultBinCount || spectrumDisplay.binCount || 1024;
+}
+
 // Set band - zoom spectrum to show entire band and tune to center
 function setBand(bandName) {
     const range = bandRanges[bandName];
@@ -6218,8 +6234,10 @@ function setBand(bandName) {
         // Use a minimum bandwidth to prevent excessive zoom on narrow bands like 30m
         const minBandWidth = 10000; // 10 kHz minimum
         const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
-        // Use default bin count (1024) instead of current state to ensure consistent zoom
-        const binCount = 1024; // Default from config.go
+        // Use the server's configured default bin count (spectrum.bin_count) rather
+        // than current state, so the zoom is consistent regardless of where the user
+        // is zoomed — the deep-zoom path can reduce the live binCount.
+        const binCount = spectrumDefaultBinCount();
         const binBandwidth = effectiveBandWidth / binCount;
 
         spectrumDisplay.ws.send(JSON.stringify({
@@ -11863,7 +11881,9 @@ function spectrumZoomSlider(position, sliderEl) {
     }
 
     // Intermediate position: compute target binBandwidth from step number.
-    const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
+    const initial = spectrumDisplay.initialBinBandwidth ||
+                    spectrumDisplay.defaultBinBandwidth ||
+                    (30000000 / spectrumDefaultBinCount());
     let targetBinBandwidth = initial / Math.pow(2, position);
     // Clamp to the server's actual minimum (or 1.0 if unknown)
     const minBw = spectrumDisplay.minBinBandwidth || 1.0;
@@ -12604,8 +12624,8 @@ function selectBandFromDropdown(value) {
             // Use a minimum bandwidth to prevent excessive zoom on narrow bands
             const minBandWidth = 10000; // 10 kHz minimum (same as band buttons)
             const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
-            // Use default bin count (1024) instead of current state to ensure consistent zoom
-            const binCount = 1024; // Default from config.go
+            // Server's configured default bin count, not current state (see band buttons)
+            const binCount = spectrumDefaultBinCount();
             const binBandwidth = effectiveBandWidth / binCount;
 
             spectrumDisplay.ws.send(JSON.stringify({
@@ -14602,7 +14622,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
                     const minBandWidth = 10000; // 10 kHz minimum
                     const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
-                    const binCount = 1024;
+                    const binCount = spectrumDefaultBinCount();
                     const binBandwidth = effectiveBandWidth / binCount;
                     
                     spectrumDisplay.ws.send(JSON.stringify({

@@ -807,6 +807,11 @@ class SpectrumDisplay {
         this.binBandwidth = 0;
         this.totalBandwidth = 0;
 
+        // Server-wide defaults (spectrum.bin_count), populated from the first
+        // config message. Zero until then; callers fall back to binCount.
+        this.defaultBinCount = 0;
+        this.defaultBinBandwidth = 0;
+
         // Zoom state
         this.zoomLevel = 1.0; // 1.0 = full bandwidth, higher = zoomed in
         this.zoomCenterFreq = 0; // Center frequency of zoomed view
@@ -2148,6 +2153,18 @@ class SpectrumDisplay {
                 this.binBandwidth = msg.binBandwidth;
                 this.totalBandwidth = msg.totalBandwidth;
 
+                // Server-wide defaults from spectrum.bin_count. Kept separate from
+                // binCount/binBandwidth because those track the current (possibly
+                // zoomed) view — the deep-zoom path reduces binCount below the
+                // configured value. Callers that need the full-span geometry
+                // (band buttons, zoom slider) must use these.
+                if (msg.defaultBinCount > 0) {
+                    this.defaultBinCount = msg.defaultBinCount;
+                }
+                if (msg.defaultBinBandwidth > 0) {
+                    this.defaultBinBandwidth = msg.defaultBinBandwidth;
+                }
+
                 // Track the minimum binBandwidth seen from the server (= actual max zoom)
                 if (!this.minBinBandwidth || this.binBandwidth < this.minBinBandwidth) {
                     this.minBinBandwidth = this.binBandwidth;
@@ -2167,9 +2184,12 @@ class SpectrumDisplay {
                     this.predictedFreqOffset = 0;
                 }
 
-                // Store initial bin bandwidth on first config (for zoom level calculation)
+                // Store initial bin bandwidth on first config (for zoom level calculation).
+                // Prefer the server-reported default: on reconnect the first config can
+                // already be zoomed (the client passes bin_bandwidth as a URL param), so
+                // msg.binBandwidth is not necessarily the full-span value.
                 if (!this.initialBinBandwidth) {
-                    this.initialBinBandwidth = this.binBandwidth;
+                    this.initialBinBandwidth = this.defaultBinBandwidth || this.binBandwidth;
                 }
 
                 // Update zoom level: how much we've zoomed from initial

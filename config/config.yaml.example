@@ -619,6 +619,26 @@ audio:
 spectrum:
   # Enable per-user spectrum channels
   enabled: true
+
+  # Number of FFT bins across the full 0-30 MHz view — the horizontal resolution
+  # of the spectrum display and waterfall. Server-wide: this applies to every
+  # user, it is not a per-session setting. Bin bandwidth is derived automatically
+  # (30 MHz / bin_count) so the display always covers exactly 0-30 MHz.
+  #
+  # Only three values are accepted; anything else snaps to the nearest:
+  #    512 = low     (58593.75 Hz/bin at full zoom-out, ~5 KB/s per client)
+  #   1024 = normal  (29296.875 Hz/bin at full zoom-out, ~10 KB/s per client)
+  #   2048 = high    (14648.4375 Hz/bin at full zoom-out, ~20 KB/s per client)
+  #
+  # Bandwidth figures are worst case (full frames at poll_period_ms: 100);
+  # delta encoding means typical traffic is well below this. Higher values also
+  # cost more CPU in radiod. Above 2048 gains nothing on a typical display, as
+  # the bins are interpolated onto a canvas only ~1000-2500 pixels wide.
+  #
+  # Maximum zoom depth is the same for all three settings.
+  # Default: 1024
+  bin_count: 1024
+
   # Poll period in milliseconds (how often to request spectrum data for user WebSocket sessions).
   # Lower values = faster updates but more CPU/network usage.
   # Range: 10–250 ms (values outside this range are clamped). Default: 100ms (10 Hz).

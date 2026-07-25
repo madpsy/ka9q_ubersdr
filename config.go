@@ -420,8 +420,14 @@ type FrequencyGainRange struct {
 
 // SpectrumConfig contains spectrum analyzer settings
 type SpectrumConfig struct {
-	Enabled                bool                          `yaml:"enabled"`
-	Default                SpectrumDefaultConfig         `yaml:"default"`
+	Enabled bool                  `yaml:"enabled"`
+	Default SpectrumDefaultConfig `yaml:"default"`
+	// BinCount is the number of FFT bins across the full 0-30 MHz view — the
+	// horizontal resolution of the spectrum and waterfall. Only 512 (low),
+	// 1024 (normal) and 2048 (high) are accepted; LoadConfig snaps anything
+	// else to the nearest of those and copies the result into Default.BinCount,
+	// deriving Default.BinBandwidth from it.
+	BinCount               int                           `yaml:"bin_count"`
 	PollPeriodMs           int                           `yaml:"poll_period_ms"`
 	BackgroundPollPeriodMs int                           `yaml:"background_poll_period_ms"` // Poll interval for internal background sessions (noisefloor, frequency-reference); default 1000ms
 	MaxSessionsPerUser     int                           `yaml:"max_sessions_per_user"`
@@ -438,11 +444,12 @@ type SmoothingConfig struct {
 	SpatialSigma  float32 `yaml:"spatial_sigma"`  // Gaussian sigma for frequency smoothing (0 = disabled)
 }
 
-// SpectrumDefaultConfig contains default parameters for new spectrum channels
-// SpectrumDefaultConfig holds the fixed default parameters for the spectrum display.
-// These values are intentionally not user-configurable via config.yaml — they are
-// hardcoded in LoadConfig to ensure the display always covers exactly 0-30 MHz.
-// (totalBandwidth = BinCount × BinBandwidth must equal 30,000,000 Hz)
+// SpectrumDefaultConfig contains default parameters for new spectrum channels.
+// These values are intentionally not settable directly via config.yaml — they are
+// derived in LoadConfig to ensure the display always covers exactly 0-30 MHz
+// (totalBandwidth = BinCount × BinBandwidth must equal 30,000,000 Hz).
+// BinCount is derived from the operator-facing spectrum.bin_count setting and
+// BinBandwidth is then computed as 30 MHz / BinCount.
 type SpectrumDefaultConfig struct {
 	CenterFrequency uint64  `yaml:"-"`
 	BinCount        int     `yaml:"-"`
@@ -1066,17 +1073,39 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Set spectrum defaults if not specified.
-	// These are intentionally not exposed in config.yaml — changing them breaks the
-	// 0-30 MHz display (totalBandwidth = binCount × binBandwidth must equal 30 MHz).
+	// Only bin_count is operator-facing; center frequency and bin bandwidth are
+	// derived, because changing them independently breaks the 0-30 MHz display
+	// (totalBandwidth = binCount × binBandwidth must equal 30 MHz).
 	if config.Spectrum.Default.CenterFrequency == 0 {
 		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz center for 0-30 MHz coverage
 	}
-	if config.Spectrum.Default.BinCount == 0 {
-		config.Spectrum.Default.BinCount = 1024
+
+	// Number of FFT bins across the 0-30 MHz view. Only 512 (low), 1024 (normal)
+	// and 2048 (high) are accepted; anything else snaps to the nearest of those so
+	// a typo in config.yaml can never produce a channel radiod will reject.
+	// The thresholds are geometric midpoints (√(512·1024) ≈ 724, √(1024·2048) ≈ 1448)
+	// so a value snaps to whichever option it is nearest on a log scale.
+	rawBinCount := config.Spectrum.BinCount
+	switch {
+	case config.Spectrum.BinCount == 0:
+		config.Spectrum.BinCount = 1024
+	case config.Spectrum.BinCount <= 724:
+		config.Spectrum.BinCount = 512
+	case config.Spectrum.BinCount <= 1448:
+		config.Spectrum.BinCount = 1024
+	default:
+		config.Spectrum.BinCount = 2048
 	}
-	if config.Spectrum.Default.BinBandwidth == 0 {
-		config.Spectrum.Default.BinBandwidth = 29296.875 // 30,000,000 Hz / 1024 bins
+	if rawBinCount != 0 && rawBinCount != config.Spectrum.BinCount {
+		fmt.Printf("Warning: spectrum.bin_count (%d) must be 512, 1024 or 2048, using %d\n",
+			rawBinCount, config.Spectrum.BinCount)
 	}
+
+	// Derived — never set directly. binCount × binBandwidth must equal exactly
+	// 30,000,000 Hz or the display stops covering 0-30 MHz.
+	config.Spectrum.Default.BinCount = config.Spectrum.BinCount
+	config.Spectrum.Default.BinBandwidth = 30000000.0 / float64(config.Spectrum.BinCount)
+
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)
 	}

@@ -958,15 +958,22 @@ func (swsh *UserSpectrumWebSocketHandler) sendStatus(conn *wsConn, session *Sess
 	session.mu.RLock()
 	totalBandwidth := float64(session.BinCount) * session.BinBandwidth
 
+	// Server-wide defaults (spectrum.bin_count). The client needs these to size
+	// band-button zooms consistently: session.BinCount can be reduced by the
+	// deep-zoom path, so it is not a reliable stand-in for the configured value.
+	def := swsh.sessions.config.Spectrum.Default
+
 	// Create message matching the format spectrum-display.js expects
 	// It looks for: centerFreq, binCount, binBandwidth, totalBandwidth
 	msg := map[string]interface{}{
-		"type":           "config",
-		"centerFreq":     session.Frequency, // JavaScript expects centerFreq (camelCase)
-		"binCount":       session.BinCount,
-		"binBandwidth":   session.BinBandwidth,
-		"totalBandwidth": totalBandwidth,
-		"sessionId":      session.ID,
+		"type":                "config",
+		"centerFreq":          session.Frequency, // JavaScript expects centerFreq (camelCase)
+		"binCount":            session.BinCount,
+		"binBandwidth":        session.BinBandwidth,
+		"totalBandwidth":      totalBandwidth,
+		"sessionId":           session.ID,
+		"defaultBinCount":     def.BinCount,
+		"defaultBinBandwidth": def.BinBandwidth,
 	}
 	session.mu.RUnlock()
 

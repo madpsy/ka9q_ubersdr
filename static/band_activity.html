@@ -25,7 +25,6 @@ body {
     background: #111118;
     border-bottom: 1px solid #222;
     flex-wrap: wrap;
-    position: relative;   /* anchors the floating notification card */
 }
 
 #topbar h1 {
@@ -135,20 +134,15 @@ body {
 #btn-notif-key:hover { border-color: #555; color: #ccc; }
 
 #notif-panel {
-    display: none;            /* shown only while there is something to show */
-    position: absolute;
-    top: calc(100% + 4px);    /* hangs below the topbar, under the clocks */
-    right: 16px;
-    z-index: 60;
+    /* Shown only while there is an alert or a password to enter, so an idle
+       stream costs no vertical space at all. */
+    display: none;
     flex-direction: column;
+    align-items: flex-end;   /* line up under the clocks */
     gap: 3px;
-    width: 340px;
-    max-width: calc(100vw - 32px);
-    padding: 6px;
-    background: rgba(17, 17, 24, 0.97);
-    border: 1px solid #262633;
-    border-radius: 6px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+    padding: 5px 16px;
+    background: #0e0e15;
+    border-bottom: 1px solid #1c1c28;
 }
 
 #notif-auth {
@@ -164,7 +158,7 @@ body {
     color: #ddd;
     padding: 3px 6px;
     font-size: 0.75em;
-    flex: 1;
+    width: 180px;
     min-width: 0;
 }
 #notif-auth input:focus { outline: none; border-color: #7ec8e3; }
@@ -189,13 +183,16 @@ body {
 #notif-list {
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
     gap: 3px;
     cursor: pointer;
+    max-width: 100%;
 }
 #notif-list:empty { display: none; }
 
 .notif-item {
     display: flex;
+    max-width: min(520px, 100%);
     gap: 6px;
     align-items: baseline;
     background: #15151e;
@@ -217,8 +214,8 @@ body {
 .notif-item .notif-text {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;   /* long alerts stay two lines; full text in the tooltip */
-    line-clamp: 2;
+    -webkit-line-clamp: 1;   /* one line per alert; full text in the tooltip */
+    line-clamp: 1;
     overflow: hidden;
     word-break: break-word;
 }
@@ -1025,18 +1022,6 @@ body {
             <button id="btn-notif-key" type="button" title="Notification stream">&#x1F514;</button>
         </span>
     </div>
-
-    <!-- Alerts hang below the clocks, out of the topbar's flow so they never
-         resize it or push the band pills down. -->
-    <div id="notif-panel">
-        <div id="notif-auth">
-            <input type="password" id="notif-password" placeholder="Notification password"
-                   autocomplete="off" spellcheck="false">
-            <button id="btn-notif-connect" type="button">Connect</button>
-        </div>
-        <div id="notif-auth-msg"></div>
-        <div id="notif-list" title="Click to dismiss"></div>
-    </div>
     <div id="band-pills"></div>
     <button id="btn-all">All</button>
     <button id="btn-none">None</button>
@@ -1077,6 +1062,18 @@ body {
             <input type="checkbox" id="show-peaks" checked> Peaks
         </label>
     </div>
+</div>
+
+<!-- Alerts sit directly under the clocks, in flow: they take no room at all
+     while there is nothing to show, and never cover a spectrum card. -->
+<div id="notif-panel">
+    <div id="notif-auth">
+        <input type="password" id="notif-password" placeholder="Notification password"
+               autocomplete="off" spellcheck="false">
+        <button id="btn-notif-connect" type="button">Connect</button>
+    </div>
+    <div id="notif-auth-msg"></div>
+    <div id="notif-list" title="Click to dismiss"></div>
 </div>
 
 <div id="grid"></div>
@@ -3426,7 +3423,7 @@ function _startCWSpots() {
 
 const _NOTIF_PW_KEY   = 'bandActivity_notifPassword';
 const _NOTIF_MAX      = 3;      // alerts shown at once in the floating card
-const _NOTIF_TTL_MS   = 5 * 60 * 1000;   // an alert clears itself after 5 minutes
+const _NOTIF_TTL_MS   = 10 * 60 * 1000;  // an alert clears itself after 10 minutes
 const _NOTIF_URL      = '/api/notifications/stream';
 
 let _notifSSE       = null;
@@ -3465,14 +3462,19 @@ function _notifShow(visible) {
     }
 }
 
-// The floating card is only on screen while it has something to say: an alert,
-// or a password box. Otherwise it would permanently cover the top-right panel.
-function _notifSyncCard() {
+// The strip is only on screen while it has something to say: an alert, or a
+// password box. Idle, it takes no vertical space at all.
+function _notifSyncPanel() {
     const panel = document.getElementById('notif-panel');
     const auth  = document.getElementById('notif-auth');
     if (!panel) return;
     const authOpen = auth && auth.style.display === 'flex';
-    panel.style.display = (authOpen || _notifItems.length > 0) ? 'flex' : 'none';
+    const want    = (authOpen || _notifItems.length > 0) ? 'flex' : 'none';
+    const current = panel.style.display || 'none';
+    if (current === want) return;
+    panel.style.display = want;
+    // In flow: showing or hiding it changes the room the grid has to lay out in.
+    scheduleLayout();
 }
 
 function _notifSetState(dotClass, text) {
@@ -3503,7 +3505,7 @@ function _notifAskPassword(msg, prefill) {
     }
     if (prefill !== undefined) input.value = prefill;
     _notifSetState('wait', 'password required');
-    _notifSyncCard();
+    _notifSyncPanel();
 }
 
 function _notifHidePasswordBox() {
@@ -3511,7 +3513,7 @@ function _notifHidePasswordBox() {
     const msgEl = document.getElementById('notif-auth-msg');
     if (auth)  auth.style.display = 'none';
     if (msgEl) msgEl.style.display = 'none';
-    _notifSyncCard();
+    _notifSyncPanel();
 }
 
 // _notifPlain turns a rendered notification into a single line of plain text.
@@ -3546,11 +3548,11 @@ function _notifRender() {
                    '<span class="notif-text">' + _escHtml(item.text) + '</span>' +
                '</div>';
     }).join('');
-    _notifSyncCard();
+    _notifSyncPanel();
 }
 
-// Alerts are transient: the card sits over the top-right band panel, so each
-// item clears itself once it has had time to be read.
+// Alerts are transient: each item clears itself once it has had time to be
+// read, so the strip collapses back to nothing.
 function _notifPrune() {
     if (_notifItems.length === 0) return;
     const cutoff = Date.now() - _NOTIF_TTL_MS;

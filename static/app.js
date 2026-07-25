@@ -11262,10 +11262,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (spectrumDisplay && spectrumDisplay.zoomLevel <= 1.0) {
                     // Fully zoomed out - perform max zoom at clicked frequency
                     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                        // Target a fixed ~409.6 kHz span rather than a fixed Hz/bin,
+                        // so the resulting view is the same at any bin_count.
+                        // (Previously hardcoded 400.0 Hz/bin, which doubled the span
+                        // when bin_count doubled.)
+                        const clickZoomBinBandwidth = 409600 / spectrumDefaultBinCount();
                         spectrumDisplay.ws.send(JSON.stringify({
                             type: 'zoom',
                             frequency: Math.round(freq),
-                            binBandwidth: 400.0
+                            binBandwidth: clickZoomBinBandwidth
                         }));
                         log(`Tuned to ${formatFrequency(freq)} and zoomed to max from spectrum click`);
                     }
@@ -11767,8 +11772,10 @@ function spectrumResetZoom() {
 
     // Notify radioAPI immediately with default binBandwidth
     if (window.radioAPI) {
-        // Default binBandwidth when fully zoomed out (will be corrected when config arrives)
-        window.radioAPI.notifyZoomChange(14648.4375); // 30MHz / 2048 bins
+        // Full-span binBandwidth for the server's configured bin count (will be
+        // corrected when config arrives). Previously hardcoded to 14648.4375, which
+        // is 30 MHz / 2048 bins and was wrong for the 1024-bin default.
+        window.radioAPI.notifyZoomChange(spectrumDisplay.fullSpanBinBandwidth());
     }
 }
 
@@ -11780,30 +11787,35 @@ function spectrumMaxZoom() {
     lastZoomTime = now;
 
     triggerButtonHaptic();
-    // Send binBandwidth=10 to land at 10 Hz/bin — the maximum zoom for normal UI operation.
-    // The server supports down to 0.5 Hz/bin but that is only reachable via explicit
-    // requests (URL params, chat sync) — not via the Max button or + button.
+    // Land at the UI zoom floor — a fixed span (MIN_ZOOM_SPAN_HZ), expressed as Hz/bin
+    // for the server's configured bin count, so max zoom shows the same span whatever
+    // spectrum.bin_count is set to. The server supports down to 0.5 Hz/bin but that is
+    // only reachable via explicit requests (URL params, extension API, chat sync).
+    const maxZoomBinBandwidth = spectrumDisplay.minBinBandwidthForUI();
     const freqInput = document.getElementById('frequency');
     const frequency = parseInt(freqInput ? (freqInput.getAttribute('data-hz-value') || freqInput.value) : '15000000');
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: isNaN(frequency) ? 15000000 : frequency,
-            binBandwidth: 10.0
+            binBandwidth: maxZoomBinBandwidth
         }));
     }
 
     updateURL();
     if (window.radioAPI && spectrumDisplay) {
-        window.radioAPI.notifyZoomChange(10.0);
+        window.radioAPI.notifyZoomChange(maxZoomBinBandwidth);
     }
-    log('Zooming to maximum (10 Hz/bin)');
+    log(`Zooming to maximum (${maxZoomBinBandwidth} Hz/bin)`);
 }
 
 // ── Zoom buttons + vertical slider ───────────────────────────────────────────
 // Zoom is controlled by Min / − / + / Max buttons on desktop and the vertical
 // #spectrum-vzoom-slider on narrow screens.
-const ZOOM_SLIDER_MAX = 14; // retained for updateZoomSlider() math
+// Fallback slider range, used only before the first config message arrives.
+// updateZoomSlider() replaces it with the value derived from the UI zoom floor
+// (log2(30 MHz span / MIN_ZOOM_SPAN_HZ) ≈ 11, same for every bin_count).
+const ZOOM_SLIDER_MAX = 11;
 
 // Source tag: tracks who last initiated a zoom change.
 // 'slider' — the user moved the slider; updateZoomSlider() must not overwrite
@@ -11867,89 +11879,38 @@ function spectrumZoomSlider(position, sliderEl) {
         updateURL();
         const _s0 = document.getElementById('spectrum-zoom-slider');
         if (_s0) _s0.value = 0;
-        if (window.radioAPI) window.radioAPI.notifyZoomChange(spectrumDisplay.initialBinBandwidth || 14648.4375);
+        if (window.radioAPI) window.radioAPI.notifyZoomChange(spectrumDisplay.fullSpanBinBandwidth());
         return;
     }
 
     if (!spectrumDisplay) return;
 
     if (position >= sliderMax) {
-        // Max position: server resolves bin_count to 256 in a single request.
+        // Max position: send the UI zoom floor directly.
         // Throttle was already reset above (boundary path).
         spectrumMaxZoom();
         return;
     }
 
-    // Intermediate position: compute target binBandwidth from step number.
-    const initial = spectrumDisplay.initialBinBandwidth ||
-                    spectrumDisplay.defaultBinBandwidth ||
-                    (30000000 / spectrumDefaultBinCount());
+    // Intermediate position: each position is one halving from the full-span
+    // bin bandwidth.
+    const initial = spectrumDisplay.fullSpanBinBandwidth();
     let targetBinBandwidth = initial / Math.pow(2, position);
-    // Clamp to the server's actual minimum (or 1.0 if unknown)
-    const minBw = spectrumDisplay.minBinBandwidth || 1.0;
-    targetBinBandwidth = Math.max(minBw, targetBinBandwidth);
 
-    // Deep zoom zone: targetBinBandwidth is below the server's safe minimum (50 Hz/bin).
-    // In this zone the server controls zoom via bin_count reduction, not binBandwidth.
-    // Sending a direct binBandwidth has no effect — delegate to zoomIn()/zoomOut()
-    // exactly as scroll does (one call per notch, server steps bin_count correctly).
-    // Route to zoomIn()/zoomOut() when the target binBandwidth would be a no-op:
-    // - At or below the server's minimum safe binBW (50 Hz/bin), OR
-    // - Would round to the same safe value as the current binBandwidth
-    //   (e.g. position 9 → 57 Hz/bin rounds to 50, same as current max → no-op)
-    // Use the next safe step above current binBW as the threshold.
-    // Server safe steps: 50, 100, 200, 300, 500, 1000, 2000, 5000, ...
-    // Anything that rounds to <= current binBW is in the deep zoom zone.
-    function roundToSafeBinBW(bw) {
-        if (bw < 75)   return 50;
-        if (bw < 150)  return 100;
-        if (bw < 250)  return 200;
-        if (bw < 400)  return 300;
-        if (bw < 750)  return 500;
-        if (bw < 1500) return 1000;
-        if (bw < 3500) return 2000;
-        if (bw < 7500) return 5000;
-        return bw;
-    }
-    const currentSafeBW = spectrumDisplay.binBandwidth || 50;
-    if (roundToSafeBinBW(targetBinBandwidth) <= currentSafeBW) {
-        // Compute current step to determine direction
-        const curBwSteps = (spectrumDisplay.binBandwidth && spectrumDisplay.binBandwidth < initial)
-            ? Math.round(Math.log2(initial / spectrumDisplay.binBandwidth)) : 0;
-        const maxSeen = spectrumDisplay._maxSeenBinCount || spectrumDisplay.binCount;
-        const curBinCountSteps = (spectrumDisplay.binCount < maxSeen)
-            ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
-        const currentStep = curBwSteps + curBinCountSteps;
+    // Clamp to the UI zoom floor (a fixed span — see MIN_ZOOM_SPAN_HZ in
+    // spectrum-display.js), matching the + button, scroll, pinch and Max button.
+    //
+    // This previously clamped against spectrumDisplay.minBinBandwidth, which tracks
+    // the minimum ever *seen* from the server and therefore starts at the full-span
+    // value — so the first drag clamped to the current bandwidth and did nothing.
+    //
+    // A "deep zoom zone" branch also used to sit here, assuming the server switches
+    // to bin_count reduction below 50 Hz/bin. It does not: that only happens below
+    // 0.5 Hz/bin (user_spectrum_websocket.go), which the UI floor never reaches, so
+    // the branch was dead code built on a stale copy of the server's ladder.
+    targetBinBandwidth = Math.max(spectrumDisplay.minBinBandwidthForUI(), targetBinBandwidth);
 
-        // In the deep zoom zone the server controls zoom via bin_count reduction.
-        // Compute the target binBandwidth by applying the required number of halvings
-        // from the current value, then send it in a single message.
-        // (Calling zoomIn() N times in a loop doesn't work because zoomIn() reads
-        // this.binBandwidth which hasn't changed between calls — all N sends would
-        // carry the same value.)
-        const stepsNeeded = position - currentStep; // positive = zoom in, negative = zoom out
-        let deepTargetBW = spectrumDisplay.binBandwidth;
-        if (stepsNeeded > 0) {
-            deepTargetBW = deepTargetBW / Math.pow(2, stepsNeeded);
-            deepTargetBW = Math.max(spectrumDisplay.minBinBandwidth || 10, deepTargetBW);
-        } else {
-            deepTargetBW = deepTargetBW * Math.pow(2, -stepsNeeded);
-            deepTargetBW = Math.min(initial, deepTargetBW);
-        }
-        const freqInputDeep = document.getElementById('frequency');
-        const frequencyDeep = parseInt(freqInputDeep.getAttribute('data-hz-value') || freqInputDeep.value);
-        if (!isNaN(frequencyDeep) && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-            spectrumDisplay.ws.send(JSON.stringify({
-                type: 'zoom',
-                frequency: frequencyDeep,
-                binBandwidth: deepTargetBW
-            }));
-        }
-        updateURL();
-        return;
-    }
-
-    // Normal zoom zone: send target binBandwidth directly.
+    // Send the target directly; the server snaps it to the nearest safe rung.
     const freqInput = document.getElementById('frequency');
     const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     if (isNaN(frequency)) {
@@ -11984,7 +11945,7 @@ function spectrumZoomSlider(position, sliderEl) {
 function updateZoomSlider() {
     if (!spectrumDisplay) return;
 
-    const initial = spectrumDisplay.initialBinBandwidth;
+    const initial = spectrumDisplay.fullSpanBinBandwidth();
     const current = spectrumDisplay.binBandwidth;
     const currentBinCount = spectrumDisplay.binCount;
 
@@ -11997,22 +11958,32 @@ function updateZoomSlider() {
     const maxBinCount = spectrumDisplay._maxSeenBinCount || currentBinCount;
 
     // Total zoom = binBandwidth halvings + bin_count halvings.
-    // binBandwidth halvings: log2(initial / current)  [stops at minSafeBinBW = 50 Hz/bin]
-    // bin_count halvings:    log2(maxBinCount / currentBinCount)  [each halving = 1 more step]
+    // binCountSteps is normally 0: the server only reduces bin_count below
+    // 0.5 Hz/bin, which the UI floor never reaches. It stays here so a session that
+    // arrived at deep zoom via an explicit URL request still reports a sane position.
     const bwSteps = (current < initial) ? Math.round(Math.log2(initial / current)) : 0;
     const binCountSteps = (currentBinCount < maxBinCount)
         ? Math.round(Math.log2(maxBinCount / currentBinCount))
         : 0;
     const totalStep = bwSteps + binCountSteps;
 
-    // Dynamically compute max steps.
-    // Max bw steps = log2(initial / 50) since server clamps binBW to 50 Hz/bin minimum.
-    // Max bin_count steps = log2(maxBinCount / 256) since server minimum bin_count = 256.
-    const minSafeBinBW = 50.0;
-    const minBinCount = 256;
-    const maxBwSteps = (initial > minSafeBinBW) ? Math.round(Math.log2(initial / minSafeBinBW)) : 0;
-    const maxBinCountSteps = (maxBinCount > minBinCount) ? Math.round(Math.log2(maxBinCount / minBinCount)) : 0;
-    const dynamicMax = maxBwSteps + maxBinCountSteps;
+    // Slider range = number of halvings from full span down to the UI zoom floor.
+    //
+    // Both terms scale as 1/binCount, so the ratio — and therefore the slider range —
+    // is the same for every spectrum.bin_count setting:
+    //   log2((30e6 / N) / (MIN_ZOOM_SPAN_HZ / N)) = log2(30e6 / 10240) ≈ 11.5 → 11
+    //
+    // floor() rather than round() so the top notch is the first position that
+    // actually reaches the floor; rounding up would leave two notches on the same
+    // bin bandwidth. Position >= max is special-cased to spectrumMaxZoom() anyway.
+    //
+    // The previous formula derived this from minSafeBinBW = 50 Hz/bin plus bin_count
+    // halvings down to 256 — neither of which reflects server behaviour. It happened
+    // to produce a usable number because the two errors cancelled.
+    const uiFloorBinBW = spectrumDisplay.minBinBandwidthForUI();
+    const dynamicMax = (initial > uiFloorBinBW)
+        ? Math.floor(Math.log2(initial / uiFloorBinBW))
+        : 0;
 
     // Helper: apply computed step to a slider element (horizontal or vertical).
     // Always updates max (so the slider range is correct during drag).
@@ -12127,7 +12098,7 @@ function spectrumCenterFrequency() {
 
     // Send zoom request to center at current frequency, keeping current bin bandwidth
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-        const currentBinBandwidth = spectrumDisplay.binBandwidth || 400.0;
+        const currentBinBandwidth = spectrumDisplay.binBandwidth || (409600 / spectrumDefaultBinCount());
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: frequency,

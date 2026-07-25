@@ -2854,7 +2854,8 @@ class ChatUI {
             console.log('[ChatUI] Applying synced zoom_bw:', zoomBW, 'Hz/bin at frequency:', userData.frequency);
 
             // Calculate new total bandwidth and apply boundary constraints (0-30 MHz)
-            const binCount = window.spectrumDisplay.binCount || 2048;
+            const binCount = window.spectrumDisplay.binCount ||
+                             window.spectrumDisplay.defaultBinCount || 1024;
             const newTotalBW = zoomBW * binCount;
             const halfBandwidth = newTotalBW / 2;
 

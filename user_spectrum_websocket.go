@@ -440,12 +440,25 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			session.mu.RUnlock()
 
 			// Radiod has constraints on valid sample rates (must be compatible with block rate).
-			// The constraint is: fft_size × bin_bw must be a multiple of samprate_base (typically 50 Hz).
-			// Safe bin_bw values verified to work with radiod (fft_size × bin_bw divisible by 50):
-			//   0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 Hz
-			// 0.5 Hz/bin: fft_size=1500 (2²×3×5³, goodchoice ✓), samprate=750 Hz ✓
-			// 1 Hz/bin:   fft_size=1000 (2³×5³, goodchoice ✓), samprate=1000 Hz ✓
-			// 2 Hz/bin:   fft_size=1000 (2³×5³, goodchoice ✓), samprate=2000 Hz ✓
+			// From ka9q-radio src/spectrum.c (demod_spectrum), FFT mode:
+			//   samprate_base = lcm(blockrate, L*blockrate/N)
+			//   fft_size      = bin_count + 400/bin_bw, then searched upward until
+			//                   goodchoice(fft_size) && (fft_size*bin_bw) % samprate_base == 0
+			// For the RX888 config here (samprate 64.8 MHz, blocktime 20 ms, overlap 5):
+			// blockrate = 50 Hz, input bin spacing = 40 Hz, so samprate_base = lcm(50,40) = 200.
+			//
+			// Note radiod SEARCHES for a valid fft_size (up to 65536) rather than rejecting,
+			// so most bin_bw values work. This ladder is deliberately more conservative than
+			// radiod requires: it keeps zoom steps predictable and the UI in sync with what
+			// the server will actually echo back.
+			//
+			// Worked examples at the UI zoom floor (10240 Hz span), all valid:
+			//   512 bins @ 20 Hz/bin:  fft_size=540  (2²×3³×5), samprate=10800 ✓
+			//  1024 bins @ 10 Hz/bin:  fft_size=1080 (2³×3³×5), samprate=10800 ✓
+			//  2048 bins @  5 Hz/bin:  fft_size=2160 (2⁴×3³×5), samprate=10800 ✓
+			//
+			// If a combination is invalid, radiod's create_filter_output() fails and the
+			// spectrum channel is closed (it logs "Try increasing bin_bw").
 			const minSafeBinBW = 0.5         // Minimum safe bin_bw (radiod supports down to 0.5 Hz/bin)
 			const maxBinBWForRestore = 200.0 // Above this, restore bin_count if reduced
 

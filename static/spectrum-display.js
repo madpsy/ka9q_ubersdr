@@ -10,6 +10,24 @@ function _spectrumIso2ToFlag(code) {
     catch (e) { return ''; }
 }
 
+// Narrowest span (Hz) reachable through the normal UI: + button, scroll wheel,
+// pinch, Max button, zoom slider, bookmark shift-click.
+//
+// The floor is a SPAN, not a Hz/bin value, so zoom depth is identical whatever
+// spectrum.bin_count the server is configured with. Expressing it as Hz/bin (the
+// old behaviour) made the narrowest view scale with bin count: 10 Hz/bin gave a
+// 10.24 kHz view at 1024 bins but 20.48 kHz at 2048.
+//
+// 10240 Hz is chosen to exactly preserve the previous behaviour at the default
+// 1024 bins (1024 × 10 Hz/bin). The resulting Hz/bin values are all rungs on the
+// server's safe ladder (user_spectrum_websocket.go), and radiod builds the same
+// 10.8 kHz IQ channel for each:
+//    512 bins → 20 Hz/bin      1024 bins → 10 Hz/bin      2048 bins → 5 Hz/bin
+//
+// Explicit requests (URL zoom_bw params, extension API, chat sync) bypass this
+// floor by design; the server's own limit of 0.5 Hz/bin still applies to them.
+const MIN_ZOOM_SPAN_HZ = 10240;
+
 // Local-time formatters, cached per IANA zone. The tooltip is rebuilt on every
 // mousemove, and constructing Intl.DateTimeFormat is expensive enough that
 // doing it per event is worth avoiding.
@@ -4849,8 +4867,9 @@ class SpectrumDisplay {
                 // Calculate new bin bandwidth (inverse of scale for zoom)
                 let newBinBandwidth = touchStartBinBandwidth / scale;
 
-                // Clamp to reasonable limits — 10 Hz/bin minimum matches the Max button floor
-                newBinBandwidth = Math.max(10, Math.min(this.initialBinBandwidth || 1000, newBinBandwidth));
+                // Clamp to reasonable limits — the minimum matches the Max button floor
+                newBinBandwidth = Math.max(this.minBinBandwidthForUI(),
+                                           Math.min(this.initialBinBandwidth || 1000, newBinBandwidth));
 
                 // Get touch center position
                 const center = getTouchCenter(e.touches[0], e.touches[1]);
@@ -5388,7 +5407,7 @@ class SpectrumDisplay {
                     // Calculate aggressive zoom similar to band buttons
                     // Target a focused bandwidth of ~10 kHz for good detail
                     const focusedBandwidth = 10000; // 10 kHz
-                    const binCount = this.binCount || 2048;
+                    const binCount = this.binCount || this.defaultBinCount || 1024;
                     const binBandwidth = focusedBandwidth / binCount;
 
                     // Send zoom message directly to WebSocket
@@ -5642,6 +5661,28 @@ class SpectrumDisplay {
     }
 
     // Zoom in - same bins over narrower bandwidth (decrease bin bandwidth)
+    // Lowest bin bandwidth the normal UI will request, derived from MIN_ZOOM_SPAN_HZ
+    // and the server's configured bin count so that zoom depth (the narrowest span)
+    // is the same for every spectrum.bin_count setting.
+    //
+    // Uses defaultBinCount — the server-wide configured value — rather than the live
+    // binCount, which the server's deep-zoom path can reduce below the configured
+    // value. Using the live value would make the floor drift with the current view.
+    //
+    // Never returns less than 0.5, the server's own hard minimum.
+    minBinBandwidthForUI() {
+        const bins = this.defaultBinCount || this.binCount || 1024;
+        return Math.max(0.5, MIN_ZOOM_SPAN_HZ / bins);
+    }
+
+    // Bin bandwidth at full zoom-out (the whole 0-30 MHz span). Prefers the value
+    // the server reports; falls back to deriving it from the bin count.
+    fullSpanBinBandwidth() {
+        if (this.defaultBinBandwidth > 0) return this.defaultBinBandwidth;
+        if (this.initialBinBandwidth > 0) return this.initialBinBandwidth;
+        return 30000000 / (this.defaultBinCount || this.binCount || 1024);
+    }
+
     // Backend now handles dynamic bin count adjustment for deep zoom levels
     zoomIn() {
         if (!this.connected || !this.ws) return;
@@ -5654,13 +5695,13 @@ class SpectrumDisplay {
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
 
-        // Minimum practical limit: 10 Hz/bin hard floor for normal UI operation.
-        // The server supports down to 0.5 Hz/bin but that level is only reachable
-        // via explicit requests (URL params, chat sync) — not via the +/scroll/Max
-        // button path.  The Max button sends binBandwidth=10 directly; the + button
-        // halves the current value and stops here.
-        if (newBinBandwidth < 10) {
-            console.log('Maximum zoom reached (10 Hz/bin hard floor)');
+        // Minimum practical limit for normal UI operation: MIN_ZOOM_SPAN_HZ, expressed
+        // as Hz/bin for the configured bin count. The server supports down to
+        // 0.5 Hz/bin but that is only reachable via explicit requests (URL params,
+        // extension API, chat sync) — not via the +/scroll/Max button path.
+        const uiFloor = this.minBinBandwidthForUI();
+        if (newBinBandwidth < uiFloor) {
+            console.log(`Maximum zoom reached (${uiFloor} Hz/bin floor = ${MIN_ZOOM_SPAN_HZ} Hz span)`);
             return;
         }
 

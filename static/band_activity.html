@@ -787,6 +787,23 @@ body {
     line-height: 1;
 }
 
+/* ── SDR front-end status section ── */
+#conditions-bar .cond-frontend {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 10px;
+    border-left: 1px solid #1e1e2e;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: flex-start;
+}
+/* Dark-theme equivalents of the admin monitor's IF power thresholds:
+   ≥ -10 dBFS too hot, -30..-10 good, below -30 weak. */
+.cond-fe-good { color: #81c784; }
+.cond-fe-weak { color: #ffb74d; }
+.cond-fe-hot  { color: #e57373; }
+
 /* ── Local weather section ── */
 #conditions-bar .cond-weather {
     flex: 1 1 0;
@@ -912,6 +929,9 @@ body {
         <div class="cond-right">
             <div class="cond-hardware" id="cond-hardware" style="display:none">
                 <!-- rotator / ant-switch status injected by JS -->
+            </div>
+            <div class="cond-frontend" id="cond-frontend" style="display:none">
+                <!-- SDR front-end status injected by JS -->
             </div>
             <div class="cond-weather" id="cond-weather" style="display:none">
                 <!-- local weather injected by JS -->
@@ -3170,6 +3190,130 @@ let _rotatorEnabled  = false;
 let _antSwitchEnabled = false;
 let _hwTimer = null;   // separate 30 s poll for hardware (changes more often than weather)
 
+// ── Front-end (SDR hardware) status ──────────────────────────────────────────
+// Polled every 5 s from /api/frontend-status.  Nothing renders it yet — the
+// values are just held here, and on window.frontendStatus, ready to be consumed.
+//
+// The object is mutated in place rather than replaced, so anything holding a
+// reference keeps seeing fresh values.  A failed or incomplete poll clears
+// every field back to null, so consumers never read a value we cannot confirm
+// is current — `updated === null` means "no data", and hides the section.
+let _feTimer  = null;
+let _feWarned = false;   // suppress a warning every 5 s if the endpoint is absent
+
+const frontendStatus = {
+    healthy:         null,  // bool  — front end reporting OK
+    if_power:        null,  // dB    — IF power after gain
+    input_power_dbm: null,  // dBm   — power at the antenna input
+    rf_gain:         null,  // dB    — current RF gain
+    updated:         null,  // Date.now() of the last successful poll, null = never
+};
+window.frontendStatus = frontendStatus;
+
+// IF power thresholds, matching the admin monitor's SDR front-end panel.
+function _feIfPowerClass(v) {
+    if (v === null) return '';
+    if (v >= -10) return 'cond-fe-hot';    // close to clipping
+    if (v >= -30) return 'cond-fe-good';
+    return 'cond-fe-weak';                 // plenty of headroom, but weak
+}
+
+function _renderFrontendStatus() {
+    const el = document.getElementById('cond-frontend');
+    if (!el) return;
+    const s = frontendStatus;
+    // updated is only set when the fetch succeeded *and* every required value
+    // parsed, so this covers an unreachable endpoint, a bad response and a
+    // partial one alike — the section is hidden rather than half-populated.
+    if (s.updated === null) { el.style.display = 'none'; return; }
+
+    const fmt = (v, suffix) => v === null ? '--' : v.toFixed(1) + suffix;
+
+    const healthCls = s.healthy ? 'active' : 'grounded';
+    const healthTxt = s.healthy ? 'OK'     : 'FAULT';
+
+    el.innerHTML =
+        `<div class="cond-hw-row">
+            <span class="cond-hw-label">Front end</span>
+            <span class="cond-hw-badge ${healthCls}">${healthTxt}</span>
+         </div>
+         <div class="cond-hw-row" title="IF power after gain — green -30 to -10 dBFS, red above -10 (near clipping), amber below -30 (weak)">
+            <span class="cond-hw-label">IF</span>
+            <span class="cond-hw-value ${_feIfPowerClass(s.if_power)}">${fmt(s.if_power, ' dBFS')}</span>
+         </div>
+         <div class="cond-hw-row" title="Power at the antenna input">
+            <span class="cond-hw-label">Input</span>
+            <span class="cond-hw-value">${fmt(s.input_power_dbm, ' dBm')}</span>
+         </div>
+         <div class="cond-hw-row" title="Current RF gain">
+            <span class="cond-hw-label">RF gain</span>
+            <span class="cond-hw-value">${fmt(s.rf_gain, ' dB')}</span>
+         </div>`;
+
+    el.style.display = '';
+}
+
+const _FE_EMPTY = {
+    healthy: null, if_power: null, input_power_dbm: null, rf_gain: null, updated: null,
+};
+
+async function _refreshFrontendStatus() {
+    let parsed = null;
+    try {
+        const resp = await fetch('/api/frontend-status');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const d = await resp.json();
+        const num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+        const p = {
+            healthy:         typeof d.healthy === 'boolean' ? d.healthy : null,
+            if_power:        num(d.if_power),
+            input_power_dbm: num(d.input_power_dbm),
+            rf_gain:         num(d.rf_gain),
+        };
+        // All four are required.  A partial response is treated exactly like a
+        // failed fetch — better to show nothing than a section that is half
+        // real readings and half dashes.
+        if (Object.values(p).some(v => v === null)) {
+            throw new Error('missing or invalid values in response');
+        }
+        parsed = p;
+    } catch (err) {
+        // Log the first failure only — this polls forever, and a receiver
+        // without the endpoint would otherwise spam the console every 5 s.
+        if (!_feWarned) {
+            _feWarned = true;
+            console.warn('[frontend-status] unavailable:', err);
+        }
+    }
+
+    if (parsed) {
+        Object.assign(frontendStatus, parsed, { updated: Date.now() });
+        _feWarned = false;
+    } else {
+        // Clear rather than keep the last good readings, so the section hides
+        // and nothing downstream consumes values we can no longer confirm.
+        Object.assign(frontendStatus, _FE_EMPTY);
+    }
+
+    // Rendered on failure too, so the section disappears when data stops.
+    _renderFrontendStatus();
+
+    // The bar may have grown/shrunk — keep the body padding and 'fit' layout in step
+    const bar = document.getElementById('conditions-bar');
+    if (bar && bar.style.display !== 'none') {
+        requestAnimationFrame(() => {
+            document.body.style.paddingBottom = bar.offsetHeight + 'px';
+            scheduleLayout();
+        });
+    }
+}
+
+function _startFrontendStatusTimer() {
+    if (_feTimer !== null) return;
+    _refreshFrontendStatus();                              // immediate first fetch
+    _feTimer = setInterval(_refreshFrontendStatus, 5_000); // every 5 s
+}
+
 function _snrStatus(snr) {
     if (snr === null || snr === undefined) return 'unknown';
     if (snr < 6)  return 'poor';
@@ -4008,6 +4152,8 @@ async function init() {
     _startConditionsTimer();
     // Start rotator / ant-switch status poll (refreshes every 5 s)
     _startHardwareTimer();
+    // Start SDR front-end status poll (refreshes every 5 s)
+    _startFrontendStatusTimer();
     // Start voice activity ticker (refreshes every 5 s)
     _startVoiceTickerTimer();
     // Start CW spots SSE stream (if CW skimmer is enabled)

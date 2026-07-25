@@ -179,6 +179,18 @@ body {
     min-width: 0;
 }
 #notif-auth input:focus { outline: none; border-color: #7ec8e3; }
+#notif-ding-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.72em;
+    color: #aaa;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+#notif-ding-label input { cursor: pointer; }
+
 #notif-auth button {
     padding: 3px 9px;
     border-radius: 4px;
@@ -1096,6 +1108,9 @@ body {
         <div id="notif-auth">
             <input type="password" id="notif-password" placeholder="Notification password"
                    autocomplete="off" spellcheck="false">
+            <label id="notif-ding-label" title="Play a sound when an alert arrives">
+                <input type="checkbox" id="notif-ding" checked> Ding
+            </label>
             <button id="btn-notif-connect" type="button">Connect</button>
         </div>
         <div id="notif-auth-msg"></div>
@@ -3449,6 +3464,8 @@ function _startCWSpots() {
 // on every visit.
 
 const _NOTIF_PW_KEY   = 'bandActivity_notifPassword';
+const _NOTIF_DING_KEY = 'bandActivity_notifDing';
+const _NOTIF_DING_GAP = 1000;   // never ding more than once a second in a burst
 const _NOTIF_MAX      = 3;      // alerts stacked at once in the overlay
 const _NOTIF_TTL_MS   = 5000;   // each alert is on screen for 5 seconds
 const _NOTIF_FADE_MS  = 500;    // …the last of which is a fade-out
@@ -3461,6 +3478,8 @@ let _notifLastEvent = 0;        // Date.now() of the last notification/heartbeat
 let _notifHbSec     = 30;       // heartbeat interval reported by the server
 let _notifStaleTid  = null;
 let _notifConnecting = false;
+let _notifAudioCtx  = null;
+let _notifLastDing  = 0;
 
 function _notifGetPassword() {
     try { return localStorage.getItem(_NOTIF_PW_KEY) || ''; } catch (_) { return ''; }
@@ -3474,6 +3493,53 @@ function _notifClearPassword() {
 
 function _notifUrl(pw) {
     return _NOTIF_URL + '?password=' + encodeURIComponent(pw);
+}
+
+// Ding on arrival — on unless it has been explicitly turned off.
+function _notifDingEnabled() {
+    try { return localStorage.getItem(_NOTIF_DING_KEY) !== '0'; } catch (_) { return true; }
+}
+function _notifSetDingEnabled(on) {
+    try { localStorage.setItem(_NOTIF_DING_KEY, on ? '1' : '0'); } catch (_) {}
+}
+
+// A short two-partial bell, synthesised rather than shipped as an audio file.
+// Its own AudioContext, created on first use so the page never opens one it
+// does not need, and kept away from the receiver's audio path.
+function _notifDing() {
+    if (!_notifDingEnabled()) return;
+    const now = Date.now();
+    if (now - _notifLastDing < _NOTIF_DING_GAP) return;   // a burst gets one ding
+    _notifLastDing = now;
+
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!_notifAudioCtx) _notifAudioCtx = new Ctx();
+        const ctx = _notifAudioCtx;
+        // Browsers suspend contexts created before a user gesture; entering the
+        // password is one, so this normally succeeds.
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const t = ctx.currentTime;
+        const out = ctx.createGain();
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+        out.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+        out.connect(ctx.destination);
+
+        [[880, 1.0], [1760, 0.35]].forEach(function(pair) {
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(pair[0], t);
+            const g = ctx.createGain();
+            g.gain.value = pair[1];
+            osc.connect(g);
+            g.connect(out);
+            osc.start(t);
+            osc.stop(t + 0.5);
+        });
+    } catch (_) { /* audio is a nicety — never let it break the feed */ }
 }
 
 // _notifShow reveals or hides the small indicator beside the clocks. The
@@ -3690,7 +3756,10 @@ async function _notifConnect() {
         es.addEventListener('notification', function(e) {
             _notifLastEvent = Date.now();
             _notifSetState('live', 'connected');
-            try { _notifPush(JSON.parse(e.data)); } catch (_) {}
+            try {
+                _notifPush(JSON.parse(e.data));
+                _notifDing();
+            } catch (_) {}
         });
 
         es.addEventListener('heartbeat', function(e) {
@@ -3751,6 +3820,17 @@ function _startNotifications() {
     const keyBtn     = document.getElementById('btn-notif-key');
     const connectBtn = document.getElementById('btn-notif-connect');
     const input      = document.getElementById('notif-password');
+    const dingBox    = document.getElementById('notif-ding');
+
+    // Saved as soon as it is clicked — the box is also opened just to change it,
+    // without ever pressing Connect.
+    if (dingBox) {
+        dingBox.checked = _notifDingEnabled();
+        dingBox.addEventListener('change', function() {
+            _notifSetDingEnabled(dingBox.checked);
+            if (dingBox.checked) _notifDing();   // confirm it audibly
+        });
+    }
 
     if (keyBtn) {
         keyBtn.addEventListener('click', function() {

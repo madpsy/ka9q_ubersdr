@@ -25,6 +25,7 @@ body {
     background: #111118;
     border-bottom: 1px solid #222;
     flex-wrap: wrap;
+    position: relative;   /* anchors the floating notification card */
 }
 
 #topbar h1 {
@@ -68,18 +69,10 @@ body {
 
 #status-row {
     display: flex;
-    align-items: flex-start;  /* the right-hand column grows downwards */
+    align-items: center;
     gap: 6px;
     flex: 1;          /* fill remaining space on the first topbar row */
     min-width: 0;
-}
-
-#status-left {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    min-height: 1.05em;   /* stay on the clock's line as the column below grows */
 }
 
 #status-text {
@@ -88,24 +81,8 @@ body {
     white-space: nowrap;
 }
 
-/* Right-hand column of the first topbar row: clocks, with the notification
-   feed stacked underneath them in what would otherwise be empty space. */
-#topright {
-    margin-left: auto;   /* push the whole column to the far right */
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 5px;
-    min-width: 0;
-}
-
-#clock-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-}
-
 #utc-clock {
+    margin-left: auto;   /* push to far right of the status row */
     font-size: 1.05em;
     font-weight: 700;
     line-height: 1;      /* keep layout height the same as surrounding text */
@@ -125,45 +102,54 @@ body {
     letter-spacing: 0.03em;
 }
 
-/* ── Notification feed (under the clocks) ── */
-#notif-panel {
+/* ── Notification stream ── */
+/* A tiny indicator rides beside the clocks; the alerts themselves float below
+   the topbar so they never change its height or force it to wrap. */
+#notif-badge {
     display: none;            /* revealed only when the stream is reachable */
-    flex-direction: column;
-    gap: 3px;
-    width: 340px;
-    max-width: 46vw;
-}
-
-#notif-head {
-    display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 5px;
-    font-size: 0.72em;
-    color: #777;
+    gap: 4px;
+    flex-shrink: 0;
 }
-#notif-head .notif-dot {
+#notif-badge .notif-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
     background: #444;
     flex-shrink: 0;
     transition: background 0.4s;
 }
-#notif-head .notif-dot.live  { background: #4caf50; box-shadow: 0 0 5px #4caf5088; }
-#notif-head .notif-dot.error { background: #f44336; }
-#notif-head .notif-dot.wait  { background: #ff9800; }
+#notif-badge .notif-dot.live  { background: #4caf50; box-shadow: 0 0 5px #4caf5088; }
+#notif-badge .notif-dot.error { background: #f44336; }
+#notif-badge .notif-dot.wait  { background: #ff9800; }
 
 #btn-notif-key {
     background: none;
     border: 1px solid #2a2a36;
     border-radius: 4px;
     color: #888;
-    font-size: 0.9em;
+    font-size: 0.78em;
     line-height: 1;
-    padding: 2px 5px;
+    padding: 2px 4px;
     cursor: pointer;
 }
 #btn-notif-key:hover { border-color: #555; color: #ccc; }
+
+#notif-panel {
+    display: none;            /* shown only while there is something to show */
+    position: absolute;
+    top: calc(100% + 4px);    /* hangs below the topbar, under the clocks */
+    right: 16px;
+    z-index: 60;
+    flex-direction: column;
+    gap: 3px;
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    padding: 6px;
+    background: rgba(17, 17, 24, 0.97);
+    border: 1px solid #262633;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
 
 #notif-auth {
     display: none;            /* shown when a password is needed */
@@ -178,7 +164,7 @@ body {
     color: #ddd;
     padding: 3px 6px;
     font-size: 0.75em;
-    width: 160px;
+    flex: 1;
     min-width: 0;
 }
 #notif-auth input:focus { outline: none; border-color: #7ec8e3; }
@@ -198,14 +184,15 @@ body {
     display: none;
     font-size: 0.7em;
     color: #e57373;
-    text-align: right;
 }
 
 #notif-list {
     display: flex;
     flex-direction: column;
     gap: 3px;
+    cursor: pointer;
 }
+#notif-list:empty { display: none; }
 
 .notif-item {
     display: flex;
@@ -234,11 +221,6 @@ body {
     line-clamp: 2;
     overflow: hidden;
     word-break: break-word;
-}
-.notif-empty {
-    font-size: 0.71em;
-    color: #555;
-    text-align: right;
 }
 
 @keyframes notifIn {
@@ -744,8 +726,6 @@ body {
 /* ── CW spots grid ── */
 @media (max-width: 767px) {
     #cond-cw-spots { display: none !important; }
-    /* 46vw is unreadably narrow on a phone, where the status row is its own line. */
-    #notif-panel { width: 100%; max-width: none; }
 }
 
 #conditions-bar .cond-cw-spots {
@@ -1034,32 +1014,28 @@ body {
         <span id="receiver-location"></span>
     </div>
     <div id="status-row">
-        <div id="status-left">
-            <div id="status-dot" class="wait"></div>
-            <span id="status-text">Connecting…</span>
+        <div id="status-dot" class="wait"></div>
+        <span id="status-text">Connecting…</span>
+        <span id="utc-clock"></span>
+        <span id="local-clock" style="display:none"></span>
+        <!-- Notification stream indicator — hidden unless the operator has
+             enabled the public notification stream (the endpoint answers 503). -->
+        <span id="notif-badge">
+            <span id="notif-dot" class="notif-dot wait"></span>
+            <button id="btn-notif-key" type="button" title="Notification stream">&#x1F514;</button>
+        </span>
+    </div>
+
+    <!-- Alerts hang below the clocks, out of the topbar's flow so they never
+         resize it or push the band pills down. -->
+    <div id="notif-panel">
+        <div id="notif-auth">
+            <input type="password" id="notif-password" placeholder="Notification password"
+                   autocomplete="off" spellcheck="false">
+            <button id="btn-notif-connect" type="button">Connect</button>
         </div>
-        <div id="topright">
-            <div id="clock-row">
-                <span id="utc-clock"></span>
-                <span id="local-clock" style="display:none"></span>
-            </div>
-            <!-- Notification feed — stays hidden unless the operator has enabled
-                 the public notification stream (the endpoint answers 503 if not). -->
-            <div id="notif-panel">
-                <div id="notif-head">
-                    <span id="notif-dot" class="notif-dot wait"></span>
-                    <span id="notif-status">Notifications</span>
-                    <button id="btn-notif-key" type="button" title="Change the notification password">&#x1F511;</button>
-                </div>
-                <div id="notif-auth">
-                    <input type="password" id="notif-password" placeholder="Notification password"
-                           autocomplete="off" spellcheck="false">
-                    <button id="btn-notif-connect" type="button">Connect</button>
-                </div>
-                <div id="notif-auth-msg"></div>
-                <div id="notif-list"></div>
-            </div>
-        </div>
+        <div id="notif-auth-msg"></div>
+        <div id="notif-list" title="Click to dismiss"></div>
     </div>
     <div id="band-pills"></div>
     <button id="btn-all">All</button>

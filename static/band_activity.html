@@ -3464,7 +3464,6 @@ async function _fetchVoiceActivity() {
 
 let _tickerHadItems = false; // true once we've shown at least one item
 let _tickerLastKey  = '';    // fingerprint of last rendered item list
-let _tickerAnimStart = null; // performance.now() when current animation began
 const _TICKER_PX_PER_S = 60; // scroll speed
 
 function _renderVoiceTicker(data, _precomputed) {
@@ -3548,6 +3547,8 @@ function _renderVoiceTicker(data, _precomputed) {
         el.dataset.band = act.band || '';
         el.dataset.freq = act.estimated_dial_freq || act.center_freq;
         el.dataset.mode = act.mode || '';
+        // Identity across rebuilds, used to re-anchor the scroll position
+        el.dataset.fp   = act._fp || '';
         el.innerHTML =
             (isNew ? `<span class="cond-ticker-new-star">★</span>` : '') +
             `<span class="cond-ticker-band">${_escHtml(band)}</span>` +
@@ -3561,13 +3562,38 @@ function _renderVoiceTicker(data, _precomputed) {
     // Show ticker so layout is computable
     tickerEl.style.display = 'block';
 
-    // Measure single-copy width using a hidden probe element
+    // Where the track actually is right now, read back from the compositor
+    // instead of reconstructed from timestamps.  Exact, and immune to however
+    // long the measuring and rebuilding below takes.
+    let curOffset = 0;
+    try {
+        const t = getComputedStyle(trackEl).transform;
+        if (t && t !== 'none') curOffset = -(new DOMMatrixReadOnly(t).m41);
+    } catch (_) { /* no transform yet — start from 0 */ }
+
+    // Remember the leftmost item still on screen and where it sits, so it can be
+    // pinned back to the same place afterwards.  Items are sorted by frequency,
+    // so a new spot lands *mid-list* and pushes everything after it along;
+    // preserving only the track offset would slide all of that sideways under
+    // the viewport, which is the judder.
+    let anchorFp = null, anchorX = 0;
+    for (const c of trackEl.children) {
+        if (c.offsetLeft + c.offsetWidth > curOffset) {
+            anchorFp = c.dataset.fp || null;
+            anchorX  = c.offsetLeft - curOffset;   // its x within the viewport
+            break;
+        }
+    }
+
+    // Measure single-copy width using a hidden probe element.
+    // getBoundingClientRect is fractional; summing per-child offsetWidth rounded
+    // every item to a whole pixel, and that accumulated error is what stopped
+    // the loop seam from lining up.
     const probe = document.createElement('span');
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;display:inline-flex;';
     for (const act of itemsWithNew) probe.appendChild(makeItem(act));
     tickerEl.appendChild(probe);
-    let singleW = 0;
-    for (let i = 0; i < probe.children.length; i++) singleW += probe.children[i].offsetWidth;
+    const singleW = probe.getBoundingClientRect().width;
     tickerEl.removeChild(probe);
 
     if (singleW < 10) {
@@ -3581,20 +3607,24 @@ function _renderVoiceTicker(data, _precomputed) {
     const viewportW = tickerEl.offsetWidth || 800;
     const copies    = Math.max(2, Math.ceil(viewportW / singleW) + 1);
 
-    // How far through the current cycle are we?  Preserve this so the
-    // animation restarts at the same visual position with no jump.
-    // On first render _tickerAnimStart is null → start from 0.
-    const elapsedMs  = _tickerAnimStart !== null ? (performance.now() - _tickerAnimStart) : 0;
-    const elapsedPx  = (elapsedMs / 1000) * _TICKER_PX_PER_S;
-    const offsetPx   = elapsedPx % singleW;           // position within one cycle
-    const duration   = singleW / _TICKER_PX_PER_S;    // seconds for one full cycle
-    const delayS     = -(offsetPx / _TICKER_PX_PER_S); // negative delay = start mid-cycle
-
     // Rebuild DOM
     trackEl.innerHTML = '';
     for (let c = 0; c < copies; c++) {
         for (const act of itemsWithNew) trackEl.appendChild(makeItem(act));
     }
+
+    // Re-anchor: put the item that was at the left edge back exactly where it
+    // was.  If it has gone from the list, fall back to holding the track offset.
+    let offsetPx = curOffset;
+    if (anchorFp) {
+        for (const c of trackEl.children) {
+            if (c.dataset.fp === anchorFp) { offsetPx = c.offsetLeft - anchorX; break; }
+        }
+    }
+    offsetPx = ((offsetPx % singleW) + singleW) % singleW;   // into [0, singleW)
+
+    const duration = singleW / _TICKER_PX_PER_S;    // seconds for one full cycle
+    const delayS   = -(offsetPx / _TICKER_PX_PER_S); // negative delay = start mid-cycle
 
     // Apply CSS animation.  We set all animation properties via inline style
     // so the keyframe can use --ticker-shift for the translate distance.
@@ -3604,9 +3634,6 @@ function _renderVoiceTicker(data, _precomputed) {
     trackEl.style.animation = 'none';
     trackEl.offsetWidth; // force reflow — do NOT remove this line
     trackEl.style.animation = `ticker-scroll ${duration}s ${delayS}s linear infinite`;
-
-    // Record when this animation cycle effectively started (adjusted for delay)
-    _tickerAnimStart = performance.now() + delayS * 1000;
 }
 
 async function _refreshVoiceTicker() {

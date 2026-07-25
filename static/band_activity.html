@@ -814,7 +814,7 @@ body {
         <label for="layout-select">Layout</label>
         <select id="layout-select">
             <option value="auto">Auto</option>
-            <option value="fit">Fit to window</option>
+            <option value="fit" selected>Fit to window</option>
             <option value="1">1 column</option>
             <option value="2">2 columns</option>
             <option value="3">3 columns</option>
@@ -962,7 +962,7 @@ let sse         = null; // EventSource
 let dbMin       = -130;
 let dbMax       = -60;
 let currentPalette = 'jet'; // active waterfall palette name
-let currentLayout  = 'auto'; // 'auto' | 'fit' | '1'…'6'
+let currentLayout  = 'fit'; // 'auto' | 'fit' | '1'…'6'
 let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
 
 // ── Grid layout ───────────────────────────────────────────────────────────────
@@ -2237,25 +2237,29 @@ class BandPanel {
         // rather than jumping by one row-height each time a new row arrives.
         if (nRows > 1 && this.waterfallTimes.length === nRows) {
             const tickStep = 10; // seconds between ticks
-            const t0 = this.waterfallTimes[nRows - 1]; // newest row timestamp (top of waterfall)
             wfCtx.save();
             wfCtx.font         = '9px monospace';
             wfCtx.textBaseline = 'middle';
             wfCtx.textAlign    = 'left';
 
-            // Build an array of per-row ages (seconds) relative to t0.
-            // rowAge[r] = age of the row at visual position r (0 = top/newest).
+            // Per-row ages in seconds, measured from *now* rather than from the
+            // newest row's timestamp.  This matters: a "10s" tick marks a fixed
+            // age, which belongs at a fixed screen position.  Ages frozen at the
+            // newest row would hold still between arrivals while the scroll
+            // offset below kept moving, so the tick sawtoothed by one row height
+            // on every update.  Measuring from now makes the age term drift up
+            // at exactly the rate the offset drifts down, and they cancel.
+            const tNow = Date.now();
             const rowAge = new Float64Array(nRows);
             for (let r = 0; r < nRows; r++) {
-                rowAge[r] = (t0 - this.waterfallTimes[nRows - 1 - r]) / 1000;
+                rowAge[r] = (tNow - this.waterfallTimes[nRows - 1 - r]) / 1000;
             }
-            // rowAge[0] ≈ 0 (newest), rowAge[nRows-1] = oldest
+            // rowAge[0] = age of newest row, rowAge[nRows-1] = oldest
 
             // For each tick boundary, interpolate the exact Y pixel between the two
-            // adjacent rows that straddle it.  This gives sub-pixel accuracy so the
-            // tick glides smoothly as the waterfall scrolls.  Row height and the
-            // scroll offset must match the blit above, or the ticks drift against
-            // the rows they label.
+            // adjacent rows that straddle it.  Row height and the scroll offset
+            // must match the blit above, or the ticks drift against the rows they
+            // label.
             let nextTick = tickStep;
             for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
                 if (rowAge[r] >= nextTick) {

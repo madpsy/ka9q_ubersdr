@@ -1044,6 +1044,12 @@ let _paletteVersion = 0;
 // palettes is near-black though, which would make the trace vanish against the
 // panel background — so dark entries are lifted toward white, preserving hue
 // while keeping the noise floor legible.
+// Bounds on the measured inter-arrival gap.  The server ticker is
+// background_poll_period_ms, itself clamped to 100–2000 ms, so anything outside
+// this range is a stall or a scheduling artefact rather than the real rate.
+const ROW_PERIOD_MIN = 60;
+const ROW_PERIOD_MAX = 4000;
+
 const TRACE_MIN_BRIGHT = 105;
 function _traceColor(idx, alpha) {
     const v = CMAP[Math.max(0, Math.min(255, idx))];
@@ -1392,12 +1398,13 @@ class BandPanel {
         // render every frame and interpolate between the last two data frames,
         // so the trace glides and the waterfall scrolls continuously instead of
         // snapping once per arrival.
-        this._newData    = false;  // a data frame arrived since the last commit
         this._prevVals   = null;   // Float32Array(n) — dBFS at previous arrival
         this._curVals    = null;   // Float32Array(n) — dBFS at latest arrival
         this._lerpVals   = null;   // Float32Array(n) — scratch for interpolation
         this._lastRowTime = 0;     // timestamp of latest arrival
-        this._rowPeriod  = 250;    // EMA of inter-arrival gap (ms)
+        this._rowPeriod  = 250;    // robust estimate of inter-arrival gap (ms)
+        this._rowPeriodSeeded = false;
+        this._rowOutliers = 0;     // consecutive gaps rejected as implausible
         this._statP5     = null;   // cached stats — recomputed only on arrival
         this._statPeak   = null;
 
@@ -1916,21 +1923,18 @@ class BandPanel {
             return;
         }
 
-        // Flag arrival only — the row is committed by the render loop.  Pushing
-        // it here (or from _draw, as it used to be) would add a waterfall row
-        // for every redraw, so zooming or switching palette injected duplicates.
-        this._newData = true;
-        this.dirty    = true;
+        // Commit here, on the arrival itself, rather than from the render loop.
+        // Deferring to rAF meant a boolean "new data" flag: if two frames landed
+        // between two animation frames the first was silently coalesced away, so
+        // the measured inter-arrival gap doubled and the interpolation clock
+        // drifted off the real data rate.  Committing on arrival makes the two
+        // rates independent — a slow frame can drop a *render*, never a sample.
+        this._commitFrame();
+        this.dirty = true;
     }
 
     _startRenderLoop() {
         const loop = () => {
-            // Commit at most one waterfall row per arrival.
-            if (this._newData) {
-                this._commitFrame();
-                this._newData = false;
-                this.dirty    = true;
-            }
             // Re-colour the cached waterfall if the palette changed.
             if (this._wfPaletteVersion !== _paletteVersion) {
                 this._wfPaletteVersion = _paletteVersion;
@@ -2039,26 +2043,64 @@ class BandPanel {
         if (!bins) return;
         const n = bins.length;
 
-        // Roll current → previous so the renderer can interpolate between them.
+        // ── Roll current → previous ──────────────────────────────────────────
+        // The new baseline is where the trace *actually is right now*, not the
+        // previous frame's target.  Those differ whenever the gap came in
+        // shorter than the estimate: the blend is still short of 1, so resetting
+        // the baseline to the old target teleports the trace forward by the
+        // remainder.  Under ordinary jitter that happens on most frames, which
+        // is what made every band appear to bounce.  Continuing from the
+        // displayed value makes the trace continuous by construction — a wrong
+        // period estimate can then only make it lag, never jump.
         if (!this._curVals || this._curVals.length !== n) {
             this._prevVals = new Float32Array(n);
             this._curVals  = new Float32Array(n);
             this._lerpVals = new Float32Array(n);
             for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
-        }
-        this._prevVals.set(this._curVals);
-        for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
-
-        // Inter-arrival period — measured rather than assumed, so it tracks the
-        // server's configured poll period and rides out network jitter.
-        const now = Date.now();
-        if (this._lastRowTime) {
-            const dt = now - this._lastRowTime;
-            if (dt > 20 && dt < 10000) {
-                this._rowPeriod = this._rowPeriod * 0.8 + dt * 0.2;
+            this._prevVals.set(this._curVals);
+        } else {
+            // Uses the old _lastRowTime — must run before the timing block below.
+            const held = this._ease(this._interpFrac());
+            if (held >= 1) {
+                this._prevVals.set(this._curVals);
+            } else {
+                const prev = this._prevVals, cur = this._curVals;
+                for (let i = 0; i < n; i++) prev[i] += (cur[i] - prev[i]) * held;
             }
         }
+        for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
+
+        // ── Inter-arrival period ─────────────────────────────────────────────
+        // This is the interpolation clock, so a wrong value shows up as *level*
+        // error: too long and the trace never finishes travelling to the real
+        // value before the next frame resets its baseline, which reads as every
+        // band bouncing.  So only plausible gaps update it.  A gap far from the
+        // running estimate is a stall, a scheduling hiccup or a throttled tab —
+        // folding those in is what poisoned the old EMA.
+        const now = Date.now();
+        const gap = this._lastRowTime ? (now - this._lastRowTime) : null;
         this._lastRowTime = now;
+
+        if (gap !== null && gap >= ROW_PERIOD_MIN && gap <= ROW_PERIOD_MAX) {
+            if (!this._rowPeriodSeeded) {
+                this._rowPeriod = gap;          // first real measurement
+                this._rowPeriodSeeded = true;
+                this._rowOutliers = 0;
+            } else if (gap >= this._rowPeriod * 0.6 && gap <= this._rowPeriod * 1.7) {
+                this._rowPeriod += (gap - this._rowPeriod) * 0.2;
+                this._rowOutliers = 0;
+            } else if (++this._rowOutliers >= 4) {
+                // Persistently outside the window — the real rate has changed
+                // (server reconfigured, or we settled on a wrong value), so
+                // re-seed instead of rejecting for ever.
+                this._rowPeriod = gap;
+                this._rowOutliers = 0;
+            }
+        }
+        this._rowPeriod = Math.max(ROW_PERIOD_MIN, Math.min(ROW_PERIOD_MAX, this._rowPeriod));
+
+        // (No explicit catch-up after a stall is needed: a long gap drives the
+        // blend above to 1, so the baseline already equals the last frame.)
 
         // Stats over the full band, written straight to the DOM — once per
         // arrival, so the render loop never touches layout.
@@ -2162,22 +2204,37 @@ class BandPanel {
     }
 
     // Repaint every stored row into the ring buffer (newest at head).
+    // Composed as one full-height ImageData and blitted once — this runs on
+    // every auto-range step, and doing it as maxRows separate putImageData
+    // calls made for a long frame at exactly the wrong moment.
     _paintWfHistory() {
+        if (!this._wfOff) return;
+        const n    = this._wfOff.width;
         const rows = this.waterfallRows;
-        this._wfHead = 0;
-        for (let r = rows.length - 1; r >= 0; r--) {
-            const y = (rows.length - 1 - r) % this.maxRows;
-            this._writeWfRow(rows[r], y);
+        const img  = this._wfOffCtx.createImageData(n, this.maxRows);
+        const buf  = new Uint32Array(img.data.buffer);
+        buf.fill(0xFF000000);          // opaque black for rows we have no data for
+
+        const lo    = this.dbLo;
+        const range = (this.dbHi - lo) || 1;
+        for (let r = rows.length - 1, y = 0; r >= 0 && y < this.maxRows; r--, y++) {
+            const src = rows[r];
+            if (src.length !== n) continue;   // row from a previous bin count
+            const base = y * n;
+            for (let i = 0; i < n; i++) {
+                const norm = (src[i] - lo) / range;
+                buf[base + i] = CMAP[norm <= 0 ? 0 : norm >= 1 ? 255 : Math.round(norm * 255)];
+            }
         }
+        this._wfOffCtx.putImageData(img, 0, 0);
+        this._wfHead = 0;
     }
 
-    // Palette changed — re-colour the cache from stored row values.
+    // Palette or dB range changed — re-colour the cache from stored raw rows.
     _rebuildWfCache() {
-        if (!this._wfOff || !this.waterfallRows.length) return;
-        this._wfOffCtx.fillStyle = '#000';
-        this._wfOffCtx.fillRect(0, 0, this._wfOff.width, this.maxRows);
-        this._paintWfHistory();
-        this._wfInterKey = '';   // colours changed under the same head
+        if (!this._wfOff) return;
+        this._paintWfHistory();          // repaints the full bitmap, blanks included
+        this._wfInterKey = '';           // colours changed under the same head
     }
 
     // ── Palette-matched trace gradients ──────────────────────────────────────

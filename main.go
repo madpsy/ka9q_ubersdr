@@ -2047,6 +2047,7 @@ func main() {
 		for range ticker.C {
 			connRateLimiter.Cleanup()
 			connectionEndpointRateLimiter.Cleanup()
+			sessions.sessionCreateLimiter.Cleanup()
 			aggregateRateLimiter.Cleanup()
 			fftRateLimiter.Cleanup()
 			spaceWeatherRateLimiter.Cleanup()

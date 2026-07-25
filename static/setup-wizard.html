@@ -579,6 +579,37 @@
                 </div>
 
                 <div class="form-group" style="margin-top: 25px;">
+                    <label>Spectrum Settings</label>
+                    <div class="help-text" style="margin-bottom: 10px;">Resolution and update rate of the spectrum display and waterfall (applies to all users)</div>
+
+                    <div style="padding: 12px 16px; background: #e8f4fd; border: 1px solid #90caf9; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #1565c0; line-height: 1.6;">
+                        ℹ️ Higher resolution and faster updates use more CPU and bandwidth on both the server and every connected client.
+                        <strong>Medium is recommended for both.</strong>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="spectrumBinCount">Resolution</label>
+                            <select id="spectrumBinCount" name="spectrumBinCount">
+                                <option value="512">Low (512 bins)</option>
+                                <option value="1024" selected>Medium (1024 bins)</option>
+                                <option value="2048">High (2048 bins)</option>
+                            </select>
+                            <div class="help-text">Number of FFT bins across the full 0–30 MHz view</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="spectrumPollPeriod">Update Rate</label>
+                            <select id="spectrumPollPeriod" name="spectrumPollPeriod">
+                                <option value="200">Slow (5 updates/sec)</option>
+                                <option value="100" selected>Medium (10 updates/sec)</option>
+                                <option value="50">Fast (20 updates/sec)</option>
+                            </select>
+                            <div class="help-text">How often the spectrum and waterfall refresh</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 25px;">
                     <label>Admin Restrictions</label>
                     <div class="help-text" style="margin-bottom: 10px;">Control which IP addresses can access the admin interface</div>
                     <div id="currentIPDisplay" style="padding: 10px; background: #e3f2fd; border: 1px solid #2196f3; border-radius: 6px; margin-bottom: 10px; display: none;">

@@ -601,6 +601,13 @@
                     setFieldValue('maxSessionsIP', config.server.max_sessions_ip);
                 }
 
+                // Pre-fill spectrum fields — snap to the nearest offered option so a
+                // hand-edited config.yaml still shows a sensible selection
+                if (config.spectrum) {
+                    setNearestOption('spectrumBinCount', config.spectrum.bin_count);
+                    setNearestOption('spectrumPollPeriod', config.spectrum.poll_period_ms);
+                }
+
                 // Pre-fill admin IP restriction
                 if (config.admin && config.admin.allowed_ips) {
                     const allowedIPs = config.admin.allowed_ips;
@@ -743,6 +750,11 @@
                     max_session_time: parseInt(formData.maxSessionTime),
                     max_sessions: parseInt(formData.maxSessions),
                     max_sessions_ip: parseInt(formData.maxSessionsIP)
+                },
+                spectrum: {
+                    ...existingConfig.spectrum,
+                    bin_count: parseInt(formData.spectrumBinCount) || 1024,
+                    poll_period_ms: parseInt(formData.spectrumPollPeriod) || 100
                 },
                 instance_reporting: {
                     ...existingConfig.instance_reporting,
@@ -1314,6 +1326,28 @@
         const field = document.getElementById(fieldId);
         if (field && value !== undefined && value !== null) {
             field.value = value;
+        }
+    }
+
+    // Selects the option whose numeric value is closest to the supplied value.
+    // Leaves the HTML default in place if the value is missing or not a number.
+    function setNearestOption(fieldId, value) {
+        const field = document.getElementById(fieldId);
+        if (!field || value === undefined || value === null) return;
+        const target = parseFloat(value);
+        if (isNaN(target)) return;
+
+        let best = null;
+        let bestDiff = Infinity;
+        for (const option of field.options) {
+            const diff = Math.abs(parseFloat(option.value) - target);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = option.value;
+            }
+        }
+        if (best !== null) {
+            field.value = best;
         }
     }
 

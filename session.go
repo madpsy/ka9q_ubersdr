@@ -230,6 +230,10 @@ type SessionManager struct {
 	dxClusterWsHandler interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
 	dailyTracker       *IPDailyTimeTracker    // Rolling 24-hour per-IP time budget tracker
 
+	// sessionCreateLimiter throttles session creation churn per UUID (reconnect loops).
+	// May be nil in tests that build a SessionManager literal; its methods tolerate that.
+	sessionCreateLimiter *SessionCreateRateLimiter
+
 	// Session event callbacks — called when a user connects or disconnects.
 	// Only fires for real user sessions (non-internal, non-background).
 	sessionEventHandlers []func(UserSessionEvent)
@@ -294,6 +298,7 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 		prometheusMetrics:    nil,           // Will be set later if Prometheus is enabled
 		geoIPService:         geoIPService,  // GeoIP service for country lookups
 		dailyTracker:         NewIPDailyTimeTracker(),
+		sessionCreateLimiter: NewSessionCreateRateLimiter(config.Server.SessionCreateRateLimit, config.Server.SessionCreateBurst),
 	}
 
 	// Start cleanup goroutine
@@ -339,6 +344,32 @@ func translateModeForRadiod(mode string) string {
 	return mode
 }
 
+// checkSessionCreateRate applies the per-user session creation rate limit for the
+// given channel kind ("audio" or "spectrum"). Internal sessions (no client IP,
+// e.g. noise floor and decoders) and bypassed users are exempt.
+//
+// This catches reconnect loops that every other limit misses: conn_rate_limit is
+// per-second so a slow loop slips under it, and the max_sessions* limits only count
+// concurrent users, which a create/destroy cycle never exceeds.
+func (sm *SessionManager) checkSessionCreateRate(kind, userSessionID, clientIP, password string) error {
+	if clientIP == "" || sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
+		return nil
+	}
+
+	allowed, shouldLog, violations := sm.sessionCreateLimiter.Allow(kind, userSessionID, clientIP)
+	if allowed {
+		return nil
+	}
+
+	if shouldLog {
+		log.Printf("Session creation rate limit exceeded: %s session for UUID %s from IP %s (%d rejected attempts; limit %d/min, burst %d)",
+			kind, userSessionID, clientIP, violations,
+			sm.config.Server.SessionCreateRateLimit, sm.config.Server.SessionCreateBurst)
+	}
+
+	return fmt.Errorf("too many session attempts; please wait a moment before reconnecting")
+}
+
 // CreateSession creates a new session with a unique channel (default bandwidth)
 func (sm *SessionManager) CreateSession(frequency uint64, mode string) (*Session, error) {
 	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, "", "", "") // Default 3000 Hz bandwidth
@@ -369,6 +400,11 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		if _, exists := sm.userSessionFirst[userSessionID]; !exists {
 			sm.userSessionFirst[userSessionID] = time.Now()
 		}
+	}
+
+	// Throttle session creation churn (reconnect loops) before doing any work
+	if err := sm.checkSessionCreateRate("audio", userSessionID, clientIP, password); err != nil {
+		return nil, err
 	}
 
 	// Check total radiod channel cap. radiod supports a maximum of maxRadiodChannels
@@ -686,6 +722,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		if _, exists := sm.userSessionFirst[userSessionID]; !exists {
 			sm.userSessionFirst[userSessionID] = time.Now()
 		}
+	}
+
+	// Throttle session creation churn (reconnect loops) before doing any work
+	if err := sm.checkSessionCreateRate("spectrum", userSessionID, clientIP, password); err != nil {
+		return nil, err
 	}
 
 	// Check session limit based on unique user_session_ids

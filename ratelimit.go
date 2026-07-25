@@ -567,6 +567,123 @@ func (crl *ConnectionRateLimiter) GetStats() int {
 	return len(crl.limiters)
 }
 
+// SessionCreateRateLimiter throttles how often new radio sessions may be created.
+// It is keyed by user_session_id UUID, falling back to the client IP when no UUID
+// is supplied, and catches reconnect loops that the per-second connection limiter
+// is too coarse to see (e.g. a client that reconnects every few seconds forever,
+// tearing down and re-creating a radiod channel each time).
+//
+// Audio and spectrum creations draw from separate buckets: a normal page load
+// creates one of each, so a shared bucket would halve the reconnect budget a
+// legitimate user gets.
+//
+// The underlying token bucket refills continuously, which gives sliding-window
+// behaviour — there is no fixed minute boundary to game — with the burst as the
+// bucket capacity.
+type SessionCreateRateLimiter struct {
+	limiters      map[string]*sessionCreateEntry
+	mu            sync.Mutex
+	ratePerMinute float64
+	burst         float64
+}
+
+// sessionCreateEntry pairs a token bucket with violation bookkeeping, so a client
+// hammering the server cannot flood the log with one line per rejected attempt.
+type sessionCreateEntry struct {
+	limiter    *RateLimiter
+	violations int
+	lastLogged time.Time
+}
+
+// NewSessionCreateRateLimiter creates a session creation rate limiter allowing
+// ratePerMinute new sessions per minute per user, with up to burst back-to-back
+// creations. A ratePerMinute of 0 or less disables the limiter (always allows).
+func NewSessionCreateRateLimiter(ratePerMinute, burst int) *SessionCreateRateLimiter {
+	if burst < 1 {
+		burst = 1
+	}
+	return &SessionCreateRateLimiter{
+		limiters:      make(map[string]*sessionCreateEntry),
+		ratePerMinute: float64(ratePerMinute),
+		burst:         float64(burst),
+	}
+}
+
+// Allow reports whether a session of the given kind ("audio" or "spectrum") may be
+// created for uuid, or for clientIP when uuid is empty.
+//
+// shouldLog is true the first time a key is rejected and at most once a minute
+// after that, so callers can log rejections without handing an abusive client a
+// log-flooding primitive. violations is the running rejection count for that key.
+func (scrl *SessionCreateRateLimiter) Allow(kind, uuid, clientIP string) (allowed bool, shouldLog bool, violations int) {
+	if scrl == nil || scrl.ratePerMinute <= 0 {
+		return true, false, 0
+	}
+
+	key := kind + "|" + uuid
+	if uuid == "" {
+		key = kind + "|ip:" + clientIP
+	}
+
+	scrl.mu.Lock()
+	defer scrl.mu.Unlock()
+
+	entry, exists := scrl.limiters[key]
+	if !exists {
+		entry = &sessionCreateEntry{
+			limiter: &RateLimiter{
+				tokens:     scrl.burst,
+				maxTokens:  scrl.burst,
+				refillRate: scrl.ratePerMinute / 60.0, // convert per-minute to per-second
+				lastRefill: time.Now(),
+			},
+		}
+		scrl.limiters[key] = entry
+	}
+
+	if entry.limiter.Allow() {
+		return true, false, entry.violations
+	}
+
+	entry.violations++
+	now := time.Now()
+	if entry.violations == 1 || now.Sub(entry.lastLogged) >= time.Minute {
+		entry.lastLogged = now
+		return false, true, entry.violations
+	}
+	return false, false, entry.violations
+}
+
+// Cleanup removes buckets that have not been used in the last 10 minutes.
+func (scrl *SessionCreateRateLimiter) Cleanup() {
+	if scrl == nil {
+		return
+	}
+
+	scrl.mu.Lock()
+	defer scrl.mu.Unlock()
+
+	now := time.Now()
+	for key, entry := range scrl.limiters {
+		entry.limiter.mu.Lock()
+		if now.Sub(entry.limiter.lastRefill) > 10*time.Minute {
+			delete(scrl.limiters, key)
+		}
+		entry.limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked buckets.
+func (scrl *SessionCreateRateLimiter) GetStats() int {
+	if scrl == nil {
+		return 0
+	}
+
+	scrl.mu.Lock()
+	defer scrl.mu.Unlock()
+	return len(scrl.limiters)
+}
+
 // RotctlRateLimiter manages rate limiters for rotctl endpoint requests per IP
 // Different endpoints have different rate limits:
 // - Status endpoint: 5 requests per second

@@ -259,6 +259,23 @@ server:
   # Set to 0 to disable rate limiting
   # Recommended: 10 (allows normal usage while preventing abuse)
   sessions_per_minute: 10
+  # Session creation rate limit per user (new sessions per minute)
+  # Keyed by user_session_id UUID (falling back to IP when no UUID is supplied) and
+  # applied separately to audio and spectrum sessions, so a page load - which creates
+  # one of each - spends one allowance from each rather than two from a shared pool.
+  # This catches slow reconnect loops that conn_rate_limit is too coarse to see: a
+  # client reconnecting every few seconds stays under a per-second limit forever while
+  # tearing down and re-creating a radiod channel each time. max_sessions/max_sessions_ip
+  # do not catch it either, as they count concurrent users, not churn.
+  # Uses a continuously-refilling token bucket, so the window slides - there is no
+  # fixed minute boundary to game.
+  # IPs in timeout_bypass_ips and users with a valid bypass_password are exempt.
+  # Set to a negative value to disable.
+  session_create_rate_limit: 6
+  # How many sessions may be created back-to-back before the per-minute rate applies.
+  # Covers legitimate bursts such as a few rapid page refreshes.
+  # Minimum 1.
+  session_create_burst: 3
 
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users

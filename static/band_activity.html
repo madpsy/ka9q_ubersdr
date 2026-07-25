@@ -260,11 +260,26 @@ body {
     padding: 10px;
 }
 
-/* Explicit column count (Fit / 1-6).  minmax(0,1fr) lets tracks shrink below
-   their content width so N columns always fit exactly, however wide the cards
-   would prefer to be. */
+/* Explicit column count (Fit / 1-6) uses flexbox rather than grid.  Grid places
+   items into fixed tracks, so a partial last row is stuck against the left edge
+   with a gap on the right and no per-row alignment to fix it.  Flexbox has no
+   tracks: it fills a line, wraps, and justify-content aligns each line on its
+   own — full lines exactly fill the width so centring is a no-op for them, and
+   only the short last line moves. */
 #grid.grid-fixed {
-    grid-template-columns: repeat(var(--grid-cols, 3), minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+/* A percentage flex-basis resolves against the container's content box, which
+   is the same width applyLayout() solves against — so the browser does the
+   division and there is no rounding drift that could wrap a card early. */
+#grid.grid-fixed .band-panel {
+    flex: 0 0 calc((100% - (var(--grid-cols, 3) - 1) * var(--grid-gap)) / var(--grid-cols, 3));
+    /* The flex equivalent of grid's minmax(0, 1fr): without it a flex item's
+       automatic minimum size is content-based, and a wide band header could
+       push a card past its basis and wrap a column early. */
+    min-width: 0;
 }
 
 /* ── Individual band panel ── */

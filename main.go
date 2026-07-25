@@ -2914,6 +2914,9 @@ func main() {
 	http.HandleFunc("/admin/notifications/schema", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsSchema(w, r)
 	}))
+	http.HandleFunc("/admin/notifications/sse/generate-password", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsSSEPassword(w, r)
+	}))
 	http.HandleFunc("/admin/notifications/telegram-updates", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleTelegramGetUpdates(w, r)
 	}))
@@ -3025,6 +3028,11 @@ func main() {
 	http.HandleFunc("/api/dxcluster/stream", HandlePublicDXClusterStream(dxClusterSSEHub, dxClusterSSELimiter, &config.Server))
 	http.HandleFunc("/api/dxcluster/inject", HandleDXSpotInject(dxCluster, &config.DXCluster, &config.Server))
 	http.HandleFunc("/api/noisefloor/spectrum/stream", HandleNoiseFloorSpectrumStream(noiseFloorMonitor, config, noiseFloorSpectrumSSELimiter, &config.Server))
+
+	// Public notification stream (SSE). Password-protected; returns 503 until the
+	// "sse_stream" notification channel is enabled in the admin UI.
+	notificationSSELimiter := NewSSEIPLimiter(2)
+	http.HandleFunc(sseStreamPath, HandleNotificationStream(notificationSSE, notificationSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin auth, or a host listed in admin.widget_trusted_hosts)
 	if len(config.Admin.WidgetTrustedHosts) > 0 {

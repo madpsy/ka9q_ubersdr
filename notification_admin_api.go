@@ -315,6 +315,28 @@ func handleNotificationsChannelLog(w http.ResponseWriter, r *http.Request, nm *N
 	json.NewEncoder(w).Encode(map[string]interface{}{"channel": name, "log": entries}) //nolint:errcheck
 }
 
+// handleNotificationsSSEPassword returns a freshly generated password that
+// satisfies the public SSE stream's password policy. It only generates a
+// candidate — nothing is stored until the admin saves the config.
+//
+// GET /admin/notifications/sse/generate-password
+func handleNotificationsSSEPassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	pw, err := generateSSEPassword()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"password":     pw,
+		"channel_name": sseChannelName,
+		"path":         sseStreamPath,
+	})
+}
+
 // handleNotificationsConfig handles GET and PUT for the notification config.
 //
 // GET /admin/notifications/config
@@ -398,6 +420,12 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		GalacticUnicornSoundsEnabled      bool    `json:"galactic_unicorn_sounds_enabled,omitempty"`
 		GalacticUnicornSound              string  `json:"galactic_unicorn_sound,omitempty"`
 		GalacticUnicornSoundVolume        float64 `json:"galactic_unicorn_sound_volume,omitempty"`
+		// Public SSE stream — the password is never returned, only whether it is
+		// set. SSEConnectedClients is live runtime state, not configuration.
+		SSEPasswordSet      bool `json:"sse_password_set,omitempty"`
+		SSEHeartbeatSeconds int  `json:"sse_heartbeat_seconds,omitempty"`
+		SSEMaxClients       int  `json:"sse_max_clients,omitempty"`
+		SSEConnectedClients int  `json:"sse_connected_clients"`
 	}
 	channels := make(map[string]redactedChannel, len(cfg.Channels))
 	for name, ch := range cfg.Channels {
@@ -445,6 +473,10 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			GalacticUnicornSoundsEnabled:      ch.GalacticUnicornSoundsEnabled,
 			GalacticUnicornSound:              ch.GalacticUnicornSound,
 			GalacticUnicornSoundVolume:        ch.GalacticUnicornSoundVolume,
+			SSEPasswordSet:                    ch.SSEPassword != "",
+			SSEHeartbeatSeconds:               ch.SSEHeartbeatSeconds,
+			SSEMaxClients:                     ch.SSEMaxClients,
+			SSEConnectedClients:               sseConnectedClients(ch.Type),
 		}
 	}
 
@@ -525,6 +557,9 @@ func handleNotificationsConfigPut(w http.ResponseWriter, r *http.Request, nm *No
 			}
 			if ch.WebhookSecret == "********" {
 				ch.WebhookSecret = existing.WebhookSecret
+			}
+			if ch.SSEPassword == "********" {
+				ch.SSEPassword = existing.SSEPassword
 			}
 			newCfg.Channels[name] = ch
 		}
@@ -667,6 +702,21 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "galactic_unicorn_insecure_skip_verify", Type: "bool", Required: false, Description: "Skip TLS certificate verification. Only for self-signed certs on private LANs.", Example: "false"},
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
 				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
+			},
+		},
+		{
+			Type: "sse",
+			Description: "Public notification stream (Server-Sent Events) at GET " + sseStreamPath +
+				"?password=<password>. Built-in and unique: there is exactly one, it must be named \"" + sseChannelName +
+				"\", and it is active only while a password is set. Anyone holding the password can subscribe from a browser " +
+				"(EventSource) or with curl; a heartbeat event keeps the connection alive and proves the feed is still live. " +
+				"Nothing is replayed on connect — a subscriber receives alerts from the moment it connects.",
+			Fields: []channelField{
+				{Name: "sse_password", Type: "string", Required: true, Description: "Subscriber password. At least 12 alphanumeric characters, must contain both letters and digits, and may only use letters, digits and - . _ ~ so it can be passed in a URL query string. Sent as ?password=… or 'Authorization: Bearer <password>'.", Example: "k7Rq2mVx9pLd4Tn6"},
+				{Name: "sse_heartbeat_seconds", Type: "int", Required: false, Description: "Interval between heartbeat events on an idle connection. Range: 5–300. Default: 30.", Example: "30"},
+				{Name: "sse_max_clients", Type: "int", Required: false, Description: "Maximum concurrent subscribers. Range: 1–1000. Default: 10.", Example: "10"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
+				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages published to the stream per minute (sliding window). 0 = unlimited (no cap).", Example: "60"},
 			},
 		},
 	}

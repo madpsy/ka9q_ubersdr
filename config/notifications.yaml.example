@@ -81,6 +81,43 @@ channels:
   #   subject_prefix: "[UberSDR]"  # default: [UberSDR]
   #   rate_limit_minutes: 10
 
+  # ── Public SSE stream ────────────────────────────────────────────────────────
+  # A built-in, password-protected Server-Sent Events endpoint that anyone can
+  # subscribe to. Unlike the other channel types there is exactly ONE of these:
+  # it must be named "sse_stream", and it exists only while it is enabled.
+  # The admin UI (Notifications → Channels) manages it, including generating a
+  # password — you rarely need to write this block by hand.
+  #
+  # Subscribe with:
+  #   curl -N "https://your-sdr/api/notifications/stream?password=<password>"
+  #   curl -N -H "Authorization: Bearer <password>" https://your-sdr/api/notifications/stream
+  #   new EventSource("/api/notifications/stream?password=<password>")   // browser
+  #
+  # Prefer the Authorization header where you can — a query string ends up in
+  # access logs, proxy logs and browser history. Browsers cannot set headers on
+  # EventSource, which is why the query parameter exists.
+  #
+  # Events delivered:
+  #   event: notification   data: {"id","channel","event","rule","message","timestamp"}
+  #   event: heartbeat      data: {"channel","timestamp","last_message","dropped","sent"}
+  #   event: closed         data: {"reason"}   (stream disabled or password rotated)
+  #
+  # Nothing is replayed on connect — a subscriber receives alerts from the moment
+  # it connects, not a backlog of ones it missed.
+  #
+  # sse_stream:
+  #   type: sse
+  #   sse_password: "k7Rq2mVx9pLd4Tn6"  # REQUIRED. At least 12 alphanumeric characters,
+  #                                     # must mix letters and digits, and may only use
+  #                                     # letters, digits and - . _ ~ (it travels in a URL).
+  #                                     # Changing it disconnects existing subscribers.
+  #   sse_heartbeat_seconds: 30         # heartbeat interval on an idle connection (5–300)
+  #                                     # alerts are rare, so this is how a subscriber
+  #                                     # tells "quiet" from "connection died"
+  #   sse_max_clients: 10               # maximum concurrent subscribers (1–1000)
+  #   rate_limit_minutes: 0
+  #   max_per_minute: 60
+
 # ── Rules ─────────────────────────────────────────────────────────────────────
 # Rules are evaluated in order. All matching rules fire (no break-on-first-match).
 # Omitting a filter field means "match anything" for that field.

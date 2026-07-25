@@ -566,12 +566,16 @@ func (m *NotificationManager) buildChannels() error {
 			ch = NewWebhookChannel(name, chCfg)
 		case "galactic_unicorn":
 			ch = NewGalacticUnicornChannel(name, chCfg)
+		case "sse":
+			ch = NewSSEChannel(name, chCfg)
 		default:
 			return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 		}
 		m.channels[name] = ch
 		log.Printf("[Notifications] Channel %q (%s) registered", name, chCfg.Type)
 	}
+	// Deactivate the public SSE stream if the config no longer contains it.
+	syncSSEStream(m.cfg)
 	// Initialise per-channel throughput limiters from the current config.
 	m.syncThroughputLimiters(m.cfg)
 	return nil
@@ -736,6 +740,8 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 				ch = NewWebhookChannel(name, chCfg)
 			case "galactic_unicorn":
 				ch = NewGalacticUnicornChannel(name, chCfg)
+			case "sse":
+				ch = NewSSEChannel(name, chCfg)
 			default:
 				return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 			}
@@ -750,6 +756,10 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 			return err
 		}
 	}
+
+	// Deactivate the public SSE stream if it is no longer in the config. When it
+	// is still present NewSSEChannel above has already applied the new settings.
+	syncSSEStream(newCfg)
 
 	// Recompute the runtime guardrail block-list for the new rule set.
 	newBlocked := computeBlockedRules(newCfg)

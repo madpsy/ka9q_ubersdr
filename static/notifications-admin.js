@@ -1,6 +1,17 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS — public SSE stream
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// The public SSE stream is a single built-in channel, not one the operator adds:
+// there is one server and one endpoint, so it always uses this fixed name and is
+// managed from its own panel on the Channels tab rather than the generic form.
+const SSE_CHANNEL_NAME = 'sse_stream';
+const SSE_STREAM_PATH  = '/api/notifications/stream';
+const SSE_DEFAULTS = { heartbeat: 30, max_clients: 10, max_per_minute: 60 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — filter field definitions per event type
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -602,6 +613,14 @@ async function loadConfig() {
                 galactic_unicorn_sounds_enabled:     !!ch.galactic_unicorn_sounds_enabled,
                 galactic_unicorn_sound:              ch.galactic_unicorn_sound              || '',
                 galactic_unicorn_sound_volume:       ch.galactic_unicorn_sound_volume       || 0,
+                // Public SSE stream — password is never returned by the server;
+                // only sse_password_set is. sse_connected_clients is live state.
+                sse_password:            (existing && existing.sse_password && existing.sse_password !== '********')
+                                             ? existing.sse_password
+                                             : (ch.sse_password_set ? '********' : ''),
+                sse_heartbeat_seconds:   ch.sse_heartbeat_seconds || SSE_DEFAULTS.heartbeat,
+                sse_max_clients:         ch.sse_max_clients       || SSE_DEFAULTS.max_clients,
+                sse_connected_clients:   ch.sse_connected_clients || 0,
             };
         }
         localConfig.channels = merged;
@@ -780,6 +799,16 @@ async function saveConfig(alertContainer) {
                 webhook_body_template:   '',
                 rate_limit_minutes:      ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
                 max_per_minute:          ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
+            };
+        } else if (ch.type === 'sse') {
+            payload.channels[name] = {
+                type:                  'sse',
+                // Masked placeholder means "keep the password already on the server".
+                sse_password:          ch.sse_password || '',
+                sse_heartbeat_seconds: Number(ch.sse_heartbeat_seconds) || SSE_DEFAULTS.heartbeat,
+                sse_max_clients:       Number(ch.sse_max_clients)       || SSE_DEFAULTS.max_clients,
+                rate_limit_minutes:    ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 0,
+                max_per_minute:        ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
         } else if (ch.type === 'galactic_unicorn') {
             payload.channels[name] = {
@@ -1006,7 +1035,296 @@ function detectWebhookPreset(url) {
     return 'custom';
 }
 
+// ── Public SSE stream panel ──────────────────────────────────────────────────
+// The stream is always offered, whether or not it is currently enabled, so its
+// settings live in a draft object rather than only in localConfig.channels.
+// Enabling it creates the channel; disabling it removes the channel again.
+
+var sseDraft = null;
+
+// sseStreamDraft returns the working copy of the stream settings, seeded from
+// the saved channel when one exists.
+function sseStreamDraft() {
+    if (!sseDraft) {
+        const ch = localConfig.channels[SSE_CHANNEL_NAME] || {};
+        sseDraft = {
+            // A masked password is one we do not hold the plaintext for; the
+            // field stays empty and blank means "keep the stored password".
+            password:       (ch.sse_password && ch.sse_password !== '********') ? ch.sse_password : '',
+            heartbeat:      ch.sse_heartbeat_seconds || SSE_DEFAULTS.heartbeat,
+            max_clients:    ch.sse_max_clients       || SSE_DEFAULTS.max_clients,
+            max_per_minute: ch.max_per_minute != null ? ch.max_per_minute : SSE_DEFAULTS.max_per_minute,
+        };
+    }
+    return sseDraft;
+}
+
+// captureSSEDraft copies whatever is currently typed into the panel back into
+// the draft so a re-render (filtering, saving, polling) never discards it.
+function captureSSEDraft() {
+    if (!el('ssePassword')) return;
+    const d = sseStreamDraft();
+    d.password       = el('ssePassword').value.trim();
+    d.heartbeat      = parseInt(el('sseHeartbeat').value, 10)  || SSE_DEFAULTS.heartbeat;
+    d.max_clients    = parseInt(el('sseMaxClients').value, 10) || SSE_DEFAULTS.max_clients;
+    const cap        = parseInt(el('sseMaxPerMinute').value, 10);
+    d.max_per_minute = isNaN(cap) ? 0 : cap;
+}
+
+// sseRulesUsing returns the names of rules that dispatch to the stream.
+function sseRulesUsing() {
+    return (localConfig.rules || []).filter(function(r) {
+        return Array.isArray(r.channels) && r.channels.indexOf(SSE_CHANNEL_NAME) >= 0;
+    }).map(function(r) { return r.name || '(unnamed)'; });
+}
+
+function renderSSEPanel() {
+    const panel = el('sseStreamPanel');
+    if (!panel) return;
+
+    const saved   = localConfig.channels[SSE_CHANNEL_NAME];
+    const enabled = !!saved;
+    const d       = sseStreamDraft();
+    // The server never returns the password, so a full copy-and-paste URL is
+    // only possible while we still hold the plaintext (just generated or typed).
+    const havePlaintext = !!d.password;
+    // A stored password is never sent back to this page, so once the stream has
+    // been saved the field is left blank and blank means "keep the current one".
+    const hasStoredPassword = !!(saved && saved.sse_password);
+    const shownPassword = havePlaintext ? d.password : '<password>';
+    const endpointURL   = window.location.origin + SSE_STREAM_PATH + '?password=' + encodeURIComponent(shownPassword);
+    const subscribers   = (saved && saved.sse_connected_clients) || 0;
+    const ruleCount     = sseRulesUsing().length;
+
+    const statusBadge = enabled
+        ? '<span class="badge badge-green">Active</span>' +
+          '<span class="badge badge-grey" title="Subscribers connected when this page was loaded">&#x1F441; ' + subscribers + ' subscriber' + (subscribers === 1 ? '' : 's') + '</span>' +
+          (ruleCount > 0
+              ? '<span class="badge badge-grey">&#x1F4CB; Rules: ' + ruleCount + '</span>'
+              : '<span class="badge badge-yellow">No rules send to it yet</span>')
+        : '<span class="badge badge-grey">Disabled</span>';
+
+    panel.innerHTML =
+        '<div class="inline-form" style="border-left:3px solid #4a90d9;margin-bottom:14px">' +
+            '<div class="inline-form-title">&#x1F4E1; Public SSE Stream ' + statusBadge + '</div>' +
+            '<div style="font-size:0.85rem;color:#555;margin-bottom:10px;line-height:1.5">' +
+                'A built-in channel that streams notifications live over Server-Sent Events to anyone holding the password. ' +
+                'There is only one, and it appears to rules as the channel <code>' + SSE_CHANNEL_NAME + '</code> once enabled. ' +
+                'A heartbeat is sent on idle connections so subscribers can tell &ldquo;no alerts&rdquo; from a dead connection.' +
+            '</div>' +
+
+            (enabled
+                ? '<div class="form-group">' +
+                      '<label>Endpoint</label>' +
+                      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+                          '<input type="text" id="sseEndpoint" value="' + escHtml(endpointURL) + '" readonly ' +
+                              'style="flex:1;min-width:280px;background:#f6f8fa;font-family:monospace;font-size:0.8rem">' +
+                          '<button type="button" class="btn btn-sm btn-secondary" id="btnCopySSEUrl">&#x1F4CB; Copy</button>' +
+                      '</div>' +
+                      '<div class="form-hint">' +
+                          (havePlaintext
+                              ? 'Ready to paste into a browser, <code>curl -N</code>, or an <code>EventSource</code>.'
+                              : 'Replace <code>&lt;password&gt;</code> with the password &mdash; it is stored on the server and never sent back to this page.') +
+                          ' Prefer <code>Authorization: Bearer &lt;password&gt;</code> for scripts: a query string ends up in access logs and browser history.' +
+                      '</div>' +
+                  '</div>'
+                : '') +
+
+            '<div class="form-group">' +
+                '<label>Password ' + (enabled ? '' : '*') + '</label>' +
+                '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+                    '<input type="text" id="ssePassword" value="' + escHtml(d.password) + '" ' +
+                        'placeholder="' + (hasStoredPassword ? 'leave blank to keep the current password' : 'at least 12 letters and digits') + '" ' +
+                        'autocomplete="off" spellcheck="false" ' +
+                        'style="flex:1;min-width:240px;font-family:monospace">' +
+                    '<button type="button" class="btn btn-sm btn-secondary" id="btnGenSSEPassword">&#x1F3B2; Generate</button>' +
+                '</div>' +
+                '<div class="form-hint">' +
+                    'At least 12 alphanumeric characters, mixing letters and digits. Only letters, digits and ' +
+                    '<code>- . _ ~</code> are allowed, so the password can be passed in a URL unescaped. ' +
+                    (hasStoredPassword && !havePlaintext
+                        ? 'The current password is stored on the server and is not shown here &mdash; type or generate a new one to replace it.'
+                        : 'Changing the password disconnects existing subscribers.') +
+                '</div>' +
+            '</div>' +
+
+            '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+                '<div class="form-group" style="max-width:170px">' +
+                    '<label>Heartbeat (s)</label>' +
+                    '<input type="number" id="sseHeartbeat" value="' + (d.heartbeat) + '" min="5" max="300">' +
+                    '<div class="form-hint">5&ndash;300. Default 30.</div>' +
+                '</div>' +
+                '<div class="form-group" style="max-width:170px">' +
+                    '<label>Max Subscribers</label>' +
+                    '<input type="number" id="sseMaxClients" value="' + (d.max_clients) + '" min="1" max="1000">' +
+                    '<div class="form-hint">1&ndash;1000. Default 10.</div>' +
+                '</div>' +
+                '<div class="form-group" style="max-width:170px">' +
+                    '<label>Max per Minute</label>' +
+                    '<input type="number" id="sseMaxPerMinute" value="' + (d.max_per_minute) + '" min="0" max="10000">' +
+                    '<div class="form-hint">Throughput cap. 0 = unlimited.</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div class="form-actions">' +
+                '<button type="button" class="btn" id="btnSaveSSE">' + (enabled ? 'Save Stream Settings' : 'Enable Stream') + '</button>' +
+                (enabled ? '<button type="button" class="btn btn-danger" id="btnDisableSSE">Disable Stream</button>' : '') +
+            '</div>' +
+        '</div>';
+
+    // Keep the draft in step with what the operator types.
+    ['ssePassword', 'sseHeartbeat', 'sseMaxClients', 'sseMaxPerMinute'].forEach(function(id) {
+        const input = el(id);
+        if (input) input.addEventListener('input', captureSSEDraft);
+    });
+
+    const btnCopy = el('btnCopySSEUrl');
+    if (btnCopy) {
+        btnCopy.addEventListener('click', function() {
+            const field = el('sseEndpoint');
+            field.select();
+            field.setSelectionRange(0, field.value.length);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(field.value).then(function() {
+                    showAlert(el('channelsAlerts'), 'success', 'Endpoint URL copied.', true);
+                }, function() {
+                    showAlert(el('channelsAlerts'), 'info', 'Press Ctrl+C to copy the selected URL.', true);
+                });
+            } else {
+                showAlert(el('channelsAlerts'), 'info', 'Press Ctrl+C to copy the selected URL.', true);
+            }
+        });
+    }
+
+    el('btnGenSSEPassword').addEventListener('click', generateSSEPassword);
+    el('btnSaveSSE').addEventListener('click', saveSSEStream);
+    const btnDisable = el('btnDisableSSE');
+    if (btnDisable) btnDisable.addEventListener('click', disableSSEStream);
+}
+
+// generateSSEPassword asks the server for a password that satisfies the policy,
+// so the UI and the validator can never disagree about what is acceptable.
+async function generateSSEPassword() {
+    const btn = el('btnGenSSEPassword');
+    btn.disabled = true;
+    try {
+        const resp = await apiFetch('/admin/notifications/sse/generate-password');
+        const data = await resp.json();
+        if (!resp.ok || !data.password) {
+            showAlert(el('channelsAlerts'), 'error', 'Could not generate a password: ' + (data.error || resp.status), false);
+            return;
+        }
+        el('ssePassword').value = data.password;
+        captureSSEDraft();
+        renderSSEPanel();
+        showAlert(el('channelsAlerts'), 'info', 'Password generated — click "' +
+            (localConfig.channels[SSE_CHANNEL_NAME] ? 'Save Stream Settings' : 'Enable Stream') +
+            '" to apply it.', true);
+    } catch (err) {
+        if (err.message === 'Redirecting to login') return;
+        showAlert(el('channelsAlerts'), 'error', 'Could not generate a password: ' + err.message, false);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// validateSSEPasswordClient mirrors the server-side policy so mistakes are caught
+// before a round-trip. Returns an error string, or '' when acceptable.
+function validateSSEPasswordClient(pw) {
+    if (!pw) return 'A password is required to enable the stream.';
+    if (!/^[A-Za-z0-9._~-]+$/.test(pw)) {
+        return 'The password may only contain letters, digits and - . _ ~ (it travels in a URL query string).';
+    }
+    const alnum = (pw.match(/[A-Za-z0-9]/g) || []).length;
+    if (alnum < 12) return 'The password needs at least 12 alphanumeric characters (it has ' + alnum + ').';
+    if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'The password must contain both letters and digits.';
+    return '';
+}
+
+async function saveSSEStream() {
+    captureSSEDraft();
+    const d = sseStreamDraft();
+    const alertEl = el('channelsAlerts');
+    alertEl.innerHTML = '';
+
+    // A blank field keeps the password already stored on the server ('********'
+    // is the placeholder the config endpoint understands); anything else is a new
+    // password and must satisfy the policy.
+    const stored = localConfig.channels[SSE_CHANNEL_NAME];
+    let password = d.password;
+    if (!password) {
+        if (!stored || !stored.sse_password) {
+            showAlert(alertEl, 'error', 'A password is required to enable the stream.', false);
+            return;
+        }
+        password = '********';
+    } else {
+        const problem = validateSSEPasswordClient(password);
+        if (problem) { showAlert(alertEl, 'error', problem, false); return; }
+    }
+    if (d.heartbeat < 5 || d.heartbeat > 300) {
+        showAlert(alertEl, 'error', 'Heartbeat must be between 5 and 300 seconds.', false); return;
+    }
+    if (d.max_clients < 1 || d.max_clients > 1000) {
+        showAlert(alertEl, 'error', 'Max subscribers must be between 1 and 1000.', false); return;
+    }
+
+    const existing = localConfig.channels[SSE_CHANNEL_NAME] || {};
+    localConfig.channels[SSE_CHANNEL_NAME] = {
+        type:                  'sse',
+        sse_password:          password,
+        sse_heartbeat_seconds: d.heartbeat,
+        sse_max_clients:       d.max_clients,
+        sse_connected_clients: existing.sse_connected_clients || 0,
+        rate_limit_minutes:    existing.rate_limit_minutes != null ? existing.rate_limit_minutes : 0,
+        max_per_minute:        d.max_per_minute,
+    };
+
+    renderChannels();
+    await saveConfig(alertEl);
+}
+
+async function disableSSEStream() {
+    const alertEl = el('channelsAlerts');
+    alertEl.innerHTML = '';
+
+    // A rule with no channels left is rejected by the server, so those rules have
+    // to be dealt with first — name them instead of quietly deleting them.
+    const orphaned = (localConfig.rules || []).filter(function(r) {
+        return Array.isArray(r.channels) &&
+               r.channels.length === 1 &&
+               r.channels[0] === SSE_CHANNEL_NAME;
+    }).map(function(r) { return r.name || '(unnamed)'; });
+    if (orphaned.length > 0) {
+        showAlert(alertEl, 'error',
+            'These rule(s) send only to the stream and would be left with no channel — ' +
+            'give them another channel or delete them first: ' + orphaned.map(escHtml).join(', '), false);
+        return;
+    }
+
+    const used = sseRulesUsing();
+    const consequence = used.length > 0
+        ? ' It will also be removed from ' + used.length + ' rule(s).'
+        : '';
+    if (!confirm('Disable the public SSE stream? Connected subscribers are disconnected and the password is discarded.' + consequence)) {
+        return;
+    }
+
+    delete localConfig.channels[SSE_CHANNEL_NAME];
+    (localConfig.rules || []).forEach(function(rule) {
+        rule.channels = (rule.channels || []).filter(function(c) { return c !== SSE_CHANNEL_NAME; });
+    });
+    sseDraft = null;
+    renderChannels();
+    renderRules();
+    await saveConfig(alertEl);
+}
+
 function renderChannels() {
+    // Preserve anything typed into the SSE panel across the re-render.
+    captureSSEDraft();
+    renderSSEPanel();
+
     const list = el('channelList');
     const channels = localConfig.channels;
 
@@ -1082,6 +1400,14 @@ function renderChannels() {
             metaBadges =
                 (cydUrl ? '<span class="badge badge-grey" title="' + escHtml(ch.webhook_url) + '">' + escHtml(cydUrl) + '</span>' : '<span class="badge badge-red">No URL</span>') +
                 '<span class="badge badge-grey">&#x1F4F2; CYD</span>';
+        } else if (ch.type === 'sse') {
+            const subscribers = ch.sse_connected_clients || 0;
+            metaBadges =
+                (ch.sse_password ? '<span class="badge badge-green">Password set</span>'
+                                 : '<span class="badge badge-red">No password</span>') +
+                '<span class="badge badge-grey" title="' + escHtml(SSE_STREAM_PATH) + '">' + escHtml(SSE_STREAM_PATH) + '</span>' +
+                '<span class="badge badge-grey" title="Subscribers connected when this page was loaded">&#x1F441; ' + subscribers + '</span>' +
+                '<span class="badge badge-grey" title="Heartbeat interval">&#x1F49B; ' + (ch.sse_heartbeat_seconds || SSE_DEFAULTS.heartbeat) + 's</span>';
         } else if (ch.type === 'galactic_unicorn') {
             const guUrl = ch.galactic_unicorn_url
                 ? ch.galactic_unicorn_url.replace(/^https?:\/\//, '').substring(0, 30) +
@@ -1121,6 +1447,12 @@ function renderChannels() {
         const manageBtn = (ch.type === 'telegram')
             ? '<button class="btn btn-sm btn-secondary btn-manage-channel" data-name="' + escHtml(name) + '">&#x1F916; Manage</button>'
             : '';
+        // The SSE stream is edited and disabled from its own panel, not the
+        // generic channel form — it has no name or type to change.
+        const editBtns = (ch.type === 'sse')
+            ? '<button class="btn btn-sm btn-secondary btn-sse-settings">&#x2699;&#xFE0F; Settings</button>'
+            : '<button class="btn btn-sm btn-edit-channel" data-name="' + escHtml(name) + '">&#x270F;&#xFE0F; Edit</button>' +
+              '<button class="btn btn-sm btn-danger btn-delete-channel" data-name="' + escHtml(name) + '">&#x1F5D1;&#xFE0F; Delete</button>';
         return '<div class="item-card" data-channel="' + escHtml(name) + '">' +
             '<div class="item-card-header">' +
                 '<div class="item-card-info">' +
@@ -1136,8 +1468,7 @@ function renderChannels() {
                 '<div class="item-card-actions">' +
                     '<button class="btn btn-sm btn-secondary btn-test-channel" data-name="' + escHtml(name) + '">&#x1F9EA; Test</button>' +
                     manageBtn +
-                    '<button class="btn btn-sm btn-edit-channel" data-name="' + escHtml(name) + '">&#x270F;&#xFE0F; Edit</button>' +
-                    '<button class="btn btn-sm btn-danger btn-delete-channel" data-name="' + escHtml(name) + '">&#x1F5D1;&#xFE0F; Delete</button>' +
+                    editBtns +
                 '</div>' +
             '</div>' +
             '<div class="tg-manage-panel" id="tgManage-' + escHtml(name) + '" style="display:none"></div>' +
@@ -1155,6 +1486,12 @@ function renderChannels() {
     });
     list.querySelectorAll('.btn-delete-channel').forEach(function(btn) {
         btn.addEventListener('click', function() { deleteChannel(btn.dataset.name); });
+    });
+    list.querySelectorAll('.btn-sse-settings').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const panel = el('sseStreamPanel');
+            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
     });
 }
 
@@ -2488,6 +2825,14 @@ function renderWebhookPresetHint(presetKey) {
 }
 
 function showChannelForm(editName) {
+    // The public SSE stream is managed by its own panel — it has no name or type
+    // to edit, so send the operator there instead of the generic form.
+    if (editName === SSE_CHANNEL_NAME) {
+        const ssePanel = el('sseStreamPanel');
+        if (ssePanel) ssePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+
     const container = el('channelFormContainer');
     const isEdit = editName !== null && editName !== undefined;
     const ch = isEdit ? Object.assign({}, localConfig.channels[editName]) : {

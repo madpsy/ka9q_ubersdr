@@ -67,7 +67,7 @@ type TelegramBotCommandsConfig struct {
 // type-specific and ignored when not relevant.
 type NotificationChannelConfig struct {
 	// Type selects the channel implementation.
-	// Currently supported: "telegram", "email", "webhook", "galactic_unicorn"
+	// Currently supported: "telegram", "email", "webhook", "galactic_unicorn", "sse"
 	Type string `yaml:"type" json:"type"`
 
 	// ── Telegram ────────────────────────────────────────────────────────────
@@ -165,6 +165,27 @@ type NotificationChannelConfig struct {
 	// override it by setting a "Content-Type" entry in WebhookHeaders.
 	// Example (Gotify): {"message":"{{.Message}}","title":"UberSDR","priority":5}
 	WebhookBodyTemplate string `yaml:"webhook_body_template,omitempty" json:"webhook_body_template,omitempty"`
+
+	// ── Public SSE stream ─────────────────────────────────────────────────────
+	// There is only ever one channel of type "sse", and it must be named
+	// sseChannelName ("sse_stream"). It publishes notifications to the public
+	// endpoint GET /api/notifications/stream, which anyone holding the password
+	// can subscribe to. The channel exists in the config only while the stream is
+	// enabled; removing the entry disables the endpoint and disconnects everyone.
+	//
+	// SSEPassword is the subscriber password. Required. It must contain at least
+	// 12 alphanumeric characters, both letters and digits, and only characters
+	// from the URL-unreserved set (alphanumerics plus - . _ ~) so it can be
+	// passed as a query parameter without escaping. Never returned by the GET
+	// config endpoint.
+	SSEPassword string `yaml:"sse_password,omitempty" json:"sse_password,omitempty"`
+	// SSEHeartbeatSeconds is how often a heartbeat event is sent to idle
+	// subscribers so they can distinguish "no alerts" from a dead connection.
+	// Range: 5–300. Default: 30.
+	SSEHeartbeatSeconds int `yaml:"sse_heartbeat_seconds,omitempty" json:"sse_heartbeat_seconds,omitempty"`
+	// SSEMaxClients is the maximum number of concurrent subscribers.
+	// Range: 1–1000. Default: 10.
+	SSEMaxClients int `yaml:"sse_max_clients,omitempty" json:"sse_max_clients,omitempty"`
 
 	// ── Galactic Unicorn (Pimoroni LED matrix display) ────────────────────────
 	// GalacticUnicornModel selects the Pimoroni Unicorn display variant, which
@@ -675,6 +696,14 @@ func applyChannelDefaults(ch *NotificationChannelConfig) {
 			ch.WebhookTimeoutSeconds = 10
 		}
 	}
+	if ch.Type == "sse" {
+		if ch.SSEHeartbeatSeconds == 0 {
+			ch.SSEHeartbeatSeconds = defaultSSEHeartbeatSeconds
+		}
+		if ch.SSEMaxClients == 0 {
+			ch.SSEMaxClients = defaultSSEMaxClients
+		}
+	}
 }
 
 // Validate checks the config for obvious errors and returns a list of issues.
@@ -716,6 +745,8 @@ func (cfg *NotificationsConfig) Validate() []string {
 			issues = append(issues, validateWebhookChannel(name, ch)...)
 		case "galactic_unicorn":
 			issues = append(issues, validateGalacticUnicornChannel(name, ch)...)
+		case "sse":
+			issues = append(issues, validateSSEChannel(name, ch)...)
 		case "":
 			issues = append(issues, fmt.Sprintf("channel %q: type is required", name))
 		default:
@@ -1081,6 +1112,36 @@ func validateGalacticUnicornChannel(name string, ch NotificationChannelConfig) [
 
 	if ch.GalacticUnicornSoundVolume != 0 && (ch.GalacticUnicornSoundVolume < 0.0 || ch.GalacticUnicornSoundVolume > 1.0) {
 		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_sound_volume must be 0.0–1.0 (got %g)", name, ch.GalacticUnicornSoundVolume))
+	}
+
+	return issues
+}
+
+// validateSSEChannel checks the public notification stream channel. There can be
+// only one, it must use the fixed name, and its password must meet the policy in
+// validateSSEPassword — the endpoint is reachable by anyone on the internet.
+func validateSSEChannel(name string, ch NotificationChannelConfig) []string {
+	var issues []string
+
+	if name != sseChannelName {
+		issues = append(issues, fmt.Sprintf(
+			"channel %q: the public SSE stream is a single built-in channel and must be named %q",
+			name, sseChannelName))
+	}
+
+	if reason := validateSSEPassword(ch.SSEPassword); reason != "" {
+		issues = append(issues, fmt.Sprintf("channel %q: sse_password %s", name, reason))
+	}
+
+	if ch.SSEHeartbeatSeconds != 0 &&
+		(ch.SSEHeartbeatSeconds < minSSEHeartbeatSeconds || ch.SSEHeartbeatSeconds > maxSSEHeartbeatSeconds) {
+		issues = append(issues, fmt.Sprintf("channel %q: sse_heartbeat_seconds must be %d–%d (got %d)",
+			name, minSSEHeartbeatSeconds, maxSSEHeartbeatSeconds, ch.SSEHeartbeatSeconds))
+	}
+
+	if ch.SSEMaxClients != 0 && (ch.SSEMaxClients < 1 || ch.SSEMaxClients > maxSSEMaxClients) {
+		issues = append(issues, fmt.Sprintf("channel %q: sse_max_clients must be 1–%d (got %d)",
+			name, maxSSEMaxClients, ch.SSEMaxClients))
 	}
 
 	return issues

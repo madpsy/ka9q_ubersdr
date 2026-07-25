@@ -25,6 +25,7 @@ const FLOW_CHANNEL_EMOJIS = {
     telegram: '📱',
     email:    '📧',
     webhook:  '🔗',
+    sse:      '📡',
 };
 
 // ─── Layout constants ────────────────────────────────────────────────────────
@@ -644,7 +645,14 @@ function renderFlowDiagram() {
             const chName = chEl.getAttribute('data-channel');
             const tabEl = document.querySelector('.tab[data-tab="channels"]');
             if (tabEl) tabEl.click();
-            if (chName && typeof showChannelForm === 'function') {
+            // The public SSE stream has no generic edit form — it is managed
+            // from its own panel at the top of the Channels tab.
+            if (typeof SSE_CHANNEL_NAME !== 'undefined' && chName === SSE_CHANNEL_NAME) {
+                setTimeout(function() {
+                    const panel = document.getElementById('sseStreamPanel');
+                    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 50);
+            } else if (chName && typeof showChannelForm === 'function') {
                 setTimeout(function() { showChannelForm(chName); }, 50);
             }
         });

@@ -1051,6 +1051,27 @@ function detectWebhookPreset(url) {
 
 var sseDraft = null;
 
+// Whether the stream section is expanded. Persisted because the panel is rebuilt
+// on every renderChannels() — filter changes, saves — and losing the open state
+// mid-edit would be maddening.
+const SSE_PANEL_OPEN_KEY = 'notifSSEPanelOpen';
+
+function ssePanelOpen() {
+    try { return localStorage.getItem(SSE_PANEL_OPEN_KEY) === '1'; } catch (_) { return false; }
+}
+function sseSetPanelOpen(open) {
+    try { localStorage.setItem(SSE_PANEL_OPEN_KEY, open ? '1' : '0'); } catch (_) {}
+}
+
+// openSSEPanel expands the section and scrolls to it — used by the channel
+// list's Settings button and by the flow diagram.
+function openSSEPanel() {
+    sseSetPanelOpen(true);
+    renderSSEPanel();
+    const panel = el('sseStreamPanel');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // revealSSEPassword replaces the masked placeholder in the loaded config with
 // the stream's real password. Failing is not fatal — the panel falls back to the
 // "leave blank to keep the current password" behaviour.
@@ -1134,8 +1155,10 @@ function renderSSEPanel() {
         : '<span class="badge badge-grey">Disabled</span>';
 
     panel.innerHTML =
-        '<div class="inline-form" style="border-left:3px solid #4a90d9;margin-bottom:14px">' +
-            '<div class="inline-form-title">&#x1F4E1; Public SSE Stream ' + statusBadge + '</div>' +
+        '<details class="inline-form sse-panel"' + (ssePanelOpen() ? ' open' : '') +
+                ' style="border-left:3px solid #4a90d9;margin-bottom:14px">' +
+            '<summary class="sse-summary">&#x1F4E1; Public SSE Stream ' + statusBadge + '</summary>' +
+            '<div class="sse-body">' +
             '<div style="font-size:0.85rem;color:#555;margin-bottom:10px;line-height:1.5">' +
                 'A built-in channel that streams notifications live over Server-Sent Events to anyone holding the password. ' +
                 'There is only one, and it appears to rules as the channel <code>' + SSE_CHANNEL_NAME + '</code> once enabled. ' +
@@ -1199,7 +1222,14 @@ function renderSSEPanel() {
                 '<button type="button" class="btn" id="btnSaveSSE">' + (enabled ? 'Save Stream Settings' : 'Enable Stream') + '</button>' +
                 (enabled ? '<button type="button" class="btn btn-danger" id="btnDisableSSE">Disable Stream</button>' : '') +
             '</div>' +
-        '</div>';
+            '</div>' +
+        '</details>';
+
+    // Remember whether the operator left it open.
+    const details = panel.querySelector('details.sse-panel');
+    if (details) {
+        details.addEventListener('toggle', function() { sseSetPanelOpen(details.open); });
+    }
 
     // Keep the draft in step with what the operator types.
     ['ssePassword', 'sseHeartbeat', 'sseMaxClients', 'sseMaxPerMinute'].forEach(function(id) {
@@ -1517,10 +1547,7 @@ function renderChannels() {
         btn.addEventListener('click', function() { deleteChannel(btn.dataset.name); });
     });
     list.querySelectorAll('.btn-sse-settings').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            const panel = el('sseStreamPanel');
-            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+        btn.addEventListener('click', openSSEPanel);
     });
 }
 
@@ -2857,8 +2884,7 @@ function showChannelForm(editName) {
     // The public SSE stream is managed by its own panel — it has no name or type
     // to edit, so send the operator there instead of the generic form.
     if (editName === SSE_CHANNEL_NAME) {
-        const ssePanel = el('sseStreamPanel');
-        if (ssePanel) ssePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        openSSEPanel();
         return;
     }
 

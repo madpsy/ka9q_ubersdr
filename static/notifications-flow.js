@@ -649,8 +649,7 @@ function renderFlowDiagram() {
             // from its own panel at the top of the Channels tab.
             if (typeof SSE_CHANNEL_NAME !== 'undefined' && chName === SSE_CHANNEL_NAME) {
                 setTimeout(function() {
-                    const panel = document.getElementById('sseStreamPanel');
-                    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    if (typeof openSSEPanel === 'function') openSSEPanel();
                 }, 50);
             } else if (chName && typeof showChannelForm === 'function') {
                 setTimeout(function() { showChannelForm(chName); }, 50);

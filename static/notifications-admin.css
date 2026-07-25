@@ -622,6 +622,39 @@ body {
 
 /* ── Template reference ──────────────────────────────────────────────────── */
 
+/* ── Public SSE stream section (collapsible) ─────────────────────────────── */
+.sse-panel > .sse-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    /* Matches .inline-form-title so collapsing does not change how it reads. */
+    font-size: 1rem;
+    font-weight: 600;
+    color: #667eea;
+}
+
+.sse-panel > .sse-summary::-webkit-details-marker { display: none; }
+
+.sse-panel > .sse-summary::before {
+    content: '\25B6';
+    font-size: 0.65rem;
+    color: #718096;
+    transition: transform 0.15s;
+}
+
+.sse-panel[open] > .sse-summary::before { transform: rotate(90deg); }
+
+.sse-panel > .sse-summary:hover { color: #4c51bf; }
+
+/* Collapsed, it should be a single compact row — that is the point of it. */
+.sse-panel:not([open]) { padding: 12px 20px; }
+
+.sse-panel > .sse-body { margin-top: 12px; }
+
 .template-ref {
     margin-top: 10px;
     border: 1px solid #e2e8f0;

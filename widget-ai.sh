@@ -19,7 +19,8 @@
 #   ./widget-ai.sh start           # start / attach
 #   ./widget-ai.sh stop            # stop the container
 #   ./widget-ai.sh status          # print state and exit
-#   ./widget-ai.sh update          # pull the latest image
+#   ./widget-ai.sh update          # pull the latest image (restarts a running
+#                                  # session onto it, and reattaches)
 #
 #   No admin password is needed: the container name is listed in the instance's
 #   admin->widget_trusted_hosts config, so UberSDR accepts its /admin/widgets/*
@@ -141,12 +142,25 @@ do_stop() {
 }
 
 do_update() {
+  # Note whether a session is live BEFORE pulling, so we can put it back
+  # afterwards. The pull runs first: if it fails, set -e aborts here and the
+  # running session is left untouched.
+  local was_running=0
+  if container_running || session_running; then was_running=1; fi
+
   say "Pulling the latest image ($IMAGE)…"
   compose pull "$SERVICE"
   ok "Image up to date."
-  if container_running || session_running; then
-    warn "A session is running — restart it (Stop, then Start) to use the new image."
+
+  if [ "$was_running" -eq 0 ]; then
+    return 0
   fi
+
+  # A session was running on the old image — cycle it so the new one takes
+  # effect. do_start reattaches, so this lands you back in the assistant.
+  say "Restarting the running session on the new image…"
+  do_stop
+  do_start
 }
 
 # ---------------------------------------------------------------------------

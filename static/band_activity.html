@@ -815,12 +815,12 @@ body {
     <div id="band-pills"></div>
     <button id="btn-all">All</button>
     <button id="btn-none">None</button>
-    <div id="range-controls">
-        <button id="db-auto" title="Auto: each band picks its own dB range to keep its noise floor at the bottom of the scale">Manual</button>
+    <div id="range-controls" class="auto">
+        <button id="db-auto" class="active" title="Auto: each band picks its own dB range to keep its noise floor at the bottom of the scale">Auto</button>
         <label class="manual-only">dB min <input type="number" id="db-min" value="-130" step="5"></label>
         <label class="manual-only">max <input type="number" id="db-max" value="-60" step="5"></label>
         <label class="auto-only" title="Smallest range auto mode will show. Quiet bands are widened upward, so the noise floor stays at the bottom.">min range
-            <input type="number" id="db-span" value="30" step="5" min="10" max="100"> dB</label>
+            <input type="number" id="db-span" value="60" step="5" min="10" max="100"> dB</label>
     </div>
     <div id="palette-controls">
         <label for="palette-select">Palette</label>
@@ -1006,14 +1006,15 @@ let panels      = {};   // name → BandPanel instance
 let sse         = null; // EventSource
 let dbMin       = -130;
 let dbMax       = -60;
-let dbAuto      = false; // false = manual (the dbMin/dbMax above apply to every
-                         // band); true = each panel picks its own range
+let dbAuto      = true;  // true (default) = each panel picks its own range;
+                         // false = manual, the dbMin/dbMax above apply to all
 // Auto mode never shows less range than this.  A quiet band makes up the span
 // by lifting the ceiling, never by dropping the floor, so the noise still sits
 // at the very bottom of the scale.
-let dbAutoMinSpan = 30;
-const AUTO_SPAN_MIN = 10;
-const AUTO_SPAN_MAX = 100;
+const AUTO_SPAN_DEFAULT = 60;
+const AUTO_SPAN_MIN     = 10;
+const AUTO_SPAN_MAX     = 100;
+let dbAutoMinSpan = AUTO_SPAN_DEFAULT;
 let currentPalette = 'jet'; // active waterfall palette name
 let currentLayout  = 'fit'; // 'auto' | 'fit' | '1'…'6'
 let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
@@ -2850,8 +2851,10 @@ function loadPrefs() {
         if (sMin) { dbMin = parseFloat(sMin); document.getElementById('db-min').value = dbMin; }
         if (sMax) { dbMax = parseFloat(sMax); document.getElementById('db-max').value = dbMax; }
 
-        // Manual is the default; only an explicit '1' turns auto on.
-        dbAuto = localStorage.getItem('bandActivity_dbAuto') === '1';
+        // Auto is the default — only an explicitly stored choice overrides it,
+        // so a missing key leaves the default intact rather than forcing manual.
+        const sAuto = localStorage.getItem('bandActivity_dbAuto');
+        if (sAuto !== null) dbAuto = (sAuto === '1');
 
         const sSpan = parseFloat(localStorage.getItem('bandActivity_dbSpan'));
         if (!isNaN(sSpan)) {
@@ -3713,10 +3716,13 @@ async function init() {
 
     // Load saved preferences (which bands were active, dB range)
     loadPrefs();
+    // Re-assert outside loadPrefs's try/catch: if localStorage threw part-way,
+    // the toolbar must still match whatever dbAuto actually ended up as.
+    applyDbAutoUI();
 
     // Default: prefer the key HF ham bands; fall back to all bands if none exist
     if (activeBands.size === 0) {
-        const preferred = ['80m', '40m', '20m', '15m', '10m'];
+        const preferred = ['40m', '20m', '15m', '10m'];
         for (const name of preferred) {
             if (bandMeta[name]) activeBands.add(name);
         }
@@ -3779,7 +3785,7 @@ async function init() {
     document.getElementById('db-span').addEventListener('change', e => {
         const v = parseFloat(e.target.value);
         dbAutoMinSpan = Math.max(AUTO_SPAN_MIN,
-                                 Math.min(AUTO_SPAN_MAX, isNaN(v) ? 30 : v));
+                                 Math.min(AUTO_SPAN_MAX, isNaN(v) ? AUTO_SPAN_DEFAULT : v));
         e.target.value = dbAutoMinSpan;   // reflect the clamp back to the user
         savePrefs();
         for (const p of Object.values(panels)) p._rangeChanged();

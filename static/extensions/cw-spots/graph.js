@@ -360,6 +360,11 @@ class CWSpotsGraph {
         // Hover-tune checkbox
         document.getElementById('hover-tune-checkbox').addEventListener('change', (e) => {
             this.hoverTune = e.target.checked;
+            this._lastHoverFrequency = null;
+            // The map's marker tooltips name the gesture that tunes, so they have
+            // to be rewritten when the gesture changes. The chart reads hoverTune
+            // live in onHover and needs no redraw.
+            this.updateViews();
         });
 
         // Auto-tune checkbox
@@ -625,6 +630,11 @@ class CWSpotsGraph {
         if (view === this.view) return;
         this.view = view;
 
+        // Hiding the outgoing view can't fire a mouseout, so the debounce would
+        // otherwise carry a stale frequency into the incoming one and swallow
+        // its first hover.
+        this._lastHoverFrequency = null;
+
         const chartWrapper = document.getElementById('chart-wrapper');
         const mapWrapper = document.getElementById('map-wrapper');
         const chartFooter = document.getElementById('chart-footer-text');
@@ -738,6 +748,23 @@ class CWSpotsGraph {
         });
     }
 
+    // Hovering a marker tunes exactly as hovering a chart point does: same
+    // hover-tune toggle, and the same per-frequency debounce so dragging the
+    // mouse across a cluster doesn't flood the parent with tune requests.
+    mapHoverTune(spot) {
+        if (!this.hoverTune || !spot) return;
+        if (spot.frequency === this._lastHoverFrequency) return;
+        this._lastHoverFrequency = spot.frequency;
+        this.tuneToSpot(spot);
+    }
+
+    // Which gesture tunes, for the marker tooltip. Clicking always tunes (and
+    // triggers the lookup when that is enabled); hovering only does when the
+    // hover-tune toggle is on.
+    tuneHint() {
+        return this.hoverTune ? 'Hover or click to tune' : 'Click to tune';
+    }
+
     // Pulse a marker that has just appeared. The class goes on the live DOM
     // element rather than into markerHtml so it survives none of the icon diffing
     // — flashUntil is what actually owns the state, and reapplyFlash restores the
@@ -768,6 +795,7 @@ class CWSpotsGraph {
 
         const wanted = this.latestPerStation(spots);
         const now = Date.now();
+        const hint = this.tuneHint();
 
         for (const [call, spot] of wanted) {
             // Spots without a resolved position can't be mapped at all.
@@ -794,17 +822,22 @@ class CWSpotsGraph {
                     this.reapplyFlash(existing); // setIcon threw away the flashing element
                 }
 
-                // Tooltip/popup/tune target only change when the spot does. The
-                // position never does: QRZ coords and the centroid offset are
-                // both per-callsign deterministic, so updating in place keeps
+                // The mouse handlers read entry.spot, so re-pointing that is the
+                // whole of "this marker now means a newer spot" — no unbinding
+                // and rebinding on every refresh.
+                existing.spot = spot;
+
+                // Tooltip/popup content changes when the spot does, and when the
+                // hover-tune toggle changes which gesture the hint should name.
+                // The position never changes: QRZ coords and the centroid offset
+                // are both per-callsign deterministic, so updating in place keeps
                 // any open popup anchored instead of churning the marker.
-                if (existing.stamp !== stamp) {
+                if (existing.stamp !== stamp || existing.hint !== hint) {
                     const content = this.mapPopupContent(spot, approx);
                     existing.marker.setTooltipContent(content);
                     existing.marker.setPopupContent(content);
-                    existing.marker.off('click');
-                    existing.marker.on('click', () => this.tuneToSpotClick(spot));
                     existing.stamp = stamp;
+                    existing.hint = hint;
                 }
                 continue;
             }
@@ -821,10 +854,21 @@ class CWSpotsGraph {
             const marker = L.marker([lat, lon], { icon: this.markerIcon(spot, approx) });
             marker.bindTooltip(content, { direction: 'top', offset: [0, -8] });
             marker.bindPopup(content);
-            marker.on('click', () => this.tuneToSpotClick(spot));
+
+            const entry = {
+                marker, stamp, spot, hint,
+                html: this.markerHtml(spot, approx),
+                flashUntil: 0,
+                flashTimer: null
+            };
+
+            // Bound once, against the entry rather than this spot, so a later
+            // spot for the same station retunes without touching the handlers.
+            marker.on('click', () => this.tuneToSpotClick(entry.spot));
+            marker.on('mouseover', () => this.mapHoverTune(entry.spot));
+            marker.on('mouseout', () => { this._lastHoverFrequency = null; });
 
             marker.addTo(this.map);
-            const entry = { marker, stamp, html: this.markerHtml(spot, approx), flashUntil: 0, flashTimer: null };
             this.mapMarkers.set(call, entry);
 
             // Only a genuinely fresh arrival pulses: the backlog drawn on the
@@ -865,7 +909,7 @@ class CWSpotsGraph {
         if (approx) {
             rows.push('<div class="cw-map-popup-hint">Approximate position (country centroid)</div>');
         }
-        rows.push('<div class="cw-map-popup-hint">Click to tune</div>');
+        rows.push(`<div class="cw-map-popup-hint">${this.tuneHint()}</div>`);
         return rows.join('');
     }
 

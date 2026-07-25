@@ -550,7 +550,10 @@ body {
 
 /* ── Space weather section ── */
 #conditions-bar .cond-sw {
-    flex: 1 1 0;
+    /* Content-sized: basis auto rather than 0, so each card is only as wide as
+       it needs to be.  Still allowed to shrink (never grow) so a narrow viewport
+       compresses them instead of overflowing. */
+    flex: 0 1 auto;
     min-width: 0;
     padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
@@ -731,7 +734,10 @@ body {
 
 /* ── Hardware status section (rotator / ant-switch) ── */
 #conditions-bar .cond-hardware {
-    flex: 1 1 0;
+    /* Content-sized: basis auto rather than 0, so each card is only as wide as
+       it needs to be.  Still allowed to shrink (never grow) so a narrow viewport
+       compresses them instead of overflowing. */
+    flex: 0 1 auto;
     min-width: 0;
     padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
@@ -752,6 +758,9 @@ body {
     color: #666;
     min-width: 52px;
     flex-shrink: 1;
+    /* Now that the cards size to their content, a two-word label like
+       "RF Health" must not wrap, or it would narrow the card instead. */
+    white-space: nowrap;
 }
 
 .cond-hw-value {
@@ -789,7 +798,10 @@ body {
 
 /* ── SDR front-end status section ── */
 #conditions-bar .cond-frontend {
-    flex: 1 1 0;
+    /* Content-sized: basis auto rather than 0, so each card is only as wide as
+       it needs to be.  Still allowed to shrink (never grow) so a narrow viewport
+       compresses them instead of overflowing. */
+    flex: 0 1 auto;
     min-width: 0;
     padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
@@ -806,7 +818,10 @@ body {
 
 /* ── Local weather section ── */
 #conditions-bar .cond-weather {
-    flex: 1 1 0;
+    /* Content-sized: basis auto rather than 0, so each card is only as wide as
+       it needs to be.  Still allowed to shrink (never grow) so a narrow viewport
+       compresses them instead of overflowing. */
+    flex: 0 1 auto;
     min-width: 0;
     padding: 10px 10px;
     border-left: 1px solid #1e1e2e;
@@ -3291,7 +3306,7 @@ function _renderFrontendStatus() {
 
     el.innerHTML =
         `<div class="cond-hw-row">
-            <span class="cond-hw-label">Front end</span>
+            <span class="cond-hw-label">RF Health</span>
             <span class="cond-hw-badge ${healthCls}">${healthTxt}</span>
          </div>
          <div class="cond-hw-row" title="IF power after gain — green -30 to -10 dBFS, red above -10 (near clipping), amber below -30 (weak)">

@@ -95,6 +95,31 @@ admin:
   #   - "192.168.1.0/24"      # Local network only
   #   - "10.0.0.0/8"          # Private network
 
+  # Docker container names or IPs permitted to manage widgets without the admin
+  # password.  Requests whose raw source IP matches one of these hosts skip the
+  # admin password / session check on all /admin/widgets/* endpoints:
+  #
+  #   GET/POST /admin/widgets/enabled              list / replace the enabled widget list
+  #   GET      /admin/widgets/mine                 widgets owned by this instance
+  #   GET      /admin/widgets/public               public widgets from the collector
+  #   GET      /admin/widgets/public-with-instances
+  #   POST     /admin/widgets/create               create a new widget
+  #   POST     /admin/widgets/update               update an existing widget
+  #   DELETE   /admin/widgets/delete               delete a widget
+  #   GET      /admin/widgets/versions             version history for a widget
+  #   GET      /admin/widgets/version              fetch one version's HTML
+  #
+  # Container names are resolved via DNS every 5 seconds (same mechanism as
+  # server.trusted_containers), so they keep working when Docker reassigns IPs.
+  # Matching uses the RAW source IP, so X-Real-IP / X-Forwarded-For headers
+  # cannot be used to impersonate a trusted host.  These hosts are NOT trusted
+  # as proxies and gain no access to any other admin endpoint.
+  #
+  # Set to [] to require the admin password for all widget management.
+  # Default: ["ubersdr-claude"]
+  widget_trusted_hosts:
+    - "ubersdr-claude"
+
 # Radiod connection settings
 radiod:
   # Multicast group for status/control messages

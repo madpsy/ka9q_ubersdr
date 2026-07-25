@@ -21,13 +21,15 @@
 #   ./widget-ai.sh status          # print state and exit
 #   ./widget-ai.sh update          # pull the latest image
 #
+#   No admin password is needed: the container name is listed in the instance's
+#   admin->widget_trusted_hosts config, so UberSDR accepts its /admin/widgets/*
+#   calls on the strength of its container IP alone.
+#
 #   Env overrides:
-#     UBERSDR_DIR        installed instance dir (holds docker-compose.yml,
-#                        get-password.sh)                 (default: $HOME/ubersdr)
+#     UBERSDR_DIR        installed instance dir (holds docker-compose.yml)
+#                                                         (default: $HOME/ubersdr)
 #     COMPOSE_FILE       path to the compose file         (default: $UBERSDR_DIR/docker-compose.yml)
 #     WIDGET_AI_IMAGE    container image                  (default: madpsy/ubersdr-claude:latest)
-#     ADMIN_PASSWORD     admin API password; if unset the script resolves it
-#                        from the running instance (never printed)
 
 set -euo pipefail
 
@@ -36,7 +38,6 @@ COMPOSE_FILE="${COMPOSE_FILE:-$UBERSDR_DIR/docker-compose.yml}"
 SERVICE="${WIDGET_AI_SERVICE:-widget-ai}"
 PROFILE="${WIDGET_AI_PROFILE:-manual}"
 CONTAINER="${WIDGET_AI_CONTAINER:-ubersdr-claude}"
-MAIN_CONTAINER="${UBERSDR_CONTAINER:-ka9q_ubersdr}"
 SESSION="${WIDGET_AI_SESSION:-Widget AI}"
 IMAGE="${WIDGET_AI_IMAGE:-madpsy/ubersdr-claude:latest}"
 
@@ -70,40 +71,6 @@ compose() { docker compose --profile "$PROFILE" -f "$COMPOSE_FILE" "$@"; }
 session_running()   { tmux has-session -t "$SESSION" 2>/dev/null; }
 container_running() { [ -n "$(docker ps -q -f "name=^/${CONTAINER}$" 2>/dev/null)" ]; }
 image_present()     { docker image inspect "$IMAGE" >/dev/null 2>&1; }
-
-# ---------------------------------------------------------------------------
-# Admin password resolution.
-#   Order: existing $ADMIN_PASSWORD → the running main container's env →
-#   get-password.sh (sudo). The value is NEVER printed; on success we only say
-#   that credentials were loaded. Callers get it via the exported var.
-# ---------------------------------------------------------------------------
-resolve_admin_password() {
-  if [ -n "${ADMIN_PASSWORD:-}" ]; then return 0; fi
-  local pw=""
-  # The main UberSDR container already holds the password in its environment.
-  pw="$(docker exec "$MAIN_CONTAINER" printenv ADMIN_PASSWORD 2>/dev/null || true)"
-  # Fall back to the helper that reads it out of the config volume (uses sudo).
-  if [ -z "$pw" ] && [ -x "$UBERSDR_DIR/get-password.sh" ]; then
-    pw="$("$UBERSDR_DIR/get-password.sh" --short 2>/dev/null || true)"
-  fi
-  if [ -n "$pw" ]; then
-    export ADMIN_PASSWORD="$pw"
-    return 0
-  fi
-  return 1
-}
-
-# Write the resolved password to a private (0600) env-file for
-# `docker compose --env-file`, so compose can substitute ${ADMIN_PASSWORD} into
-# the service env WITHOUT the value ever appearing on a command line / in `ps`.
-# Prints the env-file path on stdout. Empty ADMIN_PASSWORD is written as blank.
-make_env_file() {
-  local ef
-  ef="$(mktemp "${TMPDIR:-/tmp}/widget-ai.XXXXXX.env")"
-  chmod 600 "$ef"
-  printf 'ADMIN_PASSWORD=%s\n' "${ADMIN_PASSWORD:-}" > "$ef"
-  printf '%s' "$ef"
-}
 
 # ---------------------------------------------------------------------------
 # Status
@@ -144,23 +111,15 @@ do_start() {
     compose pull "$SERVICE"
   fi
 
-  # Resolve the admin password (never printed).
-  if resolve_admin_password; then
-    ok "Admin credentials loaded into the session."
-  else
-    warn "Could not resolve the admin password — the assistant's API calls may return 401."
-    warn "Set ADMIN_PASSWORD in the environment, or ensure $MAIN_CONTAINER is running."
-  fi
-
-  local envfile; envfile="$(make_env_file)"
-
-  # Launch the container inside a detached tmux session and attach. The compose
-  # command reads ADMIN_PASSWORD from the private env-file (removed once the run
-  # exits). Closing the window detaches; the session + container keep running.
+  # Launch the container inside a detached tmux session and attach. Closing the
+  # window detaches; the session + container keep running.
+  #
+  # --name pins the container name to $CONTAINER, which must stay in the
+  # instance's admin->widget_trusted_hosts list — that name is what authorises
+  # the assistant's /admin/widgets/* calls, so no password is passed in.
   say "Starting the Widget AI container…"
   tmux new-session -d -s "$SESSION" -n "$SESSION" \
-    "cd '$UBERSDR_DIR' && docker compose --env-file '$envfile' --profile '$PROFILE' -f '$COMPOSE_FILE' run --rm --name '$CONTAINER' '$SERVICE'; \
-     rm -f '$envfile'; \
+    "cd '$UBERSDR_DIR' && docker compose --profile '$PROFILE' -f '$COMPOSE_FILE' run --rm --name '$CONTAINER' '$SERVICE'; \
      echo; echo '=== Widget AI session ended — press Enter to close ==='; read -r _"
 
   say "Attaching (detach with Ctrl-b then d; closing the window also detaches)…"

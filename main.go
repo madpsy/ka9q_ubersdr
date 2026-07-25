@@ -3017,16 +3017,19 @@ func main() {
 	http.HandleFunc("/api/dxcluster/inject", HandleDXSpotInject(dxCluster, &config.DXCluster, &config.Server))
 	http.HandleFunc("/api/noisefloor/spectrum/stream", HandleNoiseFloorSpectrumStream(noiseFloorMonitor, config, noiseFloorSpectrumSSELimiter, &config.Server))
 
-	// Widget management endpoints (admin only)
-	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))
-	http.HandleFunc("/admin/widgets/mine", adminHandler.AuthMiddleware(widgetManager.HandleMine))
-	http.HandleFunc("/admin/widgets/public", adminHandler.AuthMiddleware(widgetManager.HandlePublic))
-	http.HandleFunc("/admin/widgets/public-with-instances", adminHandler.AuthMiddleware(widgetManager.HandlePublicWithInstances))
-	http.HandleFunc("/admin/widgets/create", adminHandler.AuthMiddleware(widgetManager.HandleCreate))
-	http.HandleFunc("/admin/widgets/update", adminHandler.AuthMiddleware(widgetManager.HandleUpdate))
-	http.HandleFunc("/admin/widgets/delete", adminHandler.AuthMiddleware(widgetManager.HandleDelete))
-	http.HandleFunc("/admin/widgets/versions", adminHandler.AuthMiddleware(widgetManager.HandleVersions))
-	http.HandleFunc("/admin/widgets/version", adminHandler.AuthMiddleware(widgetManager.HandleVersionContent))
+	// Widget management endpoints (admin auth, or a host listed in admin.widget_trusted_hosts)
+	if len(config.Admin.WidgetTrustedHosts) > 0 {
+		log.Printf("Widget management: hosts %v may call /admin/widgets/* without the admin password", config.Admin.WidgetTrustedHosts)
+	}
+	http.HandleFunc("/admin/widgets/enabled", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleEnabled))
+	http.HandleFunc("/admin/widgets/mine", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleMine))
+	http.HandleFunc("/admin/widgets/public", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandlePublic))
+	http.HandleFunc("/admin/widgets/public-with-instances", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandlePublicWithInstances))
+	http.HandleFunc("/admin/widgets/create", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleCreate))
+	http.HandleFunc("/admin/widgets/update", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleUpdate))
+	http.HandleFunc("/admin/widgets/delete", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleDelete))
+	http.HandleFunc("/admin/widgets/versions", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleVersions))
+	http.HandleFunc("/admin/widgets/version", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleVersionContent))
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {

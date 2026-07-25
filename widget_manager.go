@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -432,6 +433,42 @@ func (wm *WidgetManager) AssembleHTML(enabledIDs []string) template.HTML {
 // ---------------------------------------------------------------------------
 // Admin HTTP handlers
 // ---------------------------------------------------------------------------
+
+// AuthMiddleware guards the /admin/widgets/* endpoints.
+//
+// Callers whose RAW source IP belongs to one of the container names (or literal
+// IPs) listed in admin.widget_trusted_hosts are let straight through, so a
+// trusted sidecar container can create, update and enable widgets without
+// knowing the admin password.  This mirrors dxcluster.inject_trusted_hosts.
+//
+// The RAW source IP is used deliberately — never getClientIP() — because the
+// latter may substitute a proxied address from X-Real-IP / X-Forwarded-For,
+// which an untrusted caller can set and would defeat the container matching.
+//
+// Everyone else falls through to the normal admin authentication (allowed_ips,
+// CSRF, X-Admin-Password header or admin_session cookie).
+func (wm *WidgetManager) AuthMiddleware(ah *AdminHandler, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rawSourceIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+			rawSourceIP = host
+		}
+
+		for _, name := range wm.config.Admin.WidgetTrustedHosts {
+			if name == "" {
+				continue
+			}
+			if wm.config.Server.IsContainerIP(rawSourceIP, name) {
+				log.Printf("Widgets: %s %s allowed from trusted host %s (%s) without admin auth",
+					r.Method, r.URL.Path, name, rawSourceIP)
+				next(w, r)
+				return
+			}
+		}
+
+		ah.AuthMiddleware(next)(w, r)
+	}
+}
 
 // HandleEnabled handles GET and POST /admin/widgets/enabled.
 //

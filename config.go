@@ -283,6 +283,12 @@ type AdminConfig struct {
 	LoginAttemptWindow   int       `yaml:"login_attempt_window"`   // Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
 	LoginBanDuration     int       `yaml:"login_ban_duration"`     // Duration of temporary ban after max attempts in seconds (default: 900 = 15 minutes)
 	AllowedIPs           []string  `yaml:"allowed_ips"`            // List of IPs/CIDRs allowed to access admin endpoints (empty = allow all)
+	// WidgetTrustedHosts lists Docker container names or IPs permitted to call the
+	// /admin/widgets/* endpoints without an admin password or session.
+	// Resolved via DNS the same way as server.trusted_containers, but they are NOT
+	// trusted as proxies (no X-Real-IP spoofing privileges).
+	// Default ["ubersdr-claude"]; set to [] to require admin auth for all callers.
+	WidgetTrustedHosts []string `yaml:"widget_trusted_hosts"`
 
 	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
 }
@@ -386,6 +392,7 @@ type ServerConfig struct {
 	containerResolveErrLastLog      map[string]time.Time // Rate-limit resolve error logging per container name
 	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
 	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
+	widgetResolveNames              []string             // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
 }
 
 // AudioConfig contains audio processing settings
@@ -821,6 +828,15 @@ func LoadConfig(filename string) (*Config, error) {
 	// so they gain UUID-free lookup access WITHOUT X-Real-IP spoofing privileges.
 	config.Server.lookupResolveNames = config.LookupServices.TrustedContainers
 	config.Server.injectResolveNames = config.DXCluster.InjectTrustedHosts
+
+	// widget_trusted_hosts defaults to ["ubersdr-claude"] when absent from config.
+	// An explicit empty list (widget_trusted_hosts: []) disables password-free
+	// widget management entirely.  Defaulted here (before the resolve list is
+	// assigned) so the default name is actually resolved by the DNS refresh loop.
+	if config.Admin.WidgetTrustedHosts == nil {
+		config.Admin.WidgetTrustedHosts = []string{"ubersdr-claude"}
+	}
+	config.Server.widgetResolveNames = config.Admin.WidgetTrustedHosts
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
@@ -1704,6 +1720,20 @@ func (sc *ServerConfig) resolveContainerIPs() {
 			seen[n] = true
 			names = append(names, n)
 			lookupOnlySet[n] = true // reuse lookupOnlySet — same "not a proxy" semantics
+		}
+	}
+
+	// Merge in widget-admin container names (from admin.widget_trusted_hosts).
+	// Same semantics again: resolved for IsContainerIP matching so they can call
+	// /admin/widgets/* without a password, but NOT trusted as proxies.
+	for _, n := range sc.widgetResolveNames {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+			lookupOnlySet[n] = true
 		}
 	}
 

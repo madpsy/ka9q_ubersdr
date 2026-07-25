@@ -987,6 +987,31 @@ let CMAP = buildCMAP('jet'); // default palette
 // waterfall bitmap from the stored (palette-independent) row values.
 let _paletteVersion = 0;
 
+// ── Palette-derived trace colours ─────────────────────────────────────────────
+// The spectrum trace is coloured from the same map as the waterfall, so a signal
+// at a given level reads as the same colour in both.  The cold end of most
+// palettes is near-black though, which would make the trace vanish against the
+// panel background — so dark entries are lifted toward white, preserving hue
+// while keeping the noise floor legible.
+const TRACE_MIN_BRIGHT = 105;
+function _traceColor(idx, alpha) {
+    const v = CMAP[Math.max(0, Math.min(255, idx))];
+    let r = v & 0xFF, g = (v >> 8) & 0xFF, b = (v >> 16) & 0xFF;  // CMAP is ABGR
+    // Blend luma with the strongest channel.  Luma alone badly under-rates
+    // saturated colours — jet's hot end (190,0,0) scores 40, so a pure-luma test
+    // would wash the iconic red peak out to pink even though a red line reads
+    // perfectly well on near-black.  The max term keeps saturated colours intact
+    // while still catching genuinely dark ones like a deep blue floor.
+    const bright = 0.6 * Math.max(r, g, b) + 0.4 * (0.2126 * r + 0.7152 * g + 0.0722 * b);
+    if (bright < TRACE_MIN_BRIGHT) {
+        const t = (1 - bright / TRACE_MIN_BRIGHT) * 0.75;
+        r += (255 - r) * t;
+        g += (255 - g) * t;
+        b += (255 - b) * t;
+    }
+    return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${alpha})`;
+}
+
 // Respect the OS "reduce motion" setting — when set we snap to each new data
 // frame instead of gliding between them.
 const _reduceMotion = window.matchMedia &&
@@ -1315,6 +1340,14 @@ class BandPanel {
         // ── Cached spectrum background (dB grid + labels) ─────────────────────
         this._specBg    = null;
         this._specBgKey = '';
+
+        // ── Cached palette-matched trace gradients ────────────────────────────
+        this._traceKey  = '';
+        this._lineGrad  = null;
+        this._fillGrad  = null;
+        this._accentFaint = null;
+        this._accentDot   = null;
+        this._accentLabel = null;
 
         // ── Peak marker cache ────────────────────────────────────────────────
         this._peaks        = [];   // [{i, db}] in zoomed-slice coordinates
@@ -2064,6 +2097,39 @@ class BandPanel {
         this._wfInterKey = '';   // colours changed under the same head
     }
 
+    // ── Palette-matched trace gradients ──────────────────────────────────────
+    // Vertical gradients spanning the canvas.  Because y position *is* dB level,
+    // stroking the trace with one gives every point the colour that same level
+    // has in the waterfall — peaks glow in the palette's hot end, the noise floor
+    // sits in its cold end — without per-sample colour changes while drawing.
+    // Rebuilt only when the height or the palette changes.
+    _ensureTraceGradients(h) {
+        const key = `${h},${_paletteVersion}`;
+        if (this._traceKey === key) return;
+        this._traceKey = key;
+
+        const ctx  = this.specCtx;
+        const line = ctx.createLinearGradient(0, 0, 0, h);
+        const fill = ctx.createLinearGradient(0, 0, 0, h);
+        const N = 24;
+        for (let i = 0; i < N; i++) {
+            const p   = i / (N - 1);            // 0 = top of canvas = loudest
+            const idx = Math.round((1 - p) * 255);
+            line.addColorStop(p, _traceColor(idx, 1));
+            // Keep the wash subtle at the noise floor and stronger over signal,
+            // matching the alpha ramp the fixed blue fill used to have.
+            fill.addColorStop(p, _traceColor(idx, 0.35 * (1 - p) + 0.02));
+        }
+        this._lineGrad = line;
+        this._fillGrad = fill;
+
+        // Peak markers take the palette's hot end so they stay visible whatever
+        // the palette, rather than clashing with a fixed blue.
+        this._accentFaint = _traceColor(230, 0.18);
+        this._accentDot   = _traceColor(230, 0.75);
+        this._accentLabel = _traceColor(230, 0.55);
+    }
+
     // Cached spectrum background: opaque panel fill + adaptive dB grid + labels.
     // Rebuilt only when the canvas size or the dB range changes.
     _ensureSpecBg(w, h, dMin, dMax, dRange) {
@@ -2180,6 +2246,7 @@ class BandPanel {
         // off the per-frame path.
         const sCtx = this.specCtx;
         sCtx.drawImage(this._ensureSpecBg(w, h, dMin, dMax, dRange), 0, 0);
+        this._ensureTraceGradients(h);
 
         // ── Interpolated dBFS values ──────────────────────────────────────────
         // Blend the previous arrival into the current one across the measured
@@ -2210,10 +2277,7 @@ class BandPanel {
         sCtx.lineTo(w, h);
         sCtx.lineTo(0, h);
         sCtx.closePath();
-        const grad = sCtx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, 'rgba(126,200,227,0.35)');
-        grad.addColorStop(1, 'rgba(126,200,227,0.02)');
-        sCtx.fillStyle = grad;
+        sCtx.fillStyle = this._fillGrad;
         sCtx.fill();
 
         // Line on top
@@ -2225,7 +2289,7 @@ class BandPanel {
             if (i === 0) sCtx.moveTo(x, y);
             else         sCtx.lineTo(x, y);
         }
-        sCtx.strokeStyle = '#7ec8e3';
+        sCtx.strokeStyle = this._lineGrad;
         sCtx.lineWidth = 1.2;
         sCtx.stroke();
 
@@ -2257,7 +2321,7 @@ class BandPanel {
                 const y  = h - ((db - dMin) / dRange) * h;
 
                 // Faint vertical drop-line
-                sCtx.strokeStyle = 'rgba(126,200,227,0.18)';
+                sCtx.strokeStyle = this._accentFaint;
                 sCtx.lineWidth   = 1;
                 sCtx.setLineDash([2, 3]);
                 sCtx.beginPath();
@@ -2267,7 +2331,7 @@ class BandPanel {
                 sCtx.setLineDash([]);
 
                 // Dot at peak tip
-                sCtx.fillStyle = 'rgba(126,200,227,0.75)';
+                sCtx.fillStyle = this._accentDot;
                 sCtx.beginPath();
                 sCtx.arc(x, y, 2.5, 0, Math.PI * 2);
                 sCtx.fill();
@@ -2284,7 +2348,7 @@ class BandPanel {
                 if (lx < 2)          lx = x + 4;
                 if (lx + tw > w - 2) lx = x - tw - 4;
                 const ly = Math.max(10, y - 4);
-                sCtx.fillStyle = 'rgba(126,200,227,0.55)';
+                sCtx.fillStyle = this._accentLabel;
                 sCtx.fillText(label, lx, ly);
             }
             sCtx.restore();

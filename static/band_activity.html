@@ -1241,7 +1241,9 @@ function _getRadio() {
 }
 
 // Start audio at a specific frequency (Hz). Switches frequency if already playing.
-async function startAudioAt(freqHz, bandName) {
+// `mode` is optional — null lets MinimalRadio auto-detect LSB/USB from frequency,
+// which is what clicking on a spectrum does.
+async function startAudioAt(freqHz, bandName, mode = null) {
     const r = _getRadio();
     if (!r) { console.warn('MinimalRadio not available'); return; }
 
@@ -1256,11 +1258,11 @@ async function startAudioAt(freqHz, bandName) {
 
     if (r.isPlaying) {
         // Already playing — just retune
-        r.changeFrequency(freqHz);
+        r.changeFrequency(freqHz, mode);
         _setBandPlayingIndicator(bandName, true);
     } else {
         try {
-            await r.startPreview(freqHz);
+            await r.startPreview(freqHz, mode);
             _setBandPlayingIndicator(bandName, true);
         } catch (err) {
             console.error('Audio start failed:', err);
@@ -1270,6 +1272,38 @@ async function startAudioAt(freqHz, bandName) {
     }
     // Force immediate redraw so cursor appears right away
     if (panels[bandName]) panels[bandName].dirty = true;
+}
+
+// ── Click-to-tune from CW spot badges / voice activity ticker ────────────────
+// Both carry a band name from the server, which may not match the receiver's
+// configured band list exactly (case, or a band this receiver doesn't cover).
+function _resolveBandName(name) {
+    if (!name) return null;
+    if (bandMeta[name]) return name;
+    const lower = String(name).toLowerCase();
+    if (bandMeta[lower]) return lower;
+    return allBands.find(b => b.toLowerCase() === lower) || null;
+}
+
+// Same convention as the main receiver UI: below 10 MHz the CW/voice pair sits
+// on the lower sideband, at or above it on the upper.
+function _cwModeForFreq(hz)    { return hz < 10000000 ? 'cwl' : 'cwu'; }
+function _voiceModeForFreq(hz) { return hz < 10000000 ? 'lsb' : 'usb'; }
+const _VALID_MODES = new Set(['usb','lsb','am','sam','fm','nfm','cwu','cwl']);
+
+// Tune to a spot.  Enables the band first if it isn't already showing; does
+// nothing at all if this receiver has no such band.
+async function _tuneFromSpot(rawBand, freqHz, mode) {
+    const band = _resolveBandName(rawBand);
+    if (!band || !isFinite(freqHz) || freqHz <= 0) return;
+
+    if (!activeBands.has(band)) {
+        activeBands.add(band);
+        updatePills();
+        rebuildPanels();   // creates the panel and reconnects the spectrum stream
+        savePrefs();
+    }
+    await startAudioAt(freqHz, band, mode);
 }
 
 async function stopAudio() {
@@ -3027,6 +3061,9 @@ function _cwMakeBadge(spot) {
     const el = document.createElement('span');
     el.className = 'cond-cw-badge' + (spot.isNew ? ' new-country' : '');
     el.title = `${spot.callsign} on ${spot.band} · ${(spot.frequency / 1e6).toFixed(4)} MHz · ${spot.wpm || '?'} WPM`;
+    // Read back by the delegated click-to-tune handler
+    el.dataset.band = spot.band || '';
+    el.dataset.freq = spot.frequency;
     const flag = spot.country_code ? iso2ToFlag(spot.country_code) : '';
     el.innerHTML =
         (flag ? `<span class="ccw-flag">${flag}</span>` : '') +
@@ -3299,6 +3336,10 @@ function _renderVoiceTicker(data, _precomputed) {
 
         const el = document.createElement('span');
         el.className = 'cond-ticker-item' + (isNew ? ' cond-ticker-item--new' : '');
+        // Read back by the delegated click-to-tune handler
+        el.dataset.band = act.band || '';
+        el.dataset.freq = act.estimated_dial_freq || act.center_freq;
+        el.dataset.mode = act.mode || '';
         el.innerHTML =
             (isNew ? `<span class="cond-ticker-new-star">★</span>` : '') +
             `<span class="cond-ticker-band">${_escHtml(band)}</span>` +
@@ -3905,6 +3946,30 @@ async function init() {
         savePrefs();
         // Redraw all panels with the new colour map
         for (const p of Object.values(panels)) p.dirty = true;
+    });
+
+    // Click-to-tune from CW spot badges and the voice activity ticker.
+    // Delegated to the containers: both rebuild their children constantly (the
+    // ticker renders several duplicated copies for the marquee), so per-element
+    // listeners would be re-attached on every refresh.
+    const cwStrip = document.getElementById('cond-cw-spots');
+    if (cwStrip) cwStrip.addEventListener('click', e => {
+        const badge = e.target.closest('.cond-cw-badge');
+        if (!badge || !badge.dataset.band) return;
+        const hz = parseFloat(badge.dataset.freq);
+        _tuneFromSpot(badge.dataset.band, hz, _cwModeForFreq(hz));
+    });
+
+    const tickerTrack = document.getElementById('cond-ticker-track');
+    if (tickerTrack) tickerTrack.addEventListener('click', e => {
+        const item = e.target.closest('.cond-ticker-item');
+        if (!item || !item.dataset.band) return;
+        const hz = parseFloat(item.dataset.freq);
+        // The ticker reports its own mode (it already displays it); fall back to
+        // the sideband convention if it is missing or unrecognised.
+        const m = (item.dataset.mode || '').toLowerCase();
+        _tuneFromSpot(item.dataset.band, hz,
+                      _VALID_MODES.has(m) ? m : _voiceModeForFreq(hz));
     });
 
     // Peak marker toggle

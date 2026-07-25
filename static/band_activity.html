@@ -25,6 +25,7 @@ body {
     background: #111118;
     border-bottom: 1px solid #222;
     flex-wrap: wrap;
+    position: relative;   /* anchors the floating notification overlay */
 }
 
 #topbar h1 {
@@ -134,22 +135,31 @@ body {
 #btn-notif-key:hover { border-color: #555; color: #ccc; }
 
 #notif-panel {
-    /* Shown only while there is an alert or a password to enter, so an idle
-       stream costs no vertical space at all. */
+    /* Toast stack: floats just below the topbar, under the clocks, over the
+       grid — so it costs no layout space whether or not it has anything in it.
+       The container itself is invisible; each toast carries its own chrome. */
     display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 16px;
+    z-index: 60;
     flex-direction: column;
-    align-items: flex-end;   /* line up under the clocks */
-    gap: 3px;
-    padding: 5px 16px;
-    background: #0e0e15;
-    border-bottom: 1px solid #1c1c28;
+    align-items: flex-end;
+    gap: 6px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
 }
 
+/* Password prompt — same corner, but it stays until it is dealt with. */
 #notif-auth {
-    display: none;            /* shown when a password is needed */
+    display: none;
     align-items: center;
-    justify-content: flex-end;
     gap: 5px;
+    padding: 6px 8px;
+    background: rgba(14, 14, 21, 0.97);
+    border: 1px solid #2a2a3a;
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.6);
 }
 #notif-auth input {
     background: #0d0d14;
@@ -178,32 +188,35 @@ body {
     display: none;
     font-size: 0.7em;
     color: #e57373;
+    background: rgba(14, 14, 21, 0.97);
+    border: 1px solid #3a2626;
+    border-radius: 4px;
+    padding: 3px 7px;
 }
 
 #notif-list {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 3px;
+    gap: 6px;
     cursor: pointer;
     max-width: 100%;
 }
-#notif-list:empty { display: none; }
 
 .notif-item {
     display: flex;
-    max-width: min(520px, 100%);
     gap: 6px;
     align-items: baseline;
-    background: #15151e;
-    border: 1px solid #262633;
+    max-width: min(420px, 100%);
+    padding: 5px 9px;
+    background: rgba(21, 21, 30, 0.97);
+    border: 1px solid #2a2a3a;
     border-left: 2px solid #7ec8e3;
-    border-radius: 4px;
-    padding: 3px 7px;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
     font-size: 0.74em;
     line-height: 1.35;
     color: #c8c8d0;
-    animation: notifIn 0.35s ease-out;
 }
 .notif-item .notif-time {
     color: #666;
@@ -214,15 +227,22 @@ body {
 .notif-item .notif-text {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 1;   /* one line per alert; full text in the tooltip */
-    line-clamp: 1;
+    -webkit-line-clamp: 2;   /* full text in the tooltip */
+    line-clamp: 2;
     overflow: hidden;
     word-break: break-word;
 }
 
+/* Toasts slide in from the right edge and leave the same way. The timings are
+   set inline from _NOTIF_TTL_MS / _NOTIF_FADE_MS so they cannot drift apart
+   from the timer that removes the element. */
 @keyframes notifIn {
-    from { opacity: 0; transform: translateY(-4px); }
+    from { opacity: 0; transform: translateX(14px); }
     to   { opacity: 1; transform: none; }
+}
+@keyframes notifOut {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateX(14px); }
 }
 
 /* band selector pills — always on their own row when the topbar wraps */
@@ -1062,18 +1082,18 @@ body {
             <input type="checkbox" id="show-peaks" checked> Peaks
         </label>
     </div>
-</div>
 
-<!-- Alerts sit directly under the clocks, in flow: they take no room at all
-     while there is nothing to show, and never cover a spectrum card. -->
-<div id="notif-panel">
-    <div id="notif-auth">
-        <input type="password" id="notif-password" placeholder="Notification password"
-               autocomplete="off" spellcheck="false">
-        <button id="btn-notif-connect" type="button">Connect</button>
+    <!-- Alerts float below the clocks, over the top of the grid: they never
+         change the topbar's height or take a row of their own. -->
+    <div id="notif-panel">
+        <div id="notif-auth">
+            <input type="password" id="notif-password" placeholder="Notification password"
+                   autocomplete="off" spellcheck="false">
+            <button id="btn-notif-connect" type="button">Connect</button>
+        </div>
+        <div id="notif-auth-msg"></div>
+        <div id="notif-list" title="Click to dismiss"></div>
     </div>
-    <div id="notif-auth-msg"></div>
-    <div id="notif-list" title="Click to dismiss"></div>
 </div>
 
 <div id="grid"></div>
@@ -3422,12 +3442,12 @@ function _startCWSpots() {
 // on every visit.
 
 const _NOTIF_PW_KEY   = 'bandActivity_notifPassword';
-const _NOTIF_MAX      = 3;      // alerts shown at once in the floating card
-const _NOTIF_TTL_MS   = 10 * 60 * 1000;  // an alert clears itself after 10 minutes
+const _NOTIF_MAX      = 3;      // alerts stacked at once in the overlay
+const _NOTIF_TTL_MS   = 5000;   // each alert is on screen for 5 seconds
+const _NOTIF_FADE_MS  = 500;    // …the last of which is a fade-out
 const _NOTIF_URL      = '/api/notifications/stream';
 
 let _notifSSE       = null;
-let _notifItems     = [];
 let _notifBackoffMs = 5000;     // network-error backoff: 5 s → 60 s
 let _notifRetryTid  = null;
 let _notifLastEvent = 0;        // Date.now() of the last notification/heartbeat
@@ -3456,25 +3476,21 @@ function _notifShow(visible) {
     const badge = document.getElementById('notif-badge');
     if (badge) badge.style.display = visible ? 'flex' : 'none';
     if (!visible) {
-        _notifItems = [];
+        _notifClear();
         _notifHidePasswordBox();
-        _notifRender();
     }
 }
 
-// The strip is only on screen while it has something to say: an alert, or a
-// password box. Idle, it takes no vertical space at all.
+// The overlay is only on screen while it has something to say: an alert, or a
+// password box. It floats, so it never resizes anything underneath it.
 function _notifSyncPanel() {
     const panel = document.getElementById('notif-panel');
     const auth  = document.getElementById('notif-auth');
     if (!panel) return;
+    const list = document.getElementById('notif-list');
     const authOpen = auth && auth.style.display === 'flex';
-    const want    = (authOpen || _notifItems.length > 0) ? 'flex' : 'none';
-    const current = panel.style.display || 'none';
-    if (current === want) return;
-    panel.style.display = want;
-    // In flow: showing or hiding it changes the room the grid has to lay out in.
-    scheduleLayout();
+    const hasItems = list && list.children.length > 0;
+    panel.style.display = (authOpen || hasItems) ? 'flex' : 'none';
 }
 
 function _notifSetState(dotClass, text) {
@@ -3536,34 +3552,17 @@ function _notifPlain(s) {
         .trim();
 }
 
-function _notifRender() {
+function _notifClear() {
     const list = document.getElementById('notif-list');
-    if (!list) return;
-
-    list.innerHTML = _notifItems.map(function(item) {
-        const title = [item.text, item.event ? 'event: ' + item.event : '', item.rule ? 'rule: ' + item.rule : '']
-            .filter(Boolean).join('\n');
-        return '<div class="notif-item" title="' + _escHtml(title) + '">' +
-                   '<span class="notif-time">' + _escHtml(item.time) + '</span>' +
-                   '<span class="notif-text">' + _escHtml(item.text) + '</span>' +
-               '</div>';
-    }).join('');
+    if (list) list.innerHTML = '';
     _notifSyncPanel();
 }
 
-// Alerts are transient: each item clears itself once it has had time to be
-// read, so the strip collapses back to nothing.
-function _notifPrune() {
-    if (_notifItems.length === 0) return;
-    const cutoff = Date.now() - _NOTIF_TTL_MS;
-    const kept = _notifItems.filter(function(it) { return it.at > cutoff; });
-    if (kept.length !== _notifItems.length) {
-        _notifItems = kept;
-        _notifRender();
-    }
-}
-
+// Each alert is its own element with its own expiry timer, so a new one
+// arriving never restarts the fade of the alerts already on screen.
 function _notifPush(payload) {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
     const text = _notifPlain(payload.message);
     if (!text) return;
 
@@ -3573,13 +3572,27 @@ function _notifPush(payload) {
     const time = String(when.getUTCHours()).padStart(2, '0') + ':' +
                  String(when.getUTCMinutes()).padStart(2, '0');
 
-    _notifItems.unshift({
-        time: time, text: text, at: Date.now(),
-        event: payload.event || '', rule: payload.rule || '',
-    });
-    if (_notifItems.length > _NOTIF_MAX) _notifItems.length = _NOTIF_MAX;
+    const item = document.createElement('div');
+    item.className = 'notif-item';
+    item.title = [text,
+                  payload.event ? 'event: ' + payload.event : '',
+                  payload.rule  ? 'rule: '  + payload.rule  : '']
+                 .filter(Boolean).join('\n');
+    item.innerHTML = '<span class="notif-time">' + _escHtml(time) + '</span>' +
+                     '<span class="notif-text">' + _escHtml(text) + '</span>';
+    // Fade out under its own steam just before the timer removes it, so the two
+    // stay in step from the one constant above.
+    item.style.animation = 'notifIn 0.3s ease-out, notifOut ' + (_NOTIF_FADE_MS / 1000) +
+                           's ease-in ' + ((_NOTIF_TTL_MS - _NOTIF_FADE_MS) / 1000) + 's forwards';
 
-    _notifRender();
+    list.insertBefore(item, list.firstChild);
+    while (list.children.length > _NOTIF_MAX) list.removeChild(list.lastChild);
+    _notifSyncPanel();
+
+    setTimeout(function() {
+        item.remove();
+        _notifSyncPanel();
+    }, _NOTIF_TTL_MS);
 }
 
 function _notifScheduleRetry(ms) {
@@ -3646,7 +3659,6 @@ async function _notifConnect() {
         _notifShow(true);
         _notifHidePasswordBox();
         _notifSetState('live', 'connected');
-        _notifRender();
         _notifBackoffMs = 5000;
         _notifLastEvent = Date.now();
 
@@ -3703,7 +3715,6 @@ function _notifDisconnect() {
 function _notifStartStaleWatch() {
     if (_notifStaleTid !== null) return;
     _notifStaleTid = setInterval(function() {
-        _notifPrune();
         if (!_notifSSE) return;
         const silentMs = Date.now() - _notifLastEvent;
         if (silentMs > _notifHbSec * 2500) {
@@ -3736,10 +3747,7 @@ function _startNotifications() {
     // Clicking the alerts dismisses them — they are also cleared on a timer.
     const listEl = document.getElementById('notif-list');
     if (listEl) {
-        listEl.addEventListener('click', function() {
-            _notifItems = [];
-            _notifRender();
-        });
+        listEl.addEventListener('click', _notifClear);
     }
 
     function submit() {

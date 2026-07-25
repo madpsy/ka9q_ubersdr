@@ -1363,7 +1363,14 @@ async function saveSSEStream() {
     };
 
     renderChannels();
-    await saveConfig(alertEl);
+    const saved = await saveConfig(alertEl);
+    if (saved) {
+        // Done with it — fold it away. The summary row still carries the status,
+        // subscriber count and rule count. A failed save stays open so the
+        // rejected values are still there to fix.
+        sseSetPanelOpen(false);
+        renderSSEPanel();
+    }
 }
 
 async function disableSSEStream() {

@@ -944,6 +944,15 @@ function buildCMAP(paletteName) {
 
 let CMAP = buildCMAP('jet'); // default palette
 
+// Bumped whenever CMAP changes, so each panel knows to re-colour its cached
+// waterfall bitmap from the stored (palette-independent) row values.
+let _paletteVersion = 0;
+
+// Respect the OS "reduce motion" setting — when set we snap to each new data
+// frame instead of gliding between them.
+const _reduceMotion = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 // ── Global state ──────────────────────────────────────────────────────────────
 let bandMeta    = {};   // name → {start, end, center_frequency, bin_count, bin_bandwidth}
 let allBands    = [];   // ordered list of band names
@@ -1194,9 +1203,46 @@ class BandPanel {
         this.wfCtx = null;
         this.overlayCanvas = null;
         this.overlayCtx = null;
-        this.wfImageData = null;
         this.animFrame = null;
-        this.dirty = false;        // true when new data arrived since last draw
+        this.dirty = false;        // true when something needs a redraw
+
+        // ── Smooth animation state ───────────────────────────────────────────
+        // Data arrives on a fixed server ticker (background_poll_period_ms —
+        // 250 ms typically), which is far slower than the display refresh.  We
+        // render every frame and interpolate between the last two data frames,
+        // so the trace glides and the waterfall scrolls continuously instead of
+        // snapping once per arrival.
+        this._newData    = false;  // a data frame arrived since the last commit
+        this._prevVals   = null;   // Float32Array(n) — dBFS at previous arrival
+        this._curVals    = null;   // Float32Array(n) — dBFS at latest arrival
+        this._lerpVals   = null;   // Float32Array(n) — scratch for interpolation
+        this._lastRowTime = 0;     // timestamp of latest arrival
+        this._rowPeriod  = 250;    // EMA of inter-arrival gap (ms)
+        this._statP5     = null;   // cached stats — recomputed only on arrival
+        this._statPeak   = null;
+
+        // ── Waterfall render cache ───────────────────────────────────────────
+        // Offscreen bitmap holding one pixel row per data row at full bin
+        // resolution.  New rows are written into it as a ring buffer, so a
+        // frame costs a couple of drawImage blits instead of an O(w×h) JS
+        // pixel loop — which is what makes per-frame rendering affordable.
+        this._wfOff     = null;    // canvas: binCount × maxRows (ring buffer)
+        this._wfOffCtx  = null;
+        this._wfInter   = null;    // canvas: wfW × maxRows (horizontally resampled)
+        this._wfInterCtx = null;
+        this._wfHead    = 0;       // ring index of the newest row
+        this._wfRowPx   = null;    // ImageData(binCount × 1) scratch for row writes
+        this._wfRowBuf  = null;    // Uint32 view onto _wfRowPx
+        this._wfInterKey = '';     // cache key for the pass-1 result
+        this._wfPaletteVersion = -1;
+
+        // ── Cached spectrum background (dB grid + labels) ─────────────────────
+        this._specBg    = null;
+        this._specBgKey = '';
+
+        // ── Peak marker cache ────────────────────────────────────────────────
+        this._peaks        = [];   // [{i, db}] in zoomed-slice coordinates
+        this._peaksZoomKey = '';   // invalidates the cache when zoom changes
 
         // ── Peak hold buffer (for top-3 markers) ─────────────────────────────
         // Rolling max over ~3 s of frames. Indexed by bin position (full band).
@@ -1329,7 +1375,6 @@ class BandPanel {
         this.overlayCanvas.width  = w;
         this.overlayCanvas.height = stackH;
         this.overlayCanvas.style.height = stackH + 'px';
-        this.wfImageData = this.wfCtx.createImageData(w, 1);
         this.dirty = true;
     }
 
@@ -1679,12 +1724,32 @@ class BandPanel {
             return;
         }
 
-        this.dirty = true;
+        // Flag arrival only — the row is committed by the render loop.  Pushing
+        // it here (or from _draw, as it used to be) would add a waterfall row
+        // for every redraw, so zooming or switching palette injected duplicates.
+        this._newData = true;
+        this.dirty    = true;
     }
 
     _startRenderLoop() {
         const loop = () => {
-            if (this.dirty) {
+            // Commit at most one waterfall row per arrival.
+            if (this._newData) {
+                this._commitFrame();
+                this._newData = false;
+                this.dirty    = true;
+            }
+            // Re-colour the cached waterfall if the palette changed.
+            if (this._wfPaletteVersion !== _paletteVersion) {
+                this._wfPaletteVersion = _paletteVersion;
+                this._rebuildWfCache();
+                this.dirty = true;
+            }
+            // Render every frame while interpolating between arrivals; once the
+            // trace has settled on the latest frame there is nothing to animate,
+            // so fall back to drawing only when something marks us dirty.
+            const animating = this._interpFrac() < 1;
+            if (this.dirty || animating) {
                 this._draw();
                 this.dirty = false;
             }
@@ -1693,8 +1758,243 @@ class BandPanel {
         this.animFrame = requestAnimationFrame(loop);
     }
 
+    // Progress [0,1] through the current inter-arrival gap.
+    _interpFrac() {
+        if (_reduceMotion || !this._lastRowTime) return 1;
+        const dt = Date.now() - this._lastRowTime;
+        return Math.max(0, Math.min(1, dt / this._rowPeriod));
+    }
+
+    // Smoothstep — eases in and out of each data frame so the trace doesn't
+    // change direction abruptly at arrival boundaries.
+    _ease(t) { return t * t * (3 - 2 * t); }
+
+    // ── Commit one arrived data frame ────────────────────────────────────────
+    // Everything that must happen exactly once per arrival lives here: stats,
+    // peak-hold, waterfall history and the offscreen row write.  The per-frame
+    // renderer stays cheap because none of this runs at display rate.
+    _commitFrame() {
+        const bins = this.bins;
+        if (!bins) return;
+        const n      = bins.length;
+        const dMin   = dbMin;
+        const dRange = dbMax - dbMin;
+
+        // Roll current → previous so the renderer can interpolate between them.
+        if (!this._curVals || this._curVals.length !== n) {
+            this._prevVals = new Float32Array(n);
+            this._curVals  = new Float32Array(n);
+            this._lerpVals = new Float32Array(n);
+            for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
+        }
+        this._prevVals.set(this._curVals);
+        for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
+
+        // Inter-arrival period — measured rather than assumed, so it tracks the
+        // server's configured poll period and rides out network jitter.
+        const now = Date.now();
+        if (this._lastRowTime) {
+            const dt = now - this._lastRowTime;
+            if (dt > 20 && dt < 10000) {
+                this._rowPeriod = this._rowPeriod * 0.8 + dt * 0.2;
+            }
+        }
+        this._lastRowTime = now;
+
+        // Stats over the full band, written straight to the DOM — once per
+        // arrival, so the render loop never touches layout.
+        const sorted = Float32Array.from(this._curVals).sort();
+        this._statP5   = sorted[Math.floor(n * 0.05)];
+        this._statPeak = sorted[n - 1];
+        const elP5   = document.getElementById(`stat-p5-${this.name}`);
+        const elPeak = document.getElementById(`stat-peak-${this.name}`);
+        if (elP5)   elP5.textContent   = this._statP5.toFixed(1);
+        if (elPeak) elPeak.textContent = this._statPeak.toFixed(1);
+
+        // ── Peak-hold buffer ─────────────────────────────────────────────────
+        if (!this._peakHold || this._peakHold.length !== n) {
+            this._peakHold    = new Float32Array(n).fill(-256);
+            this._peakHoldAge = new Uint16Array(n);
+        }
+        for (let i = 0; i < n; i++) {
+            const v = this._curVals[i];
+            if (v >= this._peakHold[i]) {
+                this._peakHold[i]    = v;
+                this._peakHoldAge[i] = 0;
+            } else {
+                this._peakHoldAge[i]++;
+                if (this._peakHoldAge[i] > this._peakHoldMax) {
+                    this._peakHold[i]    = v;
+                    this._peakHoldAge[i] = 0;
+                }
+            }
+        }
+        this._peaksZoomKey = ''; // force marker recompute on the next draw
+
+        // ── Waterfall history + offscreen row ────────────────────────────────
+        // Build the cache *before* pushing, so that if it has to repaint from
+        // history it does not also paint the row we are about to write into the
+        // ring — which would show the newest row twice and shift everything.
+        this._ensureWfCache(n);
+
+        const rowData = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            rowData[i] = Math.max(0, Math.min(1, (this._curVals[i] - dMin) / dRange));
+        }
+        this.waterfallRows.push(rowData);
+        this.waterfallTimes.push(now);
+        if (this.waterfallRows.length > this.maxRows) {
+            this.waterfallRows.shift();
+            this.waterfallTimes.shift();
+        }
+
+        // Ring grows upward: the newest row sits one slot *above* the previous
+        // head, so display order (newest first) is simply head → end → wrap.
+        this._wfHead = (this._wfHead - 1 + this.maxRows) % this.maxRows;
+        this._writeWfRow(rowData, this._wfHead);
+    }
+
+    // Allocate/resize the offscreen ring buffer for a given bin count.
+    _ensureWfCache(n) {
+        if (this._wfOff && this._wfOff.width === n) return;
+        this._wfOff    = document.createElement('canvas');
+        this._wfOff.width  = n;
+        this._wfOff.height = this.maxRows;
+        this._wfOffCtx = this._wfOff.getContext('2d', { willReadFrequently: false });
+        // Unwritten rows read as opaque black rather than transparent.
+        this._wfOffCtx.fillStyle = '#000';
+        this._wfOffCtx.fillRect(0, 0, n, this.maxRows);
+        this._wfRowPx  = this._wfOffCtx.createImageData(n, 1);
+        this._wfRowBuf = new Uint32Array(this._wfRowPx.data.buffer);
+        this._wfHead   = 0;
+        this._wfPaletteVersion = _paletteVersion;
+        this._wfInterKey = '';   // intermediate buffer is now stale
+        // Re-fill from whatever history we already have.
+        this._paintWfHistory();
+    }
+
+    // Colour one normalised row into the ring buffer at row index `y`.
+    _writeWfRow(rowData, y) {
+        // History can briefly hold rows from a previous bin count.
+        if (rowData.length !== this._wfOff.width) return;
+        const buf = this._wfRowBuf;
+        for (let i = 0; i < rowData.length; i++) {
+            buf[i] = CMAP[Math.round(rowData[i] * 255)];
+        }
+        this._wfOffCtx.putImageData(this._wfRowPx, 0, y);
+    }
+
+    // Repaint every stored row into the ring buffer (newest at head).
+    _paintWfHistory() {
+        const rows = this.waterfallRows;
+        this._wfHead = 0;
+        for (let r = rows.length - 1; r >= 0; r--) {
+            const y = (rows.length - 1 - r) % this.maxRows;
+            this._writeWfRow(rows[r], y);
+        }
+    }
+
+    // Palette changed — re-colour the cache from stored row values.
+    _rebuildWfCache() {
+        if (!this._wfOff || !this.waterfallRows.length) return;
+        this._wfOffCtx.fillStyle = '#000';
+        this._wfOffCtx.fillRect(0, 0, this._wfOff.width, this.maxRows);
+        this._paintWfHistory();
+        this._wfInterKey = '';   // colours changed under the same head
+    }
+
+    // Cached spectrum background: opaque panel fill + adaptive dB grid + labels.
+    // Rebuilt only when the canvas size or the dB range changes.
+    _ensureSpecBg(w, h, dMin, dMax, dRange) {
+        const key = `${w},${h},${dMin},${dMax}`;
+        if (this._specBgKey === key) return this._specBg;
+        this._specBgKey = key;
+
+        if (!this._specBg) this._specBg = document.createElement('canvas');
+        const bg = this._specBg;
+        bg.width  = w;
+        bg.height = h;
+        const ctx = bg.getContext('2d');
+
+        // Opaque base — matches .spectrum-canvas's CSS background.
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, w, h);
+
+        // Adaptive grid
+        const niceSteps = [5, 10, 20, 25, 50, 100];
+        let labelStep = niceSteps[niceSteps.length - 1];
+        for (const s of niceSteps) {
+            if (dRange / s <= 5) { labelStep = s; break; }
+        }
+        const minorStep = Math.max(5, labelStep / 2);
+
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+
+        for (let db = Math.ceil(dMin / minorStep) * minorStep; db <= dMax; db += minorStep) {
+            const y = h - ((db - dMin) / dRange) * h;
+            const isMajor = (db % labelStep === 0);
+            ctx.strokeStyle = isMajor ? '#222233' : '#161622';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+            if (isMajor && y < h - 2) {
+                const label = `${db}`;
+                const tw = ctx.measureText(label).width;
+                ctx.fillStyle = 'rgba(10,10,15,0.65)';
+                ctx.fillRect(2, y - 13, tw + 4, 12);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(label, 4, y - 2);
+            }
+        }
+        return bg;
+    }
+
+    // ── Find top-3 local maxima in the held spectrum ─────────────────────────
+    // Minimum separation: 2.5 kHz expressed in bins of the zoomed slice.
+    // bin_bandwidth is Hz per bin in the full array; zn covers the zoomed
+    // fraction of the full band, so scale accordingly.
+    _findPeaks(n, binStart, zn, p5) {
+        if (!this._peakHold) return [];
+        const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
+        const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
+        const threshold  = p5 + 15;
+
+        // Box-smooth with radius = half the minimum separation so we merge
+        // adjacent bins of the same signal without washing out narrow peaks.
+        // This keeps the FT8 cluster (3 kHz wide) detectable at full zoom.
+        const smoothR = Math.max(1, Math.floor(minSepBins / 2));
+        const smoothed = new Float32Array(zn);
+        for (let i = 0; i < zn; i++) {
+            let sum = 0, cnt = 0;
+            for (let j = Math.max(0, i - smoothR); j <= Math.min(zn - 1, i + smoothR); j++) {
+                sum += this._peakHold[binStart + j]; cnt++;
+            }
+            smoothed[i] = sum / cnt;
+        }
+
+        const candidates = [];
+        for (let i = 1; i < zn - 1; i++) {
+            const db = smoothed[i];
+            if (db < threshold) continue;
+            if (db >= smoothed[i - 1] && db >= smoothed[i + 1]) {
+                candidates.push({ i, db });
+            }
+        }
+        candidates.sort((a, b) => b.db - a.db);
+        const peaks = [];
+        for (const c of candidates) {
+            if (peaks.length >= 3) break;
+            if (!peaks.some(p => Math.abs(p.i - c.i) < minSepBins)) peaks.push(c);
+        }
+        return peaks;
+    }
+
     _draw() {
-        if (!this.bins) return;
+        if (!this.bins || !this._curVals) return;
         const w = this.specCanvas.width;
         const h = this.specCanvas.height;
         if (w === 0 || h === 0) return;
@@ -1713,48 +2013,29 @@ class BandPanel {
         const zn       = Math.max(2, binEnd - binStart + 1);
 
         // ── Spectrum line graph ───────────────────────────────────────────────
+        // The dB grid and its labels depend only on size and dB range, so they
+        // are cached as an opaque background layer.  Blitting it both clears the
+        // previous frame's trace and draws the grid, which keeps text rendering
+        // off the per-frame path.
         const sCtx = this.specCtx;
-        sCtx.clearRect(0, 0, w, h);
+        sCtx.drawImage(this._ensureSpecBg(w, h, dMin, dMax, dRange), 0, 0);
 
-        // Adaptive grid
-        const niceSteps = [5, 10, 20, 25, 50, 100];
-        let labelStep = niceSteps[niceSteps.length - 1];
-        for (const s of niceSteps) {
-            if (dRange / s <= 5) { labelStep = s; break; }
-        }
-        const minorStep = Math.max(5, labelStep / 2);
-
-        sCtx.font = '10px monospace';
-        sCtx.textAlign = 'left';
-        sCtx.textBaseline = 'bottom';
-
-        for (let db = Math.ceil(dMin / minorStep) * minorStep; db <= dMax; db += minorStep) {
-            const y = h - ((db - dMin) / dRange) * h;
-            const isMajor = (db % labelStep === 0);
-            sCtx.strokeStyle = isMajor ? '#222233' : '#161622';
-            sCtx.lineWidth = 1;
-            sCtx.beginPath();
-            sCtx.moveTo(0, y);
-            sCtx.lineTo(w, y);
-            sCtx.stroke();
-            if (isMajor && y < h - 2) {
-                const label = `${db}`;
-                const tw = sCtx.measureText(label).width;
-                sCtx.fillStyle = 'rgba(10,10,15,0.65)';
-                sCtx.fillRect(2, y - 13, tw + 4, 12);
-                sCtx.fillStyle = '#ffffff';
-                sCtx.fillText(label, 4, y - 2);
-            }
+        // ── Interpolated dBFS values ──────────────────────────────────────────
+        // Blend the previous arrival into the current one across the measured
+        // inter-arrival gap.  At 4 Hz data this turns a stepped trace into a
+        // continuous one without inventing detail — every keyframe is real.
+        const blend = this._ease(this._interpFrac());
+        const vals = this._lerpVals;
+        const prev = this._prevVals, cur = this._curVals;
+        if (blend >= 1) {
+            vals.set(cur);
+        } else {
+            for (let i = 0; i < n; i++) vals[i] = prev[i] + (cur[i] - prev[i]) * blend;
         }
 
-        // Build dBFS values for the full bin array
-        const vals = new Float32Array(n);
-        for (let i = 0; i < n; i++) vals[i] = bins[i] - 256;
-
-        // Stats from full band
-        const sorted = Float32Array.from(vals).sort();
-        const p5   = sorted[Math.floor(n * 0.05)];
-        const peak = sorted[n - 1];
+        // Stats — computed once per arrival, not per frame
+        const p5   = this._statP5   !== null ? this._statP5   : 0;
+        const peak = this._statPeak !== null ? this._statPeak : 0;
 
         // Spectrum fill — zoomed slice
         sCtx.beginPath();
@@ -1788,8 +2069,7 @@ class BandPanel {
         sCtx.stroke();
 
         // Update stats
-        document.getElementById(`stat-p5-${this.name}`).textContent  = p5.toFixed(1);
-        document.getElementById(`stat-peak-${this.name}`).textContent = peak.toFixed(1);
+        // (written from _commitFrame — a DOM write per frame would be wasteful)
 
         // ── Top-3 local peak markers (peak-hold) ─────────────────────────────
         // Rather than tracking per-frame peaks (which flicker), we maintain a
@@ -1798,61 +2078,15 @@ class BandPanel {
         // it hasn't been the max for _peakHoldMax consecutive frames.
         // Peak detection runs on this stable buffer, not the raw noisy frame.
         {
-            // ── Update peak-hold buffer ───────────────────────────────────────
-            if (!this._peakHold || this._peakHold.length !== n) {
-                this._peakHold    = new Float32Array(n).fill(-256);
-                this._peakHoldAge = new Uint16Array(n);
+            // Detection is driven by the peak-hold buffer (updated once per
+            // arrival in _commitFrame) and by the zoom window, so it only needs
+            // recomputing when one of those changes — not on every frame.
+            const zoomKey = `${binStart},${zn}`;
+            if (this._peaksZoomKey !== zoomKey) {
+                this._peaksZoomKey = zoomKey;
+                this._peaks = this._findPeaks(n, binStart, zn, p5);
             }
-            for (let i = 0; i < n; i++) {
-                const v = vals[i];
-                if (v >= this._peakHold[i]) {
-                    this._peakHold[i]    = v;
-                    this._peakHoldAge[i] = 0;
-                } else {
-                    this._peakHoldAge[i]++;
-                    if (this._peakHoldAge[i] > this._peakHoldMax) {
-                        // Decay toward current value
-                        this._peakHold[i] = v;
-                        this._peakHoldAge[i] = 0;
-                    }
-                }
-            }
-
-            // ── Find top-3 local maxima in the held spectrum ──────────────────
-            // Minimum separation: 2.5 kHz expressed in bins of the zoomed slice.
-            // bin_bandwidth is Hz per bin in the full array; zn covers the zoomed
-            // fraction of the full band, so scale accordingly.
-            const hzPerZoomedBin = this.meta.bin_bandwidth * (n / zn);
-            const minSepBins = Math.max(4, Math.round(2500 / hzPerZoomedBin));
-            const threshold  = p5 + 15;
-
-            // Box-smooth with radius = half the minimum separation so we merge
-            // adjacent bins of the same signal without washing out narrow peaks.
-            // This keeps the FT8 cluster (3 kHz wide) detectable at full zoom.
-            const smoothR = Math.max(1, Math.floor(minSepBins / 2));
-            const smoothed = new Float32Array(zn);
-            for (let i = 0; i < zn; i++) {
-                let sum = 0, cnt = 0;
-                for (let j = Math.max(0, i - smoothR); j <= Math.min(zn - 1, i + smoothR); j++) {
-                    sum += this._peakHold[binStart + j]; cnt++;
-                }
-                smoothed[i] = sum / cnt;
-            }
-
-            const candidates = [];
-            for (let i = 1; i < zn - 1; i++) {
-                const db = smoothed[i];
-                if (db < threshold) continue;
-                if (db >= smoothed[i - 1] && db >= smoothed[i + 1]) {
-                    candidates.push({ i, db });
-                }
-            }
-            candidates.sort((a, b) => b.db - a.db);
-            const peaks = [];
-            for (const c of candidates) {
-                if (peaks.length >= 3) break;
-                if (!peaks.some(p => Math.abs(p.i - c.i) < minSepBins)) peaks.push(c);
-            }
+            const peaks = this._peaks;
 
             // ── Draw markers ──────────────────────────────────────────────────
             sCtx.save();
@@ -1947,41 +2181,55 @@ class BandPanel {
         const wfH = this.wfCanvas.height;
         if (wfW === 0 || wfH === 0) return;
 
-        // Store full-resolution normalised row (one float per bin) so any zoom
-        // level can be rendered from history without data loss.
-        const rowData = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            rowData[i] = Math.max(0, Math.min(1, (vals[i] - dMin) / dRange));
-        }
-        this.waterfallRows.push(rowData);
-        this.waterfallTimes.push(Date.now());
-        if (this.waterfallRows.length > this.maxRows) {
-            this.waterfallRows.shift();
-            this.waterfallTimes.shift();
-        }
-
-        // Redraw entire waterfall using the zoomed bin slice
         const wfCtx = this.wfCtx;
         const rows  = this.waterfallRows;
         const nRows = rows.length;
+        const maxR  = this.maxRows;
+        const rowH  = wfH / maxR;
 
-        const imgData = wfCtx.createImageData(wfW, wfH);
-        const buf32   = new Uint32Array(imgData.data.buffer);
+        if (!this._wfOff) this._ensureWfCache(n);
 
-        for (let r = 0; r < nRows; r++) {
-            const srcRow = rows[nRows - 1 - r]; // newest at top
-            const yStart = Math.round(r * wfH / this.maxRows);
-            const yEnd   = Math.round((r + 1) * wfH / this.maxRows);
-            for (let y = yStart; y < yEnd && y < wfH; y++) {
-                const base = y * wfW;
-                for (let x = 0; x < wfW; x++) {
-                    const bi   = binStart + Math.round((x / (wfW - 1)) * (zn - 1));
-                    const norm = srcRow[Math.min(bi, n - 1)];
-                    buf32[base + x] = CMAP[Math.round(norm * 255)];
-                }
+        // Intermediate buffer: the ring resampled horizontally to canvas width,
+        // in display order (newest row first).  Kept at one pixel per data row
+        // so the vertical stretch below is the only smoothed axis.
+        if (!this._wfInter || this._wfInter.width !== wfW || this._wfInter.height !== maxR) {
+            this._wfInter = document.createElement('canvas');
+            this._wfInter.width  = wfW;
+            this._wfInter.height = maxR;
+            this._wfInterCtx = this._wfInter.getContext('2d');
+        }
+        const iCtx = this._wfInterCtx;
+        const head = this._wfHead;
+
+        // Pass 1 — horizontal only, smoothing OFF so carriers stay crisp.  The
+        // zoom window falls out of the source rectangle for free.  Its result
+        // only changes when a row arrives, the zoom moves or the canvas resizes,
+        // so it is cached: the per-frame cost is then a single blit (pass 2).
+        const interKey = `${head},${binStart},${zn},${wfW}`;
+        if (this._wfInterKey !== interKey) {
+            this._wfInterKey = interKey;
+            iCtx.imageSmoothingEnabled = false;
+            const count1 = maxR - head;
+            iCtx.drawImage(this._wfOff, binStart, head, zn, count1, 0, 0, wfW, count1);
+            if (head > 0) {
+                iCtx.drawImage(this._wfOff, binStart, 0, zn, head, 0, count1, wfW, head);
             }
         }
-        wfCtx.putImageData(imgData, 0, 0);
+
+        // Pass 2 — vertical stretch with smoothing ON, offset by how far we are
+        // through the current inter-arrival gap.  Starting one row high means the
+        // newest row slides down into place rather than popping in, which is what
+        // removes the once-per-update jerk.
+        const yOff = (this._interpFrac() - 1) * rowH;
+        wfCtx.imageSmoothingEnabled = true;
+        wfCtx.imageSmoothingQuality = 'high';
+        wfCtx.drawImage(this._wfInter, 0, 0, wfW, maxR, 0, yOff, wfW, wfH);
+        // The offset leaves up to one row uncovered at the bottom; repeat the
+        // oldest row into it so no black sliver pulses along the bottom edge.
+        if (yOff < 0) {
+            wfCtx.drawImage(this._wfInter, 0, maxR - 1, wfW, 1,
+                            0, yOff + wfH, wfW, rowH + 1);
+        }
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
         // Draw tick marks at fixed time intervals using stored row timestamps.
@@ -2005,17 +2253,18 @@ class BandPanel {
 
             // For each tick boundary, interpolate the exact Y pixel between the two
             // adjacent rows that straddle it.  This gives sub-pixel accuracy so the
-            // tick glides smoothly as the waterfall scrolls.
-            const rowH = wfH / nRows; // height of one row in pixels
+            // tick glides smoothly as the waterfall scrolls.  Row height and the
+            // scroll offset must match the blit above, or the ticks drift against
+            // the rows they label.
             let nextTick = tickStep;
             for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
                 if (rowAge[r] >= nextTick) {
                     // Interpolate between row r-1 and row r
                     const ageA = rowAge[r - 1]; // age at top of row r-1
                     const ageB = rowAge[r];     // age at top of row r
-                    const frac = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
+                    const tf   = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
                     // Y at top of row r-1 is (r-1)*rowH; top of row r is r*rowH
-                    const y = Math.round((r - 1 + frac) * rowH);
+                    const y = Math.round((r - 1 + tf) * rowH + yOff);
 
                     // Tick line across full width
                     wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -2170,8 +2419,11 @@ class BandPanel {
         const times   = this.waterfallTimes;
         const nRows   = rows.length;
         if (nRows === 0) return;
-        // Map canvas Y fraction → row index 0 (newest) .. nRows-1 (oldest)
-        const rowIdx     = Math.min(nRows - 1, Math.round(fracY * (nRows - 1)));
+        // Map canvas Y fraction → row index 0 (newest) .. nRows-1 (oldest).
+        // Must use the same mapping as the renderer — maxRows slots, shifted by
+        // the current scroll offset — or the readout points at the wrong row.
+        const rowIdx = Math.min(nRows - 1, Math.max(0,
+            Math.round(fracY * this.maxRows - this._interpFrac() + 1)));
         const rowDataIdx = nRows - 1 - rowIdx;
         // Age: use actual stored timestamp for accuracy
         const ageSec = Math.round((Date.now() - (times[rowDataIdx] ?? Date.now())) / 1000);
@@ -3344,6 +3596,7 @@ async function init() {
     document.getElementById('palette-select').addEventListener('change', e => {
         currentPalette = e.target.value;
         CMAP = buildCMAP(currentPalette);
+        _paletteVersion++;   // makes each panel re-colour its cached waterfall
         savePrefs();
         // Redraw all panels with the new colour map
         for (const p of Object.values(panels)) p.dirty = true;

@@ -135,12 +135,15 @@ body {
 #btn-notif-key:hover { border-color: #555; color: #ccc; }
 
 #notif-panel {
-    /* Toast stack: floats just below the topbar, under the clocks, over the
-       grid — so it costs no layout space whether or not it has anything in it.
-       The container itself is invisible; each toast carries its own chrome. */
+    /* Toast stack: floats just under the clocks, over whatever is below — so it
+       costs no layout space whether or not it has anything in it. The container
+       itself is invisible; each toast carries its own chrome. */
     display: none;
     position: absolute;
-    top: calc(100% + 6px);
+    /* Just below the clocks, not below the whole topbar — which is several rows
+       tall once the band pills and controls wrap. _notifPosition() measures the
+       exact offset; this is only the value used before it first runs. */
+    top: 34px;
     right: 16px;
     z-index: 60;
     flex-direction: column;
@@ -148,7 +151,11 @@ body {
     gap: 6px;
     width: max-content;
     max-width: calc(100vw - 32px);
+    /* The stack overlays the topbar controls, so only the toasts themselves
+       take clicks — the gaps between them stay see-through to what is below. */
+    pointer-events: none;
 }
+#notif-auth, #notif-auth-msg, #notif-list { pointer-events: auto; }
 
 /* Password prompt — same corner, but it stays until it is dealt with. */
 #notif-auth {
@@ -3481,6 +3488,19 @@ function _notifShow(visible) {
     }
 }
 
+// _notifPosition parks the stack directly under the clocks. Measured rather
+// than hard-coded because the topbar's first row changes height with the font
+// and rewraps as the window narrows.
+function _notifPosition() {
+    const panel = document.getElementById('notif-panel');
+    const bar   = document.getElementById('topbar');
+    const clock = document.getElementById('utc-clock');
+    if (!panel || !bar || !clock) return;
+    const barTop     = bar.getBoundingClientRect().top;
+    const clockBottom = clock.getBoundingClientRect().bottom;
+    panel.style.top = Math.round(clockBottom - barTop + 6) + 'px';
+}
+
 // The overlay is only on screen while it has something to say: an alert, or a
 // password box. It floats, so it never resizes anything underneath it.
 function _notifSyncPanel() {
@@ -3490,7 +3510,9 @@ function _notifSyncPanel() {
     const list = document.getElementById('notif-list');
     const authOpen = auth && auth.style.display === 'flex';
     const hasItems = list && list.children.length > 0;
-    panel.style.display = (authOpen || hasItems) ? 'flex' : 'none';
+    const visible  = authOpen || hasItems;
+    panel.style.display = visible ? 'flex' : 'none';
+    if (visible) _notifPosition();
 }
 
 function _notifSetState(dotClass, text) {
@@ -3768,6 +3790,9 @@ function _startNotifications() {
             if (e.key === 'Enter') { e.preventDefault(); submit(); }
         });
     }
+
+    // The clocks move when the topbar rewraps, so the stack follows them.
+    window.addEventListener('resize', _notifPosition);
 
     _notifStartStaleWatch();
     _notifConnect();

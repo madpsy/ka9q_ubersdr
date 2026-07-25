@@ -783,6 +783,11 @@
                 </div>
             </div>
 
+            <!-- Background work banner (db migration, downloads, …).
+                 Populated by the /admin/background-tasks poller at the end of
+                 this file; stays display:none and takes no space when idle. -->
+            <div id="bgTaskBanner" style="display: none;"></div>
+
             <div id="alertBox"></div>
 
             <div class="editor-container">
@@ -30157,6 +30162,326 @@ Referer: ${log.referer}`;
         // Initial fetch after a short delay (let auth complete first)
         setTimeout(pollTitleHealth, 1500);
         setInterval(pollTitleHealth, 10000);
+    })();
+
+    // ── Background work banner ────────────────────────────────────────────────
+    // Polls /admin/background-tasks and renders a single-line strip between the
+    // header and the tabs while long-running work (the historical data
+    // migration, downloads, …) is in progress.  Hidden entirely when idle.
+    //
+    // The poll interval is driven by the response: 15 s when nothing is running,
+    // 2 s while a task is live, so an idle admin page costs 4 requests/minute.
+    // The loop skips the request altogether when the editor is not visible (i.e.
+    // the operator is on the login screen), which is why it needs no wiring into
+    // the login/logout paths.
+    (function () {
+        const banner = document.getElementById('bgTaskBanner');
+        if (!banner) return;
+
+        const POLL_IDLE = 15000;
+        const POLL_ACTIVE = 2000;
+
+        let expanded = false;      // detail rows shown?
+        let sawAutoRestart = false; // a task declared restart_required=automatic
+        let restartPhase = 0;       // 0 = normal, 1 = restart expected, 2 = server down
+        let timer = null;
+
+        const style = document.createElement('style');
+        style.textContent = `
+            #bgTaskBanner { margin-bottom: 15px; }
+            .bgt-strip {
+                position: relative;
+                overflow: hidden;
+                border: 1px solid #c5cae9;
+                border-radius: 6px;
+                background: #f4f6ff;
+                font-size: 13px;
+                color: #303040;
+            }
+            .bgt-strip.bgt-warning { border-color: #ffd08a; background: #fff8ec; }
+            .bgt-strip.bgt-done    { border-color: #a5d6a7; background: #f1f9f1; }
+            .bgt-fill {
+                position: absolute;
+                left: 0; top: 0; bottom: 0;
+                width: 0;
+                background: rgba(102, 126, 234, 0.22);
+                transition: width 0.4s ease;
+                pointer-events: none;
+            }
+            .bgt-strip.bgt-warning .bgt-fill { background: rgba(255, 167, 38, 0.22); }
+            .bgt-strip.bgt-done    .bgt-fill { background: rgba(76, 175, 80, 0.20); }
+            .bgt-fill.bgt-indeterminate {
+                width: 28%;
+                animation: bgtSweep 1.8s ease-in-out infinite;
+            }
+            @keyframes bgtSweep {
+                0%   { transform: translateX(-100%); }
+                100% { transform: translateX(360%); }
+            }
+            .bgt-row {
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                height: 34px;
+                padding: 0 10px;
+                white-space: nowrap;
+            }
+            .bgt-row.bgt-sub {
+                height: 26px;
+                font-size: 12px;
+                border-top: 1px solid rgba(0,0,0,0.06);
+                color: #4a4a5a;
+            }
+            .bgt-name { font-weight: 600; flex-shrink: 0; }
+            .bgt-step {
+                color: #5a5a6a;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                min-width: 0;
+                flex: 1 1 auto;
+            }
+            .bgt-pct { font-variant-numeric: tabular-nums; font-weight: 600; flex-shrink: 0; }
+            .bgt-elapsed { color: #6a6a7a; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+            .bgt-chip {
+                flex-shrink: 0;
+                padding: 1px 7px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+                background: rgba(102, 126, 234, 0.18);
+                color: #3f4b9a;
+            }
+            .bgt-chip.bgt-chip-manual { background: rgba(255, 167, 38, 0.28); color: #8a5300; }
+            .bgt-btn {
+                flex-shrink: 0;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                font-size: 13px;
+                color: #4a4a6a;
+                padding: 2px 5px;
+                border-radius: 4px;
+                line-height: 1;
+            }
+            .bgt-btn:hover { background: rgba(0,0,0,0.07); }
+            .bgt-btn.bgt-link { font-weight: 600; color: #8a5300; text-decoration: underline; }
+            .bgt-detail {
+                position: relative;
+                padding: 0 10px 9px 10px;
+                font-size: 12px;
+                line-height: 1.5;
+                color: #4a4a5a;
+            }
+            .bgt-sep { border-top: 1px solid rgba(0,0,0,0.06); }
+        `;
+        document.head.appendChild(style);
+
+        function editorActive() {
+            const ed = document.getElementById('configEditor');
+            return !!ed && ed.classList.contains('active');
+        }
+
+        function fmtElapsed(sec) {
+            sec = Math.max(0, Math.floor(sec || 0));
+            if (sec < 60) return sec + 's';
+            if (sec < 3600) return Math.floor(sec / 60) + 'm';
+            const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+            return h + 'h ' + (m ? m + 'm' : '');
+        }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        function stateIcon(t) {
+            if (t.state === 'complete') return '✅';
+            if (t.state === 'failed') return '⚠️';
+            return '⏳';
+        }
+
+        function stripClass(tasks) {
+            if (tasks.some(t => t.state === 'failed' || t.severity === 'warning')) return 'bgt-warning';
+            if (tasks.length && tasks.every(t => t.state === 'complete')) return 'bgt-done';
+            return '';
+        }
+
+        // Overall percentage across tasks: the mean of the determinate ones.
+        function overallPct(tasks) {
+            const known = tasks.filter(t => t.progress >= 0);
+            if (!known.length) return -1;
+            return known.reduce((a, t) => a + t.progress, 0) / known.length;
+        }
+
+        function fillHTML(pct) {
+            if (pct < 0) return '<div class="bgt-fill bgt-indeterminate"></div>';
+            return `<div class="bgt-fill" style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></div>`;
+        }
+
+        function chipHTML(t) {
+            if (t.restart_required === 'automatic') {
+                return '<span class="bgt-chip">⟳ auto-restart</span>';
+            }
+            if (t.restart_required === 'manual') {
+                return '<span class="bgt-chip bgt-chip-manual">⚠️ restart required</span>' +
+                       (t.state === 'complete'
+                           ? '<button class="bgt-btn bgt-link" data-bgt-restart="1">Restart now</button>'
+                           : '');
+            }
+            return '';
+        }
+
+        // One task → one 34 px row.  Several tasks → a summary row that expands
+        // into 26 px sub-rows, so the common case never costs more than one line.
+        function render(tasks, restarting) {
+            if (restarting) {
+                banner.innerHTML =
+                    '<div class="bgt-strip bgt-done">' + fillHTML(-1) +
+                    '<div class="bgt-row"><span>⟳</span>' +
+                    '<span class="bgt-name">Server restarting…</span>' +
+                    '<span class="bgt-step">this page reloads automatically once it is back</span>' +
+                    '</div></div>';
+                banner.style.display = 'block';
+                return;
+            }
+            if (!tasks.length) {
+                banner.style.display = 'none';
+                banner.innerHTML = '';
+                return;
+            }
+
+            const caret = expanded ? '⌃' : '⌄';
+            let html = `<div class="bgt-strip ${stripClass(tasks)}">`;
+
+            if (tasks.length === 1) {
+                const t = tasks[0];
+                html += fillHTML(t.progress);
+                html += '<div class="bgt-row">' +
+                    `<span>${stateIcon(t)}</span>` +
+                    `<span class="bgt-name">${esc(t.name)}</span>` +
+                    `<span class="bgt-step">${esc(t.state === 'failed' ? (t.error || t.step) : t.step)}</span>` +
+                    (t.progress >= 0 ? `<span class="bgt-pct">${Math.round(t.progress)}%</span>` : '') +
+                    `<span class="bgt-elapsed">${fmtElapsed(t.elapsed_seconds)}</span>` +
+                    chipHTML(t) +
+                    (t.dismissible ? `<button class="bgt-btn" data-bgt-dismiss="${esc(t.id)}" title="Dismiss">✕</button>` : '') +
+                    `<button class="bgt-btn" data-bgt-toggle="1" title="Details">${caret}</button>` +
+                    '</div>';
+                if (expanded && (t.description || t.error)) {
+                    html += `<div class="bgt-detail bgt-sep">${esc(t.description)}` +
+                        (t.error ? `<br><strong>Error:</strong> ${esc(t.error)}` : '') +
+                        (t.restart_required === 'automatic'
+                            ? '<br>The server restarts itself when this finishes; the page will reload.'
+                            : '') +
+                        '</div>';
+                }
+            } else {
+                const pct = overallPct(tasks);
+                const running = tasks.filter(t => t.state === 'running').length;
+                const oldest = Math.max.apply(null, tasks.map(t => t.elapsed_seconds || 0));
+                html += fillHTML(pct);
+                html += '<div class="bgt-row">' +
+                    '<span>⏳</span>' +
+                    `<span class="bgt-name">${tasks.length} background tasks</span>` +
+                    `<span class="bgt-step">${running} running</span>` +
+                    (pct >= 0 ? `<span class="bgt-pct">${Math.round(pct)}%</span>` : '') +
+                    `<span class="bgt-elapsed">${fmtElapsed(oldest)}</span>` +
+                    (tasks.some(t => t.restart_required !== 'none') ? '<span class="bgt-chip">⟳ restart</span>' : '') +
+                    `<button class="bgt-btn" data-bgt-toggle="1" title="Details">${caret}</button>` +
+                    '</div>';
+                if (expanded) {
+                    for (const t of tasks) {
+                        html += '<div class="bgt-row bgt-sub">' +
+                            `<span>${stateIcon(t)}</span>` +
+                            `<span class="bgt-name">${esc(t.name)}</span>` +
+                            `<span class="bgt-step">${esc(t.state === 'failed' ? (t.error || t.step) : t.step)}</span>` +
+                            (t.progress >= 0 ? `<span class="bgt-pct">${Math.round(t.progress)}%</span>` : '') +
+                            `<span class="bgt-elapsed">${fmtElapsed(t.elapsed_seconds)}</span>` +
+                            chipHTML(t) +
+                            (t.dismissible ? `<button class="bgt-btn" data-bgt-dismiss="${esc(t.id)}" title="Dismiss">✕</button>` : '') +
+                            '</div>';
+                    }
+                }
+            }
+
+            html += '</div>';
+            banner.innerHTML = html;
+            banner.style.display = 'block';
+        }
+
+        // Delegated so the markup can be re-rendered wholesale every poll.
+        banner.addEventListener('click', async (e) => {
+            const toggle = e.target.closest('[data-bgt-toggle]');
+            if (toggle) { expanded = !expanded; poll(); return; }
+
+            const restart = e.target.closest('[data-bgt-restart]');
+            if (restart) { showRestartModal(); return; }
+
+            const dismiss = e.target.closest('[data-bgt-dismiss]');
+            if (dismiss) {
+                const id = dismiss.getAttribute('data-bgt-dismiss');
+                try {
+                    await authenticatedFetch('/admin/background-tasks/dismiss?id=' + encodeURIComponent(id), { method: 'POST' });
+                } catch (err) { /* banner reappears on the next poll if it failed */ }
+                poll();
+            }
+        });
+
+        function schedule(ms) {
+            clearTimeout(timer);
+            timer = setTimeout(poll, ms);
+        }
+
+        async function poll() {
+            // Not logged in — no request, and nothing to show.
+            if (!editorActive() && restartPhase === 0) {
+                render([], false);
+                schedule(POLL_IDLE);
+                return;
+            }
+
+            // Phase 2: the server went down for its automatic restart. Poll with
+            // a bare fetch (authenticatedFetch would bounce us to the login
+            // screen on the 401 a fresh session hands back) and reload as soon
+            // as anything answers.
+            if (restartPhase === 2) {
+                render([], true);
+                try {
+                    await fetch('/admin/background-tasks', { cache: 'no-store' });
+                    window.location.reload();
+                    return;
+                } catch (err) {
+                    schedule(POLL_ACTIVE);
+                    return;
+                }
+            }
+
+            try {
+                const resp = await authenticatedFetch('/admin/background-tasks');
+                if (!resp || !resp.ok) { schedule(POLL_IDLE); return; }
+                const data = await resp.json();
+                const tasks = data.tasks || [];
+
+                if (tasks.some(t => t.restart_required === 'automatic')) sawAutoRestart = true;
+                if (data.restart_pending) restartPhase = 1;
+
+                render(tasks, false);
+                schedule(tasks.some(t => t.state === 'running') || restartPhase === 1 ? POLL_ACTIVE : POLL_IDLE);
+            } catch (err) {
+                // Network error. If a task told us the server would restart
+                // itself, this is that restart — start watching for it to come
+                // back. Otherwise leave the banner as-is and retry slowly.
+                if (restartPhase === 1 || sawAutoRestart) {
+                    restartPhase = 2;
+                    render([], true);
+                    schedule(POLL_ACTIVE);
+                } else {
+                    schedule(POLL_IDLE);
+                }
+            }
+        }
+
+        setTimeout(poll, 1500);
     })();
     </script>
 </body>

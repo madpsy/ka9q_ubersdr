@@ -2748,6 +2748,10 @@ func main() {
 		handleFrequencyReferenceHistoryHour(w, r, freqRefMonitor)
 	})
 
+	// Public SDR frontend status (read-only) — same handler/payload as
+	// /admin/frontend-status, just without admin authentication.
+	http.HandleFunc("/api/frontend-status", adminHandler.HandleFrontendStatus)
+
 	// Decoder spots endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/decoder/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpots(w, r, multiDecoder, ipBanManager, fftRateLimiter)
@@ -2969,6 +2973,10 @@ func main() {
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))
 	http.HandleFunc("/admin/monitor-health", adminHandler.AuthMiddleware(adminHandler.HandleMonitorHealth))
+	// Long-running background work (historical data migration, …) reported to
+	// the admin banner. See background_tasks.go.
+	http.HandleFunc("/admin/background-tasks", adminHandler.AuthMiddleware(adminHandler.HandleBackgroundTasks))
+	http.HandleFunc("/admin/background-tasks/dismiss", adminHandler.AuthMiddleware(adminHandler.HandleBackgroundTaskDismiss))
 	http.HandleFunc("/admin/session-activity/logs", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityLogs))
 	http.HandleFunc("/admin/session-activity/metrics", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityMetrics))
 	http.HandleFunc("/admin/session-activity/chart-data", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityChartData))

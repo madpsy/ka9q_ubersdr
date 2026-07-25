@@ -35,6 +35,8 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -93,6 +95,12 @@ type DBImporter struct {
 	migrationDone chan struct{}
 	restartOnce   sync.Once
 
+	// progress carries the banner state for the table currently being imported.
+	// Set by RunImportIfEmpty before each importFn runs and read only from that
+	// same goroutine, so it needs no lock of its own (the task handle it writes
+	// through is internally synchronised).
+	progress *importProgress
+
 	// SummaryHooks maps a summary table to the live aggregator that owns it.
 	// The two summary aggregators start up before this importer runs, read an
 	// empty table, and would then upsert their history-less in-memory summaries
@@ -116,6 +124,16 @@ type tableImport struct {
 	table    string
 	dir      string
 	importFn func(context.Context) error
+
+	// weight is this table's share of the overall progress bar. The spots
+	// tables dominate wall-clock time by an order of magnitude, so an even
+	// split would park the bar at 90% for hours. Values are relative only.
+	weight int
+	// countFn returns how many source files this import will read, for the
+	// within-table portion of the bar. It walks directory metadata only (no
+	// file is opened), so it costs milliseconds even on large trees. nil means
+	// the bar simply holds at the table's start position until it finishes.
+	countFn func() int
 }
 
 // dbImportOrder returns the backfill sequence. Small/fast tables come first so
@@ -123,27 +141,147 @@ type tableImport struct {
 // they are by far the largest tables and everything queued behind them would
 // otherwise wait hours.
 func dbImportOrder(imp *DBImporter) []tableImport {
+	statsCutoff := func() time.Time { return importCutoff(importStatsDays) }
+	spotsCutoff := func() time.Time { return importCutoff(importSpotsDays) }
 	return []tableImport{
-		{"chat_messages", imp.ChatDir, imp.importChat},
-		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor},
-		{"sessions", imp.SessionsDir, imp.importSessions},
-		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather},
-		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics},
-		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics},
+		{"chat_messages", imp.ChatDir, imp.importChat, 3,
+			func() int { return countImportFiles(imp.ChatDir, time.Time{}, matchBase("chat.csv")) }},
+		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor, 5,
+			func() int { return countImportFiles(imp.NoiseFloorDir, time.Time{}, matchSuffix(".csv")) }},
+		{"sessions", imp.SessionsDir, imp.importSessions, 3,
+			func() int { return countImportFiles(imp.SessionsDir, time.Time{}, matchBase("sessions.jsonl")) }},
+		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather, 2,
+			func() int { return countImportFiles(imp.SpaceWeatherDir, time.Time{}, matchSuffix(".csv")) }},
+		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics, 5,
+			func() int { return countImportFiles(imp.DecoderMetricsDir, time.Time{}, matchSuffix(".jsonl")) }},
+		{"cw_metrics", imp.CWMetricsDir, imp.importCWMetrics, 4,
+			func() int { return countImportFiles(imp.CWMetricsDir, time.Time{}, matchSuffix(".jsonl")) }},
 		// Stats share one root directory; each importer walks its own subtree.
 		// importRBN fills both rbn_skew and rbn_stats, so only rbn_skew is
 		// checked — they are always written together.
 		// These sit ahead of the spots imports: the stats tables are the sole
 		// source for /api/stats/* now that the JSONL writers are gone, so the
 		// history page stays blank until they land.
-		{"rbn_skew", imp.StatsDir, imp.importRBN},
-		{"psk_rank_snapshots", imp.StatsDir, imp.importPSKRank},
-		{"wspr_rank_windows", imp.StatsDir, imp.importWSPRRank},
-		{"decoder_metrics_summary", imp.DecoderSummaryDir, imp.importDecoderSummary},
-		{"cw_metrics_summary", imp.CWSummaryDir, imp.importCWSummary},
-		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots},
-		{"spots", imp.SpotsDir, imp.importSpots},
+		{"rbn_skew", imp.StatsDir, imp.importRBN, 6, func() int {
+			root := filepath.Join(imp.StatsDir, "rbn")
+			return countImportFiles(root, statsCutoff(), matchBase("skew.jsonl", "statistics.jsonl"))
+		}},
+		{"psk_rank_snapshots", imp.StatsDir, imp.importPSKRank, 6, func() int {
+			root := filepath.Join(imp.StatsDir, "psk")
+			return countImportFiles(root, statsCutoff(), matchBase("report_result.jsonl"))
+		}},
+		{"wspr_rank_windows", imp.StatsDir, imp.importWSPRRank, 10, func() int {
+			root := filepath.Join(imp.StatsDir, "wspr")
+			return countImportFiles(root, statsCutoff(), matchBase("rolling_24h.jsonl"))
+		}},
+		{"decoder_metrics_summary", imp.DecoderSummaryDir, imp.importDecoderSummary, 2,
+			func() int { return countImportFiles(imp.DecoderSummaryDir, time.Time{}, matchSuffix("-summary.json")) }},
+		{"cw_metrics_summary", imp.CWSummaryDir, imp.importCWSummary, 2,
+			func() int { return countImportFiles(imp.CWSummaryDir, time.Time{}, matchSuffix("-summary.json")) }},
+		{"cw_spots", imp.CWSpotsDir, imp.importCWSpots, 20,
+			func() int { return countImportFiles(imp.CWSpotsDir, spotsCutoff(), matchSuffix(".csv")) }},
+		{"spots", imp.SpotsDir, imp.importSpots, 32, func() int {
+			// <SpotsDir>/<MODE>/YYYY/MM/DD/<name>.csv — the day cutoff is
+			// relative to each mode directory, not to SpotsDir.
+			modes, err := os.ReadDir(imp.SpotsDir)
+			if err != nil {
+				return 0
+			}
+			n := 0
+			for _, m := range modes {
+				if !m.IsDir() {
+					continue
+				}
+				n += countImportFiles(filepath.Join(imp.SpotsDir, m.Name()), spotsCutoff(), matchSuffix(".csv"))
+			}
+			return n
+		}},
 	}
+}
+
+// matchBase returns a predicate matching any of the given exact file names.
+func matchBase(names ...string) func(string) bool {
+	return func(base string) bool {
+		for _, n := range names {
+			if base == n {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// matchSuffix returns a predicate matching file names ending in suffix.
+func matchSuffix(suffix string) func(string) bool {
+	return func(base string) bool { return strings.HasSuffix(base, suffix) }
+}
+
+// countImportFiles counts files under root whose base name satisfies match,
+// skipping YYYY/MM/DD day directories older than cutoff (a zero cutoff counts
+// every day). It reads directory entries only — no file is opened — so it is
+// cheap enough to run immediately before each table's import.
+//
+// The predicates here mirror the ones inside each importer. If they ever drift
+// the only consequence is a slightly optimistic or pessimistic progress bar:
+// the reported fraction is clamped, so the bar can neither exceed the table's
+// share nor move backwards.
+func countImportFiles(root string, cutoff time.Time, match func(base string) bool) int {
+	if root == "" {
+		return 0
+	}
+	n := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable entry — the importer will skip it too
+		}
+		if d.IsDir() {
+			if !cutoff.IsZero() && dayDirBefore(root, path, cutoff) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if match(filepath.Base(path)) {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+// importProgress maps one table's file-by-file work onto its slice of the
+// overall progress bar: the bar runs from base to base+span while this table
+// imports, driven by done/total files.
+type importProgress struct {
+	task  *BackgroundTask
+	base  float64 // bar position (%) when this table started
+	span  float64 // how much of the bar (%) this table is worth
+	label string  // "spots (12/12)"
+	done  int
+	total int // 0 → file count unknown; the bar holds at base
+}
+
+// progFile records that one source file has been processed and pushes the
+// resulting percentage to the banner. Called from inside the import walks; the
+// task throttles the actual updates, so calling it per file is cheap.
+func (imp *DBImporter) progFile() {
+	p := imp.progress
+	if p == nil {
+		return
+	}
+	p.done++
+	pct := p.base
+	step := p.label
+	if p.total > 0 {
+		frac := float64(p.done) / float64(p.total)
+		if frac > 1 {
+			frac = 1 // predicate drift — clamp rather than overshoot
+		}
+		pct += p.span * frac
+		step = p.label + " — " + formatCount(p.done) + " / " + formatCount(p.total) + " files"
+	} else {
+		step = p.label + " — " + formatCount(p.done) + " files"
+	}
+	p.task.SetProgressStep(pct, step)
 }
 
 // RunImportIfEmpty checks each table synchronously (before live writers start),
@@ -185,6 +323,26 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 		return // nothing to do
 	}
 
+	// Publish the banner before the goroutine starts, so an admin loading the
+	// page during startup sees the migration immediately. The registry is a
+	// package-level singleton precisely because this runs long before the admin
+	// handler or the HTTP server exist.
+	task := bgTasks.Start("db-migration", BackgroundTaskOpts{
+		Name: "Historical data migration",
+		Description: "Importing historical CSV/JSONL files into the SQLite database. " +
+			"The receiver keeps running normally; the server restarts automatically once the import finishes.",
+		RestartRequired: BGRestartAutomatic,
+	})
+	task.SetStep("preparing")
+
+	totalWeight := 0
+	for _, t := range toImport {
+		totalWeight += t.weight
+	}
+	if totalWeight == 0 {
+		totalWeight = len(toImport) // all weights zero — fall back to even split
+	}
+
 	// Run the actual file-reading and inserting in the background so startup
 	// is not blocked. The decision of WHICH tables to import was already made
 	// above, so live writes arriving now cannot affect it.
@@ -208,7 +366,10 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 			}
 		}()
 
-		for _, t := range toImport {
+		doneWeight := 0
+		failed := 0
+
+		for i, t := range toImport {
 			if ctx.Err() != nil {
 				aborted = true
 				break
@@ -217,10 +378,26 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 				dirSeen[t.dir] = true
 				dirOK[t.dir] = true // optimistic; cleared on any failure below
 			}
+			// Point the banner at this table: the bar runs from the weight
+			// already completed to that plus this table's share.
+			imp.progress = &importProgress{
+				task:  task,
+				base:  float64(doneWeight) / float64(totalWeight) * 100,
+				span:  float64(t.weight) / float64(totalWeight) * 100,
+				label: t.table + " (" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(toImport)) + ")",
+			}
+			if t.countFn != nil {
+				imp.progress.total = t.countFn()
+			}
+			task.SetStep(imp.progress.label)
+
 			log.Printf("[DB import] %s: starting backfill", t.table)
 			start := time.Now()
 			err := t.importFn(ctx)
+			doneWeight += t.weight
+			task.SetProgressStep(float64(doneWeight)/float64(totalWeight)*100, "")
 			if err != nil {
+				failed++
 				log.Printf("[DB import] %s backfill error: %v", t.table, err)
 				dirOK[t.dir] = false // keep the source dir for a future retry
 			} else {
@@ -237,6 +414,7 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 				}
 			}
 		}
+		imp.progress = nil
 
 		// Deferred, all-at-once cleanup: only after every queued import has run
 		// (and none were aborted) do we remove the source directories whose
@@ -244,14 +422,25 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 		// by the SQLite database.
 		if aborted || ctx.Err() != nil {
 			log.Printf("[DB import] backfill interrupted — leaving source directories in place")
+			task.Fail(errors.New("interrupted — the backfill will resume on the next start"))
 			return
 		}
-		if removed := imp.cleanupImportedDirs(dirOK); removed > 0 {
-			// The migrated trees are gone; whoever is listening restarts the
-			// process so it comes back up reading only from SQLite.
-			log.Printf("[DB import] %d source director(ies) removed — requesting restart", removed)
-			imp.restartOnce.Do(func() { close(imp.restartChan()) })
+		if failed > 0 {
+			// Some tables did not import; their source directories are kept and
+			// no restart happens, so the banner must not promise one.
+			task.Fail(fmt.Errorf("%d of %d imports failed — source files kept for a retry on the next start", failed, len(toImport)))
+			return
 		}
+		removed := imp.cleanupImportedDirs(dirOK)
+		if removed == 0 {
+			task.Complete("finished — no source directories to remove")
+			return
+		}
+		// The migrated trees are gone; whoever is listening restarts the
+		// process so it comes back up reading only from SQLite.
+		log.Printf("[DB import] %d source director(ies) removed — requesting restart", removed)
+		task.Complete("migration complete — restarting server")
+		imp.restartOnce.Do(func() { close(imp.restartChan()) })
 	}()
 }
 
@@ -387,6 +576,7 @@ func (imp *DBImporter) importChat(ctx context.Context) error {
 	count, total := 0, 0
 
 	err = walkCSVFiles(imp.ChatDir, "chat.csv", func(path string) error {
+		imp.progFile()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -454,6 +644,7 @@ func (imp *DBImporter) importNoiseFloor(ctx context.Context) error {
 		if band == "" {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readCSV(path, func(rec []string) error {
 			if len(rec) < 13 {
@@ -550,6 +741,7 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 				return nil
 			}
 			decoderName := strings.TrimSuffix(filepath.Base(path), ".csv")
+			imp.progFile()
 
 			if ferr := readCSV(path, func(rec []string) error {
 				if len(rec) < 14 {
@@ -639,6 +831,7 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 		if !strings.HasSuffix(path, ".csv") {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readCSV(path, func(rec []string) error {
 			if len(rec) < 13 {
@@ -704,6 +897,7 @@ func (imp *DBImporter) importSessions(ctx context.Context) error {
 	count, total := 0, 0
 
 	err = walkJSONLFiles(imp.SessionsDir, "sessions.jsonl", func(path string) error {
+		imp.progFile()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -801,6 +995,7 @@ func (imp *DBImporter) importSpaceWeather(ctx context.Context) error {
 		if !strings.HasPrefix(filepath.Base(path), "spaceweather-") || !strings.HasSuffix(path, ".csv") {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readCSV(path, func(rec []string) error {
 			if len(rec) < 37 {
@@ -890,6 +1085,7 @@ func (imp *DBImporter) importDecoderMetrics(ctx context.Context) error {
 		if !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readJSONL(path, func(line []byte) error {
 			var s MetricsSnapshot
@@ -965,6 +1161,7 @@ func (imp *DBImporter) importCWMetrics(ctx context.Context) error {
 		if !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readJSONL(path, func(line []byte) error {
 			var s CWMetricsSnapshot
@@ -1145,6 +1342,7 @@ func (imp *DBImporter) importWSPRRank(ctx context.Context) error {
 		if filepath.Base(path) != "rolling_24h.jsonl" {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
 			var resp WSPRRankResponse
@@ -1248,6 +1446,7 @@ func (imp *DBImporter) importPSKRank(ctx context.Context) error {
 		if filepath.Base(path) != "report_result.jsonl" {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
 			var data PSKRankData
@@ -1347,6 +1546,7 @@ func (imp *DBImporter) importRBN(ctx context.Context) error {
 		if base != "skew.jsonl" && base != "statistics.jsonl" {
 			return nil
 		}
+		imp.progFile()
 
 		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
 			if base == "skew.jsonl" {
@@ -1537,6 +1737,7 @@ func (imp *DBImporter) importDecoderSummary(ctx context.Context) error {
 		if d.IsDir() || !strings.HasSuffix(path, "-summary.json") {
 			return nil
 		}
+		imp.progFile()
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			log.Printf("[DB import] decoder_metrics_summary: read %s: %v", path, err)
@@ -1584,6 +1785,7 @@ func (imp *DBImporter) importCWSummary(ctx context.Context) error {
 		if d.IsDir() || !strings.HasSuffix(path, "-summary.json") {
 			return nil
 		}
+		imp.progFile()
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			log.Printf("[DB import] cw_metrics_summary: read %s: %v", path, err)

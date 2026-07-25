@@ -182,6 +182,27 @@ body {
 }
 #palette-select:focus { outline: none; border-color: #555; }
 
+/* layout (grid arrangement) selector — same styling as the palette control */
+#layout-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8em;
+    color: #888;
+    white-space: nowrap;
+}
+#layout-select {
+    padding: 2px 6px;
+    background: #1a1a24;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 0.9em;
+    cursor: pointer;
+    appearance: auto;
+}
+#layout-select:focus { outline: none; border-color: #555; }
+
 @keyframes audio-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(229,115,115,0); }
     50%       { box-shadow: 0 0 6px 2px rgba(229,115,115,0.35); }
@@ -209,10 +230,20 @@ body {
 
 /* ── Grid of band panels ── */
 #grid {
+    --grid-gap: 10px;
+    --spec-h: 80px;   /* overridden by applyLayout() in non-auto modes */
+    --wf-h: 120px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 10px;
+    gap: var(--grid-gap);
     padding: 10px;
+}
+
+/* Explicit column count (Fit / 1-6).  minmax(0,1fr) lets tracks shrink below
+   their content width so N columns always fit exactly, however wide the cards
+   would prefer to be. */
+#grid.grid-fixed {
+    grid-template-columns: repeat(var(--grid-cols, 3), minmax(0, 1fr));
 }
 
 /* ── Individual band panel ── */
@@ -267,7 +298,7 @@ body {
 .spectrum-canvas {
     display: block;
     width: 100%;
-    height: 80px;
+    height: var(--spec-h, 80px);
     background: #0a0a0f;
     cursor: crosshair;
 }
@@ -276,7 +307,7 @@ body {
 .waterfall-canvas {
     display: block;
     width: 100%;
-    height: 120px;
+    height: var(--wf-h, 120px);
     background: #000;
     image-rendering: pixelated;
 }
@@ -779,6 +810,19 @@ body {
             <option value="night-vision">Night Vision</option>
         </select>
     </div>
+    <div id="layout-controls">
+        <label for="layout-select">Layout</label>
+        <select id="layout-select">
+            <option value="auto">Auto</option>
+            <option value="fit">Fit to window</option>
+            <option value="1">1 column</option>
+            <option value="2">2 columns</option>
+            <option value="3">3 columns</option>
+            <option value="4">4 columns</option>
+            <option value="5">5 columns</option>
+            <option value="6">6 columns</option>
+        </select>
+    </div>
 </div>
 
 <div id="grid"></div>
@@ -909,7 +953,111 @@ let sse         = null; // EventSource
 let dbMin       = -130;
 let dbMax       = -60;
 let currentPalette = 'jet'; // active waterfall palette name
+let currentLayout  = 'auto'; // 'auto' | 'fit' | '1'…'6'
 let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
+
+// ── Grid layout ───────────────────────────────────────────────────────────────
+// 'auto'  → CSS auto-fill at a 340px minimum, canvases keep their default
+//           80px/120px heights (the original behaviour).
+// 'fit'   → pick the column count that makes the cards as large as possible
+//           while still fitting every *enabled* band in the viewport.
+// '1'-'6' → that many columns, card height derived from card width.
+//
+// In every non-auto mode the canvas block keeps its native proportions: the
+// spectrum+waterfall area is CANVAS_ASPECT × the card width, split 40/60
+// between spectrum and waterfall — the same ratio as the 340×(80+120) default.
+const CANVAS_ASPECT = 200 / 340;   // canvas-block height ÷ card width
+const SPEC_FRACTION = 80 / 200;    // spectrum's share of that block
+const MIN_CANVAS_H  = 110;         // never squash below this
+const MAX_CANVAS_H  = 560;         // nor stretch beyond it
+const MIN_CARD_W    = 260;         // narrower than this is unreadable → drop a column
+
+// Height of everything in a card that is *not* the two canvases (header, freq
+// axis, borders).  Measured from a live panel so it tracks any CSS change.
+function _cardChromeHeight() {
+    const p = Object.values(panels)[0];
+    if (!p || !p.el) return 46;
+    const h = p.el.offsetHeight - p.specCanvas.offsetHeight - p.wfCanvas.offsetHeight;
+    return h > 0 ? h : 46;
+}
+
+// Vertical space the grid can use before the fixed conditions bar covers it.
+function _availableGridHeight() {
+    const grid = document.getElementById('grid');
+    const bar  = document.getElementById('conditions-bar');
+    const barH = (bar && bar.style.display !== 'none') ? bar.offsetHeight : 0;
+    const padY = 20; // #grid padding top+bottom
+    return window.innerHeight - grid.getBoundingClientRect().top - barH - padY;
+}
+
+function applyLayout() {
+    const grid = document.getElementById('grid');
+    const n    = Object.keys(panels).length;
+
+    if (currentLayout === 'auto' || n === 0) {
+        grid.classList.remove('grid-fixed');
+        grid.style.removeProperty('--grid-cols');
+        grid.style.removeProperty('--spec-h');
+        grid.style.removeProperty('--wf-h');
+        for (const p of Object.values(panels)) p._resize();
+        return;
+    }
+
+    const gap     = 10;
+    const innerW  = grid.clientWidth - 20; // minus #grid horizontal padding
+    if (innerW <= 0) return;
+
+    // Card width for a given column count.
+    const widthFor = c => (innerW - (c - 1) * gap) / c;
+
+    let cols, canvasH;
+
+    if (currentLayout === 'fit') {
+        const chrome = _cardChromeHeight();
+        const availH = _availableGridHeight();
+        let best = null;
+        for (let c = 1; c <= Math.min(8, n); c++) {
+            const cardW = widthFor(c);
+            if (cardW < MIN_CARD_W && c > 1) continue;
+            const rows  = Math.ceil(n / c);
+            // Largest canvas height that respects both the aspect ratio (so cards
+            // never get absurdly tall) and the viewport (so nothing scrolls).
+            const byWidth  = cardW * CANVAS_ASPECT;
+            const byHeight = (availH - (rows - 1) * gap - rows * chrome) / rows;
+            const h = Math.min(byWidth, byHeight, MAX_CANVAS_H);
+            if (!best || h > best.h) best = { c, h };
+        }
+        if (!best) best = { c: 1, h: widthFor(1) * CANVAS_ASPECT };
+        cols    = best.c;
+        canvasH = best.h;
+    } else {
+        const want = parseInt(currentLayout, 10) || 3;
+        // Never ask for more columns than the window can show legibly.
+        cols    = Math.max(1, Math.min(want, Math.floor((innerW + gap) / (MIN_CARD_W + gap)) || 1));
+        canvasH = widthFor(cols) * CANVAS_ASPECT;
+    }
+
+    canvasH = Math.round(Math.max(MIN_CANVAS_H, Math.min(MAX_CANVAS_H, canvasH)));
+    const specH = Math.round(canvasH * SPEC_FRACTION);
+
+    grid.classList.add('grid-fixed');
+    grid.style.setProperty('--grid-cols', cols);
+    grid.style.setProperty('--spec-h', specH + 'px');
+    grid.style.setProperty('--wf-h', (canvasH - specH) + 'px');
+
+    // Canvas backing stores must follow their new CSS size.
+    for (const p of Object.values(panels)) p._resize();
+}
+
+// Coalesce resize storms into one relayout per frame.
+let _layoutRAF = null;
+function scheduleLayout() {
+    if (_layoutRAF !== null) return;
+    _layoutRAF = requestAnimationFrame(() => {
+        _layoutRAF = null;
+        applyLayout();
+    });
+}
 
 // ── Bandwidth tracking ────────────────────────────────────────────────────────
 let _bpsAccum    = 0;       // bytes accumulated in current 1s window
@@ -1102,9 +1250,10 @@ class BandPanel {
         this.wfCtx         = this.wfCanvas.getContext('2d');
         this.overlayCtx    = this.overlayCanvas.getContext('2d');
 
-        // Size canvases to their CSS pixel size
+        // Size canvases to their CSS pixel size.  Window resizes are handled by
+        // the single global listener in init(), which recomputes the grid
+        // layout and then resizes every panel.
         this._resize();
-        window.addEventListener('resize', () => this._resize());
 
         // Tooltip on spectrum hover
         this.specCanvas.addEventListener('mousemove', e => this._onSpecHover(e));
@@ -2210,6 +2359,9 @@ function rebuildPanels() {
     document.getElementById('no-data').style.display =
         activeBands.size === 0 ? 'block' : 'none';
 
+    // Card size depends on how many bands are showing, so relayout on every change
+    applyLayout();
+
     // Reconnect SSE with new band list
     connectSSE();
 }
@@ -2236,6 +2388,7 @@ function savePrefs() {
         localStorage.setItem('bandActivity_dbMin', dbMin);
         localStorage.setItem('bandActivity_dbMax', dbMax);
         localStorage.setItem('bandActivity_palette', currentPalette);
+        localStorage.setItem('bandActivity_layout', currentLayout);
     } catch(e) {}
 }
 
@@ -2257,6 +2410,13 @@ function loadPrefs() {
             CMAP = buildCMAP(currentPalette);
             const sel = document.getElementById('palette-select');
             if (sel) sel.value = currentPalette;
+        }
+
+        const sLayout = localStorage.getItem('bandActivity_layout');
+        if (sLayout && ['auto','fit','1','2','3','4','5','6'].includes(sLayout)) {
+            currentLayout = sLayout;
+            const sel = document.getElementById('layout-select');
+            if (sel) sel.value = currentLayout;
         }
     } catch(e) {}
 }
@@ -2351,6 +2511,7 @@ function _cwHandleSpot(spot) {
     if (bar && bar.style.display !== 'none') {
         requestAnimationFrame(() => {
             document.body.style.paddingBottom = bar.offsetHeight + 'px';
+            scheduleLayout(); // conditions bar height changes the space 'fit' can use
         });
     }
 }
@@ -2641,6 +2802,7 @@ async function _refreshVoiceTicker() {
         if (bar && bar.style.display !== 'none') {
             requestAnimationFrame(() => {
                 document.body.style.paddingBottom = bar.offsetHeight + 'px';
+                scheduleLayout(); // conditions bar height changes the space 'fit' can use
             });
         }
     } catch (err) {
@@ -2812,6 +2974,7 @@ async function _refreshHardware() {
         if (bar && bar.style.display !== 'none') {
             requestAnimationFrame(() => {
                 document.body.style.paddingBottom = bar.offsetHeight + 'px';
+                scheduleLayout(); // conditions bar height changes the space 'fit' can use
             });
         }
     } catch (err) {
@@ -2979,6 +3142,7 @@ function _renderConditions(bandStates, sw, wx) {
     // Adjust body bottom padding so the fixed bar never covers content
     requestAnimationFrame(() => {
         document.body.style.paddingBottom = bar.offsetHeight + 'px';
+        scheduleLayout(); // conditions bar height changes the space 'fit' can use
     });
 }
 
@@ -3153,6 +3317,17 @@ async function init() {
         // Redraw all panels with the new colour map
         for (const p of Object.values(panels)) p.dirty = true;
     });
+
+    // Layout (grid arrangement) selector
+    document.getElementById('layout-select').addEventListener('change', e => {
+        currentLayout = e.target.value;
+        savePrefs();
+        applyLayout();
+    });
+
+    // Single global resize handler — relayouts the grid, then resizes every
+    // panel's canvases to match.
+    window.addEventListener('resize', scheduleLayout);
 
     // Build initial panels and connect SSE
     rebuildPanels();

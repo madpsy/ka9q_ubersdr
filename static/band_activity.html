@@ -789,8 +789,11 @@ body {
 .cond-hw-badge.active  { background: rgba(76,175,80,0.18);  color: #81c784; border: 1px solid rgba(76,175,80,0.4); }
 
 .cond-hw-flags {
-    display: flex;
-    flex-wrap: wrap;
+    /* At most 4 flags per line; the column count is narrowed further in JS when
+       there are fewer than 4.  Grid rather than flex-wrap because the card is
+       content-sized, so there is no width for wrapping to trigger against. */
+    display: grid;
+    grid-template-columns: repeat(4, max-content);
     gap: 2px;
     font-size: 1em;
     line-height: 1;
@@ -855,15 +858,19 @@ body {
 }
 
 .cond-wx-chips {
+    /* One reading per line.  These used to rely on wrapping inside a card of
+       fixed width; now the card sizes to its content there is nothing to wrap
+       against, so the stacking is explicit — and it matches the label/value
+       rows of the neighbouring cards. */
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+    flex-direction: column;
+    gap: 3px;
 }
 
 .cond-wx-chip {
     font-size: 0.72em;
     color: #999;
-    white-space: nowrap;   /* keep each chip on one line but chips wrap between each other */
+    white-space: nowrap;
 }
 .cond-wx-chip strong {
     color: #ccc;
@@ -3740,7 +3747,17 @@ function _renderHardware(hw) {
             if (codes.length > 0) {
                 const flagsEl = document.createElement('span');
                 flagsEl.className = 'cond-hw-flags';
-                flagsEl.textContent = codes.map(iso2ToFlag).join('');
+                // One element per flag — joined into a single string they were a
+                // lone text node with no break opportunities, so they could never
+                // wrap.  Column count is capped at 4 but never exceeds the number
+                // of flags, so a short list leaves no empty grid tracks behind.
+                flagsEl.style.gridTemplateColumns =
+                    `repeat(${Math.min(4, codes.length)}, max-content)`;
+                for (const cc of codes) {
+                    const f = document.createElement('span');
+                    f.textContent = iso2ToFlag(cc);
+                    flagsEl.appendChild(f);
+                }
                 row.appendChild(flagsEl);
             }
         }

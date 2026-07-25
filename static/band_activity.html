@@ -160,6 +160,27 @@ body {
     font-size: 0.9em;
     text-align: center;
 }
+/* swap the manual min/max for the auto span setting */
+#range-controls .auto-only   { display: none; }
+#range-controls.auto .manual-only { display: none; }
+#range-controls.auto .auto-only   { display: inline; }
+
+#db-auto {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #1a1a24;
+    color: #aaa;
+    font-size: 0.95em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#db-auto:hover { border-color: #555; color: #ddd; }
+#db-auto.active {
+    border-color: #7ec8e3;
+    background: #1a2a34;
+    color: #7ec8e3;
+}
 
 /* palette selector */
 #palette-controls {
@@ -795,8 +816,11 @@ body {
     <button id="btn-all">All</button>
     <button id="btn-none">None</button>
     <div id="range-controls">
-        <label>dB min <input type="number" id="db-min" value="-130" step="5"></label>
-        <label>max <input type="number" id="db-max" value="-60" step="5"></label>
+        <button id="db-auto" title="Auto: each band picks its own dB range to keep its noise floor at the bottom of the scale">Manual</button>
+        <label class="manual-only">dB min <input type="number" id="db-min" value="-130" step="5"></label>
+        <label class="manual-only">max <input type="number" id="db-max" value="-60" step="5"></label>
+        <label class="auto-only" title="Smallest range auto mode will show. Quiet bands are widened upward, so the noise floor stays at the bottom.">min range
+            <input type="number" id="db-span" value="30" step="5" min="10" max="100"> dB</label>
     </div>
     <div id="palette-controls">
         <label for="palette-select">Palette</label>
@@ -953,6 +977,27 @@ let _paletteVersion = 0;
 const _reduceMotion = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// ── Auto dB range tuning ──────────────────────────────────────────────────────
+// The aim is to sit the noise floor just above the bottom of the scale, so the
+// whole vertical axis and colour ramp are spent on real signal.  Everything
+// here exists to make that happen *slowly*: a scale that chases each burst of
+// traffic is far worse to look at than one that is slightly wrong.
+const AUTO_NOISE_PCT  = 0.10;   // percentile taken as the noise floor
+const AUTO_SIGNAL_PCT = 0.995;  // percentile taken as the signal ceiling —
+                                // ignores single-bin spikes that would otherwise
+                                // stretch the top of the scale on their own
+const AUTO_NOISE_MARGIN = 6;    // dB of scale left below the noise floor
+const AUTO_HEADROOM     = 10;   // dB of scale left above the strongest signal
+const AUTO_EMA          = 0.02; // ≈12 s time constant at 4 Hz updates
+const AUTO_STEP         = 2;    // applied values move in steps of this many dB
+const AUTO_DEADBAND     = 3;    // smoothed target must drift this far to move it
+const AUTO_MIN_INTERVAL = 2000; // ms — hard floor on how often the scale changes
+                                // Together these two cap the slew at AUTO_STEP
+                                // per AUTO_MIN_INTERVAL (1 dB/s).  Bounding the
+                                // interval alone is not enough: if the target
+                                // has run 10 dB away in the meantime, a single
+                                // "snap to target" would move all 10 dB at once.
+
 // ── Global state ──────────────────────────────────────────────────────────────
 let bandMeta    = {};   // name → {start, end, center_frequency, bin_count, bin_bandwidth}
 let allBands    = [];   // ordered list of band names
@@ -961,6 +1006,14 @@ let panels      = {};   // name → BandPanel instance
 let sse         = null; // EventSource
 let dbMin       = -130;
 let dbMax       = -60;
+let dbAuto      = false; // false = manual (the dbMin/dbMax above apply to every
+                         // band); true = each panel picks its own range
+// Auto mode never shows less range than this.  A quiet band makes up the span
+// by lifting the ceiling, never by dropping the floor, so the noise still sits
+// at the very bottom of the scale.
+let dbAutoMinSpan = 30;
+const AUTO_SPAN_MIN = 10;
+const AUTO_SPAN_MAX = 100;
 let currentPalette = 'jet'; // active waterfall palette name
 let currentLayout  = 'fit'; // 'auto' | 'fit' | '1'…'6'
 let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
@@ -1220,6 +1273,13 @@ class BandPanel {
         this._rowPeriod  = 250;    // EMA of inter-arrival gap (ms)
         this._statP5     = null;   // cached stats — recomputed only on arrival
         this._statPeak   = null;
+
+        // ── Auto dB range (per band) ──────────────────────────────────────────
+        this._autoMin    = null;   // applied floor (quantised, changes rarely)
+        this._autoMax    = null;   // applied ceiling
+        this._autoMinEma = null;   // heavily smoothed target
+        this._autoMaxEma = null;
+        this._autoLastChange = 0;  // when the applied values last moved
 
         // ── Waterfall render cache ───────────────────────────────────────────
         // Offscreen bitmap holding one pixel row per data row at full bin
@@ -1758,6 +1818,75 @@ class BandPanel {
         this.animFrame = requestAnimationFrame(loop);
     }
 
+    // ── Effective dB range for this panel ────────────────────────────────────
+    // Manual mode uses the shared inputs; auto mode uses this band's own
+    // computed range, falling back to the shared values until it has settled.
+    get dbLo() {
+        return (dbAuto && this._autoMin !== null) ? this._autoMin : dbMin;
+    }
+    get dbHi() {
+        if (!dbAuto || this._autoMax === null) return dbMax;
+        // The minimum span is enforced here rather than inside the smoothing, so
+        // changing it takes effect on the very next frame without perturbing the
+        // EMA — and so it always widens upward, leaving the floor where it is.
+        return Math.max(this._autoMax, this._autoMin + dbAutoMinSpan);
+    }
+
+    // Recompute this band's auto range from the sorted frame.  Returns true if
+    // the *applied* range actually moved, which forces a cache repaint.
+    _updateAutoRange(sorted, n, now) {
+        const pct = f => sorted[Math.min(n - 1, Math.max(0, Math.round(f * (n - 1))))];
+        const noise  = pct(AUTO_NOISE_PCT);
+        const strong = pct(AUTO_SIGNAL_PCT);
+
+        // The floor is the anchor: placed just under the noise, then left alone.
+        // Only the signal ceiling is tracked here — the guaranteed minimum span
+        // is applied by the dbHi accessor, so it can never drag the floor up.
+        let tMin = noise - AUTO_NOISE_MARGIN;
+        tMin = Math.max(-160, Math.min(-40, tMin));
+        const tMax = Math.min(0, strong + AUTO_HEADROOM);
+
+        // Long EMA — this is what stops the scale chasing traffic.
+        if (this._autoMinEma === null) {
+            this._autoMinEma = tMin;
+            this._autoMaxEma = tMax;
+        } else {
+            this._autoMinEma += (tMin - this._autoMinEma) * AUTO_EMA;
+            this._autoMaxEma += (tMax - this._autoMaxEma) * AUTO_EMA;
+        }
+
+        // Seed immediately on the first frame so there is no visible settling
+        // ramp when auto mode is switched on.
+        if (this._autoMin === null) {
+            this._autoMin = Math.round(this._autoMinEma / AUTO_STEP) * AUTO_STEP;
+            this._autoMax = Math.round(this._autoMaxEma / AUTO_STEP) * AUTO_STEP;
+            this._autoLastChange = now;
+            return true;
+        }
+
+        // Hysteresis: only move once the smoothed target has drifted past the
+        // deadband, and then only by one step toward it.  Walking rather than
+        // snapping is what bounds the slew rate — a large genuine shift is
+        // tracked as a slow glide instead of one visible jump.  The deadband
+        // exceeds the step, so the residual after a move cannot re-trigger one
+        // and the range settles instead of oscillating.
+        if (now - this._autoLastChange < AUTO_MIN_INTERVAL) return false;
+        const stepToward = (applied, target) =>
+            applied + Math.sign(target - applied) * AUTO_STEP;
+
+        let changed = false;
+        if (Math.abs(this._autoMinEma - this._autoMin) >= AUTO_DEADBAND) {
+            this._autoMin = stepToward(this._autoMin, this._autoMinEma);
+            changed = true;
+        }
+        if (Math.abs(this._autoMaxEma - this._autoMax) >= AUTO_DEADBAND) {
+            this._autoMax = stepToward(this._autoMax, this._autoMaxEma);
+            changed = true;
+        }
+        if (changed) this._autoLastChange = now;
+        return changed;
+    }
+
     // Progress [0,1] through the current inter-arrival gap.
     _interpFrac() {
         if (_reduceMotion || !this._lastRowTime) return 1;
@@ -1776,9 +1905,7 @@ class BandPanel {
     _commitFrame() {
         const bins = this.bins;
         if (!bins) return;
-        const n      = bins.length;
-        const dMin   = dbMin;
-        const dRange = dbMax - dbMin;
+        const n = bins.length;
 
         // Roll current → previous so the renderer can interpolate between them.
         if (!this._curVals || this._curVals.length !== n) {
@@ -1811,6 +1938,12 @@ class BandPanel {
         if (elP5)   elP5.textContent   = this._statP5.toFixed(1);
         if (elPeak) elPeak.textContent = this._statPeak.toFixed(1);
 
+        // ── Auto dB range ────────────────────────────────────────────────────
+        // Always tracked, even in manual mode, so the smoothing is already
+        // settled if auto gets switched on.
+        const rangeMoved = this._updateAutoRange(sorted, n, now);
+        if (rangeMoved && dbAuto) this._rangeChanged();
+
         // ── Peak-hold buffer ─────────────────────────────────────────────────
         if (!this._peakHold || this._peakHold.length !== n) {
             this._peakHold    = new Float32Array(n).fill(-256);
@@ -1837,10 +1970,11 @@ class BandPanel {
         // ring — which would show the newest row twice and shift everything.
         this._ensureWfCache(n);
 
-        const rowData = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            rowData[i] = Math.max(0, Math.min(1, (this._curVals[i] - dMin) / dRange));
-        }
+        // History holds raw dBFS, not normalised levels.  Normalising at write
+        // time would bake the current range into the stored rows, so any later
+        // range change (auto or manual) would leave a visible seam between old
+        // and new rows.  Keeping it raw lets the whole waterfall be re-coloured.
+        const rowData = new Float32Array(this._curVals);
         this.waterfallRows.push(rowData);
         this.waterfallTimes.push(now);
         if (this.waterfallRows.length > this.maxRows) {
@@ -1873,15 +2007,26 @@ class BandPanel {
         this._paintWfHistory();
     }
 
-    // Colour one normalised row into the ring buffer at row index `y`.
+    // Colour one row of raw dBFS into the ring buffer at row index `y`,
+    // normalising against the panel's current range.
     _writeWfRow(rowData, y) {
         // History can briefly hold rows from a previous bin count.
         if (rowData.length !== this._wfOff.width) return;
-        const buf = this._wfRowBuf;
+        const lo    = this.dbLo;
+        const range = this.dbHi - lo || 1;
+        const buf   = this._wfRowBuf;
         for (let i = 0; i < rowData.length; i++) {
-            buf[i] = CMAP[Math.round(rowData[i] * 255)];
+            const norm = (rowData[i] - lo) / range;
+            buf[i] = CMAP[norm <= 0 ? 0 : norm >= 1 ? 255 : Math.round(norm * 255)];
         }
         this._wfOffCtx.putImageData(this._wfRowPx, 0, y);
+    }
+
+    // The dB range moved — re-colour the whole waterfall from raw history so
+    // old and new rows share one scale, and force a redraw.
+    _rangeChanged() {
+        this._rebuildWfCache();
+        this.dirty = true;
     }
 
     // Repaint every stored row into the ring buffer (newest at head).
@@ -2001,8 +2146,8 @@ class BandPanel {
 
         const bins   = this.bins;
         const n      = bins.length;
-        const dMin   = dbMin;
-        const dMax   = dbMax;
+        const dMin   = this.dbLo;
+        const dMax   = this.dbHi;
         const dRange = dMax - dMin;
 
         // ── Zoomed bin range ──────────────────────────────────────────────────
@@ -2436,8 +2581,9 @@ class BandPanel {
                      : `${ageSec} s ago`;
         let dbStr = '--';
         if (rowDataIdx >= 0 && rowDataIdx < nRows) {
-            const norm = rows[rowDataIdx][Math.min(binIdx, n - 1)];
-            const db   = dbMin + norm * (dbMax - dbMin);
+            // History is raw dBFS, so this is the measured value rather than one
+            // reconstructed from a normalised level at the current range.
+            const db = rows[rowDataIdx][Math.min(binIdx, n - 1)];
             dbStr = db.toFixed(1) + ' dBFS';
         }
 
@@ -2668,12 +2814,25 @@ function updatePills() {
     });
 }
 
+// Reflect the manual/auto state in the toolbar.
+function applyDbAutoUI() {
+    const btn  = document.getElementById('db-auto');
+    const wrap = document.getElementById('range-controls');
+    if (btn) {
+        btn.textContent = dbAuto ? 'Auto' : 'Manual';
+        btn.classList.toggle('active', dbAuto);
+    }
+    if (wrap) wrap.classList.toggle('auto', dbAuto);
+}
+
 // ── Preferences (localStorage) ────────────────────────────────────────────────
 function savePrefs() {
     try {
         localStorage.setItem('bandActivity_active', JSON.stringify([...activeBands]));
         localStorage.setItem('bandActivity_dbMin', dbMin);
         localStorage.setItem('bandActivity_dbMax', dbMax);
+        localStorage.setItem('bandActivity_dbAuto', dbAuto ? '1' : '0');
+        localStorage.setItem('bandActivity_dbSpan', dbAutoMinSpan);
         localStorage.setItem('bandActivity_palette', currentPalette);
         localStorage.setItem('bandActivity_layout', currentLayout);
     } catch(e) {}
@@ -2690,6 +2849,18 @@ function loadPrefs() {
         const sMax = localStorage.getItem('bandActivity_dbMax');
         if (sMin) { dbMin = parseFloat(sMin); document.getElementById('db-min').value = dbMin; }
         if (sMax) { dbMax = parseFloat(sMax); document.getElementById('db-max').value = dbMax; }
+
+        // Manual is the default; only an explicit '1' turns auto on.
+        dbAuto = localStorage.getItem('bandActivity_dbAuto') === '1';
+
+        const sSpan = parseFloat(localStorage.getItem('bandActivity_dbSpan'));
+        if (!isNaN(sSpan)) {
+            dbAutoMinSpan = Math.max(AUTO_SPAN_MIN, Math.min(AUTO_SPAN_MAX, sSpan));
+        }
+        const spanEl = document.getElementById('db-span');
+        if (spanEl) spanEl.value = dbAutoMinSpan;
+
+        applyDbAutoUI();
 
         const sPalette = localStorage.getItem('bandActivity_palette');
         if (sPalette) {
@@ -3587,13 +3758,31 @@ async function init() {
     document.getElementById('db-min').addEventListener('change', e => {
         dbMin = parseFloat(e.target.value) || -130;
         savePrefs();
-        // Mark all panels dirty so they redraw with new range
-        for (const p of Object.values(panels)) p.dirty = true;
+        // Re-colour history too, so the whole waterfall shares one scale
+        for (const p of Object.values(panels)) p._rangeChanged();
     });
     document.getElementById('db-max').addEventListener('change', e => {
         dbMax = parseFloat(e.target.value) || -60;
         savePrefs();
-        for (const p of Object.values(panels)) p.dirty = true;
+        for (const p of Object.values(panels)) p._rangeChanged();
+    });
+
+    // Manual / auto dB range toggle
+    document.getElementById('db-auto').addEventListener('click', () => {
+        dbAuto = !dbAuto;
+        applyDbAutoUI();
+        savePrefs();
+        for (const p of Object.values(panels)) p._rangeChanged();
+    });
+
+    // Minimum dynamic range for auto mode
+    document.getElementById('db-span').addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        dbAutoMinSpan = Math.max(AUTO_SPAN_MIN,
+                                 Math.min(AUTO_SPAN_MAX, isNaN(v) ? 30 : v));
+        e.target.value = dbAutoMinSpan;   // reflect the clamp back to the user
+        savePrefs();
+        for (const p of Object.values(panels)) p._rangeChanged();
     });
 
     // Palette selector

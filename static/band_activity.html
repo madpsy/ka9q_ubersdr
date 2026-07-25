@@ -619,6 +619,10 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    /* Click-to-tune target: the default I-beam reads as selectable text, and
+       drag-selecting a scrolling badge is never what was intended. */
+    cursor: pointer;
+    user-select: none;
     padding: 2px 8px;
     border-radius: 8px;
     font-size: 0.70em;
@@ -672,6 +676,9 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    /* Click-to-tune target — see .cond-cw-badge */
+    cursor: pointer;
+    user-select: none;
     padding: 0 18px;
     font-size: 0.76em;
     color: #aaa;

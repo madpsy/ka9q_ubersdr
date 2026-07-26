@@ -477,6 +477,35 @@ func TestSSEAdminConfigRoundTrip(t *testing.T) {
 	}
 }
 
+// A visitor who has never subscribed probes with no password on every page
+// load. Counting those as failed guesses would spend the IP's whole
+// brute-force budget and lock out real subscribers behind the same NAT.
+func TestHandleNotificationStreamEmptyPasswordIsNotAGuess(t *testing.T) {
+	stream := newTestSSEStream()
+	stream.activate(NotificationChannelConfig{Type: "sse", SSEPassword: "abcdefghij12"})
+	handler := HandleNotificationStream(stream, NewSSEIPLimiter(64), &ServerConfig{})
+
+	// Far more empty-password probes than the throttle allows guesses.
+	for i := 0; i < sseAuthMaxFailures*3; i++ {
+		rec := httptest.NewRecorder()
+		handler(rec, httptest.NewRequest(http.MethodGet, sseStreamPath+"?probe=1", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("probe %d: got %d, want 401", i, rec.Code)
+		}
+		if reason := rec.Header().Get(sseReasonHeader); reason != sseReasonUnauthorized {
+			t.Fatalf("probe %d: reason %q, want %q", i, reason, sseReasonUnauthorized)
+		}
+	}
+
+	// The correct password must still be accepted afterwards.
+	rec := httptest.NewRecorder()
+	handler(rec, httptest.NewRequest(http.MethodGet, sseStreamPath+"?probe=1&password=abcdefghij12", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("after %d empty probes a valid password got %d, want 204 — the throttle counted non-attempts",
+			sseAuthMaxFailures*3, rec.Code)
+	}
+}
+
 func TestSSEAuthThrottle(t *testing.T) {
 	throttle := &sseAuthThrottle{entries: make(map[string][]time.Time)}
 	const ip = "203.0.113.7"

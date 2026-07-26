@@ -612,8 +612,16 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 		}
 
 		if !stream.authorise(password) {
-			sseAuthFailures.fail(ip)
-			log.Printf("[NotificationSSE] authentication failed from %s", ip)
+			// Only an actual guess counts against the brute-force budget. A
+			// request with no password at all is a client asking whether the
+			// stream exists, not attacking it — and every page load from a
+			// visitor who has not subscribed would otherwise spend one of the
+			// ten attempts this IP gets, locking out real subscribers behind the
+			// same NAT or proxy.
+			if password != "" {
+				sseAuthFailures.fail(ip)
+				log.Printf("[NotificationSSE] authentication failed from %s", ip)
+			}
 			reject(w, http.StatusUnauthorized, sseReasonUnauthorized, "unauthorized")
 			return
 		}

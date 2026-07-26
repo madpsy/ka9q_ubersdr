@@ -3811,18 +3811,29 @@ async function _notifConnect() {
         // the password — and must never cost the operator the one they stored.
         const ours = reason !== '';
 
+        if (status === 401 && !pw) {
+            // Nobody has entered a password on this device, so a 401 is simply
+            // "you are not subscribed" — not a failure, and not something to put
+            // a prompt or an error in front of a passing visitor. Show the bell,
+            // dim, so notifications can be opted into deliberately.
+            _notifShow(true);
+            _notifHidePasswordBox();
+            _notifSetState('', 'available — click to enter the password');
+            return;
+        }
         if (status === 401 && ours) {
-            // Genuinely rejected by the stream. Never retry automatically: each
-            // attempt counts against the server's failed-authentication budget.
-            // Wait for the operator to type a new one.
+            // A password we hold was genuinely rejected by the stream. Never retry
+            // automatically: each attempt counts against the server's
+            // failed-authentication budget. Wait for the operator to type a new one.
             _notifClearPassword();
-            _notifAskPassword(pw ? 'Password rejected — try again.' : '', pw);
+            _notifAskPassword('Password rejected — try again.', pw);
             return;
         }
         if (status === 401) {
-            // Rejected by something in front of the server. Ask, because a 401
-            // does need attention, but keep the stored password: it is probably
-            // fine and we have no evidence otherwise.
+            // A password we hold was rejected by something in front of the server
+            // (no X-Stream-Reason). Ask, because a 401 does need attention, but
+            // keep the stored password: it is probably fine and we have no
+            // evidence otherwise.
             _notifAskPassword('Authentication refused upstream — retry or check with the operator.', pw);
             return;
         }

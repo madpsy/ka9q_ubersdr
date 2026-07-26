@@ -4325,6 +4325,13 @@ async function _showFloatingMap() {
     if (!document.getElementById('show-map').checked) return; // toggled off while loading
 
     if (!_leafletMap) {
+        const _dbgCanvas = document.getElementById('floating-map-canvas');
+        const _dbgBody   = document.getElementById('floating-map-body');
+        console.log('[map] creating Leaflet map. docked=', _mapDocked,
+                     'canvas size=', _dbgCanvas && _dbgCanvas.offsetWidth, 'x', _dbgCanvas && _dbgCanvas.offsetHeight,
+                     'body size=', _dbgBody && _dbgBody.offsetWidth, 'x', _dbgBody && _dbgBody.offsetHeight,
+                     'panel parent=', panel.parentElement && panel.parentElement.id);
+
         // Whole world by default — the receiver is marked on it, but the view
         // itself doesn't zoom in. If the user has already panned/zoomed the
         // map before, that view wins instead.
@@ -4368,7 +4375,14 @@ async function _showFloatingMap() {
     }
     // The container was display:none while the map was created (or since the
     // last show), so Leaflet's cached size is stale until nudged.
-    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 60);
+    setTimeout(() => {
+        if (!_leafletMap) return;
+        const sz = _leafletMap.getSize();
+        console.log('[map] invalidateSize @60ms, size before=', sz.x, 'x', sz.y);
+        _leafletMap.invalidateSize();
+        const sz2 = _leafletMap.getSize();
+        console.log('[map] invalidateSize @60ms, size after=', sz2.x, 'x', sz2.y);
+    }, 60);
 
     _updateSunInfo();
     if (!_sunInfoTimer) _sunInfoTimer = setInterval(_updateSunInfo, 60000);
@@ -4383,10 +4397,13 @@ function _ensureMapResizeObserver() {
     if (_mapResizeObserver || typeof ResizeObserver === 'undefined') return;
     const body = document.getElementById('floating-map-body');
     if (!body) return;
-    _mapResizeObserver = new ResizeObserver(() => {
+    _mapResizeObserver = new ResizeObserver(entries => {
+        const r = entries[0] && entries[0].contentRect;
+        console.log('[map] ResizeObserver fired, contentRect=', r && r.width, 'x', r && r.height);
         if (_leafletMap) _leafletMap.invalidateSize();
     });
     _mapResizeObserver.observe(body);
+    console.log('[map] ResizeObserver attached to #floating-map-body');
 }
 
 const _MAP_DOCKED_KEY = 'bandActivity_mapDocked';
@@ -4400,6 +4417,8 @@ function _applyMapDockState() {
     const panel   = document.getElementById('floating-map');
     const dockBtn = document.getElementById('floating-map-dock');
     if (!panel) return;
+
+    console.log('[map] _applyMapDockState, docked=', _mapDocked, 'leafletMap exists=', !!_leafletMap);
 
     if (_mapDocked) {
         panel.classList.add('band-panel', 'map-panel');
@@ -4415,7 +4434,11 @@ function _applyMapDockState() {
         _restoreFloatingMapGeometry();
         if (dockBtn) { dockBtn.textContent = '▦'; dockBtn.title = 'Dock as a band card'; }
     }
-    if (_leafletMap) setTimeout(() => _leafletMap.invalidateSize(), 60);
+    if (_leafletMap) setTimeout(() => {
+        const sz = _leafletMap.getSize();
+        console.log('[map] _applyMapDockState invalidateSize, size=', sz.x, 'x', sz.y);
+        _leafletMap.invalidateSize();
+    }, 60);
 }
 
 // Wires the header drag + corner resize, and the geometry persistence that

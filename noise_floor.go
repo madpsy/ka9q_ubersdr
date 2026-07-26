@@ -43,6 +43,15 @@ type NoiseFloorMonitor struct {
 	wideBandSpectrum  *BandSpectrum
 	wideBandFFTBuffer *FFTBuffer
 
+	// wideBandCache memoizes GetWideBandFFT's 10-second average — see
+	// wideBandCacheTTL. Several independent consumers (SSE clients, MQTT,
+	// the admin API, KiwiSDR, MCP, the spectrogram recorder) each ask for
+	// this on their own schedule; without the cache every single call
+	// redoes the full Pow/Log10 averaging pass over the buffer.
+	wideBandCacheMu   sync.Mutex
+	wideBandCacheFFT  *BandFFT
+	wideBandCacheTime time.Time
+
 	// SQLite write connection (for INSERTs)
 	db *sql.DB
 
@@ -94,8 +103,27 @@ func NewFFTBuffer(band string, startFreq, endFreq uint64, binWidth float64, maxA
 	}
 }
 
-// AddSample adds a new FFT sample and removes old samples
+// AddSample adds a new FFT sample and removes old samples.
+//
+// Rejects a sample whose bin count doesn't match what's already buffered.
+// GetMaxHoldFFT/GetAveragedFFT size their output off the first buffered
+// sample's length and then index every other sample against it with no
+// bounds check — a single differently-sized sample sitting alongside the
+// rest would panic a reader with an out-of-range index rather than just
+// producing a wrong result. Radiod is expected to keep a spectrum channel's
+// bin count fixed for its lifetime, but checkSpectrumParameterMismatch
+// (user_spectrum.go) exists precisely because that can transiently drift
+// out of sync before self-healing corrects it — this guard is what keeps
+// that transient from ever reaching a panic.
 func (fb *FFTBuffer) AddSample(timestamp time.Time, data []float32) {
+	if len(fb.Samples) > 0 && len(data) != len(fb.Samples[len(fb.Samples)-1].Data) {
+		if DebugMode {
+			log.Printf("DEBUG: FFTBuffer(%s): dropping sample with mismatched bin count (got %d, buffer has %d)",
+				fb.Band, len(data), len(fb.Samples[len(fb.Samples)-1].Data))
+		}
+		return
+	}
+
 	// Make a copy of the data
 	dataCopy := make([]float32, len(data))
 	copy(dataCopy, data)
@@ -1415,26 +1443,75 @@ func (nfm *NoiseFloorMonitor) GetAveragedFFT(band string, duration time.Duration
 	return nil
 }
 
+// wideBandCacheTTL bounds how often GetWideBandFFT actually recomputes the
+// underlying 10-second average, versus returning the last computed result.
+// The averaging pass (GetAveragedFFT) walks every sample currently in the
+// window doing a Pow+Log10 per bin per sample — at a 100ms background poll
+// rate that's on the order of 10ms of CPU per call, and every consumer
+// (SSE clients, MQTT, the admin API, KiwiSDR, MCP, the spectrogram
+// recorder) calls this independently. A 10-second average has nothing new
+// to say faster than about once a second anyway, so within that window all
+// callers share one computation instead of each paying for their own.
+const wideBandCacheTTL = 1 * time.Second
+
 // GetWideBandFFT returns the averaged FFT data for the wide-band spectrum (0-30 MHz) over 10 seconds
-// Uses averaging instead of max-hold to reject lightning spikes and other brief transients
+// Uses averaging instead of max-hold to reject lightning spikes and other brief transients.
+// Memoized for wideBandCacheTTL — see that constant for why.
 func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
-	nfm.fftMu.RLock()
-	defer nfm.fftMu.RUnlock()
+	if nfm == nil {
+		return nil
+	}
 
-	if nfm.wideBandFFTBuffer != nil {
-		// Return 10-second average for wide-band display (rejects lightning spikes)
-		fft := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
-		if fft == nil && DebugMode {
-			log.Printf("DEBUG: Wide-band FFT max hold returned nil (may need more samples)")
+	nfm.wideBandCacheMu.Lock()
+	defer nfm.wideBandCacheMu.Unlock()
+
+	if nfm.wideBandCacheFFT != nil && time.Since(nfm.wideBandCacheTime) < wideBandCacheTTL {
+		return copyBandFFT(nfm.wideBandCacheFFT)
+	}
+
+	// fftMu must release even if GetAveragedFFT panics (see FFTBuffer.AddSample
+	// for the bin-count guard that's meant to prevent that) — a leaked RLock
+	// here would permanently block every future writer of this buffer.
+	fresh := func() *BandFFT {
+		nfm.fftMu.RLock()
+		defer nfm.fftMu.RUnlock()
+		if nfm.wideBandFFTBuffer == nil {
+			return nil
 		}
+		// Compute the 10-second average for wide-band display (rejects lightning spikes)
+		return nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
+	}()
 
-		// No markers for wide-band spectrum (covers all bands)
-		return fft
+	if fresh == nil {
+		if DebugMode {
+			log.Printf("DEBUG: Wide-band FFT buffer/average unavailable (no buffer, or no samples yet)")
+		}
+		// Don't cache a miss — the buffer may have data on the very next call
+		// (e.g. right after startup), and there's nothing here worth reusing.
+		return nil
 	}
-	if DebugMode {
-		log.Printf("DEBUG: No wide-band FFT buffer found")
+
+	// No markers for wide-band spectrum (covers all bands)
+	nfm.wideBandCacheFFT = fresh
+	nfm.wideBandCacheTime = time.Now()
+	return copyBandFFT(fresh)
+}
+
+// copyBandFFT returns a deep-enough copy of fft for a cache reader to keep:
+// its own Data (and Markers) slice, so nothing a caller does to the result
+// — in place or otherwise — can affect the cached value or other readers
+// sharing it concurrently. Cheap relative to the averaging pass it saves
+// (a few KB memcpy versus thousands of Pow/Log10 calls).
+func copyBandFFT(fft *BandFFT) *BandFFT {
+	if fft == nil {
+		return nil
 	}
-	return nil
+	cp := *fft
+	cp.Data = append([]float32(nil), fft.Data...)
+	if fft.Markers != nil {
+		cp.Markers = append([]FrequencyMarker(nil), fft.Markers...)
+	}
+	return &cp
 }
 
 // GetWidebandSNR returns the current wideband SNR measurements (0-30 MHz and 1.8-30 MHz)

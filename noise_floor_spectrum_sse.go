@@ -14,9 +14,8 @@ package main
 //	              channel used by the spectrogram) is also selectable via
 //	              ?band=wideband, but is never included in the default set.
 //	              Unlike named bands, wideband is a 10-second rolling average
-//	              (not a per-poll max-hold) and is emitted on its own fixed
-//	              ~1 s cadence regardless of background_poll_period_ms — see
-//	              nfSpectrumSSEWideBandInterval.
+//	              (not a per-poll max-hold) and is emitted on its own ticker,
+//	              max(background_poll_period_ms, 1s) — see wideBandSSEInterval.
 //
 // Each SSE event carries the binary8-encoded spectrum for one band, base64-encoded:
 //
@@ -136,17 +135,33 @@ const (
 	wideBandSSECenterHz = 15_000_000
 )
 
-// nfSpectrumSSEWideBandInterval is the emission cadence for the synthetic
-// "wideband" pseudo-band, decoupled from the named-band poll ticker.
-// GetWideBandFFT() recomputes a 10-second linear-power average over every
-// buffered sample on each call (see FFTBuffer.GetAveragedFFT) — real CPU
-// work, not a cache read. The named-band poll ticker can run as fast as
-// background_poll_period_ms (100 ms, config.go), and this is a public,
-// unauthenticated endpoint, so driving wideband off that same ticker would
-// let any connected client force that recompute up to 10x/sec. A 10-second
-// average has nothing new to say faster than about once a second anyway, so
-// this interval trades no meaningful freshness for a bounded worst case.
-const nfSpectrumSSEWideBandInterval = 1 * time.Second
+// nfSpectrumSSEWideBandMinInterval is the floor on the emission cadence for
+// the synthetic "wideband" pseudo-band. The actual interval used is
+// max(background_poll_period_ms, this floor) — see wideBandSSEInterval.
+//
+// GetWideBandFFT() is memoized (wideBandCacheTTL in noise_floor.go), so
+// calling it more often than that no longer costs a real recompute — the
+// remaining reason for this floor is the wire, not the CPU: a 10-second
+// average has nothing new to say faster than about once a second, so
+// ticking faster than that would just mean writing, base64-encoding, and
+// flushing a near-empty delta frame to every connected client for data that
+// hasn't actually changed. The floor keeps emission matched to how often
+// the underlying value can plausibly change, independent of how fast
+// background_poll_period_ms happens to be configured for the named bands.
+const nfSpectrumSSEWideBandMinInterval = 1 * time.Second
+
+// wideBandSSEInterval returns the emission cadence for the wideband
+// pseudo-band given the configured named-band poll period.
+//
+// Not the builtin max(): rotctl.go already declares a package-level
+// func max(a, b float64) float64 that shadows it for this package.
+func wideBandSSEInterval(backgroundPollPeriodMs int) time.Duration {
+	period := time.Duration(backgroundPollPeriodMs) * time.Millisecond
+	if period < nfSpectrumSSEWideBandMinInterval {
+		return nfSpectrumSSEWideBandMinInterval
+	}
+	return period
+}
 
 // encodeBinary8PacketForSSE encodes []float32 spectrum data into the SPEC binary8
 // wire format used by both the WebSocket spectrum path and this SSE endpoint.
@@ -438,11 +453,10 @@ func HandleNoiseFloorSpectrumStream(
 		heartbeatTicker := time.NewTicker(nfSpectrumSSEHeartbeatInterval)
 		defer heartbeatTicker.Stop()
 
-		// wideband is emitted on its own slower ticker (see
-		// nfSpectrumSSEWideBandInterval) rather than the named-band
-		// pollTicker — only started when actually requested, and left as a
-		// nil channel (blocks forever, other select cases unaffected)
-		// otherwise.
+		// wideband is emitted on its own ticker (see wideBandSSEInterval)
+		// rather than the named-band pollTicker — only started when actually
+		// requested, and left as a nil channel (blocks forever, other select
+		// cases unaffected) otherwise.
 		var wideBandTickerC <-chan time.Time
 		wantsWideBand := false
 		for _, b := range bands {
@@ -452,7 +466,7 @@ func HandleNoiseFloorSpectrumStream(
 			}
 		}
 		if wantsWideBand {
-			wideBandTicker := time.NewTicker(nfSpectrumSSEWideBandInterval)
+			wideBandTicker := time.NewTicker(wideBandSSEInterval(config.Spectrum.BackgroundPollPeriodMs))
 			defer wideBandTicker.Stop()
 			wideBandTickerC = wideBandTicker.C
 		}

@@ -2906,26 +2906,32 @@ class BandPanel {
         }
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
-        // Draw tick marks at fixed time intervals.  Row position is derived
-        // purely from the same smoothed _rowPeriod / interpFrac clock that
-        // drives the scroll offset (yOff) above, not from each row's real
-        // arrival timestamp.  Real arrivals jitter slightly (network/
-        // scheduling), and interpolating against them fights the uniform
-        // row-height model the rest of the waterfall assumes (rowH is a
-        // constant wfH/maxR regardless of how long a row actually took to
-        // arrive) — that mismatch was the fast, small bounce.  Under the
-        // uniform-period model a tick's screen position is invariant between
-        // arrivals: nextTick*rowsPerSec - frac and yOff both move with frac
-        // and cancel exactly, so it only steps when a commit nudges the
-        // smoothed period estimate.
-        if (nRows > 1 && this._rowPeriod) {
+        // Draw tick marks at fixed time intervals.  The bulk of each tick's
+        // position is nextTick/avgPeriod rows from the newest row, i.e. it is
+        // extrapolated by up to (tickStep / rowPeriod) rows — for a 10s tick
+        // at a ~250ms row rate that's ~40 rows.  Using the fast per-commit
+        // _rowPeriod EMA (tuned for single-row scroll smoothing) for that
+        // extrapolation amplifies its normal frame-to-frame wobble ~40x, which
+        // made ticks swing harder than the plain real-timestamp approach this
+        // replaced.  avgPeriod instead averages over the *entire* span of
+        // buffered rows, so one more sample barely moves it — it converges and
+        // then holds still while the real arrival rate is steady, only
+        // drifting if the rate itself actually changes.  The small remaining
+        // "-frac" term (order of one row, not amplified) still uses the fast
+        // _interpFrac() clock that drives yOff, since the two must cancel to
+        // keep the tick continuous through the moment of each commit.
+        const wfTimes = this.waterfallTimes;
+        const avgPeriod = (nRows > 1 && wfTimes.length === nRows)
+            ? (wfTimes[nRows - 1] - wfTimes[0]) / (nRows - 1)
+            : 0;
+        if (avgPeriod > 0) {
             const tickStep = 10; // seconds between ticks
             wfCtx.save();
             wfCtx.font         = '9px monospace';
             wfCtx.textBaseline = 'middle';
             wfCtx.textAlign    = 'left';
 
-            const rowsPerSec = 1000 / this._rowPeriod;
+            const rowsPerSec = 1000 / avgPeriod;
             const frac = this._interpFrac();
             for (let k = 1; ; k++) {
                 const nextTick = k * tickStep;

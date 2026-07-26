@@ -298,6 +298,21 @@ body {
 }
 .band-pill:hover { border-color: #555; }
 
+/* Wideband pill — visually distinct from named-band pills since it's a
+   separate 0-30 MHz channel, not part of the "All" bulk selection, and a
+   small gap from the regular pills reinforces that it's not one of them. */
+.wideband-pill {
+    margin-right: 10px;
+    border-color: #7a5a2e;
+    color: #d9a15b;
+}
+.wideband-pill.active {
+    border-color: #d9a15b;
+    background: #34240f;
+    color: #f0b96e;
+}
+.wideband-pill:hover { border-color: #e0b370; }
+
 #btn-all, #btn-none {
     padding: 3px 10px;
     border-radius: 6px;
@@ -1376,9 +1391,15 @@ const AUTO_MIN_INTERVAL = 2000; // ms — hard floor on how often the scale chan
                                 // "snap to target" would move all 10 dB at once.
 
 // ── Global state ──────────────────────────────────────────────────────────────
+// Synthetic pseudo-band (0-30 MHz) backed by the same wideband channel the
+// spectrogram uses — see /api/noisefloor/config's separate "wideband" field
+// and /api/noisefloor/spectrum/stream's ?band=wideband. Deliberately kept out
+// of allBands: it must never be pulled in by the "All" button or the default
+// band selection, only by the user explicitly clicking its pill.
+const WIDEBAND_NAME = 'wideband';
 let bandMeta    = {};   // name → {start, end, center_frequency, bin_count, bin_bandwidth}
-let allBands    = [];   // ordered list of band names
-let activeBands = new Set(); // currently selected band names
+let allBands    = [];   // ordered list of band names (excludes WIDEBAND_NAME)
+let activeBands = new Set(); // currently selected band names (may include WIDEBAND_NAME)
 let panels      = {};   // name → BandPanel instance
 let sse         = null; // EventSource
 let dbMin       = -130;
@@ -2771,24 +2792,35 @@ class BandPanel {
             sCtx.restore();
         }
 
-        // ── FT8 frequency highlight ───────────────────────────────────────────
-        // Highlight the 3 kHz FT8 window (dial freq → dial+3 kHz, USB) if configured.
-        const ft8Hz = this.meta.ft8_frequency;
-        if (ft8Hz && ft8Hz > 0) {
+        // ── FT8 frequency highlight(s) ────────────────────────────────────────
+        // Highlight the 3 kHz FT8 window (dial freq → dial+3 kHz, USB) for each
+        // configured band. A named band has exactly one dial frequency
+        // (meta.ft8_frequency); wideband spans every band at once, so it
+        // carries a list instead (meta.ft8_markers, one {name, frequency} per
+        // band with FT8 configured — see /api/noisefloor/config).
+        const ft8List = this.meta.ft8_markers
+            ? this.meta.ft8_markers
+            : (this.meta.ft8_frequency > 0 ? [{ name: null, frequency: this.meta.ft8_frequency }] : []);
+
+        if (ft8List.length > 0) {
             const bw        = this.meta.bin_bandwidth;
             const bandStart = this.meta.start;
 
-            // Bin positions for dial and dial+3 kHz
-            const dialBin  = (ft8Hz - bandStart) / bw;
-            const endBin   = (ft8Hz + 3000 - bandStart) / bw;
+            sCtx.save();
+            for (const marker of ft8List) {
+                const ft8Hz = marker.frequency;
+                if (!ft8Hz || ft8Hz <= 0) continue;
 
-            // Canvas X positions (clamped to visible area)
-            const x1 = Math.max(0, ((dialBin - binStart) / (zn - 1)) * w);
-            const x2 = Math.min(w, ((endBin  - binStart) / (zn - 1)) * w);
+                // Bin positions for dial and dial+3 kHz
+                const dialBin = (ft8Hz - bandStart) / bw;
+                const endBin  = (ft8Hz + 3000 - bandStart) / bw;
 
-            if (x2 > x1) {
+                // Canvas X positions (clamped to visible area)
+                const x1 = Math.max(0, ((dialBin - binStart) / (zn - 1)) * w);
+                const x2 = Math.min(w, ((endBin  - binStart) / (zn - 1)) * w);
+                if (x2 <= x1) continue;
+
                 // Shaded region
-                sCtx.save();
                 sCtx.fillStyle = 'rgba(76,175,80,0.12)';
                 sCtx.fillRect(x1, 0, x2 - x1, h);
 
@@ -2802,20 +2834,20 @@ class BandPanel {
                 sCtx.stroke();
                 sCtx.setLineDash([]);
 
-                // "FT8" label at top, just right of the dial line
+                // "FT8" label (with band name when there's more than one
+                // marker on screen) at top, just right of the dial line
                 sCtx.font         = '9px monospace';
                 sCtx.textBaseline = 'top';
                 sCtx.textAlign    = 'left';
-                const label = 'FT8';
+                const label = marker.name ? `FT8 ${marker.name.toUpperCase()}` : 'FT8';
                 const tw    = sCtx.measureText(label).width;
                 const lx    = Math.min(x1 + 3, w - tw - 2);
                 sCtx.fillStyle = 'rgba(0,0,0,0.55)';
                 sCtx.fillRect(lx - 1, 1, tw + 4, 12);
                 sCtx.fillStyle = 'rgba(255,255,255,0.9)';
                 sCtx.fillText(label, lx + 1, 2);
-
-                sCtx.restore();
             }
+            sCtx.restore();
         }
 
         // ── Waterfall ─────────────────────────────────────────────────────────
@@ -3389,17 +3421,25 @@ function rebuildPanels() {
         }
     }
 
-    // Add panels for newly selected bands
+    // Add panels for newly selected bands. Wideband isn't in allBands (see
+    // WIDEBAND_NAME) so it's handled explicitly, and always placed first.
+    if (activeBands.has(WIDEBAND_NAME) && !panels[WIDEBAND_NAME]) {
+        panels[WIDEBAND_NAME] = new BandPanel(WIDEBAND_NAME, bandMeta[WIDEBAND_NAME]);
+    }
     for (const name of allBands) {
         if (activeBands.has(name) && !panels[name]) {
             panels[name] = new BandPanel(name, bandMeta[name]);
         }
     }
 
-    // Re-order DOM nodes in the grid to match allBands frequency order.
-    // appendChild moves an existing node to the end, so iterating allBands
-    // in order produces the correct final sequence regardless of prior order.
+    // Re-order DOM nodes in the grid to match allBands frequency order, with
+    // wideband (if active) always leading. appendChild moves an existing node
+    // to the end, so iterating in order produces the correct final sequence
+    // regardless of prior order.
     const grid = document.getElementById('grid');
+    if (panels[WIDEBAND_NAME] && panels[WIDEBAND_NAME].el) {
+        grid.appendChild(panels[WIDEBAND_NAME].el);
+    }
     for (const name of allBands) {
         if (panels[name] && panels[name].el) {
             grid.appendChild(panels[name].el);
@@ -5196,6 +5236,10 @@ async function init() {
     }
     allBands.sort((a, b) => bandMeta[a].start - bandMeta[b].start);
 
+    // Wideband metadata lives in its own top-level field, not cfg.bands — kept
+    // out of allBands deliberately (see WIDEBAND_NAME).
+    if (cfg.wideband) bandMeta[WIDEBAND_NAME] = cfg.wideband;
+
     // Load saved preferences (which bands were active, dB range)
     loadPrefs();
     // Re-assert outside loadPrefs's try/catch: if localStorage threw part-way,
@@ -5214,8 +5258,20 @@ async function init() {
         }
     }
 
-    // Build band pills
+    // Build band pills. Wideband goes first and outside the "All" selection —
+    // not part of allBands, so it's never included in that loop below, and the
+    // user must click it explicitly to enable it (see WIDEBAND_NAME).
     const pillsEl = document.getElementById('band-pills');
+    if (bandMeta[WIDEBAND_NAME]) {
+        const meta = bandMeta[WIDEBAND_NAME];
+        const pill = document.createElement('button');
+        pill.className = 'band-pill wideband-pill' + (activeBands.has(WIDEBAND_NAME) ? ' active' : '');
+        pill.dataset.band = WIDEBAND_NAME;
+        pill.textContent = 'WIDE';
+        pill.title = `Wideband · ${(meta.start/1e6).toFixed(3)}–${(meta.end/1e6).toFixed(3)} MHz · ${meta.bin_count} bins · ${meta.bin_bandwidth} Hz/bin (not included in "All")`;
+        pill.addEventListener('click', () => toggleBand(WIDEBAND_NAME));
+        pillsEl.appendChild(pill);
+    }
     for (const name of allBands) {
         const pill = document.createElement('button');
         pill.className = 'band-pill' + (activeBands.has(name) ? ' active' : '');

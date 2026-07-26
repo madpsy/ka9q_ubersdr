@@ -5336,8 +5336,43 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 		}
 	}
 
+	// wideband spans every band at once, so unlike a named band it can't carry
+	// a single ft8_frequency — instead it lists every configured band's FT8
+	// dial frequency, and the frontend draws one highlight per entry.
+	ft8Markers := make([]map[string]interface{}, 0, len(config.NoiseFloor.Bands))
+	for _, band := range config.NoiseFloor.Bands {
+		if band.FT8Frequency > 0 {
+			ft8Markers = append(ft8Markers, map[string]interface{}{
+				"name":      band.Name,
+				"frequency": band.FT8Frequency,
+			})
+		}
+	}
+
+	// Synthetic "wideband" pseudo-band (0-30 MHz, the same channel used by the
+	// spectrogram) — always available whenever noise floor monitoring is
+	// enabled, independent of individual band configuration. Selectable on
+	// the spectrum SSE stream via ?band=wideband.
+	//
+	// Kept out of the "bands" array on purpose: noisefloor.js indexes every
+	// entry there into its per-band UI state (band-selector dropdown, FFT
+	// canvases, historical/aggregate lookups), none of which support a
+	// "wideband" band. It is exposed as a separate top-level field instead.
+	wideband := map[string]interface{}{
+		"name":             wideBandSSEName,
+		"start":            uint64(0),
+		"end":              uint64(30_000_000),
+		"center_frequency": uint64(wideBandSSECenterHz),
+		"bin_count":        4096,
+		"bin_bandwidth":    7324.21875,
+		"total_bandwidth":  float64(4096) * 7324.21875,
+		"ft8_frequency":    uint64(0),
+		"ft8_markers":      ft8Markers,
+	}
+
 	response := map[string]interface{}{
-		"bands": bands,
+		"bands":    bands,
+		"wideband": wideband,
 	}
 
 	w.WriteHeader(http.StatusOK)

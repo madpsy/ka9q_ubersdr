@@ -10,6 +10,13 @@ package main
 //
 //	band=<name>   (repeatable, e.g. ?band=20m&band=40m)
 //	              If omitted, all configured bands are streamed.
+//	              A synthetic "wideband" pseudo-band (0-30 MHz, the same
+//	              channel used by the spectrogram) is also selectable via
+//	              ?band=wideband, but is never included in the default set.
+//	              Unlike named bands, wideband is a 10-second rolling average
+//	              (not a per-poll max-hold) and is emitted on its own fixed
+//	              ~1 s cadence regardless of background_poll_period_ms — see
+//	              nfSpectrumSSEWideBandInterval.
 //
 // Each SSE event carries the binary8-encoded spectrum for one band, base64-encoded:
 //
@@ -119,6 +126,27 @@ import (
 // nfSpectrumSSEHeartbeatInterval is how often a heartbeat event is sent to keep
 // NAT sessions alive and give clients a liveness signal.
 const nfSpectrumSSEHeartbeatInterval = 30 * time.Second
+
+// wideBandSSEName and wideBandSSECenterHz describe the synthetic "wideband"
+// pseudo-band exposed on this endpoint. It mirrors the 0-30 MHz channel used
+// by the spectrogram (see NewSpectrogramRecorder / nfm.GetWideBandFFT) and is
+// fetched separately from the per-band fftBuffers map.
+const (
+	wideBandSSEName     = "wideband"
+	wideBandSSECenterHz = 15_000_000
+)
+
+// nfSpectrumSSEWideBandInterval is the emission cadence for the synthetic
+// "wideband" pseudo-band, decoupled from the named-band poll ticker.
+// GetWideBandFFT() recomputes a 10-second linear-power average over every
+// buffered sample on each call (see FFTBuffer.GetAveragedFFT) — real CPU
+// work, not a cache read. The named-band poll ticker can run as fast as
+// background_poll_period_ms (100 ms, config.go), and this is a public,
+// unauthenticated endpoint, so driving wideband off that same ticker would
+// let any connected client force that recompute up to 10x/sec. A 10-second
+// average has nothing new to say faster than about once a second anyway, so
+// this interval trades no meaningful freshness for a bounded worst case.
+const nfSpectrumSSEWideBandInterval = 1 * time.Second
 
 // encodeBinary8PacketForSSE encodes []float32 spectrum data into the SPEC binary8
 // wire format used by both the WebSocket spectrum path and this SSE endpoint.
@@ -313,10 +341,16 @@ func HandleNoiseFloorSpectrumStream(
 		}
 
 		// ── build the set of configured bands (name → center frequency) ───────
-		configuredBands := make(map[string]uint64, len(config.NoiseFloor.Bands))
+		// Includes a synthetic "wideband" entry (0-30 MHz, center 15 MHz) backed
+		// by nfm.GetWideBandFFT() rather than the per-band fftBuffers map — see
+		// the fetch in the main event loop below. It is only streamed when
+		// explicitly requested via ?band=wideband, not included in the default
+		// (no ?band=) set, to avoid changing behavior for existing clients.
+		configuredBands := make(map[string]uint64, len(config.NoiseFloor.Bands)+1)
 		for _, b := range config.NoiseFloor.Bands {
 			configuredBands[b.Name] = b.CenterFrequency
 		}
+		configuredBands[wideBandSSEName] = wideBandSSECenterHz
 
 		// ── parse ?band= query parameters ────────────────────────────────────
 		// Repeatable: ?band=20m&band=40m
@@ -404,6 +438,25 @@ func HandleNoiseFloorSpectrumStream(
 		heartbeatTicker := time.NewTicker(nfSpectrumSSEHeartbeatInterval)
 		defer heartbeatTicker.Stop()
 
+		// wideband is emitted on its own slower ticker (see
+		// nfSpectrumSSEWideBandInterval) rather than the named-band
+		// pollTicker — only started when actually requested, and left as a
+		// nil channel (blocks forever, other select cases unaffected)
+		// otherwise.
+		var wideBandTickerC <-chan time.Time
+		wantsWideBand := false
+		for _, b := range bands {
+			if b.name == wideBandSSEName {
+				wantsWideBand = true
+				break
+			}
+		}
+		if wantsWideBand {
+			wideBandTicker := time.NewTicker(nfSpectrumSSEWideBandInterval)
+			defer wideBandTicker.Stop()
+			wideBandTickerC = wideBandTicker.C
+		}
+
 		ctx := r.Context()
 
 		// ── main event loop ───────────────────────────────────────────────────
@@ -415,8 +468,12 @@ func HandleNoiseFloorSpectrumStream(
 				return
 
 			case <-pollTicker.C:
-				// Emit one spectrum event per requested band.
+				// Emit one spectrum event per requested named band. wideband
+				// is handled separately below, off its own slower ticker.
 				for _, b := range bands {
+					if b.name == wideBandSSEName {
+						continue
+					}
 					fft := nfm.GetLatestFFT(b.name)
 					if fft == nil || len(fft.Data) == 0 {
 						// Band not yet populated (startup / stall) — skip silently.
@@ -441,6 +498,27 @@ func HandleNoiseFloorSpectrumStream(
 				}
 				flusher.Flush()
 
+			case <-wideBandTickerC:
+				fft := nfm.GetWideBandFFT()
+				if fft == nil || len(fft.Data) == 0 {
+					continue
+				}
+
+				packet := encodeBinary8PacketForSSE(fft.Data, wideBandSSECenterHz, states[wideBandSSEName], deltaThreshold)
+				if packet == nil {
+					continue
+				}
+
+				encoded := base64.StdEncoding.EncodeToString(packet)
+
+				if _, err := fmt.Fprintf(w, "id: %s\nevent: spectrum\ndata: %s\n\n",
+					wideBandSSEName, encoded); err != nil {
+					log.Printf("NoiseFloorSpectrumSSE: write error (ip=%s band=%s): %v",
+						ip, wideBandSSEName, err)
+					return
+				}
+				flusher.Flush()
+
 			case <-heartbeatTicker.C:
 				ts := time.Now().UTC().Format(time.RFC3339)
 				hb := fmt.Sprintf(`{"bands":["%s"],"timestamp":%q}`,
@@ -456,11 +534,12 @@ func HandleNoiseFloorSpectrumStream(
 }
 
 // configuredBandNames returns the names of all configured noise floor bands
-// in config order. Used for error messages.
+// in config order, plus the synthetic "wideband" pseudo-band. Used for error
+// messages.
 func configuredBandNames(config *Config) []string {
-	names := make([]string, len(config.NoiseFloor.Bands))
+	names := make([]string, len(config.NoiseFloor.Bands), len(config.NoiseFloor.Bands)+1)
 	for i, b := range config.NoiseFloor.Bands {
 		names[i] = b.Name
 	}
-	return names
+	return append(names, wideBandSSEName)
 }

@@ -590,6 +590,14 @@ body {
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: var(--grid-gap);
     padding: 10px;
+    /* Every band-panel already has identical natural height (same fixed
+       canvas sizes + header/axis), so this was a no-op until the docked map
+       card — a differently-shaped card — could share a row/track with them.
+       Without this, default stretch pulls every other card in that row up to
+       match the tallest one instead of each card keeping its own height.
+       ("flex-start" is valid here too: the CSS Box Alignment spec maps it to
+       "start" for grid containers.) */
+    align-items: flex-start;
 }
 
 /* Explicit column count (Fit / 1-6) uses flexbox rather than grid.  Grid places

@@ -1168,6 +1168,9 @@ body {
         <label for="filter-spots" title="Only show CW and voice spots for enabled bands">
             <input type="checkbox" id="filter-spots" checked> Filter
         </label>
+        <label for="show-users" title="Mark where other listeners are tuned, with the flag of each listener's country">
+            <input type="checkbox" id="show-users" checked> Users
+        </label>
     </div>
 
     <!-- Alerts float below the clocks, over the top of the grid: they never
@@ -2929,6 +2932,14 @@ class BandPanel {
             wfCtx.restore();
         }
 
+        // ── Listener markers ──────────────────────────────────────────────────
+        // Where everyone else is tuned. Drawn before the audio cursor so your own
+        // marker always sits on top of theirs.
+        if (showUsers && _userChannels.length > 0) {
+            this._drawUserCursors(sCtx, w, h, true);
+            this._drawUserCursors(wfCtx, wfW, wfH, false);
+        }
+
         // ── Audio cursor overlay ──────────────────────────────────────────────
         // Draw carrier line + bandwidth shading on both canvases when this band
         // is the one currently being listened to.
@@ -2936,6 +2947,89 @@ class BandPanel {
             this._drawAudioCursor(sCtx, w, h, true);
             this._drawAudioCursor(wfCtx, wfW, wfH, false);
         }
+    }
+
+    // Draw a marker for every frequency other listeners are tuned to: the
+    // passband shaded like the FT8 window, a dashed dial line, and the flag of
+    // each country listening there. Fed by the /stats poll that already supplies
+    // the Users count, so it costs no extra request.
+    //
+    // Listeners sharing a frequency share one marker — several flags, one line —
+    // and the shading spans the widest passband among them, since they may be on
+    // different modes.
+    _drawUserCursors(ctx, cw, ch, showFlags = false) {
+        const viewStartHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+        const viewEndHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+        const viewSpanHz  = viewEndHz - viewStartHz;
+        if (viewSpanHz <= 0) return;
+
+        const groups = new Map();   // dial Hz → { low, high, codes[] }
+        for (const c of _userChannels) {
+            const freq = Number(c.frequency);
+            if (!isFinite(freq) || freq <= 0) continue;
+
+            let g = groups.get(freq);
+            if (!g) { g = { low: null, high: null, codes: [] }; groups.set(freq, g); }
+
+            // Offsets from the dial, and both are negative on LSB — so they have
+            // to be compared, not assumed to straddle zero.
+            const lo = Number(c.bandwidth_low);
+            const hi = Number(c.bandwidth_high);
+            if (isFinite(lo)) g.low  = (g.low  === null) ? lo : Math.min(g.low,  lo);
+            if (isFinite(hi)) g.high = (g.high === null) ? hi : Math.max(g.high, hi);
+
+            const cc = (c.country_code || '').toUpperCase();
+            if (cc && g.codes.indexOf(cc) < 0) g.codes.push(cc);
+        }
+        if (groups.size === 0) return;
+
+        ctx.save();
+        ctx.font = '10px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif';
+        ctx.textBaseline = 'top';
+        ctx.textAlign    = 'left';
+
+        for (const [freq, g] of groups) {
+            const frac = (freq - viewStartHz) / viewSpanHz;
+            if (frac < -0.05 || frac > 1.05) continue;   // off-screen
+            const cx = frac * cw;
+
+            // Passband shading — same weight as the FT8 window highlight.
+            if (g.low !== null && g.high !== null) {
+                const x1 = Math.max(0,  ((freq + g.low  - viewStartHz) / viewSpanHz) * cw);
+                const x2 = Math.min(cw, ((freq + g.high - viewStartHz) / viewSpanHz) * cw);
+                if (x2 > x1) {
+                    ctx.fillStyle = 'rgba(126,200,227,0.12)';
+                    ctx.fillRect(x1, 0, x2 - x1, ch);
+                }
+            }
+
+            // Dial line — dashed, so it never reads as your own solid audio cursor.
+            ctx.strokeStyle = 'rgba(126,200,227,0.65)';
+            ctx.lineWidth   = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(cx, 0);
+            ctx.lineTo(cx, ch);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Flags — spectrum canvas only, between the FT8 label (y 1–13) and
+            // the audio dial label (y 29–41).
+            if (!showFlags || g.codes.length === 0) continue;
+            const MAX_FLAGS = 4;
+            let label = g.codes.slice(0, MAX_FLAGS).map(iso2ToFlag).join('');
+            if (g.codes.length > MAX_FLAGS) label += '+' + (g.codes.length - MAX_FLAGS);
+            if (!label) continue;
+
+            const tw = ctx.measureText(label).width;
+            const lx = Math.max(1, Math.min(cx + 3, cw - tw - 2));
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(lx - 1, 15, tw + 4, 13);
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            ctx.fillText(label, lx + 1, 16);
+        }
+
+        ctx.restore();
     }
 
     // Draw carrier line + bandwidth shading on a canvas context.
@@ -3338,6 +3432,7 @@ function savePrefs() {
         localStorage.setItem('bandActivity_layout', currentLayout);
         localStorage.setItem('bandActivity_peaks', showPeaks ? '1' : '0');
         localStorage.setItem('bandActivity_filterSpots', filterSpots ? '1' : '0');
+        localStorage.setItem('bandActivity_showUsers', showUsers ? '1' : '0');
     } catch(e) {}
 }
 
@@ -3393,6 +3488,11 @@ function loadPrefs() {
         if (sFilter !== null) filterSpots = (sFilter === '1');
         const filterEl = document.getElementById('filter-spots');
         if (filterEl) filterEl.checked = filterSpots;
+
+        const sUsers = localStorage.getItem('bandActivity_showUsers');
+        if (sUsers !== null) showUsers = (sUsers === '1');
+        const usersEl = document.getElementById('show-users');
+        if (usersEl) usersEl.checked = showUsers;
     } catch(e) {}
 }
 
@@ -4024,6 +4124,11 @@ function _startNotifications() {
 }
 
 // Hardware status flags — set from /api/description in init()
+// Listener markers: where other users of this receiver are currently tuned,
+// taken from the /stats poll that already feeds the Users count.
+let showUsers = true;
+let _userChannels = [];   // newest /stats channels array
+
 // Spot filter: when on, the CW spot badges and the voice ticker only show
 // bands that are currently selected, so the conditions bar matches what is
 // actually on screen.
@@ -4643,6 +4748,18 @@ async function _refreshHardware() {
     try {
         const hw = await _fetchHardwareStatus();
         _renderHardware(hw);
+
+        // Listener markers come from the same payload as the Users count.
+        const channels = (hw && hw.session && Array.isArray(hw.session.channels))
+            ? hw.session.channels : [];
+        const changed = JSON.stringify(channels.map(c => [c.frequency, c.country_code]))
+                     !== JSON.stringify(_userChannels.map(c => [c.frequency, c.country_code]));
+        _userChannels = channels;
+        // Only force a redraw when who-is-where actually changed: the poll runs
+        // every 5 s and the panels are otherwise redrawn on their own schedule.
+        if (changed && showUsers) {
+            for (const p of Object.values(panels)) p.dirty = true;
+        }
         // Adjust body padding in case the bar height changed
         const bar = document.getElementById('conditions-bar');
         if (bar && bar.style.display !== 'none') {
@@ -5176,6 +5293,13 @@ async function init() {
         filterSpots = e.target.checked;
         savePrefs();
         _refreshSpotFilters();
+    });
+
+    // Listener markers on the spectra
+    document.getElementById('show-users').addEventListener('change', e => {
+        showUsers = e.target.checked;
+        savePrefs();
+        for (const p of Object.values(panels)) p.dirty = true;
     });
 
     // Layout (grid arrangement) selector

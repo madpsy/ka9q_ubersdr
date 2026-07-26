@@ -6,6 +6,7 @@
 <title>Band Activity Monitor</title>
 <script src="opus-decoder.min.js"></script>
 <script src="minimal-radio.js"></script>
+<script src="suncalc.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -426,6 +427,90 @@ body {
 #peaks-controls input[type=checkbox] {
     cursor: pointer;
     accent-color: #7ec8e3;
+}
+
+/* floating, draggable/resizable receiver-location map */
+#floating-map {
+    position: fixed;
+    top: 80px;
+    left: 40px;
+    width: 380px;
+    height: 320px;
+    min-width: 240px;
+    min-height: 220px;
+    max-width: 96vw;
+    max-height: 90vh;
+    background: #12121a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#floating-map-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: #1a1a24;
+    border-bottom: 1px solid #333;
+    cursor: move;
+    font-size: 0.85em;
+    color: #ccc;
+    user-select: none;
+    flex: none;
+}
+#floating-map-close {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 1em;
+    line-height: 1;
+    padding: 2px 4px;
+}
+#floating-map-close:hover { color: #e57373; }
+#floating-map-body {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+#floating-map-canvas {
+    width: 100%;
+    height: 100%;
+    background: #0a0a0f;
+}
+#floating-map-suninfo {
+    flex: none;
+    padding: 6px 10px;
+    font-size: 0.78em;
+    color: #999;
+    border-top: 1px solid #222;
+    background: #14141c;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#floating-map-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    z-index: 1;
+}
+#floating-map-resize::before {
+    content: '';
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid #555;
+    border-bottom: 2px solid #555;
 }
 
 @keyframes audio-pulse {
@@ -1186,6 +1271,9 @@ body {
         <label for="show-users" title="Mark where other listeners are tuned, with the flag of each listener's country">
             <input type="checkbox" id="show-users" checked> Users
         </label>
+        <label for="show-map" title="Floating map: receiver location, day/night terminator and sunrise/sunset">
+            <input type="checkbox" id="show-map"> Map
+        </label>
     </div>
 
     <!-- Alerts float below the clocks, over the top of the grid: they never
@@ -1207,6 +1295,18 @@ body {
 <div id="grid"></div>
 <div id="no-data">No bands selected — use the pills above to choose bands.</div>
 <div id="tooltip"></div>
+
+<div id="floating-map" style="display:none">
+    <div id="floating-map-header">
+        <span id="floating-map-title">📍 Receiver location</span>
+        <button id="floating-map-close" type="button" title="Hide map">✕</button>
+    </div>
+    <div id="floating-map-body">
+        <div id="floating-map-canvas"></div>
+    </div>
+    <div id="floating-map-suninfo"></div>
+    <div id="floating-map-resize" title="Drag to resize"></div>
+</div>
 
 <div id="conditions-bar" style="display:none">
     <div class="cond-body">
@@ -1417,6 +1517,20 @@ let currentPalette = 'jet'; // active waterfall palette name
 let currentLayout  = 'fit'; // 'auto' | 'fit' | '1'…'6'
 let showPeaks      = true;  // draw the top-3 signal markers on each spectrum
 let _localTzOffsetMin = null; // receiver timezone offset in minutes (from /api/description)
+let _sunTimes = null;         // SunCalc.getTimes() result for the receiver's lat/lon (from /api/description), for future use
+let _receiverGps = null;      // { lat, lon } from /api/description — feeds the floating map and sun times
+let _receiverLabel = '';      // "name · location" shown on the floating map marker
+
+// ── Floating location map (Leaflet + day/night terminator) ───────────────────
+// Built lazily on first display since Leaflet needs the container to already
+// have a real size — see _showFloatingMap().
+let _floatingMapEnabled  = false;
+let _leafletMap          = null;
+let _leafletMarker       = null;
+let _leafletTerminator   = null;
+let _terminatorTimer     = null;
+let _sunInfoTimer        = null;
+let _leafletLoadPromise  = null;
 
 // ── Grid layout ───────────────────────────────────────────────────────────────
 // 'auto'  → CSS auto-fill at a 340px minimum, canvases keep their default
@@ -3614,7 +3728,206 @@ function loadPrefs() {
         if (sUsers !== null) showUsers = (sUsers === '1');
         const usersEl = document.getElementById('show-users');
         if (usersEl) usersEl.checked = showUsers;
+
+        // Off by default — unlike the toggles above, this one costs a Leaflet
+        // load + live tile fetches, so it should only come back on if the user
+        // explicitly turned it on before.
+        const sMap = localStorage.getItem('bandActivity_showMap');
+        _floatingMapEnabled = (sMap === '1');
+        const mapEl = document.getElementById('show-map');
+        if (mapEl) mapEl.checked = _floatingMapEnabled;
     } catch(e) {}
+}
+
+// ── Floating location map ─────────────────────────────────────────────────────
+// Loads Leaflet + the terminator plugin on first use only, so pages that never
+// touch the "Map" checkbox pay nothing for it.
+function _loadLeafletAssets() {
+    if (_leafletLoadPromise) return _leafletLoadPromise;
+    _leafletLoadPromise = new Promise((resolve) => {
+        if (!document.getElementById('leaflet-css')) {
+            const css = document.createElement('link');
+            css.id = 'leaflet-css';
+            css.rel = 'stylesheet';
+            css.href = 'leaflet.css';
+            document.head.appendChild(css);
+        }
+        if (window.L && typeof window.L.terminator === 'function') { resolve(); return; }
+        const js = document.createElement('script');
+        js.src = 'leaflet.js';
+        js.onload = () => {
+            const term = document.createElement('script');
+            term.src = 'L.Terminator.js';
+            term.onload = resolve;
+            document.head.appendChild(term);
+        };
+        document.head.appendChild(js);
+    });
+    return _leafletLoadPromise;
+}
+
+const _MAP_GEOM_KEY = 'bandActivity_mapGeom';
+
+function _saveFloatingMapGeometry() {
+    const panel = document.getElementById('floating-map');
+    if (!panel) return;
+    const rect = {
+        left: panel.offsetLeft, top: panel.offsetTop,
+        width: panel.offsetWidth, height: panel.offsetHeight
+    };
+    try { localStorage.setItem(_MAP_GEOM_KEY, JSON.stringify(rect)); } catch(_) {}
+}
+
+function _restoreFloatingMapGeometry() {
+    const panel = document.getElementById('floating-map');
+    if (!panel) return;
+    let rect = null;
+    try { rect = JSON.parse(localStorage.getItem(_MAP_GEOM_KEY)); } catch(_) {}
+    if (rect && typeof rect.left === 'number') {
+        panel.style.left   = Math.max(0, Math.min(rect.left, window.innerWidth - 60)) + 'px';
+        panel.style.top    = Math.max(0, Math.min(rect.top, window.innerHeight - 40)) + 'px';
+        panel.style.width  = rect.width + 'px';
+        panel.style.height = rect.height + 'px';
+    }
+}
+
+// Formats a Date in the receiver's local time (from _localTzOffsetMin) as
+// HH:MM, falling back to the browser's local time if the receiver's timezone
+// offset hasn't arrived yet.
+function _fmtLocalHHMM(date) {
+    if (!(date instanceof Date) || isNaN(date)) return '--:--';
+    if (_localTzOffsetMin !== null) {
+        const d = new Date(date.getTime() + _localTzOffsetMin * 60000);
+        return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    }
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function _updateSunInfo() {
+    const el = document.getElementById('floating-map-suninfo');
+    if (!el) return;
+    if (!_receiverGps || typeof SunCalc === 'undefined') {
+        el.textContent = 'Location unavailable';
+        return;
+    }
+    // Recomputed each tick (cheap) so the panel stays correct if left open
+    // across midnight.
+    _sunTimes = SunCalc.getTimes(new Date(), _receiverGps.lat, _receiverGps.lon);
+    const now = new Date();
+    const isDay = now >= _sunTimes.sunrise && now < _sunTimes.sunset;
+    el.textContent = `${isDay ? '☀️ Day' : '🌙 Night'} · Sunrise ${_fmtLocalHHMM(_sunTimes.sunrise)}` +
+                      ` · Sunset ${_fmtLocalHHMM(_sunTimes.sunset)}`;
+}
+
+async function _showFloatingMap() {
+    const panel = document.getElementById('floating-map');
+    if (!panel) return;
+    panel.style.display = 'flex';
+    _restoreFloatingMapGeometry();
+
+    await _loadLeafletAssets();
+    if (!document.getElementById('show-map').checked) return; // toggled off while loading
+
+    if (!_leafletMap) {
+        const center = _receiverGps ? [_receiverGps.lat, _receiverGps.lon] : [20, 0];
+        _leafletMap = L.map('floating-map-canvas', { attributionControl: false })
+            .setView(center, _receiverGps ? 5 : 2);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 19
+        }).addTo(_leafletMap);
+
+        if (typeof L.terminator === 'function') {
+            _leafletTerminator = L.terminator({ fillOpacity: 0.35, color: '#000', weight: 1 }).addTo(_leafletMap);
+            _terminatorTimer = setInterval(() => { if (_leafletTerminator) _leafletTerminator.setTime(); }, 60000);
+        }
+
+        if (_receiverGps) {
+            const icon = L.divIcon({
+                className: '',
+                html: '<div style="width:14px;height:14px;background:#e57373;border:2px solid rgba(255,255,255,0.9);' +
+                      'border-radius:50%;box-shadow:0 0 8px rgba(229,115,115,0.7);"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            _leafletMarker = L.marker(center, { icon }).addTo(_leafletMap);
+            if (_receiverLabel) _leafletMarker.bindTooltip(_receiverLabel, { direction: 'top' });
+        }
+    }
+    // The container was display:none while the map was created (or since the
+    // last show), so Leaflet's cached size is stale until nudged.
+    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 60);
+
+    _updateSunInfo();
+    if (!_sunInfoTimer) _sunInfoTimer = setInterval(_updateSunInfo, 60000);
+}
+
+function _hideFloatingMap() {
+    const panel = document.getElementById('floating-map');
+    if (panel) panel.style.display = 'none';
+}
+
+// Wires the header drag + corner resize, and the geometry persistence that
+// goes with them. Runs once at init() regardless of whether the map is
+// currently shown — the listeners are cheap and the panel may be toggled on
+// later.
+function _setupFloatingMapChrome() {
+    const panel  = document.getElementById('floating-map');
+    const header = document.getElementById('floating-map-header');
+    const grip   = document.getElementById('floating-map-resize');
+    if (!panel || !header || !grip) return;
+
+    _restoreFloatingMapGeometry();
+
+    let dragging = false, dragOffX = 0, dragOffY = 0;
+    header.addEventListener('mousedown', e => {
+        if (e.target.closest('#floating-map-close')) return;
+        dragging = true;
+        const rect = panel.getBoundingClientRect();
+        dragOffX = e.clientX - rect.left;
+        dragOffY = e.clientY - rect.top;
+        e.preventDefault();
+    });
+
+    let resizing = false, startW = 0, startH = 0, startX = 0, startY = 0;
+    grip.addEventListener('mousedown', e => {
+        resizing = true;
+        startW = panel.offsetWidth;
+        startH = panel.offsetHeight;
+        startX = e.clientX;
+        startY = e.clientY;
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (dragging) {
+            const maxLeft = window.innerWidth - 60;
+            const maxTop  = window.innerHeight - 40;
+            panel.style.left  = Math.min(Math.max(0, e.clientX - dragOffX), maxLeft) + 'px';
+            panel.style.top   = Math.min(Math.max(0, e.clientY - dragOffY), maxTop) + 'px';
+            panel.style.right = 'auto';
+        } else if (resizing) {
+            const w = Math.max(240, startW + (e.clientX - startX));
+            const h = Math.max(220, startH + (e.clientY - startY));
+            panel.style.width  = w + 'px';
+            panel.style.height = h + 'px';
+            if (_leafletMap) _leafletMap.invalidateSize();
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (dragging || resizing) _saveFloatingMapGeometry();
+        dragging  = false;
+        resizing  = false;
+    });
+
+    document.getElementById('floating-map-close').addEventListener('click', () => {
+        document.getElementById('show-map').checked = false;
+        _floatingMapEnabled = false;
+        try { localStorage.setItem('bandActivity_showMap', '0'); } catch(_) {}
+        _hideFloatingMap();
+    });
 }
 
 // ── Status indicator ──────────────────────────────────────────────────────────
@@ -5265,6 +5578,17 @@ async function init() {
             const tzOffset = desc.receiver?.timezone_offset;
             if (typeof tzOffset === 'number') _localTzOffsetMin = tzOffset;
             _cwEnabled        = !!(desc.cw_skimmer);
+
+            // Sunrise/sunset + floating map location, from the receiver's GPS coords
+            const gps = desc.receiver?.gps;
+            if (gps && typeof gps.lat === 'number' && typeof gps.lon === 'number' &&
+                (gps.lat !== 0 || gps.lon !== 0)) {
+                _receiverGps = { lat: gps.lat, lon: gps.lon };
+                _receiverLabel = [name, location].filter(Boolean).join(' · ');
+                if (typeof SunCalc !== 'undefined') {
+                    _sunTimes = SunCalc.getTimes(new Date(), gps.lat, gps.lon);
+                }
+            }
         }
     } catch(_) { /* non-fatal — receiver info is cosmetic */ }
 
@@ -5438,6 +5762,15 @@ async function init() {
         savePrefs();
         for (const p of Object.values(panels)) p.dirty = true;
     });
+
+    // Floating location map (Leaflet + terminator + sunrise/sunset)
+    _setupFloatingMapChrome();
+    document.getElementById('show-map').addEventListener('change', e => {
+        _floatingMapEnabled = e.target.checked;
+        try { localStorage.setItem('bandActivity_showMap', _floatingMapEnabled ? '1' : '0'); } catch(_) {}
+        if (_floatingMapEnabled) _showFloatingMap(); else _hideFloatingMap();
+    });
+    if (_floatingMapEnabled) _showFloatingMap();
 
     // Layout (grid arrangement) selector
     document.getElementById('layout-select').addEventListener('change', e => {

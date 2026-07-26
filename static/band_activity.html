@@ -482,6 +482,7 @@ body {
 }
 #floating-map-tile-select:hover  { color: #ccc; border-color: #444; }
 #floating-map-tile-select:focus  { outline: none; border-color: #555; }
+#floating-map-dock,
 #floating-map-close {
     background: none;
     border: none;
@@ -490,8 +491,30 @@ body {
     font-size: 1em;
     line-height: 1;
     padding: 2px 4px;
+    flex: none;
 }
+#floating-map-dock:hover  { color: #7ec8e3; }
 #floating-map-close:hover { color: #e57373; }
+
+/* Docked (band-card) state — the grid/flex layout owns position and width;
+   only the map-area height is pinned, to the same canvas height every other
+   band card gets, so it sits in the row at a matching height. */
+#floating-map.map-panel {
+    position: static;
+    left: auto; top: auto; right: auto; bottom: auto;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    max-width: none;
+    max-height: none;
+    box-shadow: none;
+    z-index: auto;
+}
+#floating-map.map-panel #floating-map-header { cursor: default; }
+#floating-map.map-panel #floating-map-resize { display: none; }
+#floating-map.map-panel #floating-map-body {
+    height: calc(var(--spec-h) + var(--wf-h));
+}
 #floating-map-body {
     flex: 1;
     min-height: 0;
@@ -1319,6 +1342,7 @@ body {
 <div id="floating-map" style="display:none">
     <div id="floating-map-header">
         <span id="floating-map-title">📍 Receiver location</span>
+        <button id="floating-map-dock" type="button" title="Dock as a band card">▦</button>
         <select id="floating-map-tile-select" title="Map style">
             <option value="dark">Dark</option>
             <option value="osm">OSM</option>
@@ -1558,6 +1582,8 @@ let _leafletTerminator   = null;
 let _terminatorTimer     = null;
 let _sunInfoTimer        = null;
 let _leafletLoadPromise  = null;
+let _mapDocked           = false; // false = floating (draggable/resizable), true = docked in the band grid
+let _mapResizeObserver   = null;
 
 // ── Grid layout ───────────────────────────────────────────────────────────────
 // 'auto'  → CSS auto-fill at a 340px minimum, canvases keep their default
@@ -3824,11 +3850,11 @@ const _MAP_TILE_LAYERS = {
 };
 const _MAP_TILE_KEY = 'bandActivity_mapTile';
 let _floatingMapTileLayer = null;
-let _floatingMapTileKey   = 'dark';
+let _floatingMapTileKey   = 'topo';
 
 function _applyFloatingMapTile(key) {
     if (!_leafletMap) return;
-    const cfg = _MAP_TILE_LAYERS[key] || _MAP_TILE_LAYERS.dark;
+    const cfg = _MAP_TILE_LAYERS[key] || _MAP_TILE_LAYERS.topo;
     if (_floatingMapTileLayer) _leafletMap.removeLayer(_floatingMapTileLayer);
     _floatingMapTileLayer = L.tileLayer(cfg.url, {
         attribution: cfg.attribution,
@@ -3904,7 +3930,7 @@ async function _showFloatingMap() {
     const panel = document.getElementById('floating-map');
     if (!panel) return;
     panel.style.display = 'flex';
-    _restoreFloatingMapGeometry();
+    if (!_mapDocked) _restoreFloatingMapGeometry();
 
     await _loadLeafletAssets();
     if (!document.getElementById('show-map').checked) return; // toggled off while loading
@@ -3944,6 +3970,12 @@ async function _showFloatingMap() {
             _leafletMarker = L.marker([_receiverGps.lat, _receiverGps.lon], { icon }).addTo(_leafletMap);
             if (_receiverLabel) _leafletMarker.bindTooltip(_receiverLabel, { direction: 'top' });
         }
+
+        // Docked mode ties the map's height to the band grid's own layout
+        // (which reflows on window resize / column-count changes), so the
+        // container can change size without any drag/checkbox interaction —
+        // keep Leaflet's canvas in sync whenever that happens.
+        _ensureMapResizeObserver();
     }
     // The container was display:none while the map was created (or since the
     // last show), so Leaflet's cached size is stale until nudged.
@@ -3958,6 +3990,45 @@ function _hideFloatingMap() {
     if (panel) panel.style.display = 'none';
 }
 
+function _ensureMapResizeObserver() {
+    if (_mapResizeObserver || typeof ResizeObserver === 'undefined') return;
+    const body = document.getElementById('floating-map-body');
+    if (!body) return;
+    _mapResizeObserver = new ResizeObserver(() => {
+        if (_leafletMap) _leafletMap.invalidateSize();
+    });
+    _mapResizeObserver.observe(body);
+}
+
+const _MAP_DOCKED_KEY = 'bandActivity_mapDocked';
+
+// Moves the panel between "floating" (fixed, draggable/resizable, wherever the
+// user last left it) and "docked" (a plain grid child styled like a band
+// card — position/width come from the grid layout, only the map area's
+// height is pinned to match the other cards' canvas height; see the
+// .map-panel CSS rule).
+function _applyMapDockState() {
+    const panel   = document.getElementById('floating-map');
+    const dockBtn = document.getElementById('floating-map-dock');
+    if (!panel) return;
+
+    if (_mapDocked) {
+        panel.classList.add('band-panel', 'map-panel');
+        const grid = document.getElementById('grid');
+        // Always first — same convention as wideband. rebuildPanels() never
+        // touches nodes it doesn't own, so this position is stable across
+        // band toggles (see rebuildPanels()'s appendChild-to-reorder comment).
+        if (grid && panel.parentElement !== grid) grid.insertBefore(panel, grid.firstChild);
+        if (dockBtn) { dockBtn.textContent = '⛶'; dockBtn.title = 'Undock — make floating'; }
+    } else {
+        panel.classList.remove('band-panel', 'map-panel');
+        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        _restoreFloatingMapGeometry();
+        if (dockBtn) { dockBtn.textContent = '▦'; dockBtn.title = 'Dock as a band card'; }
+    }
+    if (_leafletMap) setTimeout(() => _leafletMap.invalidateSize(), 60);
+}
+
 // Wires the header drag + corner resize, and the geometry persistence that
 // goes with them. Runs once at init() regardless of whether the map is
 // currently shown — the listeners are cheap and the panel may be toggled on
@@ -3968,7 +4039,20 @@ function _setupFloatingMapChrome() {
     const grip   = document.getElementById('floating-map-resize');
     if (!panel || !header || !grip) return;
 
-    _restoreFloatingMapGeometry();
+    let sDocked = null;
+    try { sDocked = localStorage.getItem(_MAP_DOCKED_KEY); } catch(_) {}
+    _mapDocked = (sDocked === '1');
+    _applyMapDockState();
+
+    const dockBtn = document.getElementById('floating-map-dock');
+    if (dockBtn) {
+        dockBtn.addEventListener('mousedown', e => e.stopPropagation());
+        dockBtn.addEventListener('click', () => {
+            _mapDocked = !_mapDocked;
+            try { localStorage.setItem(_MAP_DOCKED_KEY, _mapDocked ? '1' : '0'); } catch(_) {}
+            _applyMapDockState();
+        });
+    }
 
     // Map style selector — saved/restored independently of the map's built
     // state, since the <select> exists (and can be changed) before Leaflet
@@ -3990,7 +4074,9 @@ function _setupFloatingMapChrome() {
 
     let dragging = false, dragOffX = 0, dragOffY = 0;
     header.addEventListener('mousedown', e => {
-        if (e.target.closest('#floating-map-close') || e.target.closest('#floating-map-tile-select')) return;
+        if (_mapDocked) return; // grid layout owns position while docked
+        if (e.target.closest('#floating-map-close') || e.target.closest('#floating-map-tile-select') ||
+            e.target.closest('#floating-map-dock')) return;
         dragging = true;
         const rect = panel.getBoundingClientRect();
         dragOffX = e.clientX - rect.left;
@@ -4000,6 +4086,7 @@ function _setupFloatingMapChrome() {
 
     let resizing = false, startW = 0, startH = 0, startX = 0, startY = 0;
     grip.addEventListener('mousedown', e => {
+        if (_mapDocked) return; // hidden via CSS while docked, but be defensive
         resizing = true;
         startW = panel.offsetWidth;
         startH = panel.offsetHeight;

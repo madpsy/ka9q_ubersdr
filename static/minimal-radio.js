@@ -172,13 +172,12 @@ class MinimalRadio {
                 break;
             case 'cw':
             case 'cwu':
-                // CW uses narrow bandwidth
-                this.bandwidthLow = 50;
-                this.bandwidthHigh = 800;
-                break;
             case 'cwl':
-                this.bandwidthLow = -800;
-                this.bandwidthHigh = -50;
+                // CW is centered on the dial frequency, not offset like
+                // USB/LSB — matches the main receiver's symmetric ±500 Hz
+                // default (see combinedValueToLowHigh in app.js).
+                this.bandwidthLow = -500;
+                this.bandwidthHigh = 500;
                 break;
             default:
                 // Default to USB bandwidth

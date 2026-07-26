@@ -86,6 +86,18 @@ const (
 	// within sseAuthWindow before that IP is refused outright.
 	sseAuthMaxFailures = 10
 	sseAuthWindow      = 5 * time.Minute
+
+	// sseReasonHeader names the condition behind a rejection. Both 503s
+	// (disabled / full) and both 429s (auth-throttled / ip-limited) are
+	// otherwise indistinguishable, which leaves a client unable to tell a
+	// problem with its credentials from a problem with the server's capacity.
+	sseReasonHeader = "X-Stream-Reason"
+
+	sseReasonDisabled      = "disabled"       // no stream configured
+	sseReasonFull          = "full"           // sse_max_clients reached
+	sseReasonAuthThrottled = "auth-throttled" // too many failed passwords from this IP
+	sseReasonIPLimited     = "ip-limited"     // too many concurrent connections from this IP
+	sseReasonUnauthorized  = "unauthorized"   // missing or wrong password
 )
 
 // ─── Password policy ──────────────────────────────────────────────────────────
@@ -304,6 +316,15 @@ func (s *notificationSSEStream) ClientCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.clients)
+}
+
+// hasCapacity reports whether another subscriber could be accepted right now.
+// Used by probes, which answer "would this be accepted?" without reserving a
+// slot — so the answer is a snapshot, not a promise.
+func (s *notificationSSEStream) hasCapacity() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.active && len(s.clients) < s.maxClients
 }
 
 // IsActive reports whether the stream is configured and serving.
@@ -547,14 +568,29 @@ func (t *sseAuthThrottle) pruneLocked(ip string, now time.Time) []time.Time {
 // limiter caps concurrent connections per IP; sse_max_clients caps the total
 // number of subscribers.
 func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimiter, serverConfig *ServerConfig) http.HandlerFunc {
+	// reject answers with a status and a machine-readable reason, so a client can
+	// tell a capacity problem from a credentials problem.
+	reject := func(w http.ResponseWriter, status int, reason, msg string) {
+		w.Header().Set(sseReasonHeader, reason)
+		http.Error(w, msg, status)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		// A probe (HEAD, or ?probe=1) asks "would a subscription be accepted?"
+		// and gets the answer without opening a stream. Without it a client has
+		// to open a real connection to discover the status — EventSource never
+		// exposes one — and that probe would itself occupy a subscriber slot and
+		// a per-IP connection slot, which can turn a healthy stream into a
+		// spurious "too many connections".
+		probe := r.Method == http.MethodHead || r.URL.Query().Get("probe") == "1"
+
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "GET required", http.StatusMethodNotAllowed)
 			return
 		}
 
 		if !stream.IsActive() {
-			http.Error(w, "notification stream is not enabled", http.StatusServiceUnavailable)
+			reject(w, http.StatusServiceUnavailable, sseReasonDisabled, "notification stream is not enabled")
 			return
 		}
 
@@ -563,7 +599,7 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 		// Refuse IPs that have burned through their failed-attempt budget.
 		if sseAuthFailures.blocked(ip) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(sseAuthWindow.Seconds())))
-			http.Error(w, "too many failed authentication attempts", http.StatusTooManyRequests)
+			reject(w, http.StatusTooManyRequests, sseReasonAuthThrottled, "too many failed authentication attempts")
 			return
 		}
 
@@ -578,17 +614,28 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 		if !stream.authorise(password) {
 			sseAuthFailures.fail(ip)
 			log.Printf("[NotificationSSE] authentication failed from %s", ip)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			reject(w, http.StatusUnauthorized, sseReasonUnauthorized, "unauthorized")
 			return
 		}
 		sseAuthFailures.succeed(ip)
+
+		// Authenticated. A probe reports whether there is room and stops here,
+		// holding nothing.
+		if probe {
+			if !stream.hasCapacity() {
+				reject(w, http.StatusServiceUnavailable, sseReasonFull, "subscriber limit reached")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 
 		// Per-IP concurrent connection limit (bypassed IPs are exempt, matching
 		// the other public SSE feeds).
 		if serverConfig == nil || !serverConfig.IsIPTimeoutBypassed(ip) {
 			release, ok := limiter.Acquire(ip)
 			if !ok {
-				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+				reject(w, http.StatusTooManyRequests, sseReasonIPLimited, "too many connections from your IP")
 				return
 			}
 			defer release()
@@ -607,7 +654,7 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 			closed: make(chan struct{}),
 		}
 		if !stream.register(client) {
-			http.Error(w, "subscriber limit reached", http.StatusServiceUnavailable)
+			reject(w, http.StatusServiceUnavailable, sseReasonFull, "subscriber limit reached")
 			return
 		}
 		defer stream.unregister(client)

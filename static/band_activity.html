@@ -916,6 +916,33 @@ body {
     justify-content: flex-start;
 }
 
+/* The hardware card reserves 52px for labels like "RF Health"; PSK/WSPR/RBN
+   need far less, and the reserved space showed up as a gap. Just enough to keep
+   the three values aligned in a column. */
+#cond-stats .cond-hw-label {
+    min-width: 34px;
+}
+#cond-stats .cond-hw-row {
+    gap: 5px;
+    align-items: baseline;   /* label sits on the first line of a wrapped value */
+}
+/* Values wrap onto a second line here, so the hardware card's single-line
+   ellipsis treatment does not apply. */
+#cond-stats .cond-hw-value {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    row-gap: 2px;
+}
+/* A zero-height full-width flex item: forces what follows onto the next line. */
+.cond-stat-break {
+    flex-basis: 100%;
+    height: 0;
+}
+
 /* One rank reads as "#12 spots": the number carries the weight, the unit is
    there to say what it counts without spelling it out. */
 .cond-stat-rank {
@@ -3749,18 +3776,20 @@ function _notifScheduleRetry(ms) {
     }, ms);
 }
 
-// _notifProbe asks the endpoint for its status without committing to a stream.
-// EventSource never exposes the HTTP status, so this is the only way to tell
-// "not enabled" (503) from "wrong password" (401) from a network failure.
+// _notifProbe asks the endpoint whether a subscription would be accepted.
+// EventSource never exposes an HTTP status, so this is the only way to tell the
+// failure modes apart. ?probe=1 answers without opening a stream, so probing
+// costs neither a subscriber slot nor a per-IP connection slot.
+//
+// Returns { status, reason }: reason is the server's X-Stream-Reason —
+// "disabled", "full", "auth-throttled", "ip-limited" or "unauthorized" —
+// which distinguishes the two meanings of both 503 and 429.
 async function _notifProbe(pw) {
-    const ctrl = new AbortController();
     try {
-        const resp = await fetch(_notifUrl(pw), { signal: ctrl.signal, cache: 'no-store' });
-        ctrl.abort();   // headers are all we need; don't consume the stream
-        return resp.status;
+        const resp = await fetch(_notifUrl(pw) + '&probe=1', { cache: 'no-store' });
+        return { status: resp.status, reason: resp.headers.get('X-Stream-Reason') || '' };
     } catch (_) {
-        ctrl.abort();
-        return 0;       // network error / offline
+        return { status: 0, reason: '' };   // network error / offline
     }
 }
 
@@ -3769,20 +3798,64 @@ async function _notifConnect() {
     _notifConnecting = true;
     try {
         const pw = _notifGetPassword();
-        const status = await _notifProbe(pw);
+        const probe = await _notifProbe(pw);
+        const status = probe.status;
+        const reason = probe.reason;
 
-        if (status === 503) {
+        // Only a rejection carrying our own X-Stream-Reason header came from the
+        // notification endpoint. A 503 from a reverse proxy, or a 401 from a
+        // gateway or WAF in front of the server, says nothing whatsoever about
+        // the password — and must never cost the operator the one they stored.
+        const ours = reason !== '';
+
+        if (status === 401 && ours) {
+            // Genuinely rejected by the stream. Never retry automatically: each
+            // attempt counts against the server's failed-authentication budget.
+            // Wait for the operator to type a new one.
+            _notifClearPassword();
+            _notifAskPassword(pw ? 'Password rejected — try again.' : '', pw);
+            return;
+        }
+        if (status === 401) {
+            // Rejected by something in front of the server. Ask, because a 401
+            // does need attention, but keep the stored password: it is probably
+            // fine and we have no evidence otherwise.
+            _notifAskPassword('Authentication refused upstream — retry or check with the operator.', pw);
+            return;
+        }
+        if (status === 503 && reason === 'full') {
+            // The stream is up and our password is fine — it is just at its
+            // subscriber limit. Keep the panel and retry soon.
+            _notifShow(true);
+            _notifHidePasswordBox();
+            _notifSetState('error', 'stream full');
+            _notifScheduleRetry(30000);
+            return;
+        }
+        if (status === 503 && reason === 'disabled') {
             // Stream not enabled on this receiver — stay out of the way, but keep
             // looking in case the operator turns it on while the page is open.
             _notifShow(false);
             _notifScheduleRetry(120000);
             return;
         }
-        if (status === 401) {
-            // Never retry automatically: each attempt counts against the server's
-            // failed-authentication budget. Wait for the operator to type one.
-            _notifClearPassword();
-            _notifAskPassword(pw ? 'Password rejected — try again.' : '', pw);
+        if (status === 503) {
+            // A 503 without our header is a proxy or gateway, not the stream
+            // saying it is switched off. Treat it as the transient outage it is.
+            _notifShow(true);
+            _notifHidePasswordBox();
+            _notifSetState('error', 'offline');
+            _notifScheduleRetry(_notifBackoffMs);
+            _notifBackoffMs = Math.min(_notifBackoffMs * 2, 60000);
+            return;
+        }
+        if (status === 429 && reason === 'ip-limited') {
+            // Too many connections from this address (another tab, usually) —
+            // nothing to do with the password. Retry shortly.
+            _notifShow(true);
+            _notifHidePasswordBox();
+            _notifSetState('error', 'too many connections');
+            _notifScheduleRetry(15000);
             return;
         }
         if (status === 429) {
@@ -3792,7 +3865,7 @@ async function _notifConnect() {
             _notifScheduleRetry(300000);
             return;
         }
-        if (status !== 200) {
+        if (status !== 200 && status !== 204) {
             _notifShow(true);
             _notifSetState('error', 'offline');
             _notifScheduleRetry(_notifBackoffMs);
@@ -4765,11 +4838,19 @@ function _rankRow(label, title, parts) {
     const val = document.createElement('span');
     val.className = 'cond-hw-value';
     shown.forEach(function(part, i) {
+        // Nothing precedes the first entry — including a line break, which would
+        // otherwise leave an empty first line when earlier entries are absent.
         if (i > 0) {
-            const sep = document.createElement('span');
-            sep.className = 'cond-stat-sep';
-            sep.textContent = '·';
-            val.appendChild(sep);
+            if (part.newline) {
+                const br = document.createElement('span');
+                br.className = 'cond-stat-break';
+                val.appendChild(br);
+            } else {
+                const sep = document.createElement('span');
+                sep.className = 'cond-stat-sep';
+                sep.textContent = '·';
+                val.appendChild(sep);
+            }
         }
         const rank = document.createElement('span');
         rank.className = 'cond-stat-rank';
@@ -4788,10 +4869,13 @@ function _rankRow(label, title, parts) {
 }
 
 // _rankOf pulls one position out of the summary, tolerating a missing section.
-function _rankOf(section, key, unit) {
+function _rankOf(section, key, unit, newline) {
     const pos = section && section.available ? section[key] : null;
     if (!pos) return null;
-    return { rank: pos.rank || 0, value: pos.value || 0, total: pos.total || 0, unit: unit };
+    return {
+        rank: pos.rank || 0, value: pos.value || 0, total: pos.total || 0,
+        unit: unit, newline: !!newline,
+    };
 }
 
 function _renderRankStats(data) {
@@ -4809,7 +4893,9 @@ function _renderRankStats(data) {
     const pskDXCC   = _rankOf(psk,  'countries',   'DXCC');
     const wspr24    = _rankOf(wspr, 'rolling_24h', '24h');
     const wsprYest  = _rankOf(wspr, 'yesterday',   'yest');
-    const wsprToday = _rankOf(wspr, 'today',       'today');
+    // Three WSPR windows on one line is what makes this card wide; today drops
+    // to a second line, where there is spare height going free.
+    const wsprToday = _rankOf(wspr, 'today',       'today', true);
     const rbnSpots  = _rankOf(rbn,  'spots',       '');
 
     // Totals go in the tooltip so the row itself stays to just the ranks.

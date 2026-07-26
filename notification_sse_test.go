@@ -238,6 +238,75 @@ func TestHandleNotificationStreamAuth(t *testing.T) {
 	}
 }
 
+// The two 503s (disabled / full) and the two 429s (auth-throttled / ip-limited)
+// are indistinguishable by status alone. A client that cannot tell them apart
+// treats a busy server as a bad password — so the reason header has to be exact.
+func TestHandleNotificationStreamRejectionReasons(t *testing.T) {
+	const password = "abcdefghij12"
+	stream := newTestSSEStream()
+	handler := HandleNotificationStream(stream, NewSSEIPLimiter(4), &ServerConfig{})
+
+	probe := func(target string) (int, string) {
+		rec := httptest.NewRecorder()
+		handler(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		return rec.Code, rec.Header().Get(sseReasonHeader)
+	}
+
+	// Disabled.
+	if code, reason := probe(sseStreamPath + "?probe=1&password=" + password); code != http.StatusServiceUnavailable || reason != sseReasonDisabled {
+		t.Fatalf("disabled stream: got %d/%q, want 503/%q", code, reason, sseReasonDisabled)
+	}
+
+	stream.activate(NotificationChannelConfig{Type: "sse", SSEPassword: password, SSEMaxClients: 1})
+
+	// Wrong password — the only reason a client should discard its password.
+	if code, reason := probe(sseStreamPath + "?probe=1&password=wrongpassword1"); code != http.StatusUnauthorized || reason != sseReasonUnauthorized {
+		t.Fatalf("bad password: got %d/%q, want 401/%q", code, reason, sseReasonUnauthorized)
+	}
+
+	// Correct password with room: 204, and no slot taken.
+	if code, _ := probe(sseStreamPath + "?probe=1&password=" + password); code != http.StatusNoContent {
+		t.Fatalf("probe with capacity: got %d, want 204", code)
+	}
+	if n := stream.ClientCount(); n != 0 {
+		t.Fatalf("a probe registered %d subscriber(s); it must hold nothing", n)
+	}
+
+	// At capacity: still 503, but for a different reason than "disabled".
+	occupant := &notificationSSEClient{ch: make(chan string, 1), closed: make(chan struct{})}
+	if !stream.register(occupant) {
+		t.Fatal("could not fill the single subscriber slot")
+	}
+	if code, reason := probe(sseStreamPath + "?probe=1&password=" + password); code != http.StatusServiceUnavailable || reason != sseReasonFull {
+		t.Fatalf("full stream: got %d/%q, want 503/%q", code, reason, sseReasonFull)
+	}
+	stream.unregister(occupant)
+
+	// Per-IP connection limit is a capacity problem, not an auth one.
+	full := NewSSEIPLimiter(0)
+	rec := httptest.NewRecorder()
+	HandleNotificationStream(stream, full, &ServerConfig{})(
+		rec, httptest.NewRequest(http.MethodGet, sseStreamPath+"?password="+password, nil))
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get(sseReasonHeader) != sseReasonIPLimited {
+		t.Fatalf("ip limited: got %d/%q, want 429/%q", rec.Code, rec.Header().Get(sseReasonHeader), sseReasonIPLimited)
+	}
+
+	// Exhausting the failed-password budget is reported as its own reason.
+	throttled := newTestSSEStream()
+	throttled.activate(NotificationChannelConfig{Type: "sse", SSEPassword: password})
+	throttledHandler := HandleNotificationStream(throttled, NewSSEIPLimiter(64), &ServerConfig{})
+	var lastCode int
+	var lastReason string
+	for i := 0; i < sseAuthMaxFailures+1; i++ {
+		rec := httptest.NewRecorder()
+		throttledHandler(rec, httptest.NewRequest(http.MethodGet, sseStreamPath+"?probe=1&password=wrongpassword1", nil))
+		lastCode, lastReason = rec.Code, rec.Header().Get(sseReasonHeader)
+	}
+	if lastCode != http.StatusTooManyRequests || lastReason != sseReasonAuthThrottled {
+		t.Fatalf("auth throttled: got %d/%q, want 429/%q", lastCode, lastReason, sseReasonAuthThrottled)
+	}
+}
+
 func TestHandleNotificationStreamDelivers(t *testing.T) {
 	stream := newTestSSEStream()
 	stream.activate(NotificationChannelConfig{

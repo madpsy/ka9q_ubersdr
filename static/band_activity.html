@@ -1683,6 +1683,7 @@ class BandPanel {
         this.waterfallRows  = [];  // array of Float32Array (full n bins, normalised 0-1)
         this.waterfallTimes = [];  // array of Date.now() timestamps, parallel to waterfallRows
         this.maxRows = 120;
+        this._tickPositions = []; // [{nextTick, rowPos}] — recomputed once per arrival, see _computeTickPositions
         this.el = null;
         this.specCanvas = null;
         this.specCtx = null;
@@ -2461,6 +2462,44 @@ class BandPanel {
         // head, so display order (newest first) is simply head → end → wrap.
         this._wfHead = (this._wfHead - 1 + this.maxRows) % this.maxRows;
         this._writeWfRow(rowData, this._wfHead);
+
+        this._computeTickPositions(now);
+    }
+
+    // ── Waterfall time-axis tick positions ───────────────────────────────────
+    // Computed once per real arrival (using the rows' actual timestamps, which
+    // are exact — no estimating needed) and held fixed until the next one.  The
+    // per-frame renderer only adds the same continuous yOff used to slide the
+    // waterfall rows into place, so ticks move with exactly one clock instead
+    // of two.  Recomputing this from live wall-clock time on every animation
+    // frame (as a previous version did) made ticks track true elapsed time
+    // while the rows themselves only advance via the smoothed/estimated yOff
+    // clock — the two clocks disagree under ordinary arrival jitter, which is
+    // what showed up as ticks jittering independently of the waterfall content
+    // they label.
+    _computeTickPositions(now) {
+        const times  = this.waterfallTimes;
+        const nRows  = times.length;
+        const positions = [];
+        if (nRows > 1) {
+            const tickStep = 10; // seconds between ticks
+            const rowAge = new Float64Array(nRows);
+            for (let r = 0; r < nRows; r++) {
+                rowAge[r] = (now - times[nRows - 1 - r]) / 1000;
+            }
+            // rowAge[0] = age of newest row, rowAge[nRows-1] = oldest
+            let nextTick = tickStep;
+            for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
+                if (rowAge[r] >= nextTick) {
+                    const ageA = rowAge[r - 1];
+                    const ageB = rowAge[r];
+                    const tf = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
+                    positions.push({ nextTick, rowPos: r - 1 + tf });
+                    nextTick += tickStep;
+                }
+            }
+        }
+        this._tickPositions = positions;
     }
 
     // Allocate/resize the offscreen ring buffer for a given bin count.
@@ -2906,37 +2945,19 @@ class BandPanel {
         }
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
-        // Draw tick marks at fixed time intervals.  The bulk of each tick's
-        // position is nextTick/avgPeriod rows from the newest row, i.e. it is
-        // extrapolated by up to (tickStep / rowPeriod) rows — for a 10s tick
-        // at a ~250ms row rate that's ~40 rows.  Using the fast per-commit
-        // _rowPeriod EMA (tuned for single-row scroll smoothing) for that
-        // extrapolation amplifies its normal frame-to-frame wobble ~40x, which
-        // made ticks swing harder than the plain real-timestamp approach this
-        // replaced.  avgPeriod instead averages over the *entire* span of
-        // buffered rows, so one more sample barely moves it — it converges and
-        // then holds still while the real arrival rate is steady, only
-        // drifting if the rate itself actually changes.  The small remaining
-        // "-frac" term (order of one row, not amplified) still uses the fast
-        // _interpFrac() clock that drives yOff, since the two must cancel to
-        // keep the tick continuous through the moment of each commit.
-        const wfTimes = this.waterfallTimes;
-        const avgPeriod = (nRows > 1 && wfTimes.length === nRows)
-            ? (wfTimes[nRows - 1] - wfTimes[0]) / (nRows - 1)
-            : 0;
-        if (avgPeriod > 0) {
-            const tickStep = 10; // seconds between ticks
+        // Tick row-positions were computed once, back when the row arrived
+        // (_computeTickPositions, called from _commitFrame) — using the rows'
+        // real timestamps, which is exact.  All that's left to do per frame is
+        // add the same yOff used to slide the waterfall rows into place, so
+        // the ticks glide along with the content they label instead of being
+        // driven by a second, independent clock.
+        if (this._tickPositions.length) {
             wfCtx.save();
             wfCtx.font         = '9px monospace';
             wfCtx.textBaseline = 'middle';
             wfCtx.textAlign    = 'left';
 
-            const rowsPerSec = 1000 / avgPeriod;
-            const frac = this._interpFrac();
-            for (let k = 1; ; k++) {
-                const nextTick = k * tickStep;
-                const rowPos = nextTick * rowsPerSec - frac; // fractional row index from newest
-                if (rowPos > nRows) break;
+            for (const { nextTick, rowPos } of this._tickPositions) {
                 const y = Math.round(rowPos * rowH + yOff);
 
                 wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';

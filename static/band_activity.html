@@ -2467,16 +2467,18 @@ class BandPanel {
     }
 
     // ── Waterfall time-axis tick positions ───────────────────────────────────
-    // Computed once per real arrival (using the rows' actual timestamps, which
-    // are exact — no estimating needed) and held fixed until the next one.  The
-    // per-frame renderer only adds the same continuous yOff used to slide the
-    // waterfall rows into place, so ticks move with exactly one clock instead
-    // of two.  Recomputing this from live wall-clock time on every animation
-    // frame (as a previous version did) made ticks track true elapsed time
-    // while the rows themselves only advance via the smoothed/estimated yOff
-    // clock — the two clocks disagree under ordinary arrival jitter, which is
-    // what showed up as ticks jittering independently of the waterfall content
-    // they label.
+    // Recomputed once per real arrival from the rows' actual timestamps, which
+    // gives an exact position — but "exact" still means it reflects genuine
+    // jitter in real inter-arrival gaps, and rows can arrive every ~100ms.
+    // Recomputing and redrawing at that raw value every arrival means the tick
+    // visibly shifts up to ~10 times a second, which reads as jumping even
+    // though each individual value is correct.  So the raw measurement is
+    // fed through a slow low-pass filter (_tickSmoothed) keyed by tick label;
+    // the render loop only ever draws the smoothed value, which settles down
+    // and stops moving once the real arrival rate is steady, and only drifts
+    // if the rate genuinely changes.  No per-frame term at all — the display
+    // only updates on arrival, per the requirement that once it settles it
+    // should stop adjusting.
     _computeTickPositions(now) {
         const times  = this.waterfallTimes;
         const nRows  = times.length;
@@ -2488,15 +2490,27 @@ class BandPanel {
                 rowAge[r] = (now - times[nRows - 1 - r]) / 1000;
             }
             // rowAge[0] = age of newest row, rowAge[nRows-1] = oldest
+            if (!this._tickSmoothed) this._tickSmoothed = new Map();
             let nextTick = tickStep;
             for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
                 if (rowAge[r] >= nextTick) {
                     const ageA = rowAge[r - 1];
                     const ageB = rowAge[r];
                     const tf = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
-                    positions.push({ nextTick, rowPos: r - 1 + tf });
+                    const target = r - 1 + tf;
+
+                    const prev = this._tickSmoothed.get(nextTick);
+                    const smoothed = (prev === undefined) ? target : prev + (target - prev) * 0.1;
+                    this._tickSmoothed.set(nextTick, smoothed);
+
+                    positions.push({ nextTick, rowPos: smoothed });
                     nextTick += tickStep;
                 }
+            }
+            // Drop smoothing state for ticks that have scrolled out of range,
+            // so they don't linger and reappear stale if they come back.
+            for (const key of this._tickSmoothed.keys()) {
+                if (!positions.some(p => p.nextTick === key)) this._tickSmoothed.delete(key);
             }
         }
         this._tickPositions = positions;
@@ -2945,12 +2959,11 @@ class BandPanel {
         }
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
-        // Tick row-positions were computed once, back when the row arrived
-        // (_computeTickPositions, called from _commitFrame) — using the rows'
-        // real timestamps, which is exact.  All that's left to do per frame is
-        // add the same yOff used to slide the waterfall rows into place, so
-        // the ticks glide along with the content they label instead of being
-        // driven by a second, independent clock.
+        // Tick row-positions are computed and smoothed once per real arrival
+        // (_computeTickPositions, called from _commitFrame) — nothing here
+        // depends on the current frame's time, so redrawing every frame just
+        // re-paints the same, already-settled position until the next arrival
+        // updates it.
         if (this._tickPositions.length) {
             wfCtx.save();
             wfCtx.font         = '9px monospace';
@@ -2958,7 +2971,7 @@ class BandPanel {
             wfCtx.textAlign    = 'left';
 
             for (const { nextTick, rowPos } of this._tickPositions) {
-                const y = Math.round(rowPos * rowH + yOff);
+                const y = Math.round(rowPos * rowH);
 
                 wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';
                 wfCtx.lineWidth   = 1;

@@ -397,6 +397,7 @@ body {
 #peaks-controls {
     display: flex;
     align-items: center;
+    gap: 12px;
     font-size: 0.8em;
     color: #888;
     white-space: nowrap;
@@ -1074,12 +1075,11 @@ body {
         <button id="db-auto" class="active" title="Auto: each band picks its own dB range to keep its noise floor at the bottom of the scale">Auto</button>
         <label class="manual-only">dB min <input type="number" id="db-min" value="-130" step="5"></label>
         <label class="manual-only">max <input type="number" id="db-max" value="-60" step="5"></label>
-        <label class="auto-only" title="Smallest range auto mode will show. Quiet bands are widened upward, so the noise floor stays at the bottom.">min range
+        <label class="auto-only" title="Smallest dB range auto mode will show. Quiet bands are widened upward, so the noise floor stays at the bottom.">
             <input type="number" id="db-span" value="60" step="5" min="10" max="100"> dB</label>
     </div>
     <div id="palette-controls">
-        <label for="palette-select">Palette</label>
-        <select id="palette-select">
+        <select id="palette-select" title="Waterfall colour palette">
             <option value="jet">Jet</option>
             <option value="turbo">Turbo</option>
             <option value="viridis">Viridis</option>
@@ -1090,8 +1090,7 @@ body {
         </select>
     </div>
     <div id="layout-controls">
-        <label for="layout-select">Layout</label>
-        <select id="layout-select">
+        <select id="layout-select" title="How the band panels are arranged">
             <option value="auto">Auto</option>
             <option value="fit" selected>Fit to window</option>
             <option value="1">1 column</option>
@@ -1105,6 +1104,9 @@ body {
     <div id="peaks-controls">
         <label for="show-peaks" title="Show the top-3 signal markers on each spectrum">
             <input type="checkbox" id="show-peaks" checked> Peaks
+        </label>
+        <label for="filter-spots" title="Only show CW and voice spots for enabled bands">
+            <input type="checkbox" id="filter-spots" checked> Filter
         </label>
     </div>
 
@@ -3230,6 +3232,9 @@ function rebuildPanels() {
 
     // Reconnect SSE with new band list
     connectSSE();
+
+    // The spot filter follows the selected bands.
+    if (filterSpots) _refreshSpotFilters();
 }
 
 function toggleBand(name) {
@@ -3269,6 +3274,7 @@ function savePrefs() {
         localStorage.setItem('bandActivity_palette', currentPalette);
         localStorage.setItem('bandActivity_layout', currentLayout);
         localStorage.setItem('bandActivity_peaks', showPeaks ? '1' : '0');
+        localStorage.setItem('bandActivity_filterSpots', filterSpots ? '1' : '0');
     } catch(e) {}
 }
 
@@ -3319,6 +3325,11 @@ function loadPrefs() {
         if (sPeaks !== null) showPeaks = (sPeaks === '1');
         const peaksEl = document.getElementById('show-peaks');
         if (peaksEl) peaksEl.checked = showPeaks;
+
+        const sFilter = localStorage.getItem('bandActivity_filterSpots');
+        if (sFilter !== null) filterSpots = (sFilter === '1');
+        const filterEl = document.getElementById('filter-spots');
+        if (filterEl) filterEl.checked = filterSpots;
     } catch(e) {}
 }
 
@@ -3380,8 +3391,16 @@ function _renderCWSpots() {
         el.style.display = 'none';
         return;
     }
+    const visible = filterSpots
+        ? _cwRecentSpots.filter(function(s) { return _bandIsActive(s.band); })
+        : _cwRecentSpots;
+    if (visible.length === 0) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+        return;
+    }
     el.innerHTML = '';
-    const shown = _cwRecentSpots.slice(0, _CW_MAX_DISPLAY);
+    const shown = visible.slice(0, _CW_MAX_DISPLAY);
     for (const spot of shown) el.appendChild(_cwMakeBadge(spot));
     el.style.display = 'flex'; // must override inline style="display:none"
     // Newest render first, so drop trailing (oldest) badges until they all
@@ -3885,6 +3904,35 @@ function _startNotifications() {
 }
 
 // Hardware status flags — set from /api/description in init()
+// Spot filter: when on, the CW spot badges and the voice ticker only show
+// bands that are currently selected, so the conditions bar matches what is
+// actually on screen.
+let filterSpots = true;
+let _vaLastData = null;   // last voice-activity poll, so the filter can be
+                          // re-applied without waiting for the next one
+
+// _bandIsActive reports whether a spot's band is one of the selected bands.
+// Spot band names come from the server and may not match this receiver's
+// configured names exactly, so they go through the same resolver as click-to-tune.
+function _bandIsActive(rawBand) {
+    const band = _resolveBandName(rawBand);
+    return !!band && activeBands.has(band);
+}
+
+// Re-render everything the filter affects. Called when the checkbox changes and
+// whenever the set of selected bands changes.
+function _refreshSpotFilters() {
+    _renderCWSpots();
+    if (_vaLastData) _renderVoiceTicker(_vaLastData);
+    const bar = document.getElementById('conditions-bar');
+    if (bar && bar.style.display !== 'none') {
+        requestAnimationFrame(() => {
+            document.body.style.paddingBottom = bar.offsetHeight + 'px';
+            scheduleLayout(); // conditions bar height changes the space 'fit' can use
+        });
+    }
+}
+
 let _rotatorEnabled  = false;
 let _antSwitchEnabled = false;
 let _hwTimer = null;   // separate 30 s poll for hardware (changes more often than weather)
@@ -4124,6 +4172,7 @@ function _renderVoiceTicker(data, _precomputed) {
         const items = [];
         const bands = data?.bands || {};
         for (const [band, activities] of Object.entries(bands)) {
+            if (filterSpots && !_bandIsActive(band)) continue;
             for (const act of activities) {
                 items.push({ band, ...act });
             }
@@ -4135,8 +4184,17 @@ function _renderVoiceTicker(data, _precomputed) {
             (b.estimated_dial_freq || b.center_freq || 0)
         );
 
-        // If no items, keep whatever is already scrolling — don't hide or reset
         if (items.length === 0) {
+            // Nothing on the selected bands: the filter has to clear what is
+            // scrolling, or it would keep showing spots it just excluded.
+            if (filterSpots) {
+                trackEl.innerHTML = '';
+                tickerEl.style.display = 'none';
+                _tickerLastKey  = '';
+                _tickerHadItems = false;
+                return;
+            }
+            // Otherwise keep whatever is already scrolling — don't hide or reset
             if (!_tickerHadItems) tickerEl.style.display = 'none';
             return;
         }
@@ -4281,6 +4339,7 @@ function _renderVoiceTicker(data, _precomputed) {
 async function _refreshVoiceTicker() {
     try {
         const data = await _fetchVoiceActivity();
+        _vaLastData = data;
         _renderVoiceTicker(data);
         // Adjust body padding in case bar height changed
         const bar = document.getElementById('conditions-bar');
@@ -4864,6 +4923,13 @@ async function init() {
         showPeaks = e.target.checked;
         savePrefs();
         for (const p of Object.values(panels)) p.dirty = true;
+    });
+
+    // Spot filter — restrict the CW badges and voice ticker to selected bands
+    document.getElementById('filter-spots').addEventListener('change', e => {
+        filterSpots = e.target.checked;
+        savePrefs();
+        _refreshSpotFilters();
     });
 
     // Layout (grid arrangement) selector

@@ -2906,60 +2906,46 @@ class BandPanel {
         }
 
         // ── Waterfall time axis (left edge) ───────────────────────────────────
-        // Draw tick marks at fixed time intervals using stored row timestamps.
-        // Positions are interpolated between adjacent rows so ticks glide smoothly
-        // rather than jumping by one row-height each time a new row arrives.
-        if (nRows > 1 && this.waterfallTimes.length === nRows) {
+        // Draw tick marks at fixed time intervals.  Row position is derived
+        // purely from the same smoothed _rowPeriod / interpFrac clock that
+        // drives the scroll offset (yOff) above, not from each row's real
+        // arrival timestamp.  Real arrivals jitter slightly (network/
+        // scheduling), and interpolating against them fights the uniform
+        // row-height model the rest of the waterfall assumes (rowH is a
+        // constant wfH/maxR regardless of how long a row actually took to
+        // arrive) — that mismatch was the fast, small bounce.  Under the
+        // uniform-period model a tick's screen position is invariant between
+        // arrivals: nextTick*rowsPerSec - frac and yOff both move with frac
+        // and cancel exactly, so it only steps when a commit nudges the
+        // smoothed period estimate.
+        if (nRows > 1 && this._rowPeriod) {
             const tickStep = 10; // seconds between ticks
             wfCtx.save();
             wfCtx.font         = '9px monospace';
             wfCtx.textBaseline = 'middle';
             wfCtx.textAlign    = 'left';
 
-            // Per-row ages in seconds, measured from *now* rather than from the
-            // newest row's timestamp.  This matters: a "10s" tick marks a fixed
-            // age, which belongs at a fixed screen position.  Ages frozen at the
-            // newest row would hold still between arrivals while the scroll
-            // offset below kept moving, so the tick sawtoothed by one row height
-            // on every update.  Measuring from now makes the age term drift up
-            // at exactly the rate the offset drifts down, and they cancel.
-            const tNow = Date.now();
-            const rowAge = new Float64Array(nRows);
-            for (let r = 0; r < nRows; r++) {
-                rowAge[r] = (tNow - this.waterfallTimes[nRows - 1 - r]) / 1000;
-            }
-            // rowAge[0] = age of newest row, rowAge[nRows-1] = oldest
+            const rowsPerSec = 1000 / this._rowPeriod;
+            const frac = this._interpFrac();
+            for (let k = 1; ; k++) {
+                const nextTick = k * tickStep;
+                const rowPos = nextTick * rowsPerSec - frac; // fractional row index from newest
+                if (rowPos > nRows) break;
+                const y = Math.round(rowPos * rowH + yOff);
 
-            // For each tick boundary, interpolate the exact Y pixel between the two
-            // adjacent rows that straddle it.  Row height and the scroll offset
-            // must match the blit above, or the ticks drift against the rows they
-            // label.
-            let nextTick = tickStep;
-            for (let r = 1; r < nRows && nextTick <= rowAge[nRows - 1] + tickStep; r++) {
-                if (rowAge[r] >= nextTick) {
-                    // Interpolate between row r-1 and row r
-                    const ageA = rowAge[r - 1]; // age at top of row r-1
-                    const ageB = rowAge[r];     // age at top of row r
-                    const tf   = (ageB > ageA) ? (nextTick - ageA) / (ageB - ageA) : 0;
-                    // Y at top of row r-1 is (r-1)*rowH; top of row r is r*rowH
-                    const y = Math.round((r - 1 + tf) * rowH + yOff);
+                wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+                wfCtx.lineWidth   = 1;
+                wfCtx.beginPath();
+                wfCtx.moveTo(0, y);
+                wfCtx.lineTo(wfW, y);
+                wfCtx.stroke();
 
-                    // Tick line across full width
-                    wfCtx.strokeStyle = 'rgba(255,255,255,0.5)';
-                    wfCtx.lineWidth   = 1;
-                    wfCtx.beginPath();
-                    wfCtx.moveTo(0, y);
-                    wfCtx.lineTo(wfW, y);
-                    wfCtx.stroke();
-                    // Label
-                    const label = `${nextTick}s`;
-                    const tw = wfCtx.measureText(label).width;
-                    wfCtx.fillStyle = 'rgba(0,0,0,0.65)';
-                    wfCtx.fillRect(1, y - 6, tw + 4, 12);
-                    wfCtx.fillStyle = 'rgba(255,255,255,0.9)';
-                    wfCtx.fillText(label, 3, y);
-                    nextTick += tickStep;
-                }
+                const label = `${nextTick}s`;
+                const tw = wfCtx.measureText(label).width;
+                wfCtx.fillStyle = 'rgba(0,0,0,0.65)';
+                wfCtx.fillRect(1, y - 6, tw + 4, 12);
+                wfCtx.fillStyle = 'rgba(255,255,255,0.9)';
+                wfCtx.fillText(label, 3, y);
             }
             wfCtx.restore();
         }

@@ -452,7 +452,7 @@ body {
 #floating-map-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     padding: 6px 10px;
     background: #1a1a24;
     border-bottom: 1px solid #333;
@@ -462,6 +462,26 @@ body {
     user-select: none;
     flex: none;
 }
+#floating-map-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#floating-map-tile-select {
+    flex: none;
+    background: transparent;
+    border: 1px solid #333;
+    color: #888;
+    font-size: 0.78em;
+    padding: 1px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    appearance: auto;
+}
+#floating-map-tile-select:hover  { color: #ccc; border-color: #444; }
+#floating-map-tile-select:focus  { outline: none; border-color: #555; }
 #floating-map-close {
     background: none;
     border: none;
@@ -1299,6 +1319,13 @@ body {
 <div id="floating-map" style="display:none">
     <div id="floating-map-header">
         <span id="floating-map-title">📍 Receiver location</span>
+        <select id="floating-map-tile-select" title="Map style">
+            <option value="dark">Dark</option>
+            <option value="osm">OSM</option>
+            <option value="topo">Topo</option>
+            <option value="satellite">Satellite</option>
+            <option value="light">Light</option>
+        </select>
         <button id="floating-map-close" type="button" title="Hide map">✕</button>
     </div>
     <div id="floating-map-body">
@@ -3766,6 +3793,49 @@ function _loadLeafletAssets() {
     return _leafletLoadPromise;
 }
 
+// Same tile choices offered by the full country map, minus the labelling —
+// this is a small panel, so the dropdown stays a single subtle <select>.
+const _MAP_TILE_LAYERS = {
+    dark: {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        maxZoom: 19
+    },
+    osm: {
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19
+    },
+    topo: {
+        url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+        attribution: '&copy; OpenStreetMap contributors, &copy; OpenTopoMap (CC-BY-SA)',
+        maxZoom: 17
+    },
+    satellite: {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+        maxZoom: 19
+    },
+    light: {
+        url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
+        maxZoom: 19
+    }
+};
+const _MAP_TILE_KEY = 'bandActivity_mapTile';
+let _floatingMapTileLayer = null;
+let _floatingMapTileKey   = 'dark';
+
+function _applyFloatingMapTile(key) {
+    if (!_leafletMap) return;
+    const cfg = _MAP_TILE_LAYERS[key] || _MAP_TILE_LAYERS.dark;
+    if (_floatingMapTileLayer) _leafletMap.removeLayer(_floatingMapTileLayer);
+    _floatingMapTileLayer = L.tileLayer(cfg.url, {
+        attribution: cfg.attribution,
+        maxZoom: cfg.maxZoom
+    }).addTo(_leafletMap);
+}
+
 const _MAP_GEOM_KEY = 'bandActivity_mapGeom';
 
 function _saveFloatingMapGeometry() {
@@ -3829,14 +3899,14 @@ async function _showFloatingMap() {
     if (!document.getElementById('show-map').checked) return; // toggled off while loading
 
     if (!_leafletMap) {
-        const center = _receiverGps ? [_receiverGps.lat, _receiverGps.lon] : [20, 0];
+        // Whole world by default — the receiver is marked on it, but the view
+        // itself doesn't zoom in; the user can zoom/pan from there.
         _leafletMap = L.map('floating-map-canvas', { attributionControl: false })
-            .setView(center, _receiverGps ? 5 : 2);
+            .setView([20, 0], 2);
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 19
-        }).addTo(_leafletMap);
+        // _floatingMapTileKey was already restored from localStorage (and the
+        // <select> synced to it) by _setupFloatingMapChrome() at init time.
+        _applyFloatingMapTile(_floatingMapTileKey);
 
         if (typeof L.terminator === 'function') {
             _leafletTerminator = L.terminator({ fillOpacity: 0.35, color: '#000', weight: 1 }).addTo(_leafletMap);
@@ -3851,7 +3921,7 @@ async function _showFloatingMap() {
                 iconSize: [14, 14],
                 iconAnchor: [7, 7]
             });
-            _leafletMarker = L.marker(center, { icon }).addTo(_leafletMap);
+            _leafletMarker = L.marker([_receiverGps.lat, _receiverGps.lon], { icon }).addTo(_leafletMap);
             if (_receiverLabel) _leafletMarker.bindTooltip(_receiverLabel, { direction: 'top' });
         }
     }
@@ -3880,9 +3950,27 @@ function _setupFloatingMapChrome() {
 
     _restoreFloatingMapGeometry();
 
+    // Map style selector — saved/restored independently of the map's built
+    // state, since the <select> exists (and can be changed) before Leaflet
+    // has even loaded.
+    const tileSel = document.getElementById('floating-map-tile-select');
+    if (tileSel) {
+        let sTile = null;
+        try { sTile = localStorage.getItem(_MAP_TILE_KEY); } catch(_) {}
+        _floatingMapTileKey = _MAP_TILE_LAYERS[sTile] ? sTile : _floatingMapTileKey;
+        tileSel.value = _floatingMapTileKey;
+        // Stops a click on the dropdown from also being read as a header drag.
+        tileSel.addEventListener('mousedown', e => e.stopPropagation());
+        tileSel.addEventListener('change', e => {
+            _floatingMapTileKey = e.target.value;
+            try { localStorage.setItem(_MAP_TILE_KEY, _floatingMapTileKey); } catch(_) {}
+            _applyFloatingMapTile(_floatingMapTileKey);
+        });
+    }
+
     let dragging = false, dragOffX = 0, dragOffY = 0;
     header.addEventListener('mousedown', e => {
-        if (e.target.closest('#floating-map-close')) return;
+        if (e.target.closest('#floating-map-close') || e.target.closest('#floating-map-tile-select')) return;
         dragging = true;
         const rect = panel.getBoundingClientRect();
         dragOffX = e.clientX - rect.left;

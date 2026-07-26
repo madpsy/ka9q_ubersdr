@@ -4095,6 +4095,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    if (window.startTitleHealthPoll) window.startTitleHealthPoll();
                     // Show version footer now that we have a valid session
                     checkVersions();
                     // Probe GPSDO health once at login so the tab is visible immediately
@@ -4224,6 +4225,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    if (window.startTitleHealthPoll) window.startTitleHealthPoll();
                     // Show version footer now that we have a valid session
                     checkVersions();
                     // Probe GPSDO health once at login so the tab is visible immediately
@@ -4253,6 +4255,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             stopSystemAutoRefresh();
             stopRotatorLogsAutoRefresh();
             stopAntSwitchAutoRefresh();
+            if (window.stopTitleHealthPoll) window.stopTitleHealthPoll();
 
             try {
                 await fetch('/admin/logout', {
@@ -30066,10 +30069,16 @@ Referer: ${log.referer}`;
     // ── Title health dot ──────────────────────────────────────────────────────
     // Polls /admin/monitor-health every 10 s and updates the coloured dot next
     // to "Configuration Editor".  A custom tooltip shows each component's status
-    // and any issue strings on hover.
+    // and any issue strings on hover.  Only runs while logged in — started from
+    // checkSession()/login success, stopped from logout() — since the endpoint
+    // requires auth and an unauthenticated 401 would otherwise be misread as a
+    // session expiry, wiping the password field every ~10 s on the login screen.
     (function () {
         const dot = document.getElementById('titleHealthDot');
         if (!dot) return;
+
+        let pollTimer = null;
+        let initialTimer = null;
 
         // Inject tooltip styles once
         const style = document.createElement('style');
@@ -30159,9 +30168,18 @@ Referer: ${log.referer}`;
             }
         }
 
-        // Initial fetch after a short delay (let auth complete first)
-        setTimeout(pollTitleHealth, 1500);
-        setInterval(pollTitleHealth, 10000);
+        window.startTitleHealthPoll = function () {
+            if (pollTimer || initialTimer) return; // already running
+            initialTimer = setTimeout(pollTitleHealth, 1500);
+            pollTimer = setInterval(pollTitleHealth, 10000);
+        };
+
+        window.stopTitleHealthPoll = function () {
+            clearTimeout(initialTimer);
+            clearInterval(pollTimer);
+            initialTimer = null;
+            pollTimer = null;
+        };
     })();
 
     // ── Background work banner ────────────────────────────────────────────────

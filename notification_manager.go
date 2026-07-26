@@ -220,17 +220,34 @@ type NotificationStats struct {
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-// ChannelLogEntry records a single send attempt for a channel's response ring buffer.
-type ChannelLogEntry struct {
-	At        time.Time       `json:"at"`
-	Rule      string          `json:"rule"`
-	EventType string          `json:"event_type"`
-	Status    string          `json:"status"` // "sent", "error", "template_error"
-	ErrorMsg  string          `json:"error,omitempty"`
-	Response  ChannelResponse `json:"response"`
+// NotificationLogEntry records a single notification dispatch attempt,
+// persisted to the notification_log SQLite table so that send history
+// survives restarts and can be queried across all channels, not just the
+// last few per channel.
+type NotificationLogEntry struct {
+	ID          int64           `json:"id,omitempty"`
+	At          time.Time       `json:"at"`
+	Rule        string          `json:"rule"`
+	EventType   string          `json:"event_type"`
+	ChannelName string          `json:"channel_name"`
+	ChannelType string          `json:"channel_type"`
+	Status      string          `json:"status"` // "sent", "error", "template_error"
+	ErrorMsg    string          `json:"error,omitempty"`
+	Message     string          `json:"message,omitempty"`
+	Response    ChannelResponse `json:"response"`
 }
 
-const maxChannelLogEntries = 10
+// defaultChannelLogLimit is how many rows handleNotificationsChannelLog
+// returns for a single channel by default (matches the old in-memory ring
+// buffer's size for UI continuity).
+const defaultChannelLogLimit = 10
+
+// defaultNotificationLogLimit / maxNotificationLogLimit bound the general
+// (all-channels) notification log query.
+const (
+	defaultNotificationLogLimit = 100
+	maxNotificationLogLimit     = 500
+)
 
 // NotificationManager is the central hub. Sources call Publish() with a typed
 // event; the manager evaluates all rules, renders templates, applies rate
@@ -247,10 +264,11 @@ type NotificationManager struct {
 	funcMap        template.FuncMap
 	listeners      *TelegramListenerRegistry
 	mqtt           *MQTTPublisher // may be nil; publishes dispatch events and health stats to MQTT
+	db             *sql.DB        // write connection; nil until SetDB is called (disables notification_log persistence)
+	readDB         *sql.DB        // read-only pool; nil until SetReadDB is called
 
-	mu       sync.RWMutex
-	stats    NotificationStats
-	chanLogs map[string][]ChannelLogEntry // per-channel ring buffer of last 10 responses
+	mu    sync.RWMutex
+	stats NotificationStats
 }
 
 // SetSessionManager wires the SessionManager into the listener registry so
@@ -464,15 +482,28 @@ func (m *NotificationManager) SetConfig(c *Config) {
 	}
 }
 
-// SetReadDB wires the SQLite read-only pool into the listener registry
-// so that the /stats bot command can query session activity from the DB.
+// SetReadDB wires the SQLite read-only pool into the manager (for
+// notification_log queries) and into the listener registry so that the
+// /stats bot command can query session activity from the DB.
 func (m *NotificationManager) SetReadDB(db *sql.DB) {
-	m.mu.RLock()
+	m.mu.Lock()
+	m.readDB = db
 	reg := m.listeners
-	m.mu.RUnlock()
+	m.mu.Unlock()
 	if reg != nil {
 		reg.SetReadDB(db)
 	}
+}
+
+// SetDB wires the SQLite write connection into the manager so that every
+// notification dispatch attempt (sent/error/template_error) is persisted to
+// the notification_log table. Until this is called, dispatch logging is a
+// silent no-op (in particular, tests that construct a NotificationManager
+// directly do not need a database).
+func (m *NotificationManager) SetDB(db *sql.DB) {
+	m.mu.Lock()
+	m.db = db
+	m.mu.Unlock()
 }
 
 // SetInstanceReporter wires the instance reporter into the listener registry
@@ -509,7 +540,6 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 		dedup:          newNotifDedupTracker(),
 		throughput:     make(map[string]*channelThroughputLimiter),
 		ruleThroughput: make(map[string]*channelThroughputLimiter),
-		chanLogs:       make(map[string][]ChannelLogEntry),
 		stats: NotificationStats{
 			ByRule:               make(map[string]int64),
 			ByRuleErrors:         make(map[string]int64),
@@ -771,9 +801,6 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 	m.blocked = newBlocked
 	// Sync throughput limiters: reuse existing windows, update rates, remove stale.
 	m.syncThroughputLimiters(newCfg)
-	// chanLogs is intentionally preserved across reloads so the response history
-	// survives a config save. Entries for channels that no longer exist are
-	// harmless (they will never be queried) and are cheap to keep.
 	m.mu.Unlock()
 
 	// Sync bot command listeners with the new config (start/stop as needed).
@@ -958,8 +985,10 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			msg, err := m.renderForChannel(key, chName, evt, tmpls)
 			if err != nil {
 				log.Printf("[Notifications] Rule %q → channel %q: template error: %v", key, chName, err)
-				entry := ChannelLogEntry{
-					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
+				now := time.Now()
+				entry := NotificationLogEntry{
+					At: now, Rule: key, EventType: string(evt.EventType()),
+					ChannelName: chName, ChannelType: ch.Type(),
 					Status: "template_error", ErrorMsg: err.Error(),
 				}
 				m.mu.Lock()
@@ -967,12 +996,11 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				m.stats.ByRuleErrors[key]++
 				m.stats.ByChannelErrors[chName]++
 				m.stats.LastError = err.Error()
-				now := time.Now()
 				m.stats.LastErrorAt = &now
 				m.stats.ByChannelLastErrorAt[chName] = &now
-				m.appendChannelLog(chName, entry)
 				mqttPub := m.mqtt
 				m.mu.Unlock()
+				m.logNotification(entry)
 				if mqttPub != nil {
 					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), "", "template_error", err.Error(), ChannelResponse{})
 				}
@@ -1012,38 +1040,40 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			if sendErr != nil {
 				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, sendErr)
 				errMsg := fmt.Sprintf("channel %s: %v", chName, sendErr)
-				entry := ChannelLogEntry{
-					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
-					Status: "error", ErrorMsg: sendErr.Error(), Response: chResp,
+				now := time.Now()
+				entry := NotificationLogEntry{
+					At: now, Rule: key, EventType: string(evt.EventType()),
+					ChannelName: chName, ChannelType: ch.Type(),
+					Status: "error", ErrorMsg: sendErr.Error(), Response: chResp, Message: msg,
 				}
 				m.mu.Lock()
 				m.stats.TotalErrors++
 				m.stats.ByRuleErrors[key]++
 				m.stats.ByChannelErrors[chName]++
 				m.stats.LastError = errMsg
-				now := time.Now()
 				m.stats.LastErrorAt = &now
 				m.stats.ByChannelLastErrorAt[chName] = &now
-				m.appendChannelLog(chName, entry)
 				mqttPub := m.mqtt
 				m.mu.Unlock()
+				m.logNotification(entry)
 				if mqttPub != nil {
 					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), msg, "error", sendErr.Error(), chResp)
 				}
 			} else {
-				entry := ChannelLogEntry{
-					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
-					Status: "sent", Response: chResp,
+				now := time.Now()
+				entry := NotificationLogEntry{
+					At: now, Rule: key, EventType: string(evt.EventType()),
+					ChannelName: chName, ChannelType: ch.Type(),
+					Status: "sent", Response: chResp, Message: msg,
 				}
 				m.mu.Lock()
 				m.stats.TotalSent++
 				m.stats.ByRule[key]++
 				m.stats.ByChannel[chName]++
-				now := time.Now()
 				m.stats.LastSentAt = &now
-				m.appendChannelLog(chName, entry)
 				mqttPub := m.mqtt
 				m.mu.Unlock()
+				m.logNotification(entry)
 				if mqttPub != nil {
 					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), msg, "sent", "", chResp)
 				}
@@ -1976,42 +2006,122 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 	}
 }
 
-// AppendTestChannelLog records a manual test-send result in the per-channel
-// ring buffer. It acquires the write lock itself, unlike appendChannelLog which
-// requires the caller to hold it.
-func (m *NotificationManager) AppendTestChannelLog(chName string, entry ChannelLogEntry) {
-	m.mu.Lock()
-	m.appendChannelLog(chName, entry)
-	m.mu.Unlock()
-}
-
-// appendChannelLog appends an entry to the per-channel ring buffer (last 10).
-// Must be called with m.mu held (write lock).
-func (m *NotificationManager) appendChannelLog(chName string, entry ChannelLogEntry) {
-	if m.chanLogs == nil {
-		m.chanLogs = make(map[string][]ChannelLogEntry)
-	}
-	buf := m.chanLogs[chName]
-	buf = append(buf, entry)
-	if len(buf) > maxChannelLogEntries {
-		buf = buf[len(buf)-maxChannelLogEntries:]
-	}
-	m.chanLogs[chName] = buf
-}
-
-// GetChannelLog returns a copy of the response log for the named channel,
-// newest-first. Returns nil if the channel has no log entries.
-func (m *NotificationManager) GetChannelLog(chName string) []ChannelLogEntry {
+// logNotification persists a dispatch attempt to the notification_log table.
+// A silent no-op if SetDB was never called (e.g. tests, or the manager
+// running before the DB is wired up during startup).
+func (m *NotificationManager) logNotification(entry NotificationLogEntry) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	src := m.chanLogs[chName]
-	if len(src) == 0 {
-		return nil
+	db := m.db
+	m.mu.RUnlock()
+	if db == nil {
+		return
 	}
-	// Return newest-first copy.
-	out := make([]ChannelLogEntry, len(src))
-	for i, e := range src {
-		out[len(src)-1-i] = e
+	at := entry.At
+	if at.IsZero() {
+		at = time.Now()
 	}
-	return out
+	_, err := db.Exec(
+		`INSERT INTO notification_log (ts, rule, event_type, channel_name, channel_type, status, error_msg, resp_code, resp_body, message)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		at.Unix(), entry.Rule, entry.EventType, entry.ChannelName, entry.ChannelType,
+		entry.Status, entry.ErrorMsg, entry.Response.StatusCode, entry.Response.Body, entry.Message,
+	)
+	if err != nil {
+		log.Printf("[Notifications] notification_log insert error: %v", err)
+	}
+}
+
+// LogTestNotification records a manual test-send result (from the admin API's
+// "send test message" action) to the notification_log table.
+func (m *NotificationManager) LogTestNotification(entry NotificationLogEntry) {
+	m.logNotification(entry)
+}
+
+// NotificationLogFilter holds optional filter criteria for querying the
+// persisted notification_log table via QueryNotificationLog. Zero values
+// mean "no filter" for that field.
+type NotificationLogFilter struct {
+	ChannelName string
+	Status      string // "sent" | "error" | "template_error"
+	EventType   string
+	Rule        string
+	SinceUnix   int64 // Unix seconds UTC, inclusive; 0 = no lower bound
+	UntilUnix   int64 // Unix seconds UTC, inclusive; 0 = no upper bound
+	Limit       int   // 0 = defaultNotificationLogLimit; capped to maxNotificationLogLimit
+}
+
+// QueryNotificationLog returns notification_log rows matching f, newest-first.
+// Returns an error if the read DB has not been wired up via SetReadDB.
+func (m *NotificationManager) QueryNotificationLog(f NotificationLogFilter) ([]NotificationLogEntry, error) {
+	m.mu.RLock()
+	db := m.readDB
+	m.mu.RUnlock()
+	if db == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultNotificationLogLimit
+	}
+	if limit > maxNotificationLogLimit {
+		limit = maxNotificationLogLimit
+	}
+
+	q := `SELECT id, ts, rule, event_type, channel_name, channel_type, status, error_msg, resp_code, resp_body, message
+	      FROM notification_log WHERE 1=1`
+	args := make([]interface{}, 0, 8)
+	if f.ChannelName != "" {
+		q += " AND channel_name = ?"
+		args = append(args, f.ChannelName)
+	}
+	if f.Status != "" {
+		q += " AND status = ?"
+		args = append(args, f.Status)
+	}
+	if f.EventType != "" {
+		q += " AND event_type = ?"
+		args = append(args, f.EventType)
+	}
+	if f.Rule != "" {
+		q += " AND rule = ?"
+		args = append(args, f.Rule)
+	}
+	if f.SinceUnix > 0 {
+		q += " AND ts >= ?"
+		args = append(args, f.SinceUnix)
+	}
+	if f.UntilUnix > 0 {
+		q += " AND ts <= ?"
+		args = append(args, f.UntilUnix)
+	}
+	q += " ORDER BY ts DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query notification_log: %w", err)
+	}
+	defer rows.Close()
+
+	out := []NotificationLogEntry{}
+	for rows.Next() {
+		var e NotificationLogEntry
+		var ts int64
+		var rule, eventType, chName, chType, errorMsg, respBody, message sql.NullString
+		var respCode sql.NullInt64
+		if err := rows.Scan(&e.ID, &ts, &rule, &eventType, &chName, &chType, &e.Status, &errorMsg, &respCode, &respBody, &message); err != nil {
+			return nil, fmt.Errorf("scan notification_log row: %w", err)
+		}
+		e.At = time.Unix(ts, 0).UTC()
+		e.Rule = rule.String
+		e.EventType = eventType.String
+		e.ChannelName = chName.String
+		e.ChannelType = chType.String
+		e.ErrorMsg = errorMsg.String
+		e.Message = message.String
+		e.Response = ChannelResponse{StatusCode: int(respCode.Int64), Body: respBody.String}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

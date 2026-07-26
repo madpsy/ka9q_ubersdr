@@ -504,6 +504,14 @@ type DatabaseConfig struct {
 	// field being absent, which selects the default.
 	// Default: 30. Set to 0 to keep forever.
 	StatsRetentionDays *int `yaml:"stats_retention_days"`
+
+	// NotificationLogRetentionDays is how many days of notification dispatch
+	// history to keep in the notification_log table.
+	//
+	// A pointer so an explicit 0 ("keep forever") is distinguishable from the
+	// field being absent, which selects the default.
+	// Default: 30. Set to 0 to keep forever.
+	NotificationLogRetentionDays *int `yaml:"notification_log_retention_days"`
 }
 
 // GetStatsRetentionDays returns the configured stats retention in days,
@@ -514,6 +522,17 @@ func (dc DatabaseConfig) GetStatsRetentionDays() int {
 		return 30
 	}
 	return *dc.StatsRetentionDays
+}
+
+// GetNotificationLogRetentionDays returns the configured notification log
+// retention in days, falling back to the 30-day default when the option is
+// not set. A return value of 0 means "keep forever" and is honoured by the
+// prune loop.
+func (dc DatabaseConfig) GetNotificationLogRetentionDays() int {
+	if dc.NotificationLogRetentionDays == nil {
+		return 30
+	}
+	return *dc.NotificationLogRetentionDays
 }
 
 // DXClusterConfig contains DX cluster connection settings

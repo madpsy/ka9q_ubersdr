@@ -860,6 +860,15 @@ database:
   # Default: 30
   stats_retention_days: 30
 
+  # Number of days of notification dispatch history to keep in the
+  # notification_log table (every rule -> channel send attempt, with its
+  # success/failure status and response details). See notifications.yaml for
+  # channel and rule configuration.
+  #
+  # Set to 0 to keep all notification history forever (unbounded growth).
+  # Default: 30
+  notification_log_retention_days: 30
+
 # DX Cluster settings
 dxcluster:
   # Enable DX cluster connection

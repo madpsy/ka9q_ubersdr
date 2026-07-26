@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/cwsl/ka9q_ubersdr/gudriver"
@@ -241,7 +242,7 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 	}
 	durationMs := time.Since(start).Milliseconds()
 
-	// ── Log to channel ring buffer (named channels only, not ad-hoc) ─────────
+	// ── Log to notification_log (named channels only, not ad-hoc) ────────────
 	if isNamed && nm != nil {
 		status := "sent"
 		errMsg := ""
@@ -249,15 +250,18 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 			status = "error"
 			errMsg = sendErr.Error()
 		}
-		entry := ChannelLogEntry{
-			At:        time.Now(),
-			Rule:      "(test)",
-			EventType: "test",
-			Status:    status,
-			ErrorMsg:  errMsg,
-			Response:  chResp,
+		entry := NotificationLogEntry{
+			At:          time.Now(),
+			Rule:        "(test)",
+			EventType:   "test",
+			ChannelName: channelName,
+			ChannelType: channelType,
+			Status:      status,
+			ErrorMsg:    errMsg,
+			Response:    chResp,
+			Message:     msg,
 		}
-		nm.AppendTestChannelLog(channelName, entry)
+		nm.LogTestNotification(entry)
 	}
 
 	// ── Build response ───────────────────────────────────────────────────────
@@ -290,7 +294,9 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
-// handleNotificationsChannelLog returns the last 10 send attempts for a channel.
+// handleNotificationsChannelLog returns the most recent send attempts for a
+// single channel (default 10, matching the old in-memory ring buffer's size),
+// backed by the persisted notification_log table.
 //
 // GET /admin/notifications/channel-log/{name}
 func handleNotificationsChannelLog(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
@@ -307,12 +313,72 @@ func handleNotificationsChannelLog(w http.ResponseWriter, r *http.Request, nm *N
 		json.NewEncoder(w).Encode(map[string]string{"error": "channel name required"}) //nolint:errcheck
 		return
 	}
-	entries := nm.GetChannelLog(name)
-	if entries == nil {
-		entries = []ChannelLogEntry{}
+	entries, err := nm.QueryNotificationLog(NotificationLogFilter{ChannelName: name, Limit: defaultChannelLogLimit})
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{"channel": name, "log": entries}) //nolint:errcheck
+}
+
+// handleNotificationsLog returns notification dispatch history across all
+// channels/rules, backed by the persisted notification_log table. Unlike
+// handleNotificationsChannelLog (scoped to one channel, small fixed limit)
+// this supports filtering and a larger page size for a general "all sent
+// notifications" audit view.
+//
+// GET /admin/notifications/log
+//
+// Query params (all optional):
+//
+//	channel     — exact channel name
+//	status      — "sent" | "error" | "template_error"
+//	event_type  — e.g. "cw_spot", "system_monitor"
+//	rule        — exact rule name/key
+//	since       — Unix seconds, inclusive lower bound on send time
+//	until       — Unix seconds, inclusive upper bound on send time
+//	limit       — max rows to return (default 100, capped at 500)
+func handleNotificationsLog(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+	if nm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "notification manager not initialised"}) //nolint:errcheck
+		return
+	}
+
+	q := r.URL.Query()
+	filter := NotificationLogFilter{
+		ChannelName: q.Get("channel"),
+		Status:      q.Get("status"),
+		EventType:   q.Get("event_type"),
+		Rule:        q.Get("rule"),
+	}
+	if v := q.Get("since"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.SinceUnix = n
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.UntilUnix = n
+		}
+	}
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filter.Limit = n
+		}
+	}
+
+	entries, err := nm.QueryNotificationLog(filter)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"log": entries, "count": len(entries)}) //nolint:errcheck
 }
 
 // handleNotificationsSSEPassword returns a freshly generated password that

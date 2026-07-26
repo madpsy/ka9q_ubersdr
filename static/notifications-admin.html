@@ -28,6 +28,7 @@
             <div class="tab active" data-tab="overview">📊 Overview</div>
             <div class="tab" data-tab="channels">📡 Channels</div>
             <div class="tab" data-tab="rules">📋 Rules</div>
+            <div class="tab" data-tab="log">🧾 Log</div>
         </div>
 
         <!-- ═══════════════════════════════════════════════════════════════════
@@ -150,6 +151,58 @@
 
             <div style="display:flex;gap:10px;flex-wrap:wrap">
                 <button class="btn" id="btnAddRule">+ Add Rule</button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 4: LOG (all sent notifications, across all channels)
+             ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content" id="tab-log">
+
+            <div id="logAlerts"></div>
+
+            <div class="config-section" style="margin-bottom:16px">
+                <div class="config-section-title">Filters</div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <select id="logFilterChannel" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.85rem">
+                        <option value="">All channels</option>
+                    </select>
+                    <select id="logFilterStatus" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.85rem">
+                        <option value="">All statuses</option>
+                        <option value="sent">Sent</option>
+                        <option value="error">Error</option>
+                        <option value="template_error">Template error</option>
+                    </select>
+                    <select id="logFilterEvent" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.85rem">
+                        <option value="">All events</option>
+                    </select>
+                    <select id="logFilterRule" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.85rem">
+                        <option value="">All rules</option>
+                    </select>
+                    <select id="logFilterRange" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.85rem">
+                        <option value="">All time</option>
+                        <option value="3600">Last hour</option>
+                        <option value="86400" selected>Last 24 hours</option>
+                        <option value="604800">Last 7 days</option>
+                        <option value="2592000">Last 30 days</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" id="logFilterClear" style="font-size:0.8rem">✕ Clear</button>
+                    <span style="flex:1"></span>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.82rem;color:#555;cursor:pointer">
+                        <input type="checkbox" id="logAutoRefresh" style="cursor:pointer"> Auto-refresh
+                    </label>
+                    <button class="btn btn-sm btn-secondary" id="btnRefreshLog" style="font-size:0.8rem">🔄 Refresh</button>
+                </div>
+            </div>
+
+            <div id="logSummary" style="font-size:0.8rem;color:#888;margin-bottom:8px"></div>
+
+            <div id="logTableContainer">
+                <div class="loading-overlay"><div class="spinner"></div> Loading notification log…</div>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+                <button class="btn btn-secondary" id="btnLoadMoreLog" style="display:none">Load more</button>
             </div>
         </div>
     </div>

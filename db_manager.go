@@ -185,6 +185,8 @@ type RetentionConfig struct {
 	DecoderMetricsSummaryDays int
 	// CWMetricsSummary: no config field yet — 0 = unlimited.
 	CWMetricsSummaryDays int
+	// NotificationLog: config.Database.NotificationLogRetentionDays (default 30)
+	NotificationLogDays int
 }
 
 // retentionInterval is how often the retention loop runs after the initial
@@ -242,6 +244,7 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 		{"rbn_stats", cfg.StatsDays},
 		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays},
 		{"cw_metrics_summary", cfg.CWMetricsSummaryDays},
+		{"notification_log", cfg.NotificationLogDays},
 	}
 	anyDeleted := false
 	for _, r := range rules {
@@ -866,6 +869,36 @@ func (m *DBManager) initSchema() error {
 			)`,
 		},
 		{"cw_metrics_summary_idx_lookup", `CREATE INDEX IF NOT EXISTS cw_metrics_summary_idx_lookup ON cw_metrics_summary(period, ts, end_ts)`},
+
+		// ----------------------------------------------------------------
+		// notification_log
+		//
+		// Records every notification dispatch attempt (one row per rule →
+		// channel send), replacing the in-memory per-channel ring buffer
+		// that used to live in NotificationManager.chanLogs (last 10
+		// entries, lost on restart). Written from NotificationManager.Publish
+		// (notification_manager.go) for "sent", "error", and "template_error"
+		// outcomes, plus manual test sends from the admin API.
+		// ----------------------------------------------------------------
+		{
+			"notification_log",
+			`CREATE TABLE IF NOT EXISTS notification_log (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts           INTEGER NOT NULL,  -- Unix seconds UTC
+				rule         TEXT,              -- rule name/key, or "(test)" for admin test sends
+				event_type   TEXT,              -- e.g. "cw_spot", "system_monitor"
+				channel_name TEXT,              -- configured channel name
+				channel_type TEXT,              -- "telegram" | "email" | "webhook" | "galactic_unicorn" | "sse"
+				status       TEXT    NOT NULL,  -- "sent" | "error" | "template_error"
+				error_msg    TEXT,              -- non-empty on error/template_error
+				resp_code    INTEGER,           -- HTTP status code (0 for SMTP or when unavailable)
+				resp_body    TEXT,              -- response body/result snippet (≤512 bytes)
+				message      TEXT               -- rendered notification text that was sent
+			)`,
+		},
+		{"notification_log_idx_ts", `CREATE INDEX IF NOT EXISTS notification_log_idx_ts      ON notification_log(ts)`},
+		{"notification_log_idx_channel", `CREATE INDEX IF NOT EXISTS notification_log_idx_channel ON notification_log(channel_name, ts)`},
+		{"notification_log_idx_status", `CREATE INDEX IF NOT EXISTS notification_log_idx_status  ON notification_log(status, ts)`},
 	}
 
 	for _, s := range stmts {

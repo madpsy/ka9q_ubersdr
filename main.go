@@ -535,6 +535,7 @@ func main() {
 		StatsDays: config.Database.GetStatsRetentionDays(),
 		// CWSpotsDays, ChatDays, NoiseFloorDays, SpaceWeatherDays: no config
 		// field yet — 0 = unlimited.
+		NotificationLogDays: config.Database.GetNotificationLogRetentionDays(),
 	})
 
 	// Load notifications configuration from notifications.yaml if it exists
@@ -2444,6 +2445,7 @@ func main() {
 	// Wire config and instance reporter so the /info bot command can report
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
+	notifManager.SetDB(dbManager.DB())
 	notifManager.SetReadDB(dbManager.ReadDB())
 	notifManager.SetInstanceReporter(instanceReporter)
 	// Wire IP ban manager so the /banned bot command can list, add, and remove bans.
@@ -2919,6 +2921,9 @@ func main() {
 	}))
 	http.HandleFunc("/admin/notifications/channel-log/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsChannelLog(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/log", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsLog(w, r, notifManager)
 	}))
 	http.HandleFunc("/admin/notifications/config", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsConfig(w, r, notifManager, notifConfig, notificationsPath)

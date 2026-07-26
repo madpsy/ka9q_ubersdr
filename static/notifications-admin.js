@@ -430,7 +430,10 @@ function initTabs() {
             el('tab-' + tab.dataset.tab).classList.add('active');
             // Refresh data on every tab click (same as pressing Refresh)
             loadHealth().catch(function() {});
-            loadConfig().catch(function() {});
+            loadConfig().then(function() { populateLogFilters(); }).catch(function() {});
+            if (tab.dataset.tab === 'log') {
+                loadNotifLog(true).catch(function() {});
+            }
         });
     });
 }
@@ -4434,6 +4437,240 @@ function initRules() {
     });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 4 — LOG (all sent notifications, across all channels)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Backed by GET /admin/notifications/log, which queries the notification_log
+// SQLite table (see db_manager.go / notification_manager.go). Unlike the
+// per-channel "response log" widget on the Channels tab (last 10 sends for one
+// channel), this shows every dispatch attempt across all channels and rules,
+// with filtering and a "Load more" that widens the query limit.
+
+const LOG_STATUS_COLORS = { sent: '#2e7d32', error: '#c62828', template_error: '#e65100' };
+const LOG_STATUS_LABELS = { sent: 'Sent', error: 'Error', template_error: 'Template error' };
+
+let notifLogLimit = 100;
+let notifLogTimer = null;
+let notifLogExpanded = new Set(); // expanded row ids
+let notifLogLastKey = null;
+
+// (Re)populates the channel/rule filter dropdowns from the current config.
+// Safe to call repeatedly — preserves the current selection when still valid.
+function populateLogFilters() {
+    var chSel = el('logFilterChannel');
+    if (chSel) {
+        var prevCh = chSel.value;
+        chSel.innerHTML = '<option value="">All channels</option>';
+        Object.keys(localConfig.channels || {}).sort().forEach(function(name) {
+            var opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            chSel.appendChild(opt);
+        });
+        if (prevCh && localConfig.channels && localConfig.channels[prevCh]) chSel.value = prevCh;
+    }
+    var ruleSel = el('logFilterRule');
+    if (ruleSel) {
+        var prevRule = ruleSel.value;
+        ruleSel.innerHTML = '<option value="">All rules</option><option value="(test)">(test sends)</option>';
+        (localConfig.rules || []).forEach(function(r, idx) {
+            var name = r.name || ('rule[' + idx + ']');
+            var opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            ruleSel.appendChild(opt);
+        });
+        if (prevRule) ruleSel.value = prevRule;
+    }
+}
+
+function notifLogQueryParams(limit) {
+    var p = new URLSearchParams();
+    var ch = el('logFilterChannel').value;
+    var status = el('logFilterStatus').value;
+    var evt = el('logFilterEvent').value;
+    var rule = el('logFilterRule').value;
+    var range = el('logFilterRange').value;
+    if (ch) p.set('channel', ch);
+    if (status) p.set('status', status);
+    if (evt) p.set('event_type', evt);
+    if (rule) p.set('rule', rule);
+    if (range) p.set('since', String(Math.floor(Date.now() / 1000) - parseInt(range, 10)));
+    p.set('limit', String(limit));
+    return p;
+}
+
+async function loadNotifLog(resetLimit) {
+    if (resetLimit) notifLogLimit = 100;
+    var container = el('logTableContainer');
+    if (!container) return;
+    try {
+        var params = notifLogQueryParams(notifLogLimit);
+        var r = await apiFetch('/admin/notifications/log?' + params.toString());
+        var data = await r.json();
+        renderNotifLog((data && data.log) || []);
+    } catch (err) {
+        if (err.message !== 'Redirecting to login') {
+            container.innerHTML = '<span style="color:#c62828;font-size:0.85rem">Failed to load: ' + escHtml(err.message) + '</span>';
+        }
+    }
+}
+
+function renderNotifLog(entries) {
+    var container = el('logTableContainer');
+    if (!container) return;
+
+    var summary = el('logSummary');
+    if (summary) {
+        summary.textContent = entries.length === 0
+            ? 'No matching notifications.'
+            : 'Showing ' + entries.length + ' notification' + (entries.length === 1 ? '' : 's') +
+              (entries.length >= notifLogLimit && notifLogLimit < 500 ? ' — more may exist, use Load more' : '');
+    }
+
+    var btnMore = el('btnLoadMoreLog');
+    if (btnMore) btnMore.style.display = (entries.length >= notifLogLimit && notifLogLimit < 500) ? 'inline-block' : 'none';
+
+    // Skip the DOM rebuild if nothing changed since the last render, so
+    // auto-refresh doesn't flash the table (same trick as renderChannelLog).
+    var key = entries.map(function(e) { return e.id + ':' + e.status; }).join('|');
+    if (key === notifLogLastKey) return;
+    notifLogLastKey = key;
+
+    if (entries.length === 0) {
+        container.innerHTML = '<span style="color:#888;font-size:0.85rem">No notifications recorded yet.</span>';
+        return;
+    }
+
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.8rem';
+    table.innerHTML =
+        '<thead><tr style="color:#888;font-size:0.75rem;border-bottom:1px solid #e0e0e0">' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Time</th>' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Channel</th>' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Event</th>' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Rule</th>' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Status</th>' +
+            '<th style="padding:4px 6px;text-align:left;font-weight:600">Detail</th>' +
+        '</thead>';
+
+    var tbody = document.createElement('tbody');
+    entries.forEach(function(e) {
+        var d = new Date(e.at);
+        var ts = isNaN(d.getTime()) ? String(e.at) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        var sc = LOG_STATUS_COLORS[e.status] || '#555';
+        var sl = LOG_STATUS_LABELS[e.status] || e.status;
+        var hasDetail = (e.response && (e.response.body || e.response.status_code)) || e.error || e.message;
+        var rowId = 'logDetail-' + e.id;
+        var isExpanded = notifLogExpanded.has(e.id);
+
+        var detailLines = [];
+        if (e.message) detailLines.push('Message: ' + e.message);
+        if (e.error) detailLines.push('Error: ' + e.error);
+        if (e.response && e.response.status_code) detailLines.push('HTTP ' + e.response.status_code);
+        if (e.response && e.response.body) detailLines.push(e.response.body);
+        var detailText = detailLines.join('\n');
+
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #f0f0f0';
+        tr.innerHTML =
+            '<td style="padding:3px 6px;white-space:nowrap;color:#555;font-size:0.76rem">' + escHtml(ts) + '</td>' +
+            '<td style="padding:3px 6px;font-size:0.76rem">' + escHtml(e.channel_name || '') +
+                (e.channel_type ? ' <span style="color:#aaa">(' + escHtml(e.channel_type) + ')</span>' : '') + '</td>' +
+            '<td style="padding:3px 6px;font-size:0.76rem;color:#888">' + escHtml(eventLabel(e.event_type) || '') + '</td>' +
+            '<td style="padding:3px 6px;font-size:0.76rem;font-family:monospace">' + escHtml(e.rule || '') + '</td>' +
+            '<td style="padding:3px 6px;font-weight:600;color:' + sc + ';font-size:0.76rem">' + escHtml(sl) + '</td>' +
+            '<td style="padding:3px 6px;white-space:nowrap">' +
+                (hasDetail
+                    ? '<button class="btn btn-xs btn-secondary logEntry-view" data-target="' + rowId + '" data-id="' + e.id + '" style="font-size:0.72rem;padding:1px 6px">' + (isExpanded ? 'Hide' : 'View') + '</button>' +
+                      ' <button class="btn btn-xs btn-secondary logEntry-copy" data-copy="' + escHtml(detailText) + '" title="Copy" style="font-size:0.72rem;padding:1px 5px">📋</button>'
+                    : '<span style="color:#bbb">—</span>') +
+            '</td>';
+        tbody.appendChild(tr);
+
+        if (hasDetail) {
+            var detailTr = document.createElement('tr');
+            detailTr.id = rowId;
+            detailTr.style.display = isExpanded ? 'table-row' : 'none';
+            detailTr.innerHTML =
+                '<td colspan="6" style="padding:4px 6px 8px">' +
+                    '<pre style="margin:0;font-size:0.72rem;background:#f8f8f8;border:1px solid #e0e0e0;border-radius:3px;padding:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
+                    escHtml(detailText) +
+                    '</pre>' +
+                '</td>';
+            tbody.appendChild(detailTr);
+        }
+    });
+
+    table.appendChild(tbody);
+    container.innerHTML = '';
+    container.appendChild(table);
+
+    container.querySelectorAll('button.logEntry-view').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var target = document.getElementById(btn.getAttribute('data-target'));
+            var id = btn.getAttribute('data-id');
+            if (!target) return;
+            var visible = target.style.display !== 'none';
+            target.style.display = visible ? 'none' : 'table-row';
+            btn.textContent = visible ? 'View' : 'Hide';
+            if (visible) { notifLogExpanded.delete(id); } else { notifLogExpanded.add(id); }
+        });
+    });
+
+    container.querySelectorAll('button.logEntry-copy').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            navigator.clipboard.writeText(btn.getAttribute('data-copy')).then(function() {
+                btn.textContent = '✅';
+                setTimeout(function() { btn.textContent = '📋'; }, 1500);
+            }).catch(function() {
+                btn.textContent = '❌';
+                setTimeout(function() { btn.textContent = '📋'; }, 1500);
+            });
+        });
+    });
+}
+
+function initLogTab() {
+    // Populate the event-type filter with the same labels used elsewhere, plus
+    // a trailing "Test send" option for manual test-message entries.
+    var evtSel = el('logFilterEvent');
+    EVENT_TYPES.forEach(function(et) {
+        var opt = document.createElement('option');
+        opt.value = et;
+        opt.textContent = eventLabel(et);
+        evtSel.appendChild(opt);
+    });
+    var testOpt = document.createElement('option');
+    testOpt.value = 'test';
+    testOpt.textContent = 'Test send';
+    evtSel.appendChild(testOpt);
+
+    el('btnRefreshLog').addEventListener('click', function() { loadNotifLog(true); });
+    el('btnLoadMoreLog').addEventListener('click', function() {
+        notifLogLimit = Math.min(notifLogLimit + 100, 500);
+        loadNotifLog(false);
+    });
+    ['logFilterChannel', 'logFilterStatus', 'logFilterEvent', 'logFilterRule', 'logFilterRange'].forEach(function(id) {
+        el(id).addEventListener('change', function() { loadNotifLog(true); });
+    });
+    el('logFilterClear').addEventListener('click', function() {
+        el('logFilterChannel').value = '';
+        el('logFilterStatus').value = '';
+        el('logFilterEvent').value = '';
+        el('logFilterRule').value = '';
+        el('logFilterRange').value = '86400';
+        loadNotifLog(true);
+    });
+    el('logAutoRefresh').addEventListener('change', function() {
+        if (notifLogTimer) { clearInterval(notifLogTimer); notifLogTimer = null; }
+        if (el('logAutoRefresh').checked) {
+            notifLogTimer = setInterval(function() { loadNotifLog(false); }, 10000);
+        }
+    });
+}
+
 // =============================================================================
 // INIT
 // =============================================================================
@@ -4443,11 +4680,13 @@ async function init() {
     initOverview();
     initChannels();
     initRules();
+    initLogTab();
 
     // Auth check + initial data load
     try {
         await loadHealth();
         await loadConfig();
+        populateLogFilters();
     } catch (err) {
         if (err.message !== 'Redirecting to login') {
             showAlert(el('globalAlerts'), 'error', 'Initialisation error: ' + err.message, false);

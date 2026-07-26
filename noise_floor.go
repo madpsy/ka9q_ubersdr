@@ -1443,20 +1443,21 @@ func (nfm *NoiseFloorMonitor) GetAveragedFFT(band string, duration time.Duration
 	return nil
 }
 
-// wideBandCacheTTL bounds how often GetWideBandFFT actually recomputes the
-// underlying 10-second average, versus returning the last computed result.
-// The averaging pass (GetAveragedFFT) walks every sample currently in the
-// window doing a Pow+Log10 per bin per sample — at a 100ms background poll
-// rate that's on the order of 10ms of CPU per call, and every consumer
-// (SSE clients, MQTT, the admin API, KiwiSDR, MCP, the spectrogram
-// recorder) calls this independently. A 10-second average has nothing new
-// to say faster than about once a second anyway, so within that window all
-// callers share one computation instead of each paying for their own.
-const wideBandCacheTTL = 1 * time.Second
-
 // GetWideBandFFT returns the averaged FFT data for the wide-band spectrum (0-30 MHz) over 10 seconds
 // Uses averaging instead of max-hold to reject lightning spikes and other brief transients.
-// Memoized for wideBandCacheTTL — see that constant for why.
+//
+// Memoized for one background_poll_period_ms tick: the averaging pass
+// (GetAveragedFFT) walks every sample currently in the 10-second window
+// doing a Pow+Log10 per bin per sample — at a 100ms poll rate that's on the
+// order of 10ms of CPU per call — and every consumer (SSE clients, MQTT,
+// the admin API, KiwiSDR, MCP, the spectrogram recorder) calls this
+// independently. Tying the cache TTL to background_poll_period_ms rather
+// than a fixed interval means: the underlying value refreshes exactly as
+// often as real new samples actually arrive (matching every other band's
+// visible update rate, however fast or slow background_poll_period_ms is
+// configured), while real recomputation is still capped at roughly once
+// per tick *system-wide* — every caller within that window, no matter how
+// many or how often they ask, shares the one result.
 func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
 	if nfm == nil {
 		return nil
@@ -1465,7 +1466,8 @@ func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
 	nfm.wideBandCacheMu.Lock()
 	defer nfm.wideBandCacheMu.Unlock()
 
-	if nfm.wideBandCacheFFT != nil && time.Since(nfm.wideBandCacheTime) < wideBandCacheTTL {
+	cacheTTL := time.Duration(nfm.config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond
+	if nfm.wideBandCacheFFT != nil && time.Since(nfm.wideBandCacheTime) < cacheTTL {
 		return copyBandFFT(nfm.wideBandCacheFFT)
 	}
 

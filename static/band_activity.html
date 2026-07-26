@@ -3926,7 +3926,7 @@ function _applyTerminatorToggle(enabled) {
     if (!_leafletMap || typeof L === 'undefined' || typeof L.terminator !== 'function') return;
     if (enabled) {
         if (!_leafletTerminator) {
-            _leafletTerminator = L.terminator({ fillOpacity: 0.35, color: '#000', weight: 1 }).addTo(_leafletMap);
+            _leafletTerminator = L.terminator({ fillOpacity: 0.42, color: '#000', weight: 1 }).addTo(_leafletMap);
         } else if (!_leafletMap.hasLayer(_leafletTerminator)) {
             _leafletTerminator.addTo(_leafletMap);
         }

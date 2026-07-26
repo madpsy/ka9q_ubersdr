@@ -769,6 +769,11 @@ body {
 /* ── CW spots grid ── */
 @media (max-width: 767px) {
     #cond-cw-spots { display: none !important; }
+    /* The five right-hand cards — ranks, users/hardware, front end, weather and
+       space weather — need more width than a phone has. Hiding the container
+       rather than each card also covers anything added there later; the cards'
+       own inline display from JS is irrelevant once the parent is gone. */
+    #conditions-bar .cond-right { display: none; }
 }
 
 #conditions-bar .cond-cw-spots {
@@ -4915,6 +4920,17 @@ function _renderRankStats(data) {
     el.style.display = 'flex';
 }
 
+// _syncConditionsPadding re-measures the fixed conditions bar and keeps the
+// body's bottom padding equal to it, so the bar never covers page content.
+function _syncConditionsPadding() {
+    const bar = document.getElementById('conditions-bar');
+    if (!bar || bar.style.display === 'none') return;
+    requestAnimationFrame(() => {
+        document.body.style.paddingBottom = bar.offsetHeight + 'px';
+        scheduleLayout(); // bar height changes the space 'fit' can use
+    });
+}
+
 async function _refreshConditions() {
     try {
         const [bandResult, swResult, wxResult, rankResult] = await Promise.allSettled([
@@ -5161,6 +5177,10 @@ async function init() {
     // Single global resize handler — relayouts the grid, then resizes every
     // panel's canvases to match.
     window.addEventListener('resize', scheduleLayout);
+    // The conditions bar is fixed, so the body carries bottom padding equal to
+    // its height. Crossing the mobile breakpoint changes that height without any
+    // render happening, so keep the padding in step with it.
+    window.addEventListener('resize', _syncConditionsPadding);
 
     // Build initial panels and connect SSE
     rebuildPanels();

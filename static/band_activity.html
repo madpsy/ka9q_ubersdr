@@ -530,8 +530,21 @@ body {
     box-shadow: none;
     z-index: auto;
 }
-#floating-map.map-panel #floating-map-header { cursor: default; }
+#floating-map.map-panel #floating-map-header {
+    cursor: default;
+    /* Matches .band-header's own padding/font-size exactly, so the docked
+       card's chrome height lines up with the band cards it sits beside. */
+    padding: 5px 10px;
+    font-size: 0.82em;
+}
 #floating-map.map-panel #floating-map-resize { display: none; }
+#floating-map.map-panel #floating-map-suninfo {
+    /* .freq-axis (the band cards' equivalent trailing bar) is a fixed 18px;
+       this can't go quite that low (its text is longer-lived than freq tick
+       labels), but trimming the padding gets it close instead of leaving a
+       visibly taller footer under the map. */
+    padding: 3px 10px;
+}
 #floating-map.map-panel #floating-map-body {
     /* flex:1 (flex-basis:0%) is fine while floating — #floating-map has a
        definite height there, so growing into "remaining space" is well

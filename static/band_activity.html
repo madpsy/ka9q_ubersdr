@@ -2988,7 +2988,13 @@ class BandPanel {
         ctx.textBaseline = 'top';
         ctx.textAlign    = 'left';
 
-        for (const [freq, g] of groups) {
+        // Ascending frequency, so the flag chips are laid out left to right and a
+        // single right-edge per row is enough to pack them.
+        const freqs = Array.from(groups.keys()).sort((a, b) => a - b);
+        const chips = [];
+
+        for (const freq of freqs) {
+            const g = groups.get(freq);
             const frac = (freq - viewStartHz) / viewSpanHz;
             if (frac < -0.05 || frac > 1.05) continue;   // off-screen
             const cx = frac * cw;
@@ -3013,20 +3019,40 @@ class BandPanel {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Flags — spectrum canvas only, between the FT8 label (y 1–13) and
-            // the audio dial label (y 29–41).
             if (!showFlags || g.codes.length === 0) continue;
             const MAX_FLAGS = 4;
             let label = g.codes.slice(0, MAX_FLAGS).map(iso2ToFlag).join('');
             if (g.codes.length > MAX_FLAGS) label += '+' + (g.codes.length - MAX_FLAGS);
-            if (!label) continue;
+            if (label) chips.push({ cx: cx, label: label, w: ctx.measureText(label).width });
+        }
 
-            const tw = ctx.measureText(label).width;
-            const lx = Math.max(1, Math.min(cx + 3, cw - tw - 2));
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillRect(lx - 1, 15, tw + 4, 13);
-            ctx.fillStyle = 'rgba(255,255,255,0.92)';
-            ctx.fillText(label, lx + 1, 16);
+        // Flags — spectrum canvas only, starting below the FT8 label (y 1–13).
+        // Two listeners a few hundred Hz apart put their chips at nearly the same
+        // x, so each chip drops to the first row where it does not overlap one
+        // already placed. Stacking down is the only free direction: the line
+        // itself cannot move without lying about the frequency.
+        if (showFlags && chips.length > 0) {
+            const BASE_Y = 15, CHIP_H = 13, ROW_H = 15, GAP = 3;
+            const maxRows = Math.max(1, Math.floor((ch - BASE_Y) / ROW_H));
+            const rowEnds = [];   // right edge of the last chip placed in each row
+
+            for (const chip of chips) {
+                const lx = Math.max(1, Math.min(chip.cx + 3, cw - chip.w - 2));
+                const x1 = lx - 1;
+                const x2 = lx + chip.w + 3;
+
+                let row = 0;
+                while (row < maxRows - 1 && rowEnds[row] !== undefined && x1 < rowEnds[row] + GAP) {
+                    row++;
+                }
+                rowEnds[row] = x2;
+
+                const y = BASE_Y + row * ROW_H;
+                ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                ctx.fillRect(x1, y, chip.w + 4, CHIP_H);
+                ctx.fillStyle = 'rgba(255,255,255,0.92)';
+                ctx.fillText(chip.label, lx + 1, y + 1);
+            }
         }
 
         ctx.restore();

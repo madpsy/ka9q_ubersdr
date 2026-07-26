@@ -3836,6 +3836,17 @@ function _applyFloatingMapTile(key) {
     }).addTo(_leafletMap);
 }
 
+// Pan/zoom the user leaves the map at — separate from the panel's own
+// position/size (_MAP_GEOM_KEY) so each persists independently.
+const _MAP_VIEW_KEY = 'bandActivity_mapView';
+
+function _saveFloatingMapView() {
+    if (!_leafletMap) return;
+    const c = _leafletMap.getCenter();
+    const view = { lat: c.lat, lng: c.lng, zoom: _leafletMap.getZoom() };
+    try { localStorage.setItem(_MAP_VIEW_KEY, JSON.stringify(view)); } catch(_) {}
+}
+
 const _MAP_GEOM_KEY = 'bandActivity_mapGeom';
 
 function _saveFloatingMapGeometry() {
@@ -3900,9 +3911,18 @@ async function _showFloatingMap() {
 
     if (!_leafletMap) {
         // Whole world by default — the receiver is marked on it, but the view
-        // itself doesn't zoom in; the user can zoom/pan from there.
-        _leafletMap = L.map('floating-map-canvas', { attributionControl: false })
-            .setView([20, 0], 2);
+        // itself doesn't zoom in. If the user has already panned/zoomed the
+        // map before, that view wins instead.
+        let savedView = null;
+        try { savedView = JSON.parse(localStorage.getItem(_MAP_VIEW_KEY)); } catch(_) {}
+        _leafletMap = L.map('floating-map-canvas', { attributionControl: false });
+        if (savedView && typeof savedView.lat === 'number' &&
+            typeof savedView.lng === 'number' && typeof savedView.zoom === 'number') {
+            _leafletMap.setView([savedView.lat, savedView.lng], savedView.zoom);
+        } else {
+            _leafletMap.setView([20, 0], 2);
+        }
+        _leafletMap.on('moveend', _saveFloatingMapView);
 
         // _floatingMapTileKey was already restored from localStorage (and the
         // <select> synced to it) by _setupFloatingMapChrome() at init time.

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"sort"
 	"strings"
 	"time"
 )
@@ -141,22 +140,12 @@ func checkPSKRanks(
 	upper := strings.ToUpper(callsign)
 
 	for _, d := range dims {
-		allEntries, ok := d.src["All"]
-		if !ok {
+		if _, ok := d.src["All"]; !ok {
 			continue
 		}
-
-		newRank := 0
-		newValue := 0
-		for i, e := range allEntries {
-			if strings.ToUpper(e.Callsign) == upper {
-				newRank = i + 1
-				newValue = e.Day // 24 h count
-				break
-			}
-		}
-
-		fireRankChange(nm, d.key, "psk", d.dimName, upper, newRank, newValue, 0, last, now, hasRule)
+		// Shared with /api/stats/rank-summary so the two can never disagree.
+		pos := pskRankIn(d.src, callsign)
+		fireRankChange(nm, d.key, "psk", d.dimName, upper, pos.Rank, pos.Value, pos.Total, last, now, hasRule)
 	}
 }
 
@@ -190,23 +179,14 @@ func checkWSPRRanks(
 	upper := strings.ToUpper(callsign)
 
 	for _, w := range windows {
-		newRank := 0
-		newValue := 0
-		for i, row := range w.win.Data {
-			if strings.ToUpper(row.RxSign) == upper {
-				newRank = i + 1
-				newValue = int(row.Unique)
-				break
-			}
-		}
-
-		fireRankChange(nm, w.key, "wspr", w.dimName, upper, newRank, newValue, 0, last, now, hasRule)
+		pos := wsprRankIn(w.win, callsign)
+		fireRankChange(nm, w.key, "wspr", w.dimName, upper, pos.Rank, pos.Value, pos.Total, last, now, hasRule)
 	}
 }
 
 // ─── RBN ──────────────────────────────────────────────────────────────────────
 
-// checkRBNRank computes the station's rank among all RBN skimmers by spot count.
+// checkRBNRank reads the station's rank among all RBN skimmers by spot count.
 // hasRule controls whether a rank change triggers nm.Publish; state is always updated.
 func checkRBNRank(
 	nm *NotificationManager,
@@ -216,41 +196,14 @@ func checkRBNRank(
 	now time.Time,
 	hasRule bool,
 ) {
-	rbn.mu.RLock()
-	defer rbn.mu.RUnlock()
-
-	if rbn.statsUpdatedAt == nil {
+	if rbn.StatsUpdatedAt() == nil {
 		return // no data fetched yet
 	}
 
-	type entry struct {
-		cs    string
-		count int
-	}
-	all := make([]entry, 0, len(rbn.statsData))
-	for cs, e := range rbn.statsData {
-		all = append(all, entry{cs, e.SpotCount})
-	}
-	// Sort descending by spot count; stable by callsign for ties.
-	sort.SliceStable(all, func(i, j int) bool {
-		if all[i].count != all[j].count {
-			return all[i].count > all[j].count
-		}
-		return all[i].cs < all[j].cs
-	})
-
-	upper := strings.ToUpper(callsign)
-	newRank := 0
-	newValue := 0
-	for i, e := range all {
-		if strings.ToUpper(e.cs) == upper {
-			newRank = i + 1
-			newValue = e.count
-			break
-		}
-	}
-
-	fireRankChange(nm, "rbn:spots", "rbn", "spots", upper, newRank, newValue, len(all), last, now, hasRule)
+	// The ranking is precomputed when statistics.csv is fetched, so this is a
+	// map lookup rather than a sort of every skimmer.
+	rank, spots, total := rbn.RankFor(callsign)
+	fireRankChange(nm, "rbn:spots", "rbn", "spots", strings.ToUpper(callsign), rank, spots, total, last, now, hasRule)
 }
 
 // ─── Common helper ────────────────────────────────────────────────────────────

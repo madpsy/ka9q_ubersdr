@@ -903,6 +903,36 @@ body {
 }
 
 /* ── Hardware status section (rotator / ant-switch) ── */
+#conditions-bar .cond-stats {
+    /* Same content-sized card as its neighbours: only as wide as it needs to
+       be, allowed to shrink but never grow. */
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 10px 10px;
+    border-left: 1px solid #1e1e2e;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: flex-start;
+}
+
+/* One rank reads as "#12 spots": the number carries the weight, the unit is
+   there to say what it counts without spelling it out. */
+.cond-stat-rank {
+    color: #ccc;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.cond-stat-unit {
+    color: #666;
+    font-size: 0.9em;
+    margin-left: 2px;
+}
+.cond-stat-sep {
+    color: #333;
+    margin: 0 4px;
+}
+
 #conditions-bar .cond-hardware {
     /* Content-sized: basis auto rather than 0, so each card is only as wide as
        it needs to be.  Still allowed to shrink (never grow) so a narrow viewport
@@ -1141,6 +1171,9 @@ body {
             </div>
         </div>
         <div class="cond-right">
+            <div class="cond-stats" id="cond-stats" style="display:none">
+                <!-- leaderboard ranks injected by JS -->
+            </div>
             <div class="cond-hardware" id="cond-hardware" style="display:none">
                 <!-- rotator / ant-switch status injected by JS -->
             </div>
@@ -4700,17 +4733,121 @@ function _renderConditions(bandStates, sw, wx) {
     });
 }
 
+// ── Leaderboard ranks (PSK / WSPR / RBN) ─────────────────────────────────────
+// Served from /api/stats/rank-summary, which reads the server's in-memory
+// caches — cheap enough to poll alongside the other conditions data. The card
+// stays hidden unless at least one rank is actually available: a receiver that
+// reports to none of these leaderboards should not carry an empty box.
+
+let _rankStats = null;
+
+async function _fetchRankSummary() {
+    const resp = await fetch('/api/stats/rank-summary');
+    if (!resp.ok) return null;
+    return await resp.json();
+}
+
+// _rankRow builds one "LABEL  #12 spots · #45 DXCC" line, or null when the
+// component has no rank to show (not fetched yet, or we are not on its board).
+function _rankRow(label, title, parts) {
+    const shown = parts.filter(p => p && p.rank > 0);
+    if (shown.length === 0) return null;
+
+    const row = document.createElement('div');
+    row.className = 'cond-hw-row';
+    row.title = title;
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'cond-hw-label';
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const val = document.createElement('span');
+    val.className = 'cond-hw-value';
+    shown.forEach(function(part, i) {
+        if (i > 0) {
+            const sep = document.createElement('span');
+            sep.className = 'cond-stat-sep';
+            sep.textContent = '·';
+            val.appendChild(sep);
+        }
+        const rank = document.createElement('span');
+        rank.className = 'cond-stat-rank';
+        rank.textContent = '#' + part.rank;
+        val.appendChild(rank);
+
+        if (part.unit) {
+            const unit = document.createElement('span');
+            unit.className = 'cond-stat-unit';
+            unit.textContent = part.unit;
+            val.appendChild(unit);
+        }
+    });
+    row.appendChild(val);
+    return row;
+}
+
+// _rankOf pulls one position out of the summary, tolerating a missing section.
+function _rankOf(section, key, unit) {
+    const pos = section && section.available ? section[key] : null;
+    if (!pos) return null;
+    return { rank: pos.rank || 0, value: pos.value || 0, total: pos.total || 0, unit: unit };
+}
+
+function _renderRankStats(data) {
+    const el = document.getElementById('cond-stats');
+    if (!el) return;
+
+    el.innerHTML = '';
+    if (!data) { el.style.display = 'none'; return; }
+
+    const psk  = data.psk  || null;
+    const wspr = data.wspr || null;
+    const rbn  = data.rbn  || null;
+
+    const pskSpots  = _rankOf(psk,  'reports',     'spots');
+    const pskDXCC   = _rankOf(psk,  'countries',   'DXCC');
+    const wspr24    = _rankOf(wspr, 'rolling_24h', '24h');
+    const wsprYest  = _rankOf(wspr, 'yesterday',   'yest');
+    const wsprToday = _rankOf(wspr, 'today',       'today');
+    const rbnSpots  = _rankOf(rbn,  'spots',       '');
+
+    // Totals go in the tooltip so the row itself stays to just the ranks.
+    const scale = p => (p && p.total ? ' of ' + p.total : '');
+
+    const rows = [
+        _rankRow('PSK', 'PSK Reporter, last 24 h — rank by spots reported' +
+            (pskSpots ? ' (#' + pskSpots.rank + scale(pskSpots) + ', ' + pskSpots.value + ' spots)' : '') +
+            (pskDXCC ? ', and by countries heard (#' + pskDXCC.rank + scale(pskDXCC) + ', ' + pskDXCC.value + ' countries)' : ''),
+            [pskSpots, pskDXCC]),
+        _rankRow('WSPR', 'WSPR Live — rank by unique spots over the rolling 24 h, yesterday, and today' +
+            (wspr24 ? '. Rolling 24 h: #' + wspr24.rank + scale(wspr24) + ' with ' + wspr24.value + ' unique spots' : ''),
+            [wspr24, wsprYest, wsprToday]),
+        _rankRow('RBN', 'Reverse Beacon Network — rank among all skimmers by cumulative spot count' +
+            (rbnSpots ? ' (#' + rbnSpots.rank + scale(rbnSpots) + ', ' + rbnSpots.value.toLocaleString() + ' spots)' : ''),
+            [rbnSpots]),
+    ].filter(Boolean);
+
+    if (rows.length === 0) { el.style.display = 'none'; return; }
+    for (const row of rows) el.appendChild(row);
+    el.style.display = 'flex';
+}
+
 async function _refreshConditions() {
     try {
-        const [bandResult, swResult, wxResult] = await Promise.allSettled([
+        const [bandResult, swResult, wxResult, rankResult] = await Promise.allSettled([
             _fetchBandConditions(),
             _fetchSpaceWeather(),
-            _fetchWeather()
+            _fetchWeather(),
+            _fetchRankSummary()
         ]);
         const bs     = bandResult.status === 'fulfilled' ? bandResult.value : null;
         const swData = swResult.status   === 'fulfilled' ? swResult.value   : null;
         const wxData = wxResult.status   === 'fulfilled' ? wxResult.value   : null;
         _renderConditions(bs, swData, wxData);
+        // Keep the last good summary if this fetch failed, rather than blanking.
+        if (rankResult.status === 'fulfilled' && rankResult.value) _rankStats = rankResult.value;
+        _renderRankStats(_rankStats);
     } catch (err) {
         console.warn('[conditions] refresh error:', err);
     }

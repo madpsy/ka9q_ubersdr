@@ -2814,6 +2814,18 @@ func main() {
 		handleRBNHistory(w, r, statsLogger, ipBanManager, fftRateLimiter)
 	}))
 
+	// Current standing in every leaderboard we track, served from the in-memory
+	// fetcher caches — no database, no outbound request.
+	rankSummaryCWCallsign := ""
+	if cwskimmerConfig != nil {
+		rankSummaryCWCallsign = cwskimmerConfig.Callsign
+	}
+	http.HandleFunc("/api/stats/rank-summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleRankSummary(w, r, pskRankFetcher, wsprRankFetcher, rbnStore,
+			config.Decoder.ReceiverCallsign, rankSummaryCWCallsign,
+			ipBanManager, fftRateLimiter)
+	}))
+
 	// CW Skimmer spots endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/cwskimmer/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWSpotsAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)

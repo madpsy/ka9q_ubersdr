@@ -66,6 +66,13 @@ type RBNDataStore struct {
 	statsData      map[string]RBNStatisticsEntry
 	statsUpdatedAt *time.Time
 	statsComment   string // header comment line from CSV
+
+	// statsRank is the skimmer ranking by spot count, derived from statsData
+	// whenever it is replaced: uppercase callsign → 1-based rank. RBN publishes
+	// no rank of its own, and sorting several thousand skimmers per request
+	// would be wasteful, so it is computed once per fetch.
+	statsRank  map[string]int
+	statsTotal int
 }
 
 // NewRBNDataStore creates an empty store
@@ -73,7 +80,65 @@ func NewRBNDataStore() *RBNDataStore {
 	return &RBNDataStore{
 		skewData:  make(map[string]RBNSkewEntry),
 		statsData: make(map[string]RBNStatisticsEntry),
+		statsRank: make(map[string]int),
 	}
+}
+
+// setStats replaces the statistics dataset and rebuilds the derived ranking in
+// one locked step, so the ranking can never be stale with respect to the data.
+// Every assignment to statsData must go through here.
+func (s *RBNDataStore) setStats(entries map[string]RBNStatisticsEntry, comment string, at *time.Time) {
+	type entry struct {
+		cs    string
+		count int
+	}
+	all := make([]entry, 0, len(entries))
+	for cs, e := range entries {
+		all = append(all, entry{cs, e.SpotCount})
+	}
+	// Descending by spot count, callsign breaking ties so the order is stable
+	// across fetches.
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].count != all[j].count {
+			return all[i].count > all[j].count
+		}
+		return all[i].cs < all[j].cs
+	})
+	ranks := make(map[string]int, len(all))
+	for i, e := range all {
+		ranks[strings.ToUpper(e.cs)] = i + 1
+	}
+
+	s.mu.Lock()
+	s.statsData = entries
+	s.statsComment = comment
+	s.statsUpdatedAt = at
+	s.statsRank = ranks
+	s.statsTotal = len(all)
+	s.mu.Unlock()
+}
+
+// RankFor returns the station's 1-based rank among all RBN skimmers by spot
+// count, its spot count, and the total number of skimmers. rank is 0 when the
+// callsign is not in the dataset or nothing has been fetched yet.
+func (s *RBNDataStore) RankFor(callsign string) (rank, spots, total int) {
+	upper := strings.ToUpper(strings.TrimSpace(callsign))
+	if upper == "" {
+		return 0, 0, 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.statsUpdatedAt == nil {
+		return 0, 0, 0
+	}
+	return s.statsRank[upper], s.statsData[upper].SpotCount, s.statsTotal
+}
+
+// StatsUpdatedAt returns when the statistics dataset was last replaced, or nil.
+func (s *RBNDataStore) StatsUpdatedAt() *time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.statsUpdatedAt
 }
 
 // RBNDataFetcher manages periodic fetching of RBN data
@@ -145,11 +210,7 @@ func (f *RBNDataFetcher) seedFromDisk() {
 
 	statsData, statsComment, statsAt := f.statsLogger.LoadLatestRBNStats()
 	if statsData != nil {
-		f.store.mu.Lock()
-		f.store.statsData = statsData
-		f.store.statsComment = statsComment
-		f.store.statsUpdatedAt = statsAt
-		f.store.mu.Unlock()
+		f.store.setStats(statsData, statsComment, statsAt)
 	}
 }
 
@@ -376,11 +437,7 @@ func (f *RBNDataFetcher) fetchStatistics() {
 	}
 
 	now := time.Now().UTC()
-	f.store.mu.Lock()
-	f.store.statsData = entries
-	f.store.statsUpdatedAt = &now
-	f.store.statsComment = comment
-	f.store.mu.Unlock()
+	f.store.setStats(entries, comment, &now)
 	log.Printf("[RBN] Statistics data updated: %d entries (source comment: %q)", len(entries), comment)
 	if f.statsLogger != nil {
 		f.statsLogger.WriteRBNStats(entries, comment, now)

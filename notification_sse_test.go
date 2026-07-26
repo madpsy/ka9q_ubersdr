@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// resetSSEAuthThrottle clears the package-level failed-auth record. The
+// throttle is process-wide by design, so tests that exercise authentication
+// must not inherit another test's exhausted budget for the same client IP.
+func resetSSEAuthThrottle() {
+	sseAuthFailures.mu.Lock()
+	sseAuthFailures.entries = make(map[string][]time.Time)
+	sseAuthFailures.mu.Unlock()
+}
+
 // newTestSSEStream returns an isolated stream so tests never touch the
 // package-level singleton (which the HTTP handler takes as a parameter).
 func newTestSSEStream() *notificationSSEStream {
@@ -216,6 +225,7 @@ func TestSSEStreamMaxClients(t *testing.T) {
 }
 
 func TestHandleNotificationStreamAuth(t *testing.T) {
+	resetSSEAuthThrottle()
 	stream := newTestSSEStream()
 	handler := HandleNotificationStream(stream, NewSSEIPLimiter(4), &ServerConfig{})
 
@@ -242,6 +252,7 @@ func TestHandleNotificationStreamAuth(t *testing.T) {
 // are indistinguishable by status alone. A client that cannot tell them apart
 // treats a busy server as a bad password — so the reason header has to be exact.
 func TestHandleNotificationStreamRejectionReasons(t *testing.T) {
+	resetSSEAuthThrottle()
 	const password = "abcdefghij12"
 	stream := newTestSSEStream()
 	handler := HandleNotificationStream(stream, NewSSEIPLimiter(4), &ServerConfig{})
@@ -481,6 +492,7 @@ func TestSSEAdminConfigRoundTrip(t *testing.T) {
 // load. Counting those as failed guesses would spend the IP's whole
 // brute-force budget and lock out real subscribers behind the same NAT.
 func TestHandleNotificationStreamEmptyPasswordIsNotAGuess(t *testing.T) {
+	resetSSEAuthThrottle()
 	stream := newTestSSEStream()
 	stream.activate(NotificationChannelConfig{Type: "sse", SSEPassword: "abcdefghij12"})
 	handler := HandleNotificationStream(stream, NewSSEIPLimiter(64), &ServerConfig{})

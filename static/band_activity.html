@@ -1059,7 +1059,7 @@ body {
     justify-content: flex-start;
 }
 /* Dark-theme equivalents of the admin monitor's IF power thresholds:
-   ≥ -10 dBFS too hot, -30..-10 good, below -30 weak. */
+   ≥ -10 dBFS too hot, -45..-10 good, below -45 weak. */
 .cond-fe-good { color: #81c784; }
 .cond-fe-weak { color: #ffb74d; }
 .cond-fe-hot  { color: #e57373; }
@@ -2856,21 +2856,26 @@ class BandPanel {
             : (this.meta.ft8_frequency > 0 ? [{ name: null, frequency: this.meta.ft8_frequency }] : []);
 
         if (ft8List.length > 0) {
-            const bw        = this.meta.bin_bandwidth;
-            const bandStart = this.meta.start;
+            // Map Hz → canvas X the same way the user/audio cursor overlays do
+            // (straight from meta.start/end and the zoom fraction) rather than
+            // through bin indices — binStart/zn below are derived assuming
+            // (n-1)-spaced bins, while bin_bandwidth is (end-start)/n, and
+            // mixing the two conventions drifts further off the true dial
+            // frequency the more bins there are (negligible on a ~1000-bin
+            // per-band chart, ~2 kHz off on the 4096-bin wideband chart).
+            const viewStartHz = this.meta.start + this.zoomStart * (this.meta.end - this.meta.start);
+            const viewEndHz   = this.meta.start + this.zoomEnd   * (this.meta.end - this.meta.start);
+            const viewSpanHz  = viewEndHz - viewStartHz;
+            if (viewSpanHz <= 0) return;
 
             sCtx.save();
             for (const marker of ft8List) {
                 const ft8Hz = marker.frequency;
                 if (!ft8Hz || ft8Hz <= 0) continue;
 
-                // Bin positions for dial and dial+3 kHz
-                const dialBin = (ft8Hz - bandStart) / bw;
-                const endBin  = (ft8Hz + 3000 - bandStart) / bw;
-
                 // Canvas X positions (clamped to visible area)
-                const x1 = Math.max(0, ((dialBin - binStart) / (zn - 1)) * w);
-                const x2 = Math.min(w, ((endBin  - binStart) / (zn - 1)) * w);
+                const x1 = Math.max(0, ((ft8Hz        - viewStartHz) / viewSpanHz) * w);
+                const x2 = Math.min(w, ((ft8Hz + 3000 - viewStartHz) / viewSpanHz) * w);
                 if (x2 <= x1) continue;
 
                 // Shaded region
@@ -4278,7 +4283,7 @@ window.frontendStatus = frontendStatus;
 function _feIfPowerClass(v) {
     if (v === null) return '';
     if (v >= -10) return 'cond-fe-hot';    // close to clipping
-    if (v >= -30) return 'cond-fe-good';
+    if (v >= -45) return 'cond-fe-good';
     return 'cond-fe-weak';                 // plenty of headroom, but weak
 }
 
@@ -4301,7 +4306,7 @@ function _renderFrontendStatus() {
             <span class="cond-hw-label">RF Health</span>
             <span class="cond-hw-badge ${healthCls}">${healthTxt}</span>
          </div>
-         <div class="cond-hw-row" title="IF power after gain — green -30 to -10 dBFS, red above -10 (near clipping), amber below -30 (weak)">
+         <div class="cond-hw-row" title="IF power after gain — green -45 to -10 dBFS, red above -10 (near clipping), amber below -45 (weak)">
             <span class="cond-hw-label">IF</span>
             <span class="cond-hw-value ${_feIfPowerClass(s.if_power)}">${fmt(s.if_power, ' dBFS')}</span>
          </div>

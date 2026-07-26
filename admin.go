@@ -2838,7 +2838,7 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 // yellow, and the range between them is green.
 const (
 	ifPowerHotDBFS  = -10.0 // at or above this the A/D is close to clipping
-	ifPowerWeakDBFS = -30.0 // below this the input is unusually quiet
+	ifPowerWeakDBFS = -45.0 // below this the input is unusually quiet
 )
 
 // evaluateIFPowerHealth judges a wideband IF power reading against the

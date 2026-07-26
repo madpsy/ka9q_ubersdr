@@ -926,21 +926,19 @@ body {
     gap: 5px;
     align-items: baseline;   /* label sits on the first line of a wrapped value */
 }
-/* Values wrap onto a second line here, so the hardware card's single-line
-   ellipsis treatment does not apply. */
+/* Values run onto a second line here, so the hardware card's single-line
+   ellipsis treatment does not apply.
+   Block with a real <br>, not a wrapping flex row: a wrapping flex container's
+   intrinsic width is measured as if nothing wrapped, so the card reserved room
+   for all three WSPR entries side by side and then wrapped anyway — leaving a
+   dead margin to the right of every row. A forced break splits the max-content
+   measurement properly, so the card ends up as wide as its widest line. */
 #cond-stats .cond-hw-value {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
+    display: block;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
-    row-gap: 2px;
-}
-/* A zero-height full-width flex item: forces what follows onto the next line. */
-.cond-stat-break {
-    flex-basis: 100%;
-    height: 0;
+    line-height: 1.5;
 }
 
 /* One rank reads as "#12 spots": the number carries the weight, the unit is
@@ -4842,9 +4840,7 @@ function _rankRow(label, title, parts) {
         // otherwise leave an empty first line when earlier entries are absent.
         if (i > 0) {
             if (part.newline) {
-                const br = document.createElement('span');
-                br.className = 'cond-stat-break';
-                val.appendChild(br);
+                val.appendChild(document.createElement('br'));
             } else {
                 const sep = document.createElement('span');
                 sep.className = 'cond-stat-sep';

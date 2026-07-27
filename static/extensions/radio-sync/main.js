@@ -146,6 +146,16 @@ class RadioSyncExtension extends DecoderExtension {
             }
         })();
 
+        // Never cache a rejection: the 14MB wasm fetch can fail transiently, and
+        // holding on to the rejected promise would make every later Connect bail
+        // out on it, leaving the extension dead until a page reload. Dropping it
+        // lets the next call retry from scratch. (This handler also keeps a
+        // failure from surfacing as an unhandled rejection for callers that
+        // fire-and-forget, e.g. onEnable().)
+        this.hamlibLoadPromise.catch(() => {
+            this.hamlibLoadPromise = null;
+        });
+
         return this.hamlibLoadPromise;
     }
 
@@ -871,6 +881,19 @@ class RadioSyncExtension extends DecoderExtension {
         this.currentMode = sdrMode;
         this.updateModeDisplay(sdrMode);
 
+        // The rig can legitimately sit in modes the SDR has no equivalent for -
+        // PKTUSB/PKTLSB/RTTY/..., i.e. any data-mode operating such as FT8.
+        // radio.setMode() rejects those outright, so pushing one at the SDR just
+        // fails silently; worse, recording it in lastSentMode makes the next
+        // pollSDRState() tick see a mismatch and "correct" the radio back to the
+        // SDR's mode, dragging the rig out of data mode. Show it on the display
+        // but leave both ends alone, and keep lastSentMode tracking what the SDR
+        // is actually on so nothing gets pushed back.
+        if (!(sdrMode in SDR_TO_HAMLIB_MODE)) {
+            this.lastSentMode = this.radio.getMode();
+            return;
+        }
+
         if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
             const currentSDRMode = this.radio.getMode();
             if (sdrMode !== currentSDRMode) {
@@ -965,8 +988,10 @@ class RadioSyncExtension extends DecoderExtension {
         // Set up event listeners now that template is definitely in DOM
         this.setupEventListeners();
 
-        // Load the Hamlib wasm module and populate the radio dropdown from it
-        this.ensureHamlibLoaded();
+        // Load the Hamlib wasm module and populate the radio dropdown from it.
+        // Fire-and-forget: showHamlibLoadError() already reports failure in the
+        // UI, and connectToRadio() retries the load if the user tries anyway.
+        this.ensureHamlibLoaded().catch(() => {});
 
         // Subscribe to radio events for SDR changes
         this.subscribeToRadioEvents();

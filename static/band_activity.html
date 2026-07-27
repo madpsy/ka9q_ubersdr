@@ -296,6 +296,8 @@ body {
     gap: 10px;
     font-size: 0.72em;
     color: #aaa;
+    cursor: move;
+    user-select: none;
 }
 #digi-spots-title {
     flex: 1;
@@ -5240,14 +5242,78 @@ function _renderDigiSpots() {
 // Parks the panel under the clocks, same measured approach as
 // _notifPosition(). It shares the corner with the alert toasts and sits at a
 // lower z-index — fine for it to be covered when a toast is up.
+const _DIGI_POS_KEY = 'bandActivity_digiSpotsPos';
+let _digiSpotsCustomPos = null; // {left, top}, set once the user has dragged the panel
+
+// Positions the panel: at whatever spot the user last dragged it to, or
+// (default) parked under the clocks like #notif-panel. Coordinates are
+// relative to #topbar (position:relative), the panel's own positioned
+// ancestor — same frame _setupDigiSpotsDrag() computes drag deltas in.
 function _digiSpotsPosition() {
     const panel = document.getElementById('digi-spots-panel');
     const bar   = document.getElementById('topbar');
+    if (!panel || !bar) return;
+
+    if (_digiSpotsCustomPos) {
+        panel.style.left  = _digiSpotsCustomPos.left + 'px';
+        panel.style.top   = _digiSpotsCustomPos.top + 'px';
+        panel.style.right = 'auto';
+        return;
+    }
+
     const clock = document.getElementById('utc-clock');
-    if (!panel || !bar || !clock) return;
+    if (!clock) return;
     const barTop = bar.getBoundingClientRect().top;
     const clockBottom = clock.getBoundingClientRect().bottom;
     panel.style.top = Math.round(clockBottom - barTop + 6) + 'px';
+}
+
+// Drag-to-move, with the resulting position persisted so it survives a
+// reload — same idea as the floating map's header drag, just simpler (no
+// resize, and positioned relative to #topbar instead of the viewport).
+function _setupDigiSpotsDrag() {
+    const panel  = document.getElementById('digi-spots-panel');
+    const header = document.getElementById('digi-spots-header');
+    const bar    = document.getElementById('topbar');
+    if (!panel || !header || !bar) return;
+
+    let sPos = null;
+    try { sPos = JSON.parse(localStorage.getItem(_DIGI_POS_KEY)); } catch(_) {}
+    if (sPos && typeof sPos.left === 'number' && typeof sPos.top === 'number') {
+        _digiSpotsCustomPos = sPos;
+    }
+
+    let dragging = false, dragOffX = 0, dragOffY = 0;
+    header.addEventListener('mousedown', e => {
+        if (e.target.closest('label')) return; // let the FT8/WSPR checkboxes work normally
+        dragging = true;
+        const rect = panel.getBoundingClientRect();
+        dragOffX = e.clientX - rect.left;
+        dragOffY = e.clientY - rect.top;
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const barRect = bar.getBoundingClientRect();
+        const maxLeft = Math.max(0, barRect.width - 60);
+        const maxTop  = Math.max(0, window.innerHeight - barRect.top - 30);
+        const left = Math.min(Math.max(0, e.clientX - dragOffX - barRect.left), maxLeft);
+        const top  = Math.min(Math.max(0, e.clientY - dragOffY - barRect.top), maxTop);
+        panel.style.left  = Math.round(left) + 'px';
+        panel.style.top   = Math.round(top) + 'px';
+        panel.style.right = 'auto';
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        _digiSpotsCustomPos = {
+            left: parseFloat(panel.style.left) || 0,
+            top:  parseFloat(panel.style.top)  || 0
+        };
+        try { localStorage.setItem(_DIGI_POS_KEY, JSON.stringify(_digiSpotsCustomPos)); } catch(_) {}
+    });
 }
 
 function _startDigiSpots() {
@@ -7027,6 +7093,7 @@ async function init() {
         });
     }
     window.addEventListener('resize', _digiSpotsPosition);
+    _setupDigiSpotsDrag(); // restores a saved position, if any, before the first render below
     _renderDigiSpots(); // show the panel immediately if enabled, rather than waiting for the first decode
 
     // Layout (grid arrangement) selector

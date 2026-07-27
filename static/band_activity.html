@@ -1414,7 +1414,7 @@ body {
             <input type="checkbox" id="floating-map-muf"> MUF
         </label>
         <label id="floating-map-spots-label" title="CW/voice spots with a known location, as country flags. Respects the 'Filter' toggle.">
-            <input type="checkbox" id="floating-map-spots"> Spots
+            <input type="checkbox" id="floating-map-spots" checked> Spots
         </label>
         <select id="floating-map-tile-select" title="Map style">
             <option value="dark">Dark</option>
@@ -1662,7 +1662,7 @@ let _mapDocked           = false; // false = floating (draggable/resizable), tru
 let _mapResizeObserver   = null;
 let _showTerminator      = true;  // day/night overlay — on by default, same as before it was made toggleable
 let _showMUF             = false; // ionosphere (MUF) overlay — opt-in: costs a fetch to the public collector
-let _showSpots           = false; // CW/voice spot flags — opt-in, off by default
+let _showSpots           = true;  // CW/voice spot flags — on by default
 let _leafletSpotsLayer   = null;
 let _spotsPruneTimer     = null;  // periodically re-collects markers so aged-out CW spots drop off even with no new events
 
@@ -4273,7 +4273,7 @@ function _collectSpotMarkers() {
         if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
         if (s.latitude === 0 && s.longitude === 0) continue; // sentinel for "unknown"
         markers.push({
-            lat: s.latitude, lon: s.longitude, cc: s.country_code,
+            lat: s.latitude, lon: s.longitude, cc: s.country_code, country: s.country,
             callsign: s.callsign, band: s.band, freq: s.frequency, type: 'CW'
         });
     }
@@ -4285,8 +4285,8 @@ function _collectSpotMarkers() {
             if (typeof act.dx_latitude !== 'number' || typeof act.dx_longitude !== 'number') continue;
             if (act.dx_latitude === 0 && act.dx_longitude === 0) continue;
             markers.push({
-                lat: act.dx_latitude, lon: act.dx_longitude, cc: act.dx_country_code,
-                callsign: act.dx_callsign, band,
+                lat: act.dx_latitude, lon: act.dx_longitude, cc: act.dx_country_code, country: act.dx_country,
+                callsign: act.dx_callsign, band, mode: act.mode,
                 freq: act.estimated_dial_freq || act.center_freq, type: 'Voice'
             });
         }
@@ -4341,7 +4341,7 @@ function _addSpotMarker(m) {
     const flag = m.cc ? iso2ToFlag(m.cc) : '🏳️';
     const icon = L.divIcon({
         className: '',
-        html: `<span style="font-size:14px;line-height:1;` +
+        html: `<span style="font-size:14px;line-height:1;cursor:pointer;` +
               `filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));">${flag}</span>`,
         iconSize: [16, 16],
         iconAnchor: [8, 8]
@@ -4349,10 +4349,20 @@ function _addSpotMarker(m) {
     const marker = L.marker([m.lat, m.lon], { icon, keyboard: false });
     const freqMHz = typeof m.freq === 'number' ? (m.freq / 1e6).toFixed(3) + ' MHz' : '';
     marker.bindTooltip(
-        `<b>${_escHtml(m.callsign || '?')}</b><br>` +
+        `<b>${_escHtml(m.callsign || '?')}</b>${m.country ? ' · ' + _escHtml(m.country) : ''}<br>` +
         `${_escHtml((m.band || '').toUpperCase())}${freqMHz ? ' · ' + freqMHz : ''} · ${m.type}`,
         { direction: 'top' }
     );
+    // Same click-to-tune behaviour as the CW badges / voice ticker at the
+    // bottom of the page — CW always tunes by frequency-derived sideband;
+    // voice prefers the activity's own reported mode when it's one we know.
+    marker.on('click', () => {
+        if (typeof m.freq !== 'number') return;
+        const mode = m.type === 'CW'
+            ? _cwModeForFreq(m.freq)
+            : (_VALID_MODES.has((m.mode || '').toLowerCase()) ? m.mode.toLowerCase() : _voiceModeForFreq(m.freq));
+        _tuneFromSpot(m.band, m.freq, mode);
+    });
     marker.addTo(_leafletSpotsLayer);
 }
 
@@ -4672,14 +4682,14 @@ function _setupFloatingMapChrome() {
         });
     }
 
-    // CW/voice spot flags — off by default (purely cosmetic overlay of data
-    // already being fetched for the badges/ticker elsewhere on the page).
+    // CW/voice spot flags — on by default (just an alternate presentation of
+    // data already being fetched for the badges/ticker elsewhere on the page).
     const spotsCb = document.getElementById('floating-map-spots');
     const spotsLabel = document.getElementById('floating-map-spots-label');
     if (spotsCb) {
         let sSpots = null;
         try { sSpots = localStorage.getItem(_MAP_SPOTS_KEY); } catch(_) {}
-        _showSpots = (sSpots === '1');
+        _showSpots = (sSpots === null) ? true : (sSpots === '1');
         spotsCb.checked = _showSpots;
         if (spotsLabel) spotsLabel.addEventListener('mousedown', e => e.stopPropagation());
         spotsCb.addEventListener('change', e => {

@@ -1829,6 +1829,16 @@ const MIN_CANVAS_H  = 110;         // never squash below this
 const MAX_CANVAS_H  = 560;         // nor stretch beyond it
 const MIN_CARD_W    = 260;         // narrower than this is unreadable → drop a column
 
+// True when the floating map is currently occupying a slot in the grid —
+// i.e. docked, visible, and actually parented there (_applyMapDockState()
+// only does that while docked) — so the 'fit' layout must count it as one
+// more card, the same size as every band card (see the .map-panel CSS rule).
+function _mapOccupiesGridSlot() {
+    const grid  = document.getElementById('grid');
+    const panel = document.getElementById('floating-map');
+    return !!(panel && panel.style.display !== 'none' && panel.parentElement === grid);
+}
+
 // Height of everything in a card that is *not* the two canvases (header, freq
 // axis, borders).  Measured from a live panel so it tracks any CSS change.
 function _cardChromeHeight() {
@@ -1856,7 +1866,7 @@ const LAYOUT_EPSILON = 8; // px — ignore height changes smaller than this
 
 function applyLayout() {
     const grid = document.getElementById('grid');
-    const n    = Object.keys(panels).length;
+    const n    = Object.keys(panels).length + (_mapOccupiesGridSlot() ? 1 : 0);
 
     if (currentLayout === 'auto' || n === 0) {
         if (_lastLayout === null && !grid.classList.contains('grid-fixed')) return;
@@ -4727,6 +4737,7 @@ async function _showFloatingMap() {
     if (!panel) return;
     panel.style.display = 'flex';
     if (!_mapDocked) _restoreFloatingMapGeometry();
+    else scheduleLayout(); // docked map now counts as a card — 'fit' must re-solve
 
     await _loadLeafletAssets();
     if (!document.getElementById('show-map').checked) return; // toggled off while loading
@@ -4793,7 +4804,10 @@ async function _showFloatingMap() {
 
 function _hideFloatingMap() {
     const panel = document.getElementById('floating-map');
-    if (panel) panel.style.display = 'none';
+    if (!panel) return;
+    const wasGridSlot = _mapDocked && panel.style.display !== 'none';
+    panel.style.display = 'none';
+    if (wasGridSlot) scheduleLayout(); // one fewer card for 'fit' to solve around
 }
 
 function _ensureMapResizeObserver() {
@@ -4832,6 +4846,7 @@ function _applyMapDockState() {
         _restoreFloatingMapGeometry();
         if (dockBtn) { dockBtn.textContent = '▦'; dockBtn.title = 'Dock as a band card'; }
     }
+    scheduleLayout(); // docking/undocking changes whether the map counts as a 'fit' card
     if (_leafletMap) setTimeout(() => _leafletMap.invalidateSize(), 60);
 }
 

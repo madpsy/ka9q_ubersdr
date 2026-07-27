@@ -1750,7 +1750,14 @@ const AUTO_SIGNAL_PCT = 0.995;  // percentile taken as the signal ceiling —
                                 // stretch the top of the scale on their own
 const AUTO_NOISE_MARGIN = 6;    // dB of scale left below the noise floor
 const AUTO_HEADROOM     = 10;   // dB of scale left above the strongest signal
-const AUTO_EMA          = 0.02; // floor target — ≈12 s time constant at 4 Hz
+const AUTO_EMA          = 0.005; // floor target — ≈50 s time constant at 4 Hz.
+                                // Deliberately much slower than the ceiling
+                                // attack: periodic traffic (FT8's 15 s cycle,
+                                // QRM that keys on and off) must be attenuated
+                                // to well under the deadband by the time it
+                                // reaches the applied range, or the range
+                                // walks up and down in sympathy for ever —
+                                // the intermittent auto-range oscillation.
 // The ceiling target is smoothed asymmetrically.  On bands with cyclic
 // traffic (FT8 keys the whole band every 15 s, contest exchanges likewise)
 // the 99.5th-percentile target genuinely swings 15-25 dB; through a
@@ -1781,6 +1788,26 @@ const AUTO_RESEED_DB    = 24;   // …but a target *this* far away means the old
                                 // gone mad" oscillation), so snap once instead
                                 // — the same thing a page refresh achieved via
                                 // the first-frame seed path.
+// A step can leave the applied value parked up to a full deadband off-center
+// from where the smoothed target oscillates; from there a small periodic
+// wobble trips the deadband on one side, the step overshoots to the other,
+// and the range hops between two lattice points indefinitely.  Breaking the
+// cycle needs direction-aware hysteresis: a move that *reverses* a recent
+// move must clear a wider band than one that continues in the same direction.
+const AUTO_REVERSE_EXTRA     = 2;     // extra dB of deadband to reverse direction
+const AUTO_REVERSE_WINDOW_MS = 30000; // "recent" for the purposes of the above
+
+// ── Auto-range oscillation diagnostics ────────────────────────────────────────
+// Lightweight per-band flight recorder for hunting the intermittent "auto
+// range goes mad" oscillation: every arrival logs timing, frame type and the
+// full auto-range state into a ring buffer, and every applied-range move is
+// direction-tracked.  When the range reverses direction repeatedly within a
+// short window a console warning fires; run bandDiag('<band>') in the console
+// to dump the last ~2 minutes for that band and save the output.
+const DIAG_ROWS        = 480;    // ring size (~2 min at 4 Hz)
+const DIAG_REVERSALS   = 4;      // direction flips in the window that count as oscillation
+const DIAG_WINDOW_MS   = 90000;
+const DIAG_WARN_GAP_MS = 30000;  // don't re-warn more often than this
 
 // ── Global state ──────────────────────────────────────────────────────────────
 // Synthetic pseudo-band (0-30 MHz) backed by the same wideband channel the
@@ -2190,6 +2217,18 @@ class BandPanel {
         this._autoMinEma = null;   // heavily smoothed target
         this._autoMaxEma = null;
         this._autoLastChange = 0;  // when the applied values last moved
+        this._autoMinLastDir   = 0; // direction of each bound's last step (±1),
+        this._autoMaxLastDir   = 0; // for the reversal hysteresis
+        this._autoMinLastMoveT = 0;
+        this._autoMaxLastMoveT = 0;
+
+        // ── Flight recorder (see DIAG_ROWS) ──────────────────────────────────
+        this._diag           = null;  // ring buffers, allocated on first commit
+        this._diagMoves      = [];    // recent applied-range moves [{t, k, d}]
+        this._diagPrev       = null;  // last seen applied {min, max}
+        this._diagWarnedAt   = 0;
+        this._lastFlags      = 0;     // wire flags of latest frame (0x03 full / 0x04 delta)
+        this._lastDeltaCount = 0;     // changed bins in latest delta (0xFFFF = full)
 
         // ── Waterfall render cache ───────────────────────────────────────────
         // Offscreen bitmap holding one pixel row per data row at full bin
@@ -2684,6 +2723,8 @@ class BandPanel {
                 this.bins = new Uint8Array(binCount);
             }
             this.bins.set(data);
+            this._lastFlags = 0x03;
+            this._lastDeltaCount = 0xFFFF;
         } else if (flags === 0x04) {
             // Delta uint8 frame
             if (!this.bins) return; // need full frame first
@@ -2695,6 +2736,8 @@ class BandPanel {
                 const val = data[off+2];
                 if (idx < this.bins.length) this.bins[idx] = val;
             }
+            this._lastFlags = 0x04;
+            this._lastDeltaCount = count;
         } else {
             return;
         }
@@ -2794,23 +2837,115 @@ class BandPanel {
             Math.abs(this._autoMaxEma - this._autoMax) >= AUTO_RESEED_DB) {
             this._autoMin = Math.round(this._autoMinEma / AUTO_STEP) * AUTO_STEP;
             this._autoMax = Math.round(this._autoMaxEma / AUTO_STEP) * AUTO_STEP;
+            this._autoMinLastDir = 0;   // a snap is a fresh start, not a "move
+            this._autoMaxLastDir = 0;   // in a direction" for reversal purposes
             this._autoLastChange = now;
             return true;
         }
-        const stepToward = (applied, target) =>
-            applied + Math.sign(target - applied) * AUTO_STEP;
 
+        // One step toward the target, with direction-aware hysteresis (see
+        // AUTO_REVERSE_EXTRA): continuing a walk needs the plain deadband,
+        // reversing a recent one needs more, so the applied value cannot hop
+        // between two lattice points off the back of a small periodic wobble.
         let changed = false;
-        if (Math.abs(this._autoMinEma - this._autoMin) >= AUTO_DEADBAND) {
-            this._autoMin = stepToward(this._autoMin, this._autoMinEma);
+        const step = (applied, ema, lastDir, lastT) => {
+            const diff = ema - applied;
+            const dir  = Math.sign(diff);
+            let band = AUTO_DEADBAND;
+            if (dir !== 0 && dir === -lastDir && now - lastT < AUTO_REVERSE_WINDOW_MS) {
+                band += AUTO_REVERSE_EXTRA;
+            }
+            if (Math.abs(diff) < band) return null;
+            return { value: applied + dir * AUTO_STEP, dir };
+        };
+
+        const mMin = step(this._autoMin, this._autoMinEma,
+                          this._autoMinLastDir, this._autoMinLastMoveT);
+        if (mMin) {
+            this._autoMin         = mMin.value;
+            this._autoMinLastDir  = mMin.dir;
+            this._autoMinLastMoveT = now;
             changed = true;
         }
-        if (Math.abs(this._autoMaxEma - this._autoMax) >= AUTO_DEADBAND) {
-            this._autoMax = stepToward(this._autoMax, this._autoMaxEma);
+        const mMax = step(this._autoMax, this._autoMaxEma,
+                          this._autoMaxLastDir, this._autoMaxLastMoveT);
+        if (mMax) {
+            this._autoMax         = mMax.value;
+            this._autoMaxLastDir  = mMax.dir;
+            this._autoMaxLastMoveT = now;
             changed = true;
         }
         if (changed) this._autoLastChange = now;
         return changed;
+    }
+
+    // ── Flight recorder (see DIAG_ROWS) ──────────────────────────────────────
+    // Logs one row per arrival: timing, frame type, raw frame percentiles and
+    // the complete auto-range state.  Also watches the applied range for
+    // repeated direction reversals and warns on the console when it starts
+    // oscillating, so an intermittent episode can be captured with
+    // bandDiag('<band>') instead of reproduced.
+    _diagRecord(now, gap, sorted, n, valid) {
+        if (!this._diag) {
+            const N = DIAG_ROWS, f = () => new Float32Array(N);
+            this._diag = { i: 0, count: 0, t: new Float64Array(N),
+                           gap: f(), period: f(),
+                           flags: new Uint8Array(N), dcount: new Uint16Array(N),
+                           valid: new Uint32Array(N), ch: new Uint16Array(N),
+                           p5raw: f(), med: f(), peak: f(),
+                           lo: f(), hi: f(),
+                           aMin: f(), aMax: f(), emaMin: f(), emaMax: f() };
+        }
+        const d = this._diag, i = d.i;
+        d.t[i]      = now;
+        d.gap[i]    = gap === null ? -1 : gap;
+        d.period[i] = this._rowPeriod;
+        d.flags[i]  = this._lastFlags;
+        d.dcount[i] = this._lastDeltaCount;
+        d.valid[i]  = valid;
+        d.ch[i]     = this.specCanvas ? this.specCanvas.height : 0;
+        d.p5raw[i]  = sorted[Math.floor(n * 0.05)];   // unfiltered, floor bins included
+        d.med[i]    = sorted[n >> 1];
+        d.peak[i]   = sorted[n - 1];
+        d.lo[i]     = this.dbLo;
+        d.hi[i]     = this.dbHi;
+        d.aMin[i]   = this._autoMin    === null ? NaN : this._autoMin;
+        d.aMax[i]   = this._autoMax    === null ? NaN : this._autoMax;
+        d.emaMin[i] = this._autoMinEma === null ? NaN : this._autoMinEma;
+        d.emaMax[i] = this._autoMaxEma === null ? NaN : this._autoMaxEma;
+        d.i = (i + 1) % DIAG_ROWS;
+        if (d.count < DIAG_ROWS) d.count++;
+
+        // Direction-reversal detector on the applied values.
+        if (this._diagPrev) {
+            for (const [k, cur, prev] of [['min', this._autoMin, this._diagPrev.min],
+                                          ['max', this._autoMax, this._diagPrev.max]]) {
+                if (cur !== null && prev !== null && cur !== prev) {
+                    this._diagMoves.push({ t: now, k, d: Math.sign(cur - prev) });
+                }
+            }
+        }
+        this._diagPrev = { min: this._autoMin, max: this._autoMax };
+
+        const cutoff = now - DIAG_WINDOW_MS;
+        while (this._diagMoves.length && this._diagMoves[0].t < cutoff) this._diagMoves.shift();
+        if (now - this._diagWarnedAt > DIAG_WARN_GAP_MS) {
+            for (const k of ['min', 'max']) {
+                let rev = 0, last = 0;
+                for (const m of this._diagMoves) {
+                    if (m.k !== k) continue;
+                    if (last !== 0 && m.d !== last) rev++;
+                    last = m.d;
+                }
+                if (rev >= DIAG_REVERSALS) {
+                    this._diagWarnedAt = now;
+                    console.warn(`[band-activity] ${this.name}: auto-range ${k} reversed ` +
+                                 `direction ${rev}× in ${DIAG_WINDOW_MS / 1000}s — run ` +
+                                 `bandDiag('${this.name}') and save the output`);
+                    break;
+                }
+            }
+        }
     }
 
     // Progress [0,1] through the current inter-arrival gap.
@@ -2926,6 +3061,8 @@ class BandPanel {
             const rangeMoved = this._updateAutoRange(vSorted, valid, now);
             if (rangeMoved && dbAuto) this._rangeChanged();
         }
+
+        this._diagRecord(now, gap, sorted, n, valid);
 
         // ── Peak-hold buffer ─────────────────────────────────────────────────
         if (!this._peakHold || this._peakHold.length !== n) {
@@ -3806,6 +3943,39 @@ function decodeSSEEvent(b64data) {
     const payload = buf.subarray(22);
     return { flags, payload };
 }
+
+// Dump one band's flight recorder (see _diagRecord) as a console table and
+// return the rows.  Run this from the console while an auto-range oscillation
+// episode is visible — before refreshing the page, which discards it all.
+window.bandDiag = function(name, rows = 150) {
+    const p = panels[name];
+    if (!p || !p._diag) { console.log('no diagnostic data for', name); return; }
+    const d = p._diag, out = [];
+    const take  = Math.min(rows, d.count);
+    const start = (d.i - take + DIAG_ROWS * 2) % DIAG_ROWS;
+    for (let j = 0; j < take; j++) {
+        const i = (start + j) % DIAG_ROWS;
+        out.push({
+            t:      new Date(d.t[i]).toISOString().slice(11, 23),
+            gap:    Math.round(d.gap[i]),
+            period: Math.round(d.period[i]),
+            frame:  d.flags[i] === 3 ? 'full' : `d${d.dcount[i]}`,
+            valid:  d.valid[i],
+            canvH:  d.ch[i],
+            p5raw:  +d.p5raw[i].toFixed(1),
+            med:    +d.med[i].toFixed(1),
+            peak:   +d.peak[i].toFixed(1),
+            lo:     d.lo[i],
+            hi:     d.hi[i],
+            aMin:   +d.aMin[i].toFixed(1),
+            aMax:   +d.aMax[i].toFixed(1),
+            emaMin: +d.emaMin[i].toFixed(1),
+            emaMax: +d.emaMax[i].toFixed(1),
+        });
+    }
+    console.table(out);
+    return out;
+};
 
 // ── SSE connection management ─────────────────────────────────────────────────
 function buildSSEUrl() {

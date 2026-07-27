@@ -5065,6 +5065,19 @@ function _applyMapDockState() {
 
     if (_mapDocked) {
         panel.classList.add('band-panel', 'map-panel');
+        // The corner-resize grip and _restoreFloatingMapGeometry() both write
+        // width/height/top/left directly onto panel.style while floating.
+        // Inline styles beat the stylesheet, so without clearing them here
+        // the .map-panel rule's "height: auto" (matched to the other cards'
+        // canvas height) is silently overridden by whatever size the panel
+        // last had while floating — docking in at roughly double height is
+        // exactly that leftover inline height winning. A fresh page load has
+        // no such inline styles yet, which is why a refresh "fixes" it.
+        panel.style.removeProperty('width');
+        panel.style.removeProperty('height');
+        panel.style.removeProperty('top');
+        panel.style.removeProperty('left');
+        panel.style.removeProperty('right');
         const grid = document.getElementById('grid');
         // Always first — same convention as wideband. rebuildPanels() never
         // touches nodes it doesn't own, so this position is stable across

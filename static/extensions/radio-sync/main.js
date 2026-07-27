@@ -34,6 +34,8 @@ class RadioSyncExtension extends DecoderExtension {
         this.hamlibLoadPromise = null;
         this.rigHandle = 0;
         this.isConnected = false;
+        this.isConnecting = false; // Guards against overlapping connectToRadio() calls (e.g. impatient repeat clicks)
+        this.isDisconnecting = false;
 
         this.selectedRadio = null;
         this.selectedBaudRate = null; // Will be set when radio is selected
@@ -675,6 +677,15 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     async connectToRadio() {
+        // Guard against overlapping attempts: repeat clicks while a connect is
+        // already in flight (e.g. the device picker is still open) would each
+        // call hamlibOpen() again, popping another picker and - if more than
+        // one happened to succeed - leaking the earlier attempt's still-open
+        // serial port since only the last rigHandle survives on `this`.
+        if (this.isConnecting || this.isConnected) {
+            return;
+        }
+
         if (!this.selectedRadio) {
             this.addMessage('Please select a radio model first', 'warning');
             return;
@@ -704,6 +715,10 @@ class RadioSyncExtension extends DecoderExtension {
         const stopBits = Number(option.dataset.stopBits);
         const parity = Number(option.dataset.parity);
         const handshake = Number(option.dataset.handshake);
+
+        this.isConnecting = true;
+        const connectBtn = document.getElementById('radio-sync-connect');
+        if (connectBtn) connectBtn.disabled = true;
 
         try {
             this.addMessage(`Connecting to ${option.dataset.name}...`, 'info');
@@ -738,11 +753,16 @@ class RadioSyncExtension extends DecoderExtension {
             this.addMessage(`Connection failed: ${error.message}`, 'error');
             this.isConnected = false;
             this.rigHandle = 0;
+        } finally {
+            this.isConnecting = false;
+            if (connectBtn) connectBtn.disabled = !this.selectedRadio || this.isConnected;
         }
     }
 
     async disconnectFromRadio() {
-        if (!this.rigHandle) return;
+        if (!this.rigHandle || this.isDisconnecting) return;
+
+        this.isDisconnecting = true;
 
         try {
             this.stopRadioPolling();
@@ -757,6 +777,7 @@ class RadioSyncExtension extends DecoderExtension {
         } catch (error) {
             this.addMessage(`Disconnect error: ${error.message}`, 'error');
         } finally {
+            this.isDisconnecting = false;
             // Reset display to dashes when disconnected
             this.updateFrequencyDisplay(0);
             this.updateModeDisplay('---');
@@ -857,6 +878,7 @@ class RadioSyncExtension extends DecoderExtension {
                 }
             } else {
                 connectBtn.style.display = 'inline-block';
+                connectBtn.disabled = !this.selectedRadio;
                 disconnectBtn.style.display = 'none';
                 // Enable baud rate selection when disconnected
                 if (baudRateSelect) {

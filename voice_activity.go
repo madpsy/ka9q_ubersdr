@@ -235,6 +235,11 @@ type VoiceActivity struct {
 	DXCountryCode string  `json:"dx_country_code,omitempty"` // ISO 3166-1 alpha-2
 	DXContinent   string  `json:"dx_continent,omitempty"`
 	DXTimeOffset  float64 `json:"dx_time_offset,omitempty"`
+	// CTY-derived DXCC/prefix centroid for DXCallsign — same granularity CW
+	// skimmer spots fall back to before an optional QRZ override. Pointers so
+	// (0,0) can be distinguished from "not looked up".
+	DXLatitude  *float64 `json:"dx_latitude,omitempty"`
+	DXLongitude *float64 `json:"dx_longitude,omitempty"`
 }
 
 // enrichWithDXCallsigns annotates each VoiceActivity with a spotted callsign,
@@ -253,6 +258,28 @@ func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
 			activities[i].DXCountryCode = entry.CountryCode
 			activities[i].DXContinent = entry.Continent
 			activities[i].DXTimeOffset = entry.TimeOffset
+
+			if ctyInfo := GetCallsignInfo(entry.DXCall); ctyInfo != nil &&
+				(ctyInfo.Latitude != 0 || ctyInfo.Longitude != 0) {
+				lat, lon := ctyInfo.Latitude, ctyInfo.Longitude
+				activities[i].DXLatitude = &lat
+				activities[i].DXLongitude = &lon
+			}
+
+			// Optionally override with a precise per-operator QRZ position —
+			// same preference order CW skimmer spots use (see
+			// CWSkimmerClient.enrichSpot): QRZ coordinates win over the
+			// CTY/prefix centroid when the lookup service is configured and
+			// returns a hit with real coordinates. Cache-first, so repeat
+			// callsigns are free.
+			if globalQRZService != nil {
+				if qrz, err := globalQRZService.Lookup(entry.DXCall); err == nil && qrz != nil &&
+					(qrz.Lat != 0 || qrz.Lon != 0) {
+					lat, lon := qrz.Lat, qrz.Lon
+					activities[i].DXLatitude = &lat
+					activities[i].DXLongitude = &lon
+				}
+			}
 		}
 	}
 	return activities

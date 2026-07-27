@@ -472,7 +472,8 @@ body {
     white-space: nowrap;
 }
 #floating-map-terminator-label,
-#floating-map-muf-label {
+#floating-map-muf-label,
+#floating-map-spots-label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -483,9 +484,11 @@ body {
     white-space: nowrap;
 }
 #floating-map-terminator-label:hover,
-#floating-map-muf-label:hover { color: #ccc; }
+#floating-map-muf-label:hover,
+#floating-map-spots-label:hover { color: #ccc; }
 #floating-map-terminator-label input,
-#floating-map-muf-label input {
+#floating-map-muf-label input,
+#floating-map-spots-label input {
     cursor: pointer;
     accent-color: #7ec8e3;
 }
@@ -568,14 +571,26 @@ body {
 }
 #floating-map-suninfo {
     flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 6px 10px;
     font-size: 0.78em;
     color: #999;
     border-top: 1px solid #222;
     background: #14141c;
+}
+#floating-map-suninfo-sun {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+#floating-map-suninfo-muf {
+    flex: none;
+    white-space: nowrap;
+    color: #7ec8e3;
 }
 #floating-map-resize {
     position: absolute;
@@ -1398,6 +1413,9 @@ body {
         <label id="floating-map-muf-label" title="Maximum Usable Frequency (ionosphere) overlay">
             <input type="checkbox" id="floating-map-muf"> MUF
         </label>
+        <label id="floating-map-spots-label" title="CW/voice spots with a known location, as country flags. Respects the 'Filter' toggle.">
+            <input type="checkbox" id="floating-map-spots"> Spots
+        </label>
         <select id="floating-map-tile-select" title="Map style">
             <option value="dark">Dark</option>
             <option value="osm">OSM</option>
@@ -1410,7 +1428,10 @@ body {
     <div id="floating-map-body">
         <div id="floating-map-canvas"></div>
     </div>
-    <div id="floating-map-suninfo"></div>
+    <div id="floating-map-suninfo">
+        <span id="floating-map-suninfo-sun"></span>
+        <span id="floating-map-suninfo-muf" title="MUF at the receiver's location, translated to the highest currently-open band"></span>
+    </div>
     <div id="floating-map-resize" title="Drag to resize"></div>
 </div>
 
@@ -1641,6 +1662,9 @@ let _mapDocked           = false; // false = floating (draggable/resizable), tru
 let _mapResizeObserver   = null;
 let _showTerminator      = true;  // day/night overlay — on by default, same as before it was made toggleable
 let _showMUF             = false; // ionosphere (MUF) overlay — opt-in: costs a fetch to the public collector
+let _showSpots           = false; // CW/voice spot flags — opt-in, off by default
+let _leafletSpotsLayer   = null;
+let _spotsPruneTimer     = null;  // periodically re-collects markers so aged-out CW spots drop off even with no new events
 
 // ── Grid layout ───────────────────────────────────────────────────────────────
 // 'auto'  → CSS auto-fill at a 340px minimum, canvases keep their default
@@ -3908,6 +3932,7 @@ const _MAP_TILE_LAYERS = {
 const _MAP_TILE_KEY       = 'bandActivity_mapTile';
 const _MAP_TERMINATOR_KEY = 'bandActivity_mapTerminator';
 const _MAP_MUF_KEY        = 'bandActivity_mapMUF';
+const _MAP_SPOTS_KEY      = 'bandActivity_mapSpots';
 let _floatingMapTileLayer = null;
 let _floatingMapTileKey   = 'topo';
 
@@ -3973,23 +3998,6 @@ const _MUF_VIRIDIS_STOPS = [
 ];
 
 const _MUF_LEGEND_HALO = '0 0 3px #fff,0 0 2px #fff,0 1px 1px #fff';
-
-function _mufViridisRGB(mufd) {
-    const MIN = 4.0, MAX = 35.0;
-    let t = (Math.log(mufd) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN));
-    if (!isFinite(t) || t < 0) t = 0;
-    if (t > 1) t = 1;
-    const pos = t * (_MUF_VIRIDIS_STOPS.length - 1);
-    const i0 = Math.min(Math.floor(pos), _MUF_VIRIDIS_STOPS.length - 1);
-    const i1 = Math.min(i0 + 1, _MUF_VIRIDIS_STOPS.length - 1);
-    const f = pos - i0;
-    const a = _MUF_VIRIDIS_STOPS[i0], b = _MUF_VIRIDIS_STOPS[i1];
-    return [
-        Math.round(a[0] * (1 - f) + b[0] * f),
-        Math.round(a[1] * (1 - f) + b[1] * f),
-        Math.round(a[2] * (1 - f) + b[2] * f),
-    ];
-}
 
 function _mufScaleFraction(mhz) {
     const MIN = 4.0, MAX = 35.0;
@@ -4189,43 +4197,14 @@ async function _loadMUFLayer() {
             L.marker(midLatLng, { icon, interactive: false, keyboard: false }).addTo(group);
         }
 
+        // Station dots (raw per-ionosonde readings) are deliberately not
+        // plotted here — just the timestamp of the underlying data.
         if (stationsResp.ok) {
-            let stations = [];
             try {
                 const payload = await stationsResp.json();
-                stations = payload.stations || [];
                 if (payload.ts) { _mufDataTS = payload.ts; _mufDataIsFetchTime = false; }
             } catch (e) {
                 console.warn('MUF overlay: failed to parse station data:', e);
-            }
-            for (const s of stations) {
-                const [r, g, b] = _mufViridisRGB(s.mufd);
-                const alpha = Math.min(1, 0.35 + 0.6 * (s.cs || 0));
-                const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-                const fg = lum > 0.55 ? '#111' : '#fff';
-                const icon = L.divIcon({
-                    className: '',
-                    html: `<div style="width:22px;height:22px;border-radius:50%;` +
-                          `background:rgba(${r},${g},${b},${alpha.toFixed(2)});` +
-                          `border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 3px rgba(0,0,0,0.5);` +
-                          `color:${fg};font-size:10px;font-weight:700;line-height:22px;text-align:center;">` +
-                          `${Math.round(s.mufd)}</div>`,
-                    iconSize: [22, 22],
-                    iconAnchor: [11, 11],
-                });
-                const marker = L.marker([s.lat, s.lon], { icon, keyboard: false });
-                const age = Math.max(0, Math.round((Date.now() / 1000 - s.time) / 60));
-                const extra = [];
-                if (s.fof2 != null) extra.push(`foF2 ${s.fof2.toFixed(2)} MHz`);
-                if (s.hmf2 != null) extra.push(`hmF2 ${Math.round(s.hmf2)} km`);
-                marker.bindTooltip(
-                    `<b>${s.name}</b>${s.code ? ` (${s.code})` : ''}<br>` +
-                    `MUF ${s.mufd.toFixed(1)} MHz` +
-                    (extra.length ? `<br>${extra.join('<br>')}` : '') +
-                    `<br>${s.source} · ${age} min ago · cs ${s.cs.toFixed(2)}`,
-                    { className: 'muf-tooltip' }
-                );
-                marker.addTo(group);
             }
         }
 
@@ -4269,6 +4248,90 @@ async function _applyMUFToggle(enabled) {
         if (_mufLegend) _leafletMap.removeControl(_mufLegend);
         if (_mufTimestampCtrl) _leafletMap.removeControl(_mufTimestampCtrl);
         if (_mufRefreshTimer) { clearInterval(_mufRefreshTimer); _mufRefreshTimer = null; }
+    }
+}
+
+// ── CW/voice spot flags ───────────────────────────────────────────────────────
+// Reuses the same data already being fetched for the CW badge strip
+// (_cwRecentSpots) and the voice ticker (_vaLastData) — this is just an
+// alternate, geographic presentation of it, so it inherits the 'Filter'
+// toggle (filterSpots/_bandIsActive) the same way those do.
+// CW spots have no natural end (unlike voice activity, which simply stops
+// being reported once the signal goes away) — the ring buffer they share with
+// the badge strip only bounds them by *count*, not *time*. The map flags
+// specifically should drop off 5 minutes after last being spotted, so a
+// quiet band doesn't leave stale flags sitting around indefinitely.
+const _CW_SPOT_MAX_AGE_MS = 5 * 60 * 1000;
+
+function _collectSpotMarkers() {
+    const markers = [];
+    const cwCutoff = Date.now() - _CW_SPOT_MAX_AGE_MS;
+
+    for (const s of _cwRecentSpots) {
+        if (typeof s._receivedAt === 'number' && s._receivedAt < cwCutoff) continue;
+        if (filterSpots && !_bandIsActive(s.band)) continue;
+        if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
+        if (s.latitude === 0 && s.longitude === 0) continue; // sentinel for "unknown"
+        markers.push({
+            lat: s.latitude, lon: s.longitude, cc: s.country_code,
+            callsign: s.callsign, band: s.band, freq: s.frequency, type: 'CW'
+        });
+    }
+
+    const bands = _vaLastData?.bands || {};
+    for (const [band, activities] of Object.entries(bands)) {
+        if (filterSpots && !_bandIsActive(band)) continue;
+        for (const act of activities) {
+            if (typeof act.dx_latitude !== 'number' || typeof act.dx_longitude !== 'number') continue;
+            if (act.dx_latitude === 0 && act.dx_longitude === 0) continue;
+            markers.push({
+                lat: act.dx_latitude, lon: act.dx_longitude, cc: act.dx_country_code,
+                callsign: act.dx_callsign, band,
+                freq: act.estimated_dial_freq || act.center_freq, type: 'Voice'
+            });
+        }
+    }
+
+    return markers;
+}
+
+function _refreshSpotMarkers() {
+    if (!_leafletMap || !_showSpots) return;
+    if (!_leafletSpotsLayer) _leafletSpotsLayer = L.layerGroup().addTo(_leafletMap);
+    _leafletSpotsLayer.clearLayers();
+
+    for (const m of _collectSpotMarkers()) {
+        const flag = m.cc ? iso2ToFlag(m.cc) : '🏳️';
+        const icon = L.divIcon({
+            className: '',
+            html: `<span style="font-size:18px;line-height:1;` +
+                  `filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));">${flag}</span>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+        const marker = L.marker([m.lat, m.lon], { icon, keyboard: false });
+        const freqMHz = typeof m.freq === 'number' ? (m.freq / 1e6).toFixed(3) + ' MHz' : '';
+        marker.bindTooltip(
+            `<b>${_escHtml(m.callsign || '?')}</b><br>` +
+            `${_escHtml((m.band || '').toUpperCase())}${freqMHz ? ' · ' + freqMHz : ''} · ${m.type}`,
+            { direction: 'top' }
+        );
+        marker.addTo(_leafletSpotsLayer);
+    }
+}
+
+function _applySpotsToggle(enabled) {
+    _showSpots = enabled;
+    if (!_leafletMap) return;
+    if (enabled) {
+        _refreshSpotMarkers();
+        // New CW/voice spots already trigger a refresh as they arrive, but
+        // nothing pokes it when one simply ages out — a quiet band with no
+        // fresh events would otherwise leave a stale flag up forever.
+        if (!_spotsPruneTimer) _spotsPruneTimer = setInterval(_refreshSpotMarkers, 30000);
+    } else {
+        if (_leafletSpotsLayer) _leafletSpotsLayer.clearLayers();
+        if (_spotsPruneTimer) { clearInterval(_spotsPruneTimer); _spotsPruneTimer = null; }
     }
 }
 
@@ -4321,7 +4384,7 @@ function _fmtLocalHHMM(date) {
 }
 
 function _updateSunInfo() {
-    const el = document.getElementById('floating-map-suninfo');
+    const el = document.getElementById('floating-map-suninfo-sun');
     if (!el) return;
     if (!_receiverGps || typeof SunCalc === 'undefined') {
         el.textContent = 'Location unavailable';
@@ -4334,6 +4397,59 @@ function _updateSunInfo() {
     const isDay = now >= _sunTimes.sunrise && now < _sunTimes.sunset;
     el.textContent = `${isDay ? '☀️ Day' : '🌙 Night'} · Sunrise ${_fmtLocalHHMM(_sunTimes.sunrise)}` +
                       ` · Sunset ${_fmtLocalHHMM(_sunTimes.sunset)}`;
+}
+
+// ── MUF at the receiver's own location ────────────────────────────────────────
+// Shown in the footer regardless of whether the MUF overlay layer itself is
+// on — this is a single point query (map.html's click-to-query endpoint),
+// not the overlay's raster/contour fetch, so it's cheap enough to always run
+// once the map is open. Refreshed on the same 15-minute cadence as the
+// overlay (_MUF_CACHE_MS) since the underlying ionosonde data updates at
+// roughly that rate.
+let _receiverMUFTimer = null;
+
+// Picks the highest currently-configured band whose start frequency is at or
+// below the MUF — i.e. "the top open band" in the usual ham-radio sense.
+// Uses this receiver's own configured bands (allBands/bandMeta) rather than a
+// fixed table, so it matches the band names already used everywhere else on
+// this page.
+function _mufToBandName(mhz) {
+    if (typeof mhz !== 'number' || !allBands || allBands.length === 0) return null;
+    const hz = mhz * 1e6;
+    let best = null;
+    // allBands is sorted ascending by start frequency (see init()), so the
+    // last one whose start is still <= hz is the highest qualifying band.
+    for (const name of allBands) {
+        const meta = bandMeta[name];
+        if (!meta) continue;
+        if (meta.start <= hz) best = name;
+        else break;
+    }
+    return best;
+}
+
+async function _fetchReceiverMUF() {
+    const el = document.getElementById('floating-map-suninfo-muf');
+    if (!el) return;
+    if (!_receiverGps) { el.textContent = ''; return; }
+    try {
+        const resp = await fetch(
+            `${_MUF_COLLECTOR}/api/ionosonde/muf?lat=${_receiverGps.lat.toFixed(4)}&lon=${_receiverGps.lon.toFixed(4)}`
+        );
+        if (!resp.ok) { el.textContent = ''; return; }
+        const data = await resp.json();
+        const mhz = data?.point?.muf_3000_mhz;
+        if (typeof mhz !== 'number') { el.textContent = ''; return; }
+        const band = _mufToBandName(mhz);
+        el.textContent = `MUF ${mhz.toFixed(1)} MHz${band ? ' · ' + band.toUpperCase() : ''}`;
+    } catch (_) {
+        el.textContent = '';
+    }
+}
+
+function _startReceiverMUFTimer() {
+    _fetchReceiverMUF();
+    if (!_receiverMUFTimer) _receiverMUFTimer = setInterval(_fetchReceiverMUF, _MUF_CACHE_MS);
 }
 
 async function _showFloatingMap() {
@@ -4364,10 +4480,11 @@ async function _showFloatingMap() {
         // <select> synced to it) by _setupFloatingMapChrome() at init time.
         _applyFloatingMapTile(_floatingMapTileKey);
 
-        // _showTerminator / _showMUF were already restored from localStorage
-        // (and their checkboxes synced) by _setupFloatingMapChrome().
+        // _showTerminator / _showMUF / _showSpots were already restored from
+        // localStorage (and their checkboxes synced) by _setupFloatingMapChrome().
         _applyTerminatorToggle(_showTerminator);
         if (_showMUF) _applyMUFToggle(true);
+        if (_showSpots) _applySpotsToggle(true);
 
         if (_receiverGps) {
             const icon = L.divIcon({
@@ -4393,6 +4510,7 @@ async function _showFloatingMap() {
 
     _updateSunInfo();
     if (!_sunInfoTimer) _sunInfoTimer = setInterval(_updateSunInfo, 60000);
+    _startReceiverMUFTimer();
 }
 
 function _hideFloatingMap() {
@@ -4514,12 +4632,28 @@ function _setupFloatingMapChrome() {
         });
     }
 
+    // CW/voice spot flags — off by default (purely cosmetic overlay of data
+    // already being fetched for the badges/ticker elsewhere on the page).
+    const spotsCb = document.getElementById('floating-map-spots');
+    const spotsLabel = document.getElementById('floating-map-spots-label');
+    if (spotsCb) {
+        let sSpots = null;
+        try { sSpots = localStorage.getItem(_MAP_SPOTS_KEY); } catch(_) {}
+        _showSpots = (sSpots === '1');
+        spotsCb.checked = _showSpots;
+        if (spotsLabel) spotsLabel.addEventListener('mousedown', e => e.stopPropagation());
+        spotsCb.addEventListener('change', e => {
+            try { localStorage.setItem(_MAP_SPOTS_KEY, e.target.checked ? '1' : '0'); } catch(_) {}
+            _applySpotsToggle(e.target.checked);
+        });
+    }
+
     let dragging = false, dragOffX = 0, dragOffY = 0;
     header.addEventListener('mousedown', e => {
         if (_mapDocked) return; // grid layout owns position while docked
         if (e.target.closest('#floating-map-close') || e.target.closest('#floating-map-tile-select') ||
             e.target.closest('#floating-map-dock') || e.target.closest('#floating-map-terminator-label') ||
-            e.target.closest('#floating-map-muf-label')) return;
+            e.target.closest('#floating-map-muf-label') || e.target.closest('#floating-map-spots-label')) return;
         dragging = true;
         const rect = panel.getBoundingClientRect();
         dragOffX = e.clientX - rect.left;
@@ -4660,10 +4794,13 @@ function _cwHandleSpot(spot) {
             isNew = true;
         }
     }
-    // Prepend to ring buffer
-    _cwRecentSpots.unshift({ ...spot, isNew });
+    // Prepend to ring buffer. _receivedAt (client clock, not the spot's own
+    // "timestamp" field) is what the map's 5-minute flag expiry keys off —
+    // avoids any server/client clock-skew weirdness.
+    _cwRecentSpots.unshift({ ...spot, isNew, _receivedAt: Date.now() });
     if (_cwRecentSpots.length > _CW_RING_SIZE) _cwRecentSpots.length = _CW_RING_SIZE;
     _renderCWSpots();
+    if (_showSpots) _refreshSpotMarkers();
     // Update body padding in case bar grew
     const bar = document.getElementById('conditions-bar');
     if (bar && bar.style.display !== 'none') {
@@ -5221,6 +5358,7 @@ function _bandIsActive(rawBand) {
 function _refreshSpotFilters() {
     _renderCWSpots();
     if (_vaLastData) _renderVoiceTicker(_vaLastData);
+    if (_showSpots) _refreshSpotMarkers();
     const bar = document.getElementById('conditions-bar');
     if (bar && bar.style.display !== 'none') {
         requestAnimationFrame(() => {
@@ -5638,6 +5776,7 @@ async function _refreshVoiceTicker() {
         const data = await _fetchVoiceActivity();
         _vaLastData = data;
         _renderVoiceTicker(data);
+        if (_showSpots) _refreshSpotMarkers();
         // Adjust body padding in case bar height changed
         const bar = document.getElementById('conditions-bar');
         if (bar && bar.style.display !== 'none') {

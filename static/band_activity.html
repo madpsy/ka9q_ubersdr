@@ -345,11 +345,6 @@ body {
     background: rgba(40,40,50,0.5);
     color: #ccc;
 }
-.digi-spot-chip .digi-spot-mode {
-    color: #7ec8e3;
-    font-weight: 600;
-    font-size: 0.9em;
-}
 #digi-spots-empty {
     font-size: 0.7em;
     color: #666;
@@ -4463,7 +4458,7 @@ function _collectSpotMarkers() {
             if (filterSpots && !_bandIsActive(c.band)) continue;
             markers.push({
                 lat: c.lat, lon: c.lon, cc: c.cc, country: c.country,
-                callsign: null, band: c.band, freq: null, type: c.mode
+                callsign: null, band: c.band, freq: null, type: [...c.modes].sort().join('/')
             });
         }
     }
@@ -5156,7 +5151,9 @@ function _digiHandleDecode(d) {
     if (!band) return;
 
     const cc  = (d.country_code || '').toUpperCase();
-    const key = `${mode}|${band}|${cc}`;
+    // Grouped by band+country only — a combo seen via FT8 and one seen via
+    // WSPR for the same band+country are the same entry, not two.
+    const key = `${band}|${cc}`;
     // Not every decode carries a grid (many FT8 exchanges are just signal
     // reports) — only overwrite the combo's map position when this one has
     // one; otherwise keep whatever position it already had, if any.
@@ -5165,6 +5162,7 @@ function _digiHandleDecode(d) {
     const existing = _digiCombos.get(key);
     if (existing) {
         existing.lastSeen = Date.now(); // still active — just pushes its expiry out
+        existing.modes.add(mode);       // shown in the tooltip even though not in the chip itself
         if (loc) {
             existing.lat = loc.lat;
             existing.lon = loc.lon;
@@ -5173,8 +5171,9 @@ function _digiHandleDecode(d) {
         return;
     }
     _digiCombos.set(key, {
-        mode, band, cc, country: d.country || '', lastSeen: Date.now(),
-        lat: loc ? loc.lat : null, lon: loc ? loc.lon : null
+        band, cc, country: d.country || '', lastSeen: Date.now(),
+        lat: loc ? loc.lat : null, lon: loc ? loc.lon : null,
+        modes: new Set([mode])
     });
     _renderDigiSpots();
     if (_showDigiMap && loc) _refreshSpotMarkers();
@@ -5182,26 +5181,16 @@ function _digiHandleDecode(d) {
 
 // Drops combinations not re-seen within _DIGI_COMBO_MAX_AGE_MS. Needs its own
 // timer (rather than only pruning on the next decode) since a combo that
-// simply stops being heard would otherwise never trigger a re-check.
+// simply stops being heard would otherwise never trigger a re-check. This is
+// also what clears a combo that was only ever fed by a mode the user has
+// since disabled — since entries are no longer mode-specific, there's no
+// separate "prune this mode's entries" step; one that isn't refreshed by
+// whichever mode(s) are still enabled just ages out here like any other.
 function _digiPruneExpired() {
     const cutoff = Date.now() - _DIGI_COMBO_MAX_AGE_MS;
     let changed = false;
     for (const [key, v] of _digiCombos) {
         if (v.lastSeen < cutoff) { _digiCombos.delete(key); changed = true; }
-    }
-    if (changed) {
-        _renderDigiSpots();
-        if (_showDigiMap) _refreshSpotMarkers();
-    }
-}
-
-// Drops every tracked combination for a mode, e.g. when its checkbox is
-// switched off — otherwise stale entries would linger until the panel is
-// naturally rebuilt by a future decode.
-function _digiPruneMode(mode) {
-    let changed = false;
-    for (const [key, v] of _digiCombos) {
-        if (v.mode === mode) { _digiCombos.delete(key); changed = true; }
     }
     if (changed) {
         _renderDigiSpots();
@@ -5231,7 +5220,6 @@ function _renderDigiSpots() {
         .filter(e => !filterSpots || _bandIsActive(e.band))
         .sort((a, b) =>
             a.band !== b.band ? a.band.localeCompare(b.band, undefined, { numeric: true }) :
-            a.mode !== b.mode ? a.mode.localeCompare(b.mode) :
             (a.country || a.cc).localeCompare(b.country || b.cc)
         );
 
@@ -5248,9 +5236,11 @@ function _renderDigiSpots() {
             const flag = e.cc ? iso2ToFlag(e.cc) : '';
             chip.innerHTML =
                 (flag ? `<span>${flag}</span>` : '') +
-                `<span>${_escHtml(e.band.toUpperCase())}</span>` +
-                `<span class="digi-spot-mode">${_escHtml(e.mode)}</span>`;
-            chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${e.mode}`;
+                `<span>${_escHtml(e.band.toUpperCase())}</span>`;
+            // Mode(s) aren't shown in the chip itself (a combo is mode-agnostic
+            // now), but still worth knowing on hover.
+            const modes = [...e.modes].sort().join('/');
+            chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${modes}`;
             list.appendChild(chip);
         }
     }
@@ -7186,7 +7176,6 @@ async function init() {
         digiFT8Cb.addEventListener('change', e => {
             _digiFT8Enabled = e.target.checked;
             try { localStorage.setItem('bandActivity_digiFT8', _digiFT8Enabled ? '1' : '0'); } catch(_) {}
-            if (!_digiFT8Enabled) _digiPruneMode('FT8');
         });
     }
     const digiWSPRCb = document.getElementById('digi-wspr-toggle');
@@ -7198,7 +7187,6 @@ async function init() {
         digiWSPRCb.addEventListener('change', e => {
             _digiWSPREnabled = e.target.checked;
             try { localStorage.setItem('bandActivity_digiWSPR', _digiWSPREnabled ? '1' : '0'); } catch(_) {}
-            if (!_digiWSPREnabled) _digiPruneMode('WSPR');
         });
     }
     window.addEventListener('resize', _digiSpotsPosition);

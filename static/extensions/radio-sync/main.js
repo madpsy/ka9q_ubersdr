@@ -8,6 +8,10 @@
 
 const HAMLIB_BASE_URL = '/hamlib';
 
+// Consecutive fully-failed poll cycles (freq+mode+PTT all erroring) before we
+// treat the link as dead and disconnect, rather than retrying at 10Hz forever.
+const MAX_POLL_FAILURES = 20;
+
 // ubersdr's SDR-facing mode names (see static/extensions/README.md's Radio API)
 // vs. Hamlib's canonical rig_strrmode()/rig_parse_mode() names (RIG_MODE_* in
 // include/hamlib/rig.h). One table, shared by both sync directions - replaces
@@ -101,6 +105,7 @@ class RadioSyncExtension extends DecoderExtension {
                 const Module = await createHamlibModule({ hamlibSerial: bridge });
 
                 this.hamlibModule = Module;
+                this.hamlibBridge = bridge;
 
                 // hamlib.wasm is built with plain -sASYNCIFY (see wasm/build.sh),
                 // which supports only one in-flight async call into the module at
@@ -795,6 +800,7 @@ class RadioSyncExtension extends DecoderExtension {
         // piling up an ever-growing backlog of queued calls (see the
         // _hamlibQueue serialization in ensureHamlibLoaded()).
         this._pollingBusy = false;
+        this._pollFailures = 0;
         this.radioPollingInterval = setInterval(async () => {
             if (!this.isConnected || !this.rigHandle || this._pollingBusy) return;
 
@@ -808,10 +814,26 @@ class RadioSyncExtension extends DecoderExtension {
 
                 const ptt = await this.hamlibGetPtt(this.rigHandle);
                 if (ptt >= 0) this.updateTXRXState(ptt !== 0);
+
+                // hamlib reports failure as a negative rc rather than throwing,
+                // so a dead port would otherwise poll (and log) forever at 10Hz.
+                if (freq < 0 && !hamlibMode && ptt < 0) {
+                    this._pollFailures++;
+                } else {
+                    this._pollFailures = 0;
+                }
             } catch (error) {
                 console.error('Radio polling error:', error);
+                this._pollFailures++;
             } finally {
                 this._pollingBusy = false;
+            }
+
+            if (this._pollFailures >= MAX_POLL_FAILURES) {
+                this.addMessage(
+                    `Lost communication with radio (${this._pollFailures} failed polls) - disconnecting`,
+                    'error');
+                this.disconnectFromRadio();
             }
         }, 100); // Poll every 100ms (10 Hz) for responsive sync
 

@@ -271,6 +271,76 @@ body {
     to   { opacity: 0; transform: translateX(14px); }
 }
 
+/* Digital-spot (FT8/WSPR) unique country+band tracker — same floating
+   convention as #notif-panel (parked under the clocks, no layout cost).
+   Lower z-index than the alert toasts, so it's fine to sit underneath one. */
+#digi-spots-panel {
+    display: none;
+    position: absolute;
+    top: 34px;
+    right: 16px;
+    z-index: 55;
+    flex-direction: column;
+    gap: 5px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    background: rgba(14, 14, 21, 0.97);
+    border: 1px solid #2a2a3a;
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.6);
+    padding: 6px 8px;
+}
+#digi-spots-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.72em;
+    color: #aaa;
+}
+#digi-spots-title {
+    flex: 1;
+    font-weight: 600;
+    color: #888;
+    white-space: nowrap;
+}
+#digi-spots-header label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+#digi-spots-header input[type=checkbox] {
+    cursor: pointer;
+    accent-color: #7ec8e3;
+}
+#digi-spots-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: min(360px, calc(100vw - 48px));
+    max-height: 90px;
+    overflow-y: auto;
+}
+.digi-spot-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 0.68em;
+    white-space: nowrap;
+    border: 1px solid rgba(80,80,80,0.3);
+    background: rgba(40,40,50,0.5);
+    color: #ccc;
+}
+.digi-spot-chip .digi-spot-mode {
+    color: #7ec8e3;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
 /* band selector pills — always on their own row when the topbar wraps */
 #band-pills {
     display: flex;
@@ -1396,6 +1466,21 @@ body {
         </div>
         <div id="notif-auth-msg"></div>
         <div id="notif-list" title="Click to dismiss"></div>
+    </div>
+
+    <!-- Same floating convention as #notif-panel: parked under the clocks,
+         costs no layout space. Fine for it to be covered by an alert toast. -->
+    <div id="digi-spots-panel">
+        <div id="digi-spots-header">
+            <span id="digi-spots-title">Digital spots</span>
+            <label id="digi-ft8-label" title="Track unique country+band combinations from FT8 decodes">
+                <input type="checkbox" id="digi-ft8-toggle" checked> FT8
+            </label>
+            <label id="digi-wspr-label" title="Track unique country+band combinations from WSPR decodes">
+                <input type="checkbox" id="digi-wspr-toggle" checked> WSPR
+            </label>
+        </div>
+        <div id="digi-spots-list"></div>
     </div>
 </div>
 
@@ -4915,6 +5000,130 @@ function _startCWSpots() {
     connect();
 }
 
+// ── Digital spot tracker (FT8/WSPR unique country+band) ──────────────────────
+// Subscribes to /api/decoder/stream unfiltered (it only supports one exact
+// mode per connection, and reusing a single connection avoids eating both of
+// the public endpoint's per-IP connection slots) and keeps a running set of
+// unique (mode, band, country) combinations seen — only FT8 and WSPR are
+// tracked, each independently toggleable. Never expires entries on its own;
+// it's a "worked" tally for the session, not a live spot list.
+let _digiSSE          = null;
+let _digiReconnectMs  = 5000;
+let _digiFT8Enabled   = true;
+let _digiWSPREnabled  = true;
+const _digiCombos     = new Map(); // key `${mode}|${band}|${cc}` -> {mode, band, cc, country}
+
+function _digiHandleDecode(d) {
+    const mode = d.mode || '';
+    if (mode !== 'FT8' && mode !== 'WSPR') return; // only these two matter here
+    if (mode === 'FT8'  && !_digiFT8Enabled)  return;
+    if (mode === 'WSPR' && !_digiWSPREnabled) return;
+
+    // The decoder's own band field carries the mode suffix (e.g. "20m_FT8")
+    // since it identifies a decoder instance, not just a ham band — strip it
+    // back down to the plain band name used everywhere else on this page.
+    const band = (d.band || '').split('_')[0];
+    if (!band) return;
+
+    const cc  = (d.country_code || '').toUpperCase();
+    const key = `${mode}|${band}|${cc}`;
+    if (_digiCombos.has(key)) return; // already known — nothing new to show
+    _digiCombos.set(key, { mode, band, cc, country: d.country || '' });
+    _renderDigiSpots();
+}
+
+// Drops every tracked combination for a mode, e.g. when its checkbox is
+// switched off — otherwise stale entries would linger until the panel is
+// naturally rebuilt by a future decode.
+function _digiPruneMode(mode) {
+    let changed = false;
+    for (const [key, v] of _digiCombos) {
+        if (v.mode === mode) { _digiCombos.delete(key); changed = true; }
+    }
+    if (changed) _renderDigiSpots();
+}
+
+function _renderDigiSpots() {
+    const panel = document.getElementById('digi-spots-panel');
+    const list  = document.getElementById('digi-spots-list');
+    if (!panel || !list) return;
+
+    if (_digiCombos.size === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const entries = [..._digiCombos.values()].sort((a, b) =>
+        a.band !== b.band ? a.band.localeCompare(b.band, undefined, { numeric: true }) :
+        a.mode !== b.mode ? a.mode.localeCompare(b.mode) :
+        (a.country || a.cc).localeCompare(b.country || b.cc)
+    );
+
+    list.innerHTML = '';
+    for (const e of entries) {
+        const chip = document.createElement('span');
+        chip.className = 'digi-spot-chip';
+        const flag = e.cc ? iso2ToFlag(e.cc) : '';
+        chip.innerHTML =
+            (flag ? `<span>${flag}</span>` : '') +
+            `<span>${_escHtml(e.band.toUpperCase())}</span>` +
+            `<span class="digi-spot-mode">${_escHtml(e.mode)}</span>`;
+        chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${e.mode}`;
+        list.appendChild(chip);
+    }
+    panel.style.display = 'flex';
+    _digiSpotsPosition();
+}
+
+// Parks the panel under the clocks, same measured approach as
+// _notifPosition(). It shares the corner with the alert toasts and sits at a
+// lower z-index — fine for it to be covered when a toast is up.
+function _digiSpotsPosition() {
+    const panel = document.getElementById('digi-spots-panel');
+    const bar   = document.getElementById('topbar');
+    const clock = document.getElementById('utc-clock');
+    if (!panel || !bar || !clock) return;
+    const barTop = bar.getBoundingClientRect().top;
+    const clockBottom = clock.getBoundingClientRect().bottom;
+    panel.style.top = Math.round(clockBottom - barTop + 6) + 'px';
+}
+
+function _startDigiSpots() {
+    if (_digiSSE) return; // already connected
+    // Attempt connection regardless of whether the decoder subsystem is known
+    // to be enabled — server returns 503 if not, which onerror handles with a
+    // long backoff so we don't hammer a disabled endpoint.
+
+    function connect() {
+        const es = new EventSource('/api/decoder/stream');
+        _digiSSE = es;
+        let gotMessage = false;
+
+        es.onmessage = (e) => {
+            gotMessage = true;
+            _digiReconnectMs = 5000; // reset backoff on success
+            try {
+                const d = JSON.parse(e.data);
+                if (d.type === 'decode') _digiHandleDecode(d);
+            } catch (_) {}
+        };
+
+        es.addEventListener('heartbeat', () => { gotMessage = true; _digiReconnectMs = 5000; });
+
+        es.onerror = () => {
+            es.close();
+            _digiSSE = null;
+            const delay = gotMessage ? _digiReconnectMs : 30000;
+            setTimeout(() => {
+                _digiReconnectMs = Math.min(_digiReconnectMs * 2, 30000);
+                connect();
+            }, delay);
+        };
+    }
+
+    connect();
+}
+
 // ── Notification stream ───────────────────────────────────────────────────────
 // Subscribes to /api/notifications/stream — the public, password-protected feed
 // enabled under Notifications → Channels in the admin UI. The endpoint answers
@@ -6615,6 +6824,33 @@ async function init() {
     });
     if (_floatingMapEnabled) _showFloatingMap();
 
+    // Digital spot tracker (FT8/WSPR unique country+band combinations)
+    const digiFT8Cb = document.getElementById('digi-ft8-toggle');
+    if (digiFT8Cb) {
+        let sFT8 = null;
+        try { sFT8 = localStorage.getItem('bandActivity_digiFT8'); } catch(_) {}
+        _digiFT8Enabled = (sFT8 === null) ? true : (sFT8 === '1');
+        digiFT8Cb.checked = _digiFT8Enabled;
+        digiFT8Cb.addEventListener('change', e => {
+            _digiFT8Enabled = e.target.checked;
+            try { localStorage.setItem('bandActivity_digiFT8', _digiFT8Enabled ? '1' : '0'); } catch(_) {}
+            if (!_digiFT8Enabled) _digiPruneMode('FT8');
+        });
+    }
+    const digiWSPRCb = document.getElementById('digi-wspr-toggle');
+    if (digiWSPRCb) {
+        let sWSPR = null;
+        try { sWSPR = localStorage.getItem('bandActivity_digiWSPR'); } catch(_) {}
+        _digiWSPREnabled = (sWSPR === null) ? true : (sWSPR === '1');
+        digiWSPRCb.checked = _digiWSPREnabled;
+        digiWSPRCb.addEventListener('change', e => {
+            _digiWSPREnabled = e.target.checked;
+            try { localStorage.setItem('bandActivity_digiWSPR', _digiWSPREnabled ? '1' : '0'); } catch(_) {}
+            if (!_digiWSPREnabled) _digiPruneMode('WSPR');
+        });
+    }
+    window.addEventListener('resize', _digiSpotsPosition);
+
     // Layout (grid arrangement) selector
     document.getElementById('layout-select').addEventListener('change', e => {
         currentLayout = e.target.value;
@@ -6647,6 +6883,8 @@ async function init() {
     _startVoiceTickerTimer();
     // Start CW spots SSE stream (if CW skimmer is enabled)
     _startCWSpots();
+    // Start the digital (FT8/WSPR) spot tracker
+    _startDigiSpots();
     // Start the notification stream (hidden unless the operator enabled it)
     _startNotifications();
 }

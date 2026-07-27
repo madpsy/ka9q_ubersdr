@@ -4347,7 +4347,11 @@ async function _loadMUFLayer() {
                       `${Math.round(level)} MHz</span>`,
                 iconAnchor: [16, 7],
             });
-            L.marker(midLatLng, { icon, interactive: false, keyboard: false }).addTo(group);
+            // Leaflet stacks markers by screen y-position by default, which can
+            // put these above the spot flags depending on where they happen to
+            // land — a negative offset keeps MUF labels below all normal
+            // (zero-offset) markers regardless of position.
+            L.marker(midLatLng, { icon, interactive: false, keyboard: false, zIndexOffset: -1000 }).addTo(group);
         }
 
         // Station dots (raw per-ionosonde readings) are deliberately not
@@ -5354,6 +5358,56 @@ function _setupDigiSpotsResize() {
             try { localStorage.setItem(_DIGI_SIZE_KEY, JSON.stringify(size)); } catch(_) {}
         }, 300);
     }).observe(list);
+}
+
+// ── Auto-scroll ────────────────────────────────────────────────────────────
+// This is a passive dashboard widget, so it shouldn't need the user to touch
+// a scrollbar to see everything in it. Rather than flattening the grid into
+// a single-row marquee (losing the multi-row/column layout the resize handle
+// exists to take advantage of), this gently drifts the whole grid vertically
+// — down to the bottom, a dwell to let it be read, back up, repeat — only
+// when there's actually more content than fits. Hovering the list pauses it,
+// so a manual scroll/wheel is still there for anyone who wants to jump around.
+const _DIGI_SCROLL_PX_PER_S = 16;
+const _DIGI_SCROLL_DWELL_MS = 1500;
+
+function _startDigiAutoScroll() {
+    const list = document.getElementById('digi-spots-list');
+    if (!list) return;
+
+    let paused = false;
+    list.addEventListener('mouseenter', () => { paused = true; });
+    list.addEventListener('mouseleave', () => { paused = false; });
+
+    let dir = 1;          // 1 = scrolling down, -1 = scrolling up
+    let lastTs = null;
+    let resumeAt = 0;     // rAF timestamp to resume at, while dwelling at an end
+
+    function step(ts) {
+        requestAnimationFrame(step);
+        const dt = lastTs === null ? 0 : ts - lastTs;
+        lastTs = ts;
+
+        const panel = document.getElementById('digi-spots-panel');
+        if (!panel || panel.style.display === 'none') return;
+        if (paused || document.hidden || ts < resumeAt) return;
+
+        const maxScroll = list.scrollHeight - list.clientHeight;
+        if (maxScroll <= 1) return; // everything already fits — nothing to do
+
+        let next = list.scrollTop + dir * (_DIGI_SCROLL_PX_PER_S * dt / 1000);
+        if (next >= maxScroll) {
+            next = maxScroll;
+            dir = -1;
+            resumeAt = ts + _DIGI_SCROLL_DWELL_MS;
+        } else if (next <= 0) {
+            next = 0;
+            dir = 1;
+            resumeAt = ts + _DIGI_SCROLL_DWELL_MS;
+        }
+        list.scrollTop = next;
+    }
+    requestAnimationFrame(step);
 }
 
 function _startDigiSpots() {
@@ -7135,6 +7189,7 @@ async function init() {
     window.addEventListener('resize', _digiSpotsPosition);
     _setupDigiSpotsDrag();   // restores a saved position, if any, before the first render below
     _setupDigiSpotsResize(); // restores a saved size, if any
+    _startDigiAutoScroll();  // drifts the grid when it overflows, so scrolling isn't required
     _renderDigiSpots(); // show the panel immediately if enabled, rather than waiting for the first decode
 
     // Layout (grid arrangement) selector

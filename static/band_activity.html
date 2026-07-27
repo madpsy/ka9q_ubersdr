@@ -4295,29 +4295,65 @@ function _collectSpotMarkers() {
     return markers;
 }
 
+// Cached collection results, so a zoom-driven re-declutter (see 'zoomend'
+// below) doesn't need to re-derive the spot list — only the pixel positions
+// change with zoom, not which spots exist.
+let _lastSpotMarkerData = [];
+
 function _refreshSpotMarkers() {
     if (!_leafletMap || !_showSpots) return;
+    _lastSpotMarkerData = _collectSpotMarkers();
+    _renderSpotMarkers();
+}
+
+// Same-country flags closer than this on screen are decluttered down to one
+// — spread apart naturally as the user zooms in (screen distance between two
+// fixed coordinates grows with zoom), so more of them reappear on their own.
+// Overlap between *different* countries is left alone: that's useful
+// information (who else is active nearby), not clutter.
+const _SPOT_DECLUTTER_PX = 20;
+
+function _renderSpotMarkers() {
+    if (!_leafletMap) return;
     if (!_leafletSpotsLayer) _leafletSpotsLayer = L.layerGroup().addTo(_leafletMap);
     _leafletSpotsLayer.clearLayers();
+    if (!_showSpots) return;
 
-    for (const m of _collectSpotMarkers()) {
-        const flag = m.cc ? iso2ToFlag(m.cc) : '🏳️';
-        const icon = L.divIcon({
-            className: '',
-            html: `<span style="font-size:18px;line-height:1;` +
-                  `filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));">${flag}</span>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-        });
-        const marker = L.marker([m.lat, m.lon], { icon, keyboard: false });
-        const freqMHz = typeof m.freq === 'number' ? (m.freq / 1e6).toFixed(3) + ' MHz' : '';
-        marker.bindTooltip(
-            `<b>${_escHtml(m.callsign || '?')}</b><br>` +
-            `${_escHtml((m.band || '').toUpperCase())}${freqMHz ? ' · ' + freqMHz : ''} · ${m.type}`,
-            { direction: 'top' }
-        );
-        marker.addTo(_leafletSpotsLayer);
+    const byCountry = new Map();
+    for (const m of _lastSpotMarkerData) {
+        const key = m.cc || '';
+        if (!byCountry.has(key)) byCountry.set(key, []);
+        byCountry.get(key).push(m);
     }
+
+    for (const group of byCountry.values()) {
+        const kept = [];
+        for (const m of group) {
+            const pt = _leafletMap.latLngToContainerPoint([m.lat, m.lon]);
+            if (kept.some(k => pt.distanceTo(k.pt) < _SPOT_DECLUTTER_PX)) continue;
+            kept.push({ m, pt });
+        }
+        for (const { m } of kept) _addSpotMarker(m);
+    }
+}
+
+function _addSpotMarker(m) {
+    const flag = m.cc ? iso2ToFlag(m.cc) : '🏳️';
+    const icon = L.divIcon({
+        className: '',
+        html: `<span style="font-size:14px;line-height:1;` +
+              `filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));">${flag}</span>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
+    });
+    const marker = L.marker([m.lat, m.lon], { icon, keyboard: false });
+    const freqMHz = typeof m.freq === 'number' ? (m.freq / 1e6).toFixed(3) + ' MHz' : '';
+    marker.bindTooltip(
+        `<b>${_escHtml(m.callsign || '?')}</b><br>` +
+        `${_escHtml((m.band || '').toUpperCase())}${freqMHz ? ' · ' + freqMHz : ''} · ${m.type}`,
+        { direction: 'top' }
+    );
+    marker.addTo(_leafletSpotsLayer);
 }
 
 function _applySpotsToggle(enabled) {
@@ -4475,6 +4511,10 @@ async function _showFloatingMap() {
             _leafletMap.setView([20, 0], 2);
         }
         _leafletMap.on('moveend', _saveFloatingMapView);
+        // Screen distance between two fixed coordinates changes with zoom
+        // (not with panning), so the spot-flag decluttering only needs to
+        // re-run here — and can reuse the already-collected data.
+        _leafletMap.on('zoomend', () => { if (_showSpots) _renderSpotMarkers(); });
 
         // _floatingMapTileKey was already restored from localStorage (and the
         // <select> synced to it) by _setupFloatingMapChrome() at init time.

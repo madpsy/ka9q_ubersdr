@@ -74,6 +74,12 @@ body {
     gap: 6px;
     flex: 1;          /* fill remaining space on the first topbar row */
     min-width: 0;
+    /* Fixed to the row's natural (pre-enlarged-clock) height. A flex child
+       taller than this — the clocks, deliberately — just overflows visually
+       above/below (still centered by align-items) instead of growing the
+       row, so #topbar's height and where the next line wraps are unaffected.
+       #topbar's own row gap (12px) is the clearance budget for that overflow. */
+    height: 18px;
 }
 
 #status-text {
@@ -84,9 +90,9 @@ body {
 
 #utc-clock {
     margin-left: auto;   /* push to far right of the status row */
-    font-size: 1.05em;
+    font-size: 1.45em;
     font-weight: 700;
-    line-height: 1;      /* keep layout height the same as surrounding text */
+    line-height: 1;      /* minimises (but can't eliminate) its own growth — see #status-row */
     color: #7ec8e3;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -94,7 +100,7 @@ body {
 }
 
 #local-clock {
-    font-size: 1.05em;
+    font-size: 1.45em;
     font-weight: 700;
     line-height: 1;
     color: #a0d8a0;      /* same greenish as receiver callsign */

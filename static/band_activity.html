@@ -1480,7 +1480,7 @@ body {
          costs no layout space. Fine for it to be covered by an alert toast. -->
     <div id="digi-spots-panel">
         <div id="digi-spots-header">
-            <span id="digi-spots-title">Digital spots</span>
+            <span id="digi-spots-title">Digital Spots (5 min)</span>
             <label id="digi-ft8-label" title="Track unique country+band combinations from FT8 decodes">
                 <input type="checkbox" id="digi-ft8-toggle" checked> FT8
             </label>
@@ -5026,14 +5026,17 @@ function _startCWSpots() {
 // mode per connection, and reusing a single connection avoids eating both of
 // the public endpoint's per-IP connection slots) and keeps a running set of
 // unique (mode, band, country) combinations seen — only FT8 and WSPR are
-// tracked, each independently toggleable. Never expires entries on its own;
-// it's a "worked" tally for the session, not a live spot list.
+// tracked, each independently toggleable. A combination drops off 5 minutes
+// after it was last (re-)seen — see _digiPruneExpired().
 let _digiSSE          = null;
 let _digiReconnectMs  = 5000;
 let _digiPanelEnabled = true;  // master "Digi" toolbar checkbox — panel visibility only
 let _digiFT8Enabled   = true;
 let _digiWSPREnabled  = true;
-const _digiCombos     = new Map(); // key `${mode}|${band}|${cc}` -> {mode, band, cc, country}
+let _digiPruneTimer   = null;
+const _digiCombos     = new Map(); // key `${mode}|${band}|${cc}` -> {mode, band, cc, country, lastSeen}
+
+const _DIGI_COMBO_MAX_AGE_MS = 5 * 60 * 1000;
 
 function _digiHandleDecode(d) {
     const mode = d.mode || '';
@@ -5049,9 +5052,25 @@ function _digiHandleDecode(d) {
 
     const cc  = (d.country_code || '').toUpperCase();
     const key = `${mode}|${band}|${cc}`;
-    if (_digiCombos.has(key)) return; // already known — nothing new to show
-    _digiCombos.set(key, { mode, band, cc, country: d.country || '' });
+    const existing = _digiCombos.get(key);
+    if (existing) {
+        existing.lastSeen = Date.now(); // still active — just pushes its expiry out
+        return;
+    }
+    _digiCombos.set(key, { mode, band, cc, country: d.country || '', lastSeen: Date.now() });
     _renderDigiSpots();
+}
+
+// Drops combinations not re-seen within _DIGI_COMBO_MAX_AGE_MS. Needs its own
+// timer (rather than only pruning on the next decode) since a combo that
+// simply stops being heard would otherwise never trigger a re-check.
+function _digiPruneExpired() {
+    const cutoff = Date.now() - _DIGI_COMBO_MAX_AGE_MS;
+    let changed = false;
+    for (const [key, v] of _digiCombos) {
+        if (v.lastSeen < cutoff) { _digiCombos.delete(key); changed = true; }
+    }
+    if (changed) _renderDigiSpots();
 }
 
 // Drops every tracked combination for a mode, e.g. when its checkbox is
@@ -5132,6 +5151,8 @@ function _startDigiSpots() {
     // Attempt connection regardless of whether the decoder subsystem is known
     // to be enabled — server returns 503 if not, which onerror handles with a
     // long backoff so we don't hammer a disabled endpoint.
+
+    if (!_digiPruneTimer) _digiPruneTimer = setInterval(_digiPruneExpired, 30000);
 
     function connect() {
         const es = new EventSource('/api/decoder/stream');

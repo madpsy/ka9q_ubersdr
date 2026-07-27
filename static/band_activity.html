@@ -641,6 +641,17 @@ body {
     max-height: none;
     box-shadow: none;
     z-index: auto;
+    /* position:static + z-index:auto stops *this element* from taking part
+       in z-index ordering, but it does nothing to contain Leaflet's own
+       internal panes/controls (leaflet.css hard-codes z-index up to 1000 on
+       .leaflet-control / .leaflet-top / .leaflet-bottom). Without a stacking
+       context of its own to trap those, they leak straight out to the page's
+       root stacking context and can float above anything — including
+       #digi-spots-panel (z-index 55). isolation:isolate creates that context
+       without reintroducing position/z-index, so the docked card (Leaflet
+       controls included) stacks with its siblings purely by DOM order, the
+       same as every other plain band card. */
+    isolation: isolate;
 }
 #floating-map.map-panel #floating-map-header {
     cursor: default;

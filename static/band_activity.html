@@ -1609,6 +1609,12 @@ const AUTO_NOISE_MARGIN = 6;    // dB of scale left below the noise floor
 const AUTO_HEADROOM     = 10;   // dB of scale left above the strongest signal
 const AUTO_EMA          = 0.02; // ≈12 s time constant at 4 Hz updates
 const AUTO_STEP         = 2;    // applied values move in steps of this many dB
+
+// The displayed P5 stat is the 5th-percentile bin of a single arrival, which
+// jumps around frame to frame — smoothed the same way the auto-range target
+// is, just over a much shorter window since it's read as a live number, not
+// a scale that should barely move.
+const P5_EMA = 0.125; // ≈2 s time constant at 4 Hz updates
 const AUTO_DEADBAND     = 3;    // smoothed target must drift this far to move it
 const AUTO_MIN_INTERVAL = 2000; // ms — hard floor on how often the scale changes
                                 // Together these two cap the slew at AUTO_STEP
@@ -2669,7 +2675,9 @@ class BandPanel {
         // Stats over the full band, written straight to the DOM — once per
         // arrival, so the render loop never touches layout.
         const sorted = Float32Array.from(this._curVals).sort();
-        this._statP5   = sorted[Math.floor(n * 0.05)];
+        const rawP5 = sorted[Math.floor(n * 0.05)];
+        if (this._statP5 === null) this._statP5 = rawP5;
+        else this._statP5 += (rawP5 - this._statP5) * P5_EMA;
         this._statPeak = sorted[n - 1];
         const elP5   = document.getElementById(`stat-p5-${this.name}`);
         const elPeak = document.getElementById(`stat-peak-${this.name}`);

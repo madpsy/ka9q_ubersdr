@@ -5216,12 +5216,19 @@ function _renderDigiSpots() {
     // as the CW ring buffer / voice ticker data) — filtering down to the
     // currently-selected bands happens here, at render time, so toggling
     // Filter or a band pill updates this instantly via _refreshSpotFilters().
+    // Sorted by actual frequency (bandMeta[...].start), not the band name
+    // string — "10m" vs "80m" numeric/lexical comparison ends up backwards
+    // from frequency order, since a smaller wavelength number is a *higher*
+    // band. This matches the low-to-high order the band pills use.
     const entries = [..._digiCombos.values()]
         .filter(e => !filterSpots || _bandIsActive(e.band))
-        .sort((a, b) =>
-            a.band !== b.band ? a.band.localeCompare(b.band, undefined, { numeric: true }) :
-            (a.country || a.cc).localeCompare(b.country || b.cc)
-        );
+        .sort((a, b) => {
+            if (a.band !== b.band) {
+                const fa = bandMeta[a.band]?.start ?? 0, fb = bandMeta[b.band]?.start ?? 0;
+                return fa - fb;
+            }
+            return (a.country || a.cc).localeCompare(b.country || b.cc);
+        });
 
     list.innerHTML = '';
     if (entries.length === 0) {

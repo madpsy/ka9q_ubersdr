@@ -1070,6 +1070,13 @@ body {
        rather than each card also covers anything added there later; the cards'
        own inline display from JS is irrelevant once the parent is gone. */
     #conditions-bar .cond-right { display: none; }
+
+    /* The enlarged clocks (see #status-row/#utc-clock/#local-clock) are a
+       desktop nicety — on a phone-width topbar every row is already tight,
+       so revert both back to their original size instead of fighting for
+       space against the rest of the row. */
+    #status-row { height: auto; }
+    #utc-clock, #local-clock { font-size: 1.05em; }
 }
 
 #conditions-bar .cond-cw-spots {
@@ -7156,12 +7163,16 @@ async function init() {
     });
     if (_floatingMapEnabled) _showFloatingMap();
 
-    // Digital spot tracker (FT8/WSPR unique country+band combinations)
+    // Digital spot tracker (FT8/WSPR unique country+band combinations).
+    // Defaults on everywhere except mobile — the panel floats over the topbar
+    // corner, which is prime real estate on a phone-width screen, so it
+    // starts off there unless the user explicitly turns it on.
     const digiCb = document.getElementById('show-digi');
     if (digiCb) {
         let sDigi = null;
         try { sDigi = localStorage.getItem('bandActivity_showDigi'); } catch(_) {}
-        _digiPanelEnabled = (sDigi === null) ? true : (sDigi === '1');
+        const isMobile = window.matchMedia('(max-width: 767px)').matches;
+        _digiPanelEnabled = (sDigi === null) ? !isMobile : (sDigi === '1');
         digiCb.checked = _digiPanelEnabled;
         digiCb.addEventListener('change', e => {
             _digiPanelEnabled = e.target.checked;

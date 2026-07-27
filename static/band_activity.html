@@ -340,6 +340,11 @@ body {
     font-weight: 600;
     font-size: 0.9em;
 }
+#digi-spots-empty {
+    font-size: 0.7em;
+    color: #666;
+    font-style: italic;
+}
 
 /* band selector pills — always on their own row when the topbar wraps */
 #band-pills {
@@ -1451,6 +1456,9 @@ body {
         <label for="show-map" title="Floating map: receiver location, day/night terminator and sunrise/sunset">
             <input type="checkbox" id="show-map"> Map
         </label>
+        <label for="show-digi" title="Digital spots: unique FT8/WSPR country+band combinations, under the clock">
+            <input type="checkbox" id="show-digi" checked> Digi
+        </label>
     </div>
 
     <!-- Alerts float below the clocks, over the top of the grid: they never
@@ -1956,6 +1964,19 @@ function _resolveBandName(name) {
     const lower = String(name).toLowerCase();
     if (bandMeta[lower]) return lower;
     return allBands.find(b => b.toLowerCase() === lower) || null;
+}
+
+// Finds which of this receiver's configured bands a frequency actually falls
+// within — the authoritative mapping, since a decoder/skimmer's own band
+// label is just an instance name and isn't guaranteed to line up with this
+// receiver's configured band edges.
+function _bandNameForFreq(hz) {
+    if (typeof hz !== 'number' || !isFinite(hz) || !allBands) return null;
+    for (const name of allBands) {
+        const meta = bandMeta[name];
+        if (meta && hz >= meta.start && hz <= meta.end) return name;
+    }
+    return null;
 }
 
 // Same convention as the main receiver UI: below 10 MHz the CW/voice pair sits
@@ -5009,6 +5030,7 @@ function _startCWSpots() {
 // it's a "worked" tally for the session, not a live spot list.
 let _digiSSE          = null;
 let _digiReconnectMs  = 5000;
+let _digiPanelEnabled = true;  // master "Digi" toolbar checkbox — panel visibility only
 let _digiFT8Enabled   = true;
 let _digiWSPREnabled  = true;
 const _digiCombos     = new Map(); // key `${mode}|${band}|${cc}` -> {mode, band, cc, country}
@@ -5019,10 +5041,10 @@ function _digiHandleDecode(d) {
     if (mode === 'FT8'  && !_digiFT8Enabled)  return;
     if (mode === 'WSPR' && !_digiWSPREnabled) return;
 
-    // The decoder's own band field carries the mode suffix (e.g. "20m_FT8")
-    // since it identifies a decoder instance, not just a ham band — strip it
-    // back down to the plain band name used everywhere else on this page.
-    const band = (d.band || '').split('_')[0];
+    // Derived from the decode's actual frequency against this receiver's
+    // configured band edges, not the decoder's own band field (which is a
+    // decoder-instance label like "20m_FT8", not guaranteed to agree).
+    const band = _bandNameForFreq(d.frequency);
     if (!band) return;
 
     const cc  = (d.country_code || '').toUpperCase();
@@ -5048,28 +5070,45 @@ function _renderDigiSpots() {
     const list  = document.getElementById('digi-spots-list');
     if (!panel || !list) return;
 
-    if (_digiCombos.size === 0) {
+    // Visibility is purely the master "Digi" checkbox now — it used to hide
+    // itself whenever there were no combos to show, which also hid the FT8/
+    // WSPR checkboxes living inside it: unchecking both left no way to get
+    // them back without reloading the page.
+    if (!_digiPanelEnabled) {
         panel.style.display = 'none';
         return;
     }
 
-    const entries = [..._digiCombos.values()].sort((a, b) =>
-        a.band !== b.band ? a.band.localeCompare(b.band, undefined, { numeric: true }) :
-        a.mode !== b.mode ? a.mode.localeCompare(b.mode) :
-        (a.country || a.cc).localeCompare(b.country || b.cc)
-    );
+    // Combos are kept for every band regardless of the 'Filter' toggle (same
+    // as the CW ring buffer / voice ticker data) — filtering down to the
+    // currently-selected bands happens here, at render time, so toggling
+    // Filter or a band pill updates this instantly via _refreshSpotFilters().
+    const entries = [..._digiCombos.values()]
+        .filter(e => !filterSpots || _bandIsActive(e.band))
+        .sort((a, b) =>
+            a.band !== b.band ? a.band.localeCompare(b.band, undefined, { numeric: true }) :
+            a.mode !== b.mode ? a.mode.localeCompare(b.mode) :
+            (a.country || a.cc).localeCompare(b.country || b.cc)
+        );
 
     list.innerHTML = '';
-    for (const e of entries) {
-        const chip = document.createElement('span');
-        chip.className = 'digi-spot-chip';
-        const flag = e.cc ? iso2ToFlag(e.cc) : '';
-        chip.innerHTML =
-            (flag ? `<span>${flag}</span>` : '') +
-            `<span>${_escHtml(e.band.toUpperCase())}</span>` +
-            `<span class="digi-spot-mode">${_escHtml(e.mode)}</span>`;
-        chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${e.mode}`;
-        list.appendChild(chip);
+    if (entries.length === 0) {
+        const empty = document.createElement('span');
+        empty.id = 'digi-spots-empty';
+        empty.textContent = _digiCombos.size === 0 ? 'No spots yet' : 'No spots on selected bands';
+        list.appendChild(empty);
+    } else {
+        for (const e of entries) {
+            const chip = document.createElement('span');
+            chip.className = 'digi-spot-chip';
+            const flag = e.cc ? iso2ToFlag(e.cc) : '';
+            chip.innerHTML =
+                (flag ? `<span>${flag}</span>` : '') +
+                `<span>${_escHtml(e.band.toUpperCase())}</span>` +
+                `<span class="digi-spot-mode">${_escHtml(e.mode)}</span>`;
+            chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${e.mode}`;
+            list.appendChild(chip);
+        }
     }
     panel.style.display = 'flex';
     _digiSpotsPosition();
@@ -5634,6 +5673,7 @@ function _refreshSpotFilters() {
     _renderCWSpots();
     if (_vaLastData) _renderVoiceTicker(_vaLastData);
     if (_showSpots) _refreshSpotMarkers();
+    _renderDigiSpots();
     const bar = document.getElementById('conditions-bar');
     if (bar && bar.style.display !== 'none') {
         requestAnimationFrame(() => {
@@ -6825,6 +6865,18 @@ async function init() {
     if (_floatingMapEnabled) _showFloatingMap();
 
     // Digital spot tracker (FT8/WSPR unique country+band combinations)
+    const digiCb = document.getElementById('show-digi');
+    if (digiCb) {
+        let sDigi = null;
+        try { sDigi = localStorage.getItem('bandActivity_showDigi'); } catch(_) {}
+        _digiPanelEnabled = (sDigi === null) ? true : (sDigi === '1');
+        digiCb.checked = _digiPanelEnabled;
+        digiCb.addEventListener('change', e => {
+            _digiPanelEnabled = e.target.checked;
+            try { localStorage.setItem('bandActivity_showDigi', _digiPanelEnabled ? '1' : '0'); } catch(_) {}
+            _renderDigiSpots();
+        });
+    }
     const digiFT8Cb = document.getElementById('digi-ft8-toggle');
     if (digiFT8Cb) {
         let sFT8 = null;
@@ -6850,6 +6902,7 @@ async function init() {
         });
     }
     window.addEventListener('resize', _digiSpotsPosition);
+    _renderDigiSpots(); // show the panel immediately if enabled, rather than waiting for the first decode
 
     // Layout (grid arrangement) selector
     document.getElementById('layout-select').addEventListener('change', e => {

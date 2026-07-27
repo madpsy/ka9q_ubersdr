@@ -4734,7 +4734,10 @@ async function _showFloatingMap() {
                 iconSize: [14, 14],
                 iconAnchor: [7, 7]
             });
-            _leafletMarker = L.marker([_receiverGps.lat, _receiverGps.lon], { icon }).addTo(_leafletMap);
+            // Leaflet stacks markers by screen y-position by default, so a spot
+            // flag beneath the receiver on screen would otherwise draw over it —
+            // a large zIndexOffset keeps this marker on top regardless.
+            _leafletMarker = L.marker([_receiverGps.lat, _receiverGps.lon], { icon, zIndexOffset: 10000 }).addTo(_leafletMap);
             if (_receiverLabel) _leafletMarker.bindTooltip(_receiverLabel, { direction: 'top' });
         }
 

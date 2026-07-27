@@ -548,7 +548,8 @@ body {
 }
 #floating-map-terminator-label,
 #floating-map-muf-label,
-#floating-map-spots-label {
+#floating-map-spots-label,
+#floating-map-digi-label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -560,10 +561,12 @@ body {
 }
 #floating-map-terminator-label:hover,
 #floating-map-muf-label:hover,
-#floating-map-spots-label:hover { color: #ccc; }
+#floating-map-spots-label:hover,
+#floating-map-digi-label:hover { color: #ccc; }
 #floating-map-terminator-label input,
 #floating-map-muf-label input,
-#floating-map-spots-label input {
+#floating-map-spots-label input,
+#floating-map-digi-label input {
     cursor: pointer;
     accent-color: #7ec8e3;
 }
@@ -1509,6 +1512,9 @@ body {
         <label id="floating-map-spots-label" title="CW/voice spots with a known location, as country flags. Respects the 'Filter' toggle.">
             <input type="checkbox" id="floating-map-spots" checked> Spots
         </label>
+        <label id="floating-map-digi-label" title="FT8/WSPR country+band combinations with a known grid locator, as country flags. Respects the 'Filter' toggle and the FT8/WSPR toggles in the Digi panel.">
+            <input type="checkbox" id="floating-map-digi"> Digi
+        </label>
         <select id="floating-map-tile-select" title="Map style">
             <option value="dark">Dark</option>
             <option value="osm">OSM</option>
@@ -1762,8 +1768,9 @@ let _mapResizeObserver   = null;
 let _showTerminator      = true;  // day/night overlay — on by default, same as before it was made toggleable
 let _showMUF             = false; // ionosphere (MUF) overlay — opt-in: costs a fetch to the public collector
 let _showSpots           = true;  // CW/voice spot flags — on by default
+let _showDigiMap         = false; // FT8/WSPR combo flags — opt-in, off by default
 let _leafletSpotsLayer   = null;
-let _spotsPruneTimer     = null;  // periodically re-collects markers so aged-out CW spots drop off even with no new events
+let _spotsPruneTimer     = null;  // periodically re-collects markers so aged-out CW/digi spots drop off even with no new events
 
 // ── Grid layout ───────────────────────────────────────────────────────────────
 // 'auto'  → CSS auto-fill at a 340px minimum, canvases keep their default
@@ -1977,6 +1984,29 @@ function _bandNameForFreq(hz) {
         if (meta && hz >= meta.start && hz <= meta.end) return name;
     }
     return null;
+}
+
+// Converts a Maidenhead grid locator (4 or 6 characters) to the centre
+// lat/lon of that square — used to place FT8/WSPR combos on the map, since
+// the decoder stream gives a grid, not coordinates. Returns null for
+// anything that isn't a plausible locator.
+function _locatorToLatLon(loc) {
+    if (typeof loc !== 'string') return null;
+    const s = loc.trim().toUpperCase();
+    if (!/^[A-R]{2}[0-9]{2}([A-X]{2})?$/.test(s)) return null;
+    const A = 'A'.charCodeAt(0), Z0 = '0'.charCodeAt(0);
+    let lon = (s.charCodeAt(0) - A) * 20 - 180;
+    let lat = (s.charCodeAt(1) - A) * 10 - 90;
+    lon += (s.charCodeAt(2) - Z0) * 2;
+    lat += (s.charCodeAt(3) - Z0) * 1;
+    if (s.length >= 6) {
+        lon += (s.charCodeAt(4) - A) * (2 / 24) + (1 / 24);
+        lat += (s.charCodeAt(5) - A) * (1 / 24) + (0.5 / 24);
+    } else {
+        lon += 1;   // centre of the 2°×1° square
+        lat += 0.5;
+    }
+    return { lat, lon };
 }
 
 // Same convention as the main receiver UI: below 10 MHz the CW/voice pair sits
@@ -4047,6 +4077,7 @@ const _MAP_TILE_KEY       = 'bandActivity_mapTile';
 const _MAP_TERMINATOR_KEY = 'bandActivity_mapTerminator';
 const _MAP_MUF_KEY        = 'bandActivity_mapMUF';
 const _MAP_SPOTS_KEY      = 'bandActivity_mapSpots';
+const _MAP_DIGI_KEY       = 'bandActivity_mapDigi';
 let _floatingMapTileLayer = null;
 let _floatingMapTileKey   = 'topo';
 
@@ -4377,29 +4408,45 @@ const _CW_SPOT_MAX_AGE_MS = 5 * 60 * 1000;
 
 function _collectSpotMarkers() {
     const markers = [];
-    const cwCutoff = Date.now() - _CW_SPOT_MAX_AGE_MS;
 
-    for (const s of _cwRecentSpots) {
-        if (typeof s._receivedAt === 'number' && s._receivedAt < cwCutoff) continue;
-        if (filterSpots && !_bandIsActive(s.band)) continue;
-        if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
-        if (s.latitude === 0 && s.longitude === 0) continue; // sentinel for "unknown"
-        markers.push({
-            lat: s.latitude, lon: s.longitude, cc: s.country_code, country: s.country,
-            callsign: s.callsign, band: s.band, freq: s.frequency, type: 'CW'
-        });
+    if (_showSpots) {
+        const cwCutoff = Date.now() - _CW_SPOT_MAX_AGE_MS;
+        for (const s of _cwRecentSpots) {
+            if (typeof s._receivedAt === 'number' && s._receivedAt < cwCutoff) continue;
+            if (filterSpots && !_bandIsActive(s.band)) continue;
+            if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
+            if (s.latitude === 0 && s.longitude === 0) continue; // sentinel for "unknown"
+            markers.push({
+                lat: s.latitude, lon: s.longitude, cc: s.country_code, country: s.country,
+                callsign: s.callsign, band: s.band, freq: s.frequency, type: 'CW'
+            });
+        }
+
+        const bands = _vaLastData?.bands || {};
+        for (const [band, activities] of Object.entries(bands)) {
+            if (filterSpots && !_bandIsActive(band)) continue;
+            for (const act of activities) {
+                if (typeof act.dx_latitude !== 'number' || typeof act.dx_longitude !== 'number') continue;
+                if (act.dx_latitude === 0 && act.dx_longitude === 0) continue;
+                markers.push({
+                    lat: act.dx_latitude, lon: act.dx_longitude, cc: act.dx_country_code, country: act.dx_country,
+                    callsign: act.dx_callsign, band, mode: act.mode,
+                    freq: act.estimated_dial_freq || act.center_freq, type: 'Voice'
+                });
+            }
+        }
     }
 
-    const bands = _vaLastData?.bands || {};
-    for (const [band, activities] of Object.entries(bands)) {
-        if (filterSpots && !_bandIsActive(band)) continue;
-        for (const act of activities) {
-            if (typeof act.dx_latitude !== 'number' || typeof act.dx_longitude !== 'number') continue;
-            if (act.dx_latitude === 0 && act.dx_longitude === 0) continue;
+    // FT8/WSPR combos — no specific callsign/frequency (they're an aggregate
+    // over the toolbar's 5-minute window), only shown once a decode carrying
+    // a grid locator has given the combo a position (see _digiHandleDecode).
+    if (_showDigiMap) {
+        for (const c of _digiCombos.values()) {
+            if (typeof c.lat !== 'number' || typeof c.lon !== 'number') continue;
+            if (filterSpots && !_bandIsActive(c.band)) continue;
             markers.push({
-                lat: act.dx_latitude, lon: act.dx_longitude, cc: act.dx_country_code, country: act.dx_country,
-                callsign: act.dx_callsign, band, mode: act.mode,
-                freq: act.estimated_dial_freq || act.center_freq, type: 'Voice'
+                lat: c.lat, lon: c.lon, cc: c.cc, country: c.country,
+                callsign: null, band: c.band, freq: null, type: c.mode
             });
         }
     }
@@ -4413,7 +4460,7 @@ function _collectSpotMarkers() {
 let _lastSpotMarkerData = [];
 
 function _refreshSpotMarkers() {
-    if (!_leafletMap || !_showSpots) return;
+    if (!_leafletMap || (!_showSpots && !_showDigiMap)) return;
     _lastSpotMarkerData = _collectSpotMarkers();
     _renderSpotMarkers();
 }
@@ -4429,7 +4476,7 @@ function _renderSpotMarkers() {
     if (!_leafletMap) return;
     if (!_leafletSpotsLayer) _leafletSpotsLayer = L.layerGroup().addTo(_leafletMap);
     _leafletSpotsLayer.clearLayers();
-    if (!_showSpots) return;
+    if (!_showSpots && !_showDigiMap) return;
 
     const byCountry = new Map();
     for (const m of _lastSpotMarkerData) {
@@ -4450,42 +4497,62 @@ function _renderSpotMarkers() {
 }
 
 function _addSpotMarker(m) {
+    // FT8/WSPR combos have no specific callsign/frequency (they're an
+    // aggregate), so there's nothing sensible to tune to and no callsign to
+    // headline the tooltip with — the country takes that spot instead.
+    const clickable = m.callsign != null && typeof m.freq === 'number';
     const flag = m.cc ? iso2ToFlag(m.cc) : '🏳️';
     const icon = L.divIcon({
         className: '',
-        html: `<span style="font-size:14px;line-height:1;cursor:pointer;` +
+        html: `<span style="font-size:14px;line-height:1;cursor:${clickable ? 'pointer' : 'default'};` +
               `filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));">${flag}</span>`,
         iconSize: [16, 16],
         iconAnchor: [8, 8]
     });
     const marker = L.marker([m.lat, m.lon], { icon, keyboard: false });
     const freqMHz = typeof m.freq === 'number' ? (m.freq / 1e6).toFixed(3) + ' MHz' : '';
+    const headline = m.callsign
+        ? `<b>${_escHtml(m.callsign)}</b>${m.country ? ' · ' + _escHtml(m.country) : ''}`
+        : `<b>${_escHtml(m.country || m.cc || 'Unknown')}</b>`;
     marker.bindTooltip(
-        `<b>${_escHtml(m.callsign || '?')}</b>${m.country ? ' · ' + _escHtml(m.country) : ''}<br>` +
+        `${headline}<br>` +
         `${_escHtml((m.band || '').toUpperCase())}${freqMHz ? ' · ' + freqMHz : ''} · ${m.type}`,
         { direction: 'top' }
     );
     // Same click-to-tune behaviour as the CW badges / voice ticker at the
     // bottom of the page — CW always tunes by frequency-derived sideband;
     // voice prefers the activity's own reported mode when it's one we know.
-    marker.on('click', () => {
-        if (typeof m.freq !== 'number') return;
-        const mode = m.type === 'CW'
-            ? _cwModeForFreq(m.freq)
-            : (_VALID_MODES.has((m.mode || '').toLowerCase()) ? m.mode.toLowerCase() : _voiceModeForFreq(m.freq));
-        _tuneFromSpot(m.band, m.freq, mode);
-    });
+    if (clickable) {
+        marker.on('click', () => {
+            const mode = m.type === 'CW'
+                ? _cwModeForFreq(m.freq)
+                : (_VALID_MODES.has((m.mode || '').toLowerCase()) ? m.mode.toLowerCase() : _voiceModeForFreq(m.freq));
+            _tuneFromSpot(m.band, m.freq, mode);
+        });
+    }
     marker.addTo(_leafletSpotsLayer);
 }
 
 function _applySpotsToggle(enabled) {
     _showSpots = enabled;
+    _syncSpotsLayerState();
+}
+
+function _applyDigiMapToggle(enabled) {
+    _showDigiMap = enabled;
+    _syncSpotsLayerState();
+}
+
+// Shared by both map spot layers (CW/voice "Spots" and FT8/WSPR "Digi") since
+// they share one Leaflet layer group and one prune timer — either toggle
+// being on keeps both alive; only turning both off tears them down.
+function _syncSpotsLayerState() {
     if (!_leafletMap) return;
-    if (enabled) {
+    if (_showSpots || _showDigiMap) {
         _refreshSpotMarkers();
-        // New CW/voice spots already trigger a refresh as they arrive, but
-        // nothing pokes it when one simply ages out — a quiet band with no
-        // fresh events would otherwise leave a stale flag up forever.
+        // New spots already trigger a refresh as they arrive, but nothing
+        // pokes it when one simply ages out — a quiet band with no fresh
+        // events would otherwise leave a stale flag up forever.
         if (!_spotsPruneTimer) _spotsPruneTimer = setInterval(_refreshSpotMarkers, 30000);
     } else {
         if (_leafletSpotsLayer) _leafletSpotsLayer.clearLayers();
@@ -4642,11 +4709,12 @@ async function _showFloatingMap() {
         // <select> synced to it) by _setupFloatingMapChrome() at init time.
         _applyFloatingMapTile(_floatingMapTileKey);
 
-        // _showTerminator / _showMUF / _showSpots were already restored from
-        // localStorage (and their checkboxes synced) by _setupFloatingMapChrome().
+        // _showTerminator / _showMUF / _showSpots / _showDigiMap were already
+        // restored from localStorage (and their checkboxes synced) by
+        // _setupFloatingMapChrome().
         _applyTerminatorToggle(_showTerminator);
         if (_showMUF) _applyMUFToggle(true);
-        if (_showSpots) _applySpotsToggle(true);
+        if (_showSpots || _showDigiMap) _syncSpotsLayerState();
 
         if (_receiverGps) {
             const icon = L.divIcon({
@@ -4810,12 +4878,28 @@ function _setupFloatingMapChrome() {
         });
     }
 
+    // FT8/WSPR combo flags — off by default, same as MUF (an extra opt-in layer).
+    const digiMapCb = document.getElementById('floating-map-digi');
+    const digiMapLabel = document.getElementById('floating-map-digi-label');
+    if (digiMapCb) {
+        let sDigi = null;
+        try { sDigi = localStorage.getItem(_MAP_DIGI_KEY); } catch(_) {}
+        _showDigiMap = (sDigi === '1');
+        digiMapCb.checked = _showDigiMap;
+        if (digiMapLabel) digiMapLabel.addEventListener('mousedown', e => e.stopPropagation());
+        digiMapCb.addEventListener('change', e => {
+            try { localStorage.setItem(_MAP_DIGI_KEY, e.target.checked ? '1' : '0'); } catch(_) {}
+            _applyDigiMapToggle(e.target.checked);
+        });
+    }
+
     let dragging = false, dragOffX = 0, dragOffY = 0;
     header.addEventListener('mousedown', e => {
         if (_mapDocked) return; // grid layout owns position while docked
         if (e.target.closest('#floating-map-close') || e.target.closest('#floating-map-tile-select') ||
             e.target.closest('#floating-map-dock') || e.target.closest('#floating-map-terminator-label') ||
-            e.target.closest('#floating-map-muf-label') || e.target.closest('#floating-map-spots-label')) return;
+            e.target.closest('#floating-map-muf-label') || e.target.closest('#floating-map-spots-label') ||
+            e.target.closest('#floating-map-digi-label')) return;
         dragging = true;
         const rect = panel.getBoundingClientRect();
         dragOffX = e.clientX - rect.left;
@@ -5052,13 +5136,27 @@ function _digiHandleDecode(d) {
 
     const cc  = (d.country_code || '').toUpperCase();
     const key = `${mode}|${band}|${cc}`;
+    // Not every decode carries a grid (many FT8 exchanges are just signal
+    // reports) — only overwrite the combo's map position when this one has
+    // one; otherwise keep whatever position it already had, if any.
+    const loc = _locatorToLatLon(d.locator);
+
     const existing = _digiCombos.get(key);
     if (existing) {
         existing.lastSeen = Date.now(); // still active — just pushes its expiry out
+        if (loc) {
+            existing.lat = loc.lat;
+            existing.lon = loc.lon;
+            if (_showDigiMap) _refreshSpotMarkers();
+        }
         return;
     }
-    _digiCombos.set(key, { mode, band, cc, country: d.country || '', lastSeen: Date.now() });
+    _digiCombos.set(key, {
+        mode, band, cc, country: d.country || '', lastSeen: Date.now(),
+        lat: loc ? loc.lat : null, lon: loc ? loc.lon : null
+    });
     _renderDigiSpots();
+    if (_showDigiMap && loc) _refreshSpotMarkers();
 }
 
 // Drops combinations not re-seen within _DIGI_COMBO_MAX_AGE_MS. Needs its own
@@ -5070,7 +5168,10 @@ function _digiPruneExpired() {
     for (const [key, v] of _digiCombos) {
         if (v.lastSeen < cutoff) { _digiCombos.delete(key); changed = true; }
     }
-    if (changed) _renderDigiSpots();
+    if (changed) {
+        _renderDigiSpots();
+        if (_showDigiMap) _refreshSpotMarkers();
+    }
 }
 
 // Drops every tracked combination for a mode, e.g. when its checkbox is
@@ -5081,7 +5182,10 @@ function _digiPruneMode(mode) {
     for (const [key, v] of _digiCombos) {
         if (v.mode === mode) { _digiCombos.delete(key); changed = true; }
     }
-    if (changed) _renderDigiSpots();
+    if (changed) {
+        _renderDigiSpots();
+        if (_showDigiMap) _refreshSpotMarkers();
+    }
 }
 
 function _renderDigiSpots() {

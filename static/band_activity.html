@@ -4090,8 +4090,8 @@ function _createMUFLegendControl() {
 
         const notches = levels.map(l => {
             const pct = (_mufScaleFraction(l) * 100).toFixed(2);
-            return `<span style="position:absolute;left:${pct}%;top:-2px;bottom:-2px;width:1px;` +
-                   `margin-left:-0.5px;background:#000;box-shadow:0 0 0 1px rgba(255,255,255,0.75);"></span>`;
+            return `<span style="position:absolute;left:${pct}%;top:-1px;bottom:-1px;width:1px;` +
+                   `margin-left:-0.5px;background:#000;box-shadow:0 0 0 0.5px rgba(255,255,255,0.75);"></span>`;
         }).join('');
 
         const labels = levels.map(l => {
@@ -4107,9 +4107,7 @@ function _createMUFLegendControl() {
         ).join('');
 
         div.innerHTML =
-            `<div style="font-size:10px;font-weight:bold;letter-spacing:0.04em;margin-bottom:3px;` +
-            `text-align:center;text-shadow:${_MUF_LEGEND_HALO};">MUF (MHz)</div>` +
-            `<div style="position:relative;height:11px;border-radius:2px;border:1px solid rgba(0,0,0,0.45);` +
+            `<div style="position:relative;height:8px;border-radius:2px;border:1px solid rgba(0,0,0,0.45);` +
             `background:linear-gradient(to right,${stops});">${notches}</div>` +
             `<div style="position:relative;height:12px;margin-top:3px;">${labels}${ends}</div>`;
 
@@ -4844,6 +4842,16 @@ function _cwHandleSpot(spot) {
             isNew = true;
         }
     }
+    // The skimmer can re-emit a spot for the same ongoing CQ multiple times
+    // while it's on the air — collapse repeats of the same callsign+band+freq
+    // into one refreshed entry (newest data, moved to the front) rather than
+    // stacking duplicates in the badge strip and on the map.
+    const call = (spot.callsign || '').toUpperCase();
+    const dupIdx = _cwRecentSpots.findIndex(s =>
+        (s.callsign || '').toUpperCase() === call && (s.band || '') === band && s.frequency === spot.frequency
+    );
+    if (dupIdx !== -1) _cwRecentSpots.splice(dupIdx, 1);
+
     // Prepend to ring buffer. _receivedAt (client clock, not the spot's own
     // "timestamp" field) is what the map's 5-minute flag expiry keys off —
     // avoids any server/client clock-skew weirdness.

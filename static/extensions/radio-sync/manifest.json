@@ -2,14 +2,13 @@
   "name": "radio-sync",
   "displayName": "Radio Sync",
   "icon": "📻",
-  "version": "1.0.0",
-  "description": "Synchronize frequency and mode with external radios via serial port",
+  "version": "2.0.0",
+  "description": "Synchronize frequency and mode with external radios via Hamlib (WebAssembly) over the Web Serial API",
   "author": "UberSDR",
   "files": {
     "main": "main.js",
     "styles": ["styles.css"],
-    "template": "template.html",
-    "scripts": ["protocols/yaesu-cat.js", "protocols/kenwood-cat.js"]
+    "template": "template.html"
   },
   "config": {
     "autoTune": false,

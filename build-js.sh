@@ -56,6 +56,25 @@ fi
 
 mkdir -p "$DIST"
 
+# ── Hamlib web asset ─────────────────────────────────────────────────────────────
+# Fetch the pre-built ubersdr-hamlib WASM/JS release (hamlib.wasm + hamlib.js +
+# hamlib-serial-bridge.js) and unpack it into static/hamlib/. Files sit at the
+# root of the archive already, so no flattening needed.
+HAMLIB_URL="https://github.com/madpsy/ubersdr-hamlib/releases/download/latest/dist.zip"
+HAMLIB_DIR="$STATIC/hamlib"
+
+echo "==> Fetching hamlib → $HAMLIB_DIR"
+HAMLIB_TMP=$(mktemp -d)
+trap 'rm -rf "$HAMLIB_TMP"' EXIT
+curl -fsSL "$HAMLIB_URL" -o "$HAMLIB_TMP/dist.zip"
+rm -rf "$HAMLIB_DIR"
+mkdir -p "$HAMLIB_DIR"
+unzip -q "$HAMLIB_TMP/dist.zip" -d "$HAMLIB_DIR"
+rm -rf "$HAMLIB_TMP"
+trap - EXIT
+echo "  fetched → $HAMLIB_DIR"
+
+echo ""
 echo "==> Building JS bundles (dev=$DEV)..."
 
 # ── Head bundle ────────────────────────────────────────────────────────────────

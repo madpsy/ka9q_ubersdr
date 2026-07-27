@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     libopusfile-dev \
     pkg-config \
     esbuild \
+    curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

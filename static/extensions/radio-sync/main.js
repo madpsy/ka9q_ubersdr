@@ -1,5 +1,24 @@
-// Radio Sync Extension - Synchronize with external radios via serial port
+// Radio Sync Extension - Synchronize with external radios via Hamlib (WebAssembly)
 // Displays frequency, mode, and TX/RX state with LED-style indicators
+//
+// Backed by Hamlib compiled to WebAssembly (see Hamlib/wasm/ in the Hamlib repo),
+// served from /hamlib/ on this instance. Talks to real hardware over the Web
+// Serial API via Hamlib's own rig backends instead of a hand-written per-radio
+// protocol parser, so every serial-capable rig Hamlib supports works here.
+
+const HAMLIB_BASE_URL = '/hamlib';
+
+// ubersdr's SDR-facing mode names (see static/extensions/README.md's Radio API)
+// vs. Hamlib's canonical rig_strrmode()/rig_parse_mode() names (RIG_MODE_* in
+// include/hamlib/rig.h). One table, shared by both sync directions - replaces
+// the separate modeMap/reverseModeMap that used to live in each protocol file.
+const SDR_TO_HAMLIB_MODE = {
+    usb: 'USB', lsb: 'LSB', cwu: 'CW', cwl: 'CWR',
+    am: 'AM', sam: 'SAM', fm: 'FM', nfm: 'FMN',
+};
+const HAMLIB_TO_SDR_MODE = Object.fromEntries(
+    Object.entries(SDR_TO_HAMLIB_MODE).map(([sdr, hamlib]) => [hamlib, sdr])
+);
 
 class RadioSyncExtension extends DecoderExtension {
     constructor() {
@@ -10,37 +29,12 @@ class RadioSyncExtension extends DecoderExtension {
             preferredBandwidth: null
         });
 
-        // Serial port state
-        this.serialPort = null;
-        this.reader = null;
-        this.writer = null;
+        // Hamlib wasm module state
+        this.hamlibModule = null;
+        this.hamlibLoadPromise = null;
+        this.rigHandle = 0;
         this.isConnected = false;
-        
-        // Radio protocol configuration
-        this.radioProtocols = {
-            'icom-ic7300': { name: 'Icom IC-7300', baudRate: 19200, protocol: 'icom-civ', civAddress: 0x94 },
-            'icom-ic7610': { name: 'Icom IC-7610', baudRate: 19200, protocol: 'icom-civ', civAddress: 0x98 },
-            'icom-ic9700': { name: 'Icom IC-9700', baudRate: 19200, protocol: 'icom-civ', civAddress: 0xA2 },
-            'icom-ic705': { name: 'Icom IC-705', baudRate: 19200, protocol: 'icom-civ', civAddress: 0xA4 },
-            'yaesu-ft991a': { name: 'Yaesu FT-991A', baudRate: 38400, protocol: 'yaesu-cat' },
-            'yaesu-ft710': { name: 'Yaesu FT-710', baudRate: 38400, protocol: 'yaesu-cat' },
-            'yaesu-ftdx10': { name: 'Yaesu FTDX10', baudRate: 38400, protocol: 'yaesu-cat' },
-            'yaesu-ftdx101d': { name: 'Yaesu FTDX101D', baudRate: 38400, protocol: 'yaesu-cat' },
-            'yaesu-ft818': { name: 'Yaesu FT-818', baudRate: 38400, protocol: 'yaesu-cat' },
-            'kenwood-ts590sg': { name: 'Kenwood TS-590SG', baudRate: 115200, protocol: 'kenwood-cat' },
-            'kenwood-ts890s': { name: 'Kenwood TS-890S', baudRate: 115200, protocol: 'kenwood-cat' },
-            'kenwood-ts480': { name: 'Kenwood TS-480', baudRate: 57600, protocol: 'kenwood-cat' },
-            'elecraft-k3': { name: 'Elecraft K3', baudRate: 38400, protocol: 'elecraft' },
-            'elecraft-k4': { name: 'Elecraft K4', baudRate: 38400, protocol: 'elecraft' },
-            'elecraft-kx3': { name: 'Elecraft KX3', baudRate: 38400, protocol: 'elecraft' },
-            'elecraft-kx2': { name: 'Elecraft KX2', baudRate: 38400, protocol: 'elecraft' },
-            'xiegu-g90': { name: 'Xiegu G90', baudRate: 19200, protocol: 'icom-civ', civAddress: 0x88 },
-            'xiegu-x6100': { name: 'Xiegu X6100', baudRate: 19200, protocol: 'icom-civ', civAddress: 0x88 }
-        };
-        
-        // Protocol handler instance
-        this.protocolHandler = null;
-        
+
         this.selectedRadio = null;
         this.selectedBaudRate = null; // Will be set when radio is selected
         this.syncMode = 'both'; // 'sdr-to-radio', 'radio-to-sdr', 'both'
@@ -48,14 +42,13 @@ class RadioSyncExtension extends DecoderExtension {
         this.displayStyles = ['style-digital', 'style-led', 'style-amber', 'style-cyan', 'style-red', 'style-vfd'];
         this.currentStyleIndex = 0;
 
-        
         // State tracking - these track the RADIO state, not SDR
         this.currentFrequency = 0;  // Radio frequency
         this.currentMode = 'USB';   // Radio mode
         this.txState = false;       // false = RX, true = TX
         this.muteOnTX = true; // Mute SDR when radio is transmitting
         this.wasMutedBeforeTX = false; // Track if SDR was already muted before TX
-        
+
         // Track last values sent to radio to prevent feedback loops
         this.lastSentFrequency = 0;
         this.lastSentMode = '';
@@ -79,60 +72,107 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     /**
-     * Check which protocol implementations are available and hide radios without them
+     * Loads hamlib.wasm + the Web Serial bridge exactly once, cwraps the API,
+     * and populates the radio dropdown from hamlib_list_rigs(). Safe to call
+     * repeatedly (e.g. every onEnable()) - subsequent calls return the same
+     * cached promise instead of reloading the 14MB module.
      */
-    async filterAvailableRadios() {
-        const availableProtocols = new Set();
-
-        // Check which protocol files are available
-        const protocolsToCheck = [
-            { name: 'yaesu-cat', class: 'YaesuCATProtocol' },
-            { name: 'icom-civ', class: 'IcomCIVProtocol' },
-            { name: 'kenwood-cat', class: 'KenwoodCATProtocol' },
-            { name: 'elecraft', class: 'ElecraftProtocol' }
-        ];
-
-        for (const protocol of protocolsToCheck) {
-            if (typeof window[protocol.class] !== 'undefined') {
-                availableProtocols.add(protocol.name);
-                console.log(`✅ Protocol available: ${protocol.name}`);
-            } else {
-                console.log(`❌ Protocol not available: ${protocol.name}`);
-            }
+    ensureHamlibLoaded() {
+        if (this.hamlibLoadPromise) {
+            return this.hamlibLoadPromise;
         }
 
-        // Filter radio options based on available protocols
+        this.hamlibLoadPromise = (async () => {
+            try {
+                if (typeof window.HamlibSerialBridge === 'undefined') {
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = `${HAMLIB_BASE_URL}/hamlib-serial-bridge.js`;
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error('Failed to load hamlib-serial-bridge.js'));
+                        document.head.appendChild(script);
+                    });
+                }
+
+                const { default: createHamlibModule } = await import(`${HAMLIB_BASE_URL}/hamlib.js`);
+                const bridge = new window.HamlibSerialBridge();
+                const Module = await createHamlibModule({ hamlibSerial: bridge });
+
+                this.hamlibModule = Module;
+                this.hamlibOpen = Module.cwrap('hamlib_open', 'number',
+                    ['number', 'number', 'number', 'number', 'number', 'number'], { async: true });
+                this.hamlibClose = Module.cwrap('hamlib_close', 'number', ['number'], { async: true });
+                this.hamlibGetFreq = Module.cwrap('hamlib_get_freq', 'number', ['number'], { async: true });
+                this.hamlibSetFreq = Module.cwrap('hamlib_set_freq', 'number', ['number', 'number'], { async: true });
+                this.hamlibGetMode = Module.cwrap('hamlib_get_mode', 'string', ['number'], { async: true });
+                this.hamlibSetMode = Module.cwrap('hamlib_set_mode', 'number', ['number', 'string'], { async: true });
+                this.hamlibGetPtt = Module.cwrap('hamlib_get_ptt', 'number', ['number'], { async: true });
+
+                const listRigs = Module.cwrap('hamlib_list_rigs', 'string', []); // no I/O - plain sync call
+                const rigs = JSON.parse(listRigs());
+                this.populateRadioDropdown(rigs);
+
+                this.addMessage(`Hamlib loaded: ${rigs.length} radios available`, 'success');
+            } catch (error) {
+                console.error('Failed to load Hamlib wasm module:', error);
+                this.showHamlibLoadError(error);
+                throw error;
+            }
+        })();
+
+        return this.hamlibLoadPromise;
+    }
+
+    /**
+     * Replaces the static placeholder options in #radio-sync-model with one
+     * <optgroup> per manufacturer, generated from hamlib_list_rigs(). Each
+     * <option>'s dataset carries the serial settings hamlib_open() needs -
+     * this is the per-radio config source now (replaces the old hardcoded
+     * this.radioProtocols map).
+     */
+    populateRadioDropdown(rigs) {
         const modelSelect = document.getElementById('radio-sync-model');
         if (!modelSelect) return;
 
-        let hiddenCount = 0;
-
-        // Iterate through all options and hide those without available protocols
-        for (const [radioId, radioConfig] of Object.entries(this.radioProtocols)) {
-            if (!availableProtocols.has(radioConfig.protocol)) {
-                // Find and hide the option
-                const option = modelSelect.querySelector(`option[value="${radioId}"]`);
-                if (option) {
-                    option.style.display = 'none';
-                    option.disabled = true;
-                    hiddenCount++;
-                }
-            }
+        const byMfg = new Map();
+        for (const rig of rigs) {
+            if (!byMfg.has(rig.mfg)) byMfg.set(rig.mfg, []);
+            byMfg.get(rig.mfg).push(rig);
         }
 
-        // Hide empty optgroups
-        const optgroups = modelSelect.querySelectorAll('optgroup');
-        optgroups.forEach(optgroup => {
-            const visibleOptions = Array.from(optgroup.querySelectorAll('option'))
-                .filter(opt => opt.style.display !== 'none');
-            if (visibleOptions.length === 0) {
-                optgroup.style.display = 'none';
-            }
-        });
+        const mfgs = Array.from(byMfg.keys()).sort((a, b) => a.localeCompare(b));
 
-        if (hiddenCount > 0) {
-            this.addMessage(`${hiddenCount} radio(s) hidden (protocol not implemented)`, 'info');
+        modelSelect.innerHTML = '<option value="">Select Radio...</option>';
+        for (const mfg of mfgs) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = mfg;
+
+            const rigsForMfg = byMfg.get(mfg).sort((a, b) => a.name.localeCompare(b.name));
+            for (const rig of rigsForMfg) {
+                const option = document.createElement('option');
+                option.value = String(rig.model);
+                option.textContent = rig.name;
+                option.dataset.name = `${rig.mfg} ${rig.name}`;
+                option.dataset.baud = rig.baudMax;
+                option.dataset.dataBits = rig.dataBits;
+                option.dataset.stopBits = rig.stopBits;
+                option.dataset.parity = rig.parity;
+                option.dataset.handshake = rig.handshake;
+                optgroup.appendChild(option);
+            }
+            modelSelect.appendChild(optgroup);
         }
+    }
+
+    showHamlibLoadError(error) {
+        const errorDiv = document.getElementById('radio-sync-api-error');
+        if (errorDiv) {
+            errorDiv.style.display = 'block';
+            errorDiv.querySelector('strong').textContent = '⚠️ Hamlib module failed to load';
+            errorDiv.querySelector('p').textContent =
+                `Could not load ${HAMLIB_BASE_URL}/hamlib.js (${error.message}). Radio control is unavailable.`;
+        }
+        this.addMessage(`Hamlib load error: ${error.message}`, 'error');
     }
 
     showSerialAPIError() {
@@ -145,7 +185,7 @@ class RadioSyncExtension extends DecoderExtension {
 
     renderUI() {
         const template = window.radio_sync_template;
-        
+
         if (!template) {
             console.error('Radio Sync extension template not loaded');
             return;
@@ -168,12 +208,10 @@ class RadioSyncExtension extends DecoderExtension {
 
                 // Update baud rate dropdown to default for selected radio
                 const baudRateSelect = document.getElementById('radio-sync-baud-rate');
-                if (baudRateSelect && this.selectedRadio) {
-                    const radioConfig = this.radioProtocols[this.selectedRadio];
-                    if (radioConfig) {
-                        baudRateSelect.value = radioConfig.baudRate.toString();
-                        this.selectedBaudRate = radioConfig.baudRate;
-                    }
+                const option = modelSelect.selectedOptions[0];
+                if (baudRateSelect && this.selectedRadio && option) {
+                    baudRateSelect.value = option.dataset.baud;
+                    this.selectedBaudRate = parseInt(option.dataset.baud, 10);
                 }
 
                 // Update connect button based on selection
@@ -181,7 +219,7 @@ class RadioSyncExtension extends DecoderExtension {
                     if (this.selectedRadio) {
                         connectBtn.disabled = false;
                         connectBtn.textContent = 'Connect to Radio';
-                        this.addMessage(`Selected: ${this.radioProtocols[this.selectedRadio]?.name || 'Unknown'}`, 'info');
+                        this.addMessage(`Selected: ${option?.dataset.name || 'Unknown'}`, 'info');
                     } else {
                         connectBtn.disabled = true;
                         connectBtn.textContent = 'Select Radio First';
@@ -232,7 +270,7 @@ class RadioSyncExtension extends DecoderExtension {
         } else {
             console.error('Radio Sync: Connect button not found');
         }
-        
+
         if (disconnectBtn) {
             disconnectBtn.addEventListener('click', () => this.disconnectFromRadio());
         } else {
@@ -273,7 +311,7 @@ class RadioSyncExtension extends DecoderExtension {
             .replace('style-', '')
             .replace('-', ' ')
             .toUpperCase();
-        
+
         this.addMessage(`Display style: ${styleName}`, 'info');
     }
 
@@ -287,11 +325,9 @@ class RadioSyncExtension extends DecoderExtension {
             'both': document.getElementById('radio-sync-both')
         };
 
-        console.log('setSyncMode called with mode:', mode);
         Object.keys(buttons).forEach(key => {
             if (buttons[key]) {
                 if (key === mode) {
-                    console.log('Adding active class to:', key, buttons[key]);
                     buttons[key].classList.add('radio-sync-btn-active');
                     // Force inline styles to override any CSS
                     buttons[key].style.background = '#3498db';
@@ -299,9 +335,7 @@ class RadioSyncExtension extends DecoderExtension {
                     buttons[key].style.boxShadow = '0 0 15px rgba(52, 152, 219, 0.6)';
                     buttons[key].style.color = '#ffffff';
                     buttons[key].style.fontWeight = '700';
-                    console.log('Button classes after add:', buttons[key].className);
                 } else {
-                    console.log('Removing active class from:', key);
                     buttons[key].classList.remove('radio-sync-btn-active');
                     // Remove inline styles
                     buttons[key].style.background = '';
@@ -318,12 +352,11 @@ class RadioSyncExtension extends DecoderExtension {
         this.addMessage(`Sync mode: ${mode.replace(/-/g, ' ').toUpperCase()}`, 'info');
     }
 
-
     updateFromSDR() {
         // Initialize display with SDR state until we get radio state
         const sdrFreq = this.radio.getFrequency();
         const sdrMode = this.radio.getMode();
-        
+
         // Update displays (will be overwritten by radio responses)
         this.updateFrequencyDisplay(sdrFreq);
         this.updateModeDisplay(sdrMode);
@@ -371,7 +404,7 @@ class RadioSyncExtension extends DecoderExtension {
         this.txState = isTX;
 
         const stateDisplay = document.getElementById('radio-sync-state-display');
-        
+
         if (stateDisplay) {
             if (!isConnected) {
                 // Show dashes when not connected
@@ -392,11 +425,9 @@ class RadioSyncExtension extends DecoderExtension {
         if (isConnected && this.muteOnTX) {
             if (isTX && !wasTransmitting) {
                 // Just started transmitting - mute SDR
-                console.log('TX started - calling muteSDR()');
                 this.muteSDR();
             } else if (!isTX && wasTransmitting) {
                 // Just stopped transmitting - unmute SDR
-                console.log('TX stopped - calling unmuteSDR()');
                 this.unmuteSDR();
             }
         }
@@ -406,26 +437,16 @@ class RadioSyncExtension extends DecoderExtension {
         try {
             // Store whether SDR was already muted before we mute it
             this.wasMutedBeforeTX = this.radio.getMuted();
-            console.log('muteSDR: Current mute state =', this.wasMutedBeforeTX);
-            console.log('muteSDR: wasMutedBeforeTX will be set to', this.wasMutedBeforeTX);
 
             // Only mute if not already muted
             if (!this.wasMutedBeforeTX) {
-                console.log('muteSDR: Calling setMuted(true)...');
                 const result = this.radio.setMuted(true);
-                console.log('muteSDR: setMuted(true) returned', result);
-
-                // Verify it actually got muted
-                const newState = this.radio.getMuted();
-                console.log('muteSDR: After setMuted(true), getMuted() returns', newState);
 
                 if (result) {
                     this.addMessage('🔇 SDR muted (radio TX)', 'info');
                 } else {
                     this.addMessage('Failed to mute SDR', 'warning');
                 }
-            } else {
-                console.log('muteSDR: SDR was already muted, not muting again');
             }
         } catch (error) {
             console.error('Error in muteSDR:', error);
@@ -435,26 +456,15 @@ class RadioSyncExtension extends DecoderExtension {
 
     unmuteSDR() {
         try {
-            console.log('unmuteSDR: wasMutedBeforeTX =', this.wasMutedBeforeTX);
-            console.log('unmuteSDR: Current mute state before unmute =', this.radio.getMuted());
-
             // Only unmute if we muted it (don't unmute if it was already muted)
             if (!this.wasMutedBeforeTX) {
-                console.log('unmuteSDR: Calling setMuted(false)...');
                 const result = this.radio.setMuted(false);
-                console.log('unmuteSDR: setMuted(false) returned', result);
-
-                // Verify it actually got unmuted
-                const newState = this.radio.getMuted();
-                console.log('unmuteSDR: After setMuted(false), getMuted() returns', newState);
 
                 if (result) {
                     this.addMessage('🔊 SDR unmuted (radio RX)', 'info');
                 } else {
                     this.addMessage('Failed to unmute SDR', 'warning');
                 }
-            } else {
-                console.log('unmuteSDR: SDR was muted before TX, not unmuting');
             }
         } catch (error) {
             console.error('Error in unmuteSDR:', error);
@@ -474,49 +484,42 @@ class RadioSyncExtension extends DecoderExtension {
         }
 
         try {
-            const radioConfig = this.radioProtocols[this.selectedRadio];
-            this.addMessage(`Connecting to ${radioConfig.name}...`, 'info');
+            await this.ensureHamlibLoaded();
+        } catch (error) {
+            return; // ensureHamlibLoaded() already reported this
+        }
 
-            // Initialize protocol handler
-            if (radioConfig.protocol === 'yaesu-cat') {
-                if (typeof YaesuCATProtocol === 'undefined') {
-                    throw new Error('Yaesu CAT protocol handler not loaded');
-                }
-                this.protocolHandler = new YaesuCATProtocol();
-                this.addMessage('Initialized Yaesu CAT protocol', 'info');
-            } else if (radioConfig.protocol === 'kenwood-cat') {
-                if (typeof KenwoodCATProtocol === 'undefined') {
-                    throw new Error('Kenwood CAT protocol handler not loaded');
-                }
-                this.protocolHandler = new KenwoodCATProtocol();
-                this.addMessage('Initialized Kenwood CAT protocol', 'info');
-            } else {
-                throw new Error(`Protocol ${radioConfig.protocol} not yet implemented`);
+        const modelSelect = document.getElementById('radio-sync-model');
+        const option = modelSelect?.selectedOptions[0];
+        if (!option) {
+            this.addMessage('Please select a radio model first', 'warning');
+            return;
+        }
+
+        const model = Number(this.selectedRadio);
+        const baud = this.selectedBaudRate || Number(option.dataset.baud);
+        const dataBits = Number(option.dataset.dataBits);
+        const stopBits = Number(option.dataset.stopBits);
+        const parity = Number(option.dataset.parity);
+        const handshake = Number(option.dataset.handshake);
+
+        try {
+            this.addMessage(`Connecting to ${option.dataset.name}...`, 'info');
+
+            // This triggers the browser's Web Serial device picker.
+            this.rigHandle = await this.hamlibOpen(model, baud, dataBits, stopBits, parity, handshake);
+
+            if (this.rigHandle <= 0) {
+                throw new Error('hamlib_open failed - check the message log / browser console for the Hamlib debug trace');
             }
 
-            // Request serial port
-            this.serialPort = await navigator.serial.requestPort();
-
-            // Open with radio-specific settings
-            await this.serialPort.open({
-                baudRate: radioConfig.baudRate,
-                dataBits: 8,
-                stopBits: 1,
-                parity: 'none',
-                flowControl: 'none'
-            });
-
             this.isConnected = true;
-            this.addMessage(`Connected to ${radioConfig.name} at ${radioConfig.baudRate} baud`, 'success');
-            
+            this.addMessage(`Connected to ${option.dataset.name} at ${baud} baud`, 'success');
+
             // Update UI
             this.updateConnectionUI(true);
 
-            // Start reading from radio
-            this.startReading();
-
-            // Start polling radio state (for radio-to-sdr sync)
-            // Note: We always poll for TX status, but only poll freq/mode in radio-to-sdr or both modes
+            // Start polling radio state (freq/mode/TX for display, and for radio-to-sdr sync)
             this.startRadioPolling();
 
             // Get current SDR state before syncing to radio
@@ -532,26 +535,18 @@ class RadioSyncExtension extends DecoderExtension {
         } catch (error) {
             this.addMessage(`Connection failed: ${error.message}`, 'error');
             this.isConnected = false;
-            this.protocolHandler = null;
+            this.rigHandle = 0;
         }
     }
 
     async disconnectFromRadio() {
-        if (!this.serialPort) return;
+        if (!this.rigHandle) return;
 
         try {
-            // Stop radio polling
             this.stopRadioPolling();
 
-            // Stop reading
-            if (this.reader) {
-                await this.reader.cancel();
-                this.reader = null;
-            }
-
-            // Close port
-            await this.serialPort.close();
-            this.serialPort = null;
+            await this.hamlibClose(this.rigHandle);
+            this.rigHandle = 0;
             this.isConnected = false;
 
             this.addMessage('Disconnected from radio', 'info');
@@ -571,23 +566,21 @@ class RadioSyncExtension extends DecoderExtension {
         // Stop any existing polling
         this.stopRadioPolling();
 
-        // Poll radio every 100ms for freq/mode (always, for display) and TX state (always, for mute)
+        // Poll radio every 100ms for freq/mode/TX state (always, for display and mute-on-TX)
         this.radioPollingInterval = setInterval(async () => {
-            if (this.isConnected && this.protocolHandler) {
-                try {
-                    // Always query frequency and mode to update display
-                    const freqCmd = this.protocolHandler.buildGetFrequencyCommand();
-                    await this.sendCommand(freqCmd);
+            if (!this.isConnected || !this.rigHandle) return;
 
-                    const modeCmd = this.protocolHandler.buildGetModeCommand();
-                    await this.sendCommand(modeCmd);
+            try {
+                const freq = await this.hamlibGetFreq(this.rigHandle);
+                if (freq >= 0) this.handleRadioFrequency(freq);
 
-                    // Always query TX/RX state for mute-on-TX feature
-                    const txCmd = this.protocolHandler.buildGetTXStatusCommand();
-                    await this.sendCommand(txCmd);
-                } catch (error) {
-                    console.error('Radio polling error:', error);
-                }
+                const hamlibMode = await this.hamlibGetMode(this.rigHandle);
+                if (hamlibMode) this.handleRadioMode(hamlibMode);
+
+                const ptt = await this.hamlibGetPtt(this.rigHandle);
+                if (ptt >= 0) this.updateTXRXState(ptt !== 0);
+            } catch (error) {
+                console.error('Radio polling error:', error);
             }
         }, 100); // Poll every 100ms (10 Hz) for responsive sync
 
@@ -599,6 +592,43 @@ class RadioSyncExtension extends DecoderExtension {
             clearInterval(this.radioPollingInterval);
             this.radioPollingInterval = null;
             this.addMessage('Stopped polling radio state', 'info');
+        }
+    }
+
+    handleRadioFrequency(freq) {
+        this.currentFrequency = freq;
+        this.updateFrequencyDisplay(freq);
+
+        if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
+            const currentSDRFreq = this.radio.getFrequency();
+            if (freq !== currentSDRFreq) {
+                // Set flag to prevent our event handlers from reacting
+                this.updatingFromRadio = true;
+                // Track this as the last sent frequency to prevent feedback
+                this.lastSentFrequency = freq;
+                this.radio.setFrequency(freq);
+                // Clear flag immediately after event loop processes the event
+                setTimeout(() => { this.updatingFromRadio = false; }, 0);
+            }
+        }
+    }
+
+    handleRadioMode(hamlibMode) {
+        const sdrMode = HAMLIB_TO_SDR_MODE[hamlibMode] || hamlibMode.toLowerCase();
+        this.currentMode = sdrMode;
+        this.updateModeDisplay(sdrMode);
+
+        if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
+            const currentSDRMode = this.radio.getMode();
+            if (sdrMode !== currentSDRMode) {
+                // Set flag to prevent our event handlers from reacting
+                this.updatingFromRadio = true;
+                // Track this as the last sent mode to prevent feedback
+                this.lastSentMode = sdrMode;
+                this.radio.setMode(sdrMode);
+                // Clear flag immediately after event loop processes the event
+                setTimeout(() => { this.updatingFromRadio = false; }, 0);
+            }
         }
     }
 
@@ -626,162 +656,11 @@ class RadioSyncExtension extends DecoderExtension {
         }
     }
 
-    async startReading() {
-        if (!this.serialPort || !this.serialPort.readable) return;
-
-        try {
-            this.reader = this.serialPort.readable.getReader();
-
-            while (true) {
-                const { value, done } = await this.reader.read();
-                if (done) break;
-
-                // Parse radio response based on protocol
-                this.parseRadioResponse(value);
-            }
-        } catch (error) {
-            if (error.name !== 'NetworkError') {
-                this.addMessage(`Read error: ${error.message}`, 'error');
-            }
-        } finally {
-            if (this.reader) {
-                this.reader.releaseLock();
-                this.reader = null;
-            }
-        }
-    }
-
-    parseRadioResponse(data) {
-        if (!this.protocolHandler) {
-            this.addMessage('No protocol handler available', 'error');
-            return;
-        }
-        
-        const responses = this.protocolHandler.parseResponse(data);
-        
-        if (!responses) {
-            return; // Incomplete response, waiting for more data
-        }
-        
-        // Process each complete response
-        for (const response of responses) {
-            this.handleParsedResponse(response);
-        }
-    }
-    
-    handleParsedResponse(response) {
-        if (!response) return;
-        
-        switch (response.type) {
-            case 'frequency':
-                this.addMessage(`Radio VFO-${response.vfo}: ${this.radio.formatFrequency(response.frequency)}`, 'info');
-
-                // Update our display with radio frequency
-                this.currentFrequency = response.frequency;
-                this.updateFrequencyDisplay(response.frequency);
-
-                if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    // Only update SDR if frequency actually differs
-                    const currentSDRFreq = this.radio.getFrequency();
-                    if (response.frequency !== currentSDRFreq) {
-                        // Set flag to prevent our event handlers from reacting
-                        this.updatingFromRadio = true;
-                        // Track this as the last sent frequency to prevent feedback
-                        this.lastSentFrequency = response.frequency;
-                        // Update SDR frequency
-                        this.radio.setFrequency(response.frequency);
-                        // Clear flag immediately after event loop processes the event
-                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
-                    }
-                }
-                break;
-
-            case 'mode':
-                this.addMessage(`Radio mode: ${response.mode}`, 'info');
-
-                // Update our display with radio mode
-                this.currentMode = response.mode;
-                this.updateModeDisplay(response.mode);
-
-                if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    // Only update SDR if mode actually differs
-                    const sdrMode = response.mode.toLowerCase();
-                    const currentSDRMode = this.radio.getMode();
-                    if (sdrMode !== currentSDRMode) {
-                        // Set flag to prevent our event handlers from reacting
-                        this.updatingFromRadio = true;
-                        // Track this as the last sent mode to prevent feedback
-                        this.lastSentMode = sdrMode;
-                        // Update SDR mode
-                        this.radio.setMode(sdrMode);
-                        // Clear flag immediately after event loop processes the event
-                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
-                    }
-                }
-                break;
-
-            case 'status':
-                // Full status from IF command
-                this.addMessage(`Radio status: ${this.radio.formatFrequency(response.frequency)} ${response.mode} ${response.transmitting ? 'TX' : 'RX'}`, 'info');
-
-                // Update our display with radio state
-                this.currentFrequency = response.frequency;
-                this.currentMode = response.mode;
-                this.updateFrequencyDisplay(response.frequency);
-                this.updateModeDisplay(response.mode);
-                this.updateTXRXState(response.transmitting);
-
-                if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    // Only update SDR if values actually differ
-                    const currentSDRFreq = this.radio.getFrequency();
-                    const sdrMode = response.mode.toLowerCase();
-                    const currentSDRMode = this.radio.getMode();
-
-                    const freqChanged = response.frequency !== currentSDRFreq;
-                    const modeChanged = sdrMode !== currentSDRMode;
-
-                    if (freqChanged || modeChanged) {
-                        // Set flag to prevent our event handlers from reacting
-                        this.updatingFromRadio = true;
-                        // Track these as the last sent values to prevent feedback
-                        this.lastSentFrequency = response.frequency;
-                        this.lastSentMode = sdrMode;
-                        // Update SDR only if changed
-                        if (freqChanged) {
-                            this.radio.setFrequency(response.frequency);
-                        }
-                        if (modeChanged) {
-                            this.radio.setMode(sdrMode);
-                        }
-                        // Clear flag immediately after event loop processes the events
-                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
-                    }
-                }
-                break;
-                
-            case 'tx_status':
-                this.updateTXRXState(response.transmitting);
-                break;
-                
-            case 'power':
-                this.addMessage(`Radio power: ${response.on ? 'ON' : 'OFF'}`, 'info');
-                break;
-                
-            case 'error':
-                this.addMessage(`Parse error: ${response.message}`, 'error');
-                break;
-                
-            default:
-                this.addMessage(`Unknown response type: ${response.type}`, 'warning');
-        }
-    }
-
     async sendFrequencyToRadio(freq) {
-        if (!this.isConnected || !this.serialPort || !this.protocolHandler) return;
+        if (!this.isConnected || !this.rigHandle) return;
 
         try {
-            const command = this.protocolHandler.buildSetFrequencyCommand(freq);
-            await this.sendCommand(command);
+            await this.hamlibSetFreq(this.rigHandle, freq);
             this.addMessage(`Set radio frequency: ${this.radio.formatFrequency(freq)}`, 'success');
         } catch (error) {
             this.addMessage(`Failed to set frequency: ${error.message}`, 'error');
@@ -789,30 +668,14 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     async sendModeToRadio(mode) {
-        if (!this.isConnected || !this.serialPort || !this.protocolHandler) return;
+        if (!this.isConnected || !this.rigHandle) return;
 
         try {
-            const command = this.protocolHandler.buildSetModeCommand(mode);
-            await this.sendCommand(command);
+            const hamlibMode = SDR_TO_HAMLIB_MODE[mode] || mode.toUpperCase();
+            await this.hamlibSetMode(this.rigHandle, hamlibMode);
             this.addMessage(`Set radio mode: ${mode.toUpperCase()}`, 'success');
         } catch (error) {
             this.addMessage(`Failed to set mode: ${error.message}`, 'error');
-        }
-    }
-    
-    async sendCommand(command) {
-        if (!this.serialPort || !this.serialPort.writable) {
-            throw new Error('Serial port not writable');
-        }
-        
-        const writer = this.serialPort.writable.getWriter();
-        try {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(command);
-            await writer.write(data);
-            this.addMessage(`TX: ${command.trim()}`, 'info');
-        } finally {
-            writer.releaseLock();
         }
     }
 
@@ -845,18 +708,14 @@ class RadioSyncExtension extends DecoderExtension {
     onEnable() {
         console.log('Radio Sync Extension onEnable called');
 
-        // Filter radio options based on available protocols (do this first, before event listeners)
-        this.filterAvailableRadios();
-
         // Set up event listeners now that template is definitely in DOM
         this.setupEventListeners();
 
+        // Load the Hamlib wasm module and populate the radio dropdown from it
+        this.ensureHamlibLoaded();
+
         // Subscribe to radio events for SDR changes
-        console.log('About to subscribe to radio events...');
-        console.log('RadioAPI instance:', this.radio);
-        console.log('RadioAPI callbacks before:', this.radio.callbacks);
         this.subscribeToRadioEvents();
-        console.log('RadioAPI callbacks after:', this.radio.callbacks);
 
         // Set initial sync mode button state
         this.setSyncMode(this.syncMode);
@@ -875,26 +734,23 @@ class RadioSyncExtension extends DecoderExtension {
 
         // Initial update
         this.updateFromSDR();
-
-        console.log('Radio Sync Extension enabled, current freq:', this.currentFrequency);
-        console.log('Event listeners subscribed:', this.eventListeners.length);
     }
 
     onDisable() {
         this.addMessage('Radio Sync extension disabled', 'info');
-        
+
         // Stop periodic updates
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        
+
         // Disconnect if connected
         if (this.isConnected) {
             this.disconnectFromRadio();
         }
     }
-    
+
     pollSDRState() {
         // If not connected, ensure display shows dashes
         if (!this.isConnected) {
@@ -929,64 +785,30 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     onFrequencyChanged(frequency) {
-        console.log('onFrequencyChanged called:', {
-            frequency,
-            updatingFromRadio: this.updatingFromRadio,
-            lastSentFrequency: this.lastSentFrequency,
-            isConnected: this.isConnected,
-            syncMode: this.syncMode
-        });
-
         // Ignore if we're currently updating from radio (prevents feedback loop)
-        if (this.updatingFromRadio) {
-            console.log('Blocked: updatingFromRadio is true');
-            return;
-        }
+        if (this.updatingFromRadio) return;
 
         // Only send if frequency actually changed from what we last sent
-        if (frequency === this.lastSentFrequency) {
-            console.log('Blocked: frequency matches lastSentFrequency');
-            return;
-        }
+        if (frequency === this.lastSentFrequency) return;
 
         // Send to radio if in sdr-to-radio or both mode
         if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
-            console.log('Sending frequency to radio:', frequency);
             this.lastSentFrequency = frequency;
             this.sendFrequencyToRadio(frequency);
-        } else {
-            console.log('Not sending: isConnected=' + this.isConnected + ', syncMode=' + this.syncMode);
         }
     }
 
     onModeChanged(mode) {
-        console.log('onModeChanged called:', {
-            mode,
-            updatingFromRadio: this.updatingFromRadio,
-            lastSentMode: this.lastSentMode,
-            isConnected: this.isConnected,
-            syncMode: this.syncMode
-        });
-
         // Ignore if we're currently updating from radio (prevents feedback loop)
-        if (this.updatingFromRadio) {
-            console.log('Blocked: updatingFromRadio is true');
-            return;
-        }
+        if (this.updatingFromRadio) return;
 
         // Only send if mode actually changed from what we last sent
-        if (mode === this.lastSentMode) {
-            console.log('Blocked: mode matches lastSentMode');
-            return;
-        }
+        if (mode === this.lastSentMode) return;
 
         // Send to radio if in sdr-to-radio or both mode
         if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
-            console.log('Sending mode to radio:', mode);
             this.lastSentMode = mode;
             this.sendModeToRadio(mode);
-        } else {
-            console.log('Not sending: isConnected=' + this.isConnected + ', syncMode=' + this.syncMode);
         }
     }
 }

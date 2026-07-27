@@ -320,10 +320,18 @@ body {
 #digi-spots-list {
     display: flex;
     flex-wrap: wrap;
+    align-content: flex-start;
     gap: 4px;
-    max-width: min(360px, calc(100vw - 48px));
-    max-height: 90px;
-    overflow-y: auto;
+    width: min(360px, calc(100vw - 48px));
+    height: 90px;
+    min-width: 160px;
+    min-height: 40px;
+    max-width: calc(100vw - 48px);
+    max-height: 60vh;
+    overflow: auto;
+    /* Native resize grip — sits in the same bottom-right corner a scrollbar
+       would occupy, so there's no extra chrome/height added just to hold it. */
+    resize: both;
 }
 .digi-spot-chip {
     display: inline-flex;
@@ -5316,6 +5324,35 @@ function _setupDigiSpotsDrag() {
     });
 }
 
+const _DIGI_SIZE_KEY = 'bandActivity_digiSpotsSize';
+
+// The list's own CSS `resize: both` (see #digi-spots-list) gives it a native
+// browser resize grip for free — this just restores/persists the size that
+// produces, via ResizeObserver rather than a 'resize' event (that property
+// has no dedicated DOM event of its own).
+function _setupDigiSpotsResize() {
+    const list = document.getElementById('digi-spots-list');
+    if (!list || typeof ResizeObserver === 'undefined') return;
+
+    let sSize = null;
+    try { sSize = JSON.parse(localStorage.getItem(_DIGI_SIZE_KEY)); } catch(_) {}
+    if (sSize && typeof sSize.width === 'number' && typeof sSize.height === 'number') {
+        list.style.width  = sSize.width + 'px';
+        list.style.height = sSize.height + 'px';
+    }
+
+    let saveTimer = null;
+    new ResizeObserver(() => {
+        // Fires continuously while the handle is being dragged — only
+        // persist once it settles, so a drag isn't a localStorage write per frame.
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            const size = { width: Math.round(list.offsetWidth), height: Math.round(list.offsetHeight) };
+            try { localStorage.setItem(_DIGI_SIZE_KEY, JSON.stringify(size)); } catch(_) {}
+        }, 300);
+    }).observe(list);
+}
+
 function _startDigiSpots() {
     if (_digiSSE) return; // already connected
     // Attempt connection regardless of whether the decoder subsystem is known
@@ -7093,7 +7130,8 @@ async function init() {
         });
     }
     window.addEventListener('resize', _digiSpotsPosition);
-    _setupDigiSpotsDrag(); // restores a saved position, if any, before the first render below
+    _setupDigiSpotsDrag();   // restores a saved position, if any, before the first render below
+    _setupDigiSpotsResize(); // restores a saved size, if any
     _renderDigiSpots(); // show the panel immediately if enabled, rather than waiting for the first decode
 
     // Layout (grid arrangement) selector

@@ -11,7 +11,16 @@
         <div class="radio-sync-left-column">
             <!-- Radio Selection -->
             <div class="radio-sync-section">
-                <select id="radio-sync-model" class="radio-sync-select">
+                <div class="radio-sync-combobox" id="radio-sync-model-combobox">
+                    <input type="text" id="radio-sync-model-input" class="radio-sync-select radio-sync-combobox-input"
+                           placeholder="Loading radios..." autocomplete="off" disabled
+                           role="combobox" aria-expanded="false" aria-autocomplete="list"
+                           aria-controls="radio-sync-model-listbox">
+                    <button type="button" id="radio-sync-model-clear" class="radio-sync-combobox-clear"
+                            tabindex="-1" aria-label="Clear radio selection" style="display: none;">&times;</button>
+                    <div id="radio-sync-model-listbox" class="radio-sync-combobox-list" role="listbox" style="display: none;"></div>
+                </div>
+                <select id="radio-sync-model" class="radio-sync-select" style="display: none;" aria-hidden="true" tabindex="-1">
                     <option value="">Loading radios...</option>
                 </select>
             </div>

@@ -162,6 +162,45 @@ class RadioSyncExtension extends DecoderExtension {
             }
             modelSelect.appendChild(optgroup);
         }
+
+        this.populateModelComboboxList(mfgs, byMfg);
+
+        const modelInput = document.getElementById('radio-sync-model-input');
+        if (modelInput) {
+            modelInput.disabled = false;
+            modelInput.placeholder = 'Type to search radios...';
+        }
+    }
+
+    /**
+     * Builds the visible search dropdown (#radio-sync-model-listbox) that sits
+     * on top of the real (hidden) #radio-sync-model <select>. Each option div's
+     * data-value matches the hidden select's <option value>, so selecting one
+     * just re-uses the existing hidden select + 'change' event machinery -
+     * connectToRadio() etc. don't need to know the combobox exists.
+     */
+    populateModelComboboxList(mfgs, byMfg) {
+        const listbox = document.getElementById('radio-sync-model-listbox');
+        if (!listbox) return;
+
+        listbox.innerHTML = '';
+        for (const mfg of mfgs) {
+            const groupLabel = document.createElement('div');
+            groupLabel.className = 'radio-sync-combobox-group-label';
+            groupLabel.textContent = mfg;
+            listbox.appendChild(groupLabel);
+
+            const rigsForMfg = byMfg.get(mfg).sort((a, b) => a.name.localeCompare(b.name));
+            for (const rig of rigsForMfg) {
+                const item = document.createElement('div');
+                item.className = 'radio-sync-combobox-option';
+                item.setAttribute('role', 'option');
+                item.dataset.value = String(rig.model);
+                item.dataset.searchText = `${rig.mfg} ${rig.name}`.toLowerCase();
+                item.textContent = rig.name;
+                listbox.appendChild(item);
+            }
+        }
     }
 
     showHamlibLoadError(error) {
@@ -230,6 +269,8 @@ class RadioSyncExtension extends DecoderExtension {
             console.error('Radio Sync: model select not found');
         }
 
+        this.setupModelCombobox();
+
         // Baud rate selection
         const baudRateSelect = document.getElementById('radio-sync-baud-rate');
         if (baudRateSelect) {
@@ -291,6 +332,148 @@ class RadioSyncExtension extends DecoderExtension {
         if (displayElement) {
             displayElement.addEventListener('click', () => this.cycleDisplayStyle());
         }
+    }
+
+    /**
+     * Wires the search input + dropdown listbox that sit on top of the real
+     * (hidden) #radio-sync-model <select>. The hamlib rig list has hundreds
+     * of entries across dozens of manufacturers, so a plain <select> is
+     * painful to scroll through - this adds type-to-filter on top of it
+     * while leaving the hidden select as the single source of truth that
+     * the rest of the extension (change listener, connectToRadio()) reads.
+     */
+    setupModelCombobox() {
+        const input = document.getElementById('radio-sync-model-input');
+        const clearBtn = document.getElementById('radio-sync-model-clear');
+        const listbox = document.getElementById('radio-sync-model-listbox');
+        const modelSelect = document.getElementById('radio-sync-model');
+        const combobox = document.getElementById('radio-sync-model-combobox');
+        if (!input || !clearBtn || !listbox || !modelSelect || !combobox) {
+            console.error('Radio Sync: model combobox elements not found');
+            return;
+        }
+
+        const getVisibleOptions = () =>
+            Array.from(listbox.querySelectorAll('.radio-sync-combobox-option'))
+                .filter((el) => el.style.display !== 'none');
+
+        const setActive = (el) => {
+            listbox.querySelectorAll('.radio-sync-combobox-option.is-active')
+                .forEach((el2) => el2.classList.remove('is-active'));
+            if (el) {
+                el.classList.add('is-active');
+                el.scrollIntoView({ block: 'nearest' });
+            }
+        };
+
+        const openList = () => {
+            listbox.style.display = 'block';
+            input.setAttribute('aria-expanded', 'true');
+        };
+
+        const closeList = () => {
+            listbox.style.display = 'none';
+            input.setAttribute('aria-expanded', 'false');
+            setActive(null);
+        };
+
+        const applyFilter = () => {
+            const query = input.value.trim().toLowerCase();
+            let anyVisible = false;
+
+            listbox.querySelectorAll('.radio-sync-combobox-group-label').forEach((label) => {
+                let node = label.nextElementSibling;
+                let groupHasMatch = false;
+                while (node && !node.classList.contains('radio-sync-combobox-group-label')) {
+                    const match = !query || node.dataset.searchText.includes(query);
+                    node.style.display = match ? '' : 'none';
+                    if (match) { groupHasMatch = true; anyVisible = true; }
+                    node = node.nextElementSibling;
+                }
+                label.style.display = groupHasMatch ? '' : 'none';
+            });
+
+            let emptyMsg = listbox.querySelector('.radio-sync-combobox-empty');
+            if (!anyVisible) {
+                if (!emptyMsg) {
+                    emptyMsg = document.createElement('div');
+                    emptyMsg.className = 'radio-sync-combobox-empty';
+                    emptyMsg.textContent = 'No matching radios';
+                    listbox.appendChild(emptyMsg);
+                }
+            } else if (emptyMsg) {
+                emptyMsg.remove();
+            }
+
+            setActive(null);
+        };
+
+        const selectOption = (optionEl) => {
+            const value = optionEl.dataset.value;
+            modelSelect.value = value;
+            modelSelect.dispatchEvent(new Event('change'));
+
+            const selected = modelSelect.selectedOptions[0];
+            input.value = selected ? selected.dataset.name : '';
+            clearBtn.style.display = value ? 'inline-block' : 'none';
+            closeList();
+        };
+
+        input.addEventListener('focus', () => {
+            input.select();
+            openList();
+        });
+
+        input.addEventListener('input', () => {
+            openList();
+            applyFilter();
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                openList();
+                const visible = getVisibleOptions();
+                if (!visible.length) return;
+                const current = listbox.querySelector('.radio-sync-combobox-option.is-active');
+                let idx = current ? visible.indexOf(current) : -1;
+                idx = e.key === 'ArrowDown'
+                    ? Math.min(idx + 1, visible.length - 1)
+                    : Math.max(idx - 1, 0);
+                setActive(visible[idx]);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const active = listbox.querySelector('.radio-sync-combobox-option.is-active');
+                const visible = getVisibleOptions();
+                const target = active || (visible.length === 1 ? visible[0] : null);
+                if (target) selectOption(target);
+            } else if (e.key === 'Escape') {
+                const selected = modelSelect.selectedOptions[0];
+                input.value = modelSelect.value && selected ? selected.dataset.name : '';
+                closeList();
+            }
+        });
+
+        listbox.addEventListener('mousedown', (e) => {
+            const optionEl = e.target.closest('.radio-sync-combobox-option');
+            if (!optionEl) return;
+            e.preventDefault(); // keep focus in input, avoid a blur/close race
+            selectOption(optionEl);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            modelSelect.value = '';
+            modelSelect.dispatchEvent(new Event('change'));
+            input.value = '';
+            clearBtn.style.display = 'none';
+            input.focus();
+            applyFilter();
+            openList();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!combobox.contains(e.target)) closeList();
+        });
     }
 
     cycleDisplayStyle() {

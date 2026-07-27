@@ -1494,6 +1494,9 @@ body {
     <div id="digi-spots-panel">
         <div id="digi-spots-header">
             <span id="digi-spots-title">Digital Spots (5 min)</span>
+            <label id="digi-scroll-label" title="Auto-scroll the list when it overflows">
+                <input type="checkbox" id="digi-scroll-toggle" checked> Scroll
+            </label>
             <label id="digi-ft8-label" title="Track unique country+band combinations from FT8 decodes">
                 <input type="checkbox" id="digi-ft8-toggle" checked> FT8
             </label>
@@ -5134,6 +5137,7 @@ let _digiReconnectMs  = 5000;
 let _digiPanelEnabled = true;  // master "Digi" toolbar checkbox — panel visibility only
 let _digiFT8Enabled   = true;
 let _digiWSPREnabled  = true;
+let _digiScrollEnabled = true; // "Scroll" checkbox — auto-scroll when the list overflows
 let _digiPruneTimer   = null;
 const _digiCombos     = new Map(); // key `${mode}|${band}|${cc}` -> {mode, band, cc, country, lastSeen}
 
@@ -5390,7 +5394,7 @@ function _startDigiAutoScroll() {
 
         const panel = document.getElementById('digi-spots-panel');
         if (!panel || panel.style.display === 'none') return;
-        if (paused || document.hidden || ts < resumeAt) return;
+        if (!_digiScrollEnabled || paused || document.hidden || ts < resumeAt) return;
 
         const maxScroll = list.scrollHeight - list.clientHeight;
         if (maxScroll <= 1) return; // everything already fits — nothing to do
@@ -7160,6 +7164,17 @@ async function init() {
             _digiPanelEnabled = e.target.checked;
             try { localStorage.setItem('bandActivity_showDigi', _digiPanelEnabled ? '1' : '0'); } catch(_) {}
             _renderDigiSpots();
+        });
+    }
+    const digiScrollCb = document.getElementById('digi-scroll-toggle');
+    if (digiScrollCb) {
+        let sScroll = null;
+        try { sScroll = localStorage.getItem('bandActivity_digiScroll'); } catch(_) {}
+        _digiScrollEnabled = (sScroll === null) ? true : (sScroll === '1');
+        digiScrollCb.checked = _digiScrollEnabled;
+        digiScrollCb.addEventListener('change', e => {
+            _digiScrollEnabled = e.target.checked;
+            try { localStorage.setItem('bandActivity_digiScroll', _digiScrollEnabled ? '1' : '0'); } catch(_) {}
         });
     }
     const digiFT8Cb = document.getElementById('digi-ft8-toggle');

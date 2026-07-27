@@ -327,6 +327,7 @@ body {
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
+    align-items: flex-start; /* a busy band's group can be 2+ lines tall — don't stretch its shorter siblings to match */
     gap: 4px;
     width: min(360px, calc(100vw - 48px));
     height: 90px;
@@ -339,17 +340,36 @@ body {
        would occupy, so there's no extra chrome/height added just to hold it. */
     resize: both;
 }
-.digi-spot-chip {
+/* One pill per band: label once, flags after. Sits as its own flex item in
+   #digi-spots-list, so several short (few-country) bands pack onto a shared
+   line while a busy band wraps its own flags internally without widening
+   everyone else's row. */
+.digi-band-group {
     display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    align-items: flex-start;
+    gap: 5px;
     padding: 2px 6px;
     border-radius: 8px;
-    font-size: 0.68em;
-    white-space: nowrap;
     border: 1px solid rgba(80,80,80,0.3);
     background: rgba(40,40,50,0.5);
-    color: #ccc;
+    max-width: 100%;
+}
+.digi-band-label {
+    flex: none;
+    font-size: 0.68em;
+    font-weight: 700;
+    color: #7ec8e3;
+    line-height: 18px; /* matches the flag glyph's own line box, so it doesn't sit low against a wrapped 2nd row */
+    white-space: nowrap;
+}
+.digi-band-flags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px 4px;
+}
+.digi-flag {
+    font-size: 15px;
+    line-height: 18px;
 }
 #digi-spots-empty {
     font-size: 0.7em;
@@ -5250,18 +5270,35 @@ function _renderDigiSpots() {
         empty.textContent = _digiCombos.size === 0 ? 'No spots yet' : 'No spots on selected bands';
         list.appendChild(empty);
     } else {
+        // One group per band — the label is shown once instead of on every
+        // flag — and the groups themselves flex-wrap in #digi-spots-list, so
+        // several quiet bands sit side by side on one line while a busy band
+        // wraps internally onto its own without stealing everyone else's row.
+        // entries is already sorted band-major, so a straight run-length
+        // grouping is enough.
+        let group = null, flagsEl = null, band = null;
         for (const e of entries) {
-            const chip = document.createElement('span');
-            chip.className = 'digi-spot-chip';
-            const flag = e.cc ? iso2ToFlag(e.cc) : '';
-            chip.innerHTML =
-                (flag ? `<span>${flag}</span>` : '') +
-                `<span>${_escHtml(e.band.toUpperCase())}</span>`;
-            // Mode(s) aren't shown in the chip itself (a combo is mode-agnostic
+            if (e.band !== band) {
+                band = e.band;
+                group = document.createElement('div');
+                group.className = 'digi-band-group';
+                const label = document.createElement('span');
+                label.className = 'digi-band-label';
+                label.textContent = band.toUpperCase();
+                flagsEl = document.createElement('span');
+                flagsEl.className = 'digi-band-flags';
+                group.appendChild(label);
+                group.appendChild(flagsEl);
+                list.appendChild(group);
+            }
+            const flag = document.createElement('span');
+            flag.className = 'digi-flag';
+            flag.textContent = e.cc ? iso2ToFlag(e.cc) : '🏳️';
+            // Mode(s) aren't shown in the flag itself (a combo is mode-agnostic
             // now), but still worth knowing on hover.
             const modes = [...e.modes].sort().join('/');
-            chip.title = `${e.country || e.cc || 'Unknown'} · ${e.band.toUpperCase()} · ${modes}`;
-            list.appendChild(chip);
+            flag.title = `${e.country || e.cc || 'Unknown'} · ${band.toUpperCase()} · ${modes}`;
+            flagsEl.appendChild(flag);
         }
     }
     panel.style.display = 'flex';

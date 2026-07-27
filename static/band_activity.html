@@ -651,11 +651,14 @@ body {
 }
 #floating-map.map-panel #floating-map-resize { display: none; }
 #floating-map.map-panel #floating-map-suninfo {
-    /* .freq-axis (the band cards' equivalent trailing bar) is a fixed 18px;
-       this can't go quite that low (its text is longer-lived than freq tick
-       labels), but trimming the padding gets it close instead of leaving a
-       visibly taller footer under the map. */
-    padding: 3px 10px;
+    /* Pinned to the exact height of .freq-axis (the band cards' equivalent
+       trailing bar) so the docked map's chrome height matches a band card's
+       exactly — 'fit' layout assumes uniform card chrome across the row
+       (see _cardChromeHeight()), and any mismatch here is budget the layout
+       never accounts for. align-items:center (inherited from the base rule)
+       vertically centers the text in the fixed box instead of the padding. */
+    height: 18px;
+    padding: 0 10px;
 }
 #floating-map.map-panel #floating-map-body {
     /* flex:1 (flex-basis:0%) is fine while floating — #floating-map has a

@@ -99,14 +99,33 @@ class RadioSyncExtension extends DecoderExtension {
                 const Module = await createHamlibModule({ hamlibSerial: bridge });
 
                 this.hamlibModule = Module;
-                this.hamlibOpen = Module.cwrap('hamlib_open', 'number',
-                    ['number', 'number', 'number', 'number', 'number', 'number'], { async: true });
-                this.hamlibClose = Module.cwrap('hamlib_close', 'number', ['number'], { async: true });
-                this.hamlibGetFreq = Module.cwrap('hamlib_get_freq', 'number', ['number'], { async: true });
-                this.hamlibSetFreq = Module.cwrap('hamlib_set_freq', 'number', ['number', 'number'], { async: true });
-                this.hamlibGetMode = Module.cwrap('hamlib_get_mode', 'string', ['number'], { async: true });
-                this.hamlibSetMode = Module.cwrap('hamlib_set_mode', 'number', ['number', 'string'], { async: true });
-                this.hamlibGetPtt = Module.cwrap('hamlib_get_ptt', 'number', ['number'], { async: true });
+
+                // hamlib.wasm is built with plain -sASYNCIFY (see wasm/build.sh),
+                // which supports only one in-flight async call into the module at
+                // a time - calling a second cwrap({async:true}) function before the
+                // first has unwound corrupts Asyncify's call stack and Hamlib's
+                // shared cmd/response buffers (e.g. newcat's priv->cmd_str /
+                // ret_data). Both the radio-polling interval and the SDR->radio
+                // polling interval below fire independently every 100ms, so
+                // without serialization their calls can overlap on a slow serial
+                // link, producing exactly this kind of corruption (e.g. PTT
+                // reads flipping on/off spuriously). Route every call through one
+                // queue so the module only ever sees one call at a time.
+                this._hamlibQueue = Promise.resolve();
+                const serialize = (fn) => (...args) => {
+                    const result = this._hamlibQueue.then(() => fn(...args));
+                    this._hamlibQueue = result.then(() => {}, () => {});
+                    return result;
+                };
+
+                this.hamlibOpen = serialize(Module.cwrap('hamlib_open', 'number',
+                    ['number', 'number', 'number', 'number', 'number', 'number'], { async: true }));
+                this.hamlibClose = serialize(Module.cwrap('hamlib_close', 'number', ['number'], { async: true }));
+                this.hamlibGetFreq = serialize(Module.cwrap('hamlib_get_freq', 'number', ['number'], { async: true }));
+                this.hamlibSetFreq = serialize(Module.cwrap('hamlib_set_freq', 'number', ['number', 'number'], { async: true }));
+                this.hamlibGetMode = serialize(Module.cwrap('hamlib_get_mode', 'string', ['number'], { async: true }));
+                this.hamlibSetMode = serialize(Module.cwrap('hamlib_set_mode', 'number', ['number', 'string'], { async: true }));
+                this.hamlibGetPtt = serialize(Module.cwrap('hamlib_get_ptt', 'number', ['number'], { async: true }));
 
                 const listRigs = Module.cwrap('hamlib_list_rigs', 'string', []); // no I/O - plain sync call
                 const rigs = JSON.parse(listRigs());
@@ -749,10 +768,16 @@ class RadioSyncExtension extends DecoderExtension {
         // Stop any existing polling
         this.stopRadioPolling();
 
-        // Poll radio every 100ms for freq/mode/TX state (always, for display and mute-on-TX)
+        // Poll radio every 100ms for freq/mode/TX state (always, for display and mute-on-TX).
+        // Guarded by _pollingBusy so a round trip that runs long (real serial
+        // hardware, not guaranteed to fit in 100ms) skips ticks instead of
+        // piling up an ever-growing backlog of queued calls (see the
+        // _hamlibQueue serialization in ensureHamlibLoaded()).
+        this._pollingBusy = false;
         this.radioPollingInterval = setInterval(async () => {
-            if (!this.isConnected || !this.rigHandle) return;
+            if (!this.isConnected || !this.rigHandle || this._pollingBusy) return;
 
+            this._pollingBusy = true;
             try {
                 const freq = await this.hamlibGetFreq(this.rigHandle);
                 if (freq >= 0) this.handleRadioFrequency(freq);
@@ -764,6 +789,8 @@ class RadioSyncExtension extends DecoderExtension {
                 if (ptt >= 0) this.updateTXRXState(ptt !== 0);
             } catch (error) {
                 console.error('Radio polling error:', error);
+            } finally {
+                this._pollingBusy = false;
             }
         }, 100); // Poll every 100ms (10 Hz) for responsive sync
 

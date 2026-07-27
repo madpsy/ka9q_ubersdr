@@ -72,6 +72,21 @@ mkdir -p "$HAMLIB_DIR"
 unzip -q "$HAMLIB_TMP/dist.zip" -d "$HAMLIB_DIR"
 rm -rf "$HAMLIB_TMP"
 trap - EXIT
+
+cat > "$HAMLIB_DIR/README.md" <<EOF
+# hamlib (fetched, do not edit)
+
+These files are fetched by build-js.sh from the ubersdr-hamlib release:
+$HAMLIB_URL
+
+Source: https://github.com/madpsy/ubersdr-hamlib/releases/tag/latest
+
+This directory is wiped and re-fetched on every build — local edits here
+will not persist. Make changes in the ubersdr-hamlib repo instead.
+
+Fetched: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+
 echo "  fetched → $HAMLIB_DIR"
 
 echo ""

@@ -1750,7 +1750,17 @@ const AUTO_SIGNAL_PCT = 0.995;  // percentile taken as the signal ceiling —
                                 // stretch the top of the scale on their own
 const AUTO_NOISE_MARGIN = 6;    // dB of scale left below the noise floor
 const AUTO_HEADROOM     = 10;   // dB of scale left above the strongest signal
-const AUTO_EMA          = 0.02; // ≈12 s time constant at 4 Hz updates
+const AUTO_EMA          = 0.02; // floor target — ≈12 s time constant at 4 Hz
+// The ceiling target is smoothed asymmetrically.  On bands with cyclic
+// traffic (FT8 keys the whole band every 15 s, contest exchanges likewise)
+// the 99.5th-percentile target genuinely swings 15-25 dB; through a
+// symmetric 12 s EMA that leaves a residual swing bigger than the deadband,
+// so the applied ceiling walked up and down 2 dB every 2 s indefinitely on
+// exactly those bands.  Fast attack / slow release keeps the scale sized for
+// the *active* half of the cycle: it expands promptly when signals appear
+// and barely sags during the quiet half, staying inside the deadband.
+const AUTO_EMA_UP       = 0.06;  // ceiling attack — ≈4 s at 4 Hz
+const AUTO_EMA_DOWN     = 0.004; // ceiling release — ≈60 s at 4 Hz
 const AUTO_STEP         = 2;    // applied values move in steps of this many dB
 
 // The displayed P5 stat is the 5th-percentile bin of a single arrival, which
@@ -1765,6 +1775,12 @@ const AUTO_MIN_INTERVAL = 2000; // ms — hard floor on how often the scale chan
                                 // interval alone is not enough: if the target
                                 // has run 10 dB away in the meantime, a single
                                 // "snap to target" would move all 10 dB at once.
+const AUTO_RESEED_DB    = 24;   // …but a target *this* far away means the old
+                                // scale is useless: walking there at 1 dB/s is
+                                // minutes of visible stepping (the "auto range
+                                // gone mad" oscillation), so snap once instead
+                                // — the same thing a page refresh achieved via
+                                // the first-frame seed path.
 
 // ── Global state ──────────────────────────────────────────────────────────────
 // Synthetic pseudo-band (0-30 MHz) backed by the same wideband channel the
@@ -2748,7 +2764,8 @@ class BandPanel {
             this._autoMaxEma = tMax;
         } else {
             this._autoMinEma += (tMin - this._autoMinEma) * AUTO_EMA;
-            this._autoMaxEma += (tMax - this._autoMaxEma) * AUTO_EMA;
+            this._autoMaxEma += (tMax - this._autoMaxEma) *
+                (tMax > this._autoMaxEma ? AUTO_EMA_UP : AUTO_EMA_DOWN);
         }
 
         // Seed immediately on the first frame so there is no visible settling
@@ -2767,6 +2784,19 @@ class BandPanel {
         // exceeds the step, so the residual after a move cannot re-trigger one
         // and the range settles instead of oscillating.
         if (now - this._autoLastChange < AUTO_MIN_INTERVAL) return false;
+
+        // Escape hatch: a smoothed target this far from the applied range
+        // means the scale is simply wrong (a genuine large shift, or recovery
+        // after bad frames were smoothed in), and walking there step by step
+        // would show minutes of continuous jumping.  Re-seed once, exactly as
+        // the first frame does.
+        if (Math.abs(this._autoMinEma - this._autoMin) >= AUTO_RESEED_DB ||
+            Math.abs(this._autoMaxEma - this._autoMax) >= AUTO_RESEED_DB) {
+            this._autoMin = Math.round(this._autoMinEma / AUTO_STEP) * AUTO_STEP;
+            this._autoMax = Math.round(this._autoMaxEma / AUTO_STEP) * AUTO_STEP;
+            this._autoLastChange = now;
+            return true;
+        }
         const stepToward = (applied, target) =>
             applied + Math.sign(target - applied) * AUTO_STEP;
 
@@ -2864,21 +2894,38 @@ class BandPanel {
 
         // Stats over the full band, written straight to the DOM — once per
         // arrival, so the render loop never touches layout.
+        //
+        // Bins at the encoder's hard floor (uint8 0 → −256 dBFS) are not
+        // measurements: they appear when the source has no data for a bin
+        // (startup, stream stall) and when a full-scale signal wraps the
+        // uint8 encoder.  Feeding them into the percentiles yanks the P5 stat
+        // and the auto-range targets toward −256 whenever such frames come
+        // and go, and the poisoned EMAs then drag the applied range on a
+        // minutes-long 2 dB-per-step walk — the "auto range gone mad"
+        // oscillation.  So floor bins are excluded here, and a frame with
+        // almost no real bins updates neither the stats nor the range: the
+        // last good values simply hold until real data returns.
         const sorted = Float32Array.from(this._curVals).sort();
-        const rawP5 = sorted[Math.floor(n * 0.05)];
-        if (this._statP5 === null) this._statP5 = rawP5;
-        else this._statP5 += (rawP5 - this._statP5) * P5_EMA;
-        this._statPeak = sorted[n - 1];
-        const elP5   = document.getElementById(`stat-p5-${this.name}`);
-        const elPeak = document.getElementById(`stat-peak-${this.name}`);
-        if (elP5)   elP5.textContent   = this._statP5.toFixed(1);
-        if (elPeak) elPeak.textContent = this._statPeak.toFixed(1);
+        let firstValid = 0;
+        while (firstValid < n && sorted[firstValid] <= -255.5) firstValid++;
+        const valid = n - firstValid;
+        if (valid >= 2 && valid >= n * 0.1) {
+            const vSorted = sorted.subarray(firstValid);
+            const rawP5 = vSorted[Math.floor(valid * 0.05)];
+            if (this._statP5 === null) this._statP5 = rawP5;
+            else this._statP5 += (rawP5 - this._statP5) * P5_EMA;
+            this._statPeak = vSorted[valid - 1];
+            const elP5   = document.getElementById(`stat-p5-${this.name}`);
+            const elPeak = document.getElementById(`stat-peak-${this.name}`);
+            if (elP5)   elP5.textContent   = this._statP5.toFixed(1);
+            if (elPeak) elPeak.textContent = this._statPeak.toFixed(1);
 
-        // ── Auto dB range ────────────────────────────────────────────────────
-        // Always tracked, even in manual mode, so the smoothing is already
-        // settled if auto gets switched on.
-        const rangeMoved = this._updateAutoRange(sorted, n, now);
-        if (rangeMoved && dbAuto) this._rangeChanged();
+            // ── Auto dB range ────────────────────────────────────────────────
+            // Always tracked, even in manual mode, so the smoothing is already
+            // settled if auto gets switched on.
+            const rangeMoved = this._updateAutoRange(vSorted, valid, now);
+            if (rangeMoved && dbAuto) this._rangeChanged();
+        }
 
         // ── Peak-hold buffer ─────────────────────────────────────────────────
         if (!this._peakHold || this._peakHold.length !== n) {

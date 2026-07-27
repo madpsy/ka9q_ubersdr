@@ -1804,7 +1804,7 @@ let _leafletTerminator   = null;
 let _terminatorTimer     = null;
 let _sunInfoTimer        = null;
 let _leafletLoadPromise  = null;
-let _mapDocked           = false; // false = floating (draggable/resizable), true = docked in the band grid
+let _mapDocked           = true; // false = floating (draggable/resizable), true = docked in the band grid — this default is overridden by _MAP_DOCKED_KEY once _setupFloatingMapChrome() runs
 let _mapResizeObserver   = null;
 let _showTerminator      = true;  // day/night overlay — on by default, same as before it was made toggleable
 let _showMUF             = false; // ionosphere (MUF) overlay — opt-in: costs a fetch to the public collector
@@ -4847,7 +4847,7 @@ function _setupFloatingMapChrome() {
 
     let sDocked = null;
     try { sDocked = localStorage.getItem(_MAP_DOCKED_KEY); } catch(_) {}
-    _mapDocked = (sDocked === '1');
+    _mapDocked = (sDocked === null) ? true : (sDocked === '1');
     _applyMapDockState();
 
     const dockBtn = document.getElementById('floating-map-dock');

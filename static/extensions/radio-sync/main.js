@@ -43,7 +43,7 @@ class RadioSyncExtension extends DecoderExtension {
 
         this.selectedRadio = null;
         this.selectedBaudRate = null; // Will be set when radio is selected
-        this.syncMode = 'both'; // 'sdr-to-radio', 'radio-to-sdr', 'both'
+        this.syncMode = 'sdr-to-radio'; // 'sdr-to-radio' or 'radio-to-sdr'
         // Display style cycling (starting with modern digital)
         this.displayStyles = ['style-digital', 'style-led', 'style-amber', 'style-cyan', 'style-red', 'style-vfd'];
         this.currentStyleIndex = 0;
@@ -319,16 +319,12 @@ class RadioSyncExtension extends DecoderExtension {
         // Sync direction buttons
         const sdrToRadioBtn = document.getElementById('radio-sync-sdr-to-radio');
         const radioToSdrBtn = document.getElementById('radio-sync-radio-to-sdr');
-        const bothBtn = document.getElementById('radio-sync-both');
 
         if (sdrToRadioBtn) {
             sdrToRadioBtn.addEventListener('click', () => this.setSyncMode('sdr-to-radio'));
         }
         if (radioToSdrBtn) {
             radioToSdrBtn.addEventListener('click', () => this.setSyncMode('radio-to-sdr'));
-        }
-        if (bothBtn) {
-            bothBtn.addEventListener('click', () => this.setSyncMode('both'));
         }
 
         // Connect/Disconnect buttons
@@ -540,8 +536,7 @@ class RadioSyncExtension extends DecoderExtension {
         // Update button states
         const buttons = {
             'sdr-to-radio': document.getElementById('radio-sync-sdr-to-radio'),
-            'radio-to-sdr': document.getElementById('radio-sync-radio-to-sdr'),
-            'both': document.getElementById('radio-sync-both')
+            'radio-to-sdr': document.getElementById('radio-sync-radio-to-sdr')
         };
 
         Object.keys(buttons).forEach(key => {
@@ -759,7 +754,7 @@ class RadioSyncExtension extends DecoderExtension {
             this.currentMode = this.radio.getMode();
 
             // Send initial state to radio (for sdr-to-radio sync)
-            if (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both') {
+            if (this.syncMode === 'sdr-to-radio') {
                 await this.sendFrequencyToRadio(this.currentFrequency);
                 await this.sendModeToRadio(this.currentMode);
             }
@@ -862,7 +857,7 @@ class RadioSyncExtension extends DecoderExtension {
         this.currentFrequency = freq;
         this.updateFrequencyDisplay(freq);
 
-        if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
+        if (this.syncMode === 'radio-to-sdr') {
             const currentSDRFreq = this.radio.getFrequency();
             if (freq !== currentSDRFreq) {
                 // Set flag to prevent our event handlers from reacting
@@ -894,7 +889,7 @@ class RadioSyncExtension extends DecoderExtension {
             return;
         }
 
-        if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
+        if (this.syncMode === 'radio-to-sdr') {
             const currentSDRMode = this.radio.getMode();
             if (sdrMode !== currentSDRMode) {
                 // Set flag to prevent our event handlers from reacting
@@ -1038,8 +1033,8 @@ class RadioSyncExtension extends DecoderExtension {
             return;
         }
 
-        // Poll SDR state and send changes to radio if in sdr-to-radio or both mode
-        if (this.syncMode !== 'sdr-to-radio' && this.syncMode !== 'both') {
+        // Poll SDR state and send changes to radio if in sdr-to-radio mode
+        if (this.syncMode !== 'sdr-to-radio') {
             return;
         }
 
@@ -1070,8 +1065,8 @@ class RadioSyncExtension extends DecoderExtension {
         // Only send if frequency actually changed from what we last sent
         if (frequency === this.lastSentFrequency) return;
 
-        // Send to radio if in sdr-to-radio or both mode
-        if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
+        // Send to radio if in sdr-to-radio mode
+        if (this.isConnected && this.syncMode === 'sdr-to-radio') {
             this.lastSentFrequency = frequency;
             this.sendFrequencyToRadio(frequency);
         }
@@ -1084,8 +1079,8 @@ class RadioSyncExtension extends DecoderExtension {
         // Only send if mode actually changed from what we last sent
         if (mode === this.lastSentMode) return;
 
-        // Send to radio if in sdr-to-radio or both mode
-        if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
+        // Send to radio if in sdr-to-radio mode
+        if (this.isConnected && this.syncMode === 'sdr-to-radio') {
             this.lastSentMode = mode;
             this.sendModeToRadio(mode);
         }

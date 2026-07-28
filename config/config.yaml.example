@@ -2009,6 +2009,35 @@ whisper:
   # Example: "https://whisper.ubersdr.org/summarise"
   summary_url: "https://whisper.ubersdr.org/summarise"
 
+  # WhisperLive task (default: "translate")
+  #   translate  - always emit English, whatever the spoken language
+  #   transcribe - emit the spoken language verbatim
+  # "translate" is the historical behaviour and is right for a general-purpose
+  # multilingual receiver. Use "transcribe" with asr_language pinned when you
+  # care about verbatim accuracy in one known language (e.g. callsign spotting
+  # on English-language nets) — translate-mode is prone to inventing fluent
+  # prose out of noise on weak signals.
+  # Default: "" (= "translate")
+  task: ""
+
+  # Language Whisper decodes with, e.g. "en" (default: "" = auto-detect)
+  # This is the RECOGNITION language and is unrelated to the `language`
+  # parameter sent by the frontend, which selects the LibreTranslate output
+  # language. Auto-detect misfires frequently on noisy narrowband HF audio;
+  # pinning a language is a large accuracy win when you know what to expect.
+  # Default: "" (auto-detect)
+  asr_language: ""
+
+  # Allow clients to override initial_prompt, task and asr_language per attach
+  # (default: false)
+  # When false, an attach carrying any of those parameters is rejected.
+  # SECURITY: these values are forwarded to the upstream WhisperLive server,
+  # which may be shared with other instances. Enabling this lets any listener
+  # steer the decoding prompt. Prompts are capped at 1024 bytes and stripped of
+  # control characters, but only enable this on instances where you trust the
+  # clients — e.g. a private instance running an automated scanner.
+  allow_client_params: false
+
 # ==============================================================================
 # EiBi Shortwave Broadcast Schedule
 # ==============================================================================

@@ -32,8 +32,14 @@ const (
 	MessageTypeSummary           = 0x05 // Summary response
 
 	// Incoming message types (frontend -> backend)
-	MessageTypeSummaryRequest = 0x06 // Summary request from frontend
+	MessageTypeSummaryRequest  = 0x06 // Summary request from frontend
+	MessageTypeResetTranscript = 0x07 // Clear dedup transcript (frequency hop)
 )
+
+// maxTranscriptSegments bounds the dedup history kept by processSegments.
+// Without a bound this grows for the lifetime of the attach, and every
+// completed segment is compared against all of it.
+const maxTranscriptSegments = 500
 
 // WhisperConfig is defined in the main package (config.go)
 // This type alias allows the whisper package to use it
@@ -46,6 +52,8 @@ type WhisperConfig struct {
 	LibreTranslateURL string
 	SummaryURL        string
 	TargetLanguage    string // Target language for translation (from frontend)
+	Task              string // WhisperLive task: "transcribe" or "translate" (empty = "translate")
+	ASRLanguage       string // Language Whisper decodes with (empty = auto-detect)
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -277,13 +285,28 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	// Send initial configuration to WhisperLive in the format it expects
 	// Based on WhisperLive client.py on_open() method
-	// Always use "translate" task to get English output from Whisper
-	// Language is always set to nil for auto-detection
+	//
+	// Task defaults to "translate" (always-English output) and language to nil
+	// (auto-detect), which is what this extension has always done.  Both can be
+	// overridden from config.yaml or, when whisper.allow_client_params is set,
+	// per attach — "transcribe" with a pinned language is markedly more reliable
+	// on noisy narrowband audio, where auto-detect tends to misfire and
+	// translate-mode then invents fluent prose from noise.
+	task := d.config.Task
+	if task == "" {
+		task = "translate"
+	}
+
+	// nil (not "") is what WhisperLive expects to mean auto-detect.
+	var language interface{}
+	if d.config.ASRLanguage != "" {
+		language = d.config.ASRLanguage
+	}
 
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
-		"language":              nil, // Always nil for auto-detection
-		"task":                  "translate",
+		"language":              language,
+		"task":                  task,
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  1, // Only send current segment, not previous ones
@@ -311,8 +334,12 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
-	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: auto-detect, task: translate)",
-		d.config.ServerURL, d.clientUID, d.config.Model)
+	langDesc := "auto-detect"
+	if d.config.ASRLanguage != "" {
+		langDesc = d.config.ASRLanguage
+	}
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s)",
+		d.config.ServerURL, d.clientUID, d.config.Model, langDesc, task)
 
 	return nil
 }
@@ -682,6 +709,11 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 				}
 
 				d.transcript = append(d.transcript, seg)
+				if len(d.transcript) > maxTranscriptSegments {
+					// Drop the oldest entries; they are far enough in the past
+					// that a repeat is a genuinely new utterance, not a dupe.
+					d.transcript = d.transcript[len(d.transcript)-maxTranscriptSegments:]
+				}
 				filteredSegments = append(filteredSegments, seg)
 			}
 		} else if i == len(segments)-1 {
@@ -840,6 +872,22 @@ func (d *WhisperDecoder) getLastNEnglishSegments(n int) []string {
 	result := make([]string, n)
 	copy(result, d.englishSegments[startIndex:])
 	return result
+}
+
+// resetTranscript clears the dedup history and the pending incomplete segment.
+//
+// A scanning client that retunes without detaching needs this: processSegments
+// suppresses any completed segment whose text was already seen, so after a
+// frequency hop a genuine new "this is ..." on the new frequency would be
+// silently dropped as a duplicate of the previous one.
+func (d *WhisperDecoder) resetTranscript() {
+	d.transcriptMu.Lock()
+	d.transcript = nil
+	d.lastSegment = nil
+	d.transcriptMu.Unlock()
+
+	d.clearEnglishSegments()
+	log.Printf("[Whisper] Transcript history reset")
 }
 
 // clearEnglishSegments clears all stored English segments

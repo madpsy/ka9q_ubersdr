@@ -733,6 +733,22 @@ type WhisperConfig struct {
 	MaxUsers          int    `yaml:"max_users"`          // Maximum concurrent users of the extension (0 = unlimited)
 	LibreTranslateURL string `yaml:"libretranslate_url"` // LibreTranslate API URL for translation (default: https://whisper.ubersdr.org/translate)
 	SummaryURL        string `yaml:"summary_url"`        // Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
+
+	// Task selects the WhisperLive task: "transcribe" (verbatim, in the spoken
+	// language) or "translate" (always English output).  Empty = "translate",
+	// preserving the historical hardcoded behaviour.
+	Task string `yaml:"task"`
+
+	// ASRLanguage pins the language Whisper decodes with (e.g. "en").  Empty =
+	// auto-detect, preserving the historical hardcoded behaviour.  This is the
+	// *recognition* language and is unrelated to the `language` attach parameter,
+	// which selects the LibreTranslate output language.
+	ASRLanguage string `yaml:"asr_language"`
+
+	// AllowClientParams permits clients to override initial_prompt, task and
+	// asr_language per attach.  Off by default: on a public instance this lets
+	// any listener steer the prompt sent to a shared upstream WhisperLive server.
+	AllowClientParams bool `yaml:"allow_client_params"`
 }
 
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension

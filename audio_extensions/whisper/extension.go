@@ -3,8 +3,57 @@ package whisper
 import (
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"sync"
+	"unicode"
 )
+
+// maxInitialPromptLen bounds the client-supplied initial prompt.  Whisper only
+// conditions on the last 224 tokens of the prompt anyway, so anything beyond
+// roughly this length is silently discarded by the model — the cap exists to
+// stop a client pushing unbounded text at the upstream server.
+const maxInitialPromptLen = 1024
+
+// reASRLanguage matches an ISO-639 language code with an optional region
+// subtag, e.g. "en", "por", "pt-BR".
+var reASRLanguage = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?$`)
+
+// recognitionParamKeys are the attach parameters gated behind
+// whisper.allow_client_params.
+var recognitionParamKeys = []string{"initial_prompt", "task", "asr_language"}
+
+// hasRecognitionParams reports whether the client supplied any gated parameter,
+// so an attach can fail loudly rather than silently ignoring it.
+func hasRecognitionParams(params map[string]interface{}) bool {
+	for _, key := range recognitionParamKeys {
+		if _, ok := params[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitiseInitialPrompt trims the prompt, strips control characters (which
+// would otherwise be forwarded verbatim into the upstream JSON handshake) and
+// enforces the length cap.
+func sanitiseInitialPrompt(prompt string) (string, error) {
+	cleaned := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, prompt)
+
+	cleaned = strings.TrimSpace(cleaned)
+	if len(cleaned) > maxInitialPromptLen {
+		return "", fmt.Errorf("initial_prompt is %d bytes, maximum is %d", len(cleaned), maxInitialPromptLen)
+	}
+	return cleaned, nil
+}
 
 // ConfigProvider is set by main package to provide access to configuration
 type ConfigProvider struct {
@@ -16,6 +65,9 @@ type ConfigProvider struct {
 	MaxUsers          int
 	LibreTranslateURL string
 	SummaryURL        string
+	Task              string
+	ASRLanguage       string
+	AllowClientParams bool
 }
 
 // GlobalConfigProvider is set by main package
@@ -89,6 +141,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 
 	// Get config from global config or use defaults
 	var config WhisperConfig
+	allowClientParams := false
 	if GlobalConfigProvider != nil {
 		config = WhisperConfig{
 			Enabled:           GlobalConfigProvider.Enabled,
@@ -99,7 +152,10 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			LibreTranslateURL: GlobalConfigProvider.LibreTranslateURL,
 			SummaryURL:        GlobalConfigProvider.SummaryURL,
 			TargetLanguage:    "en", // Default to English
+			Task:              GlobalConfigProvider.Task,
+			ASRLanguage:       GlobalConfigProvider.ASRLanguage,
 		}
+		allowClientParams = GlobalConfigProvider.AllowClientParams
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
 	} else {
 		// Default configuration if global config not available
@@ -116,17 +172,58 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
 	}
 
-	// Override target language from frontend parameter if provided
+	// Override target language from frontend parameter if provided.
+	// NOTE: "language" is the LibreTranslate *output* language and always has
+	// been; the recognition language is "asr_language" below.  Keeping them
+	// separate preserves the existing frontend contract.
 	if language, ok := extensionParams["language"].(string); ok && language != "" {
 		config.TargetLanguage = language
 		log.Printf("[Whisper Extension] Target language from frontend: %s", language)
 	}
 
+	// Per-attach overrides of the recognition parameters.  Gated behind
+	// whisper.allow_client_params because these are forwarded verbatim to a
+	// possibly-shared upstream WhisperLive server.
+	if allowClientParams {
+		if prompt, ok := extensionParams["initial_prompt"].(string); ok {
+			cleaned, err := sanitiseInitialPrompt(prompt)
+			if err != nil {
+				return nil, err
+			}
+			config.InitialPrompt = cleaned
+			if cleaned != "" {
+				log.Printf("[Whisper Extension] initial_prompt from client (%d chars)", len(cleaned))
+			}
+		}
+
+		if task, ok := extensionParams["task"].(string); ok && task != "" {
+			if task != "transcribe" && task != "translate" {
+				return nil, fmt.Errorf("invalid task %q (must be \"transcribe\" or \"translate\")", task)
+			}
+			config.Task = task
+			log.Printf("[Whisper Extension] task from client: %s", task)
+		}
+
+		if lang, ok := extensionParams["asr_language"].(string); ok {
+			if lang != "" && !reASRLanguage.MatchString(lang) {
+				return nil, fmt.Errorf("invalid asr_language %q (expected a language code such as \"en\" or \"pt-BR\")", lang)
+			}
+			config.ASRLanguage = lang
+			log.Printf("[Whisper Extension] asr_language from client: %q", lang)
+		}
+	} else if hasRecognitionParams(extensionParams) {
+		return nil, fmt.Errorf("per-attach recognition parameters are disabled on this instance (set whisper.allow_client_params: true in config.yaml)")
+	}
+
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
-	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, target: %s, sample rate: %d Hz",
-		config.ServerURL, config.Model, config.TargetLanguage, audioParams.SampleRate)
+	asrLang := config.ASRLanguage
+	if asrLang == "" {
+		asrLang = "auto-detect"
+	}
+	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: %s, target: %s, sample rate: %d Hz",
+		config.ServerURL, config.Model, asrLang, config.TargetLanguage, audioParams.SampleRate)
 
 	return &WhisperExtension{
 		decoder: decoder,
@@ -169,8 +266,10 @@ func (e *WhisperExtension) HandleControlMessage(message []byte, resultChan chan<
 
 	messageType := message[0]
 	switch messageType {
-	case 0x06: // MessageTypeSummaryRequest
+	case MessageTypeSummaryRequest:
 		e.decoder.handleSummaryRequest(message, resultChan)
+	case MessageTypeResetTranscript:
+		e.decoder.resetTranscript()
 	default:
 		log.Printf("[Whisper Extension] Unknown control message type: 0x%02x", messageType)
 	}

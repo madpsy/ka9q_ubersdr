@@ -133,8 +133,39 @@ ws.onmessage = (event) => {
 |-----------|------|---------|-------------|
 | `server_url` | string | `ws://localhost:9090` | WhisperLive WebSocket URL |
 | `model` | string | `base` | Whisper model: tiny, base, small, medium, large |
-| `language` | string | `en` | Language code (en, es, fr, etc.) or "auto" |
+| `language` | string | `en` | LibreTranslate **output** language — not the recognition language |
 | `send_interval_ms` | number | 100 | Audio send interval in milliseconds |
+
+### Per-attach recognition parameters
+
+These may be sent in `params` on `audio_extension_attach`, but only when
+`whisper.allow_client_params: true` is set in `config.yaml`. Otherwise an
+attach carrying any of them is rejected. Each falls back to its `config.yaml`
+value when omitted.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `initial_prompt` | string | config value | Decoding prompt. Max 1024 bytes; control characters stripped. Whisper only conditions on the last ~224 tokens |
+| `task` | string | `translate` | `transcribe` (verbatim) or `translate` (always English) |
+| `asr_language` | string | `""` (auto) | Language Whisper decodes with, e.g. `en`. Auto-detect misfires on noisy HF |
+
+For narrowband HF voice, `task: "transcribe"` with `asr_language: "en"` and a
+domain-specific `initial_prompt` is substantially more reliable than the
+defaults, which auto-detect the language and then translate.
+
+### Control messages
+
+Sent as `audio_extension_control` on the DX WebSocket:
+
+```json
+{"type": "audio_extension_control", "control_type": "reset_transcript"}
+```
+
+Clears the duplicate-suppression history. A client that retunes without
+detaching needs this — completed segments are suppressed when their text was
+already seen, so without a reset a genuine new transmission on a new frequency
+can be swallowed as a duplicate of the previous one. The history is also capped
+at 500 segments regardless.
 
 ## Model Selection
 

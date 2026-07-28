@@ -1671,6 +1671,9 @@ func main() {
 		MaxUsers:          config.Whisper.MaxUsers,
 		LibreTranslateURL: config.Whisper.LibreTranslateURL,
 		SummaryURL:        config.Whisper.SummaryURL,
+		Task:              config.Whisper.Task,
+		ASRLanguage:       config.Whisper.ASRLanguage,
+		AllowClientParams: config.Whisper.AllowClientParams,
 	}
 	whisperInfo := whisper.GetInfo()
 

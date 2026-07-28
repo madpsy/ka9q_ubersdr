@@ -298,6 +298,23 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 			return aem.sendErrorSafe(activeExtension, conn, "summary requests only supported for whisper extension")
 		}
 
+	case "reset_transcript":
+		// Clear the whisper dedup history — used by scanning clients that retune
+		// without detaching, so a repeated phrase on a new frequency is not
+		// suppressed as a duplicate of the previous frequency's audio.
+		whisperExt, ok := activeExtension.Extension.(*whisperExtensionWrapper)
+		if !ok {
+			log.Printf("AudioExtension: reset_transcript called on non-whisper extension")
+			return aem.sendErrorSafe(activeExtension, conn, "reset_transcript is only supported for the whisper extension")
+		}
+
+		whisperExt.HandleControlMessage([]byte{0x07}, activeExtension.ResultChan)
+		log.Printf("AudioExtension: [%s] whisper transcript reset", sessionID)
+		return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
+			"type":         "audio_extension_control_ack",
+			"control_type": "reset_transcript",
+		})
+
 	case "set_output_mode":
 		// Switch the soundmodem output format on the fly (no subprocess restart needed).
 		// Expected message: { "type": "audio_extension_control", "control_type": "set_output_mode", "output_mode": "ax25" | "kiss" }

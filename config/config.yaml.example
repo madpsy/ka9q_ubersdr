@@ -2223,6 +2223,7 @@ lookup_services:
   # Default: ["dxcluster"]. Set to [] to disable.
   trusted_containers:
     - "dxcluster"
+    - "voiceskimmer"
 
   # Maximum lookups per minute for EACH trusted container above (keyed per
   # container name). This is separate from rate_limit_per_minute (which applies

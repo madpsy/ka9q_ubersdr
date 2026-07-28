@@ -1,6 +1,20 @@
 {
   "addons": [
     {
+      "name": "voiceskimmer",
+      "status": "Unstable - Testing",
+      "description": "Voice callsign skimmer — hops around detected SSB voice activity, feeds each frequency to the Whisper speech-to-text extension, extracts phonetically-spelled callsigns from the transcript, validates each one against QRZ, and optionally submits confirmed stations as DX spots. Serves a live dark-themed dashboard with the running transcript, confirmed callsigns per band/frequency, submitted spots, and band activity.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_voiceskimmer/main/install.sh",
+      "host": "voiceskimmer",
+      "port": 6098,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
       "name": "lightning",
       "status": "Stable",
       "description": "VLF lightning sferic detector — connects to UberSDR in iq48 mode (48 kHz IQ, centred at 25 kHz, covering 1–49 kHz), detects lightning sferics using an adaptive IIR noise floor and threshold trigger, captures GPS-timestamped waveforms for TDOA cross-correlation, and serves a live dark-themed web UI with strike activity timeline, waveform gallery, and SNR statistics.",

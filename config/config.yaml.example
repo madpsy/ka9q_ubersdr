@@ -1997,7 +1997,7 @@ whisper:
   #   - "Maritime weather broadcast."
   # Leave empty to disable (default)
   # Default: ""
-  initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators, Q codes and technical language to be used as well as random topics."
+  initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators, Q codes and technical language to be used as well as random topics. Operators exchange callsigns spelled in the NATO phonetic alphabet: alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu, with digits zero one two three four five six seven eight nine."
 
   # Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
   # Used to generate summaries of completed transcriptions

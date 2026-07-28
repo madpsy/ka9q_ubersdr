@@ -24,6 +24,44 @@ get_field() {
         '.addons[] | select(.name == $name) | .[$field]' "$ADDONS_FILE"
 }
 
+# Test an addon proxy backend, retrying to give a freshly started container
+# time to come up. Up to 4 retries, backing off 1, 2, 3 then 4 seconds.
+# Usage: test_backend_with_retry <name>
+test_backend_with_retry() {
+    local name="$1"
+    local delays=(1 2 3 4)
+    local attempt=0
+    local encoded
+    encoded=$(jq -rn --arg n "$name" '$n | @uri')
+
+    while true; do
+        local test_response=""
+        test_response=$(_api_curl GET "/admin/addon-proxies/test?name=${encoded}" 2>/dev/null) || test_response=""
+
+        local test_success="false" status_code="" test_error="UberSDR API request failed"
+        if [[ -n "$test_response" ]]; then
+            test_success=$(echo "$test_response" | jq -r '.success // false')
+            status_code=$(echo "$test_response" | jq -r '.status_code // ""')
+            test_error=$(echo "$test_response" | jq -r '.error // "unknown error"')
+        fi
+
+        if [[ "$test_success" == "true" ]]; then
+            echo "  ✓ Backend reachable (HTTP $status_code)"
+            return 0
+        fi
+
+        if (( attempt >= ${#delays[@]} )); then
+            echo "  ✗ Backend not reachable after $(( ${#delays[@]} + 1 )) attempts: $test_error" >&2
+            echo "  Ensure the addon container is running and try again." >&2
+            return 1
+        fi
+
+        echo "  … not reachable yet ($test_error) — retrying in ${delays[$attempt]}s"
+        sleep "${delays[$attempt]}"
+        (( attempt++ )) || true
+    done
+}
+
 # Install a single addon by name
 install_addon() {
     local name="$1"
@@ -60,20 +98,10 @@ install_addon() {
         api_add_addon_proxy "$name"
     fi
 
-    # Test backend connectivity immediately (no restart required)
+    # Test backend connectivity immediately (no restart required). Some addons
+    # take a few seconds to start listening, so this retries with a backoff.
     echo "Testing backend connectivity for '$name'..."
-    local test_response
-    test_response=$(_api_curl GET "/admin/addon-proxies/test?name=$(jq -rn --arg n "$name" '$n | @uri')")
-    local test_success status_code test_error
-    test_success=$(echo "$test_response" | jq -r '.success')
-    status_code=$(echo "$test_response" | jq -r '.status_code')
-    test_error=$(echo "$test_response" | jq -r '.error')
-    if [[ "$test_success" == "true" ]]; then
-        echo "  ✓ Backend reachable (HTTP $status_code)"
-    else
-        echo "  ✗ Backend not reachable: $test_error" >&2
-        echo "  Ensure the addon container is running and try again." >&2
-    fi
+    test_backend_with_retry "$name" || true
 
     # Show the addon URL and UI password (if one was set during install)
     local addon_url="http://ubersdr.local/addon/${name}/"

@@ -3216,29 +3216,9 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Build the base payload (load averages + CPU temp with default threshold).
+	// Load averages + CPU temp; getSystemLoad already applies the configured
+	// server.cpu_temp_threshold_c to both the reported limit and the status.
 	response := getSystemLoad()
-
-	// Override the CPU temp threshold with the configured value (getSystemLoad uses
-	// DefaultCPUTempThresholdC since it has no access to the live config).
-	configuredThreshold := ah.config.Server.CPUTempThresholdC
-	if configuredThreshold <= 0 {
-		configuredThreshold = DefaultCPUTempThresholdC
-	}
-	if configuredThreshold != DefaultCPUTempThresholdC {
-		response["cpu_temp_threshold_c"] = configuredThreshold
-		// Recompute cpu_temp_status with the configured threshold.
-		if avail, _ := response["cpu_temp_available"].(bool); avail {
-			tempC, _ := response["cpu_temp_c"].(float64)
-			tempStatus := "ok"
-			if tempC >= configuredThreshold {
-				tempStatus = "critical"
-			} else if tempC >= configuredThreshold*0.85 {
-				tempStatus = "warning"
-			}
-			response["cpu_temp_status"] = tempStatus
-		}
-	}
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {

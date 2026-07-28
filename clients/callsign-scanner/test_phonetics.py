@@ -132,9 +132,6 @@ class TestTokenise(unittest.TestCase):
         self.assertEqual(tokenise("Hello, world!"), ["hello", "world"])
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class TestLookupGate(unittest.TestCase):
     """The final gate before a QRZ request is spent."""
@@ -155,3 +152,6 @@ class TestLookupGate(unittest.TestCase):
     def test_rejects_non_alphanumeric(self):
         self.assertFalse(is_lookupable("M0-ABC"))
         self.assertFalse(is_lookupable("MM3NDH/P"))
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

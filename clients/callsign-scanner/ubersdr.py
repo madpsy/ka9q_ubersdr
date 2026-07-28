@@ -26,6 +26,7 @@ import uuid as uuidlib
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
+import requests
 import websocket
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,10 @@ class UberSDRSession:
         self._audio_ready = threading.Event()
         self._dx_ready = threading.Event()
         self._attached = threading.Event()
+        self._audio_failed = threading.Event()
+        self._reset_supported = True
+        self.bypassed = False
+        self.max_session_time = 0
 
         self._lock = threading.Lock()
 
@@ -117,8 +122,66 @@ class UberSDRSession:
 
     # -- Lifecycle ----------------------------------------------------------
 
+    def register(self, timeout: float = 10.0) -> bool:
+        """
+        Announce the session UUID via POST /connection before opening any socket.
+
+        Mandatory. The audio handler rejects any UUID with no recorded
+        User-Agent ("Invalid session. Please refresh the page and try again.",
+        websocket.go:563), and /connection is what records it. It also binds the
+        UUID to our client IP, which the DX socket checks independently.
+
+        The response tells us the applicable limits, which is worth logging —
+        max_session_time in particular caps how long a scan can run.
+        """
+        try:
+            resp = requests.post(
+                f"{self.base_http}/connection",
+                json={
+                    "user_session_id": self.user_session_id,
+                    **({"password": self.password} if self.password else {}),
+                },
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            log.error("Could not reach /connection: %s", exc)
+            return False
+
+        try:
+            data = resp.json()
+        except ValueError:
+            log.error("/connection returned non-JSON (HTTP %d)", resp.status_code)
+            return False
+
+        if not data.get("allowed", False):
+            log.error(
+                "Connection refused by server: %s",
+                data.get("reason", f"HTTP {resp.status_code}"),
+            )
+            return False
+
+        self.bypassed = bool(data.get("bypassed"))
+        self.max_session_time = int(data.get("max_session_time") or 0)
+
+        log.info(
+            "Session registered from %s (bypassed=%s, max_session_time=%s)",
+            data.get("client_ip", "?"),
+            self.bypassed,
+            f"{self.max_session_time}s" if self.max_session_time else "unlimited",
+        )
+        if not self.bypassed:
+            log.warning(
+                "Not a bypassed IP: lookups are limited to 10/min and the "
+                "session ends after %s. Use --lookup-interval 6.0.",
+                f"{self.max_session_time}s" if self.max_session_time else "n/a",
+            )
+        return True
+
     def start(self, timeout: float = 20.0) -> bool:
         """Bring up both sockets. Returns True once the audio session exists."""
+        if not self.register():
+            return False
+
         self._running = True
 
         self._audio_ws = websocket.WebSocketApp(
@@ -135,8 +198,7 @@ class UberSDRSession:
         )
         self._audio_thread.start()
 
-        if not self._audio_ready.wait(timeout):
-            log.error("Timed out waiting for the audio session to open")
+        if not self._wait_for_audio(timeout):
             return False
 
         # The DX socket is rejected unless the UUID is already known to the
@@ -161,6 +223,17 @@ class UberSDRSession:
 
         return True
 
+    def _wait_for_audio(self, timeout: float) -> bool:
+        """Wait for the session to go live, failing fast on an explicit reject."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._audio_ready.wait(0.2):
+                return True
+            if self._audio_failed.is_set():
+                return False
+        log.error("Timed out waiting for the audio session to go live")
+        return False
+
     def stop(self) -> None:
         self._running = False
         for ws in (self._dx_ws, self._audio_ws):
@@ -173,14 +246,14 @@ class UberSDRSession:
     # -- Audio socket -------------------------------------------------------
 
     def _on_audio_open(self, ws) -> None:
-        log.info(
-            "Audio session open: %s @ %.3f MHz (uuid %s)",
-            self.mode, self.frequency / 1e6, self.user_session_id,
-        )
+        # The socket being open does NOT mean the session was accepted — the
+        # server validates the UUID after the upgrade and may reject with an
+        # error frame, then close. So do not signal readiness here.
+        #
         # Suppress the audio downlink. Whisper's tap is upstream of this, so
         # transcription is unaffected — see audio.go:286 vs websocket.go:1618.
+        # The mute_updated reply doubles as our proof the session is live.
         self._send_audio({"type": "set_mute", "muted": True})
-        self._audio_ready.set()
 
     def _on_audio_message(self, ws, message) -> None:
         # Binary frames are audio/silence packets; drain and discard. Text
@@ -193,11 +266,20 @@ class UberSDRSession:
             return
 
         mtype = msg.get("type")
-        if mtype == "error":
-            detail = msg.get("error") or msg.get("message", "")
-            log.warning("Audio session error: %s", detail)
+        if mtype == "mute_updated":
+            # Only a live session answers this, so it is our readiness signal.
+            if not self._audio_ready.is_set():
+                log.info(
+                    "Audio session live: %s @ %.3f MHz (uuid %s, muted)",
+                    self.mode, self.frequency / 1e6, self.user_session_id,
+                )
+            self._audio_ready.set()
+        elif mtype == "error":
+            detail = str(msg.get("error") or msg.get("message", ""))
+            log.error("Audio session rejected: %s", detail)
+            self._audio_failed.set()
             if self.on_error:
-                self.on_error(str(detail))
+                self.on_error(detail)
         elif mtype in ("kicked", "session_kicked"):
             log.error("Session kicked by server: %s", msg)
             self._running = False
@@ -241,11 +323,29 @@ class UberSDRSession:
             log.info("Whisper detached")
             self._attached.clear()
         elif mtype == "audio_extension_error":
-            err = msg.get("error", "")
+            err = str(msg.get("error", ""))
+
+            # An older server has no reset_transcript control. Degrade rather
+            # than erroring on every hop: stop sending it and warn once. The
+            # scanner still works, but Whisper's dedup history now persists
+            # across frequencies, so a repeated phrase on a new frequency can
+            # be suppressed as a duplicate of the previous one.
+            lowered = err.lower()
+            if "reset_transcript" in lowered or "unknown control_type" in lowered:
+                if self._reset_supported:
+                    self._reset_supported = False
+                    log.warning(
+                        "Server does not support reset_transcript — continuing "
+                        "without it. Transcript dedup now spans frequencies, so "
+                        "some repeated phrases may be dropped. Update the server "
+                        "to fix."
+                    )
+                return
+
             log.error("Extension error: %s", err)
             self._attached.clear()
             if self.on_error:
-                self.on_error(str(err))
+                self.on_error(err)
         elif mtype == "audio_extension_control_ack":
             log.debug("Control ack: %s", msg.get("control_type"))
 
@@ -359,8 +459,11 @@ class UberSDRSession:
         Essential when hopping: completed segments are dropped if their exact
         text was seen before, so without this a fresh "this is ..." on a new
         frequency gets swallowed as a duplicate of the previous frequency's.
-        Requires the reset_transcript control message on the server.
+        Silently becomes a no-op against a server that lacks the
+        reset_transcript control (see _on_dx_message).
         """
+        if not self._reset_supported:
+            return
         self._send_dx({
             "type": "audio_extension_control",
             "control_type": "reset_transcript",

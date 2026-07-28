@@ -1787,26 +1787,20 @@ func getSystemLoad() map[string]interface{} {
 	loadData["status"] = status
 
 	// Include CPU temperature if available.
-	// Uses DefaultCPUTempThresholdC (80°C) as the threshold since getSystemLoad
-	// has no access to the live config.  HandleSystemLoad overrides this with the
-	// configured value when serving the HTTP endpoint.
+	// The threshold comes from server.cpu_temp_threshold_c (via the live config)
+	// so every consumer — admin UI, Telegram, monitor display — reports the same
+	// limit as the cpu_temperature health probe.
+	threshold := configuredCPUTempThresholdC()
 	if tempC, driver, err := getCPUTemperature(); err == nil {
-		threshold := DefaultCPUTempThresholdC
-		tempStatus := "ok"
-		if tempC >= threshold {
-			tempStatus = "critical"
-		} else if tempC >= threshold*0.85 {
-			tempStatus = "warning"
-		}
 		loadData["cpu_temp_c"] = tempC
 		loadData["cpu_temp_driver"] = driver
 		loadData["cpu_temp_available"] = true
 		loadData["cpu_temp_threshold_c"] = threshold
-		loadData["cpu_temp_status"] = tempStatus
+		loadData["cpu_temp_status"] = cpuTempStatus(tempC, threshold)
 	} else {
 		loadData["cpu_temp_available"] = false
 		loadData["cpu_temp_c"] = 0.0
-		loadData["cpu_temp_threshold_c"] = DefaultCPUTempThresholdC
+		loadData["cpu_temp_threshold_c"] = threshold
 		loadData["cpu_temp_status"] = "unknown"
 	}
 

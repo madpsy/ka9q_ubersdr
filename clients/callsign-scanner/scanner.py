@@ -30,12 +30,14 @@ from typing import Dict, List, Optional
 
 from activity import ActivityTracker, Target
 from lookup import CallsignValidator, LookupResult
+from preflight import run_preflight
 from phonetics import (
     Candidate,
     extract_callsigns,
     is_lookupable,
     normalise_callsign,
 )
+from timeline import FrequencyTimeline
 from ubersdr import Segment, UberSDRSession
 
 log = logging.getLogger("scanner")
@@ -80,6 +82,10 @@ class Detection:
     country: str = ""
     dx_spot: str = ""
     agrees_with_dx_spot: bool = False
+    # False when the segment's audio spanned a frequency hop, so the frequency
+    # above is a best guess rather than a certainty.
+    attribution_certain: bool = True
+    straddled_hop: bool = False
 
 
 class CallsignScanner:
@@ -98,10 +104,14 @@ class CallsignScanner:
         )
         self.session: Optional[UberSDRSession] = None
         self.validator: Optional[CallsignValidator] = None
+        self.timeline = FrequencyTimeline(pipeline_latency=args.pipeline_latency)
 
         self._running = True
-        self._current: Optional[Target] = None
         self._log_file = None
+        self._last_key: Optional[tuple] = None
+        self._worker: Optional[threading.Thread] = None
+        self._extend_lock = threading.Lock()
+        self._extend_until = 0.0
 
         self.stats = {
             "dwells": 0,
@@ -111,6 +121,7 @@ class CallsignScanner:
             "validated": 0,
             "rejected": 0,
             "dx_agreements": 0,
+            "straddled": 0,
         }
         self.confirmed: Dict[str, Detection] = {}
 
@@ -168,6 +179,11 @@ class CallsignScanner:
                 "asr_language": self.args.asr_language,
             }
 
+        # Seed the timeline with where we actually opened, so segments arriving
+        # before the first hop are attributed correctly.
+        if first is not None:
+            self.timeline.record(first)
+
         if not self.session.attach_whisper(**attach_kwargs):
             if attach_kwargs:
                 log.error(
@@ -179,6 +195,11 @@ class CallsignScanner:
             else:
                 log.error("Whisper attach failed (is whisper.enabled set?)")
             return False
+
+        # One long-lived consumer for the whole run; the session and the Whisper
+        # attach are never rebuilt.
+        self._worker = threading.Thread(target=self._segment_worker, daemon=True)
+        self._worker.start()
 
         return True
 
@@ -193,7 +214,9 @@ class CallsignScanner:
         keepalive = time.time()
 
         while self._running:
-            target = self.tracker.next_target()
+            target = self.tracker.next_target(
+                exclude=self._last_key, cooldown=self.args.revisit_cooldown
+            )
             if target is None:
                 log.info("No active voice targets; waiting")
                 if not self._sleep(10.0):
@@ -201,14 +224,21 @@ class CallsignScanner:
                 continue
 
             self._dwell(target)
+            self._last_key = target.key
 
             if time.time() - keepalive > 30:
                 self.session.ping()
                 keepalive = time.time()
 
     def _dwell(self, target: Target) -> None:
-        """Tune to a target, listen, and process whatever Whisper returns."""
-        self._current = target
+        """
+        Point at a target and stay there.
+
+        Segments are NOT collected here — they are consumed continuously by
+        _segment_worker and attributed via the timeline, because Whisper's
+        output lags its input by seconds and a segment arriving now often
+        belongs to the previous frequency.
+        """
         log.info(
             "→ %s %.3f MHz %s (SNR %.1f dB, conf %.2f)%s",
             target.band, target.dial_freq / 1e6, target.mode.upper(),
@@ -220,20 +250,48 @@ class CallsignScanner:
             log.warning("Tune failed; skipping")
             return
 
-        # Drop stale audio and clear Whisper's dedup history, otherwise a
-        # repeated phrase on this frequency is suppressed as a duplicate of the
-        # previous one.
-        self._drain_segments()
+        # Record the hop before resetting, so in-flight audio from the previous
+        # frequency is still attributed to it.
+        self.timeline.record(target)
+
+        # Clear Whisper's dedup history only — this is a control message, not a
+        # teardown. Without it, a repeated phrase on the new frequency would be
+        # suppressed as a duplicate of the previous frequency's transcript.
         self.session.reset_transcript()
 
         self.stats["dwells"] += 1
-        found = 0
-        deadline = time.time() + self.args.dwell
-        extended = False
+        with self._extend_lock:
+            self._extend_until = 0.0
 
-        while time.time() < deadline and self._running:
+        started = time.time()
+        deadline = started + self.args.dwell
+        # Each detection pushes the deadline out, so without a hard ceiling a
+        # busy net would hold the scanner indefinitely.
+        hard_deadline = started + self.args.max_dwell
+
+        while self._running:
+            with self._extend_lock:
+                effective = min(max(deadline, self._extend_until), hard_deadline)
+            if time.time() >= effective:
+                break
+            time.sleep(0.25)
+
+        held = time.time() - started
+        if held > self.args.dwell + 1:
+            log.info("   (held %.0fs)", held)
+
+        self.tracker.mark_visited(target)
+
+    def _segment_worker(self) -> None:
+        """
+        Continuously drain Whisper output for the lifetime of the run.
+
+        Runs independently of the hop loop so that audio captured before a hop
+        is still processed, and credited to the frequency it actually came from.
+        """
+        while self._running:
             try:
-                segment = self.segments.get(timeout=1.0)
+                segment = self.segments.get(timeout=0.5)
             except queue.Empty:
                 continue
 
@@ -243,31 +301,44 @@ class CallsignScanner:
                 log.info("   %s %s", marker, segment.text)
 
             # Only mine completed segments: incomplete ones are re-sent as they
-            # grow and would produce the same candidate repeatedly.
+            # grow and would yield the same candidate repeatedly.
             if not segment.completed:
                 continue
 
-            detections = self._process(segment, target)
-            found += sum(1 for d in detections if d.validated)
+            duration = max(segment.end - segment.start, 0.0)
+            attribution = self.timeline.attribute(segment.received_at, duration)
+            target = attribution.target
+            if target is None:
+                continue
 
-            # Something callsign-shaped turned up — stay a little longer, since
-            # exchanges cluster around the start and end of an over.
-            if detections and not extended:
-                deadline += self.args.dwell_extension
-                extended = True
+            if attribution.straddled:
+                self.stats["straddled"] += 1
+                if self.args.verbose:
+                    log.info(
+                        "   ~ segment spans a hop; crediting %.3f MHz (%.0f%%)",
+                        target.dial_freq / 1e6, attribution.overlap_fraction * 100,
+                    )
 
-        self.tracker.mark_visited(target, callsigns_found=found)
+            detections = self._process(segment, target, attribution)
+            self.tracker.record_success(
+                target, sum(1 for d in detections if d.validated)
+            )
 
-    def _drain_segments(self) -> None:
-        while True:
-            try:
-                self.segments.get_nowait()
-            except queue.Empty:
-                return
+            # Something callsign-shaped turned up on the frequency we are still
+            # sitting on — linger, since exchanges cluster at the start and end
+            # of an over.
+            current = self.timeline.current()
+            if detections and current is not None and current.key == target.key:
+                with self._extend_lock:
+                    self._extend_until = max(
+                        self._extend_until, time.time() + self.args.dwell_extension
+                    )
 
     # -- Extraction and validation -----------------------------------------
 
-    def _process(self, segment: Segment, target: Target) -> List[Detection]:
+    def _process(
+        self, segment: Segment, target: Target, attribution
+    ) -> List[Detection]:
         candidates = extract_callsigns(segment.text)
         if not candidates:
             return []
@@ -294,7 +365,7 @@ class CallsignScanner:
             # tell those apart from genuine stations.
             result = self.validator.validate(normalised)
             detection = self._build_detection(
-                segment, target, cand, normalised, result
+                segment, target, cand, normalised, result, attribution
             )
 
             if result.valid:
@@ -322,7 +393,7 @@ class CallsignScanner:
 
     def _build_detection(
         self, segment: Segment, target: Target,
-        cand: Candidate, normalised: str, result: LookupResult,
+        cand: Candidate, normalised: str, result: LookupResult, attribution,
     ) -> Detection:
         agrees = bool(
             target.dx_callsign
@@ -350,6 +421,8 @@ class CallsignScanner:
             country=result.country,
             dx_spot=target.dx_callsign,
             agrees_with_dx_spot=agrees,
+            attribution_certain=attribution.certain,
+            straddled_hop=attribution.straddled,
         )
 
     def _write(self, detection: Detection) -> None:
@@ -375,6 +448,21 @@ class CallsignScanner:
     def shutdown(self) -> None:
         log.info("Shutting down")
         self.tracker.stop()
+
+        # Whisper still holds buffered audio. Give it a moment to flush before
+        # detaching, or the last segments of the run are lost.
+        if self.session is not None and self.session.attached:
+            drain = max(self.args.pipeline_latency * 2, 3.0)
+            log.info("Draining the transcription pipeline (%.0fs)", drain)
+            self._running = True          # keep the worker alive for the drain
+            deadline = time.time() + drain
+            while time.time() < deadline:
+                time.sleep(0.25)
+            self._running = False
+
+        if self._worker is not None:
+            self._worker.join(timeout=3.0)
+
         if self.session is not None:
             try:
                 self.session.detach_whisper()
@@ -396,6 +484,7 @@ class CallsignScanner:
         print(f"  Validated by QRZ:     {self.stats['validated']}")
         print(f"  Rejected by QRZ:      {self.stats['rejected']}")
         print(f"  Matched a DX spot:    {self.stats['dx_agreements']}")
+        print(f"  Spanned a hop:        {self.stats['straddled']}")
 
         if self.validator is not None:
             stats = self.validator.stats
@@ -434,6 +523,12 @@ def parse_args(argv=None):
                       help="Seconds to listen on each frequency")
     scan.add_argument("--dwell-extension", type=float, default=30.0,
                       help="Extra seconds once something callsign-shaped is heard")
+    scan.add_argument("--max-dwell", type=float, default=180.0,
+                      help="Hard ceiling on time spent on one frequency, "
+                           "however much is being heard there")
+    scan.add_argument("--revisit-cooldown", type=float, default=120.0,
+                      help="Seconds before a frequency may be revisited. "
+                           "Ignored when every target is in cooldown.")
     scan.add_argument("--min-snr", type=float, default=8.0,
                       help="Ignore activity below this SNR")
     scan.add_argument("--min-confidence", type=float, default=0.7,
@@ -456,10 +551,19 @@ def parse_args(argv=None):
                          help="Whisper initial prompt (max 1024 bytes)")
     whisper.add_argument("--asr-language", default="en",
                          help="Recognition language")
+    whisper.add_argument("--pipeline-latency", type=float, default=2.0,
+                         help="Estimated seconds between audio reaching the "
+                              "server and its transcript arriving. Used to "
+                              "credit segments to the frequency that produced "
+                              "them rather than the current one.")
     whisper.add_argument("--stock-whisper", action="store_true",
                          help="Do not send per-attach recognition parameters. "
                               "Required against a server without "
                               "whisper.allow_client_params enabled.")
+
+    parser.add_argument("--check", action="store_true",
+                        help="Run pre-flight checks against the instance and "
+                             "exit without scanning")
 
     out = parser.add_argument_group("output")
     out.add_argument("--output", default="detections.jsonl",
@@ -485,6 +589,19 @@ def main(argv=None) -> int:
         log.error("--prompt exceeds the server's 1024-byte cap")
         return 2
 
+    if args.check:
+        base = f"{'https' if args.ssl else 'http'}://{args.host}:{args.port}"
+        print(f"\nPre-flight: {base}\n")
+        usable, lines = run_preflight(base, args.password or "")
+        for line in lines:
+            print(f"  {line}")
+        print()
+        if usable:
+            print("Ready to scan.\n")
+            return 0
+        print("Not usable — fix the FAIL items above.\n")
+        return 1
+
     scanner = CallsignScanner(args)
 
     def handle_signal(signum, frame):
@@ -496,8 +613,7 @@ def main(argv=None) -> int:
 
     try:
         if not scanner.start():
-            scanner.shutdown()
-            return 1
+            return 1          # the finally block below handles cleanup
         scanner.run()
     finally:
         scanner.shutdown()

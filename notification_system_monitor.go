@@ -15,6 +15,30 @@ import (
 // probe reports unhealthy. Override by passing a custom probe to BuildSystemHealthProbes.
 const DefaultCPUTempThresholdC = 80.0
 
+// configuredCPUTempThresholdC returns the effective CPU temperature threshold:
+// server.cpu_temp_threshold_c when configured, otherwise DefaultCPUTempThresholdC.
+// Reads the live config so callers with no *Config to hand (getSystemLoad and the
+// monitor display slides it feeds) report the same limit as the health probes.
+func configuredCPUTempThresholdC() float64 {
+	if globalConfig != nil && globalConfig.Server.CPUTempThresholdC > 0 {
+		return globalConfig.Server.CPUTempThresholdC
+	}
+	return DefaultCPUTempThresholdC
+}
+
+// cpuTempStatus classifies tempC against threshold using the same bands
+// everywhere: critical at/above the threshold, warning from 85% of it.
+func cpuTempStatus(tempC, threshold float64) string {
+	switch {
+	case tempC >= threshold:
+		return "critical"
+	case tempC >= threshold*0.85:
+		return "warning"
+	default:
+		return "ok"
+	}
+}
+
 // Default flap-detection parameters (overridable per system_monitor rule).
 const (
 	defaultFlapThreshold = 6  // transitions within the window to start flapping

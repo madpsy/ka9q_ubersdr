@@ -263,24 +263,67 @@ class ActivityTracker:
         for key in dead:
             del self._targets[key]
 
-    def next_target(self, exclude: Optional[Tuple[str, int]] = None) -> Optional[Target]:
-        """Highest-priority target, or None if nothing is active."""
+    def next_target(
+        self,
+        exclude: Optional[Tuple[str, int]] = None,
+        cooldown: float = 0.0,
+    ) -> Optional[Target]:
+        """
+        Highest-priority target, or None if nothing is active.
+
+        Selection is tiered so that a loud, interesting frequency cannot starve
+        the rest of the band. The priority score alone is not enough: a target
+        with high SNR, a DX spot and a previous success can out-score an
+        unvisited weak one even with its idle bonus at zero, and the scanner
+        would then sit on it forever.
+
+          tier 1  everything outside its cooldown, excluding the last frequency
+          tier 2  ignore the cooldown, but still refuse an immediate repeat
+          tier 3  the last frequency, only when it is genuinely all there is
+
+        Args:
+            exclude:  key of the frequency just visited; never chosen unless it
+                      is the only target left
+            cooldown: seconds a frequency stays ineligible after a visit
+        """
         with self._lock:
             self._expire()
-            candidates = [
-                t for t in self._targets.values()
-                if exclude is None or t.key != exclude
-            ]
-            if not candidates:
+            everything = list(self._targets.values())
+            if not everything:
                 return None
-            return max(candidates, key=lambda t: t.priority())
 
-    def mark_visited(self, target: Target, callsigns_found: int = 0) -> None:
+            now = time.time()
+            not_repeat = [t for t in everything if exclude is None or t.key != exclude]
+
+            fresh = [
+                t for t in not_repeat
+                if t.last_visited == 0.0 or (now - t.last_visited) >= cooldown
+            ]
+
+            pool = fresh or not_repeat or everything
+            return max(pool, key=lambda t: t.priority())
+
+    def mark_visited(self, target: Target) -> None:
+        """Called once per dwell, by the hop loop."""
         with self._lock:
             live = self._targets.get(target.key)
             if live is not None:
                 live.last_visited = time.time()
                 live.visits += 1
+
+    def record_success(self, target: Target, callsigns_found: int) -> None:
+        """
+        Credit a confirmed callsign to a frequency.
+
+        Separate from mark_visited because segments are attributed
+        asynchronously — a success may land well after the dwell that produced
+        it has ended, and must not be counted as another visit.
+        """
+        if callsigns_found <= 0:
+            return
+        with self._lock:
+            live = self._targets.get(target.key)
+            if live is not None:
                 live.callsigns_found += callsigns_found
 
     def snapshot(self) -> List[Target]:

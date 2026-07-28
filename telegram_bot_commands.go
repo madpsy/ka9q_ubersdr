@@ -1245,7 +1245,7 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 	// CPU temperature (silently omitted if sensor unavailable).
 	if tempC, _, err := getCPUTemperature(); err == nil {
 		tempStatus := "OK"
-		if tempC >= DefaultCPUTempThresholdC {
+		if tempC >= configuredCPUTempThresholdC() {
 			tempStatus = "⚠️ Warning"
 		}
 		fmt.Fprintf(&sb, "• CPU: %.0f°C (%s)\n", tempC, tempStatus)

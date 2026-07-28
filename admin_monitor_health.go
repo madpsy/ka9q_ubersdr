@@ -93,26 +93,13 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 
 	// ── System load & CPU temperature ─────────────────────────────────────────
 	{
+		// getSystemLoad applies the configured server.cpu_temp_threshold_c.
 		load := getSystemLoad()
-		configuredThreshold := ah.config.Server.CPUTempThresholdC
-		if configuredThreshold <= 0 {
-			configuredThreshold = DefaultCPUTempThresholdC
-		}
-		if avail, _ := load["cpu_temp_available"].(bool); avail && configuredThreshold != DefaultCPUTempThresholdC {
-			tempC, _ := load["cpu_temp_c"].(float64)
-			tempStatus := "ok"
-			if tempC >= configuredThreshold {
-				tempStatus = "critical"
-			} else if tempC >= configuredThreshold*0.85 {
-				tempStatus = "warning"
-			}
-			load["cpu_temp_status"] = tempStatus
-			load["cpu_temp_threshold_c"] = configuredThreshold
-		}
 
 		tempStatus, _ := load["cpu_temp_status"].(string)
 		tempAvail, _ := load["cpu_temp_available"].(bool)
 		tempC, _ := load["cpu_temp_c"].(float64)
+		tempThreshold, _ := load["cpu_temp_threshold_c"].(float64)
 		loadStatus, _ := load["status"].(string)
 		load1, _ := load["load_1min"].(string)
 		load5, _ := load["load_5min"].(string)
@@ -130,9 +117,9 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 			issues = append(issues, fmt.Sprintf("Load average high: %s / %s / %s (%d cores, threshold %.0f×)", load1, load5, load15, cores, 1.0))
 		}
 		if tempStatus == "critical" {
-			issues = append(issues, fmt.Sprintf("CPU temperature critical: %.1f°C (threshold %.0f°C)", tempC, configuredThreshold))
+			issues = append(issues, fmt.Sprintf("CPU temperature critical: %.1f°C (threshold %.0f°C)", tempC, tempThreshold))
 		} else if tempStatus == "warning" {
-			issues = append(issues, fmt.Sprintf("CPU temperature high: %.1f°C (threshold %.0f°C)", tempC, configuredThreshold))
+			issues = append(issues, fmt.Sprintf("CPU temperature high: %.1f°C (threshold %.0f°C)", tempC, tempThreshold))
 		}
 
 		detail := fmt.Sprintf("Load: %s / %s / %s", load1, load5, load15)

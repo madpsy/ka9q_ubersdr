@@ -217,7 +217,8 @@ func (r *AddonProxyRouter) SetAdminHandler(ah *AdminHandler) {
 
 // ServeHTTP dispatches the request to the matching addon proxy handler.
 // It matches on the /addon/<name>/ prefix (longest-prefix wins among exact
-// pattern keys). Returns 404 if no addon matches.
+// pattern keys). A request for the bare "/addon/<name>" is redirected to the
+// canonical slashed form. Returns 404 if no addon matches.
 func (r *AddonProxyRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Find the longest matching prefix in the route map.
 	// In practice every key is exactly "/addon/<name>/" so the first match wins,
@@ -233,7 +234,26 @@ func (r *AddonProxyRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			bestLen = len(pattern)
 		}
 	}
+	// Every route key carries a trailing slash, so the bare "/addon/<name>"
+	// matches nothing above. Redirect it to the slashed form rather than
+	// 404ing: that bare URL is what people type and share, and an addon's
+	// page resolves its assets relatively (against a <base> tag or the
+	// document URL), which only produces correct URLs from the slashed form.
+	// Mirrors how http.ServeMux redirects to its subtree patterns.
+	needsSlash := bestHandler == nil && r.routes[req.URL.Path+"/"] != nil
 	r.mu.RUnlock()
+
+	if needsSlash {
+		target := req.URL.Path + "/"
+		if req.URL.RawQuery != "" {
+			target += "?" + req.URL.RawQuery
+		}
+		// 308 rather than 301: this router fronts arbitrary backends, so the
+		// redirected request may be a POST to an addon's API. 301 lets clients
+		// downgrade it to GET; 308 preserves the method and body.
+		http.Redirect(w, req, target, http.StatusPermanentRedirect)
+		return
+	}
 
 	if bestHandler == nil {
 		http.NotFound(w, req)

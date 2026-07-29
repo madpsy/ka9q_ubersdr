@@ -1,0 +1,529 @@
+<!--
+  Voice Skimmer Widget
+  ====================
+  Compact, paginated list of the callsigns the Voice Skimmer addon has
+  confirmed by decoding phonetics off the air and validating them against
+  QRZ. Heard within the last 20 minutes, newest first, five per page;
+  click a row to tune to it.
+
+  • Requires the voiceskimmer addon — checked against
+    window.instanceDescription.addons, same as the SSTV widget.
+  • Reads /addon/voiceskimmer/api/spots (documented in that addon's README).
+  • Draggable, collapsible, dismissible; position and collapsed state persist.
+-->
+
+<style>
+  @media (max-width: 768px) {
+    #vsk-widget { display: none !important; }
+  }
+  html.is-mobile #vsk-widget { display: none !important; }
+
+  #vsk-widget {
+    position: fixed;
+    top: 80px;
+    right: 44px;
+    z-index: 9400;
+    /* Shrink to whatever the content actually needs rather than a fixed
+       width. The callsign column is sized in ch from the longest callsign in
+       the whole list (see sizeCallColumn), so this stays put when paging
+       instead of breathing in and out. max-width is only a guard against a
+       pathological callsign. */
+    width: max-content;
+    max-width: 260px;
+    background: rgba(88, 166, 255, 0.30);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    padding: 5px 8px 4px 9px;
+    border-left: 3px solid rgba(255,255,255,0.4);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    user-select: none;
+    cursor: grab;
+    display: none;
+    opacity: 0;
+    transition: opacity .35s ease;
+  }
+  #vsk-widget.vsk-visible { opacity: 1; }
+  #vsk-widget.vsk-dragging {
+    cursor: grabbing;
+    transition: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  #vsk-widget .vsk-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 3px;
+    padding-right: 16px;   /* room for the close button */
+  }
+  #vsk-widget .vsk-title {
+    font-size: 9px;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+    margin-right: auto;
+  }
+  #vsk-widget .vsk-collapse,
+  #vsk-widget .vsk-open {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    transition: color .15s;
+  }
+  #vsk-widget .vsk-collapse { width: 12px; height: 14px; font-size: 10px; margin-right: 5px; }
+  #vsk-widget .vsk-open { font-size: 11px; padding: 0 2px; }
+  #vsk-widget .vsk-collapse:hover,
+  #vsk-widget .vsk-open:hover { color: #fff; }
+
+  #vsk-widget .vsk-close {
+    position: absolute;
+    top: 3px; right: 5px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    transition: color .15s;
+  }
+  #vsk-widget .vsk-close:hover { color: #fff; }
+
+  /* Collapsed keeps only the header (and its close button). */
+  #vsk-widget.vsk-collapsed .vsk-header { margin-bottom: 0; }
+  #vsk-widget.vsk-collapsed > :not(.vsk-header):not(.vsk-close) {
+    display: none !important;
+  }
+
+  #vsk-widget .vsk-row {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 1px 3px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #vsk-widget .vsk-row:hover { background: rgba(255,255,255,0.18); }
+  /* Fixed width whether or not there is a flag, so the callsigns stay in a
+     column instead of stepping in and out for stations CTY has no ISO code
+     for. Not the widget's monospace face — flag glyphs are not in it. */
+  #vsk-widget .vsk-flag {
+    flex: 0 0 auto;
+    width: 16px;
+    font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+    font-size: 11px;
+    line-height: 1;
+  }
+  /* Exactly as wide as the longest callsign held, in ch — the panel is
+     monospace, so that is exact rather than a guess with padding. */
+  #vsk-widget .vsk-call {
+    font-weight: bold;
+    flex: 0 0 auto;
+    width: calc(var(--vsk-call-ch, 6) * 1ch);
+  }
+  /* Pushed to the right edge so the frequencies line up as a column whatever
+     the callsign lengths; the row's gap keeps them apart on the longest row,
+     where there is no slack left to push into. */
+  #vsk-widget .vsk-freq {
+    margin-left: auto;
+    font-size: 11px;
+    color: rgba(255,255,255,0.85);
+  }
+  /* A dot marks a callsign that was actually submitted to the DX cluster,
+     as opposed to merely confirmed here. */
+  #vsk-widget .vsk-dot {
+    flex: 0 0 auto;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+  }
+  #vsk-widget .vsk-dot.spotted { background: #e3b341; }
+
+  /* Capped so a status line cannot decide the panel's width — with
+     width:max-content an unwrapped sentence would stretch the whole widget
+     to fit it. */
+  #vsk-widget .vsk-msg {
+    font-size: 10px;
+    color: rgba(255,255,255,0.7);
+    white-space: normal;
+    max-width: 140px;
+    padding: 2px 3px;
+  }
+
+  #vsk-widget .vsk-foot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px solid rgba(255,255,255,0.18);
+    font-size: 10px;
+    color: rgba(255,255,255,0.6);
+  }
+  #vsk-widget .vsk-nav {
+    cursor: pointer;
+    padding: 0 4px;
+    transition: color .15s;
+  }
+  #vsk-widget .vsk-nav:hover { color: #fff; }
+  #vsk-widget .vsk-nav.disabled {
+    opacity: .3;
+    cursor: default;
+  }
+  #vsk-widget .vsk-nav.disabled:hover { color: rgba(255,255,255,0.6); }
+</style>
+
+<div id="vsk-widget">
+  <span class="vsk-close" id="vsk-close" title="Dismiss">&#x2715;</span>
+  <div class="vsk-header">
+    <span class="vsk-collapse" id="vsk-collapse" title="Collapse">&#x25BE;</span>
+    <span class="vsk-title">Voice Skimmer</span>
+    <span class="vsk-open" id="vsk-open" title="Open Voice Skimmer">&#x2197;</span>
+  </div>
+  <div class="vsk-list" id="vsk-list"></div>
+  <div class="vsk-foot" id="vsk-foot">
+    <span class="vsk-nav" id="vsk-prev" title="Newer">&#x2039;</span>
+    <span id="vsk-page">&ndash;</span>
+    <span class="vsk-nav" id="vsk-next" title="Older">&#x203A;</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var ADDON        = 'voiceskimmer';
+  var BASE         = '/addon/' + ADDON + '/';
+  var PAGE_SIZE    = 5;
+  // Only callsigns heard within this window. Without it the list reaches back
+  // to whenever the scanner started — the addon never evicts a confirmed
+  // sighting — so on a quiet night the top row could be hours old and tuning
+  // to it would land on a long-dead frequency. Worse, the staleness scales
+  // with how quiet it is, so it is least obvious exactly when it is worst.
+  var WINDOW       = '20m';
+  // Fetched once and paged locally: /api/spots allows one request per second
+  // per address, so paging must not cost a request or an impatient click
+  // would just earn a 429.
+  var FETCH_LIMIT  = 60;
+  var POLL_MS      = 20000;
+  var DRAG_THRESH  = 4;
+  var LS_POS       = 'voiceskimmer_widget_pos';
+  var LS_COLLAPSED = 'voiceskimmer_widget_collapsed';
+
+  var widget   = document.getElementById('vsk-widget');
+  var listEl   = document.getElementById('vsk-list');
+  var footEl   = document.getElementById('vsk-foot');
+  var pageEl   = document.getElementById('vsk-page');
+  var prevEl   = document.getElementById('vsk-prev');
+  var nextEl   = document.getElementById('vsk-next');
+  var closeEl  = document.getElementById('vsk-close');
+  var collapse = document.getElementById('vsk-collapse');
+  var openEl   = document.getElementById('vsk-open');
+  if (!widget) return;
+
+  var spots = [];
+  var page = 0;
+  var pollTimer = null;
+  // What the list looked like at the last render. The poll runs every 20 s but
+  // the data rarely changes, and rebuilding the rows regardless made the panel
+  // visibly flicker — backdrop-filter forces the whole panel to re-composite
+  // when its children are replaced, so an unnecessary render is not free.
+  var lastSig = null;
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function fmtFreq(hz) {
+    return hz ? (hz / 1e6).toFixed(3) : '';
+  }
+
+  // ISO 3166-1 alpha-2 -> flag emoji, via the regional indicator pair.
+  // Same helper as iso2ToFlag() in voice.widget.html. The code is resolved
+  // server-side by the addon (from the CTY block of the QRZ lookup), so
+  // nothing here maps a country NAME — "England", "Scotland" and "Wales" are
+  // three DXCC entities and one ISO country, and only CTY knows that.
+  function iso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try {
+      return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Everything a rendered row shows. Compared before touching the DOM so an
+  // unchanged poll costs nothing.
+  function signature(list) {
+    return list.map(function (s) {
+      return [s.callsign, s.frequency, s.country_code, s.submitted ? 1 : 0].join('|');
+    }).join(',');
+  }
+
+  function fmtAge(ts) {
+    if (!ts) return '';
+    var s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.round(s / 60) + 'm ago';
+    return Math.round(s / 3600) + 'h ago';
+  }
+
+  // ── Position / collapsed state ────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var pos = JSON.parse(localStorage.getItem(LS_POS) || 'null');
+      if (pos && typeof pos.top === 'number' && typeof pos.left === 'number') {
+        widget.style.top  = pos.top + 'px';
+        widget.style.left = pos.left + 'px';
+        widget.style.right = 'auto';
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  function setCollapsed(on) {
+    widget.classList.toggle('vsk-collapsed', on);
+    collapse.innerHTML = on ? '&#x25B8;' : '&#x25BE;';
+    collapse.title = on ? 'Expand' : 'Collapse';
+    try { localStorage.setItem(LS_COLLAPSED, on ? '1' : '0'); } catch (e) {}
+  }
+  collapse.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCollapsed(!widget.classList.contains('vsk-collapsed'));
+  });
+  try { setCollapsed(localStorage.getItem(LS_COLLAPSED) === '1'); } catch (e) {}
+
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    widget.style.display = 'none';
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  });
+
+  openEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    window.open(BASE, 'voiceskimmer');
+  });
+
+  // ── Drag to reposition ────────────────────────────────────────────────
+  var drag = null, moved = false;
+
+  widget.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    if (e.target.closest('.vsk-collapse, .vsk-close, .vsk-open, .vsk-nav')) return;
+    var rect = widget.getBoundingClientRect();
+    drag = { x: e.clientX, y: e.clientY, top: rect.top, left: rect.left };
+    moved = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!moved && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESH) {
+      moved = true;
+      widget.classList.add('vsk-dragging');
+      widget.style.right = 'auto';
+    }
+    if (!moved) return;
+    var top  = Math.min(Math.max(0, drag.top + dy), window.innerHeight - widget.offsetHeight);
+    var left = Math.min(Math.max(0, drag.left + dx), window.innerWidth - widget.offsetWidth);
+    widget.style.top = top + 'px';
+    widget.style.left = left + 'px';
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!drag) return;
+    widget.classList.remove('vsk-dragging');
+    if (moved) {
+      try {
+        localStorage.setItem(LS_POS, JSON.stringify({
+          top: parseInt(widget.style.top, 10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    drag = null;
+    // Cleared on the next tick so the click that ends a drag does not also
+    // tune to whatever row happened to be under the cursor.
+    setTimeout(function () { moved = false; }, 0);
+  });
+
+  // ── Tune ──────────────────────────────────────────────────────────────
+  // Mirrors tuneToFrequency() in voice.widget.html.
+  function tuneTo(spot) {
+    if (!spot || !spot.frequency) return;
+    var hz = spot.frequency;
+    // The skimmer records the mode it actually heard the callsign in, which
+    // beats inferring one from the frequency; the fallback is the usual
+    // convention for anything missing it.
+    var mode = (spot.mode || '').toLowerCase();
+    if (mode !== 'usb' && mode !== 'lsb') mode = hz < 10000000 ? 'lsb' : 'usb';
+
+    if (typeof window.setFrequencyInputValue === 'function') {
+      window.setFrequencyInputValue(Math.round(hz));
+    } else {
+      var fi = document.getElementById('frequency');
+      if (fi) fi.value = Math.round(hz);
+    }
+    if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
+    if (typeof window.setMode === 'function') window.setMode(mode, false);
+    if (typeof window.updateURL === 'function') window.updateURL();
+    if (typeof window.autoTune === 'function') window.autoTune();
+
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () {
+        if (spectrum) spectrum.skipEdgeDetectionTemporary = false;
+      }, 2000);
+      spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz }));
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────
+  function message(text) {
+    listEl.innerHTML = '<div class="vsk-msg">' + esc(text) + '</div>';
+    footEl.style.display = 'none';
+  }
+
+  // Width of the callsign column, from the longest callsign in the ENTIRE
+  // list rather than the page on screen — sizing it per page would make the
+  // panel jump wider and narrower as you page through it.
+  function sizeCallColumn() {
+    var longest = 4;      // shortest real callsign shape, e.g. G0AB
+    for (var i = 0; i < spots.length; i++) {
+      var n = (spots[i].callsign || '').length;
+      if (n > longest) longest = n;
+    }
+    widget.style.setProperty('--vsk-call-ch', String(longest));
+  }
+
+  function render() {
+    if (!spots.length) {
+      // Says the window explicitly — an empty panel otherwise reads as
+      // "the skimmer is broken" rather than "the band has gone quiet".
+      message('Nothing heard in the last ' + WINDOW + '.');
+      return;
+    }
+    sizeCallColumn();
+    var pages = Math.ceil(spots.length / PAGE_SIZE);
+    if (page >= pages) page = pages - 1;
+    if (page < 0) page = 0;
+
+    var slice = spots.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+    listEl.innerHTML = slice.map(function (s, i) {
+      var who = [s.name, s.country].filter(Boolean).join(', ');
+      var tip = s.callsign +
+        (who ? ' — ' + who : '') +
+        '\n' + (s.band || '') + ' ' + fmtFreq(s.frequency) + ' MHz ' + (s.mode || '') +
+        '\nheard ' + fmtAge(s.last_heard) +
+        (s.hits > 1 ? ' · ' + s.hits + ' times' : '') +
+        (s.submitted ? '\nspotted to the DX cluster' : '');
+      return '<div class="vsk-row" data-i="' + i + '" title="' + esc(tip) + '">' +
+             '<span class="vsk-dot' + (s.submitted ? ' spotted' : '') + '"></span>' +
+             '<span class="vsk-flag">' + iso2ToFlag(s.country_code) + '</span>' +
+             '<span class="vsk-call">' + esc(s.callsign) + '</span>' +
+             '<span class="vsk-freq">' + fmtFreq(s.frequency) + '</span>' +
+             '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(listEl.querySelectorAll('.vsk-row'), function (row) {
+      row.addEventListener('click', function () {
+        if (moved) return;            // this click ended a drag
+        tuneTo(slice[parseInt(row.getAttribute('data-i'), 10)]);
+      });
+    });
+
+    footEl.style.display = pages > 1 ? '' : 'none';
+    pageEl.textContent = (page + 1) + '/' + pages;
+    prevEl.classList.toggle('disabled', page === 0);
+    nextEl.classList.toggle('disabled', page >= pages - 1);
+  }
+
+  prevEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (page > 0) { page--; render(); }
+  });
+  nextEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if ((page + 1) * PAGE_SIZE < spots.length) { page++; render(); }
+  });
+
+  // ── Poll ──────────────────────────────────────────────────────────────
+  function poll() {
+    var url = BASE + 'api/spots?sort=last_heard&order=desc&last=' + WINDOW +
+              '&limit=' + FETCH_LIMIT +
+              '&fields=callsign,frequency,band,mode,submitted,last_heard,hits,' +
+              'name,country,country_code';
+    fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        // 429 is the endpoint's own rate limit — another tab on this address
+        // beat us to it. Keep what is on screen and try again next tick.
+        if (r.status === 429) return null;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        if (!d) return;
+        var next = Array.isArray(d.spots) ? d.spots : [];
+        var sig = signature(next);
+        spots = next;
+        // Leave the DOM alone when nothing changed — see lastSig.
+        if (sig === lastSig) return;
+        lastSig = sig;
+        render();
+      })
+      .catch(function (err) {
+        console.warn('[voiceskimmer-widget] poll failed:', err);
+        if (!spots.length) message('Voice Skimmer unavailable.');
+      });
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────
+  function show() {
+    // An explicit value, not '': the panel's own rule sets display:none so it
+    // stays hidden until the addon check passes, and clearing the inline
+    // style would just hand control back to that rule and hide it forever.
+    widget.style.display = 'block';
+    requestAnimationFrame(function () { widget.classList.add('vsk-visible'); });
+  }
+
+  function boot() {
+    var deadline = Date.now() + 10000;
+    var wait = setInterval(function () {
+      if (!window.instanceDescription) {
+        if (Date.now() > deadline) {
+          clearInterval(wait);
+          console.warn('[voiceskimmer-widget] timed out waiting for instanceDescription');
+        }
+        return;
+      }
+      clearInterval(wait);
+      var addons = Array.isArray(window.instanceDescription.addons)
+        ? window.instanceDescription.addons : [];
+      var enabled = addons.some(function (n) {
+        return String(n).toLowerCase() === ADDON;
+      });
+      if (!enabled) {
+        // Stay hidden entirely rather than advertising an addon that is not
+        // installed — this one is opt-in and most instances will not run it.
+        console.log('[voiceskimmer-widget] voiceskimmer addon not enabled — widget hidden');
+        return;
+      }
+      show();
+      message('Loading…');
+      poll();
+      pollTimer = setInterval(poll, POLL_MS);
+    }, 100);
+  }
+
+  boot();
+})();
+</script>

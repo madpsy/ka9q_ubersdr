@@ -331,6 +331,9 @@ migrate_noisefloor_bands() {
 # Initialize configuration files
 initialize_configs
 
+echo "Decoder availability:"
+/usr/local/bin/ubersdr-decoder-healthcheck --required
+
 # Apply Docker networking fixes and admin password
 if [ -f "/app/config/config.yaml" ]; then
     fix_docker_networking

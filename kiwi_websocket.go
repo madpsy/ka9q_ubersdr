@@ -521,9 +521,11 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	status.WriteString("status=active\n")
 	status.WriteString("offline=no\n")
 
-	// Name in KiwiSDR directory format: "0-30 MHz SDR, <callsign>, <location>"
+	minFrequency, maxFrequency := kwsh.config.SpectrumRange()
+	rangeDescription := fmt.Sprintf("%.3f-%.3f MHz SDR",
+		float64(minFrequency)/1_000_000, float64(maxFrequency)/1_000_000)
 	{
-		nameParts := []string{"0-30 MHz SDR"}
+		nameParts := []string{rangeDescription}
 		if kwsh.config.Admin.Callsign != "" {
 			nameParts = append(nameParts, kwsh.config.Admin.Callsign)
 		}
@@ -545,8 +547,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 		status.WriteString(fmt.Sprintf("op_email=%s\n", publicEmail))
 	}
 
-	// Frequency range (0-30 MHz in Hz)
-	status.WriteString("bands=0-30000000\n")
+	status.WriteString(fmt.Sprintf("bands=%d-%d\n", minFrequency, maxFrequency))
 	status.WriteString("freq_offset=0.000\n")
 	status.WriteString("mode=rx4_wf4\n")
 
@@ -1139,9 +1140,10 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.zoom = zoom
 		kc.mu.Unlock()
 
-		// Calculate bin_bandwidth from zoom level
-		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins displayed
-		fullSpanKHz := 30000.0
+		// Calculate bin bandwidth from the active receiver span.
+		minFrequency, maxFrequency := kc.config.SpectrumRange()
+		minFrequencyKHz := float64(minFrequency) / 1000
+		fullSpanKHz := float64(maxFrequency-minFrequency) / 1000
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
@@ -1161,8 +1163,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			cfKHz, _ := strconv.ParseFloat(cfStr, 64)
 			freq = uint64(cfKHz * 1000)
 			// Calculate xBin from center frequency (at max zoom resolution)
-			// freq_to_bin: bin = (freq / bandwidth) * max_bins
-			centerBin := (cfKHz / fullSpanKHz) * float64(maxBins)
+			// freq_to_bin: bin = ((freq - minimum) / bandwidth) * max_bins
+			centerBin := ((cfKHz - minFrequencyKHz) / fullSpanKHz) * float64(maxBins)
 			// Calculate bins at current zoom: bins_at_zoom(zoom) = wf_fft_size << (zoom_levels_max - zoom)
 			binsAtCurrentZoom := 1024 << uint(maxZoom-zoom)
 			// xBin is the start position, so it's center minus half the window
@@ -1185,25 +1187,19 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 			// Convert bin to frequency: freq = (bin / max_bins) * bandwidth
 			totalBandwidthHz := fullSpanKHz * 1000.0
-			freq = uint64((centerBin / float64(maxBins)) * totalBandwidthHz)
+			freq = minFrequency + uint64((centerBin/float64(maxBins))*totalBandwidthHz)
 		} else {
-			// No cf or start provided, use current center (15 MHz)
-			freq = 15000000
+			// No cf or start provided, use the configured receiver center.
+			freq = minFrequency + (maxFrequency-minFrequency)/2
 			xBin = 0
 		}
 
-		// Clamp center frequency to valid HF range (10 kHz – 30 MHz).
-		// The KiwiSDR hardware physically cannot tune outside 0-30 MHz, but
-		// a malformed or out-of-range x_bin / cf value from the client can
-		// produce a calculated frequency well beyond that.  Clamp rather than
-		// reject so the waterfall stays usable at the boundary.
-		const minSpectrumFreq = 10000    // 10 kHz
-		const maxSpectrumFreq = 30000000 // 30 MHz
-		if freq < minSpectrumFreq {
-			freq = minSpectrumFreq
+		// Clamp malformed client coordinates to receiver coverage.
+		if freq < minFrequency {
+			freq = minFrequency
 		}
-		if freq > maxSpectrumFreq {
-			freq = maxSpectrumFreq
+		if freq > maxFrequency {
+			freq = maxFrequency
 		}
 
 		// Always use 1024 bins (matching real KiwiSDR FPGA hardware behaviour).
@@ -1766,7 +1762,12 @@ func (kc *kiwiConn) sendInitMessages() {
 		rxTitle = kc.config.Admin.Callsign + " - " + kc.config.Admin.Name
 	}
 
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + rxTitle + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	minFrequency, maxFrequency := kc.config.SpectrumRange()
+	initialFrequency := kc.config.Admin.DefaultFrequency
+	if initialFrequency < minFrequency || initialFrequency > maxFrequency {
+		initialFrequency = minFrequency + (maxFrequency-minFrequency)/2
+	}
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + rxTitle + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":` + fmt.Sprintf("%.3f", float64(initialFrequency)/1000) + `,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
@@ -1784,8 +1785,8 @@ func (kc *kiwiConn) sendInitMessages() {
 	kc.sendMsg("load_dxcomm_cfg", dxcommJSONEncoded)
 
 	// Center frequency and bandwidth
-	kc.sendMsg("center_freq", "15000000")
-	kc.sendMsg("bandwidth", "30000000")
+	kc.sendMsg("center_freq", fmt.Sprintf("%d", minFrequency+(maxFrequency-minFrequency)/2))
+	kc.sendMsg("bandwidth", fmt.Sprintf("%d", maxFrequency-minFrequency))
 	kc.sendMsg("adc_clk_nom", "66666600")
 
 	if kc.connType == "SND" {
@@ -1857,10 +1858,10 @@ func (kc *kiwiConn) sendInitMessages() {
 			}
 			kc.session = session
 
-			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span)
-			// Full span = 30 MHz, zoom 0 = 30000 kHz / 1024 bins = 29.296875 kHz/bin
-			initialBinBandwidth := 30000000.0 / 1024.0 // Hz per bin at zoom 0
-			initialFreq := uint64(15000000)            // Center frequency: 15 MHz
+			// Configure initial spectrum parameters for full receiver coverage.
+			minFrequency, maxFrequency := kc.config.SpectrumRange()
+			initialBinBandwidth := float64(maxFrequency-minFrequency) / 1024
+			initialFreq := minFrequency + (maxFrequency-minFrequency)/2
 			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, initialFreq, initialBinBandwidth)
 			if !updated {
 				log.Printf("Warning: Failed to configure initial spectrum session")

@@ -401,11 +401,16 @@ type websdrConn struct {
 }
 
 func newWebSDRConn(conn *websocket.Conn, handler *WebSDRHandler, clientIP string) *websdrConn {
+	defaultFrequency := handler.config.Admin.DefaultFrequency
+	minFrequency, maxFrequency := handler.config.SpectrumRange()
+	if defaultFrequency < minFrequency || defaultFrequency > maxFrequency {
+		defaultFrequency = minFrequency + (maxFrequency-minFrequency)/2
+	}
 	return &websdrConn{
 		conn:         conn,
 		handler:      handler,
 		clientIP:     clientIP,
-		tuneKHz:      14175.0,
+		tuneKHz:      float64(defaultFrequency) / 1000,
 		loKHz:        -3.0,
 		hiKHz:        -0.3,
 		mode:         0,
@@ -599,11 +604,12 @@ func (c *websdrConn) applyParamCommand(text string) {
 
 	if v := vals.Get("f"); v != "" {
 		newFreq, _ := strconv.ParseFloat(v, 64)
-		// Clamp to valid HF range: 10 kHz – 30 MHz
-		if newFreq < 10.0 {
-			newFreq = 10.0
-		} else if newFreq > 30000.0 {
-			newFreq = 30000.0
+		minHz, maxHz := c.handler.config.FrequencyRange()
+		minKHz, maxKHz := float64(minHz)/1000.0, float64(maxHz)/1000.0
+		if newFreq < minKHz {
+			newFreq = minKHz
+		} else if newFreq > maxKHz {
+			newFreq = maxKHz
 		}
 		if newFreq != c.tuneKHz {
 			c.tuneKHz = newFreq
@@ -818,7 +824,7 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// needs c.mu to drain SpectrumChan, and radiod blocks waiting for that
 	// drain before it can respond to the update).
 	//
-	// The hardcoded HF band is 10 kHz–30 MHz (bandwidth = 29990 kHz).
+	// The band is the receiver's configured instantaneous spectrum range.
 	// maxZoom is 8 (matching handleBandInfoJS), giving a maxzoom grid of
 	// 1024 × 2^8 = 262144 pixels spanning the full band.
 	//
@@ -839,9 +845,10 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// At zoom level z, the visible bandwidth is bandBW / 2^z.
 	// Center = visibleStart + visibleBW/2
 	// binBandwidth = visibleBW / binCount
-	const bandStartHz = 10000.0  // 10 kHz
-	const bandEndHz = 30000000.0 // 30 MHz
-	const bandBWHz = bandEndHz - bandStartHz
+	minFrequency, maxFrequency := c.handler.config.SpectrumRange()
+	bandStartHz := float64(minFrequency)
+	bandEndHz := float64(maxFrequency)
+	bandBWHz := bandEndHz - bandStartHz
 	const maxZoom = 8
 	const maxZoomPixels = 1024 * (1 << maxZoom) // 262144
 	const minBinBWHz = 500.0                    // radiod minimum bin bandwidth (Hz)
@@ -876,7 +883,7 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	visibleStartHz := bandStartHz + startOffsetHz
 	centerHz := visibleStartHz + visibleBWHz/2.0
 
-	// Clamp center frequency to valid HF range (10 kHz – 30 MHz).
+	// Clamp center frequency to configured receiver coverage.
 	// A malformed or out-of-range start value from the client can produce
 	// a calculated center outside the band.  Clamp rather than reject so
 	// the waterfall stays usable at the boundary.
@@ -1094,9 +1101,10 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	// (zoom=0, start=0) so the waterfall shows data before the first
 	// /~~waterparam command arrives.
 	{
-		const bandStartHz = 10000.0
-		const bandEndHz = 30000000.0
-		const bandBWHz = bandEndHz - bandStartHz
+		minFrequency, maxFrequency := c.handler.config.SpectrumRange()
+		bandStartHz := float64(minFrequency)
+		bandEndHz := float64(maxFrequency)
+		bandBWHz := bandEndHz - bandStartHz
 		centerHz := bandStartHz + bandBWHz/2.0
 		binBandwidthHz := bandBWHz / float64(c.wfWidth)
 		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(centerHz), binBandwidthHz, c.wfWidth)
@@ -1924,8 +1932,10 @@ func (h *WebSDRHandler) buildOrgStatusBody() string {
 	qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
 	fmt.Fprintln(&buf, "Qth: "+qth)
 
-	// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]"
-	descParts := []string{"0-30 MHz SDR"}
+	minFrequency, maxFrequency := h.config.SpectrumRange()
+	rangeDescription := fmt.Sprintf("%.3f-%.3f MHz SDR",
+		float64(minFrequency)/1_000_000, float64(maxFrequency)/1_000_000)
+	descParts := []string{rangeDescription}
 	if h.config.Admin.Callsign != "" {
 		descParts = append(descParts, h.config.Admin.Callsign)
 	}
@@ -1963,13 +1973,15 @@ func (h *WebSDRHandler) buildOrgStatusBody() string {
 		}
 	}
 
-	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
+	// Advertise the coverage configured for the active receiver.
 	antenna := h.config.Admin.Antenna
 	if antenna == "" {
-		antenna = "HF"
+		antenna = "SDR"
 	}
+	centerKHz := float64(minFrequency+(maxFrequency-minFrequency)/2) / 1000
+	bandwidthKHz := float64(maxFrequency-minFrequency) / 1000
 	fmt.Fprintf(&buf, "Bands: 1\n")
-	fmt.Fprintf(&buf, "Band: 0 15005.000000 29990.000000 %s\n", antenna)
+	fmt.Fprintf(&buf, "Band: 0 %.6f %.6f %s\n", centerKHz, bandwidthKHz, antenna)
 
 	fmt.Fprintf(&buf, "Users: %d\n", users)
 
@@ -2069,7 +2081,7 @@ func (h *WebSDRHandler) websdrThroughputStats() (audioKBps, wfKBps, httpKBps flo
 }
 
 // websdrNormalizeFreq converts a tuning frequency in kHz to a normalized 0–1
-// fraction of the HF band (10 kHz – 30 MHz).  The WebSDR frontend's douu()
+// fraction of the configured spectrum band. The WebSDR frontend's douu()
 // function multiplies this by 1024 to get a pixel offset on the band display.
 func websdrNormalizeFreq(tuneKHz float64) float64 {
 	const bandStartKHz = 10.0
@@ -2303,7 +2315,7 @@ func (h *WebSDRHandler) handleLogbook(w http.ResponseWriter, r *http.Request) {
 // websdr-base.js reads this file on every page load to discover the available
 // bands (nbands, bandinfo[]), the current chseq, and the idle timeout.
 // The real WebSDR server generates this from its config at startup; we generate
-// it on-the-fly with a single hardcoded HF band (10 kHz–30 MHz).
+// it on-the-fly with the active receiver's configured coverage.
 //
 // Fields per band entry (all required by websdr-base.js):
 //   centerfreq   — centre of the band in kHz
@@ -2322,8 +2334,8 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/javascript")
 
-	// Single hardcoded HF band: 10 kHz–30 MHz.
-	bands := []Band{{Label: "HF", Start: 10000, End: 30000000}}
+	minFrequency, maxFrequency := h.config.SpectrumRange()
+	bands := []Band{{Label: h.config.Receiver.Driver, Start: minFrequency, End: maxFrequency}}
 
 	idleMS := 0
 	if h.config.Server.SessionTimeout > 0 {
@@ -2346,7 +2358,7 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 		if bwKHz <= 0 {
 			bwKHz = 192.0
 		}
-		centerKHz := 15005.0       // true centre of 10 kHz–30 MHz HF band (midpoint of 10–30000 kHz)
+		centerKHz := startKHz + bwKHz/2
 		vfoKHz := centerKHz + 10.0 // default VFO 10 kHz above centre
 
 		// tuningstep: 1/32 kHz (31.25 Hz), matching real WebSDR default

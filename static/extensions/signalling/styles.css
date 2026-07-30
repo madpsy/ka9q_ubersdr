@@ -1,0 +1,15 @@
+.sig-container { display:flex; flex-direction:column; gap:12px; padding:12px; color:var(--text-color,#ddd); }
+.sig-controls { display:flex; align-items:end; flex-wrap:wrap; gap:10px; }
+.sig-controls label { display:flex; flex-direction:column; gap:4px; font-size:12px; }
+.sig-controls select, .sig-controls button { min-height:34px; }
+.sig-controls button { padding:6px 14px; border:0; border-radius:4px; cursor:pointer; color:#fff; background:#2e7d32; }
+.sig-controls button.running { background:#b71c1c; }
+.sig-controls button.secondary { background:#555; }
+.sig-status-row { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
+#sig-status.running { color:#66bb6a; }
+#sig-status.error { color:#ef5350; }
+.sig-notice { padding:8px 10px; border-left:3px solid #607d8b; background:rgba(96,125,139,.14); font-size:12px; line-height:1.4; }
+.sig-results { min-height:220px; max-height:430px; overflow:auto; border:1px solid rgba(127,127,127,.35); border-radius:4px; background:rgba(0,0,0,.25); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
+.sig-result { display:grid; grid-template-columns:90px 1fr; gap:8px; padding:7px 9px; border-bottom:1px solid rgba(127,127,127,.18); white-space:pre-wrap; overflow-wrap:anywhere; }
+.sig-time { color:#90caf9; }
+.sig-empty { padding:22px; color:#999; text-align:center; }

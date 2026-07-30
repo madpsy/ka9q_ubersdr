@@ -410,19 +410,18 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			newBinCount := session.BinCount
 
 			if msg.Frequency > 0 {
-				// Enforce center frequency within HF range (10 kHz – 30 MHz)
-				const minCenterFreq = 10000    // 10 kHz
-				const maxCenterFreq = 30000000 // 30 MHz
+				// Enforce center frequency within configured receiver coverage.
+				minCenterFreq, maxCenterFreq := swsh.sessions.config.FrequencyRange()
 				if msg.Frequency < minCenterFreq {
-					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz (10 kHz)",
+					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz",
 						msg.Frequency, minCenterFreq)
-					swsh.sendError(conn, "Center frequency must be at least 10 kHz")
+					swsh.sendError(conn, "Center frequency is below receiver coverage")
 					continue
 				}
 				if msg.Frequency > maxCenterFreq {
-					log.Printf("Rejecting spectrum update: center frequency %d Hz > maximum %d Hz (30 MHz)",
+					log.Printf("Rejecting spectrum update: center frequency %d Hz > maximum %d Hz",
 						msg.Frequency, maxCenterFreq)
-					swsh.sendError(conn, "Center frequency must be at most 30 MHz")
+					swsh.sendError(conn, "Center frequency is above receiver coverage")
 					continue
 				}
 				newFreq = msg.Frequency
@@ -493,7 +492,7 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			} else if newBinBW < 7500 {
 				safeBinBW = 5000
 			} else {
-				// For very large bin bandwidths (e.g., default 29296.875 for full 0-30 MHz),
+				// For very large bin bandwidths in a wide receiver view,
 				// don't round - pass through as-is for full bandwidth view
 				safeBinBW = newBinBW
 			}

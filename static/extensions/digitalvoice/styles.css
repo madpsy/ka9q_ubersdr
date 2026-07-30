@@ -1,0 +1,115 @@
+.dv-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  color: var(--text-color, #ddd);
+}
+
+.dv-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dv-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.dv-controls select,
+.dv-controls button {
+  min-height: 34px;
+}
+
+.dv-controls button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+  background: #2e7d32;
+}
+
+.dv-controls button.running {
+  background: #b71c1c;
+}
+
+.dv-controls button.secondary {
+  background: #555;
+}
+
+.dv-controls .dv-check {
+  flex-direction: row;
+  align-items: center;
+  min-height: 34px;
+}
+
+.dv-volume input {
+  width: 120px;
+}
+
+.dv-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.dv-status.running {
+  color: #66bb6a;
+}
+
+.dv-status.error {
+  color: #ef5350;
+}
+
+.dv-notice {
+  padding: 8px 10px;
+  border-left: 3px solid #607d8b;
+  background: rgba(96, 125, 139, 0.14);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.dv-events {
+  min-height: 220px;
+  max-height: 430px;
+  overflow: auto;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.dv-event {
+  padding: 7px 9px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dv-event.encrypted {
+  border-left: 3px solid #ef5350;
+  background: rgba(239, 83, 80, 0.09);
+}
+
+.dv-event-head {
+  margin-bottom: 3px;
+  color: #90caf9;
+  font-weight: 600;
+}
+
+.dv-event.encrypted .dv-event-head {
+  color: #ef9a9a;
+}
+
+.dv-empty {
+  padding: 22px;
+  color: #999;
+  text-align: center;
+}

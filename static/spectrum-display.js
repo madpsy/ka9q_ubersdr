@@ -3107,10 +3107,10 @@ class SpectrumDisplay {
                 const freqDelta = -deltaX * freqPerPixel;
                 let newCenterFreq = lineGraphDragStartFreq + freqDelta;
 
-                // Apply boundary constraints (0-30 MHz)
+                // Apply configured receiver boundary constraints.
                 const halfBandwidth = this.totalBandwidth / 2;
-                const minCenterFreq = 0 + halfBandwidth;
-                const maxCenterFreq = 30e6 - halfBandwidth;
+                const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+                const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
 
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
@@ -3158,10 +3158,12 @@ class SpectrumDisplay {
         this.lineGraphCanvas.addEventListener('mousedown', (e) => {
             if (!this.spectrumData) return;
 
-            // Check if we're showing full bandwidth (0-30 MHz)
+            // Check if we're showing full receiver coverage.
             const startFreq = this.centerFreq - this.totalBandwidth / 2;
             const endFreq = this.centerFreq + this.totalBandwidth / 2;
-            const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+            const isFullBandwidth =
+                startFreq <= (window.receiverMinFrequencyHz?.() ?? 10000) &&
+                endFreq >= (window.receiverMaxFrequencyHz?.() ?? 30000000);
 
             if (isFullBandwidth) {
                 // Don't start dragging if showing full bandwidth
@@ -3294,10 +3296,12 @@ class SpectrumDisplay {
     updateLineGraphCursorStyle() {
         if (!this.lineGraphCanvas || !this.totalBandwidth) return;
 
-        // Check if we're showing full bandwidth (0-30 MHz)
+        // Check if we're showing full receiver coverage.
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+        const isFullBandwidth =
+            startFreq <= (window.receiverMinFrequencyHz?.() ?? 10000) &&
+            endFreq >= (window.receiverMaxFrequencyHz?.() ?? 30000000);
 
         // Set cursor based on whether dragging is allowed
         this.lineGraphCanvas.style.cursor = 'default';
@@ -4620,10 +4624,10 @@ class SpectrumDisplay {
                 const freqDelta = -deltaX * freqPerPixel;
                 let newCenterFreq = this.dragStartFreq + freqDelta;
 
-                // Apply boundary constraints (0-30 MHz)
+                // Apply configured receiver boundary constraints.
                 const halfBandwidth = this.totalBandwidth / 2;
-                const minCenterFreq = 0 + halfBandwidth;
-                const maxCenterFreq = 30e6 - halfBandwidth;
+                const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+                const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
 
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
@@ -4664,11 +4668,13 @@ class SpectrumDisplay {
         this.canvas.addEventListener('mousedown', (e) => {
             if (!this.spectrumData) return;
 
-            // Check if we're showing full bandwidth (0-30 MHz)
+            // Check if we're showing full receiver coverage.
             // If so, don't allow dragging
             const startFreq = this.centerFreq - this.totalBandwidth / 2;
             const endFreq = this.centerFreq + this.totalBandwidth / 2;
-            const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+            const isFullBandwidth =
+                startFreq <= (window.receiverMinFrequencyHz?.() ?? 10000) &&
+                endFreq >= (window.receiverMaxFrequencyHz?.() ?? 30000000);
 
             if (isFullBandwidth) {
                 // Don't start dragging if showing full bandwidth
@@ -4884,10 +4890,10 @@ class SpectrumDisplay {
                 const newTotalBW = newBinBandwidth * this.binCount;
                 const newCenterFreq = touchFreq;
 
-                // Constrain to 0-30 MHz
+                // Constrain to configured receiver coverage.
                 const halfBandwidth = newTotalBW / 2;
-                const minCenterFreq = 0 + halfBandwidth;
-                const maxCenterFreq = 30e6 - halfBandwidth;
+                const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+                const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
                 const clampedCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
                 // Send zoom request
@@ -4921,8 +4927,8 @@ class SpectrumDisplay {
 
                 // Apply boundary constraints
                 const halfBandwidth = this.totalBandwidth / 2;
-                const minCenterFreq = 0 + halfBandwidth;
-                const maxCenterFreq = 30e6 - halfBandwidth;
+                const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+                const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
                 // Send pan request (throttled)
@@ -5442,9 +5448,9 @@ class SpectrumDisplay {
                 // Round to nearest step size for clean values
                 newFreq = Math.round(newFreq / step) * step;
 
-                // Clamp to valid range (10 kHz to 30 MHz)
-                const MIN_FREQ = 10000;
-                const MAX_FREQ = 30000000;
+                // Clamp to the coverage advertised by the active receiver.
+                const MIN_FREQ = window.receiverMinFrequencyHz?.() ?? 10000;
+                const MAX_FREQ = window.receiverMaxFrequencyHz?.() ?? 30000000;
                 newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
                 
                 // Update frequency input
@@ -5494,10 +5500,12 @@ class SpectrumDisplay {
     updateCursorStyle() {
         if (!this.canvas || !this.totalBandwidth) return;
 
-        // Check if we're showing full bandwidth (0-30 MHz)
+        // Check if we're showing full receiver coverage.
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+        const isFullBandwidth =
+            startFreq <= (window.receiverMinFrequencyHz?.() ?? 10000) &&
+            endFreq >= (window.receiverMaxFrequencyHz?.() ?? 30000000);
 
         // Set cursor based on whether dragging is allowed
         this.canvas.style.cursor = 'default';
@@ -5675,12 +5683,14 @@ class SpectrumDisplay {
         return Math.max(0.5, MIN_ZOOM_SPAN_HZ / bins);
     }
 
-    // Bin bandwidth at full zoom-out (the whole 0-30 MHz span). Prefers the value
+    // Bin bandwidth at full zoom-out (the whole configured receiver span). Prefers the value
     // the server reports; falls back to deriving it from the bin count.
     fullSpanBinBandwidth() {
         if (this.defaultBinBandwidth > 0) return this.defaultBinBandwidth;
         if (this.initialBinBandwidth > 0) return this.initialBinBandwidth;
-        return 30000000 / (this.defaultBinCount || this.binCount || 1024);
+        const minHz = window.receiverSpectrumMinHz?.() ?? 10000;
+        const maxHz = window.receiverSpectrumMaxHz?.() ?? 30000000;
+        return (maxHz - minHz) / (this.defaultBinCount || this.binCount || 1024);
     }
 
     // Backend now handles dynamic bin count adjustment for deep zoom levels
@@ -5688,7 +5698,7 @@ class SpectrumDisplay {
         if (!this.connected || !this.ws) return;
 
         // Suppress edge detection during zoom transition to prevent
-        // unwanted retuning when tuned near 0 or 30 MHz edges
+        // unwanted retuning when tuned near receiver coverage edges
         this.skipEdgeDetectionTemporary = true;
         setTimeout(() => { this.skipEdgeDetectionTemporary = false; }, 1000);
 
@@ -5712,9 +5722,9 @@ class SpectrumDisplay {
         const newTotalBW = newBinBandwidth * this.binCount;
         const halfBandwidth = newTotalBW / 2;
 
-        // Constrain center frequency to keep view within 0-30 MHz
-        const minCenterFreq = 0 + halfBandwidth;
-        const maxCenterFreq = 30e6 - halfBandwidth;
+        // Constrain center frequency to configured receiver coverage.
+        const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+        const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
         newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
         // Clear peak hold before zoom to prevent misalignment
@@ -5747,7 +5757,7 @@ class SpectrumDisplay {
         if (!this.connected || !this.ws) return;
 
         // Suppress edge detection during zoom transition to prevent
-        // unwanted retuning when tuned near 0 or 30 MHz edges
+        // unwanted retuning when tuned near receiver edges
         this.skipEdgeDetectionTemporary = true;
         setTimeout(() => { this.skipEdgeDetectionTemporary = false; }, 1000);
 
@@ -5781,9 +5791,9 @@ class SpectrumDisplay {
         const newTotalBW = newBinBandwidth * this.binCount;
         const halfBandwidth = newTotalBW / 2;
 
-        // Constrain center frequency to keep view within 0-30 MHz
-        const minCenterFreq = 0 + halfBandwidth;
-        const maxCenterFreq = 30e6 - halfBandwidth;
+        // Constrain center frequency to configured receiver coverage.
+        const minCenterFreq = (window.receiverMinFrequencyHz?.() ?? 10000) + halfBandwidth;
+        const maxCenterFreq = (window.receiverMaxFrequencyHz?.() ?? 30000000) - halfBandwidth;
         newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
         // Clear peak hold before zoom to prevent misalignment
@@ -5811,7 +5821,7 @@ class SpectrumDisplay {
         }
     }
 
-    // Reset zoom to full view (0-30 MHz)
+    // Reset zoom to the receiver's default instantaneous view.
     resetZoom() {
         if (!this.connected || !this.ws) return;
 

@@ -1644,11 +1644,9 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Reject bookmarks outside the valid HF range (10 kHz – 30 MHz)
-	const bookmarkMinFreq uint64 = 10000
-	const bookmarkMaxFreq uint64 = 30000000
-	if newBookmark.Frequency < bookmarkMinFreq || newBookmark.Frequency > bookmarkMaxFreq {
-		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", newBookmark.Frequency), http.StatusBadRequest)
+	bookmarkMinFreq, bookmarkMaxFreq := ah.config.FrequencyRange()
+	if !ah.config.IsFrequencySupported(newBookmark.Frequency) {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (%d-%d Hz)", newBookmark.Frequency, bookmarkMinFreq, bookmarkMaxFreq), http.StatusBadRequest)
 		return
 	}
 
@@ -1759,9 +1757,8 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		// Filter out bookmarks outside the valid HF range (10 kHz – 30 MHz).
-		const bulkMinFreq uint64 = 10000
-		const bulkMaxFreq uint64 = 30000000
+		// Filter out bookmarks outside configured receiver coverage.
+		bulkMinFreq, bulkMaxFreq := ah.config.FrequencyRange()
 		accepted := incoming.Bookmarks[:0]
 		skippedCount := 0
 		for _, b := range incoming.Bookmarks {
@@ -1769,7 +1766,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 				accepted = append(accepted, b)
 			} else {
 				skippedCount++
-				log.Printf("Skipping bookmark '%s' at %d Hz: outside valid HF range (10 kHz – 30 MHz)", b.Name, b.Frequency)
+				log.Printf("Skipping bookmark '%s' at %d Hz: outside receiver range (%d-%d Hz)", b.Name, b.Frequency, bulkMinFreq, bulkMaxFreq)
 			}
 		}
 		incoming.Bookmarks = accepted
@@ -1838,11 +1835,9 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Reject updated frequency outside the valid HF range (10 kHz – 30 MHz)
-	const singleMinFreq uint64 = 10000
-	const singleMaxFreq uint64 = 30000000
-	if updatedBookmark.Frequency < singleMinFreq || updatedBookmark.Frequency > singleMaxFreq {
-		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", updatedBookmark.Frequency), http.StatusBadRequest)
+	singleMinFreq, singleMaxFreq := ah.config.FrequencyRange()
+	if !ah.config.IsFrequencySupported(updatedBookmark.Frequency) {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (%d-%d Hz)", updatedBookmark.Frequency, singleMinFreq, singleMaxFreq), http.StatusBadRequest)
 		return
 	}
 
@@ -2113,29 +2108,25 @@ func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bandsConfig)
 }
 
-// validateAndClampBandFrequencies validates and clamps band frequencies to the valid range (10 kHz - 30 MHz)
+// validateAndClampBandFrequencies validates and clamps band frequencies to receiver coverage.
 // Returns error if band is completely outside the valid range, otherwise clamps and returns nil
-func validateAndClampBandFrequencies(band *Band) error {
-	const minFreq uint64 = 10000    // 10 kHz in Hz
-	const maxFreq uint64 = 30000000 // 30 MHz in Hz
+func validateAndClampBandFrequencies(band *Band, minFreq, maxFreq uint64) error {
 
-	// Reject bands that end below 10 kHz or start above 30 MHz
 	if band.End < minFreq {
-		return fmt.Errorf("band ends below minimum frequency (10 kHz)")
+		return fmt.Errorf("band ends below minimum frequency (%d Hz)", minFreq)
 	}
 	if band.Start > maxFreq {
-		return fmt.Errorf("band starts above maximum frequency (30 MHz)")
+		return fmt.Errorf("band starts above maximum frequency (%d Hz)", maxFreq)
 	}
 
 	// Clamp start frequency to 10 kHz minimum
 	if band.Start < minFreq {
-		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz (10 kHz)", band.Label, band.Start, minFreq)
+		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz", band.Label, band.Start, minFreq)
 		band.Start = minFreq
 	}
 
-	// Clamp end frequency to 30 MHz maximum
 	if band.End > maxFreq {
-		log.Printf("Clamping band '%s' end frequency from %d Hz to %d Hz (30 MHz)", band.Label, band.End, maxFreq)
+		log.Printf("Clamping band '%s' end frequency from %d Hz to %d Hz", band.Label, band.End, maxFreq)
 		band.End = maxFreq
 	}
 
@@ -2167,8 +2158,9 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
-	if err := validateAndClampBandFrequencies(&newBand); err != nil {
+	// Validate and clamp frequencies to configured receiver coverage.
+	minFreq, maxFreq := ah.config.FrequencyRange()
+	if err := validateAndClampBandFrequencies(&newBand, minFreq, maxFreq); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -2312,7 +2304,8 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 				}
 
 				// Validate and clamp frequencies
-				if err := validateAndClampBandFrequencies(&band); err != nil {
+				minFreq, maxFreq := ah.config.FrequencyRange()
+				if err := validateAndClampBandFrequencies(&band, minFreq, maxFreq); err != nil {
 					log.Printf("Skipping band '%s': %v", band.Label, err)
 					skippedCount++
 					continue
@@ -2393,8 +2386,9 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
-	if err := validateAndClampBandFrequencies(&updatedBand); err != nil {
+	// Validate and clamp frequencies to configured receiver coverage.
+	minFreq, maxFreq := ah.config.FrequencyRange()
+	if err := validateAndClampBandFrequencies(&updatedBand, minFreq, maxFreq); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -3949,12 +3943,13 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Convert SDR# bands to our format
 	var bands []interface{}
 	skippedCount := 0
-	const minFreq = 10000     // 10 kHz in Hz
-	const maxFreq = 30000000  // 30 MHz in Hz
+	configuredMin, configuredMax := ah.config.FrequencyRange()
+	minFreq := int(configuredMin)
+	maxFreq := int(configuredMax)
 	const cwCutoff = 10000000 // 10 MHz cutoff for CW mode conversion
 
 	for _, entry := range sdrBands.Entries {
-		// Skip bands that end below 10 kHz or start above 30 MHz
+		// Skip bands outside the active receiver's configured coverage.
 		if entry.MaxFrequency < minFreq || entry.MinFrequency > maxFreq {
 			skippedCount++
 			continue
@@ -3965,13 +3960,13 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		// Clamp start frequency to 10 kHz if it's below the limit
+		// Clamp start frequency to receiver coverage.
 		startFreq := entry.MinFrequency
 		if startFreq < minFreq {
 			startFreq = minFreq
 		}
 
-		// Clamp end frequency to 30 MHz if it exceeds the limit
+		// Clamp end frequency to receiver coverage.
 		endFreq := entry.MaxFrequency
 		if endFreq > maxFreq {
 			endFreq = maxFreq
@@ -4004,7 +3999,7 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	}
 
 	if len(bands) == 0 {
-		http.Error(w, "No valid bands found in XML file (all bands may be > 30 MHz)", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("No valid bands found in XML file (receiver range is %d-%d Hz)", minFreq, maxFreq), http.StatusBadRequest)
 		return
 	}
 
@@ -4046,7 +4041,7 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Build response message
 	message := fmt.Sprintf("Successfully imported %d band(s) from SDR# XML", len(bands))
 	if skippedCount > 0 {
-		message += fmt.Sprintf(" (skipped %d band(s) outside 10 kHz - 30 MHz range)", skippedCount)
+		message += fmt.Sprintf(" (skipped %d band(s) outside %d-%d Hz receiver range)", skippedCount, minFreq, maxFreq)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -4849,6 +4844,58 @@ func (ah *AdminHandler) HandleRadiodConfig(w http.ResponseWriter, r *http.Reques
 		ah.handleGetRadiodConfig(w, r)
 	case http.MethodPut:
 		ah.handleUpdateRadiodConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleReceiverProfiles exposes the installed receiver adapter catalog and
+// previews a radiod configuration for a selected native driver. It does not
+// write files or restart services; the existing radiod-config endpoint remains
+// responsible for applying an explicitly reviewed configuration.
+func (ah *AdminHandler) HandleReceiverProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		backends := make([]map[string]interface{}, 0, len(defaultSDRBackends.IDs()))
+		for _, id := range defaultSDRBackends.IDs() {
+			backend, _ := defaultSDRBackends.Lookup(id)
+			backends = append(backends, map[string]interface{}{
+				"id":           backend.ID(),
+				"display_name": backend.DisplayName(),
+				"capabilities": backend.Capabilities(),
+			})
+		}
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":   ah.config.Receiver,
+			"backends": backends,
+			"drivers":  defaultSDRDeviceProfiles.Profiles(),
+		}); err != nil {
+			log.Printf("Error encoding receiver profiles: %v", err)
+		}
+
+	case http.MethodPost:
+		var receiver ReceiverConfig
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&receiver); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid receiver configuration: %v", err), http.StatusBadRequest)
+			return
+		}
+		configText, err := BuildRadiodConfig(receiver, ah.config.Radiod)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Cannot generate radiod configuration: %v", err), http.StatusBadRequest)
+			return
+		}
+		receiver.applyDefaults()
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"receiver": receiver,
+			"config":   configText,
+		}); err != nil {
+			log.Printf("Error encoding generated radiod config: %v", err)
+		}
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

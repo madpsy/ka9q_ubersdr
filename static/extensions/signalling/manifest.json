@@ -1,0 +1,18 @@
+{
+  "name": "signalling",
+  "displayName": "Paging & Signalling",
+  "version": "1.0.0",
+  "description": "POCSAG/FLEX paging, SAME/EAS, DTMF, two-tone selective calling and legacy telemetry decoding.",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📟",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {}
+}

@@ -39,8 +39,8 @@ admin:
   # Default tuning frequency for new visitors (Hz)
   # This is the frequency shown when a user first opens the web UI
   # Can be overridden per-link with the URL parameter: ?freq=7074000
-  # Valid range: 10000 (10 kHz) to 30000000 (30 MHz)
-  # Set to 0 (or omit) to use the built-in default of 14175000 (14.175 MHz - 20m USB calling frequency)
+  # Valid range: receiver.frequency_min_hz through receiver.frequency_max_hz
+  # Set to 0 (or omit) to use the midpoint of the configured receiver range
   default_frequency: 14175000
 
   # Default demodulation mode for new visitors
@@ -119,6 +119,41 @@ admin:
   # Default: ["ubersdr-claude"]
   widget_trusted_hosts:
     - "ubersdr-claude"
+
+# Receiver hardware/service capabilities
+#
+# Native KA9Q Radio driver values:
+#   airspy, airspyhf, bladerf, fobos, funcube, hackrf, hydrasdr,
+#   rtlsdr, rx888, sdrplay, sig_gen
+#
+# Use backend: external-radiod for a remote radiod instance or a separately
+# managed SoapySDR/vendor bridge that exposes KA9Q-compatible status/data groups.
+# The frequency range is the coverage intentionally made available by this
+# deployment (including any converter offset or front-end filtering), not a
+# marketing-limit guess made by the web application.
+receiver:
+  backend: "ka9q-radiod"
+  driver: "rx888"
+  device: "rx888"
+  description: "RX-888 wideband HF receiver"
+  sample_rate: 64800000
+  center_frequency: 0
+  frequency_min_hz: 10000
+  frequency_max_hz: 30000000
+  # Driver-specific KA9Q Radio settings. Values are copied to the generated
+  # driver section; consult the matching radiod example before enabling them.
+  options: {}
+  # Example for RTL-SDR:
+  # backend: "ka9q-radiod"
+  # driver: "rtlsdr"
+  # device: "rtlsdr"
+  # sample_rate: 2400000
+  # center_frequency: 145000000
+  # frequency_min_hz: 24000000
+  # frequency_max_hz: 1766000000
+  # options:
+  #   agc: "true"
+  #   bias: "no"
 
 # Radiod connection settings
 radiod:
@@ -2114,6 +2149,37 @@ soundmodem_extension:
   # controls the number of subprocesses running at any one time.
   # Set to 0 for unlimited users (not recommended for public instances).
   # Recommended: 3-5 depending on server capacity.
+  max_users: 5
+
+# ==============================================================================
+# Digital Voice Decoder Extension
+# ==============================================================================
+# Receive-only integration with DSD-FME for DMR, P25 Phase 1/2, NXDN48/96,
+# D-Star, YSF, M17, dPMR, ProVoice/EDACS, and X2-TDMA. The normal UberSDR NFM
+# stream is resampled from 24 kHz to DSD-FME's 48 kHz discriminator input.
+#
+# The extension uses a fixed protocol allowlist. It intentionally accepts no
+# encryption/privacy keys and no client-supplied DSD-FME command-line options.
+# Encrypted-call metadata can be shown, but encrypted voice is not decoded.
+digital_voice_extension:
+  # Set false to hide the decoder and prevent DSD-FME processes from starting.
+  enabled: true
+
+  # Executable path or command name. If only a command name is supplied it must
+  # be available in the ubersdr process PATH.
+  binary_path: "dsd-fme"
+
+  # One DSD-FME process is created per active listener.
+  max_users: 3
+
+# ==============================================================================
+# Paging and Signalling Decoder Extension
+# ==============================================================================
+# Receive-only integration with multimon-ng for POCSAG/FLEX paging, SAME/EAS,
+# DTMF, two-tone selective calling, and legacy telemetry formats.
+signalling_extension:
+  enabled: true
+  binary_path: "multimon-ng"
   max_users: 5
 
 # ==============================================================================

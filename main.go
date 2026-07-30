@@ -30,12 +30,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/digitalvoice"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/drm"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/signalling"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/soundmodem"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
@@ -1776,6 +1778,84 @@ func main() {
 		log.Printf("Sound Modem extension disabled (soundmodem_extension.enabled: false)")
 	}
 
+	// Register receive-only digital voice decoding through DSD-FME. The
+	// extension itself owns the protocol allowlist and does not accept arbitrary
+	// command-line arguments or privacy/decryption keys from clients.
+	digitalVoiceEnabled := config.DigitalVoice.Enabled == nil || *config.DigitalVoice.Enabled
+	if digitalVoiceEnabled {
+		digitalVoiceMaxUsers := config.DigitalVoice.MaxUsers
+		if digitalVoiceMaxUsers == 0 {
+			digitalVoiceMaxUsers = 3
+		}
+		digitalvoice.GlobalConfig = &digitalvoice.Config{
+			BinaryPath: config.DigitalVoice.BinaryPath,
+			MaxUsers:   digitalVoiceMaxUsers,
+		}
+		digitalVoiceInfo := digitalvoice.GetInfo()
+		digitalVoiceFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+			dvParams := digitalvoice.AudioExtensionParams{
+				SampleRate:    audioParams.SampleRate,
+				Channels:      audioParams.Channels,
+				BitsPerSample: audioParams.BitsPerSample,
+			}
+			dvExt, err := digitalvoice.Factory(dvParams, extensionParams)
+			if err != nil {
+				return nil, err
+			}
+			return &digitalVoiceExtensionWrapper{ext: dvExt}, nil
+		}
+		audioExtensionRegistry.Register(
+			"digitalvoice",
+			digitalVoiceFactoryWrapper,
+			AudioExtensionInfo{
+				Name:        digitalVoiceInfo["name"].(string),
+				Description: digitalVoiceInfo["description"].(string),
+				Version:     digitalVoiceInfo["version"].(string),
+			},
+		)
+		log.Printf("Registered audio extension: digitalvoice v%s", digitalVoiceInfo["version"].(string))
+	} else {
+		log.Printf("Digital voice extension disabled (digital_voice_extension.enabled: false)")
+	}
+
+	// Register paging and common signalling decoding through multimon-ng.
+	signallingEnabled := config.Signalling.Enabled == nil || *config.Signalling.Enabled
+	if signallingEnabled {
+		signallingMaxUsers := config.Signalling.MaxUsers
+		if signallingMaxUsers == 0 {
+			signallingMaxUsers = 5
+		}
+		signalling.GlobalConfig = &signalling.Config{
+			BinaryPath: config.Signalling.BinaryPath,
+			MaxUsers:   signallingMaxUsers,
+		}
+		signallingInfo := signalling.GetInfo()
+		signallingFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+			params := signalling.AudioExtensionParams{
+				SampleRate:    audioParams.SampleRate,
+				Channels:      audioParams.Channels,
+				BitsPerSample: audioParams.BitsPerSample,
+			}
+			extension, err := signalling.Factory(params, extensionParams)
+			if err != nil {
+				return nil, err
+			}
+			return &signallingExtensionWrapper{ext: extension}, nil
+		}
+		audioExtensionRegistry.Register(
+			"signalling",
+			signallingFactoryWrapper,
+			AudioExtensionInfo{
+				Name:        signallingInfo["name"].(string),
+				Description: signallingInfo["description"].(string),
+				Version:     signallingInfo["version"].(string),
+			},
+		)
+		log.Printf("Registered audio extension: signalling v%s", signallingInfo["version"].(string))
+	} else {
+		log.Printf("Signalling extension disabled (signalling_extension.enabled: false)")
+	}
+
 	// Register FreeDV extension
 	// Callsign and locator come from the instance config; the frontend only provides freq_hz
 	freedvMaxUsers := config.FreeDVExtension.MaxUsers
@@ -2944,6 +3024,7 @@ func main() {
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))
+	http.HandleFunc("/admin/receiver-profiles", adminHandler.AuthMiddleware(adminHandler.HandleReceiverProfiles))
 	http.HandleFunc("/admin/radiod-config", adminHandler.AuthMiddleware(adminHandler.HandleRadiodConfig))
 	http.HandleFunc("/admin/radiod-values", adminHandler.AuthMiddleware(adminHandler.HandleRadiodValues))
 	http.HandleFunc("/admin/system-stats", adminHandler.AuthMiddleware(adminHandler.HandleSystemStats))
@@ -4142,8 +4223,8 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 
 	// Optional frequency-span filter: ?center=<Hz>&width=<Hz>
 	// Both parameters must be present and valid for the filter to apply.
-	// Valid range for this system is 0–30 MHz (0–30,000,000 Hz).
-	const maxFreqHz = 30_000_000.0
+	minConfiguredHz, maxConfiguredHz := config.FrequencyRange()
+	minFreqHz, maxFreqHz := float64(minConfiguredHz), float64(maxConfiguredHz)
 	q := r.URL.Query()
 	centerStr := q.Get("center")
 	widthStr := q.Get("width")
@@ -4158,8 +4239,8 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 			http.Error(w, fmt.Sprintf("invalid width parameter: %v", errW), http.StatusBadRequest)
 			return
 		}
-		if centerHz < 0 || centerHz > maxFreqHz {
-			http.Error(w, fmt.Sprintf("center must be between 0 and %.0f Hz", maxFreqHz), http.StatusBadRequest)
+		if centerHz < minFreqHz || centerHz > maxFreqHz {
+			http.Error(w, fmt.Sprintf("center must be between %.0f and %.0f Hz", minFreqHz, maxFreqHz), http.StatusBadRequest)
 			return
 		}
 		if widthHz < 0 || widthHz > maxFreqHz {
@@ -4168,16 +4249,16 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 		}
 		loHz := centerHz - widthHz
 		hiHz := centerHz + widthHz
-		// Clamp span to the valid system range.
-		if loHz < 0 {
-			loHz = 0
+		// Clamp span to configured receiver coverage.
+		if loHz < minFreqHz {
+			loHz = minFreqHz
 		}
 		if hiHz > maxFreqHz {
 			hiHz = maxFreqHz
 		}
 		// Reject if the span doesn't overlap the system range at all.
-		if loHz > maxFreqHz || hiHz < 0 {
-			http.Error(w, "center/width span is outside the 0–30 MHz system range", http.StatusBadRequest)
+		if loHz > maxFreqHz || hiHz < minFreqHz {
+			http.Error(w, "center/width span is outside configured receiver coverage", http.StatusBadRequest)
 			return
 		}
 		spanFiltered := filteredBookmarks[:0]
@@ -4522,10 +4603,11 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// Calculate Maidenhead grid locator from GPS coordinates
 	maidenhead := latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 
-	// Resolve and sanitise default frequency (must be in valid HF range 10 kHz–30 MHz)
+	// Resolve and sanitise default frequency against configured receiver coverage.
 	effectiveDefaultFreq := config.Admin.DefaultFrequency
-	if effectiveDefaultFreq < 10000 || effectiveDefaultFreq > 30000000 {
-		effectiveDefaultFreq = 14175000 // built-in default: 14.175 MHz (20m USB calling)
+	if !config.IsFrequencySupported(effectiveDefaultFreq) {
+		minHz, maxHz := config.FrequencyRange()
+		effectiveDefaultFreq = minHz + (maxHz-minHz)/2
 	}
 
 	// Resolve and sanitise default mode (must be one of the known demodulation modes)
@@ -4555,6 +4637,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			}
 		}
 	}
+	minSpectrumFrequency, maxSpectrumFrequency := config.SpectrumRange()
 
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
@@ -4562,9 +4645,17 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"default_frequency": effectiveDefaultFreq,
 		"default_mode":      effectiveDefaultMode,
 		"receiver": map[string]interface{}{
-			"name":       config.Admin.Name,
-			"callsign":   config.Admin.Callsign,
-			"public_url": publicURL,
+			"name":             config.Admin.Name,
+			"callsign":         config.Admin.Callsign,
+			"public_url":       publicURL,
+			"backend":          config.Receiver.Backend,
+			"driver":           config.Receiver.Driver,
+			"device":           config.Receiver.Device,
+			"sample_rate":      config.Receiver.SampleRate,
+			"frequency_min_hz": config.Receiver.FrequencyMinHz,
+			"frequency_max_hz": config.Receiver.FrequencyMaxHz,
+			"spectrum_min_hz":  minSpectrumFrequency,
+			"spectrum_max_hz":  maxSpectrumFrequency,
 			"gps": map[string]interface{}{
 				"lat":          config.Admin.GPS.Lat,
 				"lon":          config.Admin.GPS.Lon,
@@ -4719,11 +4810,20 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
+	minFrequency, maxFrequency := config.FrequencyRange()
+	centerFrequency := minFrequency + (maxFrequency-minFrequency)/2
+	profileName := fmt.Sprintf("%d-%d Hz", minFrequency, maxFrequency)
+
 	// Build the status response
 	response := map[string]interface{}{
 		"receiver": map[string]interface{}{
-			"name":  config.Admin.Name,
-			"admin": config.Admin.Email,
+			"name":             config.Admin.Name,
+			"admin":            config.Admin.Email,
+			"backend":          config.Receiver.Backend,
+			"driver":           config.Receiver.Driver,
+			"device":           config.Receiver.Device,
+			"frequency_min_hz": minFrequency,
+			"frequency_max_hz": maxFrequency,
 			"gps": map[string]interface{}{
 				"lat": config.Admin.GPS.Lat,
 				"lon": config.Admin.GPS.Lon,
@@ -4739,9 +4839,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 				"type": "SDR",
 				"profiles": []map[string]interface{}{
 					{
-						"name":        "0-30 MHz",
-						"center_freq": 15000000, // 15 MHz in Hz
-						"sample_rate": 64000000, // 64 MHz in Hz
+						"name":        profileName,
+						"center_freq": centerFrequency,
+						"sample_rate": config.Receiver.SampleRate,
 					},
 				},
 			},
@@ -5478,7 +5578,7 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 		}
 	}
 
-	// Synthetic "wideband" pseudo-band (0-30 MHz, the same channel used by the
+	// Synthetic receiver-wide pseudo-band (the same channel used by the
 	// spectrogram) — always available whenever noise floor monitoring is
 	// enabled, independent of individual band configuration. Selectable on
 	// the spectrum SSE stream via ?band=wideband.
@@ -5487,14 +5587,16 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 	// entry there into its per-band UI state (band-selector dropdown, FFT
 	// canvases, historical/aggregate lookups), none of which support a
 	// "wideband" band. It is exposed as a separate top-level field instead.
+	minSpectrumFrequency, maxSpectrumFrequency := config.SpectrumRange()
+	wideBandBinBandwidth := float64(maxSpectrumFrequency-minSpectrumFrequency) / 4096
 	wideband := map[string]interface{}{
 		"name":             wideBandSSEName,
-		"start":            uint64(0),
-		"end":              uint64(30_000_000),
-		"center_frequency": uint64(wideBandSSECenterHz),
+		"start":            minSpectrumFrequency,
+		"end":              maxSpectrumFrequency,
+		"center_frequency": minSpectrumFrequency + (maxSpectrumFrequency-minSpectrumFrequency)/2,
 		"bin_count":        4096,
-		"bin_bandwidth":    7324.21875,
-		"total_bandwidth":  float64(4096) * 7324.21875,
+		"bin_bandwidth":    wideBandBinBandwidth,
+		"total_bandwidth":  float64(maxSpectrumFrequency - minSpectrumFrequency),
 		"ft8_frequency":    uint64(0),
 		"ft8_markers":      ft8Markers,
 	}
@@ -6906,6 +7008,78 @@ func (w *soundmodemExtensionWrapper) SetOutputMode(mode soundmodem.OutputMode) e
 func (w *soundmodemExtensionWrapper) CrashChan() <-chan error {
 	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
 		return cr.CrashChan()
+	}
+	return nil
+}
+
+// digitalVoiceExtensionWrapper adapts the digitalvoice package types to the
+// main package's audio extension interface.
+type digitalVoiceExtensionWrapper struct {
+	ext digitalvoice.AudioExtension
+}
+
+func (w *digitalVoiceExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	dvChan := make(chan digitalvoice.AudioSample, cap(audioChan))
+	go func() {
+		defer close(dvChan)
+		for sample := range audioChan {
+			dvChan <- digitalvoice.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(dvChan, resultChan)
+}
+
+func (w *digitalVoiceExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *digitalVoiceExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+func (w *digitalVoiceExtensionWrapper) CrashChan() <-chan error {
+	if reporter, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return reporter.CrashChan()
+	}
+	return nil
+}
+
+// signallingExtensionWrapper adapts the signalling package types to the main
+// package's audio extension interface.
+type signallingExtensionWrapper struct {
+	ext signalling.AudioExtension
+}
+
+func (w *signallingExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	signallingChan := make(chan signalling.AudioSample, cap(audioChan))
+	go func() {
+		defer close(signallingChan)
+		for sample := range audioChan {
+			signallingChan <- signalling.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(signallingChan, resultChan)
+}
+
+func (w *signallingExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *signallingExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+func (w *signallingExtensionWrapper) CrashChan() <-chan error {
+	if reporter, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return reporter.CrashChan()
 	}
 	return nil
 }

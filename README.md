@@ -10,7 +10,26 @@ The UberSDR website provides comprehensive installation instructions, setup guid
 
 ---
 
-> **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
+> **Hardware support:** UberSDR now models receiver capabilities independently
+> of the UI and includes KA9Q Radio profiles for RX-888, RTL-SDR, Airspy,
+> Airspy HF+, SDRplay, HackRF, bladeRF, Fobos, FUNcube, and HydraSDR. A generic
+> external-radiod adapter covers remote receivers and separately managed
+> SoapySDR/vendor bridges. See [SDR hardware support](docs/SDR_HARDWARE.md).
+>
+> The automated production installer and its bundled radiod configuration are
+> still tuned for an RX888 MKII providing full-HF coverage. Other devices need
+> the corresponding KA9Q driver/vendor library and receiver configuration.
+
+> **Digital voice:** The `digitalvoice` extension integrates DSD-FME for
+> receive-only DMR, P25 Phase 1/2, NXDN48/96, D-Star, YSF, M17, dPMR,
+> ProVoice/EDACS, and X2-TDMA. It includes 24-to-48 kHz resampling, decoded
+> speech playback, protocol events, and a fixed API that accepts no decryption
+> keys. See [digital voice decoding](docs/DIGITAL_VOICE.md).
+
+> **Paging and signalling:** The `signalling` extension adds POCSAG, FLEX,
+> SAME/EAS, DTMF, two-tone selective calling, and legacy telemetry decoding.
+> See [paging and signalling](docs/SIGNALLING.md) and the
+> [decoder expansion catalog](docs/DECODER_ARCHITECTURE.md).
 
 ## Quick Start
 

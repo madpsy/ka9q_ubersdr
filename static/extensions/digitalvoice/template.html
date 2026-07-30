@@ -1,0 +1,46 @@
+<div class="dv-container">
+  <div class="dv-controls">
+    <label>
+      Protocol
+      <select id="dv-protocol">
+        <option value="auto">Auto (DMR / P25 / YSF / D-Star / X2)</option>
+        <option value="dmr" selected>DMR</option>
+        <option value="p25p1">P25 Phase 1</option>
+        <option value="p25p2">P25 Phase 2</option>
+        <option value="nxdn48">NXDN48 / IDAS</option>
+        <option value="nxdn96">NXDN96</option>
+        <option value="dstar">D-Star</option>
+        <option value="ysf">YSF</option>
+        <option value="m17">M17</option>
+        <option value="dpmr">dPMR</option>
+        <option value="provoice">ProVoice</option>
+        <option value="edacs">EDACS / ProVoice</option>
+        <option value="x2tdma">X2-TDMA</option>
+      </select>
+    </label>
+    <label class="dv-check">
+      <input id="dv-inverted" type="checkbox">
+      Inverted signal
+    </label>
+    <label class="dv-volume">
+      Decoded volume
+      <input id="dv-volume" type="range" min="0" max="1.5" value="1" step="0.05">
+    </label>
+    <button id="dv-start" type="button">Start decoder</button>
+    <button id="dv-clear" type="button" class="secondary">Clear</button>
+  </div>
+
+  <div class="dv-status-row">
+    <span id="dv-status" class="dv-status">Stopped</span>
+    <span id="dv-count">0 events</span>
+  </div>
+
+  <div class="dv-notice">
+    Tune the signal in NFM with a clean discriminator/baseband level. This
+    extension decodes clear traffic only; it accepts no encryption or privacy keys.
+  </div>
+
+  <div id="dv-events" class="dv-events">
+    <div class="dv-empty">Press Start decoder and tune to a digital voice signal.</div>
+  </div>
+</div>

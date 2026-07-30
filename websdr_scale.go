@@ -7,10 +7,10 @@ package main
 // set to e.scaleimgs[zoom][tileIndex].  Each tile is a 1024×14 PNG showing
 // frequency tick marks and labels for the portion of the band it covers.
 //
-// Tile geometry (band = 10 kHz … 30 MHz, i.e. 29 990 kHz wide):
+// Tile geometry is derived from Config.SpectrumRange:
 //
-//	tileWidthKHz[zoom] = 29990 / (1 << zoom)
-//	tileStartKHz       = 10 + tile * tileWidthKHz
+//	tileWidthKHz[zoom] = bandWidth / (1 << zoom)
+//	tileStartKHz       = bandStart + tile * tileWidthKHz
 //	pixelsPerKHz       = 1024 / tileWidthKHz
 //
 // Label step is chosen so that labels are at least ~60 px apart.
@@ -109,6 +109,7 @@ func formatFreqLabel(kHz float64) string {
 // niceSteps are candidate label spacings in kHz, from finest to coarsest.
 var niceSteps = []float64{
 	1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000,
+	20000, 50000, 100000, 200000, 500000, 1000000,
 }
 
 // chooseLabelStep picks the finest step that still places labels at least
@@ -129,10 +130,8 @@ func chooseLabelStep(pixelsPerKHz, minPxApart float64) float64 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
-	scaleBandStartKHz = 10.0
-	scaleBandBWKHz    = 29990.0 // 30000 - 10
-	scaleImgW         = 1024
-	scaleImgH         = 14
+	scaleImgW = 1024
+	scaleImgH = 14
 )
 
 // handleScalePNG serves GET /~~scale?band=B&zoom=Z&tile=N
@@ -160,8 +159,11 @@ func (h *WebSDRHandler) handleScalePNG(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tile frequency range.
-	tileWidthKHz := scaleBandBWKHz / float64(numTiles)
-	tileStartKHz := scaleBandStartKHz + float64(tile)*tileWidthKHz
+	minFrequency, maxFrequency := h.config.SpectrumRange()
+	bandStartKHz := float64(minFrequency) / 1000
+	bandWidthKHz := float64(maxFrequency-minFrequency) / 1000
+	tileWidthKHz := bandWidthKHz / float64(numTiles)
+	tileStartKHz := bandStartKHz + float64(tile)*tileWidthKHz
 	tileEndKHz := tileStartKHz + tileWidthKHz
 	pixelsPerKHz := float64(scaleImgW) / tileWidthKHz
 

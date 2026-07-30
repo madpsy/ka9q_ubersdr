@@ -862,14 +862,13 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	binCount := sm.config.Spectrum.Default.BinCount
 	binBandwidth := sm.config.Spectrum.Default.BinBandwidth
 
-	// Validate frequency - must be within HF range (10 kHz – 30 MHz)
-	// If config has invalid frequency, use 15 MHz as fallback (covers 0-30 MHz HF range)
-	const minFrequency = 10000    // 10 kHz minimum
-	const maxFrequency = 30000000 // 30 MHz maximum
-	if frequency < minFrequency || frequency > maxFrequency {
-		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be %d–%d Hz), using fallback 15 MHz",
-			frequency, minFrequency, maxFrequency)
-		frequency = 15000000 // 15 MHz fallback
+	// Validate against the RF range exposed by the configured receiver.
+	minFrequency, maxFrequency := sm.config.FrequencyRange()
+	if !sm.config.IsFrequencySupported(frequency) {
+		fallback := minFrequency + (maxFrequency-minFrequency)/2
+		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be %d–%d Hz), using midpoint %d Hz",
+			frequency, minFrequency, maxFrequency, fallback)
+		frequency = fallback
 	}
 
 	// Create spectrum session
@@ -1049,10 +1048,9 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("session %s is not a spectrum session", sessionID)
 	}
 
-	// Validate frequency if provided - must be within HF range (10 kHz – 30 MHz)
-	const minFrequency = 10000    // 10 kHz minimum
-	const maxFrequency = 30000000 // 30 MHz maximum
-	if frequency > 0 && (frequency < minFrequency || frequency > maxFrequency) {
+	// Validate frequency if provided against configured receiver coverage.
+	minFrequency, maxFrequency := sm.config.FrequencyRange()
+	if frequency > 0 && !sm.config.IsFrequencySupported(frequency) {
 		return fmt.Errorf("invalid spectrum frequency %d Hz (must be %d–%d Hz)", frequency, minFrequency, maxFrequency)
 	}
 
@@ -1287,10 +1285,10 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		return fmt.Errorf("cannot update spectrum session with UpdateSession, use UpdateSpectrumSession instead")
 	}
 
-	// Validate frequency if provided - must not be below minimum
-	const minFrequency = 10000 // 10 kHz minimum
-	if frequency > 0 && frequency < minFrequency {
-		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
+	// Validate frequency if provided against configured receiver coverage.
+	minFrequency, maxFrequency := sm.config.FrequencyRange()
+	if frequency > 0 && !sm.config.IsFrequencySupported(frequency) {
+		return fmt.Errorf("invalid audio frequency %d Hz (must be %d–%d Hz)", frequency, minFrequency, maxFrequency)
 	}
 
 	// Update session state only for parameters that changed
@@ -1408,10 +1406,10 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		return fmt.Errorf("cannot update spectrum session with UpdateSessionWithEdges, use UpdateSpectrumSession instead")
 	}
 
-	// Validate frequency if provided - must not be below minimum
-	const minFrequency = 10000 // 10 kHz minimum
-	if frequency > 0 && frequency < minFrequency {
-		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
+	// Validate frequency if provided against configured receiver coverage.
+	minFrequency, maxFrequency := sm.config.FrequencyRange()
+	if frequency > 0 && !sm.config.IsFrequencySupported(frequency) {
+		return fmt.Errorf("invalid audio frequency %d Hz (must be %d–%d Hz)", frequency, minFrequency, maxFrequency)
 	}
 
 	// Update session state only for parameters that changed

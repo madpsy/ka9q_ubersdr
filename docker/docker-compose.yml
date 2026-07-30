@@ -4,7 +4,7 @@ services:
     build:
       context: ../../ka9q-radio
       dockerfile: docker/Dockerfile
-    image: ka9q-radio:latest
+    image: ${KA9Q_RADIO_IMAGE:-ka9q-radio:latest}
     container_name: ka9q-radio
     privileged: true
     restart: unless-stopped
@@ -46,7 +46,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: ka9q_ubersdr:latest
+    image: ${UBERSDR_IMAGE:-ka9q_ubersdr:latest}
     container_name: ka9q_ubersdr
     restart: unless-stopped
     init: true  # Enable tini init to reap zombie processes from background watchers

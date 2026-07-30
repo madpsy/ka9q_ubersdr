@@ -1,0 +1,18 @@
+{
+  "name": "digitalvoice",
+  "displayName": "Digital Voice",
+  "version": "1.0.0",
+  "description": "Receive-only DMR, P25, NXDN, D-Star, YSF, M17, dPMR, ProVoice/EDACS and X2-TDMA decoding through DSD-FME.",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📻",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {}
+}

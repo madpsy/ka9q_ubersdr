@@ -19,6 +19,47 @@ import { screenWakeLock } from './wake-lock.js';
 // navigated to the page with those parameters.
 const initialPageParams = new URLSearchParams(window.location.search);
 
+// Receiver coverage is supplied by /api/description. Keep the legacy HF range
+// until that request resolves so older servers and offline UI tests retain the
+// previous behavior.
+window.receiverFrequencyRange = window.receiverFrequencyRange || {
+    minHz: 10000,
+    maxHz: 30000000
+};
+window.receiverSpectrumRange = window.receiverSpectrumRange || {
+    minHz: 10000,
+    maxHz: 30000000
+};
+
+function setReceiverFrequencyRange(receiver) {
+    const minHz = Number(receiver?.frequency_min_hz);
+    const maxHz = Number(receiver?.frequency_max_hz);
+    if (Number.isFinite(minHz) && Number.isFinite(maxHz) && minHz >= 0 && maxHz > minHz) {
+        window.receiverFrequencyRange = { minHz, maxHz };
+    }
+    const spectrumMinHz = Number(receiver?.spectrum_min_hz);
+    const spectrumMaxHz = Number(receiver?.spectrum_max_hz);
+    if (Number.isFinite(spectrumMinHz) && Number.isFinite(spectrumMaxHz) &&
+        spectrumMinHz >= minHz && spectrumMaxHz <= maxHz && spectrumMaxHz > spectrumMinHz) {
+        window.receiverSpectrumRange = { minHz: spectrumMinHz, maxHz: spectrumMaxHz };
+    } else {
+        window.receiverSpectrumRange = { ...window.receiverFrequencyRange };
+    }
+}
+
+function receiverMinFrequencyHz() {
+    return window.receiverFrequencyRange?.minHz ?? 10000;
+}
+
+function receiverMaxFrequencyHz() {
+    return window.receiverFrequencyRange?.maxHz ?? 30000000;
+}
+
+window.receiverMinFrequencyHz = receiverMinFrequencyHz;
+window.receiverMaxFrequencyHz = receiverMaxFrequencyHz;
+window.receiverSpectrumMinHz = () => window.receiverSpectrumRange?.minHz ?? receiverMinFrequencyHz();
+window.receiverSpectrumMaxHz = () => window.receiverSpectrumRange?.maxHz ?? receiverMaxFrequencyHz();
+
 // Feature flag: set to true to re-enable the FM/NFM squelch UI panel and
 // the associated set_squelch server commands.  Currently disabled while the
 // squelch feature is under development.
@@ -3387,6 +3428,7 @@ async function fetchSiteDescription() {
             
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
+            setReceiverFrequencyRange(data.receiver);
 
             // Seed active antenna label from description and start polling if ant_switch enabled
             if (data.ant_switch && data.ant_switch.enabled) {
@@ -3420,9 +3462,20 @@ async function fetchSiteDescription() {
             // URL with the HTML default values before this async fetch resolved.
             const urlParams = initialPageParams;
 
-            if (data.default_frequency && !urlParams.has('freq')) {
+            if (urlParams.has('freq')) {
+                const requestedFreq = parseInt(urlParams.get('freq'));
+                if (!isNaN(requestedFreq) &&
+                    requestedFreq >= receiverMinFrequencyHz() &&
+                    requestedFreq <= receiverMaxFrequencyHz()) {
+                    setFrequencyInputValue(requestedFreq);
+                    updateBandButtons(requestedFreq);
+                    updateBandSelector();
+                }
+            } else if (data.default_frequency) {
                 const freq = parseInt(data.default_frequency);
-                if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
+                if (!isNaN(freq) &&
+                    freq >= receiverMinFrequencyHz() &&
+                    freq <= receiverMaxFrequencyHz()) {
                     // Use setFrequencyInputValue so the display is updated correctly
                     // regardless of the current frequency unit (Hz/kHz/MHz).
                     setFrequencyInputValue(freq);
@@ -5978,7 +6031,7 @@ function tune() {
     }
 }
 
-// Validate frequency input - only allow digits and max 8 digits
+// Validate frequency input - only allow digits and enough digits for this receiver
 function validateFrequencyInput(input) {
     // Store cursor position before any changes
     const cursorPos = input.selectionStart;
@@ -5987,9 +6040,9 @@ function validateFrequencyInput(input) {
     // Remove any non-digit characters
     let value = oldValue.replace(/\D/g, '');
 
-    // Limit to 8 digits (max 30000000)
-    if (value.length > 8) {
-        value = value.substring(0, 8);
+    const maxDigits = receiverMaxFrequencyHz().toString().length;
+    if (value.length > maxDigits) {
+        value = value.substring(0, maxDigits);
     }
 
     // Only update if value actually changed (prevents unnecessary cursor resets)
@@ -6015,9 +6068,9 @@ function handleFrequencyChange() {
     const freqInput = document.getElementById('frequency');
     const valueStr = freqInput.value.trim();
 
-    // Don't validate incomplete input (less than 5 digits for 10 kHz minimum)
+    // Don't validate incomplete input while the user is still typing.
     // This prevents clamping while user is still typing
-    if (valueStr.length < 5) {
+    if (valueStr.length < receiverMinFrequencyHz().toString().length) {
         return;
     }
 
@@ -6028,9 +6081,8 @@ function handleFrequencyChange() {
     // Update page title
     updatePageTitle();
 
-    // Validate frequency range: 10 kHz to 30 MHz (in Hz)
-    const MIN_FREQ = 10000;    // 10 kHz
-    const MAX_FREQ = 30000000; // 30 MHz
+    const MIN_FREQ = receiverMinFrequencyHz();
+    const MAX_FREQ = receiverMaxFrequencyHz();
 
     if (isNaN(frequency) || frequency < MIN_FREQ || frequency > MAX_FREQ) {
         // Clamp to valid range
@@ -6100,8 +6152,8 @@ function handleFrequencyChange() {
 // Set frequency from preset button
 function setFrequency(freq) {
     // Validate frequency range
-    const MIN_FREQ = 10000;    // 10 kHz
-    const MAX_FREQ = 30000000; // 30 MHz
+    const MIN_FREQ = receiverMinFrequencyHz();
+    const MAX_FREQ = receiverMaxFrequencyHz();
 
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
 
@@ -6279,9 +6331,9 @@ function adjustFrequency(deltaHz) {
     const snapped   = Math.round(currentFreq / stepSize) * stepSize;
     const newFreq   = snapped + direction * stepSize;
 
-    // Clamp to valid range: 10 kHz to 30 MHz
-    const MIN_FREQ = 10000;    // 10 kHz
-    const MAX_FREQ = 30000000; // 30 MHz
+    // Clamp to the configured receiver coverage.
+    const MIN_FREQ = receiverMinFrequencyHz();
+    const MAX_FREQ = receiverMaxFrequencyHz();
     const roundedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
 
     setFrequencyInputValue(roundedFreq);
@@ -6320,8 +6372,8 @@ function roundToNearestKHz() {
     const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     const rounded = Math.round(currentFreq / 1000) * 1000;
 
-    const MIN_FREQ = 10000;
-    const MAX_FREQ = 30000000;
+    const MIN_FREQ = receiverMinFrequencyHz();
+    const MAX_FREQ = receiverMaxFrequencyHz();
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, rounded));
 
     setFrequencyInputValue(clampedFreq);
@@ -6347,7 +6399,9 @@ function loadSettingsFromURL() {
     // Load frequency
     if (params.has('freq')) {
         const freq = parseInt(params.get('freq'));
-        if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
+        if (!isNaN(freq) &&
+            freq >= receiverMinFrequencyHz() &&
+            freq <= receiverMaxFrequencyHz()) {
             const freqInput = document.getElementById('frequency');
             if (freqInput && document.activeElement !== freqInput) {
                 // Store as Hz value directly (don't use setFrequencyInputValue yet as unit may not be loaded)
@@ -8784,9 +8838,9 @@ function performFrequencyShift() {
         newDialFreq = currentDialFreq + shiftAmount;
     }
 
-    // Clamp to valid range (10 kHz to 30 MHz)
-    const MIN_FREQ = 10000;
-    const MAX_FREQ = 30000000;
+    // Clamp to configured receiver coverage.
+    const MIN_FREQ = receiverMinFrequencyHz();
+    const MAX_FREQ = receiverMaxFrequencyHz();
     newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
     newDialFreq = Math.round(newDialFreq);
 
@@ -8956,8 +9010,8 @@ function enableFrequencyTracking() {
                 }
 
                 // Clamp to valid range
-                const MIN_FREQ = 10000;
-                const MAX_FREQ = 30000000;
+                const MIN_FREQ = receiverMinFrequencyHz();
+                const MAX_FREQ = receiverMaxFrequencyHz();
                 newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
                 newDialFreq = Math.round(newDialFreq);
 
@@ -9070,8 +9124,8 @@ function enableFrequencyTracking() {
         }
 
         // Clamp to valid range
-        const MIN_FREQ = 10000;
-        const MAX_FREQ = 30000000;
+        const MIN_FREQ = receiverMinFrequencyHz();
+        const MAX_FREQ = receiverMaxFrequencyHz();
         newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
         newDialFreq = Math.round(newDialFreq);
 
@@ -11970,8 +12024,8 @@ function updateZoomSlider() {
     // Slider range = number of halvings from full span down to the UI zoom floor.
     //
     // Both terms scale as 1/binCount, so the ratio — and therefore the slider range —
-    // is the same for every spectrum.bin_count setting:
-    //   log2((30e6 / N) / (MIN_ZOOM_SPAN_HZ / N)) = log2(30e6 / 10240) ≈ 11.5 → 11
+    // is the same for every spectrum.bin_count setting. The initial bandwidth
+    // already reflects the active receiver's instantaneous spectrum span.
     //
     // floor() rather than round() so the top notch is the first position that
     // actually reaches the floor; rounding up would leave two notches on the same
@@ -16000,7 +16054,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             const stepSize  = Math.abs(deltaHz);
             const direction = Math.sign(deltaHz);
             const snapped   = Math.round(currentHz / stepSize) * stepSize;
-            const newHz     = Math.max(10000, Math.min(30000000, snapped + direction * stepSize));
+            const newHz     = Math.max(
+                receiverMinFrequencyHz(),
+                Math.min(receiverMaxFrequencyHz(), snapped + direction * stepSize)
+            );
 
             setFrequencyInputValue(newHz);
             updateBandButtons(newHz);

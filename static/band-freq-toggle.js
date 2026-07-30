@@ -22,29 +22,36 @@ function updateFrequencyReadout() {
     const freqMHz = freqHz / 1000000;
     const freqStr = freqMHz.toFixed(6);
 
-    // Split into digits (format: XX.XXX.XXX - 2 whole, 3 decimal, 3 more decimal)
+    // Split into digits. The markup reserves five whole-MHz positions and
+    // hides unused leading positions, allowing the same readout to grow from
+    // HF through VHF/UHF/microwave frequencies.
     const parts = freqStr.split('.');
-    const wholePart = parts[0].padStart(2, '0'); // Ensure 2 digits (e.g., "14")
+    const wholePart = parts[0];
     const decimalPart = (parts[1] || '000000').padEnd(6, '0'); // Ensure exactly 6 decimal places
 
     // Update each digit
     const digits = document.querySelectorAll('.freq-digit');
+    const wholeDigitCount = Math.max(2, digits.length - 6);
+    const visibleWholeDigits = Math.max(2, Math.min(wholeDigitCount, wholePart.length));
+    const paddedWholePart = wholePart.padStart(wholeDigitCount, '0').slice(-wholeDigitCount);
 
-    // First 2 digits are the whole MHz part (e.g., "14")
-    if (digits[0]) digits[0].textContent = wholePart[0];
-    if (digits[1]) digits[1].textContent = wholePart[1];
+    for (let i = 0; i < wholeDigitCount; i++) {
+        if (!digits[i]) continue;
+        digits[i].textContent = paddedWholePart[i];
+        digits[i].style.display = i < wholeDigitCount - visibleWholeDigits ? 'none' : '';
+    }
 
     // Next 3 digits are the first part of decimal (e.g., "074")
     for (let i = 0; i < 3; i++) {
-        if (digits[i + 2]) {
-            digits[i + 2].textContent = decimalPart[i];
+        if (digits[i + wholeDigitCount]) {
+            digits[i + wholeDigitCount].textContent = decimalPart[i];
         }
     }
 
     // Last 3 digits are the final decimal part (e.g., "000")
     for (let i = 0; i < 3; i++) {
-        if (digits[i + 5]) {
-            digits[i + 5].textContent = decimalPart[i + 3];
+        if (digits[i + wholeDigitCount + 3]) {
+            digits[i + wholeDigitCount + 3].textContent = decimalPart[i + 3];
         }
     }
 }
@@ -143,8 +150,9 @@ function changeFrequencyByStep(step, increment) {
         currentFreq -= step;
     }
 
-    // Clamp frequency to reasonable bounds (10 kHz to 30 MHz for HF)
-    currentFreq = Math.max(10000, Math.min(30000000, currentFreq));
+    const minFrequency = window.receiverMinFrequencyHz?.() ?? 10000;
+    const maxFrequency = window.receiverMaxFrequencyHz?.() ?? 30000000;
+    currentFreq = Math.max(minFrequency, Math.min(maxFrequency, currentFreq));
 
     // Use the global setFrequencyInputValue function to properly update the input
     if (typeof window.setFrequencyInputValue === 'function') {

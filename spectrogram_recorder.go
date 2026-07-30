@@ -72,13 +72,14 @@ type SpectrogramRecorder struct {
 	wg       sync.WaitGroup
 }
 
-// NewSpectrogramRecorder creates a new wideband (0-30 MHz) recorder.
+// NewSpectrogramRecorder creates a recorder for instantaneous receiver coverage.
 // Returns nil if disabled or nfm is nil.
 func NewSpectrogramRecorder(nfm *NoiseFloorMonitor, config SpectrogramConfig) *SpectrogramRecorder {
 	if !config.IsEnabled() || nfm == nil {
 		return nil
 	}
-	return newSpectrogramRecorderForBand(nfm, config, "wideband", 0, 30_000_000, spectrogramBins,
+	startFrequency, endFrequency := nfm.config.SpectrumRange()
+	return newSpectrogramRecorderForBand(nfm, config, "wideband", startFrequency, endFrequency, spectrogramBins,
 		func() *BandFFT { return nfm.GetWideBandFFT() })
 }
 

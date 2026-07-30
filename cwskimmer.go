@@ -500,9 +500,9 @@ func (c *CWSkimmerClient) processLine(line string, spotHandlers []func(CWSkimmer
 
 	// Try to parse as CW spot
 	if spot, ok := c.parseCWSpot(line); ok {
-		// Filter spots: only process spots between 0 and 30 MHz
-		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
-			// Silently discard spots outside the 0-30 MHz range
+		// Reject invalid values without imposing an HF-only ceiling. External
+		// skimmers may cover VHF/UHF and UI coverage is receiver-configured.
+		if spot.Frequency <= 0 {
 			return
 		}
 

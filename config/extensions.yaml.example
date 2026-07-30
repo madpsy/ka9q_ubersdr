@@ -35,6 +35,12 @@ extensions:
   # Sound Modem - Packet Decoder for AFSK/BFSK with IL2P Support
   - soundmodem
 
+  # Digital Voice - DMR, P25, NXDN, D-Star, YSF, M17, dPMR and ProVoice/EDACS via DSD-FME
+  - digitalvoice
+
+  # Paging & Signalling - POCSAG, FLEX, SAME/EAS, DTMF and two-tone formats via multimon-ng
+  - signalling
+
   # QRSS Grabber - Narrow-band spectrogram for reading very-slow CW (QRSS) beacons
   - qrss
 

@@ -469,8 +469,8 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	// Update frequency if provided AND different
 	if frequency, ok := updates["frequency"].(float64); ok {
-		// Validate frequency (0 Hz to 30 MHz)
-		if frequency > 30000000 {
+		minFrequency, maxFrequency := cm.sessionManager.config.FrequencyRange()
+		if frequency < float64(minFrequency) || frequency > float64(maxFrequency) {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidFrequency
 		}
@@ -1736,7 +1736,7 @@ var (
 	ErrUpdateRateLimitExceeded = &ChatError{"update rate limit exceeded - please wait before updating frequency/mode"}
 	ErrMaxUsersReached         = &ChatError{"maximum number of chat users reached - please try again later"}
 	ErrUsernameAlreadyTaken    = &ChatError{"username already taken - please choose a different username"}
-	ErrInvalidFrequency        = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
+	ErrInvalidFrequency        = &ChatError{"invalid frequency - outside configured receiver coverage"}
 	ErrInvalidMode             = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm, or any IQ mode (iq, iq48, iq96, iq192, iq384)"}
 	ErrInvalidBandwidth        = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -12000 and 12000 Hz"}
 )

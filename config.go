@@ -15,43 +15,46 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin              AdminConfig               `yaml:"admin"`
-	Radiod             RadiodConfig              `yaml:"radiod"`
-	Server             ServerConfig              `yaml:"server"`
-	Audio              AudioConfig               `yaml:"audio"`
-	Spectrum           SpectrumConfig            `yaml:"spectrum"`
-	NoiseFloor         NoiseFloorConfig          `yaml:"noisefloor"`
-	Spectrogram        SpectrogramConfig         `yaml:"spectrogram"`
-	Decoder            DecoderConfig             `yaml:"decoder"`
-	Prometheus         PrometheusConfig          `yaml:"prometheus"`
-	MQTT               MQTTConfig                `yaml:"mqtt"`
-	Logging            LoggingConfig             `yaml:"logging"`
-	Database           DatabaseConfig            `yaml:"database"`
-	DXCluster          DXClusterConfig           `yaml:"dxcluster"`
-	FreeDVReporter     FreeDVReporterConfig      `yaml:"freedv_reporter"`
-	Chat               ChatConfig                `yaml:"chat"`
-	SpaceWeather       SpaceWeatherConfig        `yaml:"spaceweather"`
-	InstanceReporting  InstanceReportingConfig   `yaml:"instance_reporting"`
-	FrequencyReference FrequencyReferenceConfig  `yaml:"frequency_reference"`
-	Rotctl             RotctlConfig              `yaml:"rotctl"`
-	AntSwitch          AntSwitchConfig           `yaml:"ant_switch"`
-	GeoIP              GeoIPConfig               `yaml:"geoip"`
-	SSHProxy           SSHProxyConfig            `yaml:"ssh_proxy"`
-	GPSDO              GPSDOConfig               `yaml:"gpsdo"`
-	MCP                MCPConfig                 `yaml:"mcp"`
-	Whisper            WhisperConfig             `yaml:"whisper"`
-	FreeDVExtension    FreeDVExtensionConfig     `yaml:"freedv_extension"`
-	SoundModem         SoundModemExtensionConfig `yaml:"soundmodem_extension"`
-	EiBi               EiBiConfig                `yaml:"eibi"`
-	NTP                NTPConfig                 `yaml:"ntp"`
-	UI                 UIConfig                  `yaml:"ui"`
-	DSP                DSPConfig                 `yaml:"dsp"`
-	LookupServices     LookupServicesConfig      `yaml:"lookup_services"`
-	MonitorDisplay     MonitorDisplayConfig      `yaml:"monitor_display"`
-	Bookmarks          []Bookmark                `yaml:"bookmarks"`
-	Bands              []Band                    `yaml:"bands"`
-	Extensions         []string                  `yaml:"extensions"`
-	DefaultExtension   string                    `yaml:"default_extension,omitempty"`
+	Admin              AdminConfig                 `yaml:"admin"`
+	Receiver           ReceiverConfig              `yaml:"receiver"`
+	Radiod             RadiodConfig                `yaml:"radiod"`
+	Server             ServerConfig                `yaml:"server"`
+	Audio              AudioConfig                 `yaml:"audio"`
+	Spectrum           SpectrumConfig              `yaml:"spectrum"`
+	NoiseFloor         NoiseFloorConfig            `yaml:"noisefloor"`
+	Spectrogram        SpectrogramConfig           `yaml:"spectrogram"`
+	Decoder            DecoderConfig               `yaml:"decoder"`
+	Prometheus         PrometheusConfig            `yaml:"prometheus"`
+	MQTT               MQTTConfig                  `yaml:"mqtt"`
+	Logging            LoggingConfig               `yaml:"logging"`
+	Database           DatabaseConfig              `yaml:"database"`
+	DXCluster          DXClusterConfig             `yaml:"dxcluster"`
+	FreeDVReporter     FreeDVReporterConfig        `yaml:"freedv_reporter"`
+	Chat               ChatConfig                  `yaml:"chat"`
+	SpaceWeather       SpaceWeatherConfig          `yaml:"spaceweather"`
+	InstanceReporting  InstanceReportingConfig     `yaml:"instance_reporting"`
+	FrequencyReference FrequencyReferenceConfig    `yaml:"frequency_reference"`
+	Rotctl             RotctlConfig                `yaml:"rotctl"`
+	AntSwitch          AntSwitchConfig             `yaml:"ant_switch"`
+	GeoIP              GeoIPConfig                 `yaml:"geoip"`
+	SSHProxy           SSHProxyConfig              `yaml:"ssh_proxy"`
+	GPSDO              GPSDOConfig                 `yaml:"gpsdo"`
+	MCP                MCPConfig                   `yaml:"mcp"`
+	Whisper            WhisperConfig               `yaml:"whisper"`
+	FreeDVExtension    FreeDVExtensionConfig       `yaml:"freedv_extension"`
+	SoundModem         SoundModemExtensionConfig   `yaml:"soundmodem_extension"`
+	DigitalVoice       DigitalVoiceExtensionConfig `yaml:"digital_voice_extension"`
+	Signalling         SignallingExtensionConfig   `yaml:"signalling_extension"`
+	EiBi               EiBiConfig                  `yaml:"eibi"`
+	NTP                NTPConfig                   `yaml:"ntp"`
+	UI                 UIConfig                    `yaml:"ui"`
+	DSP                DSPConfig                   `yaml:"dsp"`
+	LookupServices     LookupServicesConfig        `yaml:"lookup_services"`
+	MonitorDisplay     MonitorDisplayConfig        `yaml:"monitor_display"`
+	Bookmarks          []Bookmark                  `yaml:"bookmarks"`
+	Bands              []Band                      `yaml:"bands"`
+	Extensions         []string                    `yaml:"extensions"`
+	DefaultExtension   string                      `yaml:"default_extension,omitempty"`
 }
 
 // MonitorDisplayConfig contains settings for the optional Pimoroni Unicorn LED
@@ -424,7 +427,7 @@ type FrequencyGainRange struct {
 type SpectrumConfig struct {
 	Enabled bool                  `yaml:"enabled"`
 	Default SpectrumDefaultConfig `yaml:"default"`
-	// BinCount is the number of FFT bins across the full 0-30 MHz view — the
+	// BinCount is the number of FFT bins across the active instantaneous receiver view — the
 	// horizontal resolution of the spectrum and waterfall. Only 512 (low),
 	// 1024 (normal) and 2048 (high) are accepted; LoadConfig snaps anything
 	// else to the nearest of those and copies the result into Default.BinCount,
@@ -448,10 +451,9 @@ type SmoothingConfig struct {
 
 // SpectrumDefaultConfig contains default parameters for new spectrum channels.
 // These values are intentionally not settable directly via config.yaml — they are
-// derived in LoadConfig to ensure the display always covers exactly 0-30 MHz
-// (totalBandwidth = BinCount × BinBandwidth must equal 30,000,000 Hz).
+// derived in LoadConfig from receiver coverage and instantaneous sample rate.
 // BinCount is derived from the operator-facing spectrum.bin_count setting and
-// BinBandwidth is then computed as 30 MHz / BinCount.
+// BinBandwidth is then computed as receiver span / BinCount.
 type SpectrumDefaultConfig struct {
 	CenterFrequency uint64  `yaml:"-"`
 	BinCount        int     `yaml:"-"`
@@ -780,6 +782,23 @@ type SoundModemExtensionConfig struct {
 	MaxUsers int   `yaml:"max_users"` // Maximum concurrent users (0 = unlimited, default: 5)
 }
 
+// DigitalVoiceExtensionConfig contains settings for the receive-only DSD-FME
+// integration. Decoder mode arguments are selected from a fixed allowlist in
+// the digitalvoice package; no decryption/privacy key settings are exposed.
+type DigitalVoiceExtensionConfig struct {
+	Enabled    *bool  `yaml:"enabled"`     // Whether the extension is registered (default: true; nil = enabled)
+	BinaryPath string `yaml:"binary_path"` // DSD-FME executable path or command name (default: dsd-fme)
+	MaxUsers   int    `yaml:"max_users"`   // Maximum concurrent DSD-FME processes (default: 3)
+}
+
+// SignallingExtensionConfig contains settings for the receive-only
+// multimon-ng paging and signalling integration.
+type SignallingExtensionConfig struct {
+	Enabled    *bool  `yaml:"enabled"`     // Whether the extension is registered (default: true; nil = enabled)
+	BinaryPath string `yaml:"binary_path"` // multimon-ng executable path or command name (default: multimon-ng)
+	MaxUsers   int    `yaml:"max_users"`   // Maximum concurrent multimon-ng processes (default: 5)
+}
+
 // EiBiConfig contains settings for the EiBi shortwave broadcast schedule
 type EiBiConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable/disable EiBi schedule fetching (default: false)
@@ -876,6 +895,11 @@ func LoadConfig(filename string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	// Preserve the historical RX888 10 kHz-30 MHz installation when the new
+	// receiver section is absent, while allowing other SDRs to declare the
+	// actual range made available by their radiod instance.
+	config.Receiver.applyDefaults()
 
 	// Apply DSP filter defaults (nr2/rn2/nr4/dfnr enabled, bnr disabled)
 	// when the filters sub-section is absent from config.
@@ -1146,15 +1170,18 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Admin.AllowedIPs = []string{"0.0.0.0/0"} // Default: allow all IPv4
 	}
 
-	// Set spectrum defaults if not specified.
+	// Set spectrum defaults from the receiver's instantaneous sampled range.
 	// Only bin_count is operator-facing; center frequency and bin bandwidth are
-	// derived, because changing them independently breaks the 0-30 MHz display
-	// (totalBandwidth = binCount × binBandwidth must equal 30 MHz).
+	// derived so narrow-band devices do not pretend their entire tuning range is
+	// visible at once.
+	minReceiverFrequency, maxReceiverFrequency := config.FrequencyRange()
+	minSpectrumFrequency, maxSpectrumFrequency := config.SpectrumRange()
+	receiverSpan := maxSpectrumFrequency - minSpectrumFrequency
 	if config.Spectrum.Default.CenterFrequency == 0 {
-		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz center for 0-30 MHz coverage
+		config.Spectrum.Default.CenterFrequency = minSpectrumFrequency + receiverSpan/2
 	}
 
-	// Number of FFT bins across the 0-30 MHz view. Only 512 (low), 1024 (normal)
+	// Number of FFT bins across the full receiver view. Only 512 (low), 1024 (normal)
 	// and 2048 (high) are accepted; anything else snaps to the nearest of those so
 	// a typo in config.yaml can never produce a channel radiod will reject.
 	// The thresholds are geometric midpoints (√(512·1024) ≈ 724, √(1024·2048) ≈ 1448)
@@ -1175,10 +1202,10 @@ func LoadConfig(filename string) (*Config, error) {
 			rawBinCount, config.Spectrum.BinCount)
 	}
 
-	// Derived — never set directly. binCount × binBandwidth must equal exactly
-	// 30,000,000 Hz or the display stops covering 0-30 MHz.
+	// Derived — never set directly. binCount × binBandwidth equals the configured
+	// receiver coverage span.
 	config.Spectrum.Default.BinCount = config.Spectrum.BinCount
-	config.Spectrum.Default.BinBandwidth = 30000000.0 / float64(config.Spectrum.BinCount)
+	config.Spectrum.Default.BinBandwidth = float64(receiverSpan) / float64(config.Spectrum.BinCount)
 
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)
@@ -1250,7 +1277,7 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Validate and clean up frequency gain ranges
-	config.Spectrum.validateFrequencyGainRanges()
+	config.Spectrum.validateFrequencyGainRanges(minReceiverFrequency, maxReceiverFrequency)
 
 	// Set DX cluster defaults if not specified
 	if config.DXCluster.Port == 0 {
@@ -1618,6 +1645,9 @@ func (c *AudioConfig) GetSampleRateForMode(mode string) int {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	if err := c.Receiver.Validate(); err != nil {
+		return err
+	}
 	if c.Radiod.StatusGroup == "" {
 		return fmt.Errorf("radiod.status_group is required")
 	}
@@ -2311,7 +2341,7 @@ func (irc *InstanceReportingConfig) IsInstanceReporter(ipStr string) bool {
 
 // validateFrequencyGainRanges validates and cleans up frequency gain ranges
 // Removes invalid ranges and logs warnings for user errors
-func (sc *SpectrumConfig) validateFrequencyGainRanges() {
+func (sc *SpectrumConfig) validateFrequencyGainRanges(minReceiverFrequency, maxReceiverFrequency uint64) {
 	if len(sc.GainDBFrequencyRanges) == 0 {
 		return
 	}
@@ -2327,11 +2357,10 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 			continue
 		}
 
-		// Check if frequency range is reasonable (within HF range: 0-30 MHz)
-		const maxHFFreq = 30000000 // 30 MHz
-		if r.StartFreq > maxHFFreq {
-			fmt.Printf("Warning: Ignoring frequency gain range '%s': start_freq (%d Hz) exceeds maximum HF frequency (30 MHz)\n",
-				name, r.StartFreq)
+		// Ignore correction ranges that cannot overlap this receiver.
+		if r.EndFreq < minReceiverFrequency || r.StartFreq > maxReceiverFrequency {
+			fmt.Printf("Warning: Ignoring frequency gain range '%s': %d-%d Hz is outside receiver coverage %d-%d Hz\n",
+				name, r.StartFreq, r.EndFreq, minReceiverFrequency, maxReceiverFrequency)
 			continue
 		}
 

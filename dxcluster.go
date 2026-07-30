@@ -498,8 +498,8 @@ func (c *DXClusterClient) processLine(line string) {
 
 	// Try to parse as DX spot
 	if spot, ok := c.parseDXSpot(line); ok {
-		// Filter spots: only process spots between 0 and 30 MHz
-		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
+		// DX clusters also carry VHF, UHF, and microwave spots.
+		if spot.Frequency <= 0 {
 			return
 		}
 

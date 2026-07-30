@@ -27,6 +27,45 @@ RUN go mod tidy
 # Build ka9q_ubersdr
 RUN make
 
+# Build a reproducible receive-only DSD-FME stack. The revisions are pinned so
+# a future upstream change cannot silently alter a published UltraSDR image.
+FROM ubuntu:24.04 AS dsd-builder
+
+ARG DSD_FME_REV=69d31151dd2d634cdc02aac4bff0e2a12c756ddb
+ARG MBELIB_REV=34adf9f054bc5650ace162a4917dcbc2cfa6102e
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    git \
+    libcodec2-dev \
+    libncurses-dev \
+    libpulse-dev \
+    libsndfile1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone https://github.com/lwvmobile/mbelib.git \
+    && cd mbelib \
+    && git checkout "${MBELIB_REV}" \
+    && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build build --parallel \
+    && cmake --install build \
+    && ldconfig
+
+RUN git clone https://github.com/lwvmobile/dsd-fme.git \
+    && cd dsd-fme \
+    && git checkout "${DSD_FME_REV}" \
+    && cmake -S . -B build \
+         -DCMAKE_BUILD_TYPE=Release \
+         -DCMAKE_INSTALL_PREFIX=/usr/local \
+         -DCOLORS=OFF \
+         -DCOLORSLOGS=OFF \
+         -DPVC=ON \
+    && cmake --build build --parallel \
+    && cmake --install build
+
 # Runtime stage
 FROM ubuntu:24.04
 
@@ -58,6 +97,11 @@ RUN apt-get update && apt-get install -y \
     libfftw3-single3 \
     libfftw3-bin \
     libgfortran5 \
+    libcodec2-1.2 \
+    libncursesw6 \
+    libpulse0 \
+    libsndfile1 \
+    multimon-ng \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${TARGETARCH} -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_${TARGETARCH} -O /usr/bin/js8 \
@@ -88,6 +132,13 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /opt/freedv/freedv-ka9q \
     && rm /tmp/freedv.zip \
     && rm -rf /var/lib/apt/lists/*
+
+# Pinned DSD-FME and MBELib artifacts from the reproducible builder above.
+COPY --from=dsd-builder /usr/local/bin/dsd-fme /usr/local/bin/dsd-fme
+COPY --from=dsd-builder /usr/local/lib/libmbe.so* /usr/local/lib/
+RUN ldconfig \
+    && command -v dsd-fme \
+    && command -v multimon-ng
 
 # Set working directory
 WORKDIR /app
@@ -134,7 +185,9 @@ COPY --from=builder /build/geoip ./geoip
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/decoder-healthcheck.sh /usr/local/bin/ubersdr-decoder-healthcheck
 RUN chmod +x /entrypoint.sh
+RUN chmod +x /usr/local/bin/ubersdr-decoder-healthcheck
 
 # Expose default ports
 # 8080 - Web interface (as configured in config.yaml)

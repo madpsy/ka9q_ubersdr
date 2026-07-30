@@ -326,6 +326,18 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		fftBuffers:         make(map[string]*FFTBuffer),
 	}
 
+	minReceiverFrequency, maxReceiverFrequency := config.SpectrumRange()
+	validBands := config.NoiseFloor.Bands[:0]
+	for _, band := range config.NoiseFloor.Bands {
+		if band.Start < minReceiverFrequency || band.End > maxReceiverFrequency {
+			log.Printf("Skipping noise-floor band %q (%d-%d Hz): outside instantaneous receiver coverage %d-%d Hz",
+				band.Name, band.Start, band.End, minReceiverFrequency, maxReceiverFrequency)
+			continue
+		}
+		validBands = append(validBands, band)
+	}
+	config.NoiseFloor.Bands = validBands
+
 	// Initialize FFT buffers for each band (store up to 1 minute of samples)
 	for _, band := range config.NoiseFloor.Bands {
 		nfm.fftBuffers[band.Name] = NewFFTBuffer(
@@ -337,13 +349,14 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		)
 	}
 
-	// Initialize wide-band FFT buffer (0-30 MHz full HF coverage)
-	// Uses 4096 bins @ 7.32421875 kHz/bin for exact 0-30 MHz coverage (4096 * 7324.21875 = 30 MHz)
+	// Initialize the receiver-wide instantaneous FFT buffer.
+	minSpectrumFrequency, maxSpectrumFrequency := config.SpectrumRange()
+	wideBandBinWidth := float64(maxSpectrumFrequency-minSpectrumFrequency) / 4096
 	nfm.wideBandFFTBuffer = NewFFTBuffer(
 		"wideband",
-		0,              // 0 Hz start
-		30000000,       // 30 MHz end
-		7324.21875,     // 7324.21875 Hz bin width (30 MHz / 4096 bins = exact coverage)
+		minSpectrumFrequency,
+		maxSpectrumFrequency,
+		wideBandBinWidth,
 		60*time.Second, // Keep 1 minute of samples
 	)
 
@@ -361,8 +374,7 @@ func (nfm *NoiseFloorMonitor) Start() error {
 
 	log.Printf("Creating noise floor spectrum sessions for %d bands + wide-band", len(nfm.config.NoiseFloor.Bands))
 
-	// Create wide-band spectrum session (0-30 MHz full HF coverage)
-	// Uses same parameters as main spectrum display
+	// Create a spectrum session across instantaneous receiver coverage.
 	wideBandSSRC := uint32(rand.Int31())
 	if wideBandSSRC == 0 || wideBandSSRC == 0xffffffff {
 		wideBandSSRC = 1
@@ -381,17 +393,19 @@ func (nfm *NoiseFloorMonitor) Start() error {
 	}
 	nfm.sessions.mu.RUnlock()
 
-	// Create wide-band spectrum channel
-	// Parameters: 15 MHz center, 4096 bins, 7.32421875 kHz/bin for exact 0-30 MHz coverage
+	minSpectrumFrequency, maxSpectrumFrequency := nfm.config.SpectrumRange()
+	wideBandCenter := minSpectrumFrequency + (maxSpectrumFrequency-minSpectrumFrequency)/2
+	wideBandBinWidth := float64(maxSpectrumFrequency-minSpectrumFrequency) / 4096
 	if DebugMode {
-		log.Printf("DEBUG: Creating wide-band spectrum - freq: 15000000 Hz, bins: 4096, bw: 7324.21875 Hz")
+		log.Printf("DEBUG: Creating wide-band spectrum - freq: %d Hz, bins: 4096, bw: %.6f Hz",
+			wideBandCenter, wideBandBinWidth)
 	}
 
 	if err := nfm.radiod.CreateSpectrumChannel(
 		"noisefloor-wideband",
-		15000000,   // 15 MHz center (covers 0-30 MHz)
-		4096,       // 4096 bins (half of 8192 for lower CPU usage)
-		7324.21875, // 7324.21875 Hz per bin (30 MHz / 4096 = exact 0-30 MHz coverage)
+		wideBandCenter,
+		4096,
+		wideBandBinWidth,
 		wideBandSSRC,
 	); err != nil {
 		return fmt.Errorf("failed to create wide-band spectrum channel: %w", err)
@@ -407,9 +421,9 @@ func (nfm *NoiseFloorMonitor) Start() error {
 		SSRC:         wideBandSSRC,
 		IsSpectrum:   true,
 		IsBackground: true,
-		Frequency:    15000000,
+		Frequency:    wideBandCenter,
 		BinCount:     4096,
-		BinBandwidth: 7324.21875,
+		BinBandwidth: wideBandBinWidth,
 		SpectrumChan: wideBandSpectrumChan,
 		CreatedAt:    time.Now(),
 		LastActive:   time.Now(),
@@ -424,18 +438,19 @@ func (nfm *NoiseFloorMonitor) Start() error {
 	nfm.wideBandSpectrum = &BandSpectrum{
 		Band: NoiseFloorBand{
 			Name:            "wideband",
-			Start:           0,
-			End:             30000000,
-			CenterFrequency: 15000000,
+			Start:           minSpectrumFrequency,
+			End:             maxSpectrumFrequency,
+			CenterFrequency: wideBandCenter,
 			BinCount:        4096,
-			BinBandwidth:    7324.21875,
+			BinBandwidth:    wideBandBinWidth,
 		},
 		SSRC:         wideBandSSRC,
 		SessionID:    wideBandSessionID,
 		SpectrumChan: wideBandSpectrumChan,
 	}
 
-	log.Printf("Created wide-band spectrum session (SSRC: 0x%08x, 7.32 kHz resolution, 0-30 MHz, 4096 bins)", wideBandSSRC)
+	log.Printf("Created wide-band spectrum session (SSRC: 0x%08x, %.2f Hz resolution, %d-%d Hz, 4096 bins)",
+		wideBandSSRC, wideBandBinWidth, minSpectrumFrequency, maxSpectrumFrequency)
 
 	// Create a spectrum session for each band
 	for _, band := range nfm.config.NoiseFloor.Bands {
@@ -761,26 +776,14 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 	timestamp := time.Now()
 	bandsProcessed := 0
 
-	// Calculate wideband SNR measurements (0-30 MHz and 1.8-30 MHz)
+	// Calculate receiver-wide and HF-overlap dynamic range measurements.
 	var snr_0_30, snr_1_8_30 float32
 	if nfm.wideBandFFTBuffer != nil {
 		widebandFFT := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
 		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
-			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
-			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
-			snr_0_30 = fullDynamicRange
-
-			// Calculate 1.8-30 MHz HF SNR
-			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
-			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
-			startBin := int(1800000.0 / widebandFFT.BinWidth)
-			if startBin < len(widebandFFT.Data) {
-				hfBins := widebandFFT.Data[startBin:]
-				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
-				snr_1_8_30 = hfDynamicRange
-			}
-
-			log.Printf("Wideband SNR: 0-30 MHz = %.1f dB, 1.8-30 MHz = %.1f dB", snr_0_30, snr_1_8_30)
+			snr_0_30, snr_1_8_30 = calculateWidebandDynamicRanges(widebandFFT)
+			log.Printf("Wideband dynamic range: %d-%d Hz = %.1f dB, HF overlap = %.1f dB",
+				widebandFFT.StartFreq, widebandFFT.EndFreq, snr_0_30, snr_1_8_30)
 		}
 	}
 
@@ -1516,7 +1519,41 @@ func copyBandFFT(fft *BandFFT) *BandFFT {
 	return &cp
 }
 
-// GetWidebandSNR returns the current wideband SNR measurements (0-30 MHz and 1.8-30 MHz)
+// calculateWidebandDynamicRanges returns the full instantaneous dynamic range
+// and, when present, the portion overlapping 1.8-30 MHz. Field names in public
+// APIs remain legacy-compatible.
+func calculateWidebandDynamicRanges(fft *BandFFT) (overall, hf float32) {
+	if fft == nil || len(fft.Data) == 0 {
+		return 0, 0
+	}
+	_, _, overall = calculateDynamicRangeFromFFT(fft.Data)
+
+	hfStart := uint64(1_800_000)
+	if fft.StartFreq > hfStart {
+		hfStart = fft.StartFreq
+	}
+	hfEnd := uint64(30_000_000)
+	if fft.EndFreq < hfEnd {
+		hfEnd = fft.EndFreq
+	}
+	if hfEnd <= hfStart || fft.BinWidth <= 0 {
+		return overall, 0
+	}
+	startBin := int(float64(hfStart-fft.StartFreq) / fft.BinWidth)
+	endBin := int(math.Ceil(float64(hfEnd-fft.StartFreq) / fft.BinWidth))
+	if startBin < 0 {
+		startBin = 0
+	}
+	if endBin > len(fft.Data) {
+		endBin = len(fft.Data)
+	}
+	if startBin < endBin {
+		_, _, hf = calculateDynamicRangeFromFFT(fft.Data[startBin:endBin])
+	}
+	return overall, hf
+}
+
+// GetWidebandSNR returns receiver-wide and HF-overlap dynamic range values.
 // Returns -1 for both values if no data is available
 func (nfm *NoiseFloorMonitor) GetWidebandSNR() (snr_0_30, snr_1_8_30 float32) {
 	if nfm == nil {
@@ -1529,21 +1566,7 @@ func (nfm *NoiseFloorMonitor) GetWidebandSNR() (snr_0_30, snr_1_8_30 float32) {
 	if nfm.wideBandFFTBuffer != nil {
 		widebandFFT := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
 		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
-			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
-			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
-			snr_0_30 = fullDynamicRange
-
-			// Calculate 1.8-30 MHz HF SNR
-			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
-			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
-			startBin := int(1800000.0 / widebandFFT.BinWidth)
-			if startBin < len(widebandFFT.Data) {
-				hfBins := widebandFFT.Data[startBin:]
-				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
-				snr_1_8_30 = hfDynamicRange
-			}
-
-			return snr_0_30, snr_1_8_30
+			return calculateWidebandDynamicRanges(widebandFFT)
 		}
 	}
 

@@ -1,0 +1,30 @@
+<div class="sig-container">
+  <div class="sig-controls">
+    <label>
+      Decoder set
+      <select id="sig-profile">
+        <option value="paging" selected>Paging (POCSAG + FLEX)</option>
+        <option value="pocsag">POCSAG</option>
+        <option value="flex">FLEX</option>
+        <option value="eas">SAME / EAS</option>
+        <option value="dtmf">DTMF</option>
+        <option value="twotone">Two-tone selective calling</option>
+        <option value="telemetry">Legacy telemetry</option>
+        <option value="all">Auto / all signalling</option>
+      </select>
+    </label>
+    <button id="sig-start" type="button">Start decoder</button>
+    <button id="sig-clear" type="button" class="secondary">Clear</button>
+  </div>
+  <div class="sig-status-row">
+    <span id="sig-status">Stopped</span>
+    <span id="sig-count">0 decodes</span>
+  </div>
+  <div class="sig-notice">
+    Tune the signal in NFM. The decoder automatically selects a suitable
+    bandwidth and supports receive-only, unencrypted over-the-air signalling.
+  </div>
+  <div id="sig-results" class="sig-results">
+    <div class="sig-empty">Press Start decoder and tune to a signalling channel.</div>
+  </div>
+</div>

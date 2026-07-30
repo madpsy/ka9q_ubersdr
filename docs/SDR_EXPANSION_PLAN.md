@@ -18,7 +18,12 @@ Keep the existing session API stable while adding a receiver layer underneath it
 4. **monitor scheduler**: allocates tuners/bandwidth using priority, dwell time, CPU budget, and recording policy; it must never assume that every frequency is visible from one capture.
 5. **decoder plugins**: declare accepted input, timing/window needs, parser, result schema, and reporting targets. Plugins run as trusted built-ins or out-of-process adapters with a versioned RPC protocol—never arbitrary in-process downloads.
 
-The initial code adds a capability-oriented `SDRBackendRegistry` with `ka9q-radiod` registered, and moves the five built-in decoder definitions behind a `DecoderPluginRegistry`. Existing configuration and behavior remain unchanged.
+The initial implementation adds a capability-oriented `SDRBackendRegistry`
+with native and external-radiod paths, a catalog covering every receive driver
+currently exposed by KA9Q Radio, configuration-driven RF coverage, and a
+radiod configuration preview generator. It also moves the five built-in
+decoder definitions behind a `DecoderPluginRegistry`. Omitting the new receiver
+block preserves the existing RX-888/10 kHz–30 MHz behavior.
 
 ## Priority hardware families
 
@@ -55,11 +60,12 @@ Use SoapySDR where it provides a reliable common denominator, but retain backend
 
 ## Delivery sequence
 
-1. Add a `receiver.backend` configuration block and select `ka9q-radiod` by default.
-2. Introduce a sidecar protocol for direct-IQ sources; ship `rtl_tcp` and SoapySDR reference adapters.
-3. Adapt the channel engine so radiod and direct-IQ adapters both satisfy the existing session/spectrum contracts.
-4. Add plugin manifests, an out-of-process decoder runner, resource limits, and normalized events.
-5. Add monitoring schedules, storage quotas, receiver health/clock metrics, and UI coverage reporting.
+1. Add a `receiver.backend` configuration block and select `ka9q-radiod` by default. **Implemented.**
+2. Catalog all current KA9Q receive drivers and add a generic externally managed radiod/Soapy path. **Implemented.**
+3. Introduce a versioned sidecar protocol for direct-IQ sources; ship `rtl_tcp` and SoapySDR reference adapters.
+4. Adapt the channel engine so radiod and direct-IQ adapters both satisfy the existing session/spectrum contracts.
+5. Add plugin manifests, an out-of-process decoder runner, resource limits, and normalized events.
+6. Add monitoring schedules, storage quotas, receiver health/clock metrics, and UI coverage reporting.
 
 ## Compatibility and safety rules
 

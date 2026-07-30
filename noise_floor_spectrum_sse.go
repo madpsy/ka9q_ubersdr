@@ -128,8 +128,9 @@ import (
 // NAT sessions alive and give clients a liveness signal.
 const nfSpectrumSSEHeartbeatInterval = 30 * time.Second
 
-// wideBandSSEName and wideBandSSECenterHz describe the synthetic "wideband"
-// pseudo-band exposed on this endpoint. It mirrors the 0-30 MHz channel used
+// wideBandSSEName identifies the synthetic receiver-wide pseudo-band.
+// Its center is derived from Config.SpectrumRange at request time. It mirrors
+// the channel used
 // by the spectrogram (see NewSpectrogramRecorder / nfm.GetWideBandFFT) and is
 // fetched separately from the per-band fftBuffers map.
 //
@@ -137,10 +138,7 @@ const nfSpectrumSSEHeartbeatInterval = 30 * time.Second
 // memoized against background_poll_period_ms itself (see that function in
 // noise_floor.go), so there's no separate cost-bounding cadence to manage
 // here; asking for it every tick, same as any other band, is already cheap.
-const (
-	wideBandSSEName     = "wideband"
-	wideBandSSECenterHz = 15_000_000
-)
+const wideBandSSEName = "wideband"
 
 // encodeBinary8PacketForSSE encodes []float32 spectrum data into the SPEC binary8
 // wire format used by both the WebSocket spectrum path and this SSE endpoint.
@@ -335,7 +333,7 @@ func HandleNoiseFloorSpectrumStream(
 		}
 
 		// ── build the set of configured bands (name → center frequency) ───────
-		// Includes a synthetic "wideband" entry (0-30 MHz, center 15 MHz) backed
+		// Includes a synthetic "wideband" entry backed
 		// by nfm.GetWideBandFFT() rather than the per-band fftBuffers map — see
 		// the fetch in the main event loop below. It is only streamed when
 		// explicitly requested via ?band=wideband, not included in the default
@@ -344,7 +342,8 @@ func HandleNoiseFloorSpectrumStream(
 		for _, b := range config.NoiseFloor.Bands {
 			configuredBands[b.Name] = b.CenterFrequency
 		}
-		configuredBands[wideBandSSEName] = wideBandSSECenterHz
+		minSpectrumFrequency, maxSpectrumFrequency := config.SpectrumRange()
+		configuredBands[wideBandSSEName] = minSpectrumFrequency + (maxSpectrumFrequency-minSpectrumFrequency)/2
 
 		// ── parse ?band= query parameters ────────────────────────────────────
 		// Repeatable: ?band=20m&band=40m

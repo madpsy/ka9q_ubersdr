@@ -139,9 +139,9 @@ ws.onmessage = (event) => {
 ### Per-attach recognition parameters
 
 These may be sent in `params` on `audio_extension_attach`, but only when
-`whisper.allow_client_params: true` is set in `config.yaml`. Otherwise an
-attach carrying any of them is rejected. Each falls back to its `config.yaml`
-value when omitted.
+`whisper.allow_client_params: true` is set in `config.yaml`, or the attach comes
+from a trusted container (see below). Otherwise an attach carrying any of them
+is rejected. Each falls back to its `config.yaml` value when omitted.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -152,6 +152,22 @@ value when omitted.
 For narrowband HF voice, `task: "transcribe"` with `asr_language: "en"` and a
 domain-specific `initial_prompt` is substantially more reliable than the
 defaults, which auto-detect the language and then translate.
+
+### Trusted containers
+
+`whisper.trusted_containers` (default `["voiceskimmer"]`) lists server-side
+addon containers whose attaches are trusted. A trusted attach:
+
+* may set the recognition parameters above regardless of `allow_client_params`;
+* is exempt from `max_users`, and does not consume a slot.
+
+Trust is decided on the **raw TCP peer IP** of the session's audio WebSocket,
+matched against the container name resolved via Docker DNS (the same mechanism
+as `lookup_services.trusted_containers`). The container must therefore connect
+directly on the internal network, not through Caddy. Listing a container here
+grants only these whisper privileges — it never confers trusted-proxy status,
+so such a container cannot spoof `X-Real-IP` / `X-Forwarded-For`. Set to `[]` to
+disable.
 
 ### Control messages
 

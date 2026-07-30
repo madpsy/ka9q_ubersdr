@@ -109,6 +109,11 @@ type AudioExtension interface {
 type WhisperExtension struct {
 	decoder *WhisperDecoder
 	config  WhisperConfig
+
+	// countedUser records whether this instance incremented activeUserCount, so
+	// Stop() only decrements what it actually took.  Trusted containers bypass
+	// the limit entirely and are never counted.
+	countedUser bool
 }
 
 // NewWhisperExtension creates a new Whisper audio extension
@@ -118,18 +123,13 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		return nil, fmt.Errorf("whisper extension is disabled in configuration (set whisper.enabled: true in config.yaml)")
 	}
 
-	// Check max users limit
-	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
-		activeUserMutex.Lock()
-		if activeUserCount >= GlobalConfigProvider.MaxUsers {
-			activeUserMutex.Unlock()
-			return nil, fmt.Errorf("maximum users reached (%d/%d)", activeUserCount, GlobalConfigProvider.MaxUsers)
-		}
-		activeUserCount++
-		currentCount := activeUserCount
-		activeUserMutex.Unlock()
-		log.Printf("[Whisper Extension] User connected (%d/%d)", currentCount, GlobalConfigProvider.MaxUsers)
-	}
+	// trusted_container is written by the host on every attach (empty for a
+	// normal listener) and always overwrites whatever the client sent, so it
+	// cannot be forged from the frontend.  A trusted server-side addon container
+	// may set the recognition parameters regardless of allow_client_params and
+	// does not count towards max_users.
+	trustedContainer, _ := extensionParams["trusted_container"].(string)
+	isTrusted := trustedContainer != ""
 
 	// Validate audio parameters
 	if audioParams.Channels != 1 {
@@ -139,9 +139,11 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		return nil, fmt.Errorf("whisper requires 16-bit audio (got %d bits)", audioParams.BitsPerSample)
 	}
 
-	// Get config from global config or use defaults
+	// Get config from global config or use defaults.
+	// A trusted container is always allowed the recognition parameters, whatever
+	// whisper.allow_client_params says.
 	var config WhisperConfig
-	allowClientParams := false
+	allowClientParams := isTrusted
 	if GlobalConfigProvider != nil {
 		config = WhisperConfig{
 			Enabled:           GlobalConfigProvider.Enabled,
@@ -155,7 +157,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			Task:              GlobalConfigProvider.Task,
 			ASRLanguage:       GlobalConfigProvider.ASRLanguage,
 		}
-		allowClientParams = GlobalConfigProvider.AllowClientParams
+		allowClientParams = GlobalConfigProvider.AllowClientParams || isTrusted
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
 	} else {
 		// Default configuration if global config not available
@@ -182,8 +184,8 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	}
 
 	// Per-attach overrides of the recognition parameters.  Gated behind
-	// whisper.allow_client_params because these are forwarded verbatim to a
-	// possibly-shared upstream WhisperLive server.
+	// whisper.allow_client_params (or a trusted container) because these are
+	// forwarded verbatim to a possibly-shared upstream WhisperLive server.
 	if allowClientParams {
 		if prompt, ok := extensionParams["initial_prompt"].(string); ok {
 			cleaned, err := sanitiseInitialPrompt(prompt)
@@ -215,6 +217,29 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		return nil, fmt.Errorf("per-attach recognition parameters are disabled on this instance (set whisper.allow_client_params: true in config.yaml)")
 	}
 
+	// Check max users limit.  Done last so a rejected attach (bad audio params,
+	// invalid task, …) never consumes a slot, and skipped entirely for trusted
+	// containers, whose sessions must not be squeezed out by listeners.
+	countedUser := false
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		if isTrusted {
+			log.Printf("[Whisper Extension] Trusted container '%s' connected (exempt from max_users)", trustedContainer)
+		} else {
+			activeUserMutex.Lock()
+			if activeUserCount >= GlobalConfigProvider.MaxUsers {
+				limit := GlobalConfigProvider.MaxUsers
+				current := activeUserCount
+				activeUserMutex.Unlock()
+				return nil, fmt.Errorf("maximum users reached (%d/%d)", current, limit)
+			}
+			activeUserCount++
+			currentCount := activeUserCount
+			activeUserMutex.Unlock()
+			countedUser = true
+			log.Printf("[Whisper Extension] User connected (%d/%d)", currentCount, GlobalConfigProvider.MaxUsers)
+		}
+	}
+
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
@@ -226,8 +251,9 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		config.ServerURL, config.Model, asrLang, config.TargetLanguage, audioParams.SampleRate)
 
 	return &WhisperExtension{
-		decoder: decoder,
-		config:  config,
+		decoder:     decoder,
+		config:      config,
+		countedUser: countedUser,
 	}, nil
 }
 
@@ -238,15 +264,20 @@ func (e *WhisperExtension) Start(audioChan <-chan AudioSample, resultChan chan<-
 
 // Stop stops the extension
 func (e *WhisperExtension) Stop() error {
-	// Decrement active user count
-	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+	// Decrement active user count — only if this instance actually took a slot
+	// (trusted containers and attaches created while max_users was 0 did not).
+	if e.countedUser {
 		activeUserMutex.Lock()
 		if activeUserCount > 0 {
 			activeUserCount--
 		}
 		currentCount := activeUserCount
 		activeUserMutex.Unlock()
-		log.Printf("[Whisper Extension] User disconnected (%d/%d)", currentCount, GlobalConfigProvider.MaxUsers)
+		maxUsers := 0
+		if GlobalConfigProvider != nil {
+			maxUsers = GlobalConfigProvider.MaxUsers
+		}
+		log.Printf("[Whisper Extension] User disconnected (%d/%d)", currentCount, maxUsers)
 	}
 
 	return e.decoder.Stop()

@@ -144,6 +144,13 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	extensionParams["tuned_bandwidth_high_hz"] = session.BandwidthHigh
 	extensionParams["session_id"] = sessionID
 
+	// Raw TCP peer IP of the session's audio WebSocket (never the X-Real-IP
+	// derived client IP — a trusted container is the direct peer).  Written
+	// unconditionally so it always overwrites any value the client put in its
+	// own attach params; extensions use it to recognise server-side addon
+	// containers.
+	extensionParams["source_ip"] = session.SourceIP
+
 	// Create extension instance
 	extension, err := aem.registry.Create(extensionName, audioParams, extensionParams)
 	if err != nil {

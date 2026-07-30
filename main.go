@@ -1334,6 +1334,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize space weather monitor: %v", err)
 	}
+	// Must be set before Start() — geomagnetic activity is weighted by the
+	// receiver's geomagnetic latitude, and Start() fetches immediately.
+	spaceWeatherMonitor.SetLocation(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 	if err := spaceWeatherMonitor.Start(); err != nil {
 		log.Printf("Warning: Failed to start space weather monitor: %v", err)
 	}
@@ -1683,12 +1686,33 @@ func main() {
 	}
 	whisperInfo := whisper.GetInfo()
 
+	if len(config.Whisper.TrustedContainers) > 0 {
+		log.Printf("Whisper trusted containers %v: client params always allowed, max_users bypassed", config.Whisper.TrustedContainers)
+	}
+
 	whisperFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
 		whisperParams := whisper.AudioExtensionParams{
 			SampleRate:    audioParams.SampleRate,
 			Channels:      audioParams.Channels,
 			BitsPerSample: audioParams.BitsPerSample,
 		}
+
+		// Match the attaching session's RAW source IP (injected by the extension
+		// manager) against whisper.trusted_containers.  Uses IsContainerIP
+		// (name→IP map) rather than IsTrustedProxy, so being listed here grants
+		// only the whisper privileges and never X-Real-IP spoofing rights.
+		// The key is always written — even when empty — so a client cannot forge
+		// it by putting "trusted_container" in its own attach params.
+		trustedContainer := ""
+		if sourceIP, ok := extensionParams["source_ip"].(string); ok && sourceIP != "" {
+			for _, name := range config.Whisper.TrustedContainers {
+				if name != "" && config.Server.IsContainerIP(sourceIP, name) {
+					trustedContainer = name
+					break
+				}
+			}
+		}
+		extensionParams["trusted_container"] = trustedContainer
 
 		whisperExt, err := whisper.Factory(whisperParams, extensionParams)
 		if err != nil {

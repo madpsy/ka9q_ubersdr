@@ -395,6 +395,7 @@ type ServerConfig struct {
 	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
 	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 	widgetResolveNames              []string             // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
+	whisperResolveNames             []string             // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
 }
 
 // AudioConfig contains audio processing settings
@@ -749,6 +750,24 @@ type WhisperConfig struct {
 	// asr_language per attach.  Off by default: on a public instance this lets
 	// any listener steer the prompt sent to a shared upstream WhisperLive server.
 	AllowClientParams bool `yaml:"allow_client_params"`
+
+	// TrustedContainers lists Docker container names whose whisper attaches are
+	// treated as trusted, regardless of AllowClientParams.  A trusted attach may
+	// set initial_prompt, task and asr_language, and is exempt from MaxUsers.
+	// Intended for server-side addons (e.g. the voiceskimmer addon) that drive
+	// their own long-running transcription sessions.  Each named container must
+	// connect directly on the internal Docker network so its own container IP is
+	// the TCP peer of the audio WebSocket — a container reaching the server via
+	// Caddy is NOT recognised.
+	//
+	// SECURITY: this list ONLY relaxes the whisper attach rules.  Unlike
+	// server.trusted_containers it does NOT confer trusted-proxy privileges —
+	// these containers cannot spoof X-Real-IP / X-Forwarded-For headers.  Their
+	// IPs are resolved into the name→IP map (for IsContainerIP matching) but are
+	// deliberately excluded from the trusted-proxy IP set.
+	//
+	// Default: ["voiceskimmer"].  Set to [] to disable.
+	TrustedContainers []string `yaml:"trusted_containers"`
 }
 
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension
@@ -881,6 +900,17 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Admin.WidgetTrustedHosts = []string{"ubersdr-claude"}
 	}
 	config.Server.widgetResolveNames = config.Admin.WidgetTrustedHosts
+
+	// whisper.trusted_containers defaults to ["voiceskimmer"] when absent from
+	// config.  An explicit empty list (trusted_containers: []) disables the
+	// feature.  Defaulted here (before the resolve list is assigned) so the
+	// default name is actually resolved by the DNS refresh loop.  Same semantics
+	// as the lookup list: resolved for IsContainerIP matching only, never
+	// trusted as a proxy.
+	if config.Whisper.TrustedContainers == nil {
+		config.Whisper.TrustedContainers = []string{"voiceskimmer"}
+	}
+	config.Server.whisperResolveNames = config.Whisper.TrustedContainers
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
@@ -1811,6 +1841,21 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		}
 	}
 
+	// Merge in whisper container names (from whisper.trusted_containers).
+	// Same semantics again: resolved for IsContainerIP matching so their whisper
+	// attaches can set recognition parameters and bypass max_users, but NOT
+	// trusted as proxies.
+	for _, n := range sc.whisperResolveNames {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+			lookupOnlySet[n] = true
+		}
+	}
+
 	// Snapshot the current name→IP mapping so we can fall back on failure.
 	sc.containerProxyMu.RLock()
 	prevNameByIP := sc.containerNameByIP
@@ -1897,7 +1942,7 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		for _, r := range results {
 			if r.err == nil && !r.fallback {
 				if r.lookupOnly {
-					log.Printf("lookup_services.trusted_containers: '%s' resolved to %v (lookup-only; not trusted as a proxy)", r.name, r.ips)
+					log.Printf("trusted container '%s' resolved to %v (feature-scoped; not trusted as a proxy)", r.name, r.ips)
 				} else {
 					log.Printf("trusted_containers: '%s' resolved to %v", r.name, r.ips)
 				}

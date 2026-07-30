@@ -2038,6 +2038,26 @@ whisper:
   # clients — e.g. a private instance running an automated scanner.
   allow_client_params: false
 
+  # Server-side addon containers whose whisper attaches are trusted.
+  # A trusted attach may set initial_prompt, task and asr_language regardless of
+  # allow_client_params above, and is exempt from max_users (so an automated
+  # skimmer is never squeezed out by listeners, and never blocks one either).
+  # Intended for addons like the voiceskimmer addon that run their own
+  # long-lived transcription sessions.
+  #
+  # Each entry is the container's hostname on the internal Docker network; the
+  # container must connect directly (so its own container IP is the peer of the
+  # audio WebSocket), not via Caddy.
+  #
+  # These names are resolved automatically and do NOT need to be added to
+  # server.trusted_containers. IMPORTANT: this list ONLY relaxes the whisper
+  # attach rules — it does NOT confer trusted-proxy privileges, so these
+  # containers cannot spoof X-Real-IP / X-Forwarded-For headers.
+  #
+  # Default: ["voiceskimmer"]. Set to [] to disable.
+  trusted_containers:
+    - "voiceskimmer"
+
 # ==============================================================================
 # EiBi Shortwave Broadcast Schedule
 # ==============================================================================

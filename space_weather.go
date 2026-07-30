@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,23 @@ type SpaceWeatherMonitor struct {
 	// Both are nil when the DB is not configured.
 	db     *sql.DB
 	readDB *sql.DB
+
+	// Receiver location, used to weight geomagnetic activity by geomagnetic
+	// latitude. Zero until SetLocation is called.
+	lat float64
+	lon float64
+}
+
+// SetLocation supplies the receiver's geographic coordinates. Geomagnetic
+// activity degrades HF far more severely at high geomagnetic latitude than
+// near the equator, so the propagation score is weighted by where this
+// receiver actually sits. Safe to call before Start().
+func (swm *SpaceWeatherMonitor) SetLocation(lat, lon float64) {
+	if swm == nil {
+		return
+	}
+	swm.lat = lat
+	swm.lon = lon
 }
 
 // SetDB wires the SQLite write connection into the space weather monitor.
@@ -60,16 +79,32 @@ func (swm *SpaceWeatherMonitor) OnUpdate(fn func(newData, prevData *SpaceWeather
 // SpaceWeatherData contains aggregated space weather information
 type SpaceWeatherData struct {
 	SolarFlux           float64           `json:"solar_flux"`            // 10.7cm solar flux (SFU)
-	KIndex              int               `json:"k_index"`               // Planetary K-index (0-9)
+	KIndex              int               `json:"k_index"`               // Planetary K-index (0-9), rounded
+	Kp                  float64           `json:"kp"`                    // Planetary Kp as reported (thirds, e.g. 3.67)
 	KIndexStatus        string            `json:"k_index_status"`        // Quiet/Unsettled/Active/Storm
 	AIndex              int               `json:"a_index"`               // Planetary A-index
 	SolarWindBz         float64           `json:"solar_wind_bz"`         // Solar wind Bz component (nT, negative values can trigger storms)
+	ObservedRScale      int               `json:"observed_r_scale"`      // Currently observed NOAA R (radio blackout) level, 0-5
 	BandConditionsDay   map[string]string `json:"band_conditions_day"`   // Per-band propagation during day
 	BandConditionsNight map[string]string `json:"band_conditions_night"` // Per-band propagation during night
 	PropagationQuality  string            `json:"propagation_quality"`   // Overall: Poor/Fair/Good/Excellent
 	Forecast            *ForecastData     `json:"forecast,omitempty"`    // 24-hour forecast
 	LastUpdate          time.Time         `json:"last_update"`           // When data was last fetched
 	Timestamp           string            `json:"timestamp"`             // ISO 8601 timestamp
+
+	// Stale names the inputs that could not be refreshed on the most recent
+	// poll and were carried over from an earlier successful fetch. Empty when
+	// every NOAA source responded.
+	Stale []string `json:"stale,omitempty"`
+}
+
+// observedScales holds the currently observed (not forecast) NOAA scale
+// levels. These come from key "0" of the noaa-scales feed, which reports
+// present conditions; keys "1".."3" carry the forward forecast instead.
+type observedScales struct {
+	RScale int // Radio blackout, 0-5 (R3+ blacks out HF on the sunlit hemisphere)
+	SScale int // Solar radiation storm, 0-5
+	GScale int // Geomagnetic storm, 0-5
 }
 
 // ForecastData contains NOAA space weather forecast for next 24 hours
@@ -211,20 +246,39 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 		Timestamp:           time.Now().UTC().Format(time.RFC3339),
 	}
 
+	// Previous poll's data, used to carry values over when a source fails. A
+	// zeroed input would otherwise read as SFI 0 / Kp 0, which scores as
+	// quiet-and-usable — the most misleading possible answer during an outage.
+	swm.mu.RLock()
+	prevData := swm.data
+	swm.mu.RUnlock()
+
 	// Fetch solar flux (10.7cm)
 	solarFlux, err := swm.fetchSolarFlux()
 	if err != nil {
 		log.Printf("Warning: Failed to fetch solar flux: %v", err)
+		if prevData != nil {
+			data.SolarFlux = prevData.SolarFlux
+			data.Stale = append(data.Stale, "solar_flux")
+		}
 	} else {
 		data.SolarFlux = solarFlux
 	}
 
 	// Fetch K-index and A-index (both come from same API)
-	kIndex, aIndex, err := swm.fetchKIndex()
+	kIndex, kp, aIndex, err := swm.fetchKIndex()
 	if err != nil {
 		log.Printf("Warning: Failed to fetch K-index: %v", err)
+		if prevData != nil {
+			data.KIndex = prevData.KIndex
+			data.Kp = prevData.Kp
+			data.AIndex = prevData.AIndex
+			data.KIndexStatus = prevData.KIndexStatus
+			data.Stale = append(data.Stale, "k_index")
+		}
 	} else {
 		data.KIndex = kIndex
+		data.Kp = kp
 		data.AIndex = aIndex
 		data.KIndexStatus = getKIndexStatus(kIndex)
 	}
@@ -233,32 +287,53 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 	solarWindBz, err := swm.fetchSolarWind()
 	if err != nil {
 		log.Printf("Warning: Failed to fetch solar wind: %v", err)
+		if prevData != nil {
+			data.SolarWindBz = prevData.SolarWindBz
+			data.Stale = append(data.Stale, "solar_wind_bz")
+		}
 	} else {
 		data.SolarWindBz = solarWindBz
 	}
 
-	// Fetch forecast data
-	forecast, err := swm.fetchForecast()
+	// Fetch forecast data and currently observed NOAA scales
+	forecast, observed, err := swm.fetchForecast()
 	if err != nil {
 		log.Printf("Warning: Failed to fetch forecast: %v", err)
+		if prevData != nil {
+			data.Forecast = prevData.Forecast
+			data.ObservedRScale = prevData.ObservedRScale
+			data.Stale = append(data.Stale, "forecast")
+		}
 	} else {
 		data.Forecast = forecast
+		data.ObservedRScale = observed.RScale
 	}
 
-	// Calculate propagation quality and band conditions (day and night)
-	// Pass forecast to adjust for predicted storms
-	data.PropagationQuality = calculatePropagationQuality(data.SolarFlux, data.KIndex, data.Forecast)
-	data.BandConditionsDay = calculateBandConditions(data.SolarFlux, data.KIndex, true, data.Forecast)
-	data.BandConditionsNight = calculateBandConditions(data.SolarFlux, data.KIndex, false, data.Forecast)
+	// Calculate propagation quality and band conditions (day and night).
+	// With no usable flux or Kp at all (first poll failed outright) leave the
+	// quality empty rather than publishing a score derived from zeros.
+	if data.SolarFlux > 0 || data.Kp > 0 {
+		data.PropagationQuality = calculatePropagationQuality(
+			data.SolarFlux, data.Kp, data.ObservedRScale, data.Forecast, swm.lat, swm.lon)
+		data.BandConditionsDay = calculateBandConditions(data.SolarFlux, data.Kp, true, data.Forecast)
+		data.BandConditionsNight = calculateBandConditions(data.SolarFlux, data.Kp, false, data.Forecast)
+	} else {
+		log.Println("Warning: no usable space weather inputs; propagation quality unavailable")
+	}
 
-	// Update cached data, capturing previous for callbacks
+	// Update cached data
 	swm.mu.Lock()
-	prevData := swm.data
 	swm.data = data
 	swm.mu.Unlock()
 
-	log.Printf("Space weather updated: SFI=%.1f, K=%d (%s), Quality=%s",
-		data.SolarFlux, data.KIndex, data.KIndexStatus, data.PropagationQuality)
+	if len(data.Stale) > 0 {
+		log.Printf("Space weather updated: SFI=%.1f, Kp=%.2f (%s), Quality=%s (stale: %s)",
+			data.SolarFlux, data.Kp, data.KIndexStatus, data.PropagationQuality,
+			strings.Join(data.Stale, ", "))
+	} else {
+		log.Printf("Space weather updated: SFI=%.1f, Kp=%.2f (%s), Quality=%s",
+			data.SolarFlux, data.Kp, data.KIndexStatus, data.PropagationQuality)
+	}
 
 	// Fire update callbacks (non-blocking, in a goroutine to avoid blocking the poll loop)
 	swm.handlerMu.RLock()
@@ -322,39 +397,42 @@ func (swm *SpaceWeatherMonitor) fetchSolarFlux() (float64, error) {
 
 // fetchKIndex gets the latest planetary K-index and A-index from NOAA
 // Uses the official 3-hour K-index (not the 1-minute estimated values)
-// Returns: kIndex, aIndex, error
-func (swm *SpaceWeatherMonitor) fetchKIndex() (int, int, error) {
+//
+// NOAA reports Kp in thirds (e.g. 3.67). The unrounded value is returned
+// alongside the rounded one because Kp is quasi-logarithmic: rounding before
+// thresholding discards the sub-step that separates "active" from "storm".
+// Returns: kIndex (rounded), kp (as reported), aIndex, error
+func (swm *SpaceWeatherMonitor) fetchKIndex() (int, float64, int, error) {
 	url := "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
 
 	req, err := http.NewRequestWithContext(swm.ctx, "GET", url, nil)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	resp, err := swm.client.Do(req)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, 0, fmt.Errorf("NOAA API returned status %d", resp.StatusCode)
+		return 0, 0, 0, fmt.Errorf("NOAA API returned status %d", resp.StatusCode)
 	}
 
 	var data []noaaKIndexResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	if len(data) == 0 {
-		return 0, 0, fmt.Errorf("no K-index data available")
+		return 0, 0, 0, fmt.Errorf("no K-index data available")
 	}
 
 	// Get the most recent entry (last object in the response)
 	last := data[len(data)-1]
 
-	// Round K-index to nearest integer
-	return int(last.Kp + 0.5), last.ARunning, nil
+	return int(last.Kp + 0.5), last.Kp, last.ARunning, nil
 }
 
 // fetchSolarWind gets the latest solar wind magnetic field from NOAA
@@ -392,34 +470,48 @@ func (swm *SpaceWeatherMonitor) fetchSolarWind() (float64, error) {
 	return data[len(data)-1].BzGSM, nil
 }
 
-// fetchForecast gets the 24-hour space weather forecast from NOAA
-func (swm *SpaceWeatherMonitor) fetchForecast() (*ForecastData, error) {
+// fetchForecast gets the 24-hour space weather forecast from NOAA, along with
+// the currently observed R/S/G scale levels.
+//
+// The noaa-scales feed is keyed by day offset: "0" reports present observed
+// conditions (Scale populated, probabilities null), "1".."3" are the forward
+// forecast (probabilities populated, R/S Scale null), and "-1" is yesterday.
+func (swm *SpaceWeatherMonitor) fetchForecast() (*ForecastData, observedScales, error) {
 	url := "https://services.swpc.noaa.gov/products/noaa-scales.json"
+
+	var observed observedScales
 
 	req, err := http.NewRequestWithContext(swm.ctx, "GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, observed, err
 	}
 
 	resp, err := swm.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, observed, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("NOAA API returned status %d", resp.StatusCode)
+		return nil, observed, fmt.Errorf("NOAA API returned status %d", resp.StatusCode)
 	}
 
 	var data noaaScalesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+		return nil, observed, err
+	}
+
+	// Present conditions come from key "0", not from the forecast keys.
+	if now, ok := data["0"]; ok {
+		observed.RScale = atoiOrZero(now.R.Scale)
+		observed.SScale = atoiOrZero(now.S.Scale)
+		observed.GScale = atoiOrZero(now.G.Scale)
 	}
 
 	// Get today's forecast (key "1")
 	todayForecast, ok := data["1"]
 	if !ok {
-		return nil, fmt.Errorf("no forecast data available for today")
+		return nil, observed, fmt.Errorf("no forecast data available for today")
 	}
 
 	forecast := &ForecastData{}
@@ -463,7 +555,17 @@ func (swm *SpaceWeatherMonitor) fetchForecast() (*ForecastData, error) {
 	// Build summary
 	forecast.Summary = buildForecastSummary(forecast)
 
-	return forecast, nil
+	return forecast, observed, nil
+}
+
+// atoiOrZero parses a NOAA scale string ("0".."5", or "" / null) into an int,
+// returning 0 for anything unparseable.
+func atoiOrZero(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // buildForecastSummary creates a human-readable forecast summary
@@ -532,56 +634,163 @@ func getKIndexStatus(kIndex int) string {
 	}
 }
 
-// calculatePropagationQuality determines overall HF propagation quality
-func calculatePropagationQuality(solarFlux float64, kIndex int, forecast *ForecastData) string {
-	// High solar flux is good, low K-index is good
-	score := 0
+// North geomagnetic (centred dipole) pole position, IGRF epoch ~2025.
+const (
+	geomagPoleLat = 80.7  // degrees north
+	geomagPoleLon = -72.7 // degrees east
+)
 
-	// Solar flux scoring (0-3 points)
-	switch {
-	case solarFlux >= 180:
-		score += 3
-	case solarFlux >= 120:
-		score += 2
-	case solarFlux >= 80:
-		score += 1
+// geomagneticLatitude converts geographic coordinates to centred-dipole
+// geomagnetic latitude. Auroral absorption follows the geomagnetic field, not
+// the equator: because the pole is offset towards North America, a European or
+// North American receiver sits several degrees closer to the auroral oval than
+// an Asian one at the same geographic latitude.
+func geomagneticLatitude(lat, lon float64) float64 {
+	latR := lat * math.Pi / 180
+	lonR := lon * math.Pi / 180
+	poleLatR := geomagPoleLat * math.Pi / 180
+	poleLonR := geomagPoleLon * math.Pi / 180
+
+	sinGeomag := math.Sin(latR)*math.Sin(poleLatR) +
+		math.Cos(latR)*math.Cos(poleLatR)*math.Cos(lonR-poleLonR)
+
+	return math.Asin(clampFloat(sinGeomag, -1, 1)) * 180 / math.Pi
+}
+
+// clampFloat constrains v to [lo, hi].
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// gScaleToKp maps a NOAA G-scale level to its defining Kp threshold.
+// G1 begins at Kp 5 and each level up is one Kp step (G5 = Kp 9).
+func gScaleToKp(gScale int) float64 {
+	if gScale <= 0 {
+		return 0
+	}
+	if gScale > 5 {
+		gScale = 5
+	}
+	return float64(gScale + 4)
+}
+
+// forecastGScale extracts the numeric G level from a formatted forecast string
+// such as "G3 - Strong". Returns 0 when no storm is expected.
+func forecastGScale(forecast *ForecastData) int {
+	if forecast == nil || forecast.GeomagneticStorm == "None expected" {
+		return 0
+	}
+	if n := atoiOrZero(forecast.GScale); n > 0 {
+		return n
+	}
+	// Fall back to parsing the display string when GScale is unset.
+	if len(forecast.GeomagneticStorm) >= 2 && forecast.GeomagneticStorm[0] == 'G' {
+		return atoiOrZero(string(forecast.GeomagneticStorm[1]))
+	}
+	return 0
+}
+
+// Quality band thresholds applied to the final score.
+const (
+	qualityExcellentAt = 2.95
+	qualityGoodAt      = 1.90
+	qualityFairAt      = 0.95
+)
+
+// fluxScore converts 10.7cm solar flux into a base HF capability score,
+// which sets the ceiling on overall quality.
+//
+// Solar flux governs which bands are open at all (it drives F2 ionisation and
+// therefore MUF), so it is modelled as a continuous ramp rather than in steps.
+// The anchors are operational rather than theoretical:
+//
+//	~65 SFU   solar minimum: 10m closed to F2, 15m sporadic, but 20m still
+//	          opens daily and 40/80m are excellent at night — "Fair", not dead
+//	~100 SFU  15m dependable by day, 10m opens on the better days — "Good"
+//	~165 SFU  everything through 10m productive — "Excellent"
+//	>200 SFU  saturates; more flux stops adding usable bands
+func fluxScore(solarFlux float64) float64 {
+	return clampFloat(1.35+(solarFlux-65)*0.0170, 0, 3.6)
+}
+
+// geomagneticPenalty converts Kp into the amount subtracted from the flux
+// ceiling, scaled by the receiver's geomagnetic latitude.
+//
+// Kp up to 3 costs mid-latitude HF essentially nothing — the field is quiet to
+// unsettled and paths behave normally. Past that the penalty grows
+// superlinearly, because Kp is quasi-logarithmic: Kp 4 is a noticeable
+// degradation, Kp 5 (G1) starts depressing mid-latitude MUF and adding auroral
+// absorption, and Kp 6 (G2) is serious. The latitude factor spans 0.6 near the
+// geomagnetic equator, where storms barely register, to 1.4 inside the auroral
+// zone, where the same Kp is destructive.
+func geomagneticPenalty(kp float64, geomagLat float64) float64 {
+	if kp <= 3 {
+		return 0
 	}
 
-	// K-index scoring (0-3 points, inverted - lower is better)
-	switch {
-	case kIndex <= 2:
-		score += 3
-	case kIndex <= 4:
-		score += 2
-	case kIndex <= 6:
-		score += 1
+	latFactor := clampFloat(0.6+(math.Abs(geomagLat)-30)*(0.8/35), 0.6, 1.4)
+
+	return 0.44 * math.Pow(kp-3, 1.2) * latFactor
+}
+
+// calculatePropagationQuality determines overall HF propagation quality.
+//
+// Solar flux sets the ceiling and geomagnetic activity subtracts from it —
+// the two are not additive peers. A quiet magnetic field cannot manufacture
+// open bands out of low flux, and high flux cannot survive a severe storm, so
+// each input is able to hold the result down on its own.
+//
+// kp is the unrounded planetary Kp. observedR is the currently observed NOAA
+// radio-blackout level (0 when none). forecast may be nil.
+func calculatePropagationQuality(solarFlux float64, kp float64, observedR int, forecast *ForecastData, lat, lon float64) string {
+	// Take the worst of measured Kp and the forecast G level. Measured Kp alone
+	// misses a storm that is forecast but not yet arrived; forecast alone misses
+	// a storm already in progress that was never forecast. The observed G level
+	// is deliberately not used here — it reports the maximum reached over the
+	// last 24 hours, so it would keep penalising after a storm has passed.
+	effectiveKp := kp
+	if g := gScaleToKp(forecastGScale(forecast)); g > effectiveKp {
+		effectiveKp = g
 	}
 
-	// Degrade score based on forecast
-	if forecast != nil {
-		// Check for geomagnetic storm forecast (G-scale)
-		if forecast.GeomagneticStorm != "None expected" {
-			// G3+ storms significantly degrade conditions
-			if len(forecast.GeomagneticStorm) >= 2 && forecast.GeomagneticStorm[1] >= '3' {
-				score -= 2 // Major storm forecast
-			} else if len(forecast.GeomagneticStorm) >= 2 && forecast.GeomagneticStorm[1] >= '1' {
-				score -= 1 // Minor storm forecast
-			}
+	geomagLat := geomagneticLatitude(lat, lon)
+	score := fluxScore(solarFlux) - geomagneticPenalty(effectiveKp, geomagLat)
+
+	// X-ray flares ionise the D layer and absorb HF across the entire sunlit
+	// hemisphere. R1-R2 degrades; R3 and above is a blackout, not a gradient.
+	switch {
+	case observedR >= 3:
+		return "Poor"
+	case observedR == 2:
+		score -= 1.2
+	case observedR == 1:
+		score -= 0.5
+	}
+
+	// Hard floors: past these thresholds the band is not merely degraded, and
+	// no amount of solar flux compensates.
+	if effectiveKp >= 7 {
+		return "Poor" // G3+: widespread HF blackout, transpolar paths gone
+	}
+
+	switch {
+	case score >= qualityExcellentAt:
+		if effectiveKp >= 6 {
+			return "Fair" // G2 caps the ceiling regardless of flux
 		}
-	}
-
-	// Ensure score doesn't go negative
-	if score < 0 {
-		score = 0
-	}
-
-	// Convert score to quality
-	switch {
-	case score >= 5:
 		return "Excellent"
-	case score >= 3:
+	case score >= qualityGoodAt:
+		if effectiveKp >= 6 {
+			return "Fair"
+		}
 		return "Good"
-	case score >= 2:
+	case score >= qualityFairAt:
 		return "Fair"
 	default:
 		return "Poor"
@@ -591,31 +800,18 @@ func calculatePropagationQuality(solarFlux float64, kIndex int, forecast *Foreca
 // calculateBandConditions determines propagation for each HF band
 // isDay parameter: true for daytime conditions, false for nighttime
 // forecast parameter: used to degrade conditions when storms are predicted
-func calculateBandConditions(solarFlux float64, kIndex int, isDay bool, forecast *ForecastData) map[string]string {
+func calculateBandConditions(solarFlux float64, kp float64, isDay bool, forecast *ForecastData) map[string]string {
 	conditions := make(map[string]string)
 
-	// Check for storm forecast and adjust effective K-index
-	effectiveKIndex := kIndex
-	stormPenalty := 0
-
-	if forecast != nil && forecast.GeomagneticStorm != "None expected" {
-		// Extract G-scale number (G1, G2, G3, etc.)
-		if len(forecast.GeomagneticStorm) >= 2 {
-			gScale := forecast.GeomagneticStorm[1]
-			switch gScale {
-			case '1', '2':
-				stormPenalty = 1 // Minor/Moderate storm: degrade by 1 level
-			case '3', '4':
-				stormPenalty = 2 // Strong/Severe storm: degrade by 2 levels
-			case '5':
-				stormPenalty = 3 // Extreme storm: degrade by 3 levels
-			}
-		}
-		// Increase effective K-index to simulate worse conditions
-		effectiveKIndex = kIndex + stormPenalty
-		if effectiveKIndex > 9 {
-			effectiveKIndex = 9
-		}
+	// Take the worst of measured Kp and the forecast G level, so that a storm
+	// already underway degrades the bands even if it was never forecast.
+	effectiveKp := kp
+	if g := gScaleToKp(forecastGScale(forecast)); g > effectiveKp {
+		effectiveKp = g
+	}
+	effectiveKIndex := int(effectiveKp + 0.5)
+	if effectiveKIndex > 9 {
+		effectiveKIndex = 9
 	}
 
 	// Lower bands (160m, 80m) - MUCH better at night, poor during day
@@ -623,7 +819,7 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool, forecast
 	if isDay {
 		// During day, D-layer absorption makes these bands very difficult
 		// But with very quiet conditions, some local/regional contacts possible
-		if kIndex <= 2 {
+		if effectiveKIndex <= 2 {
 			conditions["160m"] = "Poor"
 			conditions["80m"] = "Fair" // 80m slightly better than 160m during day
 		} else {

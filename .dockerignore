@@ -42,6 +42,7 @@ tests/
 # Docker files (avoid recursion) - but keep scripts needed by the build
 docker/
 !docker/entrypoint.sh
+!docker/decoder-healthcheck.sh
 !docker/caddy-entrypoint.sh
 !docker/fluent-bit-entrypoint.sh
 !docker/fluent-bit.conf

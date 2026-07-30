@@ -1,0 +1,58 @@
+name: UltraSDR CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "agent/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ultrasdr-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Linux tests and static validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopus-dev libopusfile-dev pkg-config
+      - name: Run Go tests
+        run: go test ./...
+      - name: Run decoder race tests
+        run: go test -race ./audio_extensions/digitalvoice ./audio_extensions/signalling
+      - name: Validate browser extensions and scripts
+        run: |
+          node --check static/extensions/digitalvoice/main.js
+          node --check static/extensions/signalling/main.js
+          jq empty static/extensions/digitalvoice/manifest.json
+          jq empty static/extensions/signalling/manifest.json
+          bash -n docker/entrypoint.sh docker/decoder-healthcheck.sh
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

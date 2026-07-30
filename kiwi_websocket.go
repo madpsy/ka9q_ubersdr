@@ -45,6 +45,12 @@ type snrBandRec struct {
 // The real KiwiSDR uses SNR_MEAS_MAX = 24 (one per hour for 24 hours).
 const snrHistoryMax = 24
 
+// kiwiClientIdentity is the placeholder identity recorded for a KiwiSDR client
+// that has not named itself with "SET ident_user". It is what SetUserAgent
+// stores, what the admin session list shows, and what a User-Agent ban pattern
+// is matched against for this protocol — see clientIdentityBan.
+const kiwiClientIdentity = "KiwiSDR Client"
+
 // KiwiWebSocketHandler handles KiwiSDR-compatible WebSocket connections
 type KiwiWebSocketHandler struct {
 	sessions           *SessionManager
@@ -704,6 +710,33 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		return
 	}
 
+	// Use timestamp + client IP as the userSessionID
+	// This ensures:
+	// 1. SND and W/F connections from same page load are linked (same timestamp)
+	// 2. Multiple tabs/users from same IP are tracked separately (different timestamps)
+	// 3. Each browser session gets its own user entry
+	userSessionID := fmt.Sprintf("kiwi-%s-%s", timestamp, clientIP)
+
+	// Check the client's identity against the User-Agent bans before spending a
+	// WebSocket upgrade on it. The identity is the name recorded by a paired
+	// SND/W-F connection that already sent "SET ident_user", otherwise the
+	// kiwiClientIdentity placeholder.
+	//
+	// The bypass password cannot be seen here — a KiwiSDR client sends it later
+	// in "SET auth", not in the URL — so when one is configured the decision is
+	// deferred to the enforceIdentityBan calls in handleSetCommand (at "SET auth"
+	// and again before "SET mod" creates a session) rather than risk rejecting a
+	// client that was about to present it. Without a bypass password configured,
+	// only timeout_bypass_ips can exempt anyone and that is testable now.
+	if kwsh.config.Server.BypassPassword == "" {
+		if ban := clientIdentityBan(kwsh.config, kwsh.ipBanManager, clientIP, "",
+			kwsh.identityForSession(userSessionID)); ban != nil {
+			log.Printf("Rejected KiwiSDR connection from %s: identity matches banned User-Agent pattern %q", clientIP, ban.Pattern)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// Skip connection rate limit for KiwiSDR protocol
 	// KiwiSDR clients need to open 2 connections rapidly (SND + W/F)
 	// Rate limiting is still enforced at the command level via rateLimiterManager
@@ -726,13 +759,6 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 	}()
 
 	// Create Kiwi connection handler
-	// Use timestamp + client IP as the userSessionID
-	// This ensures:
-	// 1. SND and W/F connections from same page load are linked (same timestamp)
-	// 2. Multiple tabs/users from same IP are tracked separately (different timestamps)
-	// 3. Each browser session gets its own user entry
-	userSessionID := fmt.Sprintf("kiwi-%s-%s", timestamp, clientIP)
-
 	kc := &kiwiConn{
 		conn:               conn,
 		connType:           connType,
@@ -788,6 +814,49 @@ type kiwiConn struct {
 	mu                 sync.RWMutex
 }
 
+// identityForSession returns the identity a User-Agent ban is matched against for
+// a KiwiSDR session: the name the client supplied via "SET ident_user" (recorded
+// by SetUserAgent, and shared between the paired SND and W/F connections), or the
+// kiwiClientIdentity placeholder if it has not named itself yet.
+func (kwsh *KiwiWebSocketHandler) identityForSession(userSessionID string) string {
+	if name := kwsh.sessions.GetUserAgent(userSessionID); name != "" {
+		return name
+	}
+	return kiwiClientIdentity
+}
+
+// enforceIdentityBan drops the connection if identity matches an active
+// User-Agent ban. It is called whenever the identity changes, so that a client
+// renaming itself into a banned pattern mid-session is cut off rather than only
+// caught on its next connect.
+//
+// Closing the socket outright would make the deferred conn.close() in
+// HandleKiwiWebSocket log a spurious "use of closed network connection", so the
+// read deadline is expired instead: handleMessages sets no deadlines of its own,
+// so its next ReadMessage fails immediately and the connection unwinds through
+// the normal cleanup path (close(done) → stream exits → single close).
+func (kc *kiwiConn) enforceIdentityBan(identity string) bool {
+	if kc.handler == nil {
+		return false
+	}
+
+	kc.mu.RLock()
+	password := kc.password
+	kc.mu.RUnlock()
+
+	ban := clientIdentityBan(kc.config, kc.handler.ipBanManager, kc.clientIP, password, identity)
+	if ban == nil {
+		return false
+	}
+
+	log.Printf("KiwiSDR: dropping %s connection from %s: identity %q matches banned User-Agent pattern %q",
+		kc.connType, kc.clientIP, identity, ban.Pattern)
+	if err := kc.conn.conn.SetReadDeadline(time.Now()); err != nil {
+		log.Printf("KiwiSDR: error expiring read deadline for banned client: %v", err)
+	}
+	return true
+}
+
 // kiwiEncodeString encodes a string for use in Kiwi MSG protocol JSON values
 // Uses %20 for spaces (not +) to match real KiwiSDR behavior
 func kiwiEncodeString(s string) string {
@@ -806,7 +875,7 @@ func (kc *kiwiConn) handle() {
 	// the same userSessionID.  Unconditionally overwriting here would wipe a name
 	// that the user already set on the paired connection that started first.
 	if kc.sessions.GetUserAgent(kc.userSessionID) == "" {
-		kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
+		kc.sessions.SetUserAgent(kc.userSessionID, kiwiClientIdentity)
 	}
 
 	// Register SND connections in the active registry so broadcastUserList()
@@ -949,6 +1018,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			}
 		}
 
+		// The password is now known, so this is the first point at which the
+		// User-Agent ban can be evaluated with the bypass password in hand — see
+		// the deferred check in HandleKiwiWebSocket.
+		if kc.handler != nil && kc.enforceIdentityBan(kc.handler.identityForSession(kc.userSessionID)) {
+			return
+		}
+
 		// Mark auth as received
 		kc.mu.Lock()
 		alreadyAuthed := kc.authReceived
@@ -1015,6 +1091,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		if existingSession == nil {
 			// Create initial session (only for SND connections)
 			if kc.connType == "SND" {
+				// Last checkpoint before audio can flow. A client is not obliged
+				// to send "SET auth" first, so the check at the auth branch is
+				// not sufficient on its own — without this, a banned client could
+				// reach a session by sending "SET mod" alone.
+				if kc.handler != nil && kc.enforceIdentityBan(kc.handler.identityForSession(kc.userSessionID)) {
+					return
+				}
 				session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
 					freq, mode, 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
 				if err != nil {
@@ -1229,6 +1312,11 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 		decoded = strings.TrimSpace(decoded)
 		if decoded != "" {
+			// The name the client picks is the identity a User-Agent ban is
+			// matched against, so check it before adopting it.
+			if kc.enforceIdentityBan(decoded) {
+				return
+			}
 			kc.mu.Lock()
 			kc.identUser = decoded
 			kc.mu.Unlock()

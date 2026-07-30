@@ -3345,8 +3345,13 @@ func main() {
 		})
 
 		kiwiServer = &http.Server{
-			Addr:    kiwiSDRListenAddr,
-			Handler: kiwiMux,
+			Addr: kiwiSDRListenAddr,
+			// The KiwiSDR port gets the same ban enforcement as the main
+			// listener. Without this the only check on this port is the
+			// hand-rolled IP ban inside HandleKiwiWebSocket, which leaves
+			// /status, /users, /snr, /s-meter, /VER and the static UI reachable
+			// by banned User-Agents, countries and ASNs.
+			Handler: banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, kiwiMux),
 		}
 
 		go func() {
@@ -3385,7 +3390,13 @@ func main() {
 		chListener := newChannelListener(ln.Addr())
 
 		websdrServer = &http.Server{
-			Handler: WebSDRServerHeaderMiddleware(websdrHandler),
+			// Ban enforcement sits inside the Server-header middleware so that
+			// 403 responses still identify themselves as WebSDR. Note that
+			// /~~orgstatus is not covered: websdrTCPRouter answers it with raw
+			// socket I/O before the http.Server ever sees the connection. That
+			// path is the websdr.org directory keep-alive, which carries no
+			// User-Agent and must keep working regardless.
+			Handler: WebSDRServerHeaderMiddleware(banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, websdrHandler)),
 		}
 
 		// Start the http.Server on the channel listener (non-orgstatus traffic).
@@ -4865,6 +4876,32 @@ func checkUserAgentBan(w http.ResponseWriter, r *http.Request, config *Config, i
 		"error": "Access denied",
 	})
 	return true
+}
+
+// clientIdentityBan returns the User-Agent ban matching a compatibility-protocol
+// client identity, or nil if the client is allowed.
+//
+// The KiwiSDR and WebSDR emulations carry no usable HTTP User-Agent: dedicated
+// clients such as kiwirecorder.py send no header at all, and
+// ValidateUserAgentPattern refuses any pattern that matches the empty string, so
+// header-based enforcement can never reach them. What those protocols do have is
+// an identity string — kiwiClientIdentity / websdrClientIdentity until the client
+// names itself via "SET ident_user" or "/~~param?name=". That string is what
+// SetUserAgent stores, and therefore what the admin session list, the regex
+// tester (HandleTestUserAgentRegex) and KickUsersByUserAgent all operate on, so
+// it is what an operator's ban pattern is actually written against. Matching it
+// here is what makes those bans stick instead of merely kicking once.
+//
+// Bypassed clients are exempt, matching checkUserAgentBan. password is the
+// protocol-level password if the client supplied one, otherwise "".
+func clientIdentityBan(config *Config, ipBanManager *IPBanManager, clientIP, password, identity string) *BannedUserAgent {
+	if ipBanManager == nil || identity == "" {
+		return nil
+	}
+	if config != nil && config.Server.IsIPTimeoutBypassed(clientIP, password) {
+		return nil
+	}
+	return ipBanManager.MatchingUserAgentBan(identity)
 }
 
 // checkCountryBan checks if the client IP's country is banned and returns appropriate error if so

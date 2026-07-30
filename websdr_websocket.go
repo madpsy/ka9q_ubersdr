@@ -102,6 +102,12 @@ func (cs *websdrChatStore) all() []string {
 	return out
 }
 
+// websdrClientIdentity is the placeholder identity recorded for a WebSDR client
+// that has not named itself with "/~~param?name=". It is what SetUserAgent
+// stores, what the admin session list shows, and what a User-Agent ban pattern is
+// matched against for this protocol — see clientIdentityBan.
+const websdrClientIdentity = "WebSDR Client"
+
 // websdrUserEntry tracks per-user state for uu_chseq incremental updates (FEAT-11).
 type websdrUserEntry struct {
 	sessionID string
@@ -413,6 +419,44 @@ func newWebSDRConn(conn *websocket.Conn, handler *WebSDRHandler, clientIP string
 	}
 }
 
+// websdrUserSessionID derives the userSessionID for a WebSDR connection.
+//
+// Timestamp (seconds) + IP means the audio and waterfall WebSocket connections
+// from the same page load share the same UUID (they connect within the same
+// second), while a new tab opened later gets a different timestamp → different
+// UUID → independent sessions. This mirrors the KiwiSDR emulation's
+// "kiwi-<timestamp>-<IP>" scheme.
+func websdrUserSessionID(clientIP string) string {
+	return fmt.Sprintf("websdr-%d-%s", time.Now().Unix(), clientIP)
+}
+
+// identityForSession returns the identity a User-Agent ban is matched against for
+// a WebSDR session: the name the client supplied via "/~~param?name=" (recorded
+// by SetUserAgent, and shared between the paired audio and waterfall
+// connections), or the websdrClientIdentity placeholder if it has not named
+// itself yet.
+func (h *WebSDRHandler) identityForSession(userSessionID string) string {
+	if name := h.sessions.GetUserAgent(userSessionID); name != "" {
+		return name
+	}
+	return websdrClientIdentity
+}
+
+// rejectBannedIdentity reports whether the client's identity matches an active
+// User-Agent ban, writing the rejection if so. Unlike the KiwiSDR emulation the
+// WebSDR protocol has no password of its own — sessions are created with an
+// empty one — so timeout_bypass_ips is the only exemption and the check can be
+// made before the WebSocket upgrade.
+func (h *WebSDRHandler) rejectBannedIdentity(w http.ResponseWriter, clientIP, userSessionID string) bool {
+	ban := clientIdentityBan(h.config, h.ipBanManager, clientIP, "", h.identityForSession(userSessionID))
+	if ban == nil {
+		return false
+	}
+	log.Printf("WebSDR: rejected connection from %s: identity matches banned User-Agent pattern %q", clientIP, ban.Pattern)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	return true
+}
+
 func (c *websdrConn) sendBinary(data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -428,6 +472,11 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	clientIP := getClientIP(r)
 	if h.ipBanManager.IsBanned(clientIP) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userSessionID := websdrUserSessionID(clientIP)
+	if h.rejectBannedIdentity(w, clientIP, userSessionID) {
 		return
 	}
 
@@ -453,15 +502,8 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	atomic.AddInt32(&h.audioUserCount, 1)
 	defer atomic.AddInt32(&h.audioUserCount, -1)
 
-	// Use timestamp (seconds) + IP as the userSessionID so that audio and
-	// waterfall WebSocket connections from the same page load share the same
-	// UUID (they connect within the same second), while a new tab opened later
-	// gets a different timestamp → different UUID → independent sessions.
-	// This mirrors the KiwiSDR emulation's "kiwi-<timestamp>-<IP>" scheme.
-	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	userSessionID := fmt.Sprintf("websdr-%s-%s", timestamp, clientIP)
 	c.sessionID = userSessionID
-	h.sessions.SetUserAgent(userSessionID, "WebSDR Client")
+	h.sessions.SetUserAgent(userSessionID, websdrClientIdentity)
 
 	// Register user entry
 	entry := &websdrUserEntry{
@@ -635,6 +677,19 @@ func (c *websdrConn) applyParamCommand(text string) {
 		// carry XSS payloads (e.g. <script> tags).
 		newName := html.EscapeString(nb.String())
 		if newName != c.username {
+			// The name the client picks is the identity a User-Agent ban is
+			// matched against, so a client renaming itself into a banned pattern
+			// mid-session is cut off rather than only caught on its next
+			// connect. Closing the socket here is enough: readAudioCommands
+			// resets its read deadline every iteration, so expiring the deadline
+			// (as the KiwiSDR path does) would not stick, and the deferred
+			// cleanup in handleAudioStream closes silently.
+			if ban := clientIdentityBan(c.handler.config, c.handler.ipBanManager, c.clientIP, "", newName); ban != nil {
+				log.Printf("WebSDR: dropping connection from %s: identity %q matches banned User-Agent pattern %q",
+					c.clientIP, newName, ban.Pattern)
+				c.conn.Close()
+				return
+			}
 			c.username = newName
 			changed = true
 			// Propagate the display name to the shared session manager so that
@@ -981,6 +1036,11 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	userSessionID := websdrUserSessionID(clientIP)
+	if h.rejectBannedIdentity(w, clientIP, userSessionID) {
+		return
+	}
+
 	// MINOR-16: extract band index from path suffix (/~~waterstream0, /~~waterstream1, …)
 	path := r.URL.Path
 	bandIdx := 0
@@ -1021,13 +1081,6 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Use timestamp (seconds) + IP as the userSessionID so that audio and
-	// waterfall WebSocket connections from the same page load share the same
-	// UUID (they connect within the same second), while a new tab opened later
-	// gets a different timestamp → different UUID → independent sessions.
-	// This mirrors the KiwiSDR emulation's "kiwi-<timestamp>-<IP>" scheme.
-	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	userSessionID := fmt.Sprintf("websdr-%s-%s", timestamp, clientIP)
 	session, err := h.sessions.CreateSpectrumSessionWithUserID(clientIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("WebSDR: failed to create waterfall session: %v", err)

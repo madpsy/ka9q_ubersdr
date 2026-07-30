@@ -2465,7 +2465,7 @@ func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
 			proto := protocolFromUserSessionID(uid)
 			name := sm.userAgents[uid]
 			// Fall back to a protocol label when no user-supplied name is available.
-			if name == "" || name == "KiwiSDR Client" || name == "WebSDR Client" ||
+			if name == "" || name == kiwiClientIdentity || name == websdrClientIdentity ||
 				strings.HasPrefix(name, "Mozilla/") || strings.HasPrefix(name, "Opera/") {
 				switch proto {
 				case "kiwi":

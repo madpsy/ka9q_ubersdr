@@ -3457,6 +3457,228 @@ func (ah *AdminHandler) HandleBannedIPs(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// HandleBanUserAgent bans a User-Agent regexp pattern and kicks matching sessions.
+//
+// The pattern is validated server-side with Go's regexp (RE2) — the same engine
+// used for enforcement — so what the admin UI reports and what actually blocks
+// traffic can never disagree. A pattern matching the admin's own User-Agent is
+// refused unless "force" is set, since that is almost always a mistake.
+func (ah *AdminHandler) HandleBanUserAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Pattern       string `json:"pattern"`
+		Reason        string `json:"reason"`
+		CaseSensitive bool   `json:"case_sensitive"`
+		Temporary     bool   `json:"temporary"`
+		Duration      int    `json:"duration"` // seconds
+		Force         bool   `json:"force"`    // override the self-match guard
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.Pattern = strings.TrimSpace(req.Pattern)
+	if req.Pattern == "" {
+		http.Error(w, "Pattern is required", http.StatusBadRequest)
+		return
+	}
+
+	re, err := ValidateUserAgentPattern(req.Pattern, req.CaseSensitive)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid pattern: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Lockout guard: refuse a pattern that would block the admin's own browser.
+	if !req.Force {
+		if ua := r.Header.Get("User-Agent"); ua != "" && re.MatchString(ua) {
+			http.Error(w, "Pattern matches your own browser's User-Agent — it would block you from using the receiver. Re-submit with force to ban it anyway.", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.Reason == "" {
+		req.Reason = "Banned by admin"
+	}
+
+	if req.Temporary && req.Duration > 0 {
+		duration := time.Duration(req.Duration) * time.Second
+		err = ah.ipBanManager.BanUserAgentWithDuration(req.Pattern, req.Reason, "admin", req.CaseSensitive, duration)
+	} else {
+		err = ah.ipBanManager.BanUserAgent(req.Pattern, req.Reason, "admin", req.CaseSensitive)
+	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to ban User-Agent: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Kick matching sessions (bypassed users are skipped)
+	count, err := ah.sessions.KickUsersByUserAgent(re)
+	if err != nil {
+		log.Printf("Error kicking sessions for banned User-Agent %q: %v", req.Pattern, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Banned User-Agent pattern %s and kicked %d session(s)", req.Pattern, count),
+		"sessions_removed": count,
+	}); err != nil {
+		log.Printf("Error encoding ban User-Agent response: %v", err)
+	}
+}
+
+// HandleUnbanUserAgent removes a banned User-Agent pattern
+func (ah *AdminHandler) HandleUnbanUserAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Pattern string `json:"pattern"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Pattern == "" {
+		http.Error(w, "Pattern is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := ah.ipBanManager.UnbanUserAgent(req.Pattern); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unban User-Agent: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Unbanned User-Agent pattern %s", req.Pattern),
+	}); err != nil {
+		log.Printf("Error encoding unban User-Agent response: %v", err)
+	}
+}
+
+// HandleBannedUserAgents returns the list of banned User-Agent patterns
+func (ah *AdminHandler) HandleBannedUserAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	bannedUserAgents := ah.ipBanManager.GetBannedUserAgents()
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"banned_user_agents": bannedUserAgents,
+		"count":              len(bannedUserAgents),
+	}); err != nil {
+		log.Printf("Error encoding banned User-Agents: %v", err)
+	}
+}
+
+// HandleTestUserAgentRegex validates a User-Agent pattern and tests it against
+// sample strings, the User-Agents of currently connected sessions, and the
+// caller's own browser.
+//
+// This exists because JavaScript regexps and Go's RE2 are not the same language:
+// validating in the browser would happily accept patterns the server rejects
+// (and vice versa for backreferences and lookaround). Testing here guarantees
+// the preview matches enforcement exactly.
+func (ah *AdminHandler) HandleTestUserAgentRegex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Pattern       string   `json:"pattern"`
+		CaseSensitive bool     `json:"case_sensitive"`
+		Samples       []string `json:"samples"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	type sampleResult struct {
+		UserAgent string `json:"user_agent"`
+		Matches   bool   `json:"matches"`
+		Matched   string `json:"matched,omitempty"` // the substring that matched
+		Source    string `json:"source"`            // "sample" | "session" | "self"
+	}
+
+	response := map[string]interface{}{
+		"pattern": req.Pattern,
+		"valid":   false,
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	re, err := ValidateUserAgentPattern(strings.TrimSpace(req.Pattern), req.CaseSensitive)
+	if err != nil {
+		response["error"] = err.Error()
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding User-Agent regex test response: %v", err)
+		}
+		return
+	}
+	response["valid"] = true
+
+	test := func(ua, source string) sampleResult {
+		res := sampleResult{UserAgent: ua, Source: source}
+		if loc := re.FindStringIndex(ua); loc != nil {
+			res.Matches = true
+			res.Matched = ua[loc[0]:loc[1]]
+		}
+		return res
+	}
+
+	results := make([]sampleResult, 0, len(req.Samples)+8)
+	for _, s := range req.Samples {
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+		results = append(results, test(s, "sample"))
+	}
+
+	// Live traffic: the most useful thing to test against.
+	matchedSessions := 0
+	for _, ua := range ah.sessions.GetActiveUserAgents() {
+		res := test(ua, "session")
+		if res.Matches {
+			matchedSessions++
+		}
+		results = append(results, res)
+	}
+
+	// The caller's own browser, so the UI can warn about self-lockout.
+	selfMatches := false
+	if ua := r.Header.Get("User-Agent"); ua != "" {
+		res := test(ua, "self")
+		selfMatches = res.Matches
+		results = append(results, res)
+	}
+
+	response["results"] = results
+	response["matched_sessions"] = matchedSessions
+	response["matches_self"] = selfMatches
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding User-Agent regex test response: %v", err)
+	}
+}
+
 // HandleExtensions returns the list of available decoder extensions (public endpoint)
 func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -5850,6 +6072,7 @@ type SessionEvent struct {
 	UserAgent     string    `json:"user_agent,omitempty"`
 	Country       string    `json:"country,omitempty"`          // Country name from GeoIP lookup
 	CountryCode   string    `json:"country_code,omitempty"`     // ISO country code from GeoIP lookup
+	Protocol      string    `json:"protocol,omitempty"`         // "native" | "kiwi" | "websdr"
 	Duration      *float64  `json:"duration_seconds,omitempty"` // Only for session_end events
 }
 
@@ -6047,6 +6270,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 						UserAgent:     existing.entry.UserAgent,
 						Country:       existing.entry.Country,
 						CountryCode:   existing.entry.CountryCode,
+						Protocol:      existing.entry.Protocol,
 						Duration:      &duration,
 					})
 
@@ -6158,6 +6382,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					UserAgent:     session.UserAgent,
 					Country:       session.Country,
 					CountryCode:   session.CountryCode,
+					Protocol:      session.Protocol,
 				})
 
 				activeSessions[session.UserSessionID] = &sessionInfo{
@@ -6215,6 +6440,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					UserAgent:     info.entry.UserAgent,
 					Country:       info.entry.Country,
 					CountryCode:   info.entry.CountryCode,
+					Protocol:      info.entry.Protocol,
 					Duration:      &duration,
 				})
 

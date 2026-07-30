@@ -793,7 +793,7 @@
             <div class="editor-container">
                 <div class="editor-tabs">
                     <button class="tab active" onclick="switchTab('sessions')">Active Sessions</button>
-                    <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
+                    <button class="tab" onclick="switchTab('banned')">Banned</button>
                     <button class="tab" onclick="switchTab('logs')">Logs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
                     <button class="tab" onclick="switchTab('ui')">UI</button>
@@ -949,6 +949,44 @@
                         <div id="bannedASNsList" class="loading">
                             <div class="spinner"></div>
                             <p>Loading banned ASNs...</p>
+                        </div>
+                    </div>
+
+                    <!-- Banned User-Agents Section -->
+                    <div id="bannedUserAgentsSection" style="margin-top: 40px;">
+                        <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🕵️ User-Agent Bans</h2>
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ <strong>Note:</strong> Patterns are regular expressions matched against the client's <code>User-Agent</code> header as an unanchored search — <code>curl</code> matches <code>curl/8.5.0</code>. Bypassed users (<code>timeout_bypass_ips</code> or bypass password) and the admin pages are never blocked. Use <strong>Test</strong> to check a pattern against live traffic before banning.
+                        </div>
+
+                        <!-- Add User-Agent ban form -->
+                        <div id="addUserAgentBanForm" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                            <h3 style="margin-bottom: 15px;">Ban a User-Agent</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: start;">
+                                <div class="config-field" style="margin: 0;">
+                                    <label>Regex Pattern</label>
+                                    <input type="text" id="newBanUAPattern" placeholder="e.g. (python-requests|scrapy|curl)" style="width: 100%; font-family: monospace;"
+                                           onkeydown="if(event.key==='Enter') addUserAgentBan()">
+                                </div>
+                                <div class="config-field" style="margin: 0;">
+                                    <label>Reason</label>
+                                    <input type="text" id="newBanUAReason" placeholder="e.g. Scraper, abuse" style="width: 100%;">
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: flex-start; padding-top: 22px;">
+                                    <button class="btn btn-secondary" onclick="openUARegexTester()">Test</button>
+                                    <button class="btn btn-danger" onclick="addUserAgentBan()">Ban</button>
+                                </div>
+                            </div>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #666; margin-top: 10px;">
+                                <input type="checkbox" id="newBanUACaseSensitive" style="width: auto; margin: 0;">
+                                Case sensitive (patterns are case-insensitive by default)
+                            </label>
+                        </div>
+
+                        <!-- Banned User-Agents list -->
+                        <div id="bannedUserAgentsList" class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading banned User-Agents...</p>
                         </div>
                     </div>
                 </div>
@@ -3062,6 +3100,15 @@
                                     </select>
                                 </div>
                                 <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Protocol</label>
+                                    <select id="filterProtocol" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                        <option value="">All Protocols</option>
+                                        <option value="native">Native Only</option>
+                                        <option value="kiwi">KiwiSDR Only</option>
+                                        <option value="websdr">WebSDR Only</option>
+                                    </select>
+                                </div>
+                                <div>
                                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Duration Filter</label>
                                     <div style="display: flex; gap: 5px;">
                                         <select id="filterDurationOp" style="flex: 0 0 auto; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
@@ -3832,6 +3879,52 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     <div class="loading">
                         <div class="spinner"></div>
                         <p>Loading GeoIP information...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User-Agent regex tester.
+         Validation and matching are done server-side with Go's regexp (RE2),
+         which is the same engine used for enforcement — a browser-side test
+         would accept patterns the server rejects and vice versa. -->
+    <div id="uaRegexTesterModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2>🕵️ User-Agent Regex Tester</h2>
+                <button class="modal-close" onclick="closeUARegexTester()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="padding: 20px;">
+                    <div class="config-field">
+                        <label>Regex Pattern</label>
+                        <input type="text" id="uaTestPattern" placeholder="e.g. (python-requests|scrapy|curl)"
+                               style="width: 100%; font-family: monospace;"
+                               oninput="scheduleUARegexTest()">
+                        <small>RE2 syntax (Go). Unanchored substring search — no backreferences or lookaround.</small>
+                    </div>
+
+                    <div id="uaTestStatus" style="margin: 12px 0; padding: 10px 12px; border-radius: 5px; font-size: 13px; display: none;"></div>
+
+                    <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #666; margin-bottom: 12px;">
+                        <input type="checkbox" id="uaTestCaseSensitive" style="width: auto; margin: 0;" onchange="scheduleUARegexTest()">
+                        Case sensitive
+                    </label>
+
+                    <div class="config-field">
+                        <label>Test Strings (one per line)</label>
+                        <textarea id="uaTestSamples" rows="4" placeholder="Paste User-Agent strings to test against, one per line"
+                                  style="width: 100%; font-family: monospace; font-size: 12px;"
+                                  oninput="scheduleUARegexTest()"></textarea>
+                        <small>Connected sessions' User-Agents and your own browser are always tested too.</small>
+                    </div>
+
+                    <div id="uaTestResults" style="margin-top: 15px;"></div>
+
+                    <div class="button-group" style="margin-top: 20px;">
+                        <button class="btn btn-danger" onclick="banFromUARegexTester()">Ban This Pattern</button>
+                        <button class="btn btn-secondary" onclick="closeUARegexTester()">Close</button>
                     </div>
                 </div>
             </div>
@@ -8300,9 +8393,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 currentBannedIPs = data.banned_ips || [];
                 renderBannedIPs();
                 
-                // Also load banned countries and ASNs when loading banned IPs
+                // Also load banned countries, ASNs and User-Agents when loading banned IPs
                 await loadBannedCountries();
                 await loadBannedASNs();
+                await loadBannedUserAgents();
             } catch (error) {
                 showAlert('Error loading banned IPs: ' + error.message, 'error');
             }
@@ -8994,6 +9088,327 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             } catch (error) {
                 showAlert('Error unbanning ASN: ' + error.message, 'error');
             }
+        }
+
+        // ── Banned User-Agents ────────────────────────────────────────────────
+        let currentBannedUserAgents = [];
+
+        async function loadBannedUserAgents() {
+            try {
+                const response = await authenticatedFetch('/admin/banned-user-agents');
+                if (!response) return;
+                if (!response.ok) throw new Error('Failed to load banned User-Agents');
+
+                const data = await response.json();
+                currentBannedUserAgents = data.banned_user_agents || [];
+                renderBannedUserAgents();
+            } catch (error) {
+                showAlert('Error loading banned User-Agents: ' + error.message, 'error');
+            }
+        }
+
+        function renderBannedUserAgents() {
+            const container = document.getElementById('bannedUserAgentsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (currentBannedUserAgents.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No User-Agents banned</em></p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">Pattern</th>
+                        <th style="padding: 12px; text-align: left;">Reason</th>
+                        <th style="padding: 12px; text-align: center;">Case</th>
+                        <th style="padding: 12px; text-align: left;">Banned At</th>
+                        <th style="padding: 12px; text-align: left;">Banned By</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bannedUserAgentsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('bannedUserAgentsTableBody');
+            currentBannedUserAgents.forEach(ban => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                const bannedDate = ban.banned_at ? new Date(ban.banned_at).toLocaleString() : '-';
+
+                // An unusable pattern is kept on disk but never matches — flag
+                // it so the operator can fix or remove it.
+                const brokenWarning = ban.inactive_reason
+                    ? `<div style="color: #dc3545; font-size: 12px; margin-top: 4px;">⚠️ Inactive — ${escapeHtml(ban.inactive_reason)}</div>`
+                    : '';
+
+                row.innerHTML = `
+                    <td style="padding: 12px; font-family: monospace; font-weight: bold; word-break: break-all;">
+                        ${escapeHtml(ban.pattern)}${brokenWarning}
+                    </td>
+                    <td style="padding: 12px;">${escapeHtml(ban.reason) || 'No reason provided'}</td>
+                    <td style="padding: 12px; text-align: center; font-size: 12px; color: #666;">${ban.case_sensitive ? 'Sensitive' : 'Insensitive'}</td>
+                    <td style="padding: 12px; font-size: 13px;">${bannedDate}</td>
+                    <td style="padding: 12px;">${escapeHtml(ban.banned_by) || 'Unknown'}</td>
+                    <td style="padding: 12px; text-align: center; white-space: nowrap;">
+                        <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Test</button>
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px;">Unban</button>
+                    </td>
+                `;
+
+                // Wire handlers in JS rather than inline onclick so arbitrary
+                // regex metacharacters in the pattern can't break the attribute.
+                const [testBtn, unbanBtn] = row.querySelectorAll('button');
+                testBtn.onclick = () => openUARegexTester(ban.pattern, ban.case_sensitive);
+                unbanBtn.onclick = () => unbanUserAgent(ban.pattern);
+
+                tbody.appendChild(row);
+            });
+        }
+
+        async function addUserAgentBan() {
+            const pattern = document.getElementById('newBanUAPattern').value.trim();
+            const reason = document.getElementById('newBanUAReason').value.trim() || 'Banned by admin';
+            const caseSensitive = document.getElementById('newBanUACaseSensitive').checked;
+
+            if (!pattern) {
+                showAlert('Please enter a regex pattern', 'error');
+                return;
+            }
+
+            if (!confirm(`Ban User-Agent pattern:\n\n${pattern}\n\nThis will block matching clients and kick any active (non-bypassed) sessions.`)) {
+                return;
+            }
+
+            await submitUserAgentBan(pattern, reason, caseSensitive, false);
+        }
+
+        // submitUserAgentBan posts the ban, handling the server's self-match
+        // guard by offering a force re-submit.
+        async function submitUserAgentBan(pattern, reason, caseSensitive, force) {
+            try {
+                const response = await fetch('/admin/ban-user-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pattern: pattern,
+                        reason: reason,
+                        case_sensitive: caseSensitive,
+                        force: force
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = (await response.text()).trim();
+                    // The server refuses patterns matching the admin's own
+                    // browser unless forced; let them confirm and retry.
+                    if (!force && errorText.includes('your own browser')) {
+                        if (confirm(`${errorText}\n\nBan it anyway?`)) {
+                            await submitUserAgentBan(pattern, reason, caseSensitive, true);
+                        }
+                        return;
+                    }
+                    throw new Error(errorText || 'Failed to ban User-Agent');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'User-Agent pattern has been banned', 'success');
+                document.getElementById('newBanUAPattern').value = '';
+                document.getElementById('newBanUAReason').value = '';
+                document.getElementById('newBanUACaseSensitive').checked = false;
+                await loadBannedUserAgents();
+            } catch (error) {
+                showAlert('Error banning User-Agent: ' + error.message, 'error');
+            }
+        }
+
+        async function unbanUserAgent(pattern) {
+            if (!confirm(`Unban User-Agent pattern:\n\n${pattern}\n\nThis will allow matching clients again.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/unban-user-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pattern: pattern })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to unban User-Agent');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'User-Agent pattern has been unbanned', 'success');
+                await loadBannedUserAgents();
+            } catch (error) {
+                showAlert('Error unbanning User-Agent: ' + error.message, 'error');
+            }
+        }
+
+        // ── User-Agent regex tester modal ─────────────────────────────────────
+        let uaTestDebounce = null;
+
+        function openUARegexTester(pattern, caseSensitive) {
+            // Seed from the add-ban form unless a specific pattern was passed
+            const seedPattern = pattern !== undefined
+                ? pattern
+                : document.getElementById('newBanUAPattern').value;
+            const seedCase = caseSensitive !== undefined
+                ? caseSensitive
+                : document.getElementById('newBanUACaseSensitive').checked;
+
+            document.getElementById('uaTestPattern').value = seedPattern;
+            document.getElementById('uaTestCaseSensitive').checked = !!seedCase;
+            document.getElementById('uaRegexTesterModal').style.display = 'block';
+            document.getElementById('uaTestPattern').focus();
+            runUARegexTest();
+        }
+
+        function closeUARegexTester() {
+            document.getElementById('uaRegexTesterModal').style.display = 'none';
+            if (uaTestDebounce) {
+                clearTimeout(uaTestDebounce);
+                uaTestDebounce = null;
+            }
+        }
+
+        function scheduleUARegexTest() {
+            if (uaTestDebounce) clearTimeout(uaTestDebounce);
+            uaTestDebounce = setTimeout(runUARegexTest, 250);
+        }
+
+        async function runUARegexTest() {
+            const pattern = document.getElementById('uaTestPattern').value.trim();
+            const caseSensitive = document.getElementById('uaTestCaseSensitive').checked;
+            const statusEl = document.getElementById('uaTestStatus');
+            const resultsEl = document.getElementById('uaTestResults');
+
+            if (!pattern) {
+                statusEl.style.display = 'none';
+                resultsEl.innerHTML = '';
+                return;
+            }
+
+            const samples = document.getElementById('uaTestSamples').value
+                .split('\n')
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            try {
+                const response = await fetch('/admin/test-user-agent-regex', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pattern, case_sensitive: caseSensitive, samples })
+                });
+
+                if (!response.ok) {
+                    throw new Error((await response.text()) || 'Test request failed');
+                }
+
+                renderUARegexTestResult(await response.json());
+            } catch (error) {
+                statusEl.style.display = 'block';
+                statusEl.style.background = '#f8d7da';
+                statusEl.style.color = '#721c24';
+                statusEl.textContent = 'Error testing pattern: ' + error.message;
+                resultsEl.innerHTML = '';
+            }
+        }
+
+        function renderUARegexTestResult(data) {
+            const statusEl = document.getElementById('uaTestStatus');
+            const resultsEl = document.getElementById('uaTestResults');
+
+            statusEl.style.display = 'block';
+
+            if (!data.valid) {
+                statusEl.style.background = '#f8d7da';
+                statusEl.style.color = '#721c24';
+                statusEl.innerHTML = `❌ <strong>Invalid pattern:</strong> ${escapeHtml(data.error)}`;
+                resultsEl.innerHTML = '';
+                return;
+            }
+
+            if (data.matches_self) {
+                statusEl.style.background = '#fff3cd';
+                statusEl.style.color = '#856404';
+                statusEl.innerHTML = '⚠️ <strong>Valid, but this pattern matches your own browser.</strong> Banning it would block you from the receiver (the admin pages stay reachable).';
+            } else {
+                statusEl.style.background = '#d4edda';
+                statusEl.style.color = '#155724';
+                statusEl.innerHTML = `✅ <strong>Valid pattern.</strong> Matches ${data.matched_sessions} of the currently connected session User-Agent(s).`;
+            }
+
+            const results = data.results || [];
+            if (results.length === 0) {
+                resultsEl.innerHTML = '<p style="color: #666; font-size: 13px;"><em>Nothing to test against — add test strings above.</em></p>';
+                return;
+            }
+
+            const sourceLabels = { sample: 'Test string', session: 'Connected', self: 'Your browser' };
+
+            let html = `
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead>
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 8px; text-align: left; width: 90px;">Result</th>
+                            <th style="padding: 8px; text-align: left; width: 100px;">Source</th>
+                            <th style="padding: 8px; text-align: left;">User-Agent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            results.forEach(res => {
+                const verdict = res.matches
+                    ? '<span style="color: #dc3545; font-weight: bold;">🚫 Blocked</span>'
+                    : '<span style="color: #28a745;">✓ Allowed</span>';
+                // Highlight the substring that actually matched
+                let ua = escapeHtml(res.user_agent);
+                if (res.matches && res.matched) {
+                    const matched = escapeHtml(res.matched);
+                    ua = ua.replace(matched, `<mark style="background: #ffe08a;">${matched}</mark>`);
+                }
+                html += `
+                    <tr style="border-bottom: 1px solid #dee2e6; ${res.matches ? 'background: #fff5f5;' : ''}">
+                        <td style="padding: 8px; white-space: nowrap;">${verdict}</td>
+                        <td style="padding: 8px; color: #666;">${sourceLabels[res.source] || res.source}</td>
+                        <td style="padding: 8px; font-family: monospace; word-break: break-all;">${ua}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            resultsEl.innerHTML = html;
+        }
+
+        // Copy the tested pattern into the add-ban form and submit it
+        async function banFromUARegexTester() {
+            const pattern = document.getElementById('uaTestPattern').value.trim();
+            const caseSensitive = document.getElementById('uaTestCaseSensitive').checked;
+
+            if (!pattern) {
+                showAlert('Please enter a regex pattern', 'error');
+                return;
+            }
+
+            const reason = document.getElementById('newBanUAReason').value.trim() || 'Banned by admin';
+
+            if (!confirm(`Ban User-Agent pattern:\n\n${pattern}\n\nThis will block matching clients and kick any active (non-bypassed) sessions.`)) {
+                return;
+            }
+
+            document.getElementById('newBanUAPattern').value = pattern;
+            document.getElementById('newBanUACaseSensitive').checked = caseSensitive;
+            closeUARegexTester();
+            await submitUserAgentBan(pattern, reason, caseSensitive, false);
         }
 
         // Pre-fill the ASN ban form from the IP lookup card or GeoIP modal
@@ -25290,6 +25705,7 @@ const tooltipLine2 = timeStr;
             document.getElementById('filterEventType').value = '';
             document.getElementById('filterAuthMethod').value = '';
             document.getElementById('filterSessionType').value = '';
+            document.getElementById('filterProtocol').value = '';
             document.getElementById('filterDurationOp').value = '';
             document.getElementById('filterDurationValue').value = '';
             document.getElementById('filterIPAddress').value = '';
@@ -25300,6 +25716,23 @@ const tooltipLine2 = timeStr;
             // Reload events
             loadSessionEvents();
         }
+
+        // Resolve an event's protocol ("native" | "kiwi" | "websdr").
+        // Events logged before the protocol field existed fall back to the
+        // user_session_id prefix, which is how the server derives it too.
+        function eventProtocol(event) {
+            if (event.protocol) return event.protocol;
+            const uid = event.user_session_id || '';
+            if (uid.startsWith('kiwi-')) return 'kiwi';
+            if (uid.startsWith('websdr-')) return 'websdr';
+            return 'native';
+        }
+
+        const PROTOCOL_LABELS = {
+            native: { label: 'Native', color: '#667eea' },
+            kiwi: { label: 'KiwiSDR', color: '#fd7e14' },
+            websdr: { label: 'WebSDR', color: '#20c997' }
+        };
 
         function applyClientSideFilters(events) {
             let filtered = events;
@@ -25328,6 +25761,12 @@ const tooltipLine2 = timeStr;
                 filtered = filtered.filter(e => {
                     return e.session_types && e.session_types.includes(sessionType);
                 });
+            }
+
+            // Filter by protocol (native / kiwi / websdr)
+            const protocol = document.getElementById('filterProtocol').value;
+            if (protocol) {
+                filtered = filtered.filter(e => eventProtocol(e) === protocol);
             }
 
             // Filter by duration
@@ -25469,6 +25908,7 @@ const tooltipLine2 = timeStr;
                             <th style="padding: 10px; text-align: left;">IP Address</th>
                             <th style="padding: 10px; text-align: left;">Country</th>
                             <th style="padding: 10px; text-align: left;">User Agent</th>
+                            <th style="padding: 10px; text-align: center;">Protocol</th>
                             <th style="padding: 10px; text-align: left;">Bands</th>
                             <th style="padding: 10px; text-align: left;">Modes</th>
                             <th style="padding: 10px; text-align: center;">Auth</th>
@@ -25495,6 +25935,10 @@ const tooltipLine2 = timeStr;
 
                 // Session types
                 const types = event.session_types ? event.session_types.join(', ') : 'N/A';
+
+                // Protocol badge
+                const proto = PROTOCOL_LABELS[eventProtocol(event)] || { label: eventProtocol(event), color: '#6c757d' };
+                const protocolBadge = `<span style="background: ${proto.color}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${proto.label}</span>`;
 
                 // Duration (only for end events)
                 let durationDisplay = '—';
@@ -25571,6 +26015,7 @@ const tooltipLine2 = timeStr;
                         <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>
                         <td style="padding: 10px; font-size: 12px; line-height: 1.4;">${event.country_code ? String.fromCodePoint(...[...event.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : ''}${event.country || '—'}</td>
                         <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
+                        <td style="padding: 10px; text-align: center;">${protocolBadge}</td>
                         <td style="padding: 10px; font-size: 11px;">${event.bands && event.bands.length > 0 ? event.bands.join(', ') : '—'}</td>
                         <td style="padding: 10px; font-size: 11px;">${event.modes && event.modes.length > 0 ? event.modes.map(m => m.toUpperCase()).join(', ') : '—'}</td>
                         <td style="padding: 10px; text-align: center;">${authBadge}</td>
@@ -25644,7 +26089,7 @@ const tooltipLine2 = timeStr;
                 const data = await response.json();
 
                 // Create CSV content
-                let csv = 'Timestamp,Event Type,User Session ID,Client IP,Country,Country Code,Source IP,Auth Method,Session Types,Duration (seconds)\n';
+                let csv = 'Timestamp,Event Type,User Session ID,Client IP,Country,Country Code,Source IP,Auth Method,Protocol,Session Types,Duration (seconds)\n';
 
                 (data.events || []).forEach(event => {
                     const timestamp = event.timestamp;
@@ -25655,6 +26100,7 @@ const tooltipLine2 = timeStr;
                     const countryCode = event.country_code || '';
                     const sourceIP = event.source_ip || '';
                     const authMethod = event.auth_method || '';
+                    const protocol = eventProtocol(event);
                     const sessionTypes = (event.session_types || []).join(';');
                     const duration = event.duration_seconds !== null && event.duration_seconds !== undefined ? event.duration_seconds : '';
 
@@ -25666,7 +26112,7 @@ const tooltipLine2 = timeStr;
                         return field;
                     };
 
-                    csv += `${timestamp},${eventType},${escapeCsv(userSessionID)},${clientIP},${escapeCsv(country)},${countryCode},${sourceIP},${authMethod},${escapeCsv(sessionTypes)},${duration}\n`;
+                    csv += `${timestamp},${eventType},${escapeCsv(userSessionID)},${clientIP},${escapeCsv(country)},${countryCode},${sourceIP},${authMethod},${protocol},${escapeCsv(sessionTypes)},${duration}\n`;
                 });
 
                 // Create download
@@ -27612,6 +28058,9 @@ const tooltipLine2 = timeStr;
             const modal = document.getElementById('geoipModal');
             if (event.target === modal) {
                 closeGeoIPModal();
+            }
+            if (event.target === document.getElementById('uaRegexTesterModal')) {
+                closeUARegexTester();
             }
         });
 

@@ -296,12 +296,18 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// banMiddleware checks if requests come from banned IPs, banned countries, or banned ASNs and blocks them
+// banMiddleware checks if requests come from banned IPs, banned User-Agents, banned countries,
+// or banned ASNs and blocks them.
 // This runs early in the request pipeline to block banned traffic before any processing
-func banMiddleware(ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, next http.Handler) http.Handler {
+func banMiddleware(config *Config, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if the client's IP is banned (direct IP ban)
 		if checkIPBan(w, r, ipBanManager) {
+			return
+		}
+
+		// Check if the client's User-Agent matches a banned pattern
+		if checkUserAgentBan(w, r, config, ipBanManager) {
 			return
 		}
 
@@ -2899,6 +2905,10 @@ func main() {
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
+	http.HandleFunc("/admin/ban-user-agent", adminHandler.AuthMiddleware(adminHandler.HandleBanUserAgent))
+	http.HandleFunc("/admin/unban-user-agent", adminHandler.AuthMiddleware(adminHandler.HandleUnbanUserAgent))
+	http.HandleFunc("/admin/banned-user-agents", adminHandler.AuthMiddleware(adminHandler.HandleBannedUserAgents))
+	http.HandleFunc("/admin/test-user-agent-regex", adminHandler.AuthMiddleware(adminHandler.HandleTestUserAgentRegex))
 	http.HandleFunc("/admin/ban-country", adminHandler.AuthMiddleware(adminHandler.HandleBanCountry))
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
@@ -3170,7 +3180,7 @@ func main() {
 	// Always wrap with httpLogger (it handles both file and in-memory logging)
 	handler = httpLogger(logFile, geoIPService, handler)
 	// Ban middleware runs first (before logging) to block banned IPs, countries, and ASNs early
-	handler = banMiddleware(ipBanManager, countryBanManager, asnBanManager, handler)
+	handler = banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, handler)
 
 	// Start HTTP server
 	server := &http.Server{
@@ -3561,6 +3571,17 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	if ipBanManager.IsBanned(clientIP) {
 		response.Allowed = false
 		response.Reason = "Your IP address has been banned"
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if the User-Agent matches a banned pattern. banMiddleware skips
+	// /connection because the bypass password is in the request body, so this
+	// is where the check happens for this endpoint — bypassed users are exempt.
+	if !isBypassed && ipBanManager.IsUserAgentBanned(r.Header.Get("User-Agent")) {
+		response.Allowed = false
+		response.Reason = "Your browser or client has been banned"
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(response)
 		return
@@ -4781,6 +4802,45 @@ func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManag
 		return true
 	}
 	return false
+}
+
+// isUserAgentBanExempt reports whether a request must never be blocked by a
+// User-Agent ban. Three cases are exempt:
+//
+//   - /admin*: a pattern broad enough to match the operator's own browser must
+//     never lock them out of the UI needed to delete that pattern.
+//   - /connection: the bypass password arrives in the POST body, which this
+//     middleware cannot read without consuming it. handleConnectionCheck does
+//     the User-Agent check itself once it has decoded the password.
+//   - Bypassed clients: an IP in timeout_bypass_ips, or a request carrying the
+//     bypass password as a query parameter (how /ws and the SSE endpoints pass
+//     it). Bypassed users are exempt from User-Agent bans entirely.
+func isUserAgentBanExempt(r *http.Request, config *Config) bool {
+	if strings.HasPrefix(r.URL.Path, "/admin") || r.URL.Path == "/connection" {
+		return true
+	}
+
+	return config.Server.IsIPTimeoutBypassed(getClientIP(r), r.URL.Query().Get("password"))
+}
+
+// checkUserAgentBan checks if the client's User-Agent matches a banned regexp
+// and returns appropriate error if so
+func checkUserAgentBan(w http.ResponseWriter, r *http.Request, config *Config, ipBanManager *IPBanManager) bool {
+	if isUserAgentBanExempt(r, config) {
+		return false
+	}
+
+	ban := ipBanManager.MatchingUserAgentBan(r.Header.Get("User-Agent"))
+	if ban == nil {
+		return false
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": "Access denied",
+	})
+	return true
 }
 
 // checkCountryBan checks if the client IP's country is banned and returns appropriate error if so

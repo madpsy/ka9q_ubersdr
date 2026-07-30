@@ -310,10 +310,92 @@ func (m *DBManager) Close() error {
 	return nil
 }
 
+// migrateColumns adds columns that were introduced after a table's original
+// definition. Each entry is skipped when the table does not exist yet (a fresh
+// database gets the column from the CREATE TABLE statement in initSchema) or
+// when the column is already present.
+func (m *DBManager) migrateColumns() error {
+	migrations := []struct {
+		table  string
+		column string
+		ddl    string
+	}{
+		// protocol: "native" | "kiwi" | "websdr" — which front-end the listener
+		// connected through. Backfilled below from the user_session_id prefix.
+		{"sessions", "protocol", `ALTER TABLE sessions ADD COLUMN protocol TEXT`},
+	}
+
+	for _, mig := range migrations {
+		exists, hasCol, err := m.tableColumnState(mig.table, mig.column)
+		if err != nil {
+			return err
+		}
+		if !exists || hasCol {
+			continue
+		}
+		if _, err := m.db.Exec(mig.ddl); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", mig.table, mig.column, err)
+		}
+		log.Printf("[DB] migration: added column %s.%s", mig.table, mig.column)
+
+		if mig.table == "sessions" && mig.column == "protocol" {
+			res, err := m.db.Exec(`UPDATE sessions SET protocol = CASE
+				WHEN user_session_id LIKE 'kiwi-%'   THEN 'kiwi'
+				WHEN user_session_id LIKE 'websdr-%' THEN 'websdr'
+				ELSE 'native' END`)
+			if err != nil {
+				return fmt.Errorf("backfill sessions.protocol: %w", err)
+			}
+			if n, err := res.RowsAffected(); err == nil {
+				log.Printf("[DB] migration: backfilled protocol on %d sessions rows", n)
+			}
+		}
+	}
+
+	return nil
+}
+
+// tableColumnState reports whether the table exists and, if so, whether it
+// already has the named column.
+func (m *DBManager) tableColumnState(table, column string) (tableExists, hasColumn bool, err error) {
+	rows, err := m.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, false, fmt.Errorf("table_info(%s): %w", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
+			return false, false, fmt.Errorf("table_info(%s) scan: %w", table, err)
+		}
+		tableExists = true
+		if name == column {
+			hasColumn = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, false, err
+	}
+	return tableExists, hasColumn, nil
+}
+
 // initSchema creates all tables and indexes if they do not already exist.
 // Column names and types mirror the existing Go structs and CSV column order
 // so that future migration code can map fields 1-to-1.
 func (m *DBManager) initSchema() error {
+	// Bring pre-existing tables up to date before the DDL below runs: CREATE
+	// TABLE IF NOT EXISTS is a no-op on an existing table, so new columns must
+	// be added explicitly. This runs first so that indexes referencing new
+	// columns can be created unconditionally further down.
+	if err := m.migrateColumns(); err != nil {
+		return err
+	}
+
 	stmts := []struct {
 		name string
 		ddl  string
@@ -349,12 +431,14 @@ func (m *DBManager) initSchema() error {
 				first_seen      INTEGER,            -- Unix seconds UTC
 				user_agent      TEXT,
 				country         TEXT,
-				country_code    TEXT                -- ISO 3166-1 alpha-2
+				country_code    TEXT,               -- ISO 3166-1 alpha-2
+				protocol        TEXT                -- "native" | "kiwi" | "websdr"
 			)`,
 		},
 		{"sessions_idx_snapshot_ts", `CREATE INDEX IF NOT EXISTS sessions_idx_snapshot_ts ON sessions(snapshot_ts)`},
 		{"sessions_idx_source_ip", `CREATE INDEX IF NOT EXISTS sessions_idx_source_ip   ON sessions(source_ip)`},
 		{"sessions_idx_session_id", `CREATE INDEX IF NOT EXISTS sessions_idx_session_id  ON sessions(user_session_id)`},
+		{"sessions_idx_protocol", `CREATE INDEX IF NOT EXISTS sessions_idx_protocol    ON sessions(protocol, snapshot_ts)`},
 
 		// ----------------------------------------------------------------
 		// chat_messages

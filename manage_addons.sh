@@ -211,6 +211,22 @@ is_addon_installed() {
     [[ -f "$HOME/ubersdr/${name}/docker-compose.yml" ]]
 }
 
+# Check whether an addon currently has any running container.
+# Usage: is_addon_running <name>  → returns 0 if running, 1 if not
+is_addon_running() {
+    local name="$1"
+    local compose_file="$HOME/ubersdr/${name}/docker-compose.yml"
+    local running=""
+    if [[ -f "$compose_file" ]]; then
+        running=$(docker compose -f "$compose_file" ps -q --status running 2>/dev/null) || running=""
+    fi
+    if [[ -z "$running" ]]; then
+        # Fall back to matching the container name (containers are named after the addon)
+        running=$(docker ps -q --filter "name=^/?${name}\$" 2>/dev/null) || running=""
+    fi
+    [[ -n "$running" ]]
+}
+
 # Control a specific addon: start / stop / restart via its ~/ubersdr/<name>/{start,stop,restart}.sh
 control_addon_menu() {
     echo ""
@@ -293,9 +309,29 @@ control_addon_menu() {
         return 1
     fi
 
+    # Keep the proxy state in step with the container: stopping an addon
+    # disables its proxy (so UberSDR doesn't route to a dead backend), and
+    # starting/restarting one re-enables it.
+    if [[ "$action_script" == "stop.sh" ]]; then
+        echo ""
+        echo "Disabling addon proxy '$SELECTED_ADDON'..."
+        api_toggle_addon_proxy "$SELECTED_ADDON" false || \
+            echo "Warning: could not disable addon proxy '$SELECTED_ADDON'." >&2
+    fi
+
     echo ""
     echo "Running $action_script for '$SELECTED_ADDON'..."
     bash "$script_path"
+
+    if [[ "$action_script" != "stop.sh" ]]; then
+        echo ""
+        echo "Enabling addon proxy '$SELECTED_ADDON'..."
+        api_toggle_addon_proxy "$SELECTED_ADDON" true || \
+            echo "Warning: could not enable addon proxy '$SELECTED_ADDON'." >&2
+        echo "Testing backend connectivity for '$SELECTED_ADDON'..."
+        test_backend_with_retry "$SELECTED_ADDON" || true
+    fi
+
     echo "Done."
     echo ""
 }
@@ -819,7 +855,20 @@ delete_addon_menu() {
 
     local addon_dir="$HOME/ubersdr/${SELECTED_ADDON}"
 
-    # Stop the addon first (best-effort — don't abort if stop.sh is missing)
+    # Confirm before touching anything — a cancelled delete must leave the
+    # addon exactly as it was (still running, proxy still enabled).
+    echo ""
+    echo "WARNING: This will stop '$SELECTED_ADDON' and permanently delete the directory:"
+    echo "  $addon_dir"
+    echo ""
+    read -rp "Are you sure you want to delete '$SELECTED_ADDON'? Type 'yes' to confirm: " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Cancelled — nothing was stopped or deleted."
+        echo ""
+        return 0
+    fi
+
+    # Stop the addon (best-effort — don't abort if stop.sh is missing)
     local stop_script="$addon_dir/stop.sh"
     if [[ -f "$stop_script" ]]; then
         echo ""
@@ -827,18 +876,6 @@ delete_addon_menu() {
         bash "$stop_script" || true
     else
         echo "Warning: stop.sh not found at $stop_script — skipping stop step." >&2
-    fi
-
-    # Confirm before deleting
-    echo ""
-    echo "WARNING: This will permanently delete the following directory:"
-    echo "  $addon_dir"
-    echo ""
-    read -rp "Are you sure you want to delete '$SELECTED_ADDON'? Type 'yes' to confirm: " confirm
-    if [[ "$confirm" != "yes" ]]; then
-        echo "Cancelled — directory was NOT deleted."
-        echo ""
-        return 0
     fi
 
     echo "Deleting $addon_dir ..."
@@ -955,6 +992,14 @@ edit_compose_menu() {
 
     local compose_file="$HOME/ubersdr/${SELECTED_ADDON}/docker-compose.yml"
     local backup_file="${compose_file}.bak"
+
+    # Note whether the addon is running *before* the edit — a stopped addon
+    # must stay stopped afterwards.
+    local was_running="no"
+    if is_addon_running "$SELECTED_ADDON"; then
+        was_running="yes"
+    fi
+
     echo ""
     echo "Backing up $compose_file to ${backup_file}..."
     cp "$compose_file" "$backup_file"
@@ -962,6 +1007,14 @@ edit_compose_menu() {
     echo ""
     echo "Opening $compose_file in nano..."
     nano "$compose_file"
+
+    if [[ "$was_running" != "yes" ]]; then
+        echo ""
+        echo "'$SELECTED_ADDON' was not running — leaving it stopped."
+        echo "Done."
+        echo ""
+        return 0
+    fi
 
     echo ""
     echo "Restarting '$SELECTED_ADDON'..."
@@ -972,6 +1025,15 @@ edit_compose_menu() {
         echo "Warning: restart.sh not found at $restart_script — using docker compose directly..." >&2
         docker compose -f "$compose_file" restart
     fi
+
+    # The container is up again, so make sure its proxy is enabled too.
+    echo ""
+    echo "Enabling addon proxy '$SELECTED_ADDON'..."
+    api_toggle_addon_proxy "$SELECTED_ADDON" true || \
+        echo "Warning: could not enable addon proxy '$SELECTED_ADDON'." >&2
+    echo "Testing backend connectivity for '$SELECTED_ADDON'..."
+    test_backend_with_retry "$SELECTED_ADDON" || true
+
     echo "Done."
     echo ""
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -2400,6 +2401,21 @@ func (sm *SessionManager) GetBypassedUserCount() int {
 	return sm.getBypassedUserCountLocked()
 }
 
+// protocolFromUserSessionID derives the client protocol from a user session ID.
+// KiwiSDR and WebSDR front-ends mint their own IDs with a fixed prefix
+// (see kiwi_websocket.go / websdr_websocket.go); native UberSDR clients supply
+// a client-generated UUID with no prefix.
+func protocolFromUserSessionID(uid string) string {
+	switch {
+	case strings.HasPrefix(uid, "kiwi-"):
+		return "kiwi"
+	case strings.HasPrefix(uid, "websdr-"):
+		return "websdr"
+	default:
+		return "native"
+	}
+}
+
 // UnifiedUserInfo is a protocol-agnostic view of a connected listener,
 // used to present a unified user list across KiwiSDR, WebSDR, and native UberSDR interfaces.
 type UnifiedUserInfo struct {
@@ -2446,12 +2462,7 @@ func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
 
 		uid := session.UserSessionID
 		if _, exists := seen[uid]; !exists {
-			proto := "native"
-			if strings.HasPrefix(uid, "kiwi-") {
-				proto = "kiwi"
-			} else if strings.HasPrefix(uid, "websdr-") {
-				proto = "websdr"
-			}
+			proto := protocolFromUserSessionID(uid)
 			name := sm.userAgents[uid]
 			// Fall back to a protocol label when no user-supplied name is available.
 			if name == "" || name == "KiwiSDR Client" || name == "WebSDR Client" ||
@@ -3363,6 +3374,69 @@ func (sm *SessionManager) KickUsersByASN(asn uint, geoIPService *GeoIPService) (
 
 	log.Printf("Kicked users from AS%d (%d session(s) destroyed)", asn, len(sessionsToKick))
 	return len(sessionsToKick), nil
+}
+
+// KickUsersByUserAgent destroys every session whose User-Agent matches re.
+// Bypassed sessions (timeout_bypass_ips or a valid bypass password) are left
+// alone, matching the enforcement rule that bypassed users are never blocked
+// by a User-Agent ban.
+func (sm *SessionManager) KickUsersByUserAgent(re *regexp.Regexp) (int, error) {
+	if re == nil {
+		return 0, fmt.Errorf("nil pattern")
+	}
+
+	sm.mu.RLock()
+	var sessionsToKick []string
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		userSessionID := session.UserSessionID
+		clientIP := session.ClientIP
+		bypassPassword := session.BypassPassword
+		session.mu.RUnlock()
+
+		if sm.config.Server.IsIPTimeoutBypassed(clientIP, bypassPassword) {
+			continue
+		}
+
+		userAgent := sm.userAgents[userSessionID]
+		if userAgent == "" {
+			continue
+		}
+		if re.MatchString(userAgent) {
+			sessionsToKick = append(sessionsToKick, session.ID)
+		}
+	}
+	sm.mu.RUnlock()
+
+	for _, sessionID := range sessionsToKick {
+		if err := sm.DestroySession(sessionID); err != nil {
+			log.Printf("Error kicking session %s: %v", sessionID, err)
+		}
+	}
+
+	log.Printf("Kicked users matching User-Agent pattern %s (%d session(s) destroyed)", re, len(sessionsToKick))
+	return len(sessionsToKick), nil
+}
+
+// GetActiveUserAgents returns the distinct User-Agent strings currently known
+// to the session manager, sorted. Used by the admin regex tester so operators
+// can try a pattern against real traffic before committing to a ban.
+func (sm *SessionManager) GetActiveUserAgents() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	seen := make(map[string]bool, len(sm.userAgents))
+	result := make([]string, 0, len(sm.userAgents))
+	for _, ua := range sm.userAgents {
+		if ua == "" || seen[ua] {
+			continue
+		}
+		seen[ua] = true
+		result = append(result, ua)
+	}
+
+	sort.Strings(result)
+	return result
 }
 
 // GetSampleRate returns the session's sample rate

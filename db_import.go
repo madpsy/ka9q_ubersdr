@@ -887,8 +887,8 @@ func (imp *DBImporter) importSessions(ctx context.Context) error {
 	const stmt = `INSERT OR IGNORE INTO sessions
 		(snapshot_ts, event_type, user_session_id, client_ip, source_ip,
 		 auth_method, session_types, bands, modes,
-		 created_at, first_seen, user_agent, country, country_code)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		 created_at, first_seen, user_agent, country, country_code, protocol)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	tx, err := imp.beginBatch(ctx)
 	if err != nil {
@@ -921,13 +921,19 @@ func (imp *DBImporter) importSessions(ctx context.Context) error {
 					firstSeen = entry.FirstSeen.Unix()
 				}
 
+				// Older JSONL has no protocol field; derive it from the ID prefix.
+				protocol := entry.Protocol
+				if protocol == "" {
+					protocol = protocolFromUserSessionID(entry.UserSessionID)
+				}
+
 				_, err := tx.ExecContext(ctx, stmt,
 					snapshotTS, logEntry.EventType,
 					entry.UserSessionID, entry.ClientIP, entry.SourceIP,
 					entry.AuthMethod,
 					string(sessionTypesJSON), string(bandsJSON), string(modesJSON),
 					createdAt, firstSeen,
-					entry.UserAgent, entry.Country, entry.CountryCode,
+					entry.UserAgent, entry.Country, entry.CountryCode, protocol,
 				)
 				if err != nil {
 					return err

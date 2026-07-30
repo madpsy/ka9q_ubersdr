@@ -45,6 +45,7 @@ type SessionActivityEntry struct {
 	UserAgent     string    `json:"user_agent,omitempty"`
 	Country       string    `json:"country,omitempty"`      // Country name from GeoIP lookup
 	CountryCode   string    `json:"country_code,omitempty"` // ISO country code from GeoIP lookup
+	Protocol      string    `json:"protocol,omitempty"`     // "native", "kiwi", "websdr"
 }
 
 // SessionActivityLog represents a snapshot of all active sessions at a point in time
@@ -277,8 +278,8 @@ func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 			`INSERT INTO sessions
 			 (snapshot_ts, event_type, user_session_id, client_ip, source_ip,
 			  auth_method, session_types, bands, modes,
-			  created_at, first_seen, user_agent, country, country_code)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  created_at, first_seen, user_agent, country, country_code, protocol)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			logEntry.Timestamp.Unix(),
 			logEntry.EventType,
 			entry.UserSessionID,
@@ -293,6 +294,7 @@ func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 			entry.UserAgent,
 			entry.Country,
 			entry.CountryCode,
+			entry.Protocol,
 		)
 		if dbErr != nil {
 			log.Printf("[DB] sessions insert error: %v", dbErr)
@@ -317,6 +319,7 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 			UserSessionID: event.uuid,
 			Bands:         []string{},
 			Modes:         []string{},
+			Protocol:      protocolFromUserSessionID(event.uuid),
 		}
 
 		// Populate bands from event data
@@ -422,6 +425,7 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 				UserAgent:     userAgent,
 				Country:       country,
 				CountryCode:   countryCode,
+				Protocol:      protocolFromUserSessionID(userSessionID),
 			}
 			userSessions[userSessionID] = entry
 		}
@@ -515,7 +519,8 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 		`SELECT snapshot_ts, event_type,
 		        user_session_id, client_ip, source_ip, auth_method,
 		        session_types, bands, modes,
-		        created_at, first_seen, user_agent, country, country_code
+		        created_at, first_seen, user_agent, country, country_code,
+		        COALESCE(protocol, '')
 		 FROM sessions
 		 WHERE snapshot_ts >= ? AND snapshot_ts <= ?
 		 ORDER BY snapshot_ts ASC`,
@@ -538,13 +543,14 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 		var snapshotTS, createdAt, firstSeen int64
 		var eventType, userSessionID, clientIP, sourceIP, authMethod string
 		var sessionTypesJSON, bandsJSON, modesJSON string
-		var userAgent, country, countryCode string
+		var userAgent, country, countryCode, protocol string
 
 		if err := rows.Scan(
 			&snapshotTS, &eventType,
 			&userSessionID, &clientIP, &sourceIP, &authMethod,
 			&sessionTypesJSON, &bandsJSON, &modesJSON,
 			&createdAt, &firstSeen, &userAgent, &country, &countryCode,
+			&protocol,
 		); err != nil {
 			return nil, fmt.Errorf("sessions scan error: %w", err)
 		}
@@ -584,6 +590,12 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 			UserAgent:     userAgent,
 			Country:       country,
 			CountryCode:   countryCode,
+			Protocol:      protocol,
+		}
+		// Rows written before the protocol column existed have no value stored;
+		// fall back to the session-ID prefix so readers always see a protocol.
+		if entry.Protocol == "" {
+			entry.Protocol = protocolFromUserSessionID(userSessionID)
 		}
 		if createdAt != 0 {
 			entry.CreatedAt = time.Unix(createdAt, 0).UTC()

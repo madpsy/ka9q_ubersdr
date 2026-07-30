@@ -85,55 +85,10 @@ type ModeInfo struct {
 
 // GetModeInfo returns the mode information for a given decoder mode
 func GetModeInfo(mode DecoderMode) ModeInfo {
-	switch mode {
-	case ModeWSPR:
-		return ModeInfo{
-			CycleTime:        120 * time.Second,
-			TransmissionTime: 114 * time.Second,
-			DecoderCommand:   "wsprd",
-			DecoderArgs:      []string{"-f", "{freq}", "-C", "{depth}", "-w", "{file}"},
-			Preset:           "usb",
-			IsStreaming:      false,
-		}
-	case ModeFT8:
-		return ModeInfo{
-			CycleTime:        0, // No fixed cycles for streaming mode
-			TransmissionTime: 0,
-			DecoderCommand:   "jt9_wrapper",
-			DecoderArgs:      []string{"-m", "FT8", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
-			Preset:           "usb",
-			IsStreaming:      true,
-		}
-	case ModeFT4:
-		return ModeInfo{
-			CycleTime:        0, // No fixed cycles for streaming mode
-			TransmissionTime: 0,
-			DecoderCommand:   "jt9_wrapper",
-			DecoderArgs:      []string{"-m", "FT4", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
-			Preset:           "usb",
-			IsStreaming:      true,
-		}
-	case ModeJS8:
-		return ModeInfo{
-			CycleTime:        0, // No fixed cycles for streaming mode
-			TransmissionTime: 0,
-			DecoderCommand:   "js8",
-			DecoderArgs:      []string{"--stdin", "-d", "{depth}"},
-			Preset:           "usb",
-			IsStreaming:      true,
-		}
-	case ModeFT2:
-		return ModeInfo{
-			CycleTime:        0, // No fixed cycles for streaming mode
-			TransmissionTime: 0,
-			DecoderCommand:   "jt9_wrapper",
-			DecoderArgs:      []string{"-m", "FT2", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
-			Preset:           "usb",
-			IsStreaming:      true,
-		}
-	default:
-		return ModeInfo{}
+	if plugin, ok := defaultDecoderPlugins.Lookup(mode); ok {
+		return plugin.ModeInfo()
 	}
+	return ModeInfo{}
 }
 
 // DecoderBandConfig represents a single band configuration for decoding

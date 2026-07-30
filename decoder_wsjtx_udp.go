@@ -375,9 +375,11 @@ func (w *WSJTXUDPBroadcaster) heartbeatLoop() {
 	for {
 		select {
 		case <-w.heartbeatTicker.C:
-			if err := w.sendHeartbeat(); err != nil {
-				log.Printf("WSJT-X UDP: Failed to send heartbeat: %v", err)
-			}
+			// Errors are deliberately not logged: with no WSJT-X client
+			// listening, every heartbeat draws an ICMP port-unreachable
+			// ("connection refused") on the connected UDP socket, which is
+			// expected and would otherwise repeat forever.
+			_ = w.sendHeartbeat()
 		case <-w.stopChan:
 			return
 		}

@@ -391,7 +391,6 @@ type ServerConfig struct {
 	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)
 	containerNameByIP               map[string]string    // Reverse map: IP -> container name (internal use)
 	containerProxyMu                sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
-	containerResolveErrLastLog      map[string]time.Time // Rate-limit resolve error logging per container name
 	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
 	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 	widgetResolveNames              []string             // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
@@ -1774,16 +1773,12 @@ func (sc *ServerConfig) IsContainerIP(ipStr, containerName string) bool {
 // The containers "tunnel-support-client", "tunnel-client", and "caddy" are always
 // trusted regardless of what is in TrustedContainers; any user-configured names
 // are merged in (duplicates are deduplicated).
-// Logs a warning on resolution failure.
+// Resolution failures are not logged: a container that is not running (or a
+// Docker embedded-DNS hiccup) is an expected, self-healing condition that the
+// 5-second refresh retries anyway.
 func (sc *ServerConfig) resolveContainerIPs() {
 	// Always-trusted built-in container names.
 	builtIn := []string{"tunnel-support-client", "tunnel-client", "caddy"}
-
-	// Build a set of built-in names so we can suppress warnings for them.
-	builtInSet := make(map[string]bool, len(builtIn))
-	for _, n := range builtIn {
-		builtInSet[n] = true
-	}
 
 	// Merge built-ins with user-configured names, deduplicating.
 	seen := make(map[string]bool, len(builtIn)+len(sc.TrustedContainers))
@@ -1881,19 +1876,7 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		lookupOnly := lookupOnlySet[name]
 		ips, err := net.LookupHost(name)
 		if err != nil {
-			// Only warn for user-configured containers; built-ins (e.g. tunnel-support-client)
-			// may simply not be running, which is expected and not worth logging.
-			if !builtInSet[name] {
-				// Rate-limit resolve error logging to once per 5 minutes per container name.
-				now := time.Now()
-				if sc.containerResolveErrLastLog == nil {
-					sc.containerResolveErrLastLog = make(map[string]time.Time)
-				}
-				if last, ok := sc.containerResolveErrLastLog[name]; !ok || now.Sub(last) >= 5*time.Minute {
-					log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
-					sc.containerResolveErrLastLog[name] = now
-				}
-			}
+			// Not logged — a container that isn't running is an expected state.
 			// Fall back to previously resolved IPs for this name, if any.
 			if prev, ok := prevIPsByName[name]; ok && len(prev) > 0 {
 				results = append(results, result{name, prev, nil, true, lookupOnly})
@@ -1905,10 +1888,6 @@ func (sc *ServerConfig) resolveContainerIPs() {
 				results = append(results, result{name, nil, err, false, lookupOnly})
 			}
 			continue
-		}
-		// Clear the rate-limit entry on successful resolution.
-		if sc.containerResolveErrLastLog != nil {
-			delete(sc.containerResolveErrLastLog, name)
 		}
 		results = append(results, result{name, ips, nil, false, lookupOnly})
 		// Lookup-only names are resolved into the name→IP map (below) but are

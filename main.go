@@ -2403,6 +2403,9 @@ func main() {
 		if multiDecoder != nil {
 			mqttPublisher.SetMultiDecoder(multiDecoder)
 		}
+		if globalQRZService != nil {
+			globalQRZService.SetLookupCallback(mqttPublisher.PublishQRZLookup)
+		}
 	}
 
 	// Wire rotator notifications — fires RotatorEvent on moving-state transitions.

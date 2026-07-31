@@ -432,6 +432,15 @@ type QRZService struct {
 	// images).  Called with cacheMu held — must not re-acquire it.
 	onEvict func(cs *QRZCallsign)
 
+	// onLookupMu guards onLookup below.
+	onLookupMu sync.RWMutex
+	// onLookup is called (if non-nil) after every completed Lookup() —
+	// cache hit or fresh network fetch alike — with the normalised callsign
+	// and the result (nil if not found in the QRZ database). Used to publish
+	// every lookup made by the app (public API, CW Skimmer, voice activity,
+	// Telegram bot...) to MQTT.
+	onLookup func(call string, cs *QRZCallsign)
+
 	// sf deduplicates concurrent in-flight lookups for the same callsign.
 	// When N goroutines all miss the cache for the same key simultaneously,
 	// only one HTTP request is made to QRZ; the rest wait and share the result.
@@ -469,6 +478,18 @@ type QRZService struct {
 	// finer-grained breakdown of the CURRENT hour in the admin lookup-stats
 	// API. Incremented alongside apiCallStats in fetchCallsign.
 	apiCallMinuteStats qrzMinuteStats
+
+	// dailyCountMu guards dailyCount/dailyCountAt below.
+	dailyCountMu sync.Mutex
+	// dailyCount is the most recent value QRZ itself reported in the <Count>
+	// field of the Session block: QRZ's own authoritative count of lookups
+	// made on this account in the current rolling 24h period, as tracked by
+	// QRZ's billing system. This is distinct from apiCallStats, which only
+	// counts calls made by this process since it started. Since these
+	// credentials are only ever used by this service, the last value seen is
+	// always up to date — see setDailyCount.
+	dailyCount   int
+	dailyCountAt time.Time
 
 	httpClient *http.Client
 }
@@ -591,6 +612,7 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	if cs, hit := s.cacheGet(call); hit {
 		s.apiCallStats.recordHit()
 		s.apiCallMinuteStats.recordHit()
+		s.notifyLookup(call, cs)
 		return cs, nil
 	}
 
@@ -651,7 +673,9 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 		return nil, err
 	}
 
-	return v.(*lookupResult).cs, nil
+	cs := v.(*lookupResult).cs
+	s.notifyLookup(call, cs)
+	return cs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -743,6 +767,51 @@ func (s *QRZService) SetEvictCallback(fn func(cs *QRZCallsign)) {
 	s.cacheMu.Lock()
 	s.onEvict = fn
 	s.cacheMu.Unlock()
+}
+
+// SetLookupCallback registers a function to be called after every completed
+// Lookup() — cache hit or fresh network fetch alike — with the normalised
+// callsign and the result (nil if not found in the QRZ database).  Safe to
+// call at any time; replaces any previously registered callback.
+func (s *QRZService) SetLookupCallback(fn func(call string, cs *QRZCallsign)) {
+	s.onLookupMu.Lock()
+	s.onLookup = fn
+	s.onLookupMu.Unlock()
+}
+
+// notifyLookup invokes the registered lookup callback, if any.
+func (s *QRZService) notifyLookup(call string, cs *QRZCallsign) {
+	s.onLookupMu.RLock()
+	fn := s.onLookup
+	s.onLookupMu.RUnlock()
+	if fn != nil {
+		fn(call, cs)
+	}
+}
+
+// setDailyCount records the most recent QRZ-reported daily lookup count (the
+// <Count> field of the Session block).  Guards against overwriting a known
+// value with a zero count from a response that omitted the field entirely,
+// rather than genuinely reporting zero.
+func (s *QRZService) setDailyCount(count int) {
+	if count <= 0 {
+		return
+	}
+	s.dailyCountMu.Lock()
+	s.dailyCount = count
+	s.dailyCountAt = time.Now()
+	s.dailyCountMu.Unlock()
+}
+
+// DailyLookupCount returns the most recent lookup count QRZ itself reported
+// (via the <Count> field of the Session block) for the current 24h period,
+// and when it was last updated. found is false if no QRZ response has
+// included a Count yet. Since these credentials are only ever used by this
+// service, the last value seen is always up to date.
+func (s *QRZService) DailyLookupCount() (count int, updatedAt time.Time, found bool) {
+	s.dailyCountMu.Lock()
+	defer s.dailyCountMu.Unlock()
+	return s.dailyCount, s.dailyCountAt, !s.dailyCountAt.IsZero()
 }
 
 // CacheSize returns the number of entries currently in the cache.
@@ -1037,6 +1106,10 @@ func (s *QRZService) fetchCallsign(call, sessionKey string) (*QRZCallsign, bool,
 	var db qrzDatabase
 	if err := xml.Unmarshal(body, &db); err != nil {
 		return nil, false, fmt.Errorf("qrz: parsing lookup response: %w", err)
+	}
+
+	if db.Session != nil {
+		s.setDailyCount(db.Session.Count)
 	}
 
 	if db.Session != nil && db.Session.Error != "" {

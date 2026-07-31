@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"time"
 )
 
 // lookup_stats_api.go — admin API for QRZ callsign-lookup volume/cache stats.
@@ -31,6 +32,8 @@ type lookupStatsResponse struct {
 	CacheMaxSize       int             `json:"cache_max_size"`                 // configured cache size cap (0 = unlimited)
 	ImageCacheSize     int             `json:"image_cache_size"`               // current number of cached proxied images
 	ImageCacheMaxSize  int             `json:"image_cache_max_size"`           // configured image cache size cap (0 = unlimited)
+	QRZDailyCount      int             `json:"qrz_daily_count,omitempty"`      // QRZ's own reported lookup count for the current 24h period (the <Count> field); absent until the first successful lookup
+	QRZDailyCountAt    string          `json:"qrz_daily_count_at,omitempty"`   // RFC3339 timestamp of when QRZ last reported qrz_daily_count
 }
 
 // handleLookupStats handles GET /admin/lookup/stats.
@@ -66,6 +69,10 @@ func handleLookupStats(w http.ResponseWriter, r *http.Request, cfg *Config) {
 	if globalImageProxy != nil {
 		resp.ImageCacheSize = globalImageProxy.CacheSize()
 		resp.ImageCacheMaxSize = globalImageProxy.CacheMaxSize()
+	}
+	if count, at, ok := globalQRZService.DailyLookupCount(); ok {
+		resp.QRZDailyCount = count
+		resp.QRZDailyCountAt = at.UTC().Format(time.RFC3339)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

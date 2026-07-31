@@ -387,6 +387,11 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 		go mp.startDSPHealthPublisher(ctx, appConfig)
 	}
 
+	// QRZ lookup stats publisher — only when the QRZ lookup service is configured.
+	if globalQRZService != nil {
+		go mp.startQRZLookupStatsPublisher(ctx)
+	}
+
 	// WSPR phone prediction publisher is started by SetMultiDecoder (called after StartPublisher).
 }
 
@@ -1085,6 +1090,61 @@ func (mp *MQTTPublisher) PublishDXSpot(spot DXSpot) {
 	}()
 }
 
+// PublishQRZLookup publishes the result of a single QRZ callsign lookup to
+// MQTT — one message per completed QRZService.Lookup() call (cache hit or
+// fresh network fetch alike), covering every lookup made anywhere in the app
+// (public /api/lookup requests, CW Skimmer spot enrichment, voice-activity DX
+// enrichment, Telegram bot commands...).
+//
+// Topic: {prefix}/qrz_lookup/{call} — call is the normalised callsign that
+// was looked up, so subscribers can filter or route per callsign.
+//
+// On a match the payload is the raw QRZCallsign JSON, the same shape as the
+// public /api/lookup response (PII fields such as email/street address/zip
+// are already excluded via json:"-" on QRZCallsign). On a miss (callsign not
+// in the QRZ database) the payload is {"call": "...", "found": false} since
+// there is no QRZ data to publish.
+//
+// Not retained: callsigns are an unbounded key space (unlike e.g. band in
+// PublishDXSpot), so retaining would leave the broker holding a message per
+// distinct callsign ever looked up, forever.
+func (mp *MQTTPublisher) PublishQRZLookup(call string, cs *QRZCallsign) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	var (
+		data []byte
+		err  error
+	)
+	if cs != nil {
+		data, err = json.Marshal(cs)
+	} else {
+		data, err = json.Marshal(map[string]interface{}{
+			"call":  call,
+			"found": false,
+		})
+	}
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal QRZ lookup payload: %v", err)
+		return
+	}
+
+	topic := fmt.Sprintf("%s/qrz_lookup/%s", mp.config.TopicPrefix, call)
+
+	token := mp.client.Publish(topic, mp.config.QoS, false, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish QRZ lookup to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
 // PublishCWSpot publishes a CW Skimmer spot to MQTT
 // Topic structure: {prefix}/cw_spots/{band}
 // Uses the same JSON format as websocket messages for consistency
@@ -1736,6 +1796,72 @@ func (mp *MQTTPublisher) publishSystemLoadOnce() {
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish system load to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startQRZLookupStatsPublisher publishes QRZ.com callsign-lookup health stats
+// every 60 seconds, mirroring the admin UI's "Callsign Lookup (QRZ)" monitor
+// section: our own 24h outbound-call/cache-hit counters plus QRZ's own
+// reported daily lookup count (the <Count> field), when known.
+// Topic: {prefix}/qrz_lookup_stats (retained — a single current-value sensor).
+func (mp *MQTTPublisher) startQRZLookupStatsPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: QRZ lookup stats publisher started (60s interval)")
+
+	mp.publishQRZLookupStatsOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: QRZ lookup stats publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishQRZLookupStatsOnce()
+		}
+	}
+}
+
+// publishQRZLookupStatsOnce performs a single QRZ lookup stats publish.
+func (mp *MQTTPublisher) publishQRZLookupStatsOnce() {
+	if !mp.isConnected() || globalQRZService == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"api_calls_24h":  globalQRZService.TotalAPICalls24h(),
+		"cache_hits_24h": globalQRZService.TotalCacheHits24h(),
+		"cache_size":     globalQRZService.CacheSize(),
+		"cache_max_size": globalQRZService.CacheMaxSize(),
+	}
+	if globalImageProxy != nil {
+		payload["image_cache_size"] = globalImageProxy.CacheSize()
+		payload["image_cache_max_size"] = globalImageProxy.CacheMaxSize()
+	}
+	if count, at, ok := globalQRZService.DailyLookupCount(); ok {
+		payload["qrz_daily_count"] = count
+		payload["qrz_daily_count_at"] = at.UTC().Format(time.RFC3339)
+	}
+
+	topic := fmt.Sprintf("%s/qrz_lookup_stats", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal QRZ lookup stats payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, 1, true, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish QRZ lookup stats to %s: %v", topic, token.Error())
 		} else {
 			mp.mu.Lock()
 			mp.messagesSent++

@@ -19988,6 +19988,11 @@ const tooltipLine2 = timeStr;
                                 <div style="font-size: 28px; font-weight: bold; color: #667eea;">${data.total_24h}</div>
                                 <div style="font-size: 12px; color: #666;">API Calls (24h)</div>
                             </div>
+                            ${data.qrz_daily_count ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 28px; font-weight: bold; color: #6f42c1;" title="QRZ.com's own reported lookup count for this account in the current 24h period (the API's Count field) — the authoritative figure for the account's daily lookup quota.">${data.qrz_daily_count}</div>
+                                <div style="font-size: 12px; color: #666;">QRZ Daily Count</div>
+                            </div>` : ''}
                             <div style="text-align: center;">
                                 <div style="font-size: 28px; font-weight: bold; color: #667eea;">${providerLabel}</div>
                                 <div style="font-size: 12px; color: #666;">Provider</div>

@@ -887,7 +887,6 @@ func (d *WhisperDecoder) resetTranscript() {
 	d.transcriptMu.Unlock()
 
 	d.clearEnglishSegments()
-	log.Printf("[Whisper] Transcript history reset")
 }
 
 // clearEnglishSegments clears all stored English segments

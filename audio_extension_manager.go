@@ -316,7 +316,6 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 		}
 
 		whisperExt.HandleControlMessage([]byte{0x07}, activeExtension.ResultChan)
-		log.Printf("AudioExtension: [%s] whisper transcript reset", sessionID)
 		return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
 			"type":         "audio_extension_control_ack",
 			"control_type": "reset_transcript",

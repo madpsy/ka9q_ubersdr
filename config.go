@@ -1767,6 +1767,12 @@ func (sc *ServerConfig) IsContainerIP(ipStr, containerName string) bool {
 	return sc.containerNameByIP[ip.String()] == containerName
 }
 
+// containerDNSLookupTimeout bounds each individual container-name DNS lookup
+// in resolveContainerIPs. Lookups run concurrently and are capped so that a
+// container which isn't running (or a slow/unreachable upstream resolver for
+// a name absent from the Docker network) can't stall the whole batch.
+const containerDNSLookupTimeout = 2 * time.Second
+
 // resolveContainerIPs performs a DNS lookup for each name in TrustedContainers,
 // updates containerProxyIPs under the write lock, and logs whenever the resolved
 // set changes (including the initial resolution from empty).
@@ -1775,7 +1781,9 @@ func (sc *ServerConfig) IsContainerIP(ipStr, containerName string) bool {
 // are merged in (duplicates are deduplicated).
 // Resolution failures are not logged: a container that is not running (or a
 // Docker embedded-DNS hiccup) is an expected, self-healing condition that the
-// 5-second refresh retries anyway.
+// 5-second refresh retries anyway. Lookups run concurrently, each bounded by
+// containerDNSLookupTimeout, so one absent/slow name can never delay detection
+// of the others.
 func (sc *ServerConfig) resolveContainerIPs() {
 	// Always-trusted built-in container names.
 	builtIn := []string{"tunnel-support-client", "tunnel-client", "caddy"}
@@ -1870,30 +1878,51 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		fallback   bool // true if using cached IPs from a previous successful resolve
 		lookupOnly bool // true if resolved for lookups only (NOT added to the trusted-proxy IP set)
 	}
+
+	// Look up every name concurrently, each bounded by its own short timeout.
+	// A container that isn't running (or a slow/unreachable upstream resolver
+	// for names that aren't found on the Docker network) must never stall
+	// resolution of the OTHER names — this used to be a sequential loop with
+	// no per-lookup timeout, so one slow name could delay trusted-container
+	// detection (and therefore e.g. widget-admin auth) for minutes.
+	var resolver net.Resolver
+	rawResults := make([]result, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			lookupOnly := lookupOnlySet[name]
+			ctx, cancel := context.WithTimeout(context.Background(), containerDNSLookupTimeout)
+			defer cancel()
+			ips, err := resolver.LookupHost(ctx, name)
+			rawResults[i] = result{name: name, ips: ips, err: err, lookupOnly: lookupOnly}
+		}(i, name)
+	}
+	wg.Wait()
+
 	results := make([]result, 0, len(names))
 	var resolved []string
-	for _, name := range names {
-		lookupOnly := lookupOnlySet[name]
-		ips, err := net.LookupHost(name)
-		if err != nil {
+	for _, r := range rawResults {
+		if r.err != nil {
 			// Not logged — a container that isn't running is an expected state.
 			// Fall back to previously resolved IPs for this name, if any.
-			if prev, ok := prevIPsByName[name]; ok && len(prev) > 0 {
-				results = append(results, result{name, prev, nil, true, lookupOnly})
+			if prev, ok := prevIPsByName[r.name]; ok && len(prev) > 0 {
+				results = append(results, result{r.name, prev, nil, true, r.lookupOnly})
 				// Lookup-only names are NOT trusted as proxies — skip the resolved set.
-				if !lookupOnly {
+				if !r.lookupOnly {
 					resolved = append(resolved, prev...)
 				}
 			} else {
-				results = append(results, result{name, nil, err, false, lookupOnly})
+				results = append(results, result{r.name, nil, r.err, false, r.lookupOnly})
 			}
 			continue
 		}
-		results = append(results, result{name, ips, nil, false, lookupOnly})
+		results = append(results, r)
 		// Lookup-only names are resolved into the name→IP map (below) but are
 		// deliberately excluded from the trusted-proxy IP set (resolved).
-		if !lookupOnly {
-			resolved = append(resolved, ips...)
+		if !r.lookupOnly {
+			resolved = append(resolved, r.ips...)
 		}
 	}
 

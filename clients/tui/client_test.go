@@ -362,7 +362,7 @@ func TestWaterfallRingBuffer(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		w.Push([]float32{float32(i)}, 0, 1000)
+		w.Push([]float32{float32(i)}, 0, 1000, -120, -20)
 	}
 	if w.Len() != 5 {
 		t.Errorf("Len = %d, want 5", w.Len())
@@ -383,7 +383,7 @@ func TestWaterfallRingBuffer(t *testing.T) {
 
 	// Overflowing the ring must evict the oldest rows, not grow or corrupt.
 	for i := 0; i < maxWaterfallRows+50; i++ {
-		w.Push([]float32{float32(i)}, 0, 1000)
+		w.Push([]float32{float32(i)}, 0, 1000, -120, -20)
 	}
 	if w.Len() != maxWaterfallRows {
 		t.Errorf("Len after overflow = %d, want %d", w.Len(), maxWaterfallRows)
@@ -398,7 +398,7 @@ func TestWaterfallPushCopiesBins(t *testing.T) {
 	// The caller reuses its frame buffer, so stored rows must not alias it.
 	w := NewWaterfall()
 	buf := []float32{1, 2, 3}
-	w.Push(buf, 0, 1000)
+	w.Push(buf, 0, 1000, -120, -20)
 	buf[0] = 99
 
 	row, _ := w.Row(0)

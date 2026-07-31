@@ -32,9 +32,18 @@ type SpectrumConfig struct {
 
 // Frame is one decoded spectrum update, with bins already unwrapped from FFT
 // order into ascending frequency order.
+//
+// Center and Span describe the frequency range this particular frame covers.
+// They are resolved here, on the receive path, because that is the only place
+// where a frame's ordering relative to the config messages is still known: the
+// UI consumes frames and configs from separate channels, so pairing a frame
+// with "the latest config" there mis-stamps every frame that is in flight
+// while the view is being panned or zoomed.
 type Frame struct {
 	Bins      []float32
 	Timestamp int64
+	Center    float64
+	Span      float64
 }
 
 // Client speaks the /ws/user-spectrum protocol. It handles both the binary
@@ -292,11 +301,19 @@ func (c *Client) handleJSON(data []byte) error {
 		var msg struct {
 			Data      []float32 `json:"data"`
 			Timestamp int64     `json:"timestamp"`
+			Frequency float64   `json:"frequency"`
 		}
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return fmt.Errorf("bad spectrum: %w", err)
 		}
-		c.emit(unwrapFFT(msg.Data), msg.Timestamp)
+		c.mu.Lock()
+		center := msg.Frequency
+		if center == 0 {
+			center = c.cfg.CenterFreq // older servers omit it
+		}
+		span := c.spanForLocked(len(msg.Data))
+		c.mu.Unlock()
+		c.emit(unwrapFFT(msg.Data), msg.Timestamp, center, span)
 
 	case "error":
 		if probe.Error != "" {
@@ -323,6 +340,10 @@ func (c *Client) handleBinarySpectrum(msg []byte) error {
 
 	flags := msg[5]
 	timestamp := int64(binary.LittleEndian.Uint64(msg[6:14]))
+	// The server stamps every frame with the centre frequency it was captured
+	// at (session.Frequency), which is authoritative for this frame even when a
+	// pan is in flight and the config message has not caught up.
+	frameCenter := float64(binary.LittleEndian.Uint64(msg[14:22]))
 	payload := msg[22:]
 
 	c.mu.Lock()
@@ -390,8 +411,19 @@ func (c *Client) handleBinarySpectrum(msg []byte) error {
 		return fmt.Errorf("unknown binary flags 0x%02x", flags)
 	}
 
-	c.emitLocked(unwrapFFT(bins), timestamp)
+	c.emitLocked(unwrapFFT(bins), timestamp, frameCenter, c.spanForLocked(len(bins)))
 	return nil
+}
+
+// spanForLocked derives this frame's width from the bin bandwidth in force when
+// it was parsed. Messages are handled in arrival order, so c.cfg here is the
+// config that actually applies to the frame — unlike the UI's view of it.
+// Callers must hold c.mu.
+func (c *Client) spanForLocked(binCount int) float64 {
+	if c.cfg.BinBandwidth > 0 && binCount > 0 {
+		return c.cfg.BinBandwidth * float64(binCount)
+	}
+	return c.cfg.TotalBandwidth
 }
 
 func u8ToDB(src []uint8) []float32 {
@@ -416,17 +448,17 @@ func unwrapFFT(bins []float32) []float32 {
 	return out
 }
 
-func (c *Client) emit(bins []float32, ts int64) {
+func (c *Client) emit(bins []float32, ts int64, center, span float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.emitLocked(bins, ts)
+	c.emitLocked(bins, ts, center, span)
 }
 
 // emitLocked drops the frame rather than blocking when the UI is behind —
 // spectrum data is only useful live, so the newest frame always wins.
-func (c *Client) emitLocked(bins []float32, ts int64) {
+func (c *Client) emitLocked(bins []float32, ts int64, center, span float64) {
 	select {
-	case c.Frames <- Frame{Bins: bins, Timestamp: ts}:
+	case c.Frames <- Frame{Bins: bins, Timestamp: ts, Center: center, Span: span}:
 	default:
 	}
 }

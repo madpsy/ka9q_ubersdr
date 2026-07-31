@@ -22,11 +22,6 @@ var brailleDots = [4][2]rune{
 
 const brailleBase = 0x2800
 
-// upperHalf lets one cell show two vertically stacked colours: the foreground
-// paints the top half and the background the bottom, doubling waterfall
-// resolution.
-const upperHalf = '▀'
-
 type ViewMode int
 
 const (
@@ -192,6 +187,10 @@ func NewUI(server string) *UI {
 		cursorX:    -1,
 		cursorY:    -1,
 		stepIdx:    3, // 1 kHz
+		// Braille resolves twice as many bins per screen width as block bars,
+		// which matters far more than the bars' extra vertical steps when a
+		// receiver sends 2048 bins into ~200 columns.
+		braille: true,
 	}
 }
 
@@ -213,12 +212,38 @@ func (u *UI) Reset() {
 
 // SetFrame stores the newest bins, updates peak hold, and appends a waterfall
 // line tagged with the frequency range it was captured over.
-func (u *UI) SetFrame(bins []float32) {
+//
+// center and span come from the frame itself, not from the UI's current config.
+// Using the config here would mis-stamp every frame still in flight while the
+// view is panning or zooming, and those rows then render at the wrong
+// frequencies — appearing as displaced blocks that scroll up with the history.
+// Pass 0 for either to fall back to the current view.
+func (u *UI) SetFrame(bins []float32, center, span float64) {
 	u.bins = bins
 
-	start, span := u.viewRange()
+	// Re-range here rather than in Draw: the window must advance once per
+	// frame. Doing it per draw made the easing rate depend on how often the UI
+	// happened to repaint — mouse movement alone would drive the scale.
+	u.autoRange()
+
+	if center <= 0 || span <= 0 {
+		center, span = u.cfg.CenterFreq, u.cfg.TotalBandwidth
+	}
 	if span > 0 {
-		u.wf.Push(bins, start, span)
+		// A change of span makes the stored history incomparable. Rows are
+		// anchored to the frequencies they were captured at, so after zooming
+		// out they are squeezed into the sliver of screen their old span now
+		// occupies — 200 kHz of history lands in about two columns of a 30 MHz
+		// view, drawing a bright vertical line through the whole history that
+		// looks like a signal which was never there. Panning keeps history,
+		// where the anchoring is exactly what makes old rows line up; zooming
+		// restarts it.
+		if last, ok := u.wf.Row(0); ok && math.Abs(last.span-span) > span*0.01 {
+			u.wf.Clear()
+		}
+		// The row keeps the window it was captured under, so it never gets
+		// repainted by later changes to the scale.
+		u.wf.Push(bins, center-span/2, span, u.minDB, u.maxDB)
 	}
 
 	if !u.showPeaks {
@@ -299,7 +324,6 @@ func (u *UI) Draw(s tcell.Screen) {
 	l := computeLayout(w, h, u.mode, u.splitRatio)
 
 	s.Clear()
-	u.autoRange()
 	u.lastCols = columnPeaks(u.bins, l.PlotW)
 
 	u.drawHeader(s, l)
@@ -467,44 +491,39 @@ func (u *UI) drawBars(s tcell.Screen, l Layout) {
 	}
 }
 
-// drawBraille renders the trace as a line at 2x horizontal and 4x vertical
-// sub-cell resolution — more detail than block bars, but it needs a font with
-// braille glyphs.
+// drawBraille renders the spectrum at 2x horizontal and 4x vertical sub-cell
+// resolution, filled from the trace down to the baseline. The horizontal
+// doubling is the point: it halves how many bins are collapsed into each screen
+// position compared with one bar per character cell.
+//
+// It needs a font with braille glyphs, which is near-universal in monospace
+// fonts; `b` switches to block bars if a terminal lacks them.
 func (u *UI) drawBraille(s tcell.Screen, l Layout) {
 	pxW := l.PlotW * 2
 	pxH := l.SpecH * 4
 	cols := columnPeaks(u.bins, pxW)
 	cells := make([]rune, l.PlotW*l.SpecH)
 
-	prevY := -1
 	for px, db := range cols {
 		if math.IsInf(db, -1) {
 			continue
 		}
-		py := pxH - 1 - int(u.norm(db)*float64(pxH-1))
-		py = clampInt(py, 0, pxH-1)
+		top := pxH - 1 - int(u.norm(db)*float64(pxH-1))
+		top = clampInt(top, 0, pxH-1)
 
-		// Join to the previous sample so steep edges stay connected rather
-		// than breaking into isolated dots.
-		from, to := py, py
-		if prevY >= 0 {
-			if prevY < py {
-				from = prevY + 1
-			} else if prevY > py {
-				to = prevY - 1
-			}
+		cx := px / 2
+		if cx >= l.PlotW {
+			continue
 		}
-		if from > to {
-			from, to = to, from
-		}
-		for y := from; y <= to; y++ {
-			cx, cy := px/2, y/4
-			if cx >= l.PlotW || cy >= l.SpecH {
-				continue
+		// Fill from the trace down to the baseline so the spectrum reads as a
+		// solid shape rather than a thin line.
+		for y := top; y < pxH; y++ {
+			cy := y / 4
+			if cy >= l.SpecH {
+				break
 			}
 			cells[cy*l.PlotW+cx] |= brailleDots[y%4][px%2]
 		}
-		prevY = py
 	}
 
 	for cy := 0; cy < l.SpecH; cy++ {
@@ -520,51 +539,62 @@ func (u *UI) drawBraille(s tcell.Screen, l Layout) {
 	}
 }
 
-// drawWaterfall paints history newest-at-top, packing two time steps into each
-// character cell via the upper-half block.
+// drawWaterfall paints history newest-at-top, one time step per character row,
+// with two frequency samples packed into each cell as an exact left/right pair.
 func (u *UI) drawWaterfall(s tcell.Screen, l Layout) {
 	if u.wf.Len() == 0 {
 		return
 	}
-
-	// Frequency per column for the current view, resolved once and reused for
-	// every history row.
-	freqs := make([]float64, l.PlotW)
-	for i := range freqs {
-		freqs[i] = u.FreqAt(l, l.PlotX+i)
+	start, span := u.viewRange()
+	if span <= 0 {
+		return
 	}
 
-	black := tcell.NewRGBColor(0, 0, 0)
+	// Frequency span covered by each sub-column, resolved once and reused for
+	// every row. Each sub-column aggregates the bins it covers rather than
+	// point sampling one of them, so no signal in the range is dropped.
+	subW := l.PlotW * 2
+	subStep := span / float64(subW)
+
+	// In auto mode each row is coloured with the window it was captured under,
+	// so scrolled-past history never changes appearance. In manual mode the
+	// user owns the window and it applies to everything, which is the point of
+	// setting it by hand.
+	sample := func(row wfRow, ok bool, lo float64) rgb {
+		if !ok {
+			return rgb{}
+		}
+		v, found := row.MeanBetween(lo, lo+subStep)
+		if !found {
+			return rgb{}
+		}
+		n := row.norm(float64(v))
+		if !u.autoScale || row.maxDB <= row.minDB {
+			n = u.norm(float64(v))
+		}
+		return lookup(&waterfallLUT, n)
+	}
 
 	for cy := 0; cy < l.WfH; cy++ {
-		topRow, topOK := u.wf.Row(cy * 2)
-		botRow, botOK := u.wf.Row(cy*2 + 1)
-		if !topOK && !botOK {
+		row, ok := u.wf.Row(cy)
+		if !ok {
 			break
 		}
 
 		y := l.WfY + cy
-		for i, freq := range freqs {
-			top, bot := black, black
-			if topOK {
-				if v, ok := topRow.ValueAt(freq); ok {
-					top = u.waterfallColor(float64(v))
-				}
-			}
-			if botOK {
-				if v, ok := botRow.ValueAt(freq); ok {
-					bot = u.waterfallColor(float64(v))
-				}
-			}
-			s.SetContent(l.PlotX+i, y, upperHalf, nil,
-				tcell.StyleDefault.Foreground(top).Background(bot))
+		for cx := 0; cx < l.PlotW; cx++ {
+			loFreq := start + float64(cx*2)*subStep
+			left := sample(row, ok, loFreq)
+			right := sample(row, ok, loFreq+subStep)
+
+			// Exact: the glyph paints the left sub-column in the foreground
+			// and the right one in the background, with no approximation.
+			s.SetContent(l.PlotX+cx, y, leftHalf, nil,
+				tcell.StyleDefault.
+					Foreground(tcell.NewRGBColor(left.r, left.g, left.b)).
+					Background(tcell.NewRGBColor(right.r, right.g, right.b)))
 		}
 	}
-}
-
-func (u *UI) waterfallColor(db float64) tcell.Color {
-	r, g, b := interpolate(waterfallPalette, u.norm(db))
-	return tcell.NewRGBColor(r, g, b)
 }
 
 // drawMarker highlights the VFO column by recolouring its background, keeping
@@ -782,8 +812,8 @@ var spectrumPalette = []colorStop{
 }
 
 func rampColor(f float64) tcell.Color {
-	r, g, b := interpolate(spectrumPalette, f)
-	return tcell.NewRGBColor(r, g, b)
+	c := lookup(&spectrumLUT, f)
+	return tcell.NewRGBColor(c.r, c.g, c.b)
 }
 
 // niceStep rounds a raw interval up to the nearest 1, 2 or 5 times a power of ten.

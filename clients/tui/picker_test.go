@@ -437,7 +437,7 @@ func TestPickerRendersEverySize(t *testing.T) {
 func TestUIResetClearsPerConnectionState(t *testing.T) {
 	ui := NewUI("old")
 	ui.cfg = SpectrumConfig{CenterFreq: 7e6, BinCount: 1024, TotalBandwidth: 200e3}
-	ui.SetFrame([]float32{-100, -50})
+	ui.SetFrame([]float32{-100, -50}, 0, 0)
 	ui.vfo = 7.1e6
 	ui.fps = 12
 	ui.haveRange = true

@@ -26,7 +26,7 @@ func main() {
 	password := flag.String("password", "", "optional bypass password")
 	freq := flag.Float64("freq", 0, "initial centre frequency in kHz (0 = server default)")
 	span := flag.Float64("span", 0, "initial span in kHz (0 = server default)")
-	braille := flag.Bool("braille", false, "draw a braille line trace instead of filled bars (higher resolution, needs braille glyphs)")
+	bars := flag.Bool("bars", false, "draw block bars instead of the higher-resolution braille spectrum")
 	view := flag.String("view", "split", "initial view: spectrum, waterfall or split")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -45,7 +45,7 @@ func main() {
 		password:    *password,
 		initialFreq: *freq * 1000,
 		initialSpan: *span * 1000,
-		braille:     *braille,
+		braille:     !*bars,
 		mode:        mode,
 	}
 	// An explicit -server connects straight away; otherwise the picker opens so
@@ -290,7 +290,7 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			dirty = true
 
 		case frame := <-frames:
-			e.ui.SetFrame(frame.Bins)
+			e.ui.SetFrame(frame.Bins, frame.Center, frame.Span)
 			e.ui.connected = true
 			now := time.Now()
 			if !e.lastFrame.IsZero() {
@@ -798,7 +798,7 @@ func onOff(b bool) string {
 
 func styleName(braille bool) string {
 	if braille {
-		return "braille trace"
+		return "braille (2x resolution)"
 	}
 	return "filled bars"
 }

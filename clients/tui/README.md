@@ -81,7 +81,7 @@ Or connect directly:
 | `-freq` | Initial centre frequency in kHz (0 = server default). |
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
-| `-braille` | Draw the trace with braille dots instead of filled bars. |
+| `-bars` | Draw block bars instead of the higher-resolution braille spectrum. |
 | `-version` | Print the version and exit. |
 
 ## Choosing a receiver
@@ -121,7 +121,7 @@ paging keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`. `Backspace` edits the sea
 | **Display** | |
 | `v` | cycle spectrum / waterfall / split |
 | `<` `>` | resize the split |
-| `b` | filled bars or braille trace |
+| `b` | braille (2x resolution) or block bars |
 | `p` | peak hold |
 | **Scaling** | |
 | `a` | auto / manual |
@@ -145,17 +145,67 @@ manual mode, since an explicit change would otherwise be overwritten
 immediately.
 
 **Waterfall.** Each history line records the frequency range it was captured
-over, so panning and zooming keeps old lines aligned under the frequency axis
-instead of smearing them sideways. Two time steps are packed into each
-character row using half-block glyphs.
+over, so **panning** keeps old lines aligned under the frequency axis instead of
+smearing them sideways. That range comes from the frame itself — the server
+stamps every frame with the centre frequency it was captured at — not from the
+client's current config. Frames and config messages arrive on separate channels,
+so pairing a frame with "the latest config" mis-stamps everything in flight
+while the view is moving.
 
-**Bars vs braille.** Filled bars give 8 vertical steps per row and a colour
-gradient, and work in any font. Braille gives 2× the horizontal and 4× the
-vertical resolution but needs a font with braille glyphs — use `b` to compare.
+**Zooming restarts the history**, because a change of span makes stored lines
+incomparable. Anchoring is what makes panning work, but after a zoom it squeezes
+old rows into whatever sliver of screen their original span now occupies —
+200 kHz of history lands in about two columns of a 30 MHz view, drawing a bright
+vertical stripe through the whole history that reads as a signal which was never
+there.
 
-**Decimation.** When there are more bins than columns, each column shows the
-*maximum* of the bins it covers, so narrow signals survive rather than being
-averaged into the noise.
+Each line also records the dB window it was captured under, and keeps it. Auto
+ranging moves that window continuously; colouring stored lines with the *current*
+window repaints the entire history every time it moves, so a carrier sitting
+just under the visibility threshold suddenly appears as a stripe running all the
+way back through time. Setting the scale by hand does re-colour history, which
+is the point of setting it by hand.
+
+Colour tracks the dB window, and the palette maps roughly 1 dB to a visible
+step, so a noise floor that varies a few dB bin to bin genuinely looks mottled.
+That is real data, not a rendering artifact.
+
+**Resolution.** A receiver sends far more bins than a terminal has columns —
+2048 bins into roughly 190 columns is about 11 bins per character cell. Both
+panes therefore sample at *sub-cell* resolution to halve that:
+
+- The spectrum uses braille, which packs 2×4 dots into a cell, filled from the
+  trace down to the baseline. This is the default; `b` switches to block bars,
+  which give finer vertical steps (8 per row) but only one sample per cell
+  horizontally. Braille needs a font with braille glyphs — near-universal in
+  monospace fonts, but `b` is the escape hatch.
+- The waterfall packs two horizontally adjacent samples into each cell with the
+  half-block glyph `▌`, the left sub-column in the foreground colour and the
+  right in the background. Two pixels is the most a cell can hold *exactly*,
+  since a cell has only those two colours.
+
+  An earlier version packed 2×2 pixels using the quadrant glyphs, approximating
+  four samples with two colours by splitting them into the two lowest-error
+  groups. That is fine on smooth images and wrong for a noise floor: among four
+  noisy samples there is always some largest gap, so it drew a hard two-colour
+  edge in essentially every cell — measured at ~100%, at every realistic noise
+  level — and re-rolled that pattern each frame as the display scrolled,
+  inventing blocky structure that was never in the data. Pairing horizontally
+  keeps the doubled frequency resolution and cannot invent anything, at one
+  time step per row instead of two.
+
+**Decimation.** Both panes aggregate: each sub-column shows the *maximum* of
+every bin it covers, so narrow signals survive rather than being averaged into
+the noise, and the two panes agree with each other.
+
+This matters more than it sounds. Point-sampling one bin per screen position —
+the obvious implementation — drops the other four or five, and *which* signals
+survive depends on where the sample happens to land on the bin grid. That
+mapping shifts whenever the view pans or zooms, so isolated cells light up and
+go dark essentially at random: the waterfall sparkles, and disagrees with the
+spectrum drawn directly above it. Sub-column ranges tile the bin array exactly,
+each bin covered once and none twice, so a single strong bin lights exactly one
+sub-column.
 
 **Zoom.** The server snaps every requested bin bandwidth to a fixed ladder
 (`0.5, 1, 2, 5, 10, 20, 50, 100, 200, 300, 500, 1000, 2000, 5000`, then

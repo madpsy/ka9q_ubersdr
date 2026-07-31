@@ -434,11 +434,11 @@ type QRZService struct {
 
 	// onLookupMu guards onLookup below.
 	onLookupMu sync.RWMutex
-	// onLookup is called (if non-nil) after every completed Lookup() —
-	// cache hit or fresh network fetch alike — with the normalised callsign
-	// and the result (nil if not found in the QRZ database). Used to publish
-	// every lookup made by the app (public API, CW Skimmer, voice activity,
-	// Telegram bot...) to MQTT.
+	// onLookup is called (if non-nil) after every genuine outbound QRZ.com
+	// fetch — NOT on cache hits or singleflight waiters — with the normalised
+	// callsign and the result (nil if not found in the QRZ database). Used to
+	// publish real QRZ.com traffic made by the app (public API, CW Skimmer,
+	// voice activity, Telegram bot...) to MQTT.
 	onLookup func(call string, cs *QRZCallsign)
 
 	// sf deduplicates concurrent in-flight lookups for the same callsign.
@@ -609,10 +609,13 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	// Fast path: cache hit (shared read lock, no singleflight overhead).
 	// cacheGet returns (result, true) on hit (result may be nil = cached not-found),
 	// and (nil, false) on miss.
+	//
+	// Deliberately does NOT call notifyLookup here — that callback drives the
+	// MQTT qrz_lookup publish, which should reflect genuine outbound QRZ.com
+	// traffic only, not cache hits (see the call site inside sf.Do below).
 	if cs, hit := s.cacheGet(call); hit {
 		s.apiCallStats.recordHit()
 		s.apiCallMinuteStats.recordHit()
-		s.notifyLookup(call, cs)
 		return cs, nil
 	}
 
@@ -640,7 +643,8 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	v, err, _ := s.sf.Do(call, func() (interface{}, error) {
 		// Re-check the cache inside the flight: a previous flight for this
 		// key may have just finished and populated the cache while we were
-		// waiting to enter sf.Do.
+		// waiting to enter sf.Do. This is still a cache hit, not a genuine
+		// fetch, so it does not notifyLookup.
 		if cs, hit := s.cacheGet(call); hit {
 			return &lookupResult{cs: cs}, nil
 		}
@@ -661,6 +665,12 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 		// Cache the result (even nil = "not found") to avoid hammering the API.
 		// Only the leader reaches here; waiters share this cached value.
 		s.cachePut(call, result)
+
+		// notifyLookup here — inside the closure — so it fires exactly once
+		// per genuine outbound QRZ.com request, regardless of how many
+		// goroutines are waiting on this singleflight (they all share this
+		// same result without re-entering the closure).
+		s.notifyLookup(call, result)
 		return &lookupResult{cs: result}, nil
 	})
 
@@ -673,9 +683,7 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 		return nil, err
 	}
 
-	cs := v.(*lookupResult).cs
-	s.notifyLookup(call, cs)
-	return cs, nil
+	return v.(*lookupResult).cs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -769,10 +777,11 @@ func (s *QRZService) SetEvictCallback(fn func(cs *QRZCallsign)) {
 	s.cacheMu.Unlock()
 }
 
-// SetLookupCallback registers a function to be called after every completed
-// Lookup() — cache hit or fresh network fetch alike — with the normalised
-// callsign and the result (nil if not found in the QRZ database).  Safe to
-// call at any time; replaces any previously registered callback.
+// SetLookupCallback registers a function to be called after every genuine
+// outbound QRZ.com fetch made by Lookup() — cache hits and singleflight
+// waiters do not trigger it — with the normalised callsign and the result
+// (nil if not found in the QRZ database).  Safe to call at any time; replaces
+// any previously registered callback.
 func (s *QRZService) SetLookupCallback(fn func(call string, cs *QRZCallsign)) {
 	s.onLookupMu.Lock()
 	s.onLookup = fn

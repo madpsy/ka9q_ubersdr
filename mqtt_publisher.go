@@ -1091,8 +1091,9 @@ func (mp *MQTTPublisher) PublishDXSpot(spot DXSpot) {
 }
 
 // PublishQRZLookup publishes the result of a single QRZ callsign lookup to
-// MQTT — one message per completed QRZService.Lookup() call (cache hit or
-// fresh network fetch alike), covering every lookup made anywhere in the app
+// MQTT — one message per genuine outbound QRZ.com fetch made via
+// QRZService.Lookup() (cache hits and singleflight waiters are excluded, see
+// QRZService.onLookup), covering every real lookup made anywhere in the app
 // (public /api/lookup requests, CW Skimmer spot enrichment, voice-activity DX
 // enrichment, Telegram bot commands...).
 //
@@ -1108,6 +1109,13 @@ func (mp *MQTTPublisher) PublishDXSpot(spot DXSpot) {
 // Not retained: callsigns are an unbounded key space (unlike e.g. band in
 // PublishDXSpot), so retaining would leave the broker holding a message per
 // distinct callsign ever looked up, forever.
+//
+// On a hit (cs != nil) this also republishes the same payload to the fixed,
+// retained {prefix}/qrz_lookup_latest topic — see publishQRZLookupLatest —
+// so a Home Assistant sensor can track "most recent callsign looked up"
+// without subscribing to the unbounded per-callsign topic space. Misses are
+// deliberately NOT pushed to that topic, so the dashboard keeps showing the
+// last known station rather than blanking out on every not-found lookup.
 func (mp *MQTTPublisher) PublishQRZLookup(call string, cs *QRZCallsign) {
 	if mp == nil || !mp.isConnected() {
 		return
@@ -1136,6 +1144,31 @@ func (mp *MQTTPublisher) PublishQRZLookup(call string, cs *QRZCallsign) {
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish QRZ lookup to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+
+	if cs != nil {
+		mp.publishQRZLookupLatest(data)
+	}
+}
+
+// publishQRZLookupLatest republishes an already-marshalled QRZCallsign
+// payload (see PublishQRZLookup) to the fixed, retained
+// {prefix}/qrz_lookup_latest topic. Retained so a Home Assistant sensor
+// always has a value immediately on (re)subscribe, without needing to wait
+// for the next genuine QRZ.com fetch.
+func (mp *MQTTPublisher) publishQRZLookupLatest(data []byte) {
+	topic := fmt.Sprintf("%s/qrz_lookup_latest", mp.config.TopicPrefix)
+
+	token := mp.client.Publish(topic, mp.config.QoS, true, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish QRZ lookup latest to %s: %v", topic, token.Error())
 		} else {
 			mp.mu.Lock()
 			mp.messagesSent++

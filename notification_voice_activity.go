@@ -65,13 +65,12 @@ func StartVoiceActivityNotifier(
 				for _, bandCfg := range nfm.config.NoiseFloor.Bands {
 					band := bandCfg.Name
 
+					// GetVoiceActivityForBand already enriches with DX cluster
+					// callsigns internally — no need to do it again here.
 					activities, err := GetVoiceActivityForBand(nfm, band, params)
 					if err != nil || len(activities) == 0 {
 						continue
 					}
-
-					// Enrich with DX cluster callsigns (same as the HTTP handler)
-					activities = enrichWithDXCallsigns(activities)
 
 					for _, act := range activities {
 						// 500 Hz bucket — same key strategy as VoiceActivityCache

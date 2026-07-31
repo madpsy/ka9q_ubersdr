@@ -354,6 +354,37 @@ func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
 		UnitOfMeasurement: "dB", StateClass: "measurement", Icon: "mdi:signal",
 	})
 
+	// --- Latest QRZ lookup, when the QRZ lookup service is configured ----
+	// State is the callsign itself; attributes carry the fields that matter
+	// for a dashboard card (operator name, country, grid, timezone, license
+	// class, QSL methods) plus entity_picture — the special HA attribute
+	// name the frontend renders as the entity's picture — pointed straight
+	// at QRZ's own CDN image URL. Not every callsign has every field (or a
+	// photo at all), so each is defaulted to '' rather than left undefined.
+	// Only updated on a genuine hit (see publishQRZLookupLatest), so the
+	// dashboard keeps showing the last known station rather than blanking
+	// out whenever a callsign isn't found in the QRZ database.
+	if globalQRZService != nil {
+		qrz := prefix + "/qrz_lookup_latest"
+		add(haEntity{
+			component: "sensor", Name: "Latest QRZ Lookup", ObjectID: "qrz_lookup_latest",
+			StateTopic: qrz, ValueTemplate: "{{ value_json.call }}",
+			Icon:                "mdi:card-account-details",
+			JSONAttributesTopic: qrz,
+			JSONAttributesTemplate: "{{ {" +
+				"'name': (value_json.name_fmt | default(value_json.name, true)) | default('', true), " +
+				"'country': value_json.country | default('', true), " +
+				"'grid': value_json.grid | default('', true), " +
+				"'timezone': value_json.tz_iana | default('', true), " +
+				"'dxcc': value_json.dxcc | default('', true), " +
+				"'class': value_json.class | default('', true), " +
+				"'lotw': value_json.lotw | default('', true), " +
+				"'eqsl': value_json.eqsl | default('', true), " +
+				"'url': value_json.url | default('', true), " +
+				"'entity_picture': value_json.image | default('', true)} | tojson }}",
+		})
+	}
+
 	// --- Frequency reference (GPSDO discipline), when enabled -------------
 	if appConfig.FrequencyReference.Enabled {
 		fr := prefix + "/frequency_reference"

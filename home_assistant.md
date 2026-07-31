@@ -110,13 +110,17 @@ a topic", enter `ubersdr/metrics/#`, and you should see live messages.
 ## Step 3 - Add the dashboard
 
 A ready-made dashboard is provided at
-[`homeassistant/ubersdr-dashboard.yaml`](homeassistant/ubersdr-dashboard.yaml).
+[`static/homeassistant/ubersdr-dashboard.yaml`](static/homeassistant/ubersdr-dashboard.yaml).
+It's also served directly by your running instance at
+`https://YOUR_SDR/homeassistant/ubersdr-dashboard.yaml` — the Admin -> Config ->
+MQTT section links to it (right click -> Save As, or Save Page As from a
+tab showing the raw YAML).
 
 1. Settings -> Dashboards -> **Add Dashboard** -> create a new empty dashboard.
 2. Open it, then top-right menu (three dots) -> **Edit Dashboard** -> menu (three
    dots) -> **Raw configuration editor**.
 3. Delete the placeholder content and paste the entire contents of
-   `homeassistant/ubersdr-dashboard.yaml`. Save.
+   `ubersdr-dashboard.yaml`. Save.
 
 The file is a complete dashboard (it defines `title:` and `views:`). To instead
 add it as a view on an existing dashboard, paste only the single item under
@@ -275,6 +279,7 @@ All entity IDs are prefixed `ubersdr_` and are the same on every instance.
 | `sensor.ubersdr_weather_condition` | Weather condition, e.g. Clouds/Rain, if weather configured |
 | `sensor.ubersdr_weather_description` | Detailed weather description, if weather configured |
 | `sensor.ubersdr_k_index_status` | Geomagnetic status (text) |
+| `sensor.ubersdr_qrz_lookup_latest` | Callsign of the most recent QRZ lookup hit (voice activity DX enrichment, CW Skimmer, public lookups, Telegram bot...), if `lookup_services.provider: qrz` is configured. Only updates on a hit, so it always shows the last known station rather than blanking out on a miss. Attributes: `name`, `country`, `grid`, `timezone`, `class`, `lotw`, `eqsl`, `url`, and `entity_picture` (QRZ's own photo URL, when the operator has one on file) |
 | `sensor.ubersdr_noisefloor_<band>_occupancy` | Band occupancy percent (per configured band) |
 | `sensor.ubersdr_noisefloor_<band>_ft8_snr` | Estimated FT8 SNR, dB (per configured band) |
 | `sensor.ubersdr_system_load_1m` | 1-minute system load |

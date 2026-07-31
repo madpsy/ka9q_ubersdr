@@ -5208,6 +5208,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         content.appendChild(infoDiv);
                     }
 
+                    // Add Home Assistant dashboard link for the mqtt section
+                    if (section === 'mqtt') {
+                        const haDashboardInfoDiv = document.createElement('div');
+                        haDashboardInfoDiv.className = 'alert alert-info';
+                        haDashboardInfoDiv.style.marginBottom = '15px';
+                        haDashboardInfoDiv.innerHTML = 'ℹ️ Enable <code>homeassistant_discovery</code> below, then import the ready-made ' +
+                            '<a href="/homeassistant/ubersdr-dashboard.yaml" download style="color: #0c5460; font-weight: bold; text-decoration: underline;">Home Assistant dashboard</a> ' +
+                            '(right click the link -&gt; Save Link As / Save As to download the YAML file). See ' +
+                            '<a href="https://github.com/madpsy/ka9q_ubersdr/blob/main/home_assistant.md" target="_blank" rel="noopener" style="color: #0c5460; font-weight: bold; text-decoration: underline;">home_assistant.md</a> for full setup instructions.';
+                        content.appendChild(haDashboardInfoDiv);
+                    }
+
                     // Add "Setup Rotator" button for rotctl section
                     if (section === 'rotctl') {
                         const setupButtonDiv = document.createElement('div');

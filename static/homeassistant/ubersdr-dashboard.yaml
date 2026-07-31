@@ -265,6 +265,61 @@ views:
               {%- endif %}
 
       # ================================================================
+      # LATEST QRZ LOOKUP (only when lookup_services.provider: qrz is
+      # configured). sensor.ubersdr_qrz_lookup_latest only updates on a
+      # genuine hit (see PublishQRZLookup / publishQRZLookupLatest in
+      # mqtt_publisher.go), so it always shows the last known station rather
+      # than blanking out on a lookup miss. The photo, when the operator has
+      # one on file, is QRZ's own CDN image - fetched directly by your
+      # browser/HA, not proxied through the receiver.
+      # ================================================================
+      - type: grid
+        cards:
+          - type: heading
+            heading: Latest QRZ Lookup
+            heading_style: title
+            icon: mdi:card-account-details
+
+          - type: markdown
+            grid_options:
+              columns: full
+            content: |-
+              {%- set e = 'sensor.ubersdr_qrz_lookup_latest' -%}
+              {%- set call = states(e) -%}
+              {%- if call in ['unknown', 'unavailable', ''] -%}
+              _No QRZ lookups yet._
+              {%- else -%}
+              {%- set name = state_attr(e, 'name') -%}
+              {%- set country = state_attr(e, 'country') -%}
+              {%- set grid = state_attr(e, 'grid') -%}
+              {%- set tz = state_attr(e, 'timezone') -%}
+              {%- set cls = state_attr(e, 'class') -%}
+              {%- set lotw = state_attr(e, 'lotw') -%}
+              {%- set eqsl = state_attr(e, 'eqsl') -%}
+              {%- set url = state_attr(e, 'url') -%}
+              {%- set pic = state_attr(e, 'entity_picture') -%}
+
+              ### {{ call }}{{ ' — ' ~ name if name else '' }}
+
+              {%- if pic %}
+              ![QRZ photo]({{ pic }})
+              {%- endif %}
+
+              {%- set parts = [] -%}
+              {%- if country %}{% set parts = parts + ['🌍 ' ~ country] %}{% endif %}
+              {%- if grid %}{% set parts = parts + ['📍 ' ~ grid] %}{% endif %}
+              {%- if tz %}{% set parts = parts + ['🕒 ' ~ tz] %}{% endif %}
+              {%- if cls %}{% set parts = parts + ['📜 Class ' ~ cls] %}{% endif %}
+              {%- if lotw == '1' %}{% set parts = parts + ['LoTW ✅'] %}{% endif %}
+              {%- if eqsl == '1' %}{% set parts = parts + ['eQSL ✅'] %}{% endif %}
+              {{ parts | join(' · ') }}
+              {%- if url %}
+
+              [QRZ profile]({{ url }})
+              {%- endif %}
+              {%- endif %}
+
+      # ================================================================
       # PROPAGATION & SPACE WEATHER - all four indices as gauges (2x2),
       # SNR tile pair, then the SFI trend. Single home for these numbers.
       # ================================================================

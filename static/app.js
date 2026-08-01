@@ -1021,6 +1021,7 @@ function _armModeConfirm() {
     _modeConfirmTimer = setTimeout(() => {
         _modeConfirmTimer = null;
         if (_pendingMode && wsManager.isConnected()) {
+            console.log('[mode] no confirmation for', _pendingMode, '- requesting status');
             wsManager.send({ type: 'get_status' });
         }
     }, MODE_CONFIRM_GRACE_MS);
@@ -1030,12 +1031,14 @@ function _noteModeRequested(mode) {
     _pendingMode = mode;
     _pendingModeSince = Date.now();
     _pendingModeRetries = 0;
+    console.log('[mode] requested', mode);
     _armModeConfirm();
 }
 
 function _reconcileMode(serverMode) {
     if (!serverMode || !_pendingMode) return;
     if (serverMode === _pendingMode) {   // applied
+        console.log('[mode] confirmed', serverMode);
         _pendingMode = null;
         _cancelModeConfirm();
         return;
@@ -1046,6 +1049,8 @@ function _reconcileMode(serverMode) {
     if (_pendingModeRetries < MODE_CONFIRM_MAX_RETRIES) {
         _pendingModeRetries++;
         _pendingModeSince = Date.now();
+        console.warn('[mode] server reports', serverMode, 'but requested',
+                     _pendingMode, '- resending tune (attempt', _pendingModeRetries + ')');
         log(`Mode still ${serverMode.toUpperCase()} after requesting ` +
             `${_pendingMode.toUpperCase()} - resending tune`, 'error');
         if (wsManager.isConnected()) tune();
@@ -1057,6 +1062,8 @@ function _reconcileMode(serverMode) {
     // buttons act on the real state and the next press is a genuine retry.
     log(`Mode change to ${_pendingMode.toUpperCase()} did not take - ` +
         `showing ${serverMode.toUpperCase()}`, 'error');
+    console.error('[mode] gave up - server stayed on', serverMode,
+                  'after requesting', _pendingMode);
     _pendingMode = null;
     _cancelModeConfirm();
     setMode(serverMode, true);

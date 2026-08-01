@@ -1001,17 +1001,43 @@ let _pendingModeSince = 0;
 let _pendingModeRetries = 0;
 const MODE_CONFIRM_GRACE_MS = 1500;  // server sleeps 500ms loading the preset
 const MODE_CONFIRM_MAX_RETRIES = 2;
+let _modeConfirmTimer = null;
+
+function _cancelModeConfirm() {
+    if (_modeConfirmTimer) {
+        clearTimeout(_modeConfirmTimer);
+        _modeConfirmTimer = null;
+    }
+}
+
+// The server only emits a status message when a tune actually changed
+// something (websocket.go, sendStatus inside the freq/mode/bandwidth branch).
+// A tune that never arrives, or one the server skips because it already
+// believes the mode is set, therefore produces no status at all — so waiting
+// for one to reconcile against never fires in exactly the cases that matter.
+// Ask for the status explicitly instead.
+function _armModeConfirm() {
+    _cancelModeConfirm();
+    _modeConfirmTimer = setTimeout(() => {
+        _modeConfirmTimer = null;
+        if (_pendingMode && wsManager.isConnected()) {
+            wsManager.send({ type: 'get_status' });
+        }
+    }, MODE_CONFIRM_GRACE_MS);
+}
 
 function _noteModeRequested(mode) {
     _pendingMode = mode;
     _pendingModeSince = Date.now();
     _pendingModeRetries = 0;
+    _armModeConfirm();
 }
 
 function _reconcileMode(serverMode) {
     if (!serverMode || !_pendingMode) return;
     if (serverMode === _pendingMode) {   // applied
         _pendingMode = null;
+        _cancelModeConfirm();
         return;
     }
     // Still settling — the server has not had time to report the new mode yet.
@@ -1023,6 +1049,7 @@ function _reconcileMode(serverMode) {
         log(`Mode still ${serverMode.toUpperCase()} after requesting ` +
             `${_pendingMode.toUpperCase()} - resending tune`, 'error');
         if (wsManager.isConnected()) tune();
+        _armModeConfirm();
         return;
     }
 
@@ -1031,6 +1058,7 @@ function _reconcileMode(serverMode) {
     log(`Mode change to ${_pendingMode.toUpperCase()} did not take - ` +
         `showing ${serverMode.toUpperCase()}`, 'error');
     _pendingMode = null;
+    _cancelModeConfirm();
     setMode(serverMode, true);
 }
 

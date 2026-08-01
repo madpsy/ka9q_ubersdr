@@ -38,7 +38,10 @@ func main() {
 	noDevice := flag.Bool("no-device", false, "do not open a sound device; useful with -stdout")
 	device := flag.String("device", "", "output device: an index from -device list, or part of its name (empty = system default)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	ipv4Only := flag.Bool("4", false, "IPv4 only: never dial a receiver or the directory over IPv6 (LAN discovery is always IPv4)")
 	flag.Parse()
+
+	forceIPv4 = *ipv4Only
 
 	if *showVersion {
 		fmt.Printf("ubersdr-tui %s\n", version)

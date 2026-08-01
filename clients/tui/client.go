@@ -130,6 +130,7 @@ func (c *Client) httpClient() *http.Client {
 			// Public instances behind self-signed certs are common in this
 			// project's deployments; the spectrum feed carries no secrets.
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext:     dialFunc(),
 		},
 	}
 }
@@ -337,6 +338,7 @@ func (c *Client) session(ctx context.Context, initialFreq, initialBinBW float64)
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 15 * time.Second
 	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	dialer.NetDialContext = dialFunc()
 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, http.Header{
 		"User-Agent": []string{userAgent},

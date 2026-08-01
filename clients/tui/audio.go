@@ -199,6 +199,7 @@ func (a *AudioClient) session(ctx context.Context) error {
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 15 * time.Second
 	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	dialer.NetDialContext = dialFunc()
 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, http.Header{
 		"User-Agent": []string{userAgent},

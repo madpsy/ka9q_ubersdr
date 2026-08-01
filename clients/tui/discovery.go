@@ -87,8 +87,11 @@ func FetchPublicInstances(ctx context.Context) ([]Instance, error) {
 	req.Header.Set("User-Agent", userAgent)
 
 	client := &http.Client{
-		Timeout:   15 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			DialContext:     dialFunc(),
+		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -182,7 +185,11 @@ func NewLocalDiscovery() *LocalDiscovery {
 // after this returns. Discovery is best-effort: on a network without mDNS it
 // simply finds nothing rather than failing.
 func (d *LocalDiscovery) Run(ctx context.Context) error {
-	resolver, err := zeroconf.NewResolver(nil)
+	// IPv4 only: browse over the v4 multicast group alone. Answers can still
+	// carry AAAA records, so add() drops those too — a LAN receiver reached by
+	// a link-local IPv6 literal is at best fragile (it needs a zone the client
+	// has to guess) and at worst unroutable.
+	resolver, err := zeroconf.NewResolver(zeroconf.SelectIPTraffic(zeroconf.IPv4))
 	if err != nil {
 		return fmt.Errorf("mDNS unavailable: %w", err)
 	}
@@ -202,14 +209,16 @@ func (d *LocalDiscovery) add(entry *zeroconf.ServiceEntry) {
 		return
 	}
 
-	// Prefer IPv4; fall back to a bracketed IPv6 literal.
+	// IPv4 only: an entry that advertises nothing but IPv6 is skipped rather
+	// than listed as unreachable.
 	var host string
-	switch {
-	case len(entry.AddrIPv4) > 0:
-		host = entry.AddrIPv4[0].String()
-	case len(entry.AddrIPv6) > 0:
-		host = "[" + entry.AddrIPv6[0].String() + "]"
-	default:
+	for _, ip := range entry.AddrIPv4 {
+		if v4 := ip.To4(); v4 != nil {
+			host = v4.String()
+			break
+		}
+	}
+	if host == "" {
 		return
 	}
 
@@ -284,7 +293,12 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // not fatal: the entry simply keeps its mDNS-derived name.
 func (d *LocalDiscovery) enrich(key string, inst Instance) {
 	url := fmt.Sprintf("http://%s/api/description", inst.Host)
-	client := &http.Client{Timeout: 5 * time.Second}
+	// Always v4 here: inst.Host came from an A record, so there is nothing to
+	// gain from a dual-stack dial.
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{DialContext: dialIPv4},
+	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

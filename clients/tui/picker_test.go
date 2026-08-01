@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/grandcat/zeroconf"
 )
 
 func TestParseManualTarget(t *testing.T) {
@@ -574,6 +576,31 @@ func TestUnescapeDNSName(t *testing.T) {
 		if got := unescapeDNSName(c.in); got != c.want {
 			t.Errorf("unescapeDNSName(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestLocalDiscoveryIsIPv4Only(t *testing.T) {
+	// A receiver advertising both families is listed at its IPv4 address; one
+	// advertising only IPv6 is dropped rather than listed as unreachable.
+	d := NewLocalDiscovery()
+	d.add(&zeroconf.ServiceEntry{
+		ServiceRecord: zeroconf.ServiceRecord{Instance: "dual"},
+		Port:          8080,
+		AddrIPv4:      []net.IP{net.ParseIP("127.0.0.1")},
+		AddrIPv6:      []net.IP{net.ParseIP("fe80::1")},
+	})
+	d.add(&zeroconf.ServiceEntry{
+		ServiceRecord: zeroconf.ServiceRecord{Instance: "v6only"},
+		Port:          8080,
+		AddrIPv6:      []net.IP{net.ParseIP("fe80::2")},
+	})
+
+	got := d.Instances()
+	if len(got) != 1 {
+		t.Fatalf("got %d instances, want only the IPv4 one: %+v", len(got), got)
+	}
+	if got[0].Host != "127.0.0.1:8080" {
+		t.Errorf("host = %q, want the IPv4 literal", got[0].Host)
 	}
 }
 

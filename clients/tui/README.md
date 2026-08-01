@@ -109,6 +109,7 @@ Or connect directly:
 | `-stdout-wav` | The same, with a WAV header, so a redirected file plays anywhere. |
 | `-no-device` | Do not open a sound device; useful with `-stdout`. |
 | `-device` | Output device: an index from `-device list`, or part of its name. |
+| `-4` | IPv4 only: never dial a receiver or the directory over IPv6. LAN discovery is IPv4-only regardless. |
 | `-version` | Print the version and exit. |
 
 ## Headless

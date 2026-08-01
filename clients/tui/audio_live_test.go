@@ -75,7 +75,7 @@ loop:
 		}
 	}
 
-	buffered, dropped := out.Stats()
+	buffered, dropped, _ := out.Stats()
 	t.Logf("decoded %d frames, %d samples (%.1f s of audio at %d Hz)",
 		frames, samples, float64(samples)/float64(opusOutputRate), opusOutputRate)
 	t.Logf("baseband %.1f dBFS, noise %.1f dBFS, SNR %.1f dB; mixer buffered=%d dropped=%d",

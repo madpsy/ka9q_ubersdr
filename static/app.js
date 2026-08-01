@@ -4390,7 +4390,12 @@ async function handleBinaryMessage(data) {
             });
             window.audioContext = audioContext;
             currentAudioContextSampleRate = sampleRate;
-            nextPlayTime = audioContext.currentTime;
+            // Start with a full cushion, not at currentTime.  Scheduling from
+            // currentTime means the very first packet is already late, which
+            // trips the underrun branch below and leaves the schedule running
+            // on the bare minimum lead — every subsequent jitter spike is then
+            // another underrun, heard as stuttering after a mode change.
+            nextPlayTime = audioContext.currentTime + (MIN_BUFFER_MS / 1000);
             window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
             // Clear the old _sinkGain so applyAudioSink() creates a fresh one
@@ -4999,7 +5004,28 @@ async function initOpusDecoder(sampleRate, channels) {
 
     if (opusDecoderInitialized) {
         // Silently return true if already initialized (normal during squelch)
-        return true;
+        if (opusDecoderSampleRate === sampleRate && opusDecoderChannels === channels) {
+            return true;
+        }
+        // Settings changed, so the existing decoder is wrong and has to go.
+        // Switching USB -> AM moves the channel from 12 kHz to 24 kHz; a decoder
+        // still built for 12 kHz emits half as many samples per 20 ms packet as
+        // the 24 kHz AudioContext consumes, starving playback for as long as the
+        // mode is selected. Returning true here would keep that stale decoder.
+        console.log('Reinitializing Opus decoder:',
+            opusDecoderSampleRate, '->', sampleRate, 'Hz,',
+            opusDecoderChannels, '->', channels, 'channels');
+        try {
+            if (opusDecoder && typeof opusDecoder.free === 'function') {
+                opusDecoder.free();
+            }
+        } catch (e) {
+            console.warn('Error freeing previous Opus decoder:', e);
+        }
+        opusDecoder = null;
+        opusDecoderInitialized = false;
+        opusDecoderSampleRate = null;
+        opusDecoderChannels = null;
     }
 
     console.log('Initializing Opus decoder:', sampleRate, 'Hz,', channels, 'channels');
@@ -5223,7 +5249,9 @@ async function handlePCMAudio(msg) {
         });
         window.audioContext = audioContext;
         currentAudioContextSampleRate = msg.sampleRate;
-        nextPlayTime = audioContext.currentTime;
+        // Prime the schedule, as above: starting at currentTime guarantees an
+        // immediate underrun.
+        nextPlayTime = audioContext.currentTime + (MIN_BUFFER_MS / 1000);
         window.nextPlayTime = nextPlayTime;
         audioStartTime = audioContext.currentTime;
         // Clear the old _sinkGain so applyAudioSink() creates a fresh one

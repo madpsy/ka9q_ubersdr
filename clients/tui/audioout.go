@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 )
 
 // AudioDevice is one selectable output.
@@ -47,13 +48,29 @@ type mixer struct {
 	// without limit; the oldest audio is dropped, which keeps latency low.
 	maxSamples int
 
-	dropped int
+	// Jitter buffer. Audio arrives at exactly real time, so without a cushion
+	// the buffer sits near empty and ordinary network and scheduling jitter
+	// empties it between callbacks, inserting silence — heard as a stutter.
+	// While priming, silence is played and nothing is consumed, letting the
+	// buffer fill to targetSamples first.
+	targetSamples int
+	priming       bool
+
+	dropped   int
+	underruns int // reads that ran out of buffered audio and padded with silence
 }
+
+// targetLatency is how much audio to hold before playing. It has to cover the
+// worst inter-packet gap comfortably: packets are nominally 20 ms apart, with a
+// measured 99th percentile near 24 ms and occasional 50 ms outliers.
+const targetLatency = 120 * time.Millisecond
 
 func newMixer() *mixer {
 	return &mixer{
-		volume:     1.0,
-		maxSamples: opusOutputRate, // one second
+		volume:        1.0,
+		maxSamples:    opusOutputRate, // one second
+		targetSamples: int(float64(opusOutputRate) * targetLatency.Seconds()),
+		priming:       true,
 	}
 }
 
@@ -76,6 +93,19 @@ func (m *mixer) readStereo(out []int16) int {
 	defer m.mu.Unlock()
 
 	frames := len(out) / 2
+
+	// Hold everything back until the cushion has built up. Starting early only
+	// means underrunning again a few milliseconds later.
+	if m.priming {
+		if len(m.buf) < m.targetSamples {
+			for i := 0; i < frames; i++ {
+				out[i*2], out[i*2+1] = 0, 0
+			}
+			return frames * 2
+		}
+		m.priming = false
+	}
+
 	avail := len(m.buf)
 	if avail > frames {
 		avail = frames
@@ -97,6 +127,12 @@ func (m *mixer) readStereo(out []int16) int {
 		s := float64(m.buf[i])
 		out[i*2] = clampSample(s * gainL)
 		out[i*2+1] = clampSample(s * gainR)
+	}
+	if avail < frames {
+		// Ran dry. Rebuild the cushion rather than limping along underrunning
+		// on every callback, which is what turns one gap into a stutter.
+		m.underruns++
+		m.priming = true
 	}
 	for i := avail; i < frames; i++ {
 		out[i*2], out[i*2+1] = 0, 0
@@ -126,9 +162,10 @@ func (m *mixer) setMuted(muted bool) {
 	m.mu.Lock()
 	m.muted = muted
 	// Drop what is buffered so unmuting resumes at live audio instead of
-	// replaying whatever accumulated while silent.
+	// replaying whatever accumulated while silent, and rebuild the cushion.
 	if muted {
 		m.buf = m.buf[:0]
+		m.priming = true
 	}
 	m.mu.Unlock()
 }
@@ -145,10 +182,10 @@ func (m *mixer) setVolume(v float64) {
 	m.mu.Unlock()
 }
 
-func (m *mixer) stats() (buffered, dropped int) {
+func (m *mixer) stats() (buffered, dropped, underruns int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.buf), m.dropped
+	return len(m.buf), m.dropped, m.underruns
 }
 
 // AudioOutput owns the mixer and the platform backend, and can switch device
@@ -201,12 +238,12 @@ func (o *AudioOutput) Close() {
 	}
 }
 
-func (o *AudioOutput) Push(mono []int16)               { o.mix.push(mono) }
-func (o *AudioOutput) SetChannel(c Channel)            { o.mix.setChannel(c) }
-func (o *AudioOutput) SetMuted(m bool)                 { o.mix.setMuted(m) }
-func (o *AudioOutput) SetVolume(v float64)             { o.mix.setVolume(v) }
-func (o *AudioOutput) Stats() (int, int)               { return o.mix.stats() }
-func (o *AudioOutput) Devices() ([]AudioDevice, error) { return listDevices() }
+func (o *AudioOutput) Push(mono []int16)                         { o.mix.push(mono) }
+func (o *AudioOutput) SetChannel(c Channel)                      { o.mix.setChannel(c) }
+func (o *AudioOutput) SetMuted(m bool)                           { o.mix.setMuted(m) }
+func (o *AudioOutput) SetVolume(v float64)                       { o.mix.setVolume(v) }
+func (o *AudioOutput) Stats() (buffered, dropped, underruns int) { return o.mix.stats() }
+func (o *AudioOutput) Devices() ([]AudioDevice, error)           { return listDevices() }
 
 func (o *AudioOutput) DeviceID() string {
 	o.mu.Lock()

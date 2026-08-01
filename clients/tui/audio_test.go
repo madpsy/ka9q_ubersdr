@@ -213,6 +213,7 @@ func TestFilterRange(t *testing.T) {
 
 func TestMixerChannelRouting(t *testing.T) {
 	m := newMixer()
+	m.priming = false // steady state; priming is covered separately
 	m.push([]int16{1000, 1000})
 
 	out := make([]int16, 4)
@@ -241,6 +242,7 @@ func TestMixerChannelRouting(t *testing.T) {
 
 func TestMixerMuteAndVolume(t *testing.T) {
 	m := newMixer()
+	m.priming = false
 
 	m.push([]int16{5000})
 	m.setMuted(true)
@@ -252,11 +254,12 @@ func TestMixerMuteAndVolume(t *testing.T) {
 
 	// Muting also discards the backlog, so unmuting resumes at live audio
 	// instead of replaying what accumulated while silent.
-	if buffered, _ := m.stats(); buffered != 0 {
+	if buffered, _, _ := m.stats(); buffered != 0 {
 		t.Errorf("muting left %d samples buffered", buffered)
 	}
 
 	m.setMuted(false)
+	m.priming = false
 	m.setVolume(0.5)
 	m.push([]int16{1000})
 	out = make([]int16, 2)
@@ -270,6 +273,7 @@ func TestMixerPadsRatherThanShortReading(t *testing.T) {
 	// Backends treat a short read as end-of-stream, so an underrun must produce
 	// silence for the whole buffer.
 	m := newMixer()
+	m.priming = false
 	m.push([]int16{100, 200})
 
 	out := make([]int16, 20)
@@ -291,7 +295,7 @@ func TestMixerBoundsLatency(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		m.push(chunk)
 	}
-	buffered, dropped := m.stats()
+	buffered, dropped, _ := m.stats()
 	if buffered > m.maxSamples {
 		t.Errorf("buffered %d samples, cap is %d", buffered, m.maxSamples)
 	}
@@ -302,6 +306,7 @@ func TestMixerBoundsLatency(t *testing.T) {
 
 func TestMixerClampsLoudSamples(t *testing.T) {
 	m := newMixer()
+	m.priming = false
 	m.setVolume(4)
 	m.push([]int16{20000, -20000})
 
@@ -1678,5 +1683,66 @@ func TestStreamValueReportsBothRates(t *testing.T) {
 	u.signal.Channels = 2
 	if got := streamValue(u); !strings.Contains(got, "stereo") {
 		t.Errorf("stereo not reflected: %q", got)
+	}
+}
+
+// TestMixerPrimesBeforePlaying covers the jitter buffer. Audio arrives at
+// exactly real time, so without a cushion the buffer sits near empty and
+// ordinary jitter empties it between callbacks, inserting silence — heard as a
+// stutter. Measured before this: the buffer reached 0 and underran 13 times in
+// three seconds.
+func TestMixerPrimesBeforePlaying(t *testing.T) {
+	m := newMixer()
+	if !m.priming {
+		t.Fatal("a new mixer should start priming")
+	}
+	if m.targetSamples < opusOutputRate/20 {
+		t.Errorf("target cushion is %d samples, under 50 ms", m.targetSamples)
+	}
+
+	// Below the target, only silence comes out and nothing is consumed.
+	m.push(make([]int16, m.targetSamples/2))
+	before, _, _ := m.stats()
+	out := make([]int16, 200)
+	m.readStereo(out)
+	for _, v := range out {
+		if v != 0 {
+			t.Fatal("played audio before the cushion was built")
+		}
+	}
+	if after, _, _ := m.stats(); after != before {
+		t.Errorf("consumed %d samples while priming", before-after)
+	}
+
+	// Once the cushion is there, it plays. Use a fresh mixer holding only
+	// non-zero samples, so leading silence cannot be mistaken for priming.
+	m2 := newMixer()
+	loud := make([]int16, m2.targetSamples+100)
+	for i := range loud {
+		loud[i] = 1000
+	}
+	m2.push(loud)
+	m2.readStereo(out)
+	if out[0] == 0 {
+		t.Error("still silent after the cushion filled")
+	}
+	if m2.priming {
+		t.Error("still priming after the cushion filled")
+	}
+
+	// Running dry rebuilds the cushion rather than underrunning every callback,
+	// which is what turns one gap into a stutter.
+	for i := 0; i < 1000; i++ {
+		if b, _, _ := m2.stats(); b == 0 {
+			break
+		}
+		m2.readStereo(out)
+	}
+	m2.readStereo(out)
+	if !m2.priming {
+		t.Error("should re-prime after running dry")
+	}
+	if _, _, u := m2.stats(); u == 0 {
+		t.Error("underrun was not counted")
 	}
 }

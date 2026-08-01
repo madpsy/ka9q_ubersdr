@@ -6220,12 +6220,15 @@ function handleFrequencyChange() {
         }, 2000);
     }
 
-    // Auto-connect if not connected
-    if (!wsManager.isConnected()) {
-        connect();
-    } else {
-        _noteModeRequested(mode);
-        autoTune();
+    } finally {
+        // Auto-connect if not connected
+        if (!wsManager.isConnected()) {
+            console.log('[mode] not connected - connecting instead of tuning');
+            connect();
+        } else {
+            _noteModeRequested(mode);
+            autoTune();
+        }
     }
 }
 
@@ -6604,6 +6607,13 @@ function updateURL() {
 
 // Set mode from buttons
 function setMode(mode, preserveBandwidth = false) {
+    // Everything up to the finally block is display work. It is wrapped so that
+    // a failure in any of it cannot stop the tune from being sent: the mode
+    // buttons are repainted at the top of this function, so throwing partway
+    // leaves the UI showing a mode that was never requested of the server, with
+    // no way to retry (the buttons toggle on currentMode, so pressing the same
+    // one again selects its pair). The exception still propagates.
+    try {
     currentMode = mode;
     window.currentMode = mode; // Update global reference
     // Only fire haptic when the user tapped a mode button directly,

@@ -6220,15 +6220,11 @@ function handleFrequencyChange() {
         }, 2000);
     }
 
-    } finally {
-        // Auto-connect if not connected
-        if (!wsManager.isConnected()) {
-            console.log('[mode] not connected - connecting instead of tuning');
-            connect();
-        } else {
-            _noteModeRequested(mode);
-            autoTune();
-        }
+    // Auto-connect if not connected
+    if (!wsManager.isConnected()) {
+        connect();
+    } else {
+        autoTune();
     }
 }
 
@@ -6911,11 +6907,15 @@ function setMode(mode, preserveBandwidth = false) {
     // Update NR engine mode support (fm/nfm not suitable for entropy VAD)
     updateNRModeSupport(mode);
 
-    // Auto-connect if not connected
-    if (!wsManager.isConnected()) {
-        connect();
-    } else {
-        autoTune();
+    } finally {
+        // Auto-connect if not connected
+        if (!wsManager.isConnected()) {
+            console.log('[mode] not connected - connecting instead of tuning');
+            connect();
+        } else {
+            _noteModeRequested(mode);
+            autoTune();
+        }
     }
 }
 

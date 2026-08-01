@@ -610,3 +610,88 @@ func TestLiveServer(t *testing.T) {
 		t.Error("no config message after the zoom command")
 	}
 }
+
+// A receiver names where it wants a listener to start. Both fields are
+// advisory, and both are re-checked here: an older or third-party receiver can
+// report a frequency outside the band or a mode this client cannot demodulate,
+// which is why the Python client re-checks them too.
+func TestDescriptionDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		desc     Description
+		wantFreq float64
+		wantMode string
+	}{
+		{"as configured",
+			Description{DefaultFrequency: 7_100_000, DefaultMode: "lsb"}, 7_100_000, "lsb"},
+		{"upper case mode",
+			Description{DefaultFrequency: 14_074_000, DefaultMode: "USB"}, 14_074_000, "usb"},
+		{"nothing said",
+			Description{}, defaultStartFrequency, "usb"},
+		{"out of band",
+			Description{DefaultFrequency: 145_500_000, DefaultMode: "nfm"}, defaultStartFrequency, "nfm"},
+		{"below the receiver's range",
+			Description{DefaultFrequency: 500, DefaultMode: "am"}, defaultStartFrequency, "am"},
+		{"a mode we cannot demodulate",
+			Description{DefaultFrequency: 7_100_000, DefaultMode: "iq48"}, 7_100_000, "usb"},
+	} {
+		freq, mode := tc.desc.Defaults()
+		if freq != tc.wantFreq || mode != tc.wantMode {
+			t.Errorf("%s: got %.0f Hz %s, want %.0f Hz %s",
+				tc.name, freq, mode, tc.wantFreq, tc.wantMode)
+		}
+	}
+}
+
+// Priority is the same as the Python client's: what the user asked for, then
+// what the receiver prefers, then the built-in fallback.
+func TestReceiverDefaultsLoseToTheCommandLine(t *testing.T) {
+	desc := Description{DefaultFrequency: 7_100_000, DefaultMode: "lsb"}
+
+	e := &eventLoop{ui: NewUI("test")}
+	e.applyDescription(desc)
+	if e.ui.vfo != 7_100_000 || e.ui.audioMode != "lsb" {
+		t.Errorf("receiver default not applied: %.0f Hz %s", e.ui.vfo, e.ui.audioMode)
+	}
+	// The sideband convention says USB below 10 MHz is wrong, but the receiver
+	// said LSB and it is not for this client to argue before the user has
+	// tuned anywhere.
+	e.ui.SyncSideband()
+	if e.ui.audioMode != "lsb" {
+		t.Errorf("the convention overruled the receiver: %s", e.ui.audioMode)
+	}
+
+	// Tuning hands the convention back.
+	e.setVFO(14_100_000)
+	if e.ui.audioMode != "usb" {
+		t.Errorf("after tuning above 10 MHz the mode is %s", e.ui.audioMode)
+	}
+
+	// What the user asked for wins outright.
+	e = &eventLoop{ui: NewUI("test"), opts: options{initialFreq: 3_700_000, initialMode: "am"}}
+	e.applyDescription(desc)
+	if e.ui.vfo != 3_700_000 || e.ui.audioMode != "am" {
+		t.Errorf("the command line lost: %.0f Hz %s", e.ui.vfo, e.ui.audioMode)
+	}
+
+	// A VFO the user has already moved is theirs, whatever the receiver says.
+	e = &eventLoop{ui: NewUI("test")}
+	e.ui.vfo = 10_000_000
+	e.applyDescription(desc)
+	if e.ui.vfo != 10_000_000 {
+		t.Errorf("the receiver moved a VFO already in use: %.0f", e.ui.vfo)
+	}
+}
+
+// Every mode the -mode flag accepts must be one the client can actually apply.
+func TestModeNamesMatchTheModeTable(t *testing.T) {
+	names := modeNames()
+	if len(names) != len(modes) {
+		t.Fatalf("listed %d modes for %d in the table", len(names), len(modes))
+	}
+	for _, name := range names {
+		if _, ok := lookupMode(name); !ok {
+			t.Errorf("%q is offered but cannot be applied", name)
+		}
+	}
+}

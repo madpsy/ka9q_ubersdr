@@ -96,7 +96,8 @@ Or connect directly:
 | `-server` | `host:port` or a full `http(s)://` URL. Empty opens the picker. |
 | `-tls` | Force TLS. Implied by an `https://` URL. |
 | `-password` | Bypass password, if the receiver requires one. |
-| `-freq` | Initial centre frequency in kHz (0 = server default). |
+| `-freq` | Initial frequency in kHz (0 = the receiver's own default). |
+| `-mode` | Initial demodulation mode (empty = the receiver's own default). |
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
 | `-bars` | Draw block bars instead of the higher-resolution braille spectrum. |
@@ -165,6 +166,10 @@ and the **view**, which is what the display shows. They have separate keys.
 | `n` | cycle server-side noise reduction |
 | `t` / `T` | raise / lower the squelch threshold (SNR) |
 | `d` | audio settings: device, volume, mode, exact filter edges |
+| **Chat** | |
+| `C` | open the chat, on receivers that run one |
+| `@` | in the chat: start a mention, `tab` completes it |
+| `/leave` | typed in the chat: leave it, keeping the display |
 | **Other** | |
 | `i` | pick another receiver |
 | `?` | help overlay |
@@ -281,6 +286,72 @@ choose the output in the OS sound settings.
 
 Typing a frequency accepts kHz by default (`7100` → 7.100 MHz). Add a suffix to
 override: `7.1M`, `7100k`, `7100000Hz`.
+
+**Where a session starts.** Receivers publish a starting point — the operator's
+`default_frequency` and `default_mode`, in `/api/description` — and this client
+uses it, tuning there and opening the view centred on it. The order is the same
+as the Python client's: **what you asked for on the command line, then what the
+receiver prefers, then the built-in fallback** of 14.175 MHz USB. Both values
+are re-checked on arrival, since a receiver can name a frequency outside
+0.01–30 MHz or a mode this client has no demodulator for.
+
+A mode that was asked for — by `-mode` or by the receiver naming its own —
+holds against the 10 MHz sideband convention until you tune somewhere yourself:
+a receiver whose default is USB on 40 m means it, and `A` would otherwise undo
+that before the first frame arrived. The first tune hands the convention back.
+
+## Chat
+
+Some receivers run a chat; many do not. `/api/description` says which
+(`chat_enabled`), and this client follows it: on a receiver without one the key
+does nothing but say so, and the header and status bar carry no chat at all.
+
+Where there is one, the socket opens with the session — it is the DX cluster
+socket, `/ws/dxcluster`, which is where the server hosts chat, sharing the
+spectrum session's UUID so you still count as one user. Subscribing is enough to
+see who is in the room, so **the header shows the number of people in the chat
+before you join anything**, right beside the `● live` indicator:
+
+```
+ m9psy.tunnel.ubersdr.org ● live chat 3 +2@     VFO 7.1000 MHz │ span 205 kHz │ …
+```
+
+It sits there rather than in the right-hand block because that block is shed
+field by field on a narrow terminal, which is exactly when an unread message
+would be dropped. Once you are **in** the chat it grows a `+n` for messages that
+arrived while the panel was closed, drawn in the alert colour; a listener who
+never joined sees the count alone, since nobody can address them. A message
+naming you — `@yourname` — adds an `@` to that count.
+
+`C` opens the panel over the running display. Type a username and press enter to
+join: 1–15 characters, letters and digits plus `-` `_` `/`, which is the
+server's own rule and is checked here first so a bad name is refused instantly
+rather than after a round trip. After that the same line sends messages. `Esc`
+closes the panel and leaves the chat running behind it; `/leave` leaves the chat
+itself.
+
+**Mentions** work both ways, as they do in the Python client. Typing `@`
+followed by part of a name offers the people in the room — sorted, yourself
+excluded — on the line above the input: `↑` `↓` choose, `tab` completes with a
+trailing space, `Esc` dismisses the list before it closes anything. In the other
+direction, a message naming you highlights **the `@yourname` token itself**
+rather than the whole line, so it is findable in a wall of chat, and if the
+panel is shut when it arrives the status line names who it was from and the
+terminal bell rings once. The header's `@` stays until you open the panel.
+
+**Your frequency and mode are published while you are in the chat**, which is
+what makes a receiver's chat about radio: the panel's right-hand column shows
+where everyone else is listening. Updates are sent only when something actually
+changes and at most once a second, because the server rate limits them and
+answers a breach with an error.
+
+Two details are worth knowing. The subscription is a real handshake — measured
+against a live receiver, anything sent immediately after `subscribe_chat` comes
+back as *"you must subscribe to chat first"* — so nothing is sent until the
+server confirms it. And the server replays its message buffer to every new
+subscriber: that replay is history, so it fills the transcript without counting
+as unread, and it replaces the transcript rather than appending to it, which is
+what stops a reconnect showing everything twice.
 
 ## Display notes
 
@@ -424,9 +495,12 @@ requires, which is what surfaces a clear reason when a receiver is full or the
 client is rate limited.
 
 Everything else it reads is a plain JSON GET: `/api/description` for the DSP
-inserts a receiver offers, and `/api/bands` and `/api/bookmarks` for the marker
-strip. None of them is required — a receiver serving none of them simply gets a
-display without those parts.
+inserts a receiver offers and whether it runs a chat, and `/api/bands` and
+`/api/bookmarks` for the marker strip. None of them is required — a receiver
+serving none of them simply gets a display without those parts.
+
+Chat, when there is one, is a third WebSocket: `/ws/dxcluster`, subscribed to
+the chat stream only and sharing the same session UUID.
 
 ## Tests
 

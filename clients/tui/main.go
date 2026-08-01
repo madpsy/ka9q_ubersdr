@@ -28,6 +28,7 @@ func main() {
 	span := flag.Float64("span", 0, "initial span in kHz (0 = server default)")
 	bars := flag.Bool("bars", false, "draw block bars instead of the higher-resolution braille spectrum")
 	view := flag.String("view", "split", "initial view: spectrum, waterfall or split")
+	audioMode := flag.String("mode", "", "initial demodulation mode (empty = the receiver's own default)")
 	noAudio := flag.Bool("no-audio", false, "watch the spectrum without opening an audio channel")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -42,10 +43,19 @@ func main() {
 		fatal("%v", err)
 	}
 
+	// An unknown mode is worth refusing outright: silently falling back would
+	// leave the user listening on something they did not ask for.
+	if *audioMode != "" {
+		if _, ok := lookupMode(*audioMode); !ok {
+			fatal("unknown mode %q (want one of %s)", *audioMode, strings.Join(modeNames(), ", "))
+		}
+	}
+
 	opts := options{
 		password:    *password,
 		initialFreq: *freq * 1000,
 		initialSpan: *span * 1000,
+		initialMode: strings.ToLower(*audioMode),
 		braille:     !*bars,
 		mode:        mode,
 		noAudio:     *noAudio,
@@ -68,6 +78,9 @@ type options struct {
 	password    string
 	initialFreq float64
 	initialSpan float64
+	// initialMode is the demodulation mode asked for on the command line, empty
+	// to take whatever the receiver names as its own default.
+	initialMode string
 	braille     bool
 	mode        ViewMode
 	noAudio     bool
@@ -174,6 +187,11 @@ type eventLoop struct {
 	picker        *Picker
 	audioPanel    *AudioPanel
 	bookmarkPanel *BookmarkPanel
+	chatPanel     *ChatPanel
+
+	// Chat exists only on receivers that run one; the client is created either
+	// way so the UI has something to read, and connects only when it does.
+	chat *ChatClient
 
 	// Audio shares the spectrum session's UUID but needs its own socket.
 	audio       *AudioClient
@@ -239,6 +257,8 @@ func (e *eventLoop) connectTo(inst Instance) {
 	}
 	e.ui.serverName = name
 	e.ui.Reset()
+	// A chat panel belongs to the receiver it was opened on.
+	e.chatPanel = nil
 	e.ui.status = "connecting to " + inst.Host + "…"
 
 	var initialBinBW float64
@@ -248,16 +268,32 @@ func (e *eventLoop) connectTo(inst Instance) {
 		initialBinBW = e.opts.initialSpan / 1024
 	}
 
-	// Audio rides the same session UUID on its own socket, so the server sees
-	// one user rather than two.
+	// Audio and chat ride the same session UUID on their own sockets, so the
+	// server sees one user rather than three.
 	audio := NewAudioClient(inst.Host, inst.TLS, e.opts.password, client.sessionID)
 	e.audio = audio
+	chat := NewChatClient(inst.Host, inst.TLS, client.sessionID)
+	e.chat = chat
 
 	go func() {
-		// Ask what DSP inserts this receiver offers. Failure is not fatal: the
-		// control simply reports that there are none.
-		if info, err := client.FetchDSPInfo(); err == nil && info.Enabled {
-			e.ui.dspFilters = info.Filters
+		// Ask what this receiver offers and where it wants a listener to start.
+		// Failure is not fatal: each feature simply reports itself as absent,
+		// and the view falls back to whatever the spectrum socket opens on.
+		desc, descErr := client.FetchDescription()
+		if descErr == nil {
+			// Applied by the event loop rather than from here, so the UI is
+			// only ever written from its own goroutine.
+			select {
+			case client.Info <- desc:
+			default:
+			}
+		}
+
+		// The receiver's default frequency is where the view opens too, unless
+		// -freq said otherwise.
+		initialFreq := e.opts.initialFreq
+		if initialFreq <= 0 && descErr == nil {
+			initialFreq, _ = desc.Defaults()
 		}
 
 		// The server requires this handshake before it will accept a spectrum
@@ -270,10 +306,17 @@ func (e *eventLoop) connectTo(inst Instance) {
 			}
 			return
 		}
-		go client.Run(ctx, e.opts.initialFreq, initialBinBW)
+		go client.Run(ctx, initialFreq, initialBinBW)
 		// The band plan and bookmarks come off the HTTP API, so they neither
 		// wait for nor block the spectrum socket.
 		go client.RunMarkers(ctx)
+
+		// Chat connects on its own so the header can report who is in it
+		// before anyone opens the panel. Joining is still explicit.
+		chat.SetAvailable(desc.ChatEnabled)
+		if desc.ChatEnabled {
+			go chat.Run(ctx)
+		}
 
 		// Audio only starts once the user asks for it, so a spectrum-only
 		// session costs the server nothing extra.
@@ -417,6 +460,14 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			frames, configs, status = e.client.Frames, e.client.Configs, e.client.Status
 			markers = e.client.Markers
 		}
+		var info chan Description
+		if e.client != nil {
+			info = e.client.Info
+		}
+		var chatUpdates chan ChatState
+		if e.chat != nil {
+			chatUpdates = e.chat.Updates
+		}
 		var pcm chan []int16
 		var level chan Signal
 		var audioStatus chan string
@@ -475,8 +526,16 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			e.maybeStartAudio()
 			dirty = true
 
+		case desc := <-info:
+			e.applyDescription(desc)
+			dirty = true
+
 		case m := <-markers:
 			e.ui.bands, e.ui.bookmarks = m.Bands, m.Bookmarks
+			dirty = true
+
+		case st := <-chatUpdates:
+			e.noteChatUpdate(st)
 			dirty = true
 
 		case msg := <-status:
@@ -520,6 +579,13 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 		case <-redraw.C:
 			if dirty {
 				e.ui.connected = e.client != nil && e.client.Connected()
+				// Publishing where this receiver is tuned is part of being in a
+				// receiver's chat. The client itself decides what is worth
+				// sending, so calling it per redraw is free until something
+				// actually moves.
+				if e.chat != nil {
+					e.chat.SetRadio(e.ui.vfo, e.ui.audioMode, e.ui.bwLow, e.ui.bwHigh, e.ui.cfg.BinBandwidth)
+				}
 				e.draw()
 				dirty = false
 			}
@@ -548,6 +614,9 @@ func (e *eventLoop) draw() {
 	if e.bookmarkPanel != nil {
 		e.bookmarkPanel.Draw(e.screen, e.ui)
 	}
+	if e.chatPanel != nil {
+		e.chatPanel.Draw(e.screen, e.ui)
+	}
 	e.screen.Show()
 }
 
@@ -555,6 +624,10 @@ func (e *eventLoop) draw() {
 // retuning the audio channel.
 func (e *eventLoop) setVFO(freq float64) {
 	e.ui.vfo = clampFreq(freq)
+	// Tuning somewhere hands the sideband convention back: a mode that came
+	// from the command line or the receiver's own default was chosen for the
+	// frequency it came with, not for wherever the user goes next.
+	e.ui.modePinned = false
 	e.ui.SyncSideband()
 	e.retune()
 }
@@ -571,6 +644,9 @@ func (e *eventLoop) tuneToBookmark(bm Bookmark) {
 
 	if _, ok := lookupMode(bm.Mode); ok {
 		ui.ApplyMode(bm.Mode)
+		// Holds against the convention until the user tunes away, including
+		// when audio starts later and would otherwise re-apply it.
+		ui.modePinned = true
 		// A bookmark's own filter, when it carries one, beats the mode default.
 		if bm.BandwidthLow != nil && bm.BandwidthHigh != nil {
 			ui.bwLow, ui.bwHigh = clampBandwidth(ui.audioMode, *bm.BandwidthLow, *bm.BandwidthHigh)
@@ -604,6 +680,9 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 		if e.bookmarkPanel != nil {
 			return e.handleBookmarkKey(ev)
 		}
+		if e.chatPanel != nil {
+			return e.handleChatKey(ev)
+		}
 		if e.audioPanel != nil {
 			return e.handleAudioPanelKey(ev)
 		}
@@ -612,7 +691,7 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 	case *tcell.EventMouse:
 		// A modal owns the screen it covers, so a click behind it must not
 		// tune the radio.
-		if e.picker == nil && e.bookmarkPanel == nil {
+		if e.picker == nil && e.bookmarkPanel == nil && e.chatPanel == nil {
 			e.handleMouse(ev)
 		}
 	}
@@ -628,6 +707,97 @@ func (e *eventLoop) handleBookmarkKey(ev *tcell.EventKey) (quit bool) {
 		e.bookmarkPanel = nil
 	}
 	return false
+}
+
+func (e *eventLoop) handleChatKey(ev *tcell.EventKey) (quit bool) {
+	cmd, done := e.chatPanel.HandleKey(ev, e.ui)
+	if e.chat != nil {
+		switch {
+		case cmd.join != "":
+			e.chat.Join(cmd.join)
+		case cmd.say != "":
+			e.chat.Say(cmd.say)
+		case cmd.leave:
+			e.chat.Leave()
+		}
+	}
+	if done {
+		e.chatPanel = nil
+	}
+	return false
+}
+
+// applyDescription takes what a receiver says about itself: the DSP inserts it
+// offers, and where its operator wants a listener to start.
+//
+// The starting point is advisory and loses to anything the user asked for on
+// the command line, which is the order the Python client uses too: CLI, then
+// the receiver's configuration, then the built-in fallback.
+func (e *eventLoop) applyDescription(desc Description) {
+	if desc.DSP.Enabled {
+		e.ui.dspFilters = desc.DSP.Filters
+	}
+
+	freq, mode := desc.Defaults()
+	if e.opts.initialMode != "" {
+		mode = e.opts.initialMode
+	}
+	if e.opts.initialFreq > 0 {
+		freq = e.opts.initialFreq
+	}
+
+	// Only for the receiver this session opened on: switching receivers keeps
+	// the VFO where the user left it rather than jumping to the new one's
+	// default, and a VFO the user has already moved is theirs.
+	if e.ui.vfo <= 0 {
+		e.ui.vfo = clampFreq(freq)
+	}
+	e.ui.ApplyMode(mode)
+	// The sideband convention must not overrule a mode that was asked for
+	// before the user has tuned anywhere: a receiver whose default is USB on
+	// 40 m means it. The first tune hands the convention back.
+	e.ui.modePinned = true
+	e.retune()
+}
+
+// noteChatUpdate adopts a fresh chat snapshot.
+//
+// Anything that arrived while the panel was shut is unread, and a message
+// naming us earns an actual interruption: the status line says who it was from
+// and the terminal bell rings once. Nothing interrupts while the panel is open,
+// where the message is already on screen.
+func (e *eventLoop) noteChatUpdate(st ChatState) {
+	// Only a member has anything unread: a listener who never joined cannot be
+	// addressed, and the header says so by showing the count alone.
+	if !st.Joined {
+		e.ui.chatUnread, e.ui.chatMention = 0, false
+	}
+	if e.chatPanel == nil && st.Joined {
+		if n := st.Received - e.ui.chat.Received; n > 0 {
+			e.ui.chatUnread += n
+		}
+		if st.Mentions > e.ui.chat.Mentions {
+			e.ui.chatMention = true
+			if line, ok := st.LastMention(); ok {
+				e.ui.status = line.Username + " mentioned you in chat — C to open"
+			}
+			if e.screen != nil {
+				e.screen.Beep()
+			}
+		}
+	}
+	e.ui.chat = st
+}
+
+// openChat shows the chat panel and clears the unread marks, since the messages
+// are about to be on screen.
+func (e *eventLoop) openChat() {
+	if !e.ui.chat.Available {
+		e.ui.status = "this receiver does not run a chat"
+		return
+	}
+	e.chatPanel = NewChatPanel()
+	e.ui.chatUnread, e.ui.chatMention = 0, false
 }
 
 func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
@@ -776,11 +946,13 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			// bookmarks, could have it.
 			ui.braille = !ui.braille
 			ui.status = fmt.Sprintf("style: %s", styleName(ui.braille))
-		case 'c', 'C':
+		case 'c':
 			if ui.vfo > 0 {
 				e.pan(clampFreq(ui.vfo))
 				ui.status = "centred on VFO"
 			}
+		case 'C':
+			e.openChat()
 		case 'v', 'V':
 			ui.mode = (ui.mode + 1) % 3
 			ui.status = "view: " + ui.mode.String()

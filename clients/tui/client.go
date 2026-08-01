@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +75,10 @@ type Client struct {
 	// Markers carries the band plan and bookmarks, refreshed periodically off
 	// the HTTP API rather than the spectrum socket.
 	Markers chan Markers
+	// Info carries the receiver's description once, so what it says about
+	// itself is applied on the UI's own goroutine rather than from the
+	// background fetch.
+	Info chan Description
 }
 
 const minCommandDelay = 100 * time.Millisecond
@@ -94,6 +99,7 @@ func NewClient(host string, useTLS bool, password string) (*Client, error) {
 		Configs: make(chan SpectrumConfig, 4),
 		Status:  make(chan string, 8),
 		Markers: make(chan Markers, 1),
+		Info:    make(chan Description, 1),
 	}, nil
 }
 
@@ -187,16 +193,53 @@ func (c *Client) getJSON(path string, out interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// FetchDSPInfo asks the receiver which DSP inserts it offers. A receiver
-// without DSP simply reports none, which is not an error.
-func (c *Client) FetchDSPInfo() (DSPInfo, error) {
-	var payload struct {
-		DSP DSPInfo `json:"dsp"`
+// Description is what a receiver says about itself, from /api/description.
+// Only the parts this client acts on are decoded: which optional features are
+// worth offering the user.
+type Description struct {
+	DSP DSPInfo `json:"dsp"`
+	// ChatEnabled is the only way to know whether a receiver runs a chat —
+	// plenty do not, and its socket must not be opened for those.
+	ChatEnabled bool `json:"chat_enabled"`
+	ChatUsers   int  `json:"chat_users"`
+
+	// Where the operator wants a new listener to start. Both are advisory and
+	// both are already sanitised server-side, but see Defaults.
+	DefaultFrequency float64 `json:"default_frequency"`
+	DefaultMode      string  `json:"default_mode"`
+}
+
+// defaultStartFrequency is the fallback when a receiver names none: 14.175 MHz,
+// the 20 m calling frequency, which is what the server and the Python client
+// both fall back to.
+const defaultStartFrequency = 14_175_000
+
+// Defaults returns where this receiver wants a listener to start, sanitised.
+//
+// The server applies these same rules before sending, so this is belt and
+// braces against an older or third-party receiver reporting something outside
+// the band or a mode this client cannot demodulate — the Python client
+// re-checks them for the same reason.
+func (d Description) Defaults() (freq float64, mode string) {
+	freq = d.DefaultFrequency
+	if freq < minFreq || freq > maxFreq {
+		freq = defaultStartFrequency
 	}
-	if err := c.getJSON("/api/description", &payload); err != nil {
-		return DSPInfo{}, err
+	mode = strings.ToLower(strings.TrimSpace(d.DefaultMode))
+	if _, ok := lookupMode(mode); !ok {
+		mode = "usb"
 	}
-	return payload.DSP, nil
+	return freq, mode
+}
+
+// FetchDescription asks a receiver what it offers. Failure is not fatal to
+// anything: each feature simply reports itself as absent.
+func (c *Client) FetchDescription() (Description, error) {
+	var desc Description
+	if err := c.getJSON("/api/description", &desc); err != nil {
+		return Description{}, err
+	}
+	return desc, nil
 }
 
 // Run connects and pumps frames until ctx is cancelled, reconnecting on drop.

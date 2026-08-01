@@ -167,6 +167,11 @@ type UI struct {
 	wheelTunes bool
 	stepIdx    int
 
+	// modePinned holds off the sideband convention for a mode that was asked
+	// for — on the command line, or by the receiver naming its own default —
+	// until the user tunes somewhere themselves.
+	modePinned bool
+
 	// Audio state. The VFO doubles as the tuned frequency, so the filter edges
 	// are relative to it.
 	audioOn      bool
@@ -196,6 +201,13 @@ type UI struct {
 	bands        []Band
 	bookmarks    []Bookmark
 	bookmarkHits []bookmarkHit
+
+	// Chat, when the receiver runs it. chatUnread counts messages that have
+	// arrived since the panel was last open, and chatMention marks any of them
+	// naming us — the one thing worth interrupting for.
+	chat        ChatState
+	chatUnread  int
+	chatMention bool
 
 	// Cursor tracking for the crosshair and readout; -1 means off-plot.
 	cursorX, cursorY int
@@ -264,7 +276,7 @@ func (u *UI) ApplyMode(name string) {
 // not silently undo it. The user's filter width is carried across rather than
 // reset to the default.
 func (u *UI) SyncSideband() {
-	if !u.autoSideband || u.vfo <= 0 || !isSideband(u.audioMode) {
+	if u.modePinned || !u.autoSideband || u.vfo <= 0 || !isSideband(u.audioMode) {
 		return
 	}
 	want := autoMode(u.vfo)
@@ -314,10 +326,13 @@ func (u *UI) Reset() {
 	u.peaks = nil
 	u.lastCols = nil
 	u.wf.Clear()
-	// The next receiver has its own band plan and bookmarks.
+	// The next receiver has its own band plan, bookmarks and chat.
 	u.bands = nil
 	u.bookmarks = nil
 	u.bookmarkHits = nil
+	u.chat = ChatState{}
+	u.chatUnread, u.chatMention = 0, false
+	u.modePinned = false
 	u.vfo = 0
 	u.fps = 0
 	u.haveRange = false
@@ -521,18 +536,39 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	dim := tcell.StyleDefault.Foreground(tcell.ColorSilver)
 	sep := tcell.StyleDefault.Foreground(tcell.NewRGBColor(80, 80, 90))
 
+	// Every advance is in runes: the state glyphs are multi-byte, and counting
+	// bytes left a two-column hole after them and mismeasured how much room the
+	// right-hand block had.
 	left := " " + u.serverName + " "
 	drawText(s, x, 0, name, left)
-	x += len(left)
+	x += runeLen(left)
 
 	if u.connected {
 		state := "● live "
 		drawText(s, x, 0, tcell.StyleDefault.Foreground(tcell.NewRGBColor(0, 220, 90)), state)
-		x += len(state)
+		x += runeLen(state)
 	} else {
 		state := "○ offline "
 		drawText(s, x, 0, tcell.StyleDefault.Foreground(tcell.NewRGBColor(230, 70, 70)), state)
-		x += len(state)
+		x += runeLen(state)
+	}
+
+	// Chat sits beside the connection state rather than in the right-hand
+	// block: it is state, not a setting, and the right-hand fields are shed on
+	// a narrow terminal — which is exactly when an unread message would be
+	// dropped. Whatever it takes here narrows that block, since its width is
+	// measured from x.
+	if u.chat.Available {
+		users, unread := u.chatLabels()
+		drawText(s, x, 0, dim, users)
+		x += runeLen(users)
+		if unread != "" {
+			// The alert colour is the notification: an unread count that looks
+			// like the rest of the header is one nobody sees.
+			drawText(s, x, 0, tcell.StyleDefault.
+				Foreground(tcell.NewRGBColor(255, 205, 90)).Bold(true), unread)
+			x += runeLen(unread)
+		}
 	}
 
 	span := u.cfg.TotalBandwidth
@@ -608,10 +644,15 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	right := strings.Join(fields, " │ ") + " "
 
 	// Draw separators in a dimmer colour than the values themselves.
+	//
+	// Every advance is counted in runes, matching where the block was placed.
+	// Counting bytes here pushed each part further right than the one before it
+	// as soon as any of them held a multi-byte glyph — the em dash in the audio
+	// field alone was enough — and shoved the tail of the header off the screen.
 	cx := l.W - runeLen(right)
 	for _, part := range strings.Split(right, "│") {
 		drawText(s, cx, 0, dim, part)
-		cx += len(part)
+		cx += runeLen(part)
 		if cx < l.W {
 			drawText(s, cx, 0, sep, "│")
 			cx++
@@ -627,6 +668,38 @@ const (
 	squelchMin = 20
 	squelchMax = 80
 )
+
+// chatLabels returns the two halves of the header's chat indicator: how many
+// people are in the chat, and what has arrived unread since the panel was last
+// open. They are separate because only the second is drawn in an alert colour.
+//
+// The unread half is empty unless we are actually in the chat — nobody can
+// address a listener who has not joined — and empty when there is nothing
+// unread, so the common case costs the header four characters. A message naming
+// us adds @, the one thing worth breaking off tuning for.
+func (u *UI) chatLabels() (users, unread string) {
+	users = fmt.Sprintf("chat %d ", len(u.chat.Users))
+	if !u.chat.Connected {
+		users = "chat … "
+	}
+	if !u.chat.Joined || u.chatUnread <= 0 {
+		return users, ""
+	}
+	unread = fmt.Sprintf("+%d", u.chatUnread)
+	if u.chatMention {
+		unread += "@"
+	}
+	return users, unread + " "
+}
+
+// chatHint is the status-bar entry for the chat key, empty on a receiver that
+// does not run one so the hint disappears rather than promising a dead key.
+func (u *UI) chatHint() string {
+	if !u.chat.Available {
+		return ""
+	}
+	return "C chat"
+}
 
 // squelchLabel renders the threshold: "off" when disabled, otherwise the dB
 // figure.
@@ -1129,14 +1202,15 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 	hints := []prioritisedField{
 		{"f tune", 5},
 		{"b bookmarks", 6},
+		{u.chatHint(), 7},
 		{"m mute", 4},
-		{"M mode", 9},
+		{"M mode", 10},
 		{"n NR:" + padRunes(u.dspLabel(), 4), 0},
 		{"t SQ:" + u.squelchField(), 1},
-		{"d audio", 7},
-		{"g meter", 8},
-		{"v view", 10},
-		{"i receiver", 11},
+		{"d audio", 8},
+		{"g meter", 9},
+		{"v view", 11},
+		{"i receiver", 12},
 		{"? help", 3},
 		{"q quit", 2},
 	}
@@ -1200,6 +1274,11 @@ var helpLines = []string{
 	"  a                auto / manual",
 	"  [ ]              lower / raise the floor",
 	"  { }              lower / raise the ceiling",
+	"",
+	"Chat  (only on receivers that run one)",
+	"  C                open the chat",
+	"  @name            in the chat, mention someone; tab completes it",
+	"  /leave           in the chat, leave it but keep the display",
 	"",
 	"Receivers",
 	"  i                pick another receiver",
@@ -1347,6 +1426,11 @@ func fitFields(fields []prioritisedField, avail int, sep string) []string {
 	keep := make([]bool, len(fields))
 	used := 0
 	for _, idx := range order {
+		// A field with no text is one the display does not offer at all — chat
+		// on a receiver that does not run it — and must not cost a separator.
+		if fields[idx].text == "" {
+			continue
+		}
 		cost := runeLen(fields[idx].text)
 		if used > 0 {
 			cost += sepW

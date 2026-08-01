@@ -19,10 +19,11 @@ func TestLiveDSP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := sp.FetchDSPInfo()
+	desc, err := sp.FetchDescription()
 	if err != nil {
 		t.Fatalf("DSP discovery failed: %v", err)
 	}
+	info := desc.DSP
 	t.Logf("receiver offers DSP: enabled=%v filters=%v max_users=%d",
 		info.Enabled, info.Filters, info.MaxUsers)
 	if !info.Enabled || len(info.Filters) == 0 {

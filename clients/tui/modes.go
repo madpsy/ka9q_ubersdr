@@ -47,6 +47,15 @@ func lookupMode(name string) (Mode, bool) {
 	return Mode{}, false
 }
 
+// modeNames lists the modes this client can demodulate, for error messages.
+func modeNames() []string {
+	out := make([]string, len(modes))
+	for i, m := range modes {
+		out[i] = m.Name
+	}
+	return out
+}
+
 func modeIndex(name string) int {
 	for i, m := range modes {
 		if m.Name == name {

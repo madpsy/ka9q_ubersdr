@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -104,10 +103,6 @@ type AudioClient struct {
 	// on change, so it survives a reconnect.
 	squelch int
 
-	// Set when a reconnect is deliberate, so Run redials immediately instead of
-	// backing off as it would after a failure.
-	reconnecting bool
-
 	PCM     chan []int16 // decoded mono samples at opusOutputRate
 	Level   chan Signal  // baseband power and noise density, for the meter
 	DSP     chan DSPState
@@ -159,23 +154,6 @@ func (a *AudioClient) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		// A reconnect we asked for is not a failure: redial at once and keep
-		// the backoff for genuine drops.
-		a.mu.Lock()
-		deliberate := a.reconnecting
-		a.reconnecting = false
-		a.mu.Unlock()
-
-		if deliberate {
-			backoff = time.Second
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
-			continue
-		}
-
 		if err != nil {
 			a.report(fmt.Sprintf("audio disconnected: %v", err))
 		}
@@ -461,36 +439,18 @@ func (a *AudioClient) sendDSP(conn *websocket.Conn, filter string) {
 	}
 }
 
-// Tune retunes the existing channel in place. The server reuses the same radiod
-// channel for this, which is far cheaper than reconnecting.
-//
-// Changing to a mode with a different channel sample rate is the exception. The
-// server builds its Opus encoder once, from the rate in force when the socket
-// opened, and never rebuilds it — so after such a change it encodes 24 kHz
-// audio as though it were 12 kHz, emitting 40 ms frames for 20 ms of sound.
-// That decodes to twice as many samples and plays at half speed. Reconnecting
-// gets an encoder built for the new rate.
+// Tune retunes the existing channel in place, including across a change of
+// channel sample rate. The server reuses the same radiod channel and rebuilds
+// its Opus encoder when the rate changes, so no reconnect is needed.
 func (a *AudioClient) Tune(freq float64, mode string, low, high int) {
 	a.mu.Lock()
-	rateChanged := a.connected && modeSampleRate(mode) != modeSampleRate(a.mode)
 	a.freq, a.mode, a.bwLow, a.bwHigh = freq, mode, low, high
 	conn := a.conn
 	ok := a.connected
-	if rateChanged {
-		a.reconnecting = true
-	}
 	a.mu.Unlock()
 
 	if !ok || conn == nil {
 		return // the new values are stored; the next connect will use them
-	}
-
-	if rateChanged {
-		// Closing here makes Run redial with the values just stored.
-		a.report(fmt.Sprintf("%s needs %d kHz audio — reconnecting",
-			strings.ToUpper(mode), modeSampleRate(mode)/1000))
-		conn.Close()
-		return
 	}
 
 	// Same 10/s budget the spectrum socket uses. Commands are absolute, so a

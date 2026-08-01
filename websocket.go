@@ -2135,6 +2135,20 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 				}
 
+				// Discard a buffer whose length disagrees with the rate stamped on
+				// it.  The stamp is taken when the packet arrives from radiod, so
+				// a mode change can label a buffer captured at the old rate with
+				// the new one.  Encoding that produces a frame of the wrong
+				// duration — 40 ms of frame for 20 ms of sound, or 10 ms — which
+				// is audible as a hiccup at every switch between the 12 kHz and
+				// 24 kHz modes.  Blocks are always 20 ms, so a mismatch pinpoints
+				// the stray packet; dropping it costs 20 ms that the client's
+				// buffer absorbs silently.
+				if expected := audioPacket.SampleRate / 50; expected > 0 &&
+					len(audioPacket.PCMData)/2 != expected {
+					continue
+				}
+
 				// Match the encoder to the rate this packet was captured at.
 				// audioPacket.SampleRate is stamped on receipt from radiod, so it
 				// stays correct even when session.SampleRate has already moved on

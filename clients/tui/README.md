@@ -182,19 +182,24 @@ across both the spectrum and the waterfall so it is obvious what is being
 demodulated — the shading is offset to one side of the marker for sideband
 modes, and dims when muted.
 
-Changing between a narrow mode (`usb`, `lsb`, `cwu`, `cwl`, 12 kHz channel) and
-a wide one (`am`, `sam`, `fm`, `nfm`, 24 kHz) **reconnects the audio socket**.
-The server builds its Opus encoder once, from the sample rate in force when the
-socket opened, and never rebuilds it — so retuning across that boundary in place
-leaves it encoding 24 kHz audio as though it were 12 kHz, emitting 40 ms frames
-for 20 ms of sound. That decodes to twice as many samples and plays at half
-speed. Reconnecting gets an encoder built for the new rate. Changes within a
-rate class still retune in place, which is much cheaper.
+Every change of mode, frequency or filter retunes in place — the server reuses
+the same radiod channel, which is far cheaper than reconnecting. That includes
+moving between a narrow mode (`usb`, `lsb`, `cwu`, `cwl`, 12 kHz channel) and a
+wide one (`am`, `sam`, `fm`, `nfm`, 24 kHz): the server rebuilds its Opus
+encoder when the channel's rate changes.
 
-The packet header also carries the channel's sample rate and channel count.
-Neither affects the playback rate — Opus always reconstructs at 48 kHz — but the
-channel count decides whether a frame is folded to mono, and both are shown in
-the `d` panel.
+That last part needed a server fix. An encoder left configured for the old rate
+reads 20 ms of 24 kHz audio as 40 ms and emits a 40 ms frame, which decodes to
+twice as many samples and plays at half speed an octave low. No client can
+recover from it, because an Opus frame's duration is carried in the bitstream —
+decoding at a different rate changes the sample count but not the duration. If
+you point this client at a receiver predating that fix, expect AM and FM to play
+at half speed after switching from a sideband mode.
+
+The packet header carries the channel's sample rate and channel count. Neither
+affects the playback rate — Opus always reconstructs at 48 kHz — but the channel
+count decides whether a frame is folded to mono, and both are shown in the `d`
+panel.
 
 **Modes and default filters**, matching the web UI so a frequency sounds the
 same in both:

@@ -37,18 +37,6 @@ const sidebandCutoff = 10_000_000.0
 // The server clamps bandwidth to ±12 kHz for non-bypassed sessions.
 const maxBandwidthHz = 12000
 
-// modeSampleRate is the radio channel's sample rate for a mode, mirroring
-// GetSampleRateForMode in the server's config.go. It matters because the
-// server builds its Opus encoder once, from the rate in force at connect.
-func modeSampleRate(name string) int {
-	switch strings.ToLower(name) {
-	case "am", "sam", "fm", "nfm":
-		return 24000
-	default:
-		return 12000
-	}
-}
-
 func lookupMode(name string) (Mode, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	for _, m := range modes {

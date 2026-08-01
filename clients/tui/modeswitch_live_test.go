@@ -33,17 +33,19 @@ func TestLiveModeSwitchSpeed(t *testing.T) {
 
 	check := func(mode string, low, high int) {
 		ac.Tune(7_100_000, mode, low, high)
-		// Allow for a reconnect when the sample rate class changes.
-		time.Sleep(1800 * time.Millisecond)
-		for !ac.Connected() {
+
+		// Drain while the change takes effect. Sleeping instead would let
+		// packets queue and then be read faster than real time, inflating the
+		// measurement.
+		settle := time.Now()
+		for time.Since(settle) < 1500*time.Millisecond {
 			select {
-			case <-time.After(100 * time.Millisecond):
-			case <-ctx.Done():
-				t.Fatalf("%s: never reconnected", mode)
+			case <-ac.PCM:
+			case <-ac.Level:
+			case <-ac.Silence:
+			case <-ac.Status:
+			case <-time.After(50 * time.Millisecond):
 			}
-		}
-		for len(ac.PCM) > 0 {
-			<-ac.PCM
 		}
 
 		start := time.Now()

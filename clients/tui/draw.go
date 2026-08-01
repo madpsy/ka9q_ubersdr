@@ -48,6 +48,8 @@ func (v ViewMode) String() string {
 type Layout struct {
 	W, H         int
 	PlotX, PlotW int
+	MarkY, MarkH int // band/bookmark strip; MarkH is 0 when there is nothing to show
+	BodyY        int // first row below the header and the marker strip
 	SpecY, SpecH int // spectrum pane; SpecH is 0 when hidden
 	WfY, WfH     int // waterfall pane; WfH is 0 when hidden
 	AxisY        int
@@ -56,7 +58,10 @@ type Layout struct {
 
 const gutterW = 9 // room for right-aligned "-120 dB" / "-12.5s" labels
 
-func computeLayout(w, h int, mode ViewMode, splitRatio float64) Layout {
+// computeLayout derives the geometry for one draw. markerRows is how many rows
+// the band/bookmark strip wants; it gets them only when the panes can spare
+// them, since a receiver's markers are never worth losing the spectrum over.
+func computeLayout(w, h int, mode ViewMode, splitRatio float64, markerRows int) Layout {
 	l := Layout{W: w, H: h}
 	l.PlotX = gutterW
 	l.PlotW = w - gutterW
@@ -65,6 +70,7 @@ func computeLayout(w, h int, mode ViewMode, splitRatio float64) Layout {
 	}
 	l.AxisY = h - 2
 	l.StatusY = h - 1
+	l.BodyY = 1
 
 	// Rows between the header and the axis. On a terminal too short to hold
 	// header + body + axis + status this goes non-positive; leave both panes
@@ -75,11 +81,19 @@ func computeLayout(w, h int, mode ViewMode, splitRatio float64) Layout {
 		return l
 	}
 
+	// Keep at least two rows of body: one row of spectrum is not a display, and
+	// in split view both panes still have to exist.
+	if markerRows > 0 && body-markerRows >= 2 {
+		l.MarkY, l.MarkH = 1, markerRows
+		l.BodyY += markerRows
+		body -= markerRows
+	}
+
 	switch mode {
 	case ViewSpectrum:
-		l.SpecY, l.SpecH = 1, body
+		l.SpecY, l.SpecH = l.BodyY, body
 	case ViewWaterfall:
-		l.WfY, l.WfH = 1, body
+		l.WfY, l.WfH = l.BodyY, body
 	case ViewSplit:
 		specH := int(float64(body) * splitRatio)
 		// Both panes must stay visible, otherwise "split" silently becomes a
@@ -93,8 +107,8 @@ func computeLayout(w, h int, mode ViewMode, splitRatio float64) Layout {
 		if specH < 1 {
 			specH = body
 		}
-		l.SpecY, l.SpecH = 1, specH
-		l.WfY, l.WfH = 1+specH, body-specH
+		l.SpecY, l.SpecH = l.BodyY, specH
+		l.WfY, l.WfH = l.BodyY+specH, body-specH
 	}
 	return l
 }
@@ -176,6 +190,12 @@ type UI struct {
 	// last heard, used to show whether the gate is currently closed.
 	squelch     int
 	lastAudioAt time.Time
+
+	// The receiver's band plan and bookmarks, drawn as a strip above the panes.
+	// bookmarkHits records where each label landed so a click can find it.
+	bands        []Band
+	bookmarks    []Bookmark
+	bookmarkHits []bookmarkHit
 
 	// Cursor tracking for the crosshair and readout; -1 means off-plot.
 	cursorX, cursorY int
@@ -294,6 +314,10 @@ func (u *UI) Reset() {
 	u.peaks = nil
 	u.lastCols = nil
 	u.wf.Clear()
+	// The next receiver has its own band plan and bookmarks.
+	u.bands = nil
+	u.bookmarks = nil
+	u.bookmarkHits = nil
 	u.vfo = 0
 	u.fps = 0
 	u.haveRange = false
@@ -456,12 +480,13 @@ func (u *UI) render(s tcell.Screen) {
 		drawText(s, 0, 0, tcell.StyleDefault, "terminal too small")
 		return
 	}
-	l := computeLayout(w, h, u.mode, u.splitRatio)
+	l := computeLayout(w, h, u.mode, u.splitRatio, u.markerRows())
 
 	s.Clear()
 	u.lastCols = columnPeaks(u.bins, l.PlotW)
 
 	u.drawHeader(s, l)
+	u.drawMarkers(s, l)
 	if l.SpecH > 0 {
 		u.drawDBScale(s, l)
 		if u.braille {
@@ -950,7 +975,7 @@ func (u *UI) drawFilter(s tcell.Screen, l Layout) {
 		edge = tcell.NewRGBColor(130, 130, 130)
 	}
 
-	for y := 1; y < l.AxisY; y++ {
+	for y := l.BodyY; y < l.AxisY; y++ {
 		for x := loCol; x <= hiCol; x++ {
 			r, combi, style, _ := s.GetContent(x, y)
 			if r == 0 {
@@ -979,7 +1004,7 @@ func (u *UI) drawMarker(s tcell.Screen, l Layout) {
 	tint := tcell.NewRGBColor(120, 70, 0)
 	accent := tcell.StyleDefault.Foreground(tcell.NewRGBColor(255, 175, 0)).Background(tint)
 
-	for y := 1; y < l.AxisY; y++ {
+	for y := l.BodyY; y < l.AxisY; y++ {
 		r, combi, style, _ := s.GetContent(col, y)
 		if r == ' ' || r == 0 {
 			s.SetContent(col, y, '│', nil, accent)
@@ -997,7 +1022,7 @@ func (u *UI) drawCursor(s tcell.Screen, l Layout) {
 		return
 	}
 	ghost := tcell.NewRGBColor(70, 70, 80)
-	for y := 1; y < l.AxisY; y++ {
+	for y := l.BodyY; y < l.AxisY; y++ {
 		r, combi, style, _ := s.GetContent(u.cursorX, y)
 		if r == ' ' || r == 0 {
 			s.SetContent(u.cursorX, y, '┆', nil, tcell.StyleDefault.Foreground(ghost))
@@ -1103,14 +1128,15 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 	// stops the hints after it shifting as it changes.
 	hints := []prioritisedField{
 		{"f tune", 5},
+		{"b bookmarks", 6},
 		{"m mute", 4},
-		{"M mode", 8},
+		{"M mode", 9},
 		{"n NR:" + padRunes(u.dspLabel(), 4), 0},
 		{"t SQ:" + u.squelchField(), 1},
-		{"d audio", 6},
-		{"g meter", 7},
-		{"v view", 9},
-		{"i receiver", 10},
+		{"d audio", 7},
+		{"g meter", 8},
+		{"v view", 10},
+		{"i receiver", 11},
 		{"? help", 3},
 		{"q quit", 2},
 	}
@@ -1134,6 +1160,8 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 var helpLines = []string{
 	"Tuning  (the VFO is what the radio is tuned to)",
 	"  click            set the VFO",
+	"  click a bookmark tune to it, with its mode and filter",
+	"  b                browse and search the receiver's bookmarks",
 	"  f                type a frequency",
 	"  c                centre the view on the VFO",
 	"  ↑ ↓              tune up / down one step",
@@ -1154,7 +1182,7 @@ var helpLines = []string{
 	"Display",
 	"  v                spectrum / waterfall / split",
 	"  < >              resize the split",
-	"  b                filled bars or braille trace",
+	"  B                filled bars or braille trace",
 	"  p                peak hold",
 	"",
 	"Audio",

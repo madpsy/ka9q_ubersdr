@@ -330,7 +330,7 @@ func TestFilterShadingFollowsBandwidth(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(120, 30, ViewSplit, ui.splitRatio)
+	l := computeLayout(120, 30, ViewSplit, ui.splitRatio, 0)
 	start, span := ui.viewRange()
 	lo, hi := filterRange(ui.vfo, ui.bwLow, ui.bwHigh)
 	loCol := l.PlotX + int((lo-start)/span*float64(l.PlotW))
@@ -362,7 +362,7 @@ func TestFilterShadingHiddenWhenAudioOff(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(120, 30, ViewSplit, ui.splitRatio)
+	l := computeLayout(120, 30, ViewSplit, ui.splitRatio, 0)
 	cells, w, _ := screen.GetContents()
 	markerCol := ui.ColAt(l, ui.vfo)
 	for x := l.PlotX; x < w; x++ {
@@ -1121,7 +1121,7 @@ func TestStatusBarAlwaysShowsNoiseReduction(t *testing.T) {
 		ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 		ui.Draw(screen)
 
-		l := computeLayout(w, 24, ViewSpectrum, ui.splitRatio)
+		l := computeLayout(w, 24, ViewSpectrum, ui.splitRatio, 0)
 		cells, sw, _ := screen.GetContents()
 		row := make([]rune, 0, sw)
 		for i := 0; i < sw; i++ {
@@ -1171,7 +1171,7 @@ func TestStatusHintsShedByPriority(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(64, 24, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(64, 24, ViewSpectrum, ui.splitRatio, 0)
 	cells, sw, _ := screen.GetContents()
 	row := make([]rune, 0, sw)
 	for i := 0; i < sw; i++ {
@@ -1487,7 +1487,7 @@ func TestSquelchStatusIndicator(t *testing.T) {
 		ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 		ui.Draw(screen)
 
-		l := computeLayout(150, 24, ViewSpectrum, ui.splitRatio)
+		l := computeLayout(150, 24, ViewSpectrum, ui.splitRatio, 0)
 		cells, w, _ := screen.GetContents()
 		row := make([]rune, 0, w)
 		for i := 0; i < w; i++ {

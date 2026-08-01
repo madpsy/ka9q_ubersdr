@@ -130,6 +130,8 @@ and the **view**, which is what the display shows. They have separate keys.
 | --- | --- |
 | **Tuning — moves the radio** | |
 | click | set the VFO |
+| click a bookmark | tune to it, taking its mode and filter |
+| `b` | browse and search the receiver's bookmarks |
 | `f` | type a frequency |
 | `c` | centre the view on the VFO |
 | `↑` `↓` | tune up / down one step |
@@ -147,7 +149,7 @@ and the **view**, which is what the display shows. They have separate keys.
 | **Display** | |
 | `v` | cycle spectrum / waterfall / split |
 | `<` `>` | resize the split |
-| `b` | braille (2x resolution) or block bars |
+| `B` | braille (2x resolution) or block bars |
 | `p` | peak hold — marks the highest level each position has reached, decaying slowly |
 | **Scaling — the dB window, not the audio filter** | |
 | `a` | auto / manual |
@@ -282,6 +284,41 @@ override: `7.1M`, `7100k`, `7100000Hz`.
 
 ## Display notes
 
+**Marker strip.** Two rows sit between the header and the panes: bookmarks on
+top, the band plan directly above the spectrum where it reads as a ruler over
+it. Both come from the receiver's HTTP API — `/api/bands` and `/api/bookmarks`,
+the same endpoints the web and Python clients use — refreshed every five
+minutes, because the bookmark list includes the EiBi broadcasts that are on air
+*at that moment* and those turn over with the schedules. Bands are coloured by
+their position in the receiver's list, so a band is the same colour here as in a
+browser, and the widest are drawn first so a narrow segment nested inside one
+stays visible.
+
+A bookmark's `▾` sits on its exact column, with the name running whichever way
+there is room for it, so a label near the right-hand edge is shifted without the
+marker ever misreporting the frequency. A wide view holds far more bookmarks
+than columns — a receiver carrying the EiBi schedule serves well over a thousand
+— so labels are placed in order of usefulness and the rest fall away: the
+receiver's own bookmarks before the EiBi ones, and within each, those nearest
+the VFO. The strip gives up its rows on a terminal too short to spare them.
+
+**Browsing bookmarks.** `b` opens the full list — everything the receiver
+serves, in frequency order, over the running display. **Just start typing to
+search**, as in the receiver picker: the list narrows on every keystroke and
+matches the name, group, mode and frequency, the last in both the units it gets
+quoted in, so `7074` and `7.074` both find FT8 on 40 m. Terms are matched
+independently and all must hit, so `cw 20` finds `CW 20m` whichever field each
+word lands in. Because every printable key is search text, navigation is on the
+arrows and paging keys; `Esc` clears the search and closes the panel once the
+search is already empty, and `^U` clears it outright.
+
+`Enter` tunes to the highlighted entry with its mode and its filter, and brings
+the view along when it is off-screen. Clicking a label on the strip does the
+same thing without the panel. In both cases the mode is applied *after* the VFO
+moves and without the automatic sideband switch: a bookmark that names LSB above
+10 MHz means it, and the 10 MHz convention must not overrule it — the web and
+Python clients skip the automatic switch for bookmarks for the same reason.
+
 **Scaling.** In auto mode the dB window is anchored on the 10th percentile —
 a representative noise floor, not its lowest outlier — and on the strongest
 signal in the frame, with a **minimum range of 60 dB**. The minimum is what
@@ -328,10 +365,10 @@ That is real data, not a rendering artifact.
 panes therefore sample at *sub-cell* resolution to halve that:
 
 - The spectrum uses braille, which packs 2×4 dots into a cell, filled from the
-  trace down to the baseline. This is the default; `b` switches to block bars,
+  trace down to the baseline. This is the default; `B` switches to block bars,
   which give finer vertical steps (8 per row) but only one sample per cell
   horizontally. Braille needs a font with braille glyphs — near-universal in
-  monospace fonts, but `b` is the escape hatch.
+  monospace fonts, but `B` is the escape hatch.
 - The waterfall packs two horizontally adjacent samples into each cell with the
   half-block glyph `▌`, the left sub-column in the foreground colour and the
   right in the background. Two pixels is the most a cell can hold *exactly*,
@@ -385,6 +422,11 @@ so it works against older servers.
 Before opening the WebSocket it performs the `/connection` precheck the server
 requires, which is what surfaces a clear reason when a receiver is full or the
 client is rate limited.
+
+Everything else it reads is a plain JSON GET: `/api/description` for the DSP
+inserts a receiver offers, and `/api/bands` and `/api/bookmarks` for the marker
+strip. None of them is required — a receiver serving none of them simply gets a
+display without those parts.
 
 ## Tests
 

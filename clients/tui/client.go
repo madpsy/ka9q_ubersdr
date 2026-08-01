@@ -71,6 +71,9 @@ type Client struct {
 	Frames  chan Frame
 	Configs chan SpectrumConfig
 	Status  chan string
+	// Markers carries the band plan and bookmarks, refreshed periodically off
+	// the HTTP API rather than the spectrum socket.
+	Markers chan Markers
 }
 
 const minCommandDelay = 100 * time.Millisecond
@@ -90,6 +93,7 @@ func NewClient(host string, useTLS bool, password string) (*Client, error) {
 		Frames:  make(chan Frame, 4),
 		Configs: make(chan SpectrumConfig, 4),
 		Status:  make(chan string, 8),
+		Markers: make(chan Markers, 1),
 	}, nil
 }
 
@@ -161,29 +165,35 @@ type DSPInfo struct {
 	MaxUsers int      `json:"max_users"`
 }
 
-// FetchDSPInfo asks the receiver which DSP inserts it offers. A receiver
-// without DSP simply reports none, which is not an error.
-func (c *Client) FetchDSPInfo() (DSPInfo, error) {
-	endpoint := fmt.Sprintf("%s://%s/api/description", c.scheme("https", "http"), c.host)
+// getJSON reads a JSON endpoint from the receiver into out. Every read-only
+// part of the HTTP API this client uses is a plain GET returning JSON, so they
+// all share this.
+func (c *Client) getJSON(path string, out interface{}) error {
+	endpoint := fmt.Sprintf("%s://%s%s", c.scheme("https", "http"), c.host, path)
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return DSPInfo{}, err
+		return err
 	}
 	req.Header.Set("User-Agent", "UberSDR TUI Client (go)")
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return DSPInfo{}, err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return DSPInfo{}, fmt.Errorf("description returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("%s returned HTTP %d", path, resp.StatusCode)
 	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
 
+// FetchDSPInfo asks the receiver which DSP inserts it offers. A receiver
+// without DSP simply reports none, which is not an error.
+func (c *Client) FetchDSPInfo() (DSPInfo, error) {
 	var payload struct {
 		DSP DSPInfo `json:"dsp"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := c.getJSON("/api/description", &payload); err != nil {
 		return DSPInfo{}, err
 	}
 	return payload.DSP, nil

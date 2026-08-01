@@ -187,7 +187,7 @@ func TestCursorReadoutClampsToScreen(t *testing.T) {
 		// The readout carries "MHz"; confirm it landed somewhere on the axis row.
 		cells, w, _ := screen.GetContents()
 		row := make([]rune, 0, w)
-		l := computeLayout(100, 30, ViewSpectrum, ui.splitRatio)
+		l := computeLayout(100, 30, ViewSpectrum, ui.splitRatio, 0)
 		for i := 0; i < w; i++ {
 			runes := cells[l.AxisY*w+i].Runes
 			if len(runes) > 0 && runes[0] != 0 {
@@ -219,7 +219,7 @@ func TestWaterfallAlignsHistoryAfterPan(t *testing.T) {
 	ui.cfg.CenterFreq = 7_150_000
 	ui.Draw(screen)
 
-	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio)
+	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio, 0)
 	wantCol := ui.ColAt(l, 7_100_000)
 	if wantCol < 0 {
 		t.Fatal("7.100 MHz should still be on screen after a 50 kHz pan")
@@ -259,7 +259,7 @@ func TestZeroHzAxisTickIsFormattedAsANumber(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(2048, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(120, 30, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(120, 30, ViewSpectrum, ui.splitRatio, 0)
 	cells, w, _ := screen.GetContents()
 	var axis strings.Builder
 	for i := 0; i < w; i++ {
@@ -303,7 +303,7 @@ func TestHeaderShowsPlaceholderBeforeFirstConfig(t *testing.T) {
 // the terminal could actually show.
 func TestWaterfallResolvesSubColumns(t *testing.T) {
 	ui, screen := newTestUI(100, 30, ViewWaterfall)
-	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio)
+	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio, 0)
 
 	// Alternate floor and peak between neighbouring sub-columns. The pattern is
 	// laid out using the same sub-column-to-bin ranges the renderer uses, so
@@ -355,7 +355,7 @@ func TestBrailleFillsToBaseline(t *testing.T) {
 	// The braille spectrum should read as a solid shape, so a strong signal
 	// must light cells all the way down to the bottom row of the pane.
 	ui, screen := newTestUI(100, 30, ViewSpectrum)
-	l := computeLayout(100, 30, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(100, 30, ViewSpectrum, ui.splitRatio, 0)
 
 	bins := make([]float32, 2048)
 	for i := range bins {
@@ -383,7 +383,7 @@ func TestBrailleFillsToBaseline(t *testing.T) {
 func TestBinsPerScreenPositionHalved(t *testing.T) {
 	// Document the actual win: braille and the quadrant waterfall both sample
 	// at 2x the character-cell width.
-	l := computeLayout(200, 50, ViewSplit, 0.45)
+	l := computeLayout(200, 50, ViewSplit, 0.45, 0)
 	const bins = 2048
 
 	perCell := float64(bins) / float64(l.PlotW)
@@ -582,7 +582,7 @@ func TestSetFrameFallsBackToCurrentView(t *testing.T) {
 // cell shows must be exactly what was sampled.
 func TestWaterfallRenderingIsExact(t *testing.T) {
 	ui, screen := newTestUI(100, 30, ViewWaterfall)
-	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio)
+	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio, 0)
 
 	// Pure noise with no real structure, at the level a noise floor sits.
 	rng := newDeterministicRNG(11)
@@ -660,7 +660,7 @@ func newDeterministicRNG(seed uint64) func() float64 {
 // keep the window it was captured under.
 func TestScaleShiftDoesNotRepaintHistory(t *testing.T) {
 	ui, screen := newTestUI(100, 30, ViewWaterfall)
-	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio)
+	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio, 0)
 
 	// A noise floor with one weak carrier just above it.
 	bins := make([]float32, 1024)
@@ -721,7 +721,7 @@ func TestManualScaleAppliesToWholeHistory(t *testing.T) {
 	// When the user sets the window by hand, applying it to everything is the
 	// point — history should re-colour so it can be re-examined.
 	ui, screen := newTestUI(100, 30, ViewWaterfall)
-	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio)
+	l := computeLayout(100, 30, ViewWaterfall, ui.splitRatio, 0)
 
 	bins := make([]float32, 1024)
 	for i := range bins {

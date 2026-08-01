@@ -171,8 +171,9 @@ type eventLoop struct {
 	// so the user can switch receivers without restarting.
 	clientCancel context.CancelFunc
 
-	picker     *Picker
-	audioPanel *AudioPanel
+	picker        *Picker
+	audioPanel    *AudioPanel
+	bookmarkPanel *BookmarkPanel
 
 	// Audio shares the spectrum session's UUID but needs its own socket.
 	audio       *AudioClient
@@ -270,6 +271,9 @@ func (e *eventLoop) connectTo(inst Instance) {
 			return
 		}
 		go client.Run(ctx, e.opts.initialFreq, initialBinBW)
+		// The band plan and bookmarks come off the HTTP API, so they neither
+		// wait for nor block the spectrum socket.
+		go client.RunMarkers(ctx)
 
 		// Audio only starts once the user asks for it, so a spectrum-only
 		// session costs the server nothing extra.
@@ -408,8 +412,10 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 		var frames chan Frame
 		var configs chan SpectrumConfig
 		var status chan string
+		var markers chan Markers
 		if e.client != nil {
 			frames, configs, status = e.client.Frames, e.client.Configs, e.client.Status
+			markers = e.client.Markers
 		}
 		var pcm chan []int16
 		var level chan Signal
@@ -467,6 +473,10 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			// The first config is the earliest point at which there is a
 			// frequency to tune audio to.
 			e.maybeStartAudio()
+			dirty = true
+
+		case m := <-markers:
+			e.ui.bands, e.ui.bookmarks = m.Bands, m.Bookmarks
 			dirty = true
 
 		case msg := <-status:
@@ -531,9 +541,12 @@ func (e *eventLoop) draw() {
 	// once. Presenting between the two would show a frame of the bare display
 	// on every redraw, which looks like the overlay flickering.
 	e.ui.render(e.screen)
+	// Drawn over the live display so the spectrum keeps updating behind them.
 	if e.audioPanel != nil {
-		// Drawn over the live display so the spectrum keeps updating behind it.
 		e.audioPanel.Draw(e.screen, e.ui, e.deviceID)
+	}
+	if e.bookmarkPanel != nil {
+		e.bookmarkPanel.Draw(e.screen, e.ui)
 	}
 	e.screen.Show()
 }
@@ -544,6 +557,37 @@ func (e *eventLoop) setVFO(freq float64) {
 	e.ui.vfo = clampFreq(freq)
 	e.ui.SyncSideband()
 	e.retune()
+}
+
+// tuneToBookmark takes the frequency, mode and filter from a bookmark.
+//
+// The mode is applied after the VFO has moved, and deliberately without
+// SyncSideband: a bookmark states which sideband its station uses, and the
+// 10 MHz convention must not overrule it — the web and Python clients skip the
+// automatic switch for bookmarks for the same reason.
+func (e *eventLoop) tuneToBookmark(bm Bookmark) {
+	ui := e.ui
+	ui.vfo = clampFreq(bm.Frequency)
+
+	if _, ok := lookupMode(bm.Mode); ok {
+		ui.ApplyMode(bm.Mode)
+		// A bookmark's own filter, when it carries one, beats the mode default.
+		if bm.BandwidthLow != nil && bm.BandwidthHigh != nil {
+			ui.bwLow, ui.bwHigh = clampBandwidth(ui.audioMode, *bm.BandwidthLow, *bm.BandwidthHigh)
+		}
+	}
+
+	e.retune()
+	ui.status = fmt.Sprintf("%s — %s MHz %s", bm.Name,
+		formatFreq(ui.vfo, ui.cfg.TotalBandwidth), strings.ToUpper(ui.audioMode))
+
+	// Bring the view along when the bookmark is off-screen, which it usually is
+	// when it was chosen from the browser rather than clicked on the strip.
+	// Same margin as stepVFO, so the marker never lands right on the edge.
+	start, span := ui.viewRange()
+	if span > 0 && (ui.vfo < start+span*0.05 || ui.vfo > start+span*0.95) {
+		e.pan(clampCenter(ui.vfo, span))
+	}
 }
 
 func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
@@ -557,15 +601,31 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 		if e.picker != nil {
 			return e.handlePickerKey(ev)
 		}
+		if e.bookmarkPanel != nil {
+			return e.handleBookmarkKey(ev)
+		}
 		if e.audioPanel != nil {
 			return e.handleAudioPanelKey(ev)
 		}
 		return e.handleKey(ev)
 
 	case *tcell.EventMouse:
-		if e.picker == nil {
+		// A modal owns the screen it covers, so a click behind it must not
+		// tune the radio.
+		if e.picker == nil && e.bookmarkPanel == nil {
 			e.handleMouse(ev)
 		}
+	}
+	return false
+}
+
+func (e *eventLoop) handleBookmarkKey(ev *tcell.EventKey) (quit bool) {
+	bm, done := e.bookmarkPanel.HandleKey(ev, e.ui)
+	if bm != nil {
+		e.tuneToBookmark(*bm)
+	}
+	if done || bm != nil {
+		e.bookmarkPanel = nil
 	}
 	return false
 }
@@ -709,7 +769,11 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			ui.showPeaks = !ui.showPeaks
 			ui.peaks = nil
 			ui.status = fmt.Sprintf("peak hold %s", onOff(ui.showPeaks))
-		case 'b', 'B':
+		case 'b':
+			e.bookmarkPanel = NewBookmarkPanel()
+		case 'B':
+			// The trace style moved to shift so that b, the obvious key for
+			// bookmarks, could have it.
 			ui.braille = !ui.braille
 			ui.status = fmt.Sprintf("style: %s", styleName(ui.braille))
 		case 'c', 'C':
@@ -822,12 +886,12 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 	ui := e.ui
 	w, h := e.screen.Size()
-	l := computeLayout(w, h, ui.mode, ui.splitRatio)
+	l := computeLayout(w, h, ui.mode, ui.splitRatio, ui.markerRows())
 	x, y := ev.Position()
 	buttons := ev.Buttons()
 
 	// Track the pointer for the crosshair readout regardless of buttons.
-	if x >= l.PlotX && y >= 1 && y < l.AxisY {
+	if x >= l.PlotX && y >= l.BodyY && y < l.AxisY {
 		ui.cursorX, ui.cursorY = x, y
 	} else {
 		ui.cursorX, ui.cursorY = -1, -1
@@ -853,7 +917,7 @@ func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 	}
 
 	// Both panes accept click and drag, so the whole body is interactive.
-	inPlot := y >= 1 && y < l.AxisY && x >= l.PlotX
+	inPlot := y >= l.BodyY && y < l.AxisY && x >= l.PlotX
 
 	if buttons&tcell.ButtonPrimary != 0 {
 		if !e.dragging {
@@ -862,6 +926,11 @@ func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 			if ui.MeterHit(l, x, y) {
 				ui.meterSNR = !ui.meterSNR
 				ui.status = "meter: " + meterModeName(ui.meterSNR)
+				return
+			}
+			// A bookmark label is a tuning target, as in the other clients.
+			if bm, ok := ui.BookmarkAt(l, x, y); ok {
+				e.tuneToBookmark(bm)
 				return
 			}
 			if !inPlot {

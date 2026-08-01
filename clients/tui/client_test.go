@@ -325,12 +325,12 @@ func TestLayoutStaysValidWhenTiny(t *testing.T) {
 	modes := []ViewMode{ViewSpectrum, ViewWaterfall, ViewSplit}
 	for _, dim := range [][2]int{{1, 1}, {8, 3}, {20, 6}, {24, 8}, {200, 60}} {
 		for _, mode := range modes {
-			l := computeLayout(dim[0], dim[1], mode, 0.45)
+			l := computeLayout(dim[0], dim[1], mode, 0.45, 0)
 			if l.PlotW < 1 {
-				t.Errorf("computeLayout(%d,%d,%v) gave PlotW=%d", dim[0], dim[1], mode, l.PlotW)
+				t.Errorf("computeLayout(%d,%d,%v, 0) gave PlotW=%d", dim[0], dim[1], mode, l.PlotW)
 			}
 			if l.SpecH < 0 || l.WfH < 0 {
-				t.Errorf("computeLayout(%d,%d,%v) gave SpecH=%d WfH=%d",
+				t.Errorf("computeLayout(%d,%d,%v, 0) gave SpecH=%d WfH=%d",
 					dim[0], dim[1], mode, l.SpecH, l.WfH)
 			}
 			// Panes must not run past the frequency axis.
@@ -348,7 +348,7 @@ func TestSplitShowsBothPanes(t *testing.T) {
 	// Split view must never collapse to a single pane on a usable terminal,
 	// whatever the ratio.
 	for _, ratio := range []float64{0.05, 0.15, 0.45, 0.85, 0.99} {
-		l := computeLayout(120, 40, ViewSplit, ratio)
+		l := computeLayout(120, 40, ViewSplit, ratio, 0)
 		if l.SpecH < 1 || l.WfH < 1 {
 			t.Errorf("ratio %.2f collapsed the split: SpecH=%d WfH=%d", ratio, l.SpecH, l.WfH)
 		}

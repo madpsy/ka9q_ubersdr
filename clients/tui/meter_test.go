@@ -196,7 +196,7 @@ func TestMeterRendersInStatusRow(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(120, 24, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(120, 24, ViewSpectrum, ui.splitRatio, 0)
 	cells, w, _ := screen.GetContents()
 	var row strings.Builder
 	for i := 0; i < w; i++ {
@@ -257,7 +257,7 @@ func TestMeterToggleSwitchesScale(t *testing.T) {
 func TestMeterHitTest(t *testing.T) {
 	u := NewUI("test")
 	u.audioOn = true
-	l := computeLayout(120, 24, ViewSpectrum, u.splitRatio)
+	l := computeLayout(120, 24, ViewSpectrum, u.splitRatio, 0)
 
 	x0, x1, ok := u.meterRegion(l)
 	if !ok {
@@ -295,7 +295,7 @@ func TestMeterHitTest(t *testing.T) {
 
 	// Nor on a terminal too narrow to draw it.
 	u.audioOn = true
-	narrow := computeLayout(meterCells()+10, 24, ViewSpectrum, u.splitRatio)
+	narrow := computeLayout(meterCells()+10, 24, ViewSpectrum, u.splitRatio, 0)
 	if _, _, ok := u.meterRegion(narrow); ok {
 		t.Error("meter drawn on a terminal with no room for it")
 	}
@@ -314,7 +314,7 @@ func TestMeterHitMatchesDrawnCells(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(120, 24, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(120, 24, ViewSpectrum, ui.splitRatio, 0)
 	cells, w, _ := screen.GetContents()
 
 	// The label's first cell and the closing bracket must both be inside the
@@ -363,7 +363,7 @@ func TestMeterKeyIsDiscoverable(t *testing.T) {
 	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
 	ui.Draw(screen)
 
-	l := computeLayout(160, 24, ViewSpectrum, ui.splitRatio)
+	l := computeLayout(160, 24, ViewSpectrum, ui.splitRatio, 0)
 	cells, w, _ := screen.GetContents()
 	var row []rune
 	for i := 0; i < w; i++ {

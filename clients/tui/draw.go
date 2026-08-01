@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -152,6 +153,30 @@ type UI struct {
 	wheelTunes bool
 	stepIdx    int
 
+	// Audio state. The VFO doubles as the tuned frequency, so the filter edges
+	// are relative to it.
+	audioOn      bool
+	muted        bool
+	audioMode    string // demodulation mode: usb, lsb, am…
+	bwLow        int
+	bwHigh       int
+	autoSideband bool
+	channel      Channel
+	volume       float64
+	signal       Signal // latest level report from the audio stream
+	meterSNR     bool   // meter shows SNR rather than absolute dBFS
+	audioStatus  string
+
+	// Server-side DSP insert. dspFilters is what this receiver offers;
+	// dspFilter is the one in use, empty for off, which is the default.
+	dspFilters []string
+	dspFilter  string
+
+	// Squelch threshold in dB of SNR, 0 for off. squelchedAt is when audio was
+	// last heard, used to show whether the gate is currently closed.
+	squelch     int
+	lastAudioAt time.Time
+
 	// Cursor tracking for the crosshair and readout; -1 means off-plot.
 	cursorX, cursorY int
 
@@ -175,7 +200,7 @@ type UI struct {
 var tuningSteps = []float64{10, 100, 500, 1000, 5000, 9000, 10000}
 
 func NewUI(server string) *UI {
-	return &UI{
+	u := &UI{
 		serverName: server,
 		wf:         NewWaterfall(),
 		mode:       ViewSplit,
@@ -186,15 +211,80 @@ func NewUI(server string) *UI {
 		status:     "connecting…",
 		cursorX:    -1,
 		cursorY:    -1,
-		stepIdx:    3, // 1 kHz
+		stepIdx:    2, // 500 Hz — fine enough to land on an SSB signal,
+		//                coarse enough to cross a band without spinning
 		// Braille resolves twice as many bins per screen width as block bars,
 		// which matters far more than the bars' extra vertical steps when a
 		// receiver sends 2048 bins into ~200 columns.
-		braille: true,
+		braille:      true,
+		autoSideband: true,
+		channel:      ChannelBoth,
+		volume:       1.0,
+		signal:       Signal{Power: float32(math.Inf(-1)), Noise: float32(math.Inf(-1))},
 	}
+	// Take the starting mode and its filter from the mode table rather than
+	// repeating the numbers here, where they would silently go stale when the
+	// table is corrected.
+	u.ApplyMode("usb")
+	return u
+}
+
+// ApplyMode switches demodulation mode, adopting that mode's default filter.
+func (u *UI) ApplyMode(name string) {
+	m, ok := lookupMode(name)
+	if !ok {
+		return
+	}
+	u.audioMode = m.Name
+	u.bwLow, u.bwHigh = clampBandwidth(m.Name, m.Low, m.High)
+}
+
+// SyncSideband applies the 10 MHz convention when the VFO moves, but only for
+// sideband modes: choosing AM or CW is deliberate and crossing the cutoff must
+// not silently undo it. The user's filter width is carried across rather than
+// reset to the default.
+func (u *UI) SyncSideband() {
+	if !u.autoSideband || u.vfo <= 0 || !isSideband(u.audioMode) {
+		return
+	}
+	want := autoMode(u.vfo)
+	if want == u.audioMode {
+		return
+	}
+	u.audioMode = want
+	low, high := mirrorSideband(u.bwLow, u.bwHigh)
+	u.bwLow, u.bwHigh = clampBandwidth(u.audioMode, low, high)
+}
+
+// AdjustBandwidth widens or narrows the filter by moving its outer edge, which
+// is the edge that carries the audio bandwidth in every mode.
+func (u *UI) AdjustBandwidth(delta int) {
+	low, high := u.bwLow, u.bwHigh
+	switch {
+	case low >= 0: // upper sideband style: outer edge is the high one
+		high += delta
+	case high <= 0: // lower sideband: outer edge is the low one
+		low -= delta
+	default: // symmetric, as for AM and FM
+		low -= delta
+		high += delta
+	}
+	u.bwLow, u.bwHigh = clampBandwidth(u.audioMode, low, high)
 }
 
 func (u *UI) StepHz() float64 { return tuningSteps[u.stepIdx] }
+
+// snapToStep rounds a frequency onto the current tuning grid. Typed
+// frequencies deliberately skip this — 14.074 MHz for FT8 is exact and should
+// not be nudged — but pointing at the display is only ever as precise as a
+// character cell, which can span many kHz at a wide span.
+func (u *UI) snapToStep(freq float64) float64 {
+	step := u.StepHz()
+	if step <= 0 {
+		return freq
+	}
+	return math.Round(freq/step) * step
+}
 
 // Reset clears per-connection state so a newly selected receiver doesn't
 // inherit the previous one's spectrum, history or scale.
@@ -263,9 +353,19 @@ func (u *UI) SetFrame(bins []float32, center, span float64) {
 	}
 }
 
-// autoRange picks the dB window from percentiles, matching the GUI clients: the
-// 1st percentile tracks the true noise floor and the 99th keeps a single strong
-// carrier from flattening everything else.
+// autoRange picks the dB window from the current frame.
+//
+// It anchors on two things: a representative noise floor and the strongest
+// signal. Earlier this used the 1st and 99th percentiles, which had two
+// problems on real data — the noise band filled the bottom third of the pane,
+// wasting most of the height, and the 99th percentile sat *below* the actual
+// peaks, so the strongest signals were clipped flat against the top (measured:
+// 9 to 14 bins clipped on a live receiver).
+//
+// The 10th percentile represents the floor without chasing its lowest outlier,
+// and tracking the peak gives signals the rest of the pane. The top is capped
+// relative to the 99th percentile so one strong spur cannot squash everything
+// else into the bottom of the display.
 func (u *UI) autoRange() {
 	if !u.autoScale || len(u.bins) == 0 {
 		return
@@ -285,10 +385,34 @@ func (u *UI) autoRange() {
 	p := func(q float64) float64 {
 		return valid[int(q*float64(len(valid)-1))]
 	}
-	targetMin := p(0.01) - 2
-	targetMax := p(0.99) + 5
-	if targetMax-targetMin < 10 {
-		targetMax = targetMin + 10
+	noise := p(0.10)
+	peak := valid[len(valid)-1]
+
+	const (
+		floorMargin = 4 // headroom below the noise so it is not flush with the edge
+		peakMargin  = 4 // headroom above the strongest signal
+		// How far above the 99.9th percentile the top may be dragged. The
+		// reference has to be this high: with 2048 bins the 99th percentile is
+		// the 20th from the top, so any signal narrower than that does not move
+		// it and a real carrier gets clipped as though it were a spur. At
+		// 99.9 only a literal one- or two-bin outlier is excluded.
+		spurLimit = 15
+
+		// Minimum dynamic range. Without this the window collapses onto
+		// whatever happens to be in the span: point the receiver somewhere with
+		// no strong signals and the top follows the noise down, so the noise
+		// floor climbs the pane even though nothing has actually got louder.
+		// Holding 60 dB open keeps the floor pinned near the bottom and makes
+		// the display comparable as you tune across bands.
+		minWindow = 60
+	)
+
+	targetMin := noise - floorMargin
+	targetMax := math.Min(peak+peakMargin, p(0.999)+spurLimit)
+	// Extend upward rather than downward: adding headroom below the noise
+	// would push it *up* the pane, which is the opposite of what is wanted.
+	if targetMax-targetMin < minWindow {
+		targetMax = targetMin + minWindow
 	}
 
 	if !u.haveRange {
@@ -313,12 +437,23 @@ func (u *UI) AdjustScale(dMin, dMax float64) {
 	u.status = fmt.Sprintf("manual scale %.0f … %.0f dB", u.minDB, u.maxDB)
 }
 
+// Draw renders the display and presents it.
+//
+// Callers that stack an overlay on top must use render() and present once
+// themselves: presenting here and again after the overlay shows a frame of the
+// bare display in between, which reads as the overlay flickering and the
+// waterfall drawing over it.
 func (u *UI) Draw(s tcell.Screen) {
+	u.render(s)
+	s.Show()
+}
+
+// render draws the display into the screen buffer without presenting it.
+func (u *UI) render(s tcell.Screen) {
 	w, h := s.Size()
 	if w < 24 || h < 8 {
 		s.Clear()
 		drawText(s, 0, 0, tcell.StyleDefault, "terminal too small")
-		s.Show()
 		return
 	}
 	l := computeLayout(w, h, u.mode, u.splitRatio)
@@ -334,6 +469,10 @@ func (u *UI) Draw(s tcell.Screen) {
 		} else {
 			u.drawBars(s, l)
 		}
+		// After the trace, and for either style: peak hold used to be drawn
+		// inside the bars renderer only, so it silently did nothing once
+		// braille became the default.
+		u.drawPeaks(s, l)
 	}
 	if l.WfH > 0 {
 		u.drawWaterfall(s, l)
@@ -342,13 +481,13 @@ func (u *UI) Draw(s tcell.Screen) {
 	// Order matters on the axis row: the scale is the base layer, the VFO
 	// marker sits on top of it, and the cursor readout wins over both.
 	u.drawFreqScale(s, l)
+	u.drawFilter(s, l)
 	u.drawMarker(s, l)
 	u.drawCursor(s, l)
 	u.drawStatus(s, l)
 	if u.showHelp {
 		u.drawHelp(s, l)
 	}
-	s.Show()
 }
 
 func (u *UI) drawHeader(s tcell.Screen, l Layout) {
@@ -385,29 +524,198 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	if u.vfo > 0 {
 		vfo = fmt.Sprintf("VFO %s MHz", formatFreq(u.vfo, span))
 	}
-	fields := []string{
-		fmt.Sprintf("span %s", formatSpan(span)),
-		vfo,
-		fmt.Sprintf("%s %.0f/%.0f dB", scaleMode, u.minDB, u.maxDB),
-		wheel,
-		u.mode.String(),
-		fmt.Sprintf("%.0f fps", u.fps),
+	// Fields carry a priority so a narrow terminal sheds the least useful ones
+	// instead of dropping the entire right-hand side — which is what an 80
+	// column window used to do, hiding the frequency and audio state outright.
+	type field struct {
+		text string
+		prio int // lower is kept longer
+	}
+	candidates := []field{
+		{vfo, 0},
+		{fmt.Sprintf("span %s", formatSpan(span)), 2},
+		{fmt.Sprintf("%s %.0f/%.0f dB", scaleMode, u.minDB, u.maxDB), 4},
+		{wheel, 6},
+		{u.mode.String(), 5},
+		{fmt.Sprintf("%3.0f fps", u.fps), 7},
+	}
+	if u.audioOn {
+		candidates = append(candidates, field{u.audioField(), 1})
+	}
+
+	// Keep the display order stable while choosing what fits by priority.
+	order := make([]int, len(candidates))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return candidates[order[a]].prio < candidates[order[b]].prio
+	})
+
+	// Width is measured in runes throughout: the separators and unit glyphs are
+	// multi-byte, so byte length would overestimate and push the right-hand
+	// block left over the server name.
+	const sepWidth = 3 // " │ "
+	avail := l.W - x - 2
+	keep := make([]bool, len(candidates))
+	used := 0
+	for _, idx := range order {
+		cost := runeLen(candidates[idx].text)
+		if used > 0 {
+			cost += sepWidth
+		}
+		if used+cost > avail {
+			continue // try the next, shorter field rather than stopping
+		}
+		keep[idx] = true
+		used += cost
+	}
+
+	fields := make([]string, 0, len(candidates))
+	for i, c := range candidates {
+		if keep[i] {
+			fields = append(fields, c.text)
+		}
+	}
+	if len(fields) == 0 {
+		return
 	}
 	right := strings.Join(fields, " │ ") + " "
 
-	rx := l.W - len(right)
-	if rx > x+1 {
-		// Draw separators in a dimmer colour than the values themselves.
-		cx := rx
-		for _, part := range strings.Split(right, "│") {
-			drawText(s, cx, 0, dim, part)
-			cx += len(part)
-			if cx < l.W {
-				drawText(s, cx, 0, sep, "│")
-				cx++
-			}
+	// Draw separators in a dimmer colour than the values themselves.
+	cx := l.W - runeLen(right)
+	for _, part := range strings.Split(right, "│") {
+		drawText(s, cx, 0, dim, part)
+		cx += len(part)
+		if cx < l.W {
+			drawText(s, cx, 0, sep, "│")
+			cx++
 		}
 	}
+}
+
+// Squelch threshold limits, in dB of SNR. The floor is not zero because this
+// SNR — baseband power over noise density — does not approach zero on a live
+// channel; the meter's own scale starts at 30, so a threshold below the floor
+// would never gate and is treated as off instead.
+const (
+	squelchMin = 20
+	squelchMax = 80
+)
+
+// squelchLabel renders the threshold: "off" when disabled, otherwise the dB
+// figure.
+func (u *UI) squelchLabel() string {
+	if u.squelch <= 0 {
+		return "off"
+	}
+	return fmt.Sprintf("%d", u.squelch)
+}
+
+// Squelched reports whether the gate is currently closed. The server sends
+// silence rather than dropping packets while gated, so a short run of silent
+// frames is the signal. The grace period stops the indicator flickering during
+// natural pauses in speech.
+func (u *UI) Squelched() bool {
+	if !u.audioOn || u.squelch <= 0 {
+		return false
+	}
+	return !u.lastAudioAt.IsZero() && time.Since(u.lastAudioAt) > 400*time.Millisecond
+}
+
+// NoteAudio records whether the newest frame carried sound.
+func (u *UI) NoteAudio(silent bool) {
+	if !silent {
+		u.lastAudioAt = time.Now()
+	}
+}
+
+// squelchField is the status-bar text: the threshold in a fixed-width slot,
+// followed by a marker while the gate is actually closed so it is obvious why
+// the audio has stopped. The marker's space is reserved either way so the
+// hints after it do not shift when it appears.
+func (u *UI) squelchField() string {
+	marker := "  "
+	if u.Squelched() {
+		marker = " ▼"
+	}
+	return padRunes(u.squelchLabel(), 3) + marker
+}
+
+// dspName renders a filter name for display. The server's names are lowercase
+// and must stay that way on the wire, so this is presentation only.
+func dspName(filter string) string { return strings.ToUpper(filter) }
+
+// dspNames renders a list of filter names for display.
+func dspNames(filters []string) []string {
+	out := make([]string, len(filters))
+	for i, f := range filters {
+		out[i] = dspName(f)
+	}
+	return out
+}
+
+// dspLabel names the current noise-reduction state for display: the active
+// filter, "off" when the receiver offers DSP but none is selected, or "n/a"
+// when it offers none at all. Those are three different things and conflating
+// them would misreport a receiver without DSP as simply switched off.
+//
+// Only the filter name is uppercased; "off" and "n/a" describe a state rather
+// than naming a filter, and keeping them lowercase makes the difference
+// visible at a glance.
+func (u *UI) dspLabel() string {
+	switch {
+	case len(u.dspFilters) == 0:
+		return "n/a"
+	case u.dspFilter != "":
+		return dspName(u.dspFilter)
+	default:
+		return "off"
+	}
+}
+
+// audioField summarises the audio channel for the header: mode, filter edges in
+// kHz, mute state and signal level.
+//
+// Every part is padded to a fixed width. The header is right-aligned, so a
+// value that changes length — the signal level swinging between -90 and -120,
+// or the state going from "both" to "muted" — would otherwise shift the whole
+// row sideways on almost every frame.
+func (u *UI) audioField() string {
+	name := strings.ToUpper(u.audioMode)
+	if u.autoSideband && isSideband(u.audioMode) {
+		name += "*" // following the 10 MHz convention automatically
+	}
+
+	// Filter width only. The exact edges are asymmetric for sideband modes, but
+	// the shading already shows which side they fall on and the audio panel has
+	// the numbers; spelling both out here cost 15 columns and pushed the whole
+	// field off an 80-column terminal.
+	bw := fmt.Sprintf("%.1fk", float64(u.bwHigh-u.bwLow)/1000)
+
+	// Plain words rather than a speaker emoji: emoji are double-width in most
+	// terminals but count as one rune, so they break the width arithmetic the
+	// header layout depends on.
+	state := "on"
+	if u.muted {
+		state = "muted"
+	} else if u.channel != ChannelBoth {
+		state = u.channel.String()
+	}
+
+	// Reserve the level's space even before the first packet, so the row does
+	// not jump the moment audio starts.
+	level := fmt.Sprintf("%5s", "—")
+	if u.signal.Valid() {
+		level = fmt.Sprintf("%5.0f", u.signal.Power)
+	}
+
+	return fmt.Sprintf("%s %s %s %s %s dB",
+		padRunes(name, 4),         // USB*, SAM, NFM
+		padRunes(bw, 5),           // 24.0k
+		padRunes(u.dspLabel(), 4), // NR4, DFNR, off, n/a
+		padRunes(state, 5),        // muted, right
+		level)
 }
 
 // columnPeaks reduces the bin array to one value per screen column, taking the
@@ -454,11 +762,6 @@ func (u *UI) norm(db float64) float64 {
 func (u *UI) drawBars(s tcell.Screen, l Layout) {
 	subRows := l.SpecH * 8
 
-	var peakCols []float64
-	if u.showPeaks && len(u.peaks) > 0 {
-		peakCols = columnPeaks(u.peaks, l.PlotW)
-	}
-
 	for i, db := range u.lastCols {
 		x := l.PlotX + i
 		if math.IsInf(db, -1) {
@@ -480,14 +783,32 @@ func (u *UI) drawBars(s tcell.Screen, l Layout) {
 			s.SetContent(x, y, blockChars[level], nil,
 				tcell.StyleDefault.Foreground(rampColor(frac)))
 		}
+	}
+}
 
-		if peakCols != nil && !math.IsInf(peakCols[i], -1) {
-			py := l.SpecY + l.SpecH - 1 - int(u.norm(peakCols[i])*float64(l.SpecH-1))
-			if py >= l.SpecY && py < l.SpecY+l.SpecH {
-				s.SetContent(x, py, '‾', nil,
-					tcell.StyleDefault.Foreground(tcell.NewRGBColor(210, 210, 230)).Dim(true))
-			}
+// drawPeaks overlays the peak-hold trace on the spectrum pane.
+//
+// It marks the highest level each screen position has reached, decaying slowly,
+// which is what makes a brief signal visible after it has gone. Drawn over
+// whichever trace style is active.
+func (u *UI) drawPeaks(s tcell.Screen, l Layout) {
+	if !u.showPeaks || len(u.peaks) == 0 || l.SpecH < 2 {
+		return
+	}
+
+	cols := columnPeaks(u.peaks, l.PlotW)
+	style := tcell.StyleDefault.Foreground(tcell.NewRGBColor(235, 235, 250))
+
+	for i, db := range cols {
+		if math.IsInf(db, -1) {
+			continue
 		}
+		y := l.SpecY + l.SpecH - 1 - int(u.norm(db)*float64(l.SpecH-1))
+		if y < l.SpecY || y >= l.SpecY+l.SpecH {
+			continue
+		}
+		// Overwrite whatever the trace drew: the peak line is the point.
+		s.SetContent(l.PlotX+i, y, '‾', nil, style)
 	}
 }
 
@@ -594,6 +915,57 @@ func (u *UI) drawWaterfall(s tcell.Screen, l Layout) {
 					Foreground(tcell.NewRGBColor(left.r, left.g, left.b)).
 					Background(tcell.NewRGBColor(right.r, right.g, right.b)))
 		}
+	}
+}
+
+// drawFilter shades the passband across both panes, so it is obvious which part
+// of the spectrum is actually being demodulated. The band is asymmetric about
+// the VFO for sideband modes, which is exactly what makes it worth drawing.
+func (u *UI) drawFilter(s tcell.Screen, l Layout) {
+	if !u.audioOn || u.vfo <= 0 {
+		return
+	}
+	start, span := u.viewRange()
+	if span <= 0 {
+		return
+	}
+
+	lo, hi := filterRange(u.vfo, u.bwLow, u.bwHigh)
+	if hi < start || lo > start+span {
+		return // filter entirely off-screen
+	}
+
+	colOf := func(f float64) int {
+		return l.PlotX + int((f-start)/span*float64(l.PlotW))
+	}
+	loCol := clampInt(colOf(lo), l.PlotX, l.PlotX+l.PlotW-1)
+	hiCol := clampInt(colOf(hi), l.PlotX, l.PlotX+l.PlotW-1)
+
+	// A muted channel is shaded more faintly, so mute is visible at a glance
+	// rather than only readable in the header.
+	tint := tcell.NewRGBColor(40, 60, 40)
+	edge := tcell.NewRGBColor(90, 190, 90)
+	if u.muted {
+		tint = tcell.NewRGBColor(55, 55, 55)
+		edge = tcell.NewRGBColor(130, 130, 130)
+	}
+
+	for y := 1; y < l.AxisY; y++ {
+		for x := loCol; x <= hiCol; x++ {
+			r, combi, style, _ := s.GetContent(x, y)
+			if r == 0 {
+				r = ' '
+			}
+			s.SetContent(x, y, r, combi, style.Background(tint))
+		}
+	}
+
+	// Edge ticks on the axis row mark the exact filter limits.
+	if lo >= start {
+		s.SetContent(loCol, l.AxisY, '▏', nil, tcell.StyleDefault.Foreground(edge))
+	}
+	if hi <= start+span {
+		s.SetContent(hiCol, l.AxisY, '▕', nil, tcell.StyleDefault.Foreground(edge))
 	}
 }
 
@@ -717,28 +1089,66 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 
 	style := tcell.StyleDefault.Foreground(tcell.NewRGBColor(200, 200, 210)).
 		Background(tcell.NewRGBColor(45, 45, 55))
-	help := " f tune · v view · a auto · w wheel · i receiver · ? help · q quit "
-	text := help
-	if u.status != "" {
-		text = help + "│ " + u.status
+
+	// Leave room for the meter on the right rather than letting the hints run
+	// under it.
+	reserved := 0
+	if _, _, ok := u.meterRegion(l); ok {
+		reserved = meterCells() + 1
 	}
-	drawText(s, 0, l.StatusY, style, padTo(text, l.W))
+
+	// Noise reduction carries its state next to its key, since it is the one
+	// audio setting with no other always-visible indication of what it is
+	// doing, and it is the first hint kept when space runs short. Padding it
+	// stops the hints after it shifting as it changes.
+	hints := []prioritisedField{
+		{"f tune", 5},
+		{"m mute", 4},
+		{"M mode", 8},
+		{"n NR:" + padRunes(u.dspLabel(), 4), 0},
+		{"t SQ:" + u.squelchField(), 1},
+		{"d audio", 6},
+		{"g meter", 7},
+		{"v view", 9},
+		{"i receiver", 10},
+		{"? help", 3},
+		{"q quit", 2},
+	}
+
+	avail := l.W - reserved - 2 // leading and trailing space
+	text := " " + strings.Join(fitFields(hints, avail, " · "), " · ") + " "
+
+	// The transient status message gets whatever is left over.
+	if u.status != "" {
+		if spare := avail - runeLen(text) - 2; spare > 8 {
+			text += "│ " + truncate(u.status, spare)
+		}
+	}
+	drawText(s, 0, l.StatusY, style, padTo(truncate(text, l.W-reserved), l.W))
+
+	if reserved > 0 {
+		u.drawMeter(s, l)
+	}
 }
 
 var helpLines = []string{
-	"Tuning",
-	"  click            set the VFO marker",
-	"  drag             pan the view",
+	"Tuning  (the VFO is what the radio is tuned to)",
+	"  click            set the VFO",
 	"  f                type a frequency",
-	"  c                centre on the VFO",
-	"  ← →              pan   (, . for fine)",
+	"  c                centre the view on the VFO",
+	"  ↑ ↓              tune up / down one step",
+	"  PgUp PgDn        tune ten steps",
+	"  s / S            cycle the tuning step",
+	"  wheel            tune, when the wheel is in tune mode (w)",
+	"",
+	"View  (moves the display, not the radio)",
+	"  drag             pan",
+	"  ← →              pan       shift+← → for a fine step",
 	"",
 	"Zoom and wheel",
-	"  wheel            zoom, or tune",
-	"                   (in at the cursor, out from the centre)",
+	"  wheel            zoom, in at the cursor and out from the centre",
 	"  w                switch the wheel between zoom and tune",
-	"  s / S            cycle the tuning step",
-	"  + -  /  ↑ ↓      zoom about the centre",
+	"  + -              zoom about the centre",
 	"  0                reset to full span",
 	"",
 	"Display",
@@ -747,7 +1157,18 @@ var helpLines = []string{
 	"  b                filled bars or braille trace",
 	"  p                peak hold",
 	"",
-	"Scaling",
+	"Audio",
+	"  m                mute / unmute",
+	"  M                cycle demodulation mode",
+	"  A                auto sideband either side of 10 MHz",
+	"  , .              narrow / widen the audio filter",
+	"  x                output channel: both / left / right",
+	"  g                signal meter: dBFS or SNR",
+	"  n                cycle server-side noise reduction",
+	"  t / T            raise / lower the squelch threshold (SNR)",
+	"  d                audio settings: device, volume, filter",
+	"",
+	"Scaling  (the dB window, not the audio filter)",
 	"  a                auto / manual",
 	"  [ ]              lower / raise the floor",
 	"  { }              lower / raise the ceiling",
@@ -873,6 +1294,65 @@ func formatSpan(hz float64) string {
 	}
 }
 
+// prioritisedField is a piece of status text with a shedding priority: lower
+// values are kept longer when there is not enough width for everything.
+type prioritisedField struct {
+	text string
+	prio int
+}
+
+// fitFields returns, in display order, those fields that fit within avail
+// columns when joined by sep, dropping the lowest-priority ones first.
+//
+// Widths are counted in runes because the separators and unit glyphs are
+// multi-byte, and a byte count would push the block off the edge.
+func fitFields(fields []prioritisedField, avail int, sep string) []string {
+	order := make([]int, len(fields))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return fields[order[a]].prio < fields[order[b]].prio
+	})
+
+	sepW := runeLen(sep)
+	keep := make([]bool, len(fields))
+	used := 0
+	for _, idx := range order {
+		cost := runeLen(fields[idx].text)
+		if used > 0 {
+			cost += sepW
+		}
+		if used+cost > avail {
+			continue // try the next, shorter field rather than stopping
+		}
+		keep[idx] = true
+		used += cost
+	}
+
+	out := make([]string, 0, len(fields))
+	for i, f := range fields {
+		if keep[i] {
+			out = append(out, f.text)
+		}
+	}
+	return out
+}
+
+// runeLen is the column width of a string on screen. drawText advances one
+// column per rune, so byte length would be wrong for the multi-byte glyphs the
+// header uses.
+func runeLen(s string) int { return len([]rune(s)) }
+
+// padRunes pads to a fixed display width. Byte-based padding would be wrong for
+// the multi-byte glyphs used in the header.
+func padRunes(s string, w int) string {
+	if n := runeLen(s); n < w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	return s
+}
+
 func drawText(s tcell.Screen, x, y int, style tcell.Style, text string) {
 	w, _ := s.Size()
 	for _, r := range text {
@@ -886,14 +1366,20 @@ func drawText(s tcell.Screen, x, y int, style tcell.Style, text string) {
 	}
 }
 
+// padTo pads or truncates to a column width.
+//
+// Measured in runes: byte length would over-count every multi-byte glyph, and
+// byte-slicing a string full of separators cuts it short and can split a
+// character in half.
 func padTo(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if len(s) >= w {
-		return s[:w]
+	r := []rune(s)
+	if len(r) >= w {
+		return string(r[:w])
 	}
-	return s + strings.Repeat(" ", w-len(s))
+	return s + strings.Repeat(" ", w-len(r))
 }
 
 func overlaps(occupied []bool, x, n int) bool {

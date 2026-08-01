@@ -1722,24 +1722,57 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	var opusEncoder *OpusEncoderWrapper
 	var pcmBinaryEncoder *PCMBinaryEncoder
 
+	// Opus encoder settings, and the sample rate the current encoder was built
+	// for.  Both are needed outside this block so the encoder can be rebuilt
+	// when the mode changes (see ensureOpusEncoder below).
+	var opusBitrate, opusComplexity, opusEncoderRate int
+
 	if format == "opus" {
 		// Create Opus encoder with config settings
-		bitrate := wsh.config.Audio.Opus.Bitrate
-		if bitrate == 0 {
-			bitrate = 24000 // Default 24 kbps for good quality
+		opusBitrate = wsh.config.Audio.Opus.Bitrate
+		if opusBitrate == 0 {
+			opusBitrate = 24000 // Default 24 kbps for good quality
 		}
-		complexity := wsh.config.Audio.Opus.Complexity
-		if complexity == 0 {
-			complexity = 5 // Default medium complexity
+		opusComplexity = wsh.config.Audio.Opus.Complexity
+		if opusComplexity == 0 {
+			opusComplexity = 5 // Default medium complexity
 		}
 
 		var err error
-		opusEncoder, err = NewOpusEncoderForClient(session.SampleRate, bitrate, complexity)
+		opusEncoder, err = NewOpusEncoderForClient(session.SampleRate, opusBitrate, opusComplexity)
 		if err != nil {
 			log.Printf("Failed to create Opus encoder: %v", err)
 			log.Printf("Falling back to pcm-zstd")
 			format = "pcm-zstd" // Fall back to pcm-zstd
+		} else {
+			opusEncoderRate = session.SampleRate
 		}
+	}
+
+	// ensureOpusEncoder rebuilds the Opus encoder when the channel's sample rate
+	// changes, which happens whenever the mode moves between the narrow modes
+	// (usb/lsb/cwu/cwl, 12 kHz) and the wide ones (am/sam/fm/nfm, 24 kHz).
+	//
+	// An encoder built for one rate mis-frames audio captured at another: feed
+	// 20 ms of 24 kHz samples to a 12 kHz encoder and it reads them as 40 ms,
+	// emitting a 40 ms frame.  That decodes to twice as many samples and plays
+	// at half speed, an octave low, because an Opus frame's duration is carried
+	// in the bitstream and no decoder setting can undo it.  Clients that retune
+	// in place — the web UI included — have no way to recover from it.
+	ensureOpusEncoder := func(rate int) {
+		if opusEncoder == nil || rate <= 0 || rate == opusEncoderRate {
+			return
+		}
+		enc, err := NewOpusEncoderForClient(rate, opusBitrate, opusComplexity)
+		if err != nil {
+			// Keep the existing encoder: mis-framed audio still beats none, and
+			// the next packet retries.
+			log.Printf("Failed to rebuild Opus encoder for %d Hz: %v", rate, err)
+			return
+		}
+		opusEncoder = enc
+		opusEncoderRate = rate
+		log.Printf("Opus encoder rebuilt for %d Hz after sample rate change", rate)
 	}
 
 	if format == "pcm-zstd" {
@@ -1832,6 +1865,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				switch currentFormat {
 				case "opus":
 					if opusEncoder != nil {
+						// The silence buffer is sized from session.SampleRate and
+						// the header below reports the same, so the encoder has to
+						// agree with it or a 20 ms buffer is framed as 40 ms.
+						ensureOpusEncoder(session.SampleRate)
+
 						// Create silence samples (20ms worth - standard Opus frame size)
 						// Opus works best with 20ms frames (2.5, 5, 10, 20, 40, 60ms are valid)
 						silenceDuration := session.SampleRate / 50        // 20ms frame
@@ -2096,6 +2134,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
 					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 				}
+
+				// Match the encoder to the rate this packet was captured at.
+				// audioPacket.SampleRate is stamped on receipt from radiod, so it
+				// stays correct even when session.SampleRate has already moved on
+				// to a new mode while this packet was queued.
+				ensureOpusEncoder(audioPacket.SampleRate)
 
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
 				if err != nil {

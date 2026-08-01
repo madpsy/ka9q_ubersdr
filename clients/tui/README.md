@@ -1,7 +1,7 @@
 # UberSDR Terminal Client
 
-A spectrum and waterfall viewer that runs entirely in a terminal, on Linux,
-macOS and Windows.
+A spectrum, waterfall and audio receiver that runs entirely in a terminal, on
+Linux, macOS and Windows.
 
 It connects to the same `/ws/user-spectrum` endpoint as the web UI and the
 other clients, so it needs no server-side changes.
@@ -20,12 +20,30 @@ other clients, so it needs no server-side changes.
 
 ## Why it is a separate module
 
-This client is **pure Go**. Unlike `clients/go/`, it links no C libraries —
-no PortAudio, no Opus, no libsamplerate — because it never touches audio.
-That is what makes `CGO_ENABLED=0` cross-compilation work, so binaries for
-ARM and every other target build from any machine with no cross toolchain,
-sysroot or emulator. It has its own `go.mod` to keep the CGO dependencies of
-the audio client out of the graph.
+This client is **pure Go**, audio included. That is what makes
+`CGO_ENABLED=0` cross-compilation work, so binaries for ARM and every other
+target build from any machine with no cross toolchain, sysroot or emulator. It
+has its own `go.mod` to keep the CGO dependencies of the other clients out of
+the graph.
+
+Audio is the part where that took work, since the obvious libraries all need C:
+
+- **Opus** decodes through `github.com/pion/opus`, a pure-Go implementation,
+  rather than binding libopus as `clients/go` and `clients/ubersdr-audio` do.
+  The server encodes with `AppVoIP` at 12 kHz, which selects SILK — the layer
+  the pure-Go decoder implements. Opus always reconstructs at 48 kHz, so that
+  is the playback rate regardless of the channel's own sample rate.
+- **Playback on Linux** goes through `github.com/jfreymuth/pulse`, a pure-Go
+  implementation of the PulseAudio wire protocol. ALSA and PortAudio bindings
+  need a C toolchain per target; PipeWire speaks the same protocol, so this
+  covers effectively every modern desktop Linux.
+- **Playback on macOS and Windows** uses `oto`, which reaches CoreAudio and
+  WASAPI through `purego`. oto needs CGO for ALSA on Linux, which is why Linux
+  takes the PulseAudio path instead.
+
+If the pure-Go Opus decoder ever meets a frame it cannot handle, the frame is
+dropped rather than tearing down the stream; the server also offers `pcm-zstd`,
+which needs no codec at all, as a fallback worth adding if that ever bites.
 
 The terminal layer is [tcell](https://github.com/gdamore/tcell), a from-scratch
 Go implementation of what ncurses does (including terminfo handling), so there
@@ -82,6 +100,7 @@ Or connect directly:
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
 | `-bars` | Draw block bars instead of the higher-resolution braille spectrum. |
+| `-no-audio` | Watch the spectrum without opening an audio channel. |
 | `-version` | Print the version and exit. |
 
 ## Choosing a receiver
@@ -104,45 +123,174 @@ paging keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`. `Backspace` edits the sea
 
 ## Keys
 
+Two things move independently: the **VFO**, which is what the radio is tuned to,
+and the **view**, which is what the display shows. They have separate keys.
+
 | | |
 | --- | --- |
-| **Tuning** | |
-| click | set the VFO marker |
-| drag | pan the view |
+| **Tuning — moves the radio** | |
+| click | set the VFO |
 | `f` | type a frequency |
-| `c` | centre on the VFO |
-| `←` `→` | pan (`,` `.` for fine steps) |
-| **Zoom and wheel** | |
-| wheel | zoom (in at the cursor, out from the centre), or tune |
+| `c` | centre the view on the VFO |
+| `↑` `↓` | tune up / down one step |
+| `PgUp` `PgDn` | tune ten steps |
+| `s` / `S` | cycle the tuning step (10 Hz … 10 kHz, default 500 Hz) |
+| wheel | tune, when the wheel is in tune mode (`w`) |
+| **View — moves the display** | |
+| drag | pan |
+| `←` `→` | pan, `shift`+`←` `→` for a fine step |
+| **Zoom** | |
+| wheel | zoom, in at the cursor and out from the centre |
 | `w` | switch the wheel between zoom and tune |
-| `s` / `S` | cycle the tuning step (10 Hz … 10 kHz) |
-| `+` `-`, `↑` `↓` | zoom about the centre |
+| `+` `-` | zoom about the centre |
 | `0` | reset to full span |
 | **Display** | |
 | `v` | cycle spectrum / waterfall / split |
 | `<` `>` | resize the split |
 | `b` | braille (2x resolution) or block bars |
-| `p` | peak hold |
-| **Scaling** | |
+| `p` | peak hold — marks the highest level each position has reached, decaying slowly |
+| **Scaling — the dB window, not the audio filter** | |
 | `a` | auto / manual |
 | `[` `]` | lower / raise the noise floor |
 | `{` `}` | lower / raise the ceiling |
+| **Audio** | |
+| `m` | mute / unmute |
+| `M` | cycle demodulation mode |
+| `A` | auto sideband either side of 10 MHz |
+| `,` `.` | narrow / widen the audio filter |
+| `x` | output channel: both / left / right |
+| `g` | signal meter: dBFS or SNR |
+| `n` | cycle server-side noise reduction |
+| `t` / `T` | raise / lower the squelch threshold (SNR) |
+| `d` | audio settings: device, volume, mode, exact filter edges |
 | **Other** | |
 | `i` | pick another receiver |
 | `?` | help overlay |
 | `q` | quit |
+
+## Audio
+
+Audio starts automatically and unmuted as soon as there is a frequency to tune
+to — this is a receiver. `m` mutes and unmutes. If you only want the spectrum,
+`-no-audio` skips opening an audio channel entirely, which also saves the server
+a demodulator.
+
+The audio stream is a **separate WebSocket sharing the spectrum session's
+UUID**, so the server counts you as one user rather than two. It negotiates
+Opus, the most compact format on offer, and the decoded passband is shaded
+across both the spectrum and the waterfall so it is obvious what is being
+demodulated — the shading is offset to one side of the marker for sideband
+modes, and dims when muted.
+
+Changing between a narrow mode (`usb`, `lsb`, `cwu`, `cwl`, 12 kHz channel) and
+a wide one (`am`, `sam`, `fm`, `nfm`, 24 kHz) **reconnects the audio socket**.
+The server builds its Opus encoder once, from the sample rate in force when the
+socket opened, and never rebuilds it — so retuning across that boundary in place
+leaves it encoding 24 kHz audio as though it were 12 kHz, emitting 40 ms frames
+for 20 ms of sound. That decodes to twice as many samples and plays at half
+speed. Reconnecting gets an encoder built for the new rate. Changes within a
+rate class still retune in place, which is much cheaper.
+
+The packet header also carries the channel's sample rate and channel count.
+Neither affects the playback rate — Opus always reconstructs at 48 kHz — but the
+channel count decides whether a frame is folded to mono, and both are shown in
+the `d` panel.
+
+**Modes and default filters**, matching the web UI so a frequency sounds the
+same in both:
+
+| Mode | Filter | Limit |
+| --- | --- | --- |
+| `usb` | +50 … +2700 Hz | ±6 kHz |
+| `lsb` | −2700 … −50 Hz | ±6 kHz |
+| `cwu`, `cwl` | ±200 Hz | ±6 kHz |
+| `am`, `sam` | ±5000 Hz | ±12 kHz |
+| `nfm` | ±5000 Hz | ±12 kHz |
+| `fm` | ±8000 Hz | ±12 kHz |
+
+The limit is each mode's Nyquist frequency: the narrow modes run on a 12 kHz
+channel and the wide ones on 24 kHz, so asking USB for ±12 kHz would be
+imaginary bandwidth. With auto sideband on (the default), tuning across
+10 MHz flips between LSB and USB following amateur convention, carrying your
+filter width across rather than resetting it. Picking AM or CW is treated as
+deliberate and is never overridden.
+
+**Filter**: `,` and `.` move the outer edge — the one that carries the audio
+bandwidth in every mode — in 100 Hz steps. `d` opens a panel for setting each
+edge exactly, in 50 Hz steps.
+
+**Signal meter**: a coloured bar at the right-hand end of the status row, red
+through green. **Click it, or press `g`,** to switch between absolute level and
+signal-to-noise.
+Both come straight from the audio packet header — baseband power and noise
+density — and the scales match `signal-meter.js` so a reading means the same
+here as in a browser: dBFS runs −127 … −33 (the S-meter's own span, S1 at −115
+with 6 dB per S-unit), and SNR runs 30 … 60, which is where this measurement
+actually sits on a live channel.
+
+**Server-side DSP**: `n` cycles the noise-reduction inserts the receiver
+offers, starting from off, which is the default. The status bar always carries
+`n NR:` with the current state — the active filter in uppercase (`NR2`, `DFNR`),
+`off` when the receiver offers DSP but none is selected, or `n/a` when it offers
+none at all. Those are
+three different things. It is the first hint kept when the bar runs short of
+width, since nothing else shows what the DSP is doing. The available filters come
+from the `dsp` block of `/api/description` — a receiver that offers none says
+so rather than showing a dead control. The `d` panel has the same control on
+its own row, listing what is on offer.
+
+The server is authoritative here: it may refuse an insert when the DSP is at
+its user limit, so the display follows the `dsp_status` message it sends back
+rather than assuming the request succeeded. The chosen insert is re-applied
+after a reconnect, since each new session starts with none.
+
+Parameters for each filter are not exposed; the web UI is the place for that.
+
+**Squelch** gates the audio on signal-to-noise. `t` and `T` move the threshold
+a decibel at a time, as does the `d` panel. It defaults to off.
+
+The range is 20–80 dB, and stepping below 20 turns the gate off rather than
+leaving a threshold that could never fire: this SNR — baseband power over noise
+density — does not approach zero on a live channel, and the meter's own scale
+starts at 30. Off is sent as the server's `-999` sentinel rather than as `0`,
+since 0 dB is itself a valid threshold.
+
+The status bar shows `t SQ:` with the threshold and a **▼** while the gate is
+actually closed, so it is obvious when silence is the squelch rather than a dead
+band. That indicator reads the audio itself: the server substitutes silence
+rather than dropping packets when gated, which is more reliable than
+reimplementing its hang timer and hysteresis client-side. A frame counts as
+silent below a small amplitude threshold, not at exactly zero — the PCM is
+zeroed *before* Opus encoding and the codec is lossy, so a gated frame decodes
+to near-silence.
+
+**Output**: `d` lists output devices and lets you pick one, set volume, and
+route audio to both channels, left only, or right only (`x` cycles that
+directly). Left/right routing is handy when running two receivers side by side.
+
+Device enumeration works on Linux. On macOS and Windows the client plays to
+whatever the system default is — those backends expose no enumeration API, so
+choose the output in the OS sound settings.
 
 Typing a frequency accepts kHz by default (`7100` → 7.100 MHz). Add a suffix to
 override: `7.1M`, `7100k`, `7100000Hz`.
 
 ## Display notes
 
-**Scaling.** In auto mode the dB window tracks the 1st and 99th percentiles of
-the current frame — the 1st follows the true noise floor, the 99th stops a
-single strong carrier from flattening everything else. The window is eased
-between frames so the scale doesn't jitter. Any manual adjustment switches to
-manual mode, since an explicit change would otherwise be overwritten
-immediately.
+**Scaling.** In auto mode the dB window is anchored on the 10th percentile —
+a representative noise floor, not its lowest outlier — and on the strongest
+signal in the frame, with a **minimum range of 60 dB**. The minimum is what
+stops the window collapsing onto the noise when a span has nothing strong in
+it: without it the top follows the noise down and the floor appears to climb
+the pane even though nothing has got louder. In practice the noise sits around
+13–15% of the pane height and stays there as you tune across bands.
+
+The top is capped 15 dB above the 99.9th percentile so a one- or two-bin spur
+cannot squash the display. That reference has to be that high — at the 99th
+percentile, a carrier narrower than 1% of the span does not move it and would
+be clipped as though it were a spur. The window is eased between frames so the
+scale doesn't jitter, and any manual adjustment switches to manual mode, since
+an explicit change would otherwise be overwritten immediately.
 
 **Waterfall.** Each history line records the frequency range it was captured
 over, so **panning** keeps old lines aligned under the frequency axis instead of
@@ -247,6 +395,7 @@ Three tests reach the network and are skipped unless enabled:
 
 ```bash
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveServer -v
+UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveModeSwitchSpeed -v
 UBERSDR_TEST_DIRECTORY=1 go test -run TestLivePublicDirectory -v
 UBERSDR_TEST_MDNS=1 go test -run TestLiveLocalDiscovery -v
 ```

@@ -28,6 +28,7 @@ func main() {
 	span := flag.Float64("span", 0, "initial span in kHz (0 = server default)")
 	bars := flag.Bool("bars", false, "draw block bars instead of the higher-resolution braille spectrum")
 	view := flag.String("view", "split", "initial view: spectrum, waterfall or split")
+	noAudio := flag.Bool("no-audio", false, "watch the spectrum without opening an audio channel")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -47,6 +48,7 @@ func main() {
 		initialSpan: *span * 1000,
 		braille:     !*bars,
 		mode:        mode,
+		noAudio:     *noAudio,
 	}
 	// An explicit -server connects straight away; otherwise the picker opens so
 	// the user can browse public, local or manually entered receivers.
@@ -68,6 +70,7 @@ type options struct {
 	initialSpan float64
 	braille     bool
 	mode        ViewMode
+	noAudio     bool
 }
 
 func parseView(s string) (ViewMode, error) {
@@ -168,7 +171,14 @@ type eventLoop struct {
 	// so the user can switch receivers without restarting.
 	clientCancel context.CancelFunc
 
-	picker *Picker
+	picker     *Picker
+	audioPanel *AudioPanel
+
+	// Audio shares the spectrum session's UUID but needs its own socket.
+	audio       *AudioClient
+	out         *AudioOutput
+	deviceID    string
+	audioFailed bool // output could not be opened; do not retry automatically
 
 	// wake lets background work (directory fetches, failed prechecks) ask for
 	// a redraw without waiting on a keypress.
@@ -237,7 +247,18 @@ func (e *eventLoop) connectTo(inst Instance) {
 		initialBinBW = e.opts.initialSpan / 1024
 	}
 
+	// Audio rides the same session UUID on its own socket, so the server sees
+	// one user rather than two.
+	audio := NewAudioClient(inst.Host, inst.TLS, e.opts.password, client.sessionID)
+	e.audio = audio
+
 	go func() {
+		// Ask what DSP inserts this receiver offers. Failure is not fatal: the
+		// control simply reports that there are none.
+		if info, err := client.FetchDSPInfo(); err == nil && info.Enabled {
+			e.ui.dspFilters = info.Filters
+		}
+
 		// The server requires this handshake before it will accept a spectrum
 		// socket, and it carries the rejection reason when it declines.
 		if err := client.CheckConnection(); err != nil {
@@ -248,8 +269,129 @@ func (e *eventLoop) connectTo(inst Instance) {
 			}
 			return
 		}
-		client.Run(ctx, e.opts.initialFreq, initialBinBW)
+		go client.Run(ctx, e.opts.initialFreq, initialBinBW)
+
+		// Audio only starts once the user asks for it, so a spectrum-only
+		// session costs the server nothing extra.
+		<-ctx.Done()
 	}()
+}
+
+// maybeStartAudio brings audio up as soon as there is a frequency to tune to.
+// Audio is on by default — this is a receiver — so the only reasons to skip it
+// are the -no-audio flag or a failure the user can retry with m.
+func (e *eventLoop) maybeStartAudio() {
+	if e.opts.noAudio || e.ui.audioOn || e.audioFailed || e.ui.vfo <= 0 {
+		return
+	}
+	e.startAudio()
+}
+
+// startAudio opens the output device and the audio socket.
+func (e *eventLoop) startAudio() {
+	if e.audio == nil || e.ui.audioOn {
+		return
+	}
+	if e.out == nil {
+		e.out = NewAudioOutput()
+	}
+	if err := e.out.Start(e.deviceID); err != nil {
+		e.ui.status = "audio output: " + err.Error()
+		// Remember the failure so a missing or busy device is not retried on
+		// every config message; m clears this and tries again.
+		e.audioFailed = true
+		return
+	}
+	e.audioFailed = false
+
+	e.ui.audioOn = true
+	e.ui.SyncSideband()
+	e.audio.SetTuning(e.ui.vfo, e.ui.audioMode, e.ui.bwLow, e.ui.bwHigh)
+	e.audio.SetSquelch(e.ui.squelch)
+	e.out.SetChannel(e.ui.channel)
+	e.out.SetVolume(e.ui.volume)
+	e.out.SetMuted(e.ui.muted)
+
+	go e.audio.Run(e.rootCtx)
+	e.ui.status = "audio on"
+}
+
+// cycleDSP steps through off and each DSP insert the receiver offers. Off is
+// first, so the cycle always starts from the default.
+func (e *eventLoop) cycleDSP(dir int) {
+	ui := e.ui
+	if len(ui.dspFilters) == 0 {
+		ui.status = "this receiver offers no server-side DSP"
+		return
+	}
+
+	// Position 0 is off; 1..n are the filters.
+	cur := 0
+	for i, f := range ui.dspFilters {
+		if f == ui.dspFilter {
+			cur = i + 1
+			break
+		}
+	}
+	n := len(ui.dspFilters) + 1
+	next := ((cur+dir)%n + n) % n
+
+	if next == 0 {
+		ui.dspFilter = ""
+		ui.status = "noise reduction off"
+	} else {
+		ui.dspFilter = ui.dspFilters[next-1]
+		ui.status = "noise reduction: " + dspName(ui.dspFilter)
+	}
+	if e.audio != nil {
+		e.audio.SetDSP(ui.dspFilter)
+	}
+}
+
+// adjustSquelch moves the threshold by delta dB. Stepping below the useful
+// floor turns the gate off rather than leaving it at a value that can never
+// fire, and stepping up from off starts at that floor.
+func (e *eventLoop) adjustSquelch(delta int) {
+	ui := e.ui
+	switch {
+	case ui.squelch <= 0 && delta > 0:
+		ui.squelch = squelchMin
+	case ui.squelch <= 0 && delta < 0:
+		// Already off; nothing below it.
+	default:
+		ui.squelch += delta
+		if ui.squelch < squelchMin {
+			ui.squelch = 0 // off
+		}
+		if ui.squelch > squelchMax {
+			ui.squelch = squelchMax
+		}
+	}
+	e.applySquelch()
+}
+
+// applySquelch pushes the threshold to the server and reports it.
+func (e *eventLoop) applySquelch() {
+	ui := e.ui
+	if ui.squelch <= 0 {
+		ui.status = "squelch off"
+	} else {
+		ui.status = fmt.Sprintf("squelch %d dB SNR", ui.squelch)
+	}
+	// Assume the gate is open until the next silent frame says otherwise, so
+	// the indicator does not stick from a previous threshold.
+	ui.lastAudioAt = time.Now()
+	if e.audio != nil {
+		e.audio.SetSquelch(ui.squelch)
+	}
+}
+
+// retune pushes the current VFO, mode and filter to the audio channel.
+func (e *eventLoop) retune() {
+	if e.audio == nil || !e.ui.audioOn {
+		return
+	}
+	e.audio.Tune(e.ui.vfo, e.ui.audioMode, e.ui.bwLow, e.ui.bwHigh)
 }
 
 func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
@@ -268,6 +410,15 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 		var status chan string
 		if e.client != nil {
 			frames, configs, status = e.client.Frames, e.client.Configs, e.client.Status
+		}
+		var pcm chan []int16
+		var level chan Signal
+		var audioStatus chan string
+		var dspStatus chan DSPState
+		var silence chan bool
+		if e.audio != nil && e.ui.audioOn {
+			pcm, level, audioStatus = e.audio.PCM, e.audio.Level, e.audio.Status
+			dspStatus, silence = e.audio.DSP, e.audio.Silence
 		}
 
 		select {
@@ -311,12 +462,49 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			// Park the marker at the centre until the user moves it.
 			if e.ui.vfo == 0 {
 				e.ui.vfo = cfg.CenterFreq
+				e.ui.SyncSideband()
 			}
+			// The first config is the earliest point at which there is a
+			// frequency to tune audio to.
+			e.maybeStartAudio()
 			dirty = true
 
 		case msg := <-status:
 			e.ui.status = msg
 			e.ui.connected = e.client != nil && e.client.Connected()
+			dirty = true
+
+		case samples := <-pcm:
+			// Audio must keep flowing regardless of redraw pacing, so this
+			// path never touches the renderer.
+			if e.out != nil {
+				e.out.Push(samples)
+			}
+
+		case sig := <-level:
+			e.ui.signal = sig
+			dirty = true
+
+		case silent := <-silence:
+			was := e.ui.Squelched()
+			e.ui.NoteAudio(silent)
+			if e.ui.Squelched() != was {
+				dirty = true
+			}
+
+		case st := <-dspStatus:
+			// The server is authoritative: it may refuse an insert when the
+			// DSP is at its user limit, so follow what it reports.
+			if st.Enabled {
+				e.ui.dspFilter = st.Filter
+			} else {
+				e.ui.dspFilter = ""
+			}
+			dirty = true
+
+		case msg := <-audioStatus:
+			e.ui.audioStatus = msg
+			e.ui.status = msg
 			dirty = true
 
 		case <-redraw.C:
@@ -332,13 +520,30 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 // draw renders whichever surface is on top: the picker replaces the spectrum
 // display entirely while it is open.
 func (e *eventLoop) draw() {
-	if e.picker == nil {
-		e.ui.Draw(e.screen) // clears and shows internally
+	if e.picker != nil {
+		e.screen.Clear()
+		e.picker.Draw(e.screen)
+		e.screen.Show()
 		return
 	}
-	e.screen.Clear()
-	e.picker.Draw(e.screen)
+
+	// Render the display and any overlay into the buffer, then present exactly
+	// once. Presenting between the two would show a frame of the bare display
+	// on every redraw, which looks like the overlay flickering.
+	e.ui.render(e.screen)
+	if e.audioPanel != nil {
+		// Drawn over the live display so the spectrum keeps updating behind it.
+		e.audioPanel.Draw(e.screen, e.ui, e.deviceID)
+	}
 	e.screen.Show()
+}
+
+// setVFO moves the tuned frequency, applying the sideband convention and
+// retuning the audio channel.
+func (e *eventLoop) setVFO(freq float64) {
+	e.ui.vfo = clampFreq(freq)
+	e.ui.SyncSideband()
+	e.retune()
 }
 
 func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
@@ -352,12 +557,51 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 		if e.picker != nil {
 			return e.handlePickerKey(ev)
 		}
+		if e.audioPanel != nil {
+			return e.handleAudioPanelKey(ev)
+		}
 		return e.handleKey(ev)
 
 	case *tcell.EventMouse:
 		if e.picker == nil {
 			e.handleMouse(ev)
 		}
+	}
+	return false
+}
+
+func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
+	retune, reopen, done := e.audioPanel.HandleKey(ev, e.ui, e.deviceID)
+
+	if step := e.audioPanel.dspStep; step != 0 {
+		e.audioPanel.dspStep = 0
+		e.cycleDSP(step)
+	}
+	if e.audioPanel.squelchChanged {
+		e.audioPanel.squelchChanged = false
+		e.applySquelch()
+	}
+
+	if reopen && e.audioPanel.selectedDevice != e.deviceID {
+		e.deviceID = e.audioPanel.selectedDevice
+		if e.out != nil && e.ui.audioOn {
+			if err := e.out.Start(e.deviceID); err != nil {
+				e.ui.status = "audio output: " + err.Error()
+			} else {
+				e.ui.status = "output device changed"
+			}
+		}
+	}
+	if e.out != nil {
+		e.out.SetChannel(e.ui.channel)
+		e.out.SetVolume(e.ui.volume)
+		e.out.SetMuted(e.ui.muted)
+	}
+	if retune {
+		e.retune()
+	}
+	if done {
+		e.audioPanel = nil
 	}
 	return false
 }
@@ -420,13 +664,29 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 		return true
 
 	case tcell.KeyLeft:
-		e.panBy(-0.10)
+		// Shift gives a fine step. The filter keys used to double as fine pan,
+		// which collided once audio arrived and needed them.
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.panBy(-0.01)
+		} else {
+			e.panBy(-0.10)
+		}
 	case tcell.KeyRight:
-		e.panBy(0.10)
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.panBy(0.01)
+		} else {
+			e.panBy(0.10)
+		}
+	// Up/down tune, as on a radio. Zoom keeps +/-, which already covered it, so
+	// nothing is lost by giving the arrows to the VFO.
 	case tcell.KeyUp:
-		e.zoomStep(-1, 0)
+		e.stepVFO(+1)
 	case tcell.KeyDown:
-		e.zoomStep(+1, 0)
+		e.stepVFO(-1)
+	case tcell.KeyPgUp:
+		e.stepVFO(+10)
+	case tcell.KeyPgDn:
+		e.stepVFO(-10)
 
 	case tcell.KeyRune:
 		switch ev.Rune() {
@@ -462,6 +722,56 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			ui.status = "view: " + ui.mode.String()
 		case 'i', 'I':
 			e.openPicker(false)
+
+		case 'm':
+			if !ui.audioOn {
+				// Audio normally comes up by itself; getting here means it was
+				// turned off or the device could not be opened, so retry.
+				ui.muted = false
+				e.audioFailed = false
+				e.startAudio()
+			} else {
+				ui.muted = !ui.muted
+				if e.out != nil {
+					e.out.SetMuted(ui.muted)
+				}
+				ui.status = map[bool]string{true: "muted", false: "unmuted"}[ui.muted]
+			}
+		case 'M':
+			idx := (modeIndex(ui.audioMode) + 1) % len(modes)
+			ui.ApplyMode(modes[idx].Name)
+			// Choosing a mode by hand means the 10 MHz convention should stop
+			// overriding it, unless the choice is itself a sideband.
+			ui.status = "mode " + strings.ToUpper(ui.audioMode)
+			e.retune()
+		case 'A':
+			ui.autoSideband = !ui.autoSideband
+			if ui.autoSideband {
+				ui.SyncSideband()
+				e.retune()
+			}
+			ui.status = fmt.Sprintf("auto sideband %s", onOff(ui.autoSideband))
+		case 'd', 'D':
+			// Enumerate on open rather than at startup, so devices plugged in
+			// mid-session appear.
+			devices, err := listDevices()
+			e.audioPanel = NewAudioPanel(devices, err)
+			e.audioPanel.selectedDevice = e.deviceID
+		case 'n', 'N':
+			e.cycleDSP(+1)
+		case 't':
+			e.adjustSquelch(+1)
+		case 'T':
+			e.adjustSquelch(-1)
+		case 'g', 'G':
+			ui.meterSNR = !ui.meterSNR
+			ui.status = "meter: " + meterModeName(ui.meterSNR)
+		case 'x', 'X':
+			ui.channel = Channel((int(ui.channel) + 1) % 3)
+			if e.out != nil {
+				e.out.SetChannel(ui.channel)
+			}
+			ui.status = "audio channel: " + ui.channel.String()
 		case 'w', 'W':
 			ui.wheelTunes = !ui.wheelTunes
 			if ui.wheelTunes {
@@ -475,7 +785,7 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 		case 'S':
 			ui.stepIdx = (ui.stepIdx + len(tuningSteps) - 1) % len(tuningSteps)
 			ui.status = "step " + formatStep(ui.StepHz())
-		case 'a', 'A':
+		case 'a':
 			ui.autoScale = !ui.autoScale
 			if ui.autoScale {
 				ui.status = "auto scaling"
@@ -497,9 +807,13 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 		case '?', 'h', 'H':
 			ui.showHelp = true
 		case ',':
-			e.panBy(-0.01)
+			ui.AdjustBandwidth(-100)
+			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
+			e.retune()
 		case '.':
-			e.panBy(0.01)
+			ui.AdjustBandwidth(+100)
+			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
+			e.retune()
 		}
 	}
 	return false
@@ -543,6 +857,13 @@ func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 
 	if buttons&tcell.ButtonPrimary != 0 {
 		if !e.dragging {
+			// Clicking the signal meter switches its scale, which is the
+			// discoverable way to find the g key.
+			if ui.MeterHit(l, x, y) {
+				ui.meterSNR = !ui.meterSNR
+				ui.status = "meter: " + meterModeName(ui.meterSNR)
+				return
+			}
 			if !inPlot {
 				return
 			}
@@ -569,7 +890,11 @@ func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 	// Button released: a press that never moved is a click-to-tune.
 	if e.dragging {
 		if !e.dragMoved && inPlot {
-			ui.vfo = ui.FreqAt(l, x)
+			// Snap to the tuning step: one character cell can span many kHz at
+			// a wide span, so the raw click frequency is far more precise than
+			// the pointing was. Snapping lands on channel boundaries instead of
+			// an arbitrary offset.
+			e.setVFO(ui.snapToStep(ui.FreqAt(l, x)))
 			ui.status = fmt.Sprintf("VFO %s MHz", formatFreq(ui.vfo, ui.cfg.TotalBandwidth))
 		}
 		e.dragging = false
@@ -590,17 +915,18 @@ func (e *eventLoop) zoom(freq, span float64) {
 	}
 }
 
-// stepVFO moves the marker by one tuning step, snapped to the step grid, and
-// pans the view only when the marker would otherwise leave the screen.
-func (e *eventLoop) stepVFO(direction int) {
+// stepVFO moves the VFO by `steps` tuning increments, snapped to the step grid,
+// and pans the view only when the VFO would otherwise leave the screen. Callers
+// pass a larger multiple for coarse tuning.
+func (e *eventLoop) stepVFO(steps int) {
 	ui := e.ui
 	step := ui.StepHz()
 	if ui.vfo == 0 {
 		ui.vfo = ui.cfg.CenterFreq
 	}
 
-	target := ui.vfo + float64(direction)*step
-	ui.vfo = clampFreq(math.Round(target/step) * step)
+	target := ui.vfo + float64(steps)*step
+	e.setVFO(math.Round(target/step) * step)
 	ui.status = fmt.Sprintf("VFO %.6f MHz", ui.vfo/1e6)
 
 	start, span := ui.viewRange()
@@ -733,7 +1059,7 @@ func (e *eventLoop) commitPrompt() {
 		return
 	}
 
-	ui.vfo = hz
+	e.setVFO(hz)
 	_, span := ui.viewRange()
 	if span <= 0 {
 		span = minSpan

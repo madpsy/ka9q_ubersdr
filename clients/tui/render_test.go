@@ -97,6 +97,8 @@ func TestRenderAllModes(t *testing.T) {
 		if !strings.Contains(out, "sim.example.org") {
 			t.Errorf("%v: header missing the server name", mode)
 		}
+		// The quit hint is the highest-priority one after noise reduction, so
+		// it survives any width the status bar is drawn at.
 		if !strings.Contains(out, "q quit") {
 			t.Errorf("%v: status bar missing", mode)
 		}
@@ -794,5 +796,250 @@ func TestZoomRestartsHistory(t *testing.T) {
 	ui.SetFrame(wide, 15e6, 30e6*1.0001)
 	if ui.wf.Len() != 7 {
 		t.Errorf("a negligible span change cleared history: %d rows, want 7", ui.wf.Len())
+	}
+}
+
+// TestPeakHoldRendersInBothStyles is the regression guard for peak hold doing
+// nothing. It was drawn inside the block-bars renderer only, so it silently
+// stopped appearing when braille became the default trace style.
+func TestPeakHoldRendersInBothStyles(t *testing.T) {
+	for _, braille := range []bool{false, true} {
+		name := "bars"
+		if braille {
+			name = "braille"
+		}
+
+		ui, screen := newTestUI(100, 30, ViewSpectrum)
+		ui.braille = braille
+		ui.showPeaks = true
+		ui.minDB, ui.maxDB, ui.haveRange, ui.autoScale = -120, -20, true, false
+
+		// A burst that then disappears: peak hold exists to keep showing it.
+		loud := make([]float32, 1024)
+		quiet := make([]float32, 1024)
+		for i := range loud {
+			loud[i], quiet[i] = -110, -110
+		}
+		for i := 480; i < 540; i++ {
+			loud[i] = -30
+		}
+		ui.SetFrame(loud, 0, 0)
+		for i := 0; i < 5; i++ {
+			ui.SetFrame(quiet, 0, 0)
+		}
+		ui.Draw(screen)
+
+		cells, w, _ := screen.GetContents()
+		marks := 0
+		for y := 0; y < 30; y++ {
+			for x := 0; x < w; x++ {
+				if r := cells[y*w+x].Runes; len(r) > 0 && r[0] == '‾' {
+					marks++
+				}
+			}
+		}
+		if marks == 0 {
+			t.Errorf("%s: peak hold drew nothing after the signal went away", name)
+		}
+
+		// With peak hold off there must be no marks at all.
+		ui2, screen2 := newTestUI(100, 30, ViewSpectrum)
+		ui2.braille = braille
+		ui2.showPeaks = false
+		ui2.minDB, ui2.maxDB, ui2.haveRange, ui2.autoScale = -120, -20, true, false
+		ui2.SetFrame(loud, 0, 0)
+		ui2.SetFrame(quiet, 0, 0)
+		ui2.Draw(screen2)
+
+		cells2, w2, _ := screen2.GetContents()
+		for y := 0; y < 30; y++ {
+			for x := 0; x < w2; x++ {
+				if r := cells2[y*w2+x].Runes; len(r) > 0 && r[0] == '‾' {
+					t.Fatalf("%s: peak marks drawn with peak hold off", name)
+				}
+			}
+		}
+	}
+}
+
+// TestPeakHoldDecays: the held level must fall back rather than sticking at the
+// maximum forever.
+func TestPeakHoldDecays(t *testing.T) {
+	ui, _ := newTestUI(100, 30, ViewSpectrum)
+	ui.showPeaks = true
+
+	loud := make([]float32, 64)
+	quiet := make([]float32, 64)
+	for i := range loud {
+		loud[i], quiet[i] = -30, -110
+	}
+	ui.SetFrame(loud, 0, 0)
+	first := ui.peaks[0]
+
+	for i := 0; i < 20; i++ {
+		ui.SetFrame(quiet, 0, 0)
+	}
+	if ui.peaks[0] >= first {
+		t.Errorf("peak did not decay: %v then %v", first, ui.peaks[0])
+	}
+	// And it must rise instantly when the signal returns.
+	ui.SetFrame(loud, 0, 0)
+	if ui.peaks[0] != -30 {
+		t.Errorf("peak did not follow the signal back up: %v", ui.peaks[0])
+	}
+}
+
+// TestAutoRangeGivesSignalsRoom is the regression guard for the noise floor
+// eating the bottom third of the pane. The old window ran from the 1st to the
+// 99th percentile, which both wasted height on noise and clipped the strongest
+// signals off the top.
+func TestAutoRangeGivesSignalsRoom(t *testing.T) {
+	// A realistic frame: a noise floor with a few dB of spread, plus signals
+	// well above it.
+	bins := make([]float32, 2048)
+	rng := newDeterministicRNG(5)
+	for i := range bins {
+		bins[i] = float32(-125 + rng()*8)
+	}
+	for _, sig := range []struct {
+		at, width int
+		power     float32
+	}{
+		{300, 8, -95}, {900, 12, -84}, {1500, 6, -70},
+	} {
+		for d := -sig.width; d <= sig.width; d++ {
+			bins[sig.at+d] = sig.power
+		}
+	}
+
+	u := NewUI("test")
+	u.bins = bins
+	u.autoRange()
+
+	sorted := append([]float64(nil), toFloat64(bins)...)
+	sortFloats(sorted)
+	pct := func(q float64) float64 { return sorted[int(q*float64(len(sorted)-1))] }
+	height := func(db float64) float64 { return (db - u.minDB) / (u.maxDB - u.minDB) }
+
+	// The bulk of the noise must sit in the lower part of the pane, leaving the
+	// rest for signals.
+	if h := height(pct(0.90)); h > 0.35 {
+		t.Errorf("noise band reaches %.0f%% of pane height, want under 35%%", h*100)
+	}
+	if h := height(pct(0.50)); h > 0.25 {
+		t.Errorf("noise median at %.0f%% of pane height, want under 25%%", h*100)
+	}
+
+	// Nothing may be clipped off the top: the strongest signal is the thing
+	// you most want to see.
+	for _, v := range bins {
+		if float64(v) > u.maxDB {
+			t.Errorf("signal at %.0f dB is above the window top %.0f", v, u.maxDB)
+			break
+		}
+	}
+
+	// A lone spur must not squash everything else.
+	spur := append([]float32(nil), bins...)
+	spur[42] = -5
+	u2 := NewUI("test")
+	u2.bins = spur
+	u2.autoRange()
+	if u2.maxDB > -40 {
+		t.Errorf("a single -5 dB spur dragged the window top to %.0f", u2.maxDB)
+	}
+
+	// A dead-quiet band still gets a usable scale rather than a collapsed one.
+	flat := make([]float32, 512)
+	for i := range flat {
+		flat[i] = -120
+	}
+	u3 := NewUI("test")
+	u3.bins = flat
+	u3.autoRange()
+	if u3.maxDB-u3.minDB < 20 {
+		t.Errorf("flat input gave a %.0f dB window, want at least 20", u3.maxDB-u3.minDB)
+	}
+}
+
+func toFloat64(in []float32) []float64 {
+	out := make([]float64, len(in))
+	for i, v := range in {
+		out[i] = float64(v)
+	}
+	return out
+}
+
+func sortFloats(v []float64) {
+	for i := 1; i < len(v); i++ {
+		for j := i; j > 0 && v[j] < v[j-1]; j-- {
+			v[j], v[j-1] = v[j-1], v[j]
+		}
+	}
+}
+
+// TestAutoRangeHoldsMinimumDynamicRange: on a span with nothing strong in it,
+// the window used to collapse onto the noise, so the floor climbed the pane as
+// though the band had got louder. A floor of 60 dB keeps it pinned down and
+// makes the display comparable while tuning around.
+func TestAutoRangeHoldsMinimumDynamicRange(t *testing.T) {
+	rng := newDeterministicRNG(9)
+
+	quiet := make([]float32, 2048)
+	for i := range quiet {
+		quiet[i] = float32(-125 + rng()*6) // noise only, nothing above it
+	}
+
+	u := NewUI("test")
+	u.bins = quiet
+	u.autoRange()
+
+	if got := u.maxDB - u.minDB; got < 60 {
+		t.Errorf("quiet span gave a %.0f dB window, want at least 60", got)
+	}
+
+	sorted := toFloat64(quiet)
+	sortFloats(sorted)
+	pct := func(q float64) float64 { return sorted[int(q*float64(len(sorted)-1))] }
+	height := func(db float64) float64 { return (db - u.minDB) / (u.maxDB - u.minDB) }
+
+	// With no signals present the noise should sit low, not fill the pane.
+	if h := height(pct(0.90)); h > 0.25 {
+		t.Errorf("on a quiet span the noise reaches %.0f%% of the pane, want under 25%%", h*100)
+	}
+
+	// Adding a strong signal must not move the floor much: that is what makes
+	// the display comparable as signals come and go.
+	loud := append([]float32(nil), quiet...)
+	for i := 900; i < 920; i++ {
+		loud[i] = -70
+	}
+	u2 := NewUI("test")
+	u2.bins = loud
+	u2.autoRange()
+
+	quietFloor := height(pct(0.50))
+	loudFloor := (pct(0.50) - u2.minDB) / (u2.maxDB - u2.minDB)
+	if diff := loudFloor - quietFloor; diff > 0.10 || diff < -0.10 {
+		t.Errorf("noise floor moved %.0f%% of pane height when a signal appeared (%.0f%% then %.0f%%)",
+			diff*100, quietFloor*100, loudFloor*100)
+	}
+
+	// The window only grows past the minimum when something needs the room.
+	veryLoud := append([]float32(nil), quiet...)
+	for i := 900; i < 920; i++ {
+		veryLoud[i] = -40
+	}
+	u3 := NewUI("test")
+	u3.bins = veryLoud
+	u3.autoRange()
+	if u3.maxDB-u3.minDB <= 60 {
+		t.Errorf("a signal 85 dB above the floor gave only a %.0f dB window", u3.maxDB-u3.minDB)
+	}
+	for _, v := range veryLoud {
+		if float64(v) > u3.maxDB {
+			t.Errorf("signal at %.0f is clipped above the window top %.0f", v, u3.maxDB)
+			break
+		}
 	}
 }

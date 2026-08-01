@@ -461,15 +461,15 @@ func TestUIResetClearsPerConnectionState(t *testing.T) {
 
 func TestTuningStepsAndFormat(t *testing.T) {
 	ui := NewUI("test")
-	if ui.StepHz() != 1000 {
-		t.Errorf("default step = %v Hz, want 1000", ui.StepHz())
+	if ui.StepHz() != 500 {
+		t.Errorf("default step = %v Hz, want 500", ui.StepHz())
 	}
 	// Cycling wraps around the whole list.
 	for i := 0; i < len(tuningSteps); i++ {
 		ui.stepIdx = (ui.stepIdx + 1) % len(tuningSteps)
 	}
-	if ui.StepHz() != 1000 {
-		t.Errorf("a full cycle should return to 1000 Hz, got %v", ui.StepHz())
+	if ui.StepHz() != 500 {
+		t.Errorf("a full cycle should return to 500 Hz, got %v", ui.StepHz())
 	}
 
 	if got := formatStep(10); got != "10Hz" {

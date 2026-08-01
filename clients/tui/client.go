@@ -151,6 +151,44 @@ func (c *Client) CheckConnection() error {
 	return nil
 }
 
+// DSPInfo describes the server-side DSP inserts a receiver offers, from the
+// "dsp" block of /api/description. This is the fast path: it is available
+// before any WebSocket is open, which is how the other clients know whether to
+// offer the control at all.
+type DSPInfo struct {
+	Enabled  bool     `json:"enabled"`
+	Filters  []string `json:"filters"`
+	MaxUsers int      `json:"max_users"`
+}
+
+// FetchDSPInfo asks the receiver which DSP inserts it offers. A receiver
+// without DSP simply reports none, which is not an error.
+func (c *Client) FetchDSPInfo() (DSPInfo, error) {
+	endpoint := fmt.Sprintf("%s://%s/api/description", c.scheme("https", "http"), c.host)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return DSPInfo{}, err
+	}
+	req.Header.Set("User-Agent", "UberSDR TUI Client (go)")
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return DSPInfo{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return DSPInfo{}, fmt.Errorf("description returned HTTP %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		DSP DSPInfo `json:"dsp"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return DSPInfo{}, err
+	}
+	return payload.DSP, nil
+}
+
 // Run connects and pumps frames until ctx is cancelled, reconnecting on drop.
 func (c *Client) Run(ctx context.Context, initialFreq float64, initialBinBW float64) {
 	backoff := time.Second

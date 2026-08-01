@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1744,5 +1748,555 @@ func TestMixerPrimesBeforePlaying(t *testing.T) {
 	}
 	if _, _, u := m2.stats(); u == 0 {
 		t.Error("underrun was not counted")
+	}
+}
+
+// --- stdout, the second output -------------------------------------------
+
+// blockingWriter holds every write until it is released, standing in for a pipe
+// whose reader has stalled.
+type blockingWriter struct {
+	release chan struct{}
+	mu      sync.Mutex
+	n       int
+}
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	<-w.release
+	w.mu.Lock()
+	w.n += len(p)
+	w.mu.Unlock()
+	return len(p), nil
+}
+
+func TestPCMWriterEncodesLittleEndian(t *testing.T) {
+	var sink bytes.Buffer
+	p := newPCMWriter(&sink, StdoutRaw)
+	p.push([]int16{0, 1, -1, 32767, -32768})
+	p.Close()
+
+	want := []byte{
+		0x00, 0x00, // 0
+		0x01, 0x00, // 1
+		0xff, 0xff, // -1
+		0xff, 0x7f, // 32767
+		0x00, 0x80, // -32768
+	}
+	if got := sink.Bytes(); !bytes.Equal(got, want) {
+		t.Errorf("wrote % x, want % x", got, want)
+	}
+
+	// Which is exactly what the format string promises, so the pipe command in
+	// the docs works: S16_LE, 48 kHz, one channel.
+	if stdoutFormat != "S16_LE" || stdoutSampleRate != opusOutputRate || stdoutChannels != 1 {
+		t.Errorf("the advertised format no longer matches what is written")
+	}
+}
+
+// The caller reuses its packet buffer, so the queue has to hold a copy.
+func TestPCMWriterCopiesItsInput(t *testing.T) {
+	var sink bytes.Buffer
+	p := newPCMWriter(&sink, StdoutRaw)
+
+	packet := []int16{100, 200}
+	p.push(packet)
+	packet[0], packet[1] = -1, -1
+	p.Close()
+
+	want := []byte{100, 0, 200, 0}
+	if got := sink.Bytes(); !bytes.Equal(got, want) {
+		t.Errorf("wrote % x, want % x — the queue aliased the caller's buffer", got, want)
+	}
+}
+
+// A stalled reader must cost audio, never the event loop: pushes drop rather
+// than block.
+func TestPCMWriterDropsRatherThanBlocking(t *testing.T) {
+	w := &blockingWriter{release: make(chan struct{})}
+	p := newPCMWriter(w, StdoutRaw)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			p.push([]int16{int16(i)})
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("push blocked on a stalled reader")
+	}
+
+	if _, dropped, _ := p.stats(); dropped == 0 {
+		t.Error("a full queue dropped nothing")
+	}
+
+	close(w.release) // let the writer drain and exit
+	p.Close()
+}
+
+// The two outputs are independent: audio goes to whichever are switched on.
+func TestAudioOutputFansOut(t *testing.T) {
+	var sink bytes.Buffer
+	out := NewAudioOutput()
+
+	// Device only, which is what the pipe being off looks like.
+	out.Push([]int16{1, 2, 3})
+	if buffered, _, _ := out.Stats(); buffered != 3 {
+		t.Errorf("the mixer holds %d samples, want 3", buffered)
+	}
+	if out.StdoutOn() {
+		t.Error("the pipe is on before anything asked for it")
+	}
+	if sink.Len() != 0 {
+		t.Error("audio reached a pipe that is not running")
+	}
+
+	// Both.
+	out.pipe = newPCMWriter(&sink, StdoutRaw)
+	if !out.StdoutOn() {
+		t.Fatal("the pipe did not come up")
+	}
+	out.Push([]int16{4, 5})
+	if buffered, _, _ := out.Stats(); buffered != 5 {
+		t.Errorf("the mixer holds %d samples, want 5", buffered)
+	}
+	out.Close()
+	if sink.Len() != 4 {
+		t.Errorf("the pipe carried %d bytes, want 4", sink.Len())
+	}
+	if out.StdoutOn() {
+		t.Error("closing left the pipe running")
+	}
+
+	// Switching it off twice is not an error, and neither is off when it was
+	// never on.
+	if err := out.SetStdout(StdoutOff); err != nil {
+		t.Errorf("switching an idle pipe off: %v", err)
+	}
+}
+
+// "Off" heads the device list, so the speakers are switched off by the same
+// control that chooses them.
+func TestAudioPanelOffersNoLocalPlayback(t *testing.T) {
+	p := NewAudioPanel([]AudioDevice{
+		{ID: "", Name: "System default", Default: true},
+		{ID: "sink-1", Name: "Headphones"},
+	}, nil)
+
+	choices := p.deviceChoices()
+	if len(choices) != 3 || choices[0].ID != audioDeviceOff {
+		t.Fatalf("the device list is %v, want off at its head", choices)
+	}
+
+	// Stepping back from the first real device lands on off.
+	u := NewUI("test")
+	p.row = rowDevice
+	if _, reopen, _ := p.adjust(u, "", -1); !reopen || p.selectedDevice != audioDeviceOff {
+		t.Errorf("stepping back from the default gave %q", p.selectedDevice)
+	}
+
+	// Enumeration failing still leaves it possible to switch playback off,
+	// which is what a machine with no sound server needs.
+	p = NewAudioPanel(nil, errors.New("no sound server"))
+	if got := p.deviceChoices(); len(got) != 1 || got[0].ID != audioDeviceOff {
+		t.Errorf("with no devices the list is %v", got)
+	}
+}
+
+// The stdout row asks the caller to switch the stream: the panel does not own
+// the output.
+func TestAudioPanelTogglesStdout(t *testing.T) {
+	p := NewAudioPanel(nil, nil)
+	p.row = rowStdout
+
+	if _, _, done := p.adjust(NewUI("test"), "", +1); done {
+		t.Error("toggling stdout closed the panel")
+	}
+	if p.stdoutStep != +1 {
+		t.Errorf("the stdout row asked for step %d", p.stdoutStep)
+	}
+
+	// What it shows comes from the caller, including why it is unavailable.
+	for _, mode := range []StdoutMode{StdoutRaw, StdoutWAV} {
+		p.stdoutMode = mode
+		if got := p.stdoutValue(); !strings.Contains(got, "on") || !strings.Contains(got, stdoutFormat) {
+			t.Errorf("%v stdout shows %q", mode, got)
+		}
+	}
+	if got := p.stdoutValue(); !strings.Contains(got, "WAV") {
+		t.Errorf("WAV mode does not say so: %q", got)
+	}
+	p.stdoutMode, p.stdoutErr = StdoutOff, errors.New("broken pipe")
+	if got := p.stdoutValue(); !strings.Contains(got, "broken pipe") {
+		t.Errorf("a failed pipe shows %q", got)
+	}
+}
+
+// Switching local playback off leaves the session running: a receiver piped
+// somewhere else needs no speakers.
+func TestDeviceOffKeepsTheSessionRunning(t *testing.T) {
+	e := &eventLoop{ui: NewUI("test"), out: NewAudioOutput()}
+	e.deviceID = "sink-1"
+
+	e.applyDeviceChoice(audioDeviceOff)
+	if !e.deviceOff || e.currentDeviceID() != audioDeviceOff {
+		t.Errorf("off not applied: deviceOff=%v id=%q", e.deviceOff, e.currentDeviceID())
+	}
+	if e.out.Running() {
+		t.Error("the sound device is still open")
+	}
+	if !strings.Contains(e.ui.status, "off") {
+		t.Errorf("nothing said what happened: %q", e.ui.status)
+	}
+
+	// Choosing a device again clears it, and the panel shows that device.
+	e.applyDeviceChoice("sink-2")
+	if e.deviceOff || e.currentDeviceID() != "sink-2" {
+		t.Errorf("choosing a device left deviceOff=%v id=%q", e.deviceOff, e.currentDeviceID())
+	}
+}
+
+// The panel has to show both outputs, since either can be off.
+func TestAudioPanelShowsBothOutputs(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(120, 30)
+
+	u := NewUI("test")
+	u.audioOn = true
+	p := NewAudioPanel([]AudioDevice{{ID: "", Name: "System default"}}, nil)
+	p.stdoutMode = StdoutRaw
+
+	u.Draw(screen)
+	p.Draw(screen, u, audioDeviceOff)
+	screen.Show()
+
+	out := dump(screen)
+	t.Logf("\n%s", out)
+	for _, want := range []string{"Output device", "Off — no local playback", "Stdout", stdoutFormat} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the panel is missing %q", want)
+		}
+	}
+}
+
+// A refusal has to be visible in the panel: it covers the status line, so a key
+// that cannot do anything would otherwise look like a key that did nothing.
+func TestStdoutRefusalIsVisibleInThePanel(t *testing.T) {
+	e := &eventLoop{ui: NewUI("test")}
+	e.stdoutErr = errors.New("stdout is a terminal")
+
+	mode, err := e.stdoutState()
+	if mode != StdoutOff || err == nil {
+		t.Fatalf("the refusal did not survive: mode=%v err=%v", mode, err)
+	}
+
+	p := NewAudioPanel(nil, nil)
+	p.stdoutMode, p.stdoutErr = e.stdoutState()
+	if got := p.stdoutValue(); !strings.Contains(got, "terminal") {
+		t.Errorf("the row says %q", got)
+	}
+
+	// The note under the rows carries the remedy, and turns red once a toggle
+	// has been refused.
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(120, 30)
+
+	u := NewUI("test")
+	u.audioOn = true
+	p.row = rowStdout
+	p.Draw(screen, u, "")
+	screen.Show()
+
+	out := dump(screen)
+	if !strings.Contains(out, "pipe: ubersdr-tui -stdout | aplay") {
+		t.Errorf("the panel does not say how to fix it:\n%s", out)
+	}
+
+	noteFG := func(p *AudioPanel) tcell.Color {
+		screen.Clear()
+		p.Draw(screen, u, "")
+		screen.Show()
+		cells, w, h := screen.GetContents()
+		for y := 0; y < h; y++ {
+			line := rowText(screen, y)
+			if i := strings.Index(line, "pipe: ubersdr-tui"); i >= 0 {
+				fg, _, _ := cells[y*w+i].Style.Decompose()
+				return fg
+			}
+		}
+		t.Fatal("the note was not drawn")
+		return 0
+	}
+
+	refused := noteFG(p)
+	p.stdoutErr = nil
+	if calm := noteFG(p); calm == refused {
+		t.Error("a refused toggle looks the same as a quiet one")
+	}
+}
+
+// WAV mode exists so that a redirected file plays anywhere: a headerless
+// capture is one no player will open, since none of them infer 48 kHz mono
+// S16_LE from a file extension.
+func TestStdoutWAVHeader(t *testing.T) {
+	// Down a pipe the length cannot be known, so the sizes stay open-ended and
+	// players read to end of file.
+	var pipe bytes.Buffer
+	p := newPCMWriter(&pipe, StdoutWAV)
+	p.push([]int16{1, 2, 3, 4})
+	p.Close()
+
+	b := pipe.Bytes()
+	if len(b) != wavHeaderLen+8 {
+		t.Fatalf("wrote %d bytes, want a %d-byte header and 8 of audio", len(b), wavHeaderLen)
+	}
+	if string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" || string(b[36:40]) != "data" {
+		t.Fatalf("not a WAV header: %q", b[:44])
+	}
+
+	le := binary.LittleEndian
+	if got := le.Uint16(b[22:]); got != stdoutChannels {
+		t.Errorf("header says %d channels", got)
+	}
+	if got := le.Uint32(b[24:]); got != stdoutSampleRate {
+		t.Errorf("header says %d Hz", got)
+	}
+	if got := le.Uint16(b[34:]); got != 16 {
+		t.Errorf("header says %d bits per sample", got)
+	}
+	if got := le.Uint32(b[40:]); got != streamingSize {
+		t.Errorf("a pipe got a data size of %d, want the open-ended one", got)
+	}
+
+	// The audio follows the header unchanged.
+	if want := []byte{1, 0, 2, 0, 3, 0, 4, 0}; !bytes.Equal(b[wavHeaderLen:], want) {
+		t.Errorf("audio after the header is % x, want % x", b[wavHeaderLen:], want)
+	}
+}
+
+// A regular file can seek, so the real sizes are patched in on close and the
+// capture is a valid WAV rather than an open-ended one.
+func TestStdoutWAVPatchesSizesOnAFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "capture.wav")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPCMWriter(f, StdoutWAV)
+	const samples = 480
+	p.push(make([]int16, samples))
+	p.Close()
+	f.Close()
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != wavHeaderLen+samples*2 {
+		t.Fatalf("the file is %d bytes, want %d", len(b), wavHeaderLen+samples*2)
+	}
+
+	le := binary.LittleEndian
+	if got, want := le.Uint32(b[40:]), uint32(samples*2); got != want {
+		t.Errorf("data size is %d, want %d", got, want)
+	}
+	if got, want := le.Uint32(b[4:]), uint32(36+samples*2); got != want {
+		t.Errorf("RIFF size is %d, want %d", got, want)
+	}
+}
+
+// The mode is what the panel and the status line describe, so each has to say
+// something different and useful.
+func TestStdoutModeLabels(t *testing.T) {
+	seen := map[string]bool{}
+	for _, m := range []StdoutMode{StdoutOff, StdoutRaw, StdoutWAV} {
+		if seen[m.String()] || seen[m.Label()] {
+			t.Errorf("%v describes itself like another mode", m)
+		}
+		seen[m.String()], seen[m.Label()] = true, true
+	}
+	if !strings.Contains(StdoutWAV.Label(), "WAV") || !strings.Contains(StdoutRaw.Label(), "raw") {
+		t.Errorf("labels are %q and %q", StdoutRaw.Label(), StdoutWAV.Label())
+	}
+}
+
+// --- choosing an output device -------------------------------------------
+
+// stubDevices replaces the platform enumeration for the duration of a test.
+func stubDevices(t *testing.T, devices []AudioDevice, err error) {
+	t.Helper()
+	orig := listDevicesForTest
+	listDevicesForTest = func() ([]AudioDevice, error) { return devices, err }
+	t.Cleanup(func() { listDevicesForTest = orig })
+}
+
+// -device takes an index from the listing or enough of a name to be sure, so a
+// headless session can be pointed at one output and a service at another.
+func TestResolveDevice(t *testing.T) {
+	stubDevices(t, []AudioDevice{
+		{ID: "", Name: "System default"},
+		{ID: "sink-usb", Name: "Steinberg UR24C Analogue Surround 4.0", Default: true},
+		{ID: "sink-hdmi", Name: "HDMI Output"},
+	}, nil)
+
+	for _, tc := range []struct{ spec, want string }{
+		{"0", ""},
+		{"1", "sink-usb"},
+		{"2", "sink-hdmi"},
+		{"steinberg", "sink-usb"},    // part of a name, case-insensitively
+		{"HDMI Output", "sink-hdmi"}, // or the whole of one
+		{"sink-hdmi", "sink-hdmi"},   // or the underlying ID
+		{"System default", ""},
+	} {
+		got, err := resolveDevice(tc.spec)
+		if err != nil {
+			t.Errorf("%q: %v", tc.spec, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%q resolved to %q, want %q", tc.spec, got, tc.want)
+		}
+	}
+
+	// An index off the end says how many there are rather than picking one.
+	if _, err := resolveDevice("9"); err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("an index past the end gave %v", err)
+	}
+	if _, err := resolveDevice("-1"); err == nil {
+		t.Error("a negative index was accepted")
+	}
+	if _, err := resolveDevice("nosuchdevice"); err == nil {
+		t.Error("a name matching nothing was accepted")
+	}
+
+	// A name that matches more than one is refused with the candidates, since
+	// picking one at random is how a service ends up on the wrong speakers.
+	stubDevices(t, []AudioDevice{
+		{ID: "a", Name: "USB Audio front"},
+		{ID: "b", Name: "USB Audio rear"},
+	}, nil)
+	_, err := resolveDevice("usb audio")
+	if err == nil {
+		t.Fatal("an ambiguous name was accepted")
+	}
+	if !strings.Contains(err.Error(), "front") || !strings.Contains(err.Error(), "rear") {
+		t.Errorf("the complaint does not list the candidates: %v", err)
+	}
+}
+
+// The listing is what -device list prints and what an unusable value is
+// answered with, so it has to carry the indices and mark the default.
+func TestDescribeDevices(t *testing.T) {
+	stubDevices(t, []AudioDevice{
+		{ID: "", Name: "System default"},
+		{ID: "sink-usb", Name: "Steinberg UR24C", Default: true},
+	}, nil)
+
+	got := describeDevices()
+	for _, want := range []string{"0", "1", "System default", "Steinberg UR24C", "*"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the listing is missing %q:\n%s", want, got)
+		}
+	}
+
+	// A machine with no sound server says so rather than printing an empty list.
+	stubDevices(t, nil, errors.New("cannot reach PulseAudio"))
+	if got := describeDevices(); !strings.Contains(got, "PulseAudio") {
+		t.Errorf("enumeration failure is not explained: %q", got)
+	}
+	if _, err := resolveDevice("1"); err == nil {
+		t.Error("a device was resolved with no way to list them")
+	}
+}
+
+// --- the session clock ---------------------------------------------------
+
+// Receivers cap how long a session may run, and say so in the /connection
+// reply. The clock counts that down in the corner, because a session that ends
+// without warning is indistinguishable from a crash.
+func TestSessionCountdown(t *testing.T) {
+	for _, tc := range []struct {
+		left time.Duration
+		want string
+	}{
+		{time.Hour + 24*time.Minute + 12*time.Second, "1h24m12s"},
+		{2 * time.Hour, "2h00m00s"},
+		{4*time.Minute + 9*time.Second, "4m09s"},
+		{9 * time.Second, "9s"},
+		{0, "0s"},
+		{-time.Minute, "0s"}, // never counts past the end
+	} {
+		if got := formatCountdown(tc.left); got != tc.want {
+			t.Errorf("%v left renders as %q, want %q", tc.left, got, tc.want)
+		}
+	}
+}
+
+func TestSessionFieldAndWarning(t *testing.T) {
+	u := NewUI("test")
+
+	// Nothing is claimed before there is a connection to claim it for.
+	if got := u.sessionField(); got != "" {
+		t.Errorf("a disconnected session shows %q", got)
+	}
+
+	// A receiver that sets no limit says so, rather than showing a clock that
+	// never moves.
+	u.connected = true
+	if got := strings.TrimSpace(u.sessionField()); got != "unlimited" {
+		t.Errorf("an unlimited session shows %q", got)
+	}
+	calm := u.sessionStyle()
+
+	u.sessionLimited, u.sessionEnd = true, time.Now().Add(time.Hour)
+	if got := strings.TrimSpace(u.sessionField()); got != "1h00m00s" {
+		t.Errorf("an hour left shows %q", got)
+	}
+	if u.sessionStyle() != calm {
+		t.Error("an hour left is already being warned about")
+	}
+
+	// The last five minutes are marked, on the same threshold the Python
+	// client uses.
+	u.sessionEnd = time.Now().Add(4 * time.Minute)
+	if u.sessionStyle() == calm {
+		t.Error("the last five minutes are not marked")
+	}
+}
+
+// The clock owns the last columns of the header, and nothing else may be drawn
+// over it however narrow the terminal gets.
+func TestSessionClockKeepsTheCorner(t *testing.T) {
+	for _, w := range []int{60, 80, 100, 140, 200} {
+		ui, screen := newTestUI(w, 24, ViewSpectrum)
+		ui.audioOn = true
+		ui.signal = Signal{Power: -70, Noise: -110}
+		ui.chat = ChatState{Available: true, Connected: true, Users: []ChatUser{{Username: "a"}}}
+		ui.sessionLimited, ui.sessionEnd = true, time.Now().Add(2*time.Hour)
+		ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
+		ui.Draw(screen)
+
+		header := rowText(screen, 0)
+		if !strings.HasSuffix(strings.TrimRight(header, " "), "2h00m00s") {
+			t.Errorf("width %d: the clock is not in the corner: %q", w, header)
+		}
+		// Whatever else is shed, the frequency stays — in its compact form if
+		// that is all there is room for.
+		if !strings.Contains(header, "7.1000") {
+			t.Errorf("width %d: the frequency was shed: %q", w, header)
+		}
+		if len([]rune(strings.TrimRight(header, " "))) > w {
+			t.Errorf("width %d: the header overflowed", w)
+		}
 	}
 }

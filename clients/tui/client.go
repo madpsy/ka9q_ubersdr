@@ -60,6 +60,11 @@ type Client struct {
 	connected bool
 	cfg       SpectrumConfig
 
+	// How long this session may run and when it was allowed, from the
+	// /connection precheck. A zero limit means the receiver sets none.
+	sessionLimit time.Duration
+	sessionStart time.Time
+
 	// Delta-decode state. The server sends one full frame then deltas against
 	// it, so this must be reset on every reconnect or deltas land on stale bins.
 	prevF32 []float32
@@ -80,6 +85,14 @@ type Client struct {
 	// background fetch.
 	Info chan Description
 }
+
+// userAgent identifies this client to every receiver it talks to, on every
+// request it makes — HTTP and WebSocket alike.
+//
+// It is not decoration. The server records the User-Agent a session presented
+// to /connection and refuses to open a socket for a UUID it has never seen one
+// from, so this string is part of the handshake as much as the UUID is.
+const userAgent = "UberSDR_TUI/1.0"
 
 const minCommandDelay = 100 * time.Millisecond
 
@@ -136,7 +149,7 @@ func (c *Client) CheckConnection() error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "UberSDR TUI Client (go)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -147,6 +160,9 @@ func (c *Client) CheckConnection() error {
 	var result struct {
 		Allowed bool   `json:"allowed"`
 		Reason  string `json:"reason"`
+		// How long this receiver lets a session last, in seconds. Zero means it
+		// does not limit them — which is also what a bypassed connection gets.
+		MaxSessionTime int `json:"max_session_time"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("bad /connection response (HTTP %d): %w", resp.StatusCode, err)
@@ -158,7 +174,33 @@ func (c *Client) CheckConnection() error {
 		}
 		return fmt.Errorf("%s", reason)
 	}
+
+	// The clock starts here: this is the moment the receiver allowed the
+	// session, and what it counts from.
+	c.mu.Lock()
+	c.sessionLimit = time.Duration(result.MaxSessionTime) * time.Second
+	c.sessionStart = time.Now()
+	c.mu.Unlock()
 	return nil
+}
+
+// SessionDeadline reports when this session runs out, and whether the receiver
+// limits it at all. It is only meaningful once CheckConnection has run.
+func (c *Client) SessionDeadline() (time.Time, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.sessionLimit <= 0 || c.sessionStart.IsZero() {
+		return time.Time{}, false
+	}
+	return c.sessionStart.Add(c.sessionLimit), true
+}
+
+// SessionLimit is how long the receiver allows a session to run, zero when it
+// sets no limit.
+func (c *Client) SessionLimit() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sessionLimit
 }
 
 // DSPInfo describes the server-side DSP inserts a receiver offers, from the
@@ -180,7 +222,7 @@ func (c *Client) getJSON(path string, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "UberSDR TUI Client (go)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -297,7 +339,7 @@ func (c *Client) session(ctx context.Context, initialFreq, initialBinBW float64)
 	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, http.Header{
-		"User-Agent": []string{"UberSDR TUI Client (go)"},
+		"User-Agent": []string{userAgent},
 	})
 	if err != nil {
 		if resp != nil {

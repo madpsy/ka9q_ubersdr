@@ -219,7 +219,7 @@ func (c *ChatClient) session(ctx context.Context) error {
 	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, http.Header{
-		"User-Agent": []string{"UberSDR TUI Client (go)"},
+		"User-Agent": []string{userAgent},
 	})
 	if err != nil {
 		if resp != nil {

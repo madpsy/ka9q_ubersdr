@@ -84,7 +84,7 @@ func FetchPublicInstances(ctx context.Context) ([]Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "UberSDR TUI Client (go)")
+	req.Header.Set("User-Agent", userAgent)
 
 	client := &http.Client{
 		Timeout:   15 * time.Second,
@@ -286,7 +286,13 @@ func (d *LocalDiscovery) enrich(key string, inst Instance) {
 	url := fmt.Sprintf("http://%s/api/description", inst.Host)
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}

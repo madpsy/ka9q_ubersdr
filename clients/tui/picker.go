@@ -240,18 +240,15 @@ func (p *Picker) Draw(s tcell.Screen) {
 		x += len(label) + 1
 	}
 
-	listTop := 5
-	listBottom := h - 3
-
 	if p.tab == TabManual {
-		p.drawManual(s, listTop, w, bg, accent, dim)
+		p.drawManual(s, pickerListTop, w, bg, accent, dim)
 	} else {
-		p.drawList(s, listTop, listBottom, w, bg, accent, dim)
+		p.drawList(s, w, h, bg, accent, dim)
 	}
 
-	hint := " type to search · ↑↓ move · enter connect · tab switch source · esc close "
+	hint := " type to search · ↑↓ or click · enter or click again to connect · tab switch source · esc close "
 	if p.mustChoose {
-		hint = " type to search · ↑↓ move · enter connect · tab switch source · ^C quit "
+		hint = " type to search · ↑↓ or click · enter or click again to connect · tab switch source · ^C quit "
 	}
 	if p.filter != "" {
 		hint = " ↑↓ move · enter connect · esc clear search · ^U clear · tab switch source "
@@ -284,7 +281,47 @@ func (p *Picker) drawManual(s tcell.Screen, top, w int, bg, accent, dim tcell.St
 	}
 }
 
-func (p *Picker) drawList(s tcell.Screen, top, bottom, w int, bg, accent, dim tcell.Style) {
+// The list geometry, shared by drawing and hit testing so a click can never
+// land on a different entry than the one under the pointer.
+const (
+	pickerListTop = 5 // first row of the list; the search box sits above it
+	pickerRows    = 2 // rows per entry: name, then its details
+)
+
+// listWindow returns how many entries fit at this terminal height and which one
+// is at the top after scrolling to keep the cursor in view.
+func (p *Picker) listWindow(h int) (visible, first int) {
+	visible = (h - 3 - pickerListTop) / pickerRows
+	if visible < 1 {
+		visible = 1
+	}
+	if p.cursor >= visible {
+		first = p.cursor - visible + 1
+	}
+	return visible, first
+}
+
+// EntryAt reports which entry covers a screen position, so the list can be
+// worked with the mouse as well as the keyboard.
+func (p *Picker) EntryAt(h, y int) (int, bool) {
+	if p.tab == TabManual || y < pickerListTop {
+		return 0, false
+	}
+	visible, first := p.listWindow(h)
+	row := (y - pickerListTop) / pickerRows
+	if row >= visible {
+		return 0, false
+	}
+	idx := first + row
+	if idx >= len(p.entries()) {
+		return 0, false
+	}
+	return idx, true
+}
+
+func (p *Picker) drawList(s tcell.Screen, w, h int, bg, accent, dim tcell.Style) {
+	const top = pickerListTop
+
 	// The search box is always visible so it is obvious that typing filters.
 	if p.filter == "" {
 		drawText(s, 2, top-1, dim, "search: ▏(type to filter by callsign, name or location)")
@@ -309,22 +346,11 @@ func (p *Picker) drawList(s tcell.Screen, top, bottom, w int, bg, accent, dim tc
 		return
 	}
 
-	// Two rows per entry, plus a blank separator.
-	const rowsPerEntry = 2
-	visible := (bottom - top) / rowsPerEntry
-	if visible < 1 {
-		visible = 1
-	}
-
-	// Scroll so the cursor stays in view.
-	first := 0
-	if p.cursor >= visible {
-		first = p.cursor - visible + 1
-	}
+	visible, first := p.listWindow(h)
 
 	for i := 0; i < visible && first+i < len(list); i++ {
 		inst := list[first+i]
-		y := top + i*rowsPerEntry
+		y := top + i*pickerRows
 		selected := first+i == p.cursor
 
 		nameStyle, detailStyle := bg, dim

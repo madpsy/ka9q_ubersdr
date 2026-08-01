@@ -202,6 +202,12 @@ type UI struct {
 	bookmarks    []Bookmark
 	bookmarkHits []bookmarkHit
 
+	// When this session runs out, from the receiver's own limit. sessionLimited
+	// is false on a receiver that does not limit sessions, which is a different
+	// thing from one whose limit has not arrived yet.
+	sessionEnd     time.Time
+	sessionLimited bool
+
 	// Chat, when the receiver runs it. chatUnread counts messages that have
 	// arrived since the panel was last open, and chatMention marks any of them
 	// naming us — the one thing worth interrupting for.
@@ -333,6 +339,7 @@ func (u *UI) Reset() {
 	u.chat = ChatState{}
 	u.chatUnread, u.chatMention = 0, false
 	u.modePinned = false
+	u.sessionEnd, u.sessionLimited = time.Time{}, false
 	u.vfo = 0
 	u.fps = 0
 	u.haveRange = false
@@ -571,6 +578,15 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 		}
 	}
 
+	// The session clock takes the last columns of the row, and everything else
+	// is fitted to the left of it. It is the one field that is never shed: a
+	// session that ends without warning is worse than a header missing its
+	// frame rate.
+	clock := u.sessionField()
+	if clock != "" {
+		drawText(s, l.W-runeLen(clock), 0, u.sessionStyle(), clock)
+	}
+
 	span := u.cfg.TotalBandwidth
 	scaleMode := "AUTO"
 	if !u.autoScale {
@@ -584,6 +600,11 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	vfo := "VFO —"
 	if u.vfo > 0 {
 		vfo = fmt.Sprintf("VFO %s MHz", formatFreq(u.vfo, span))
+		// On a header too narrow for the label, the number alone still says
+		// where the radio is pointed, which is the one thing that must survive.
+		if runeLen(vfo) > l.W-x-2-runeLen(clock) {
+			vfo = formatFreq(u.vfo, span)
+		}
 	}
 	// Fields carry a priority so a narrow terminal sheds the least useful ones
 	// instead of dropping the entire right-hand side — which is what an 80
@@ -601,7 +622,14 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 		{fmt.Sprintf("%3.0f fps", u.fps), 7},
 	}
 	if u.audioOn {
-		candidates = append(candidates, field{u.audioField(), 1})
+		// The full audio field is wide. Where it will not fit beside the VFO,
+		// a compact form carries the part that matters — what is being
+		// demodulated — rather than the field being shed altogether.
+		audio := u.audioField()
+		if runeLen(vfo)+3+runeLen(audio) > l.W-x-2-runeLen(clock) {
+			audio = u.audioFieldCompact()
+		}
+		candidates = append(candidates, field{audio, 1})
 	}
 
 	// Keep the display order stable while choosing what fits by priority.
@@ -617,7 +645,7 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	// multi-byte, so byte length would overestimate and push the right-hand
 	// block left over the server name.
 	const sepWidth = 3 // " │ "
-	avail := l.W - x - 2
+	avail := l.W - x - 2 - runeLen(clock)
 	keep := make([]bool, len(candidates))
 	used := 0
 	for _, idx := range order {
@@ -649,11 +677,14 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	// Counting bytes here pushed each part further right than the one before it
 	// as soon as any of them held a multi-byte glyph — the em dash in the audio
 	// field alone was enough — and shoved the tail of the header off the screen.
-	cx := l.W - runeLen(right)
-	for _, part := range strings.Split(right, "│") {
+	cx := l.W - runeLen(right) - runeLen(clock)
+	parts := strings.Split(right, "│")
+	for i, part := range parts {
 		drawText(s, cx, 0, dim, part)
 		cx += runeLen(part)
-		if cx < l.W {
+		// Between the fields only: drawing one after the last used to put a
+		// stray separator against whatever came next on the row.
+		if i < len(parts)-1 && cx < l.W {
 			drawText(s, cx, 0, sep, "│")
 			cx++
 		}
@@ -690,6 +721,52 @@ func (u *UI) chatLabels() (users, unread string) {
 		unread += "@"
 	}
 	return users, unread + " "
+}
+
+// sessionField is the session clock for the top right: how long is left before
+// the receiver ends this session, or that it does not end them.
+//
+// Receivers publish the limit in the /connection reply, and the countdown runs
+// from the moment that reply arrived — the same clock the receiver is using.
+func (u *UI) sessionField() string {
+	if !u.connected {
+		return ""
+	}
+	if !u.sessionLimited {
+		return " unlimited "
+	}
+	return " " + formatCountdown(time.Until(u.sessionEnd)) + " "
+}
+
+// sessionStyle warns as the end approaches, on the same five-minute threshold
+// the Python client uses.
+func (u *UI) sessionStyle() tcell.Style {
+	if u.sessionLimited && time.Until(u.sessionEnd) <= 5*time.Minute {
+		return tcell.StyleDefault.
+			Foreground(tcell.ColorBlack).
+			Background(tcell.NewRGBColor(230, 70, 70)).Bold(true)
+	}
+	return tcell.StyleDefault.Foreground(tcell.NewRGBColor(140, 200, 255))
+}
+
+// formatCountdown renders a remaining time as 1h24m12s, dropping the units that
+// have run out: 4m09s, then 9s. Seconds are always shown, because the last
+// minute is exactly when the number matters.
+func formatCountdown(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second).Seconds())
+	h, m, sec := total/3600, (total/60)%60, total%60
+
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%02dm%02ds", h, m, sec)
+	case m > 0:
+		return fmt.Sprintf("%dm%02ds", m, sec)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
 }
 
 // chatHint is the status-bar entry for the chat key, empty on a receiver that
@@ -814,6 +891,23 @@ func (u *UI) audioField() string {
 		padRunes(u.dspLabel(), 4), // NR4, DFNR, off, n/a
 		padRunes(state, 5),        // muted, right
 		level)
+}
+
+// audioFieldCompact is the audio state for a narrow header: the mode and the
+// filter width, and nothing else.
+//
+// Noise reduction, routing and the level all have somewhere else to be seen —
+// the d panel and the meter — but nothing else on screen says what is being
+// demodulated, so that is what survives.
+func (u *UI) audioFieldCompact() string {
+	name := strings.ToUpper(u.audioMode)
+	if u.autoSideband && isSideband(u.audioMode) {
+		name += "*"
+	}
+	if u.muted {
+		return padRunes(name, 4) + " muted"
+	}
+	return padRunes(name, 4) + fmt.Sprintf(" %.1fk", float64(u.bwHigh-u.bwLow)/1000)
 }
 
 // columnPeaks reduces the bin array to one value per screen column, taking the
@@ -1268,7 +1362,7 @@ var helpLines = []string{
 	"  g                signal meter: dBFS or SNR",
 	"  n                cycle server-side noise reduction",
 	"  t / T            raise / lower the squelch threshold (SNR)",
-	"  d                audio settings: device, volume, filter",
+	"  d                audio settings: outputs, volume, filter",
 	"",
 	"Scaling  (the dB window, not the audio filter)",
 	"  a                auto / manual",

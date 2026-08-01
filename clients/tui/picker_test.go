@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -652,5 +653,159 @@ func TestLocalDiscoveryEnrichSurvivesBadResponses(t *testing.T) {
 	d.enrich("missing", Instance{Host: "127.0.0.1:1", Available: -1})
 	if len(d.Instances()) != 0 {
 		t.Error("enrich resurrected an entry that no longer exists")
+	}
+}
+
+// pickerMouse builds a mouse event at a position, with the buttons held.
+func pickerMouse(x, y int, buttons tcell.ButtonMask) *tcell.EventMouse {
+	return tcell.NewEventMouse(x, y, buttons, tcell.ModNone)
+}
+
+// A click lands on the entry it points at, whatever the terminal height and
+// however far the list has scrolled.
+func TestPickerEntryAt(t *testing.T) {
+	p := NewPicker(nil)
+	for i := 0; i < 20; i++ {
+		p.public = append(p.public, Instance{
+			Name: fmt.Sprintf("rx%d", i), Host: fmt.Sprintf("h%d:8080", i), Available: -1,
+		})
+	}
+
+	const h = 24
+	visible, _ := p.listWindow(h)
+
+	// The first entry starts at the top of the list and covers both its rows.
+	for _, y := range []int{pickerListTop, pickerListTop + 1} {
+		if idx, ok := p.EntryAt(h, y); !ok || idx != 0 {
+			t.Errorf("y=%d gave %d,%v, want the first entry", y, idx, ok)
+		}
+	}
+	if idx, ok := p.EntryAt(h, pickerListTop+pickerRows); !ok || idx != 1 {
+		t.Errorf("the second entry is not below the first: %d,%v", idx, ok)
+	}
+
+	// Above the list and below the last visible row are both misses.
+	if _, ok := p.EntryAt(h, pickerListTop-1); ok {
+		t.Error("the search box reported an entry")
+	}
+	if _, ok := p.EntryAt(h, pickerListTop+visible*pickerRows); ok {
+		t.Error("a row past the visible window reported an entry")
+	}
+
+	// Once scrolled, the top row is whatever scrolling put there.
+	p.cursor = len(p.public) - 1
+	_, first := p.listWindow(h)
+	if first == 0 {
+		t.Fatal("the list did not scroll")
+	}
+	if idx, ok := p.EntryAt(h, pickerListTop); !ok || idx != first {
+		t.Errorf("after scrolling the top row is %d,%v, want %d", idx, ok, first)
+	}
+
+	// The manual tab is a form, not a list.
+	p.tab = TabManual
+	if _, ok := p.EntryAt(h, pickerListTop); ok {
+		t.Error("the manual tab reported an entry")
+	}
+}
+
+// One click highlights; a second on the same entry connects. Connecting tears
+// down a session, so it must not hang on a single stray click.
+func TestPickerClickHighlightsThenConnects(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(80, 24)
+
+	p := NewPicker(nil)
+	p.public = []Instance{
+		{Name: "one", Host: "a:8080", Available: -1},
+		{Name: "two", Host: "b:8080", Available: -1},
+		{Name: "three", Host: "c:8080", Available: -1},
+	}
+
+	e := &eventLoop{screen: screen, ui: NewUI(""), picker: p}
+	click := func(y int) *Instance {
+		choice := e.handlePickerMouse(pickerMouse(4, y, tcell.ButtonPrimary))
+		e.handlePickerMouse(pickerMouse(4, y, tcell.ButtonNone))
+		return choice
+	}
+
+	// Third entry: highlighted, not connected.
+	if choice := click(pickerListTop + 2*pickerRows); choice != nil {
+		t.Fatalf("one click connected to %q", choice.Name)
+	}
+	if p.cursor != 2 {
+		t.Fatalf("the click highlighted %d, want the third entry", p.cursor)
+	}
+
+	// Clicking it again connects.
+	choice := click(pickerListTop + 2*pickerRows)
+	if choice == nil || choice.Name != "three" {
+		t.Fatalf("the second click chose %v", choice)
+	}
+
+	// A click on empty space below the list does neither.
+	p.cursor = 0
+	if choice := click(pickerListTop + 9*pickerRows); choice != nil || p.cursor != 0 {
+		t.Errorf("a click below the list gave %v cursor=%d", choice, p.cursor)
+	}
+}
+
+// Holding the button down is one click, not a stream of them.
+func TestPickerHeldButtonIsOneClick(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(80, 24)
+
+	p := NewPicker(nil)
+	p.public = []Instance{
+		{Name: "one", Host: "a:8080", Available: -1},
+		{Name: "two", Host: "b:8080", Available: -1},
+	}
+
+	e := &eventLoop{screen: screen, ui: NewUI(""), picker: p}
+
+	// Press on the already-highlighted first entry and keep reporting it held.
+	chosen := 0
+	for i := 0; i < 5; i++ {
+		if e.handlePickerMouse(pickerMouse(4, pickerListTop, tcell.ButtonPrimary)) != nil {
+			chosen++
+		}
+	}
+	if chosen != 1 {
+		t.Errorf("a held button connected %d times", chosen)
+	}
+}
+
+// The wheel scrolls the list, and cannot push the cursor off either end.
+func TestPickerWheelScrolls(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(80, 24)
+
+	p := NewPicker(nil)
+	p.public = []Instance{
+		{Name: "one", Host: "a:8080", Available: -1},
+		{Name: "two", Host: "b:8080", Available: -1},
+	}
+	e := &eventLoop{screen: screen, ui: NewUI(""), picker: p}
+
+	for i := 0; i < 5; i++ {
+		e.handlePickerMouse(pickerMouse(4, 10, tcell.WheelDown))
+	}
+	if p.cursor != 1 {
+		t.Errorf("the wheel ran past the last entry: %d", p.cursor)
+	}
+	for i := 0; i < 5; i++ {
+		e.handlePickerMouse(pickerMouse(4, 10, tcell.WheelUp))
+	}
+	if p.cursor != 0 {
+		t.Errorf("the wheel ran above the first entry: %d", p.cursor)
 	}
 }

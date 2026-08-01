@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -693,5 +697,74 @@ func TestModeNamesMatchTheModeTable(t *testing.T) {
 		if _, ok := lookupMode(name); !ok {
 			t.Errorf("%q is offered but cannot be applied", name)
 		}
+	}
+}
+
+// Every request this client makes identifies itself, HTTP and WebSocket alike.
+// The server records the User-Agent a session presented to /connection and
+// refuses sockets for a UUID it has never seen one from, so a call that forgets
+// it is not merely impolite.
+func TestUserAgentOnEveryRequest(t *testing.T) {
+	if userAgent != "UberSDR_TUI/1.0" {
+		t.Errorf("user agent is %q", userAgent)
+	}
+
+	seen := make(chan string, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get("User-Agent")
+		switch r.URL.Path {
+		case "/connection":
+			json.NewEncoder(w).Encode(map[string]interface{}{"allowed": true})
+		case "/api/bands":
+			json.NewEncoder(w).Encode([]interface{}{})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		}
+	}))
+	defer srv.Close()
+
+	host := strings.TrimPrefix(srv.URL, "http://")
+	c, err := NewClient(host, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := map[string]func() error{
+		"/connection":      c.CheckConnection,
+		"/api/description": func() error { _, err := c.FetchDescription(); return err },
+		"/api/bands":       func() error { var b []Band; return c.getJSON("/api/bands", &b) },
+	}
+	for name, call := range calls {
+		if err := call(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := <-seen; got != userAgent {
+			t.Errorf("%s presented %q", name, got)
+		}
+	}
+
+	// The public directory and the mDNS enrichment are the two that reach a
+	// receiver without going through Client.
+	stubbed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get("User-Agent")
+		json.NewEncoder(w).Encode(map[string]interface{}{"count": 0, "instances": []interface{}{}})
+	}))
+	defer stubbed.Close()
+
+	orig := publicInstancesURLForTest
+	publicInstancesURLForTest = stubbed.URL
+	defer func() { publicInstancesURLForTest = orig }()
+
+	if _, err := FetchPublicInstances(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-seen; got != userAgent {
+		t.Errorf("the public directory saw %q", got)
+	}
+
+	d := NewLocalDiscovery()
+	d.enrich("k", Instance{Host: strings.TrimPrefix(srv.URL, "http://")})
+	if got := <-seen; got != userAgent {
+		t.Errorf("local discovery saw %q", got)
 	}
 }

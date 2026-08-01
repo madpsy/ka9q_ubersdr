@@ -9,6 +9,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/jfreymuth/pulse v0.1.2
 	github.com/pion/opus v0.1.0
+	golang.org/x/term v0.37.0
 )
 
 require (
@@ -21,6 +22,5 @@ require (
 	golang.org/x/crypto v0.35.0 // indirect
 	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/term v0.37.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 )

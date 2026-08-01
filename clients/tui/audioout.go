@@ -1,8 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // AudioDevice is one selectable output.
@@ -188,8 +198,330 @@ func (m *mixer) stats() (buffered, dropped, underruns int) {
 	return len(m.buf), m.dropped, m.underruns
 }
 
-// AudioOutput owns the mixer and the platform backend, and can switch device
-// without disturbing the decode path.
+// Stdout is the second output, always available on any platform: the decoded
+// audio as raw PCM, for piping into anything that reads a stream.
+//
+//	ubersdr-tui -server … -stdout | aplay -f S16_LE -r 48000 -c 1
+//
+// It carries the demodulated audio as it arrives — 48 kHz mono, signed 16-bit
+// little-endian — and deliberately not what the speakers get: volume, mute and
+// channel routing belong to the sound device, and applying them here would
+// quietly ruin a recording or halve a pipe when the routing is set to one side.
+//
+// Nothing about the display is at risk from this. tcell drives /dev/tty rather
+// than stdout, so the two never meet; the only real hazard is a stdout that is
+// still a terminal, which stdoutIsRedirected rules out before anything opens.
+const (
+	stdoutSampleRate = opusOutputRate
+	stdoutChannels   = 1
+	stdoutFormat     = "S16_LE"
+)
+
+// StdoutMode is what the second output carries: nothing, headerless PCM, or the
+// same samples behind a WAV header.
+//
+// Raw is what a pipe wants — the reader is told the format on its own command
+// line. WAV is what a *file* wants: `> radio.wav` is otherwise a file nothing
+// will open, because no player infers 48 kHz mono S16_LE from an extension.
+type StdoutMode int
+
+const (
+	StdoutOff StdoutMode = iota
+	StdoutRaw
+	StdoutWAV
+)
+
+func (m StdoutMode) String() string {
+	switch m {
+	case StdoutRaw:
+		return "raw"
+	case StdoutWAV:
+		return "wav"
+	default:
+		return "off"
+	}
+}
+
+// Label describes the stream in full, for the panel.
+func (m StdoutMode) Label() string {
+	switch m {
+	case StdoutRaw:
+		return fmt.Sprintf("on   raw %s %d kHz mono", stdoutFormat, stdoutSampleRate/1000)
+	case StdoutWAV:
+		return fmt.Sprintf("on   WAV, %s %d kHz mono", stdoutFormat, stdoutSampleRate/1000)
+	default:
+		return "off"
+	}
+}
+
+// wavHeaderLen is the canonical PCM header: RIFF, fmt and data chunks.
+const wavHeaderLen = 44
+
+// streamingSize is the size written into a header for a stream whose length is
+// not knowable yet. Players read to end of file rather than trusting it, which
+// is what makes a live WAV pipe work at all; sox says "premature EOF" and
+// converts the lot, ffmpeg and VLC say nothing. When stdout turns out to be a
+// regular file the real sizes are patched in on close, so a captured file ends
+// up exactly right.
+const streamingSize = 0xFFFFFFFF
+
+// writeWAVHeader emits a 44-byte PCM header for the format this client sends.
+func writeWAVHeader(w io.Writer, dataBytes uint32) error {
+	var h [wavHeaderLen]byte
+	le := binary.LittleEndian
+
+	copy(h[0:], "RIFF")
+	if dataBytes == streamingSize {
+		le.PutUint32(h[4:], streamingSize)
+	} else {
+		le.PutUint32(h[4:], 36+dataBytes)
+	}
+	copy(h[8:], "WAVE")
+
+	copy(h[12:], "fmt ")
+	le.PutUint32(h[16:], 16) // PCM fmt chunk length
+	le.PutUint16(h[20:], 1)  // PCM, uncompressed
+	le.PutUint16(h[22:], stdoutChannels)
+	le.PutUint32(h[24:], stdoutSampleRate)
+	le.PutUint32(h[28:], stdoutSampleRate*stdoutChannels*2) // bytes per second
+	le.PutUint16(h[32:], stdoutChannels*2)                  // block align
+	le.PutUint16(h[34:], 16)                                // bits per sample
+
+	copy(h[36:], "data")
+	le.PutUint32(h[40:], dataBytes)
+
+	_, err := w.Write(h[:])
+	return err
+}
+
+// stdoutIsTerminal reports whether stdout is still the user's terminal, which
+// is the one place this audio must never go: it would fill the screen with
+// binary noise.
+//
+// This asks the terminal itself rather than inspecting the file mode. The
+// character-device shortcut that usually stands in for it is wrong in both
+// directions here — it refuses `> /dev/null`, which is a perfectly good place
+// to throw audio, and it would accept any other device file.
+func stdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// pcmWriter streams mono samples to an io.Writer from its own goroutine.
+//
+// The write must never happen on the caller's goroutine: a pipe whose reader
+// has stalled blocks, and the caller is the event loop. Samples are queued
+// instead, and the queue drops the oldest when it fills — the same bargain the
+// mixer makes, for the same reason.
+type pcmWriter struct {
+	queue chan []int16
+	done  chan struct{}
+	mode  StdoutMode
+
+	mu      sync.Mutex
+	dropped int
+	written int
+	err     error
+}
+
+func newPCMWriter(w io.Writer, mode StdoutMode) *pcmWriter {
+	p := &pcmWriter{
+		// A second of audio at 20 ms a packet, so a brief stall in whatever is
+		// reading costs nothing.
+		queue: make(chan []int16, 50),
+		done:  make(chan struct{}),
+		mode:  mode,
+	}
+	go p.run(w)
+	return p
+}
+
+func (p *pcmWriter) run(w io.Writer) {
+	defer close(p.done)
+	// Buffered: one packet is 960 samples, and an unbuffered write syscall per
+	// packet is pure overhead on a pipe.
+	out := bufio.NewWriterSize(w, 8192)
+	buf := make([]byte, 0, 4096)
+
+	// Where the header goes, so its sizes can be patched on the way out. A pipe
+	// cannot seek, and says so.
+	var start int64 = -1
+	if p.mode == StdoutWAV {
+		if f, ok := w.(io.Seeker); ok {
+			if at, err := f.Seek(0, io.SeekCurrent); err == nil {
+				start = at
+			}
+		}
+		if err := writeWAVHeader(out, streamingSize); err != nil {
+			p.note(err)
+			return
+		}
+		if err := out.Flush(); err != nil {
+			p.note(err)
+			return
+		}
+	}
+	defer func() {
+		out.Flush()
+		p.finish(w, start)
+	}()
+
+	for chunk := range p.queue {
+		if cap(buf) < len(chunk)*2 {
+			buf = make([]byte, len(chunk)*2)
+		}
+		buf = buf[:len(chunk)*2]
+		for i, s := range chunk {
+			binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
+		}
+		if _, err := out.Write(buf); err != nil {
+			p.note(err)
+			return
+		}
+		// Flushed per packet: a listener on the other end wants the audio now,
+		// not when 8 kB have accumulated.
+		if err := out.Flush(); err != nil {
+			p.note(err)
+			return
+		}
+		p.mu.Lock()
+		p.written += len(chunk)
+		p.mu.Unlock()
+	}
+}
+
+// finish patches the real sizes into a WAV header, which is possible exactly
+// when stdout turned out to be a regular file. A stream down a pipe keeps the
+// open-ended sizes it was written with, which is what players expect there.
+func (p *pcmWriter) finish(w io.Writer, start int64) {
+	if p.mode != StdoutWAV || start < 0 {
+		return
+	}
+	seeker, ok := w.(io.WriteSeeker)
+	if !ok {
+		return
+	}
+
+	p.mu.Lock()
+	dataBytes := uint32(p.written * 2)
+	p.mu.Unlock()
+
+	if _, err := seeker.Seek(start, io.SeekStart); err != nil {
+		return
+	}
+	writeWAVHeader(seeker, dataBytes)
+	seeker.Seek(0, io.SeekEnd)
+}
+
+func (p *pcmWriter) note(err error) {
+	p.mu.Lock()
+	p.err = err
+	p.mu.Unlock()
+}
+
+func (p *pcmWriter) push(mono []int16) {
+	// The caller reuses its buffer between packets, so this has to be a copy.
+	chunk := append([]int16(nil), mono...)
+	select {
+	case p.queue <- chunk:
+	default:
+		p.mu.Lock()
+		p.dropped += len(chunk)
+		p.mu.Unlock()
+	}
+}
+
+func (p *pcmWriter) stats() (written, dropped int, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.written, p.dropped, p.err
+}
+
+func (p *pcmWriter) Close() error {
+	close(p.queue)
+	<-p.done
+	return nil
+}
+
+// listDevicesForTest is the enumeration used by everything that resolves or
+// prints a device. It is a var purely so tests can stand in a fixed list rather
+// than depending on whatever sound server the machine happens to run.
+var listDevicesForTest = listDevices
+
+// deviceListSpecs are the -device values that ask what there is rather than
+// naming one.
+var deviceListSpecs = map[string]bool{"list": true, "?": true, "help": true}
+
+// resolveDevice turns a -device value into a sink ID: an index into the list,
+// or enough of a name to pick one out.
+//
+// Both forms exist because they fail differently. An index is quick to type
+// from the listing, but the order can change when a device is plugged in or a
+// sound server restarts — so a service that has to come back to the same
+// speakers should name them instead.
+func resolveDevice(spec string) (string, error) {
+	devices, err := listDevicesForTest()
+	if err != nil {
+		return "", fmt.Errorf("cannot list output devices: %w", err)
+	}
+
+	if idx, err := strconv.Atoi(strings.TrimSpace(spec)); err == nil {
+		if idx < 0 || idx >= len(devices) {
+			return "", fmt.Errorf("device %d is out of range: there are %d, numbered 0 to %d",
+				idx, len(devices), len(devices)-1)
+		}
+		return devices[idx].ID, nil
+	}
+
+	var matches []AudioDevice
+	for _, d := range devices {
+		if strings.EqualFold(d.Name, spec) {
+			return d.ID, nil // an exact name beats anything merely containing it
+		}
+		if strings.Contains(strings.ToLower(d.Name), strings.ToLower(spec)) ||
+			strings.EqualFold(d.ID, spec) {
+			matches = append(matches, d)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no output device matches %q", spec)
+	case 1:
+		return matches[0].ID, nil
+	default:
+		names := make([]string, 0, len(matches))
+		for _, d := range matches {
+			names = append(names, strconv.Quote(d.Name))
+		}
+		return "", fmt.Errorf("%q matches %d devices: %s", spec, len(matches), strings.Join(names, ", "))
+	}
+}
+
+// describeDevices renders the numbered output list, which is what -device list
+// prints and what an unusable -device value is answered with.
+func describeDevices() string {
+	devices, err := listDevicesForTest()
+	if err != nil {
+		return fmt.Sprintf("cannot list output devices: %v", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("output devices:\n")
+	for i, d := range devices {
+		mark := " "
+		if d.Default {
+			mark = "*" // where the sound server is currently sending audio
+		}
+		fmt.Fprintf(&b, " %s %d  %s\n", mark, i, d.Name)
+	}
+	b.WriteString("   (* is the sound server's current default, which is what index 0 follows;\n" +
+		"    -device takes an index or part of a name)")
+	return b.String()
+}
+
+// AudioOutput fans the decoded audio out to as many sinks as are switched on:
+// the sound device, stdout, both or neither. They are independent — a receiver
+// piped to another machine needs no local playback, and a missing or busy sound
+// device must not take the pipe down with it.
 type AudioOutput struct {
 	mix *mixer
 
@@ -197,6 +529,7 @@ type AudioOutput struct {
 	backend  audioBackend
 	deviceID string
 	lastErr  error
+	pipe     *pcmWriter
 }
 
 // audioBackend is the platform-specific player. Implementations live in
@@ -229,6 +562,72 @@ func (o *AudioOutput) Start(deviceID string) error {
 	return nil
 }
 
+// StopDevice closes the sound device, leaving any other sink running.
+func (o *AudioOutput) StopDevice() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.backend != nil {
+		o.backend.Close()
+		o.backend = nil
+	}
+	o.lastErr = nil
+}
+
+// SetStdout switches the second output between off, raw PCM and WAV. It refuses
+// to write to a terminal, since that is not a pipe but a mess.
+func (o *AudioOutput) SetStdout(mode StdoutMode) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if mode == StdoutOff {
+		if o.pipe != nil {
+			o.pipe.Close()
+			o.pipe = nil
+		}
+		return nil
+	}
+	if o.pipe != nil && o.pipe.mode == mode {
+		return nil
+	}
+	if stdoutIsTerminal() {
+		// Short on purpose: this is shown in the panel's value column, and the
+		// note under the rows carries the command that fixes it.
+		return errors.New("stdout is a terminal")
+	}
+	// Changing format mid-stream closes the old one first, which is what puts
+	// the sizes into a WAV header that has just been superseded.
+	if o.pipe != nil {
+		o.pipe.Close()
+	}
+	o.pipe = newPCMWriter(os.Stdout, mode)
+	return nil
+}
+
+// StdoutMode reports what the second output is carrying.
+func (o *AudioOutput) StdoutMode() StdoutMode {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.pipe == nil {
+		return StdoutOff
+	}
+	return o.pipe.mode
+}
+
+// StdoutOn reports whether the second output is running at all.
+func (o *AudioOutput) StdoutOn() bool { return o.StdoutMode() != StdoutOff }
+
+// StdoutStats reports what the raw stream has done: samples written, samples
+// dropped because whatever is reading fell behind, and any write error.
+func (o *AudioOutput) StdoutStats() (written, dropped int, err error) {
+	o.mu.Lock()
+	pipe := o.pipe
+	o.mu.Unlock()
+	if pipe == nil {
+		return 0, 0, nil
+	}
+	return pipe.stats()
+}
+
 func (o *AudioOutput) Close() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -236,9 +635,24 @@ func (o *AudioOutput) Close() {
 		o.backend.Close()
 		o.backend = nil
 	}
+	if o.pipe != nil {
+		o.pipe.Close()
+		o.pipe = nil
+	}
 }
 
-func (o *AudioOutput) Push(mono []int16)                         { o.mix.push(mono) }
+// Push hands one packet of decoded audio to every sink that is switched on.
+func (o *AudioOutput) Push(mono []int16) {
+	o.mix.push(mono)
+
+	o.mu.Lock()
+	pipe := o.pipe
+	o.mu.Unlock()
+	if pipe != nil {
+		pipe.push(mono)
+	}
+}
+
 func (o *AudioOutput) SetChannel(c Channel)                      { o.mix.setChannel(c) }
 func (o *AudioOutput) SetMuted(m bool)                           { o.mix.setMuted(m) }
 func (o *AudioOutput) SetVolume(v float64)                       { o.mix.setVolume(v) }

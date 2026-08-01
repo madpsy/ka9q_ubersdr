@@ -21,15 +21,22 @@ const (
 )
 
 func main() {
-	server := flag.String("server", "", "receiver as host:port or a full http(s):// URL (empty opens the receiver picker)")
+	server := flag.String("server", "", "receiver: a public callsign or name, host:port, or a full http(s):// URL (empty opens the receiver picker)")
 	useTLS := flag.Bool("tls", false, "use TLS (wss/https); implied by an https:// URL")
 	password := flag.String("password", "", "optional bypass password")
-	freq := flag.Float64("freq", 0, "initial centre frequency in kHz (0 = server default)")
+	freq := flag.Float64("freq", 0, "initial frequency in kHz (0 = the receiver's own default)")
 	span := flag.Float64("span", 0, "initial span in kHz (0 = server default)")
 	bars := flag.Bool("bars", false, "draw block bars instead of the higher-resolution braille spectrum")
 	view := flag.String("view", "split", "initial view: spectrum, waterfall or split")
 	audioMode := flag.String("mode", "", "initial demodulation mode (empty = the receiver's own default)")
+	bandwidth := flag.String("bw", "", "filter edges in Hz as low:high (empty = the mode's own default)")
+	headless := flag.Bool("headless", false, "no display: tune and stream the audio, for scripts and services (needs -server)")
+	squelch := flag.Int("squelch", 0, "squelch threshold in dB of SNR (0 = off)")
 	noAudio := flag.Bool("no-audio", false, "watch the spectrum without opening an audio channel")
+	toStdout := flag.Bool("stdout", false, "write the demodulated audio to stdout as raw PCM (48 kHz mono S16_LE) for piping")
+	toStdoutWAV := flag.Bool("stdout-wav", false, "as -stdout, but with a WAV header, so a redirected file plays anywhere")
+	noDevice := flag.Bool("no-device", false, "do not open a sound device; useful with -stdout")
+	device := flag.String("device", "", "output device: an index from -device list, or part of its name (empty = system default)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -51,20 +58,97 @@ func main() {
 		}
 	}
 
+	// -device list is a question, not a setting: answer it and stop. It goes to
+	// stderr like everything else that is not audio, so it stays readable when
+	// stdout is being piped.
+	if deviceListSpecs[strings.ToLower(strings.TrimSpace(*device))] {
+		fmt.Fprintln(os.Stderr, describeDevices())
+		return
+	}
+
+	deviceID := ""
+	if *device != "" {
+		var err error
+		if deviceID, err = resolveDevice(*device); err != nil {
+			fatal("-device %q: %v\n%s", *device, err, describeDevices())
+		}
+	}
+
+	// The same flags serve both modes, so they are checked once here rather
+	// than differently in each.
+	if *squelch != 0 && (*squelch < squelchMin || *squelch > squelchMax) {
+		fatal("-squelch %d is outside %d–%d dB SNR (0 turns it off)", *squelch, squelchMin, squelchMax)
+	}
+
+	var bwLow, bwHigh int
+	if *bandwidth != "" {
+		var err error
+		if bwLow, bwHigh, err = parseBandwidth(*bandwidth); err != nil {
+			fatal("-bw %q: %v", *bandwidth, err)
+		}
+	}
+
+	// WAV is the same stream with a header, so asking for both is not a
+	// conflict: the header wins.
+	stdoutMode := StdoutOff
+	switch {
+	case *toStdoutWAV:
+		stdoutMode = StdoutWAV
+	case *toStdout:
+		stdoutMode = StdoutRaw
+	}
+
+	// Refusing here rather than starting without it: someone who asked for the
+	// stream wants the stream, and writing PCM to a terminal would wreck it.
+	if stdoutMode != StdoutOff && stdoutIsTerminal() {
+		fatal("-stdout needs somewhere to write: pipe it, e.g. %s -stdout | aplay -f %s -r %d -c %d\n"+
+			"       or redirect it, e.g. %s -stdout-wav > radio.wav",
+			os.Args[0], stdoutFormat, stdoutSampleRate, stdoutChannels, os.Args[0])
+	}
+
 	opts := options{
-		password:    *password,
-		initialFreq: *freq * 1000,
-		initialSpan: *span * 1000,
-		initialMode: strings.ToLower(*audioMode),
-		braille:     !*bars,
-		mode:        mode,
-		noAudio:     *noAudio,
+		password:      *password,
+		initialFreq:   *freq * 1000,
+		initialSpan:   *span * 1000,
+		initialMode:   strings.ToLower(*audioMode),
+		braille:       !*bars,
+		mode:          mode,
+		noAudio:       *noAudio,
+		stdoutMode:    stdoutMode,
+		noDevice:      *noDevice,
+		headless:      *headless,
+		deviceID:      deviceID,
+		squelch:       *squelch,
+		bwLow:         bwLow,
+		bwHigh:        bwHigh,
+		haveBandwidth: *bandwidth != "",
 	}
 	// An explicit -server connects straight away; otherwise the picker opens so
-	// the user can browse public, local or manually entered receivers.
+	// the user can browse public, local or manually entered receivers. It takes
+	// an address or the name of a public receiver, so -server m9psy works.
 	if *server != "" {
-		host, secure := parseServer(*server, *useTLS)
-		opts.target = &Instance{Name: host, Host: host, TLS: secure, Available: -1}
+		ctx, cancel := context.WithTimeout(context.Background(), directoryTimeout)
+		inst, err := resolveTarget(ctx, *server, *useTLS)
+		cancel()
+		if err != nil {
+			fatal("%v", err)
+		}
+		opts.target = &inst
+	}
+
+	// Headless has nowhere to show a picker, so it needs to be told where to
+	// listen.
+	if opts.headless {
+		if opts.target == nil {
+			fatal("-headless needs -server: a receiver name, host:port or URL")
+		}
+		if opts.noAudio {
+			fatal("-no-audio leaves -headless with nothing to do")
+		}
+		if err := runHeadless(opts); err != nil {
+			fatal("%v", err)
+		}
+		return
 	}
 
 	if err := run(opts); err != nil {
@@ -84,6 +168,22 @@ type options struct {
 	braille     bool
 	mode        ViewMode
 	noAudio     bool
+	// The two outputs are independent: either, both or neither.
+	stdoutMode StdoutMode
+	noDevice   bool
+
+	// Headless drops the display entirely: tune, stream, and say nothing but
+	// what stderr needs to hear.
+	headless bool
+	// deviceID is the sound device chosen by -device, empty for the system
+	// default. It is resolved before anything starts, so a name that matches
+	// nothing is refused while there is still a terminal to say so.
+	deviceID string
+	squelch  int
+	// The filter edges, when the command line named them rather than leaving
+	// the mode's own defaults in place.
+	bwLow, bwHigh int
+	haveBandwidth bool
 }
 
 func parseView(s string) (ViewMode, error) {
@@ -137,6 +237,7 @@ func run(opts options) error {
 	ui := NewUI("")
 	ui.braille = opts.braille
 	ui.mode = opts.mode
+	ui.squelch = opts.squelch
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -154,14 +255,27 @@ func run(opts options) error {
 	go screen.ChannelEvents(events, ctx.Done())
 
 	loop := &eventLoop{
-		screen:  screen,
-		ui:      ui,
-		cancel:  cancel,
-		rootCtx: ctx,
-		opts:    opts,
-		local:   local,
-		wake:    make(chan struct{}, 1),
+		screen:   screen,
+		ui:       ui,
+		cancel:   cancel,
+		rootCtx:  ctx,
+		opts:     opts,
+		local:    local,
+		wake:     make(chan struct{}, 1),
+		deviceID: opts.deviceID,
+		// -no-device starts with the speakers off, which is what makes
+		// -stdout on its own useful.
+		deviceOff: opts.noDevice,
 	}
+
+	// Shut the outputs down on the way out. It matters for more than tidiness:
+	// a WAV capture only gets the real sizes in its header when the stream is
+	// closed properly, and an abandoned PulseAudio stream lingers.
+	defer func() {
+		if loop.out != nil {
+			loop.out.Close()
+		}
+	}()
 
 	if opts.target != nil {
 		loop.connectTo(*opts.target)
@@ -194,14 +308,25 @@ type eventLoop struct {
 	chat *ChatClient
 
 	// Audio shares the spectrum session's UUID but needs its own socket.
-	audio       *AudioClient
-	out         *AudioOutput
-	deviceID    string
+	audio    *AudioClient
+	out      *AudioOutput
+	deviceID string
+	// deviceOff switches local playback off without touching the stream, so a
+	// session can feed stdout alone.
+	deviceOff bool
+	// stdoutErr is why the raw stream is not running. It is kept here because
+	// the panel covers the status line: a refusal reported there would be
+	// invisible at exactly the moment the user asked for it.
+	stdoutErr   error
 	audioFailed bool // output could not be opened; do not retry automatically
 
 	// wake lets background work (directory fetches, failed prechecks) ask for
 	// a redraw without waiting on a keypress.
 	wake chan struct{}
+
+	// pickerHeld marks the mouse button as already down in the receiver picker,
+	// so one physical click is one click however many reports it generates.
+	pickerHeld bool
 
 	// Drag state, captured on button press so panning stays anchored even as
 	// the server echoes new centre frequencies mid-drag.
@@ -342,14 +467,32 @@ func (e *eventLoop) startAudio() {
 	if e.out == nil {
 		e.out = NewAudioOutput()
 	}
-	if err := e.out.Start(e.deviceID); err != nil {
+
+	// stdout first: it is the sink that decides whether a failed sound device
+	// is fatal to the session or merely one output short.
+	if e.opts.stdoutMode != StdoutOff && !e.out.StdoutOn() {
+		if err := e.out.SetStdout(e.opts.stdoutMode); err != nil {
+			e.stdoutErr = err
+			e.ui.status = "stdout: " + err.Error()
+		}
+	}
+
+	if e.deviceOff {
+		e.audioFailed = false
+	} else if err := e.out.Start(e.deviceID); err != nil {
 		e.ui.status = "audio output: " + err.Error()
 		// Remember the failure so a missing or busy device is not retried on
 		// every config message; m clears this and tries again.
 		e.audioFailed = true
-		return
+		// With nothing to play through there is no reason to hold a channel
+		// open — unless stdout is taking the audio, in which case the session
+		// is fine and the speakers simply are not.
+		if !e.out.StdoutOn() {
+			return
+		}
+	} else {
+		e.audioFailed = false
 	}
-	e.audioFailed = false
 
 	e.ui.audioOn = true
 	e.ui.SyncSideband()
@@ -361,6 +504,76 @@ func (e *eventLoop) startAudio() {
 
 	go e.audio.Run(e.rootCtx)
 	e.ui.status = "audio on"
+}
+
+// currentDeviceID is what the panel should show as selected: the chosen device,
+// or the sentinel when local playback is switched off.
+func (e *eventLoop) currentDeviceID() string {
+	if e.deviceOff {
+		return audioDeviceOff
+	}
+	return e.deviceID
+}
+
+// applyDeviceChoice switches local playback between off and a device, which is
+// one control: the device list has "off" at its head.
+func (e *eventLoop) applyDeviceChoice(id string) {
+	if id == audioDeviceOff {
+		e.deviceOff = true
+		e.audioFailed = false
+		if e.out != nil {
+			e.out.StopDevice()
+		}
+		e.ui.status = "local playback off"
+		return
+	}
+
+	e.deviceOff, e.deviceID = false, id
+	if e.out == nil || !e.ui.audioOn {
+		return
+	}
+	if err := e.out.Start(e.deviceID); err != nil {
+		e.ui.status = "audio output: " + err.Error()
+		return
+	}
+	e.audioFailed = false
+	e.ui.status = "output device changed"
+}
+
+// cycleStdout steps the second output through off, raw PCM and WAV. It is
+// independent of the sound device: either, both or neither may be running.
+func (e *eventLoop) cycleStdout(dir int) {
+	if e.out == nil {
+		e.out = NewAudioOutput()
+	}
+	const modes = 3
+	next := StdoutMode((int(e.out.StdoutMode()) + dir + modes) % modes)
+
+	if err := e.out.SetStdout(next); err != nil {
+		e.stdoutErr = err
+		e.ui.status = "stdout: " + err.Error()
+		return
+	}
+	e.opts.stdoutMode, e.stdoutErr = next, nil
+	if next == StdoutOff {
+		e.ui.status = "stdout off"
+		return
+	}
+	e.ui.status = fmt.Sprintf("stdout: %s, %s %d Hz mono", next, stdoutFormat, stdoutSampleRate)
+}
+
+// stdoutState is what the panel shows for the second output: what it carries,
+// and whatever went wrong with it.
+func (e *eventLoop) stdoutState() (StdoutMode, error) {
+	if e.out == nil {
+		return StdoutOff, e.stdoutErr
+	}
+	// A write that failed describes the stream better than a refusal to open
+	// one, so it wins.
+	if _, _, err := e.out.StdoutStats(); err != nil {
+		return e.out.StdoutMode(), err
+	}
+	return e.out.StdoutMode(), e.stdoutErr
 }
 
 // cycleDSP steps through off and each DSP insert the receiver offers. Off is
@@ -447,6 +660,12 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 	redraw := time.NewTicker(33 * time.Millisecond)
 	defer redraw.Stop()
 
+	// The session clock counts in seconds, and a stalled or disconnected
+	// receiver sends nothing to redraw on — so the clock gets its own tick
+	// rather than relying on the spectrum to keep it honest.
+	clock := time.NewTicker(time.Second)
+	defer clock.Stop()
+
 	dirty := true
 	for {
 		// Channels are re-read each iteration because switching receivers
@@ -484,6 +703,11 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 
 		case <-e.wake:
 			dirty = true
+
+		case <-clock.C:
+			if e.ui.connected {
+				dirty = true
+			}
 
 		case <-e.local.Updates:
 			dirty = true
@@ -579,6 +803,9 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 		case <-redraw.C:
 			if dirty {
 				e.ui.connected = e.client != nil && e.client.Connected()
+				if e.client != nil {
+					e.ui.sessionEnd, e.ui.sessionLimited = e.client.SessionDeadline()
+				}
 				// Publishing where this receiver is tuned is part of being in a
 				// receiver's chat. The client itself decides what is worth
 				// sending, so calling it per redraw is free until something
@@ -609,7 +836,7 @@ func (e *eventLoop) draw() {
 	e.ui.render(e.screen)
 	// Drawn over the live display so the spectrum keeps updating behind them.
 	if e.audioPanel != nil {
-		e.audioPanel.Draw(e.screen, e.ui, e.deviceID)
+		e.audioPanel.Draw(e.screen, e.ui, e.currentDeviceID())
 	}
 	if e.bookmarkPanel != nil {
 		e.bookmarkPanel.Draw(e.screen, e.ui)
@@ -689,9 +916,17 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 		return e.handleKey(ev)
 
 	case *tcell.EventMouse:
+		if e.picker != nil {
+			// Same shape as the key handler: the picker decides, the loop acts.
+			if choice := e.handlePickerMouse(ev); choice != nil {
+				e.picker = nil
+				e.connectTo(*choice)
+			}
+			return false
+		}
 		// A modal owns the screen it covers, so a click behind it must not
 		// tune the radio.
-		if e.picker == nil && e.bookmarkPanel == nil && e.chatPanel == nil {
+		if e.bookmarkPanel == nil && e.chatPanel == nil {
 			e.handleMouse(ev)
 		}
 	}
@@ -753,6 +988,11 @@ func (e *eventLoop) applyDescription(desc Description) {
 		e.ui.vfo = clampFreq(freq)
 	}
 	e.ui.ApplyMode(mode)
+	// A filter named on the command line outlives the mode default that
+	// ApplyMode just installed.
+	if e.opts.haveBandwidth {
+		e.ui.bwLow, e.ui.bwHigh = clampBandwidth(e.ui.audioMode, e.opts.bwLow, e.opts.bwHigh)
+	}
 	// The sideband convention must not overrule a mode that was asked for
 	// before the user has tuned anywhere: a receiver whose default is USB on
 	// 40 m means it. The first tune hands the convention back.
@@ -801,7 +1041,7 @@ func (e *eventLoop) openChat() {
 }
 
 func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
-	retune, reopen, done := e.audioPanel.HandleKey(ev, e.ui, e.deviceID)
+	retune, reopen, done := e.audioPanel.HandleKey(ev, e.ui, e.currentDeviceID())
 
 	if step := e.audioPanel.dspStep; step != 0 {
 		e.audioPanel.dspStep = 0
@@ -811,17 +1051,15 @@ func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
 		e.audioPanel.squelchChanged = false
 		e.applySquelch()
 	}
-
-	if reopen && e.audioPanel.selectedDevice != e.deviceID {
-		e.deviceID = e.audioPanel.selectedDevice
-		if e.out != nil && e.ui.audioOn {
-			if err := e.out.Start(e.deviceID); err != nil {
-				e.ui.status = "audio output: " + err.Error()
-			} else {
-				e.ui.status = "output device changed"
-			}
-		}
+	if step := e.audioPanel.stdoutStep; step != 0 {
+		e.audioPanel.stdoutStep = 0
+		e.cycleStdout(step)
 	}
+
+	if reopen && e.audioPanel.selectedDevice != e.currentDeviceID() {
+		e.applyDeviceChoice(e.audioPanel.selectedDevice)
+	}
+	e.audioPanel.stdoutMode, e.audioPanel.stdoutErr = e.stdoutState()
 	if e.out != nil {
 		e.out.SetChannel(e.ui.channel)
 		e.out.SetVolume(e.ui.volume)
@@ -834,6 +1072,56 @@ func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
 		e.audioPanel = nil
 	}
 	return false
+}
+
+// handlePickerMouse works the receiver list with the mouse: the wheel scrolls
+// it, the first click highlights an entry and a second click on the entry
+// already highlighted connects to it.
+//
+// Two clicks rather than one, because connecting tears down the current session
+// and opens another — too much to hang on a single stray click, and the same
+// reason the keyboard asks for enter after the arrows.
+func (e *eventLoop) handlePickerMouse(ev *tcell.EventMouse) *Instance {
+	_, h := e.screen.Size()
+	buttons := ev.Buttons()
+
+	switch {
+	case buttons&tcell.WheelUp != 0:
+		e.picker.cursor--
+		e.picker.clampCursor()
+		return nil
+	case buttons&tcell.WheelDown != 0:
+		e.picker.cursor++
+		e.picker.clampCursor()
+		return nil
+	}
+
+	// Act on the press, once: a held button keeps reporting, and every report
+	// would otherwise count as another click.
+	if buttons&tcell.ButtonPrimary == 0 {
+		e.pickerHeld = false
+		return nil
+	}
+	if e.pickerHeld {
+		return nil
+	}
+	e.pickerHeld = true
+
+	_, y := ev.Position()
+	idx, ok := e.picker.EntryAt(h, y)
+	if !ok {
+		return nil
+	}
+	if idx != e.picker.cursor {
+		e.picker.cursor = idx
+		return nil
+	}
+
+	list := e.picker.entries()
+	if idx >= len(list) {
+		return nil
+	}
+	return &list[idx]
 }
 
 func (e *eventLoop) handlePickerKey(ev *tcell.EventKey) (quit bool) {
@@ -992,7 +1280,8 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			// mid-session appear.
 			devices, err := listDevices()
 			e.audioPanel = NewAudioPanel(devices, err)
-			e.audioPanel.selectedDevice = e.deviceID
+			e.audioPanel.selectedDevice = e.currentDeviceID()
+			e.audioPanel.stdoutMode, e.audioPanel.stdoutErr = e.stdoutState()
 		case 'n', 'N':
 			e.cycleDSP(+1)
 		case 't':

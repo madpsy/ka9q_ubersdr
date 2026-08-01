@@ -93,18 +93,94 @@ Or connect directly:
 
 | Flag | Meaning |
 | --- | --- |
-| `-server` | `host:port` or a full `http(s)://` URL. Empty opens the picker. |
+| `-server` | A receiver name from the public directory, `host:port`, or a full `http(s)://` URL. Empty opens the picker. |
 | `-tls` | Force TLS. Implied by an `https://` URL. |
 | `-password` | Bypass password, if the receiver requires one. |
 | `-freq` | Initial frequency in kHz (0 = the receiver's own default). |
 | `-mode` | Initial demodulation mode (empty = the receiver's own default). |
+| `-bw` | Filter edges in Hz as `low:high` (empty = the mode's own default). |
+| `-squelch` | Squelch threshold in dB of SNR (0 = off). |
+| `-headless` | No display: tune and stream the audio, for scripts and services. |
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
 | `-bars` | Draw block bars instead of the higher-resolution braille spectrum. |
 | `-no-audio` | Watch the spectrum without opening an audio channel. |
+| `-stdout` | Write the demodulated audio to stdout as raw PCM. Needs a pipe or a redirect. |
+| `-stdout-wav` | The same, with a WAV header, so a redirected file plays anywhere. |
+| `-no-device` | Do not open a sound device; useful with `-stdout`. |
+| `-device` | Output device: an index from `-device list`, or part of its name. |
 | `-version` | Print the version and exit. |
 
+## Headless
+
+`-headless` drops the display: it connects, tunes, and puts the audio wherever
+it was told to. It opens **no spectrum socket at all** — a session nobody is
+watching has no use for one, and not asking saves the receiver a channel.
+
+```bash
+# record 20 m for ten minutes
+timeout 600 ubersdr-tui -headless -server m9psy -freq 14074 -mode usb \
+    -stdout-wav -no-device > ft8.wav
+
+# listen to a remote receiver through a named output, nothing on screen
+ubersdr-tui -headless -server https://sdr.example.org -freq 7100 -mode lsb -device steinberg
+
+# a narrow CW filter, piped into something else
+ubersdr-tui -headless -server nb3a -freq 14050 -mode cwu -bw -250:250 \
+    -stdout -no-device | my-decoder
+```
+
+Everything it says goes to **stderr**, since stdout may be carrying the audio:
+one summary line on start, then whatever the connection reports.
+
+```
+m9psy.tunnel.ubersdr.org — 7.100000 MHz LSB, filter -2700/-300 Hz → stdout (wav)
+audio connected
+```
+
+**Choosing the output device.** `-device list` prints what there is and exits —
+to stderr, so it stays readable while stdout is being piped:
+
+```
+$ ubersdr-tui -device list
+output devices:
+   0  System default
+ * 1  Steinberg UR24C Analogue Surround 4.0
+   2  HDMI Output
+   (* is the sound server's current default, which is what index 0 follows;
+    -device takes an index or part of a name)
+```
+
+Then `-device 1`, or `-device steinberg` — any part of the name, case
+insensitively, as long as it picks out one device. Both forms exist because they
+fail differently: an index is quick to type from the listing, but the order
+moves when something is plugged in or the sound server restarts, so **a service
+that has to come back to the same speakers should name them**. A name matching
+several devices is refused with the candidates rather than guessing. `-device`
+works with the display too, where it sets the device the session starts on.
+
+Enumeration is a Linux feature: it comes from PulseAudio, and on macOS and
+Windows the backends expose no such API, so the list there is the system default
+alone and the output is chosen in the OS sound settings.
+
+`-freq` and `-mode` fall back to the receiver's own defaults, exactly as they do
+with the display. `-bw` takes the filter as **`low:high` in Hz** — the same pair
+of edges the rest of the client uses, so a lower-sideband filter is two negative
+numbers (`-2700:-300`) and a CW filter straddles zero (`-250:250`). It is
+clamped to what the mode can carry. `-squelch` takes a threshold in dB of SNR
+and works in both modes.
+
+`SIGINT` and `SIGTERM` shut it down properly rather than killing it, which is
+what finishes a WAV capture's header — so `systemctl stop` and Ctrl-C both leave
+a valid file.
+
 ## Choosing a receiver
+
+**`-server` takes a receiver name as well as an address.** Anything with a
+scheme, a port or a dot is used as given; a bare word is looked up in the public
+directory by callsign or name, so `-server m9psy` finds
+`m9psy.tunnel.ubersdr.org` on its own. An exact callsign wins; anything else has
+to match one receiver, and a name that matches several is refused with the list.
 
 Press `i` at any time to open the picker and switch receivers without
 restarting. It has three sources:
@@ -121,6 +197,12 @@ Because every printable key is search text, navigation is on the arrows and
 paging keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`. `Backspace` edits the search,
 `Esc` clears it (and closes the picker when the search is already empty), and
 `^U` clears it outright. `Tab` switches source.
+
+**Or use the mouse.** The wheel scrolls the list, a click highlights the
+receiver under the pointer, and a second click on the one already highlighted
+connects to it. Two clicks rather than one for the same reason the keyboard asks
+for `enter` after the arrows: connecting tears down the current session and
+opens another, which is too much to hang on a single stray click.
 
 ## Keys
 
@@ -165,7 +247,7 @@ and the **view**, which is what the display shows. They have separate keys.
 | `g` | signal meter: dBFS or SNR |
 | `n` | cycle server-side noise reduction |
 | `t` / `T` | raise / lower the squelch threshold (SNR) |
-| `d` | audio settings: device, volume, mode, exact filter edges |
+| `d` | audio settings: outputs, volume, mode, exact filter edges |
 | **Chat** | |
 | `C` | open the chat, on receivers that run one |
 | `@` | in the chat: start a mention, `tab` completes it |
@@ -207,6 +289,86 @@ The packet header carries the channel's sample rate and channel count. Neither
 affects the playback rate — Opus always reconstructs at 48 kHz — but the channel
 count decides whether a frame is folded to mono, and both are shown in the `d`
 panel.
+
+### Two outputs
+
+There are two places the audio can go, and each is independent: **the sound
+device**, **stdout**, both at once, or neither.
+
+```bash
+# play it through the system player instead of opening a sound device here
+./ubersdr-tui -server localhost:8080 -stdout -no-device | aplay -f S16_LE -r 48000 -c 1
+
+# record it
+./ubersdr-tui -server localhost:8080 -stdout -no-device | sox -t raw -r 48000 -e signed -b 16 -c 1 - out.wav
+
+# both at once: local speakers *and* a recording
+./ubersdr-tui -server localhost:8080 -stdout | sox -t raw -r 48000 -e signed -b 16 -c 1 - out.wav
+
+# straight to a playable file, no converter in the way
+./ubersdr-tui -server localhost:8080 -stdout-wav -no-device > radio.wav
+```
+
+**Stdout has to be redirected before the stream can start** — see below — so
+starting with one of the flags is the usual way in. Both outputs are then
+switchable while running, from the `d` panel: the device list has **Off — no
+local playback** at its head, so the speakers are switched off by the same
+control that chooses them, and a **Stdout** row cycles through off, raw and WAV.
+To leave the choice until later, redirect at launch and turn the stream on when
+you want it:
+
+```bash
+./ubersdr-tui -server localhost:8080 > radio.wav     # then d, Stdout, → → for WAV
+```
+
+### Raw or WAV
+
+`-stdout` writes **headerless PCM**. That is what a pipe wants, because the
+reader is told the format on its own command line — but it makes a poor file:
+nothing infers 48 kHz mono S16_LE from an extension, VLC included, so a bare
+`> radio.raw` leaves you with something no player will open.
+
+`-stdout-wav` puts a 44-byte WAV header in front of the same samples, which is
+what makes a redirected file work everywhere. The length is not knowable while
+the stream is live, so the header goes out open-ended; **when stdout is a
+regular file the real sizes are patched in as the client exits**, leaving a
+capture that is exactly right rather than merely playable. Quit with `q` rather
+than killing the process, or that last step is missed — the file still plays,
+but tools will report a nonsense duration.
+
+If you already have a headerless capture, tell the tool what it is:
+
+```bash
+# convert it once
+sox -t raw -r 48000 -e signed -b 16 -c 1 radio.raw radio.wav
+ffmpeg -f s16le -ar 48000 -ac 1 -i radio.raw radio.wav
+
+# or play it where it lies
+aplay -f S16_LE -r 48000 -c 1 radio.raw
+ffplay -f s16le -ar 48000 -ac 1 radio.raw
+vlc --demux=rawaud --rawaud-channels=1 --rawaud-samplerate=48000 --rawaud-fourcc=s16l radio.raw
+```
+
+What goes down the pipe is the demodulated audio exactly as it arrives —
+**48 kHz mono, signed 16-bit little-endian**, header or no header — and deliberately *not* what the
+speakers get: volume, mute and channel routing belong to the sound device, and
+applying them here would quietly ruin a recording, or halve a pipe whenever the
+routing was set to one side. Server-side squelch and noise reduction do apply,
+since those shape the audio before it is ever sent.
+
+This works because tcell drives `/dev/tty` rather than stdout, so the display
+and the audio never meet. **The one thing it cannot do is write to a terminal**,
+which is what stdout still is unless you redirect it — so there has to be a pipe
+before the stream will start, whether it is asked for by `-stdout` or from the
+panel. `-stdout` refuses at startup rather than filling the terminal with binary
+noise; in the panel the row reads `off — stdout is a terminal`, the note under
+the rows gives the command that fixes it, and that note turns red if you try
+anyway, since the status line is behind the panel and a refusal reported there
+would be invisible.
+
+A reader that stalls costs audio, never the display — the queue drops the oldest
+packets rather than blocking the event loop, the same bargain the local mixer
+makes.
 
 **Modes and default filters**, matching the web UI so a frequency sounds the
 same in both:
@@ -355,6 +517,15 @@ what stops a reconnect showing everything twice.
 
 ## Display notes
 
+**Session clock.** Receivers cap how long one session may run, and say so in the
+`/connection` reply that every session begins with — `max_session_time`, in
+seconds, zero for no limit. The top right corner counts it down every second,
+`1h24m12s`, turning red for the last five minutes; a receiver that sets no limit
+shows `unlimited` instead of a clock that never moves. The clock is the one
+header field that is never shed on a narrow terminal, because a session ending
+without warning is indistinguishable from a crash. Headless mode reports the
+same limit in its startup line.
+
 **Marker strip.** Two rows sit between the header and the panes: bookmarks on
 top, the band plan directly above the spectrum where it reads as a ruler over
 it. Both come from the receiver's HTTP API — `/api/bands` and `/api/bookmarks`,
@@ -493,6 +664,11 @@ so it works against older servers.
 Before opening the WebSocket it performs the `/connection` precheck the server
 requires, which is what surfaces a clear reason when a receiver is full or the
 client is rate limited.
+
+Every request it makes — HTTP and WebSocket alike — identifies itself as
+`UberSDR_TUI/1.0`. That is part of the handshake rather than decoration: the
+server records the User-Agent a session presented to `/connection` and refuses
+to open a socket for a UUID it has never seen one from.
 
 Everything else it reads is a plain JSON GET: `/api/description` for the DSP
 inserts a receiver offers and whether it runs a chat, and `/api/bands` and

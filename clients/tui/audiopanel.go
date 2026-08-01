@@ -26,15 +26,30 @@ type AudioPanel struct {
 	// squelchChanged marks that the threshold moved and must be pushed to the
 	// server, for the same reason.
 	squelchChanged bool
+
+	// stdoutStep asks the caller to step the second output, which it owns along
+	// with the rest of the audio.
+	stdoutStep int
+
+	// stdoutMode and stdoutErr are what the caller last reported about that
+	// output, since the panel cannot see it itself.
+	stdoutMode StdoutMode
+	stdoutErr  error
 }
 
 // filterStepHz is how far one keypress moves a filter edge. It matches the
 // granularity of the mode defaults, whose narrowest edge is 50 Hz.
 const filterStepHz = 50
 
+// audioDeviceOff is the sentinel device meaning "no local playback". It heads
+// the device list so switching the speakers off is the same control as choosing
+// which ones to use — and it cannot collide with a real sink ID.
+const audioDeviceOff = "\x00off"
+
 // Panel rows, in display order.
 const (
 	rowDevice = iota
+	rowStdout
 	rowChannel
 	rowVolume
 	rowMode
@@ -91,19 +106,21 @@ func (p *AudioPanel) HandleKey(ev *tcell.EventKey, u *UI, deviceID string) (retu
 func (p *AudioPanel) adjust(u *UI, deviceID string, dir int) (retune, reopen, done bool) {
 	switch p.row {
 	case rowDevice:
-		if len(p.devices) == 0 {
-			return false, false, false
-		}
+		list := p.deviceChoices()
 		idx := 0
-		for i, d := range p.devices {
+		for i, d := range list {
 			if d.ID == deviceID {
 				idx = i
 				break
 			}
 		}
-		idx = (idx + dir + len(p.devices)) % len(p.devices)
-		p.selectedDevice = p.devices[idx].ID
+		idx = (idx + dir + len(list)) % len(list)
+		p.selectedDevice = list[idx].ID
 		return false, true, false
+
+	case rowStdout:
+		p.stdoutStep = dir
+		return false, false, false
 
 	case rowChannel:
 		u.channel = Channel((int(u.channel) + dir + 3) % 3)
@@ -192,13 +209,13 @@ func (p *AudioPanel) Draw(s tcell.Screen, u *UI, deviceID string) {
 	drawText(s, x0, y0, title, padTo(" Audio", width))
 
 	deviceName := "System default"
-	for _, d := range p.devices {
+	for _, d := range p.deviceChoices() {
 		if d.ID == deviceID {
 			deviceName = d.Name
 			break
 		}
 	}
-	if p.devErr != nil {
+	if p.devErr != nil && deviceID != audioDeviceOff {
 		deviceName = "unavailable: " + p.devErr.Error()
 	}
 
@@ -214,6 +231,7 @@ func (p *AudioPanel) Draw(s tcell.Screen, u *UI, deviceID string) {
 
 	rows := [rowCount]struct{ label, value string }{
 		rowDevice:   {"Output device", deviceName},
+		rowStdout:   {"Stdout", p.stdoutValue()},
 		rowChannel:  {"Channel", u.channel.String()},
 		rowVolume:   {"Volume", fmt.Sprintf("%.0f%%", u.volume*100)},
 		rowMode:     {"Mode", modeLabel(u.audioMode)},
@@ -236,12 +254,52 @@ func (p *AudioPanel) Draw(s tcell.Screen, u *UI, deviceID string) {
 		drawText(s, x0+1, y0+2+i, style, truncate(line, width-2))
 	}
 
-	drawText(s, x0+1, y0+height-2, dim,
-		truncate(fmt.Sprintf(" filter width %.1f kHz", float64(u.bwHigh-u.bwLow)/1000), width-2))
+	// The note under the rows follows the selection, because the one row that
+	// cannot simply be switched on is the one that needs to say why. A refusal
+	// turns it red: pressing a key that cannot do anything has to look like
+	// something, and the status line is behind this panel.
+	note, noteStyle := fmt.Sprintf(" filter width %.1f kHz", float64(u.bwHigh-u.bwLow)/1000), dim
+	if p.row == rowStdout {
+		note = fmt.Sprintf(" pipe: ubersdr-tui -stdout | aplay -f %s -r %d -c %d",
+			stdoutFormat, stdoutSampleRate, stdoutChannels)
+		if p.stdoutErr != nil {
+			noteStyle = tcell.StyleDefault.
+				Foreground(tcell.NewRGBColor(235, 110, 100)).
+				Background(tcell.NewRGBColor(28, 28, 38))
+		}
+	}
+	drawText(s, x0+1, y0+height-2, noteStyle, truncate(note, width-2))
 	drawText(s, x0, y0+height-1, tcell.StyleDefault.
 		Foreground(tcell.NewRGBColor(200, 200, 210)).
 		Background(tcell.NewRGBColor(45, 45, 55)),
 		padTo(" ↑↓ select · ←→ change · m mute · esc close ", width))
+}
+
+// deviceChoices is the device list with "off" at its head, so the speakers are
+// switched off by the same control that chooses them.
+//
+// Enumeration failing is not a reason to lose that: a machine with no sound
+// server can still pipe audio to stdout, and the panel has to be able to say so.
+func (p *AudioPanel) deviceChoices() []AudioDevice {
+	out := make([]AudioDevice, 0, len(p.devices)+1)
+	out = append(out, AudioDevice{ID: audioDeviceOff, Name: "Off — no local playback"})
+	return append(out, p.devices...)
+}
+
+// stdoutValue describes the raw stream: what it is carrying, or why it is not.
+func (p *AudioPanel) stdoutValue() string {
+	switch {
+	case p.stdoutErr != nil:
+		return "off — " + p.stdoutErr.Error()
+	case p.stdoutMode != StdoutOff:
+		return p.stdoutMode.Label()
+	case stdoutIsTerminal():
+		// Kept short enough to survive the value column; the note below the
+		// rows carries the command that fixes it.
+		return "off — stdout is a terminal"
+	default:
+		return "off"
+	}
 }
 
 // streamValue reports the channel's sample rate and the rate actually played.

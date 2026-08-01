@@ -1144,7 +1144,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 			// Send success response
 			if *msg.SquelchOpen == -999 {
-				log.Printf("Squelch set to always open for session %s", currentSession.ID)
 				wsh.sendMessage(conn, ServerMessage{Type: "squelch_updated", Info: map[string]interface{}{
 					"mode": "always_open",
 				}})

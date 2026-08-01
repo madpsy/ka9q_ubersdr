@@ -985,6 +985,55 @@ function _checkSAMSilenceFallback() {
     }
 }
 
+// Mode confirmation.
+// setMode() commits the UI optimistically and tune() cannot report failure —
+// wsManager.send() returns false silently when the socket is not OPEN, and a
+// tune the server ignores looks identical to one it applied. The server echoes
+// the live mode in every status message, so that is the only source of truth.
+//
+// Without this reconciliation a lost mode change leaves the UI showing a mode
+// the receiver is not in, and it cannot be recovered by pressing the same
+// button again: the mode buttons toggle on currentMode, so with the UI already
+// reading "fm" a second press selects NFM rather than retrying FM. The only way
+// out is to route through another mode.
+let _pendingMode = null;
+let _pendingModeSince = 0;
+let _pendingModeRetries = 0;
+const MODE_CONFIRM_GRACE_MS = 1500;  // server sleeps 500ms loading the preset
+const MODE_CONFIRM_MAX_RETRIES = 2;
+
+function _noteModeRequested(mode) {
+    _pendingMode = mode;
+    _pendingModeSince = Date.now();
+    _pendingModeRetries = 0;
+}
+
+function _reconcileMode(serverMode) {
+    if (!serverMode || !_pendingMode) return;
+    if (serverMode === _pendingMode) {   // applied
+        _pendingMode = null;
+        return;
+    }
+    // Still settling — the server has not had time to report the new mode yet.
+    if (Date.now() - _pendingModeSince < MODE_CONFIRM_GRACE_MS) return;
+
+    if (_pendingModeRetries < MODE_CONFIRM_MAX_RETRIES) {
+        _pendingModeRetries++;
+        _pendingModeSince = Date.now();
+        log(`Mode still ${serverMode.toUpperCase()} after requesting ` +
+            `${_pendingMode.toUpperCase()} - resending tune`, 'error');
+        if (wsManager.isConnected()) tune();
+        return;
+    }
+
+    // Out of retries. Stop displaying a mode the receiver is not in, so the
+    // buttons act on the real state and the next press is a genuine retry.
+    log(`Mode change to ${_pendingMode.toUpperCase()} did not take - ` +
+        `showing ${serverMode.toUpperCase()}`, 'error');
+    _pendingMode = null;
+    setMode(serverMode, true);
+}
+
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
@@ -5121,6 +5170,9 @@ function findBandForFrequency(frequency) {
 
 // Update status display
 function updateStatus(msg) {
+    // Confirm (or recover) the last requested mode against what the server reports.
+    _reconcileMode(msg.mode);
+
     if (msg.frequency) {
         const freqText = formatFrequency(msg.frequency);
         const bandName = findBandForFrequency(msg.frequency);
@@ -6137,6 +6189,7 @@ function handleFrequencyChange() {
     if (!wsManager.isConnected()) {
         connect();
     } else {
+        _noteModeRequested(mode);
         autoTune();
     }
 }

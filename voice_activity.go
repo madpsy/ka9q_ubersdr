@@ -84,8 +84,10 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor, hub *VoiceActiv
 
 				// Broadcast confirmed activities to SSE clients (suppressed if nothing new/due)
 				if hub != nil && len(confirmed) > 0 {
-					// Enrich with DX cluster callsigns before broadcasting
-					confirmed = enrichWithDXCallsigns(confirmed)
+					// Enrich with DX cluster callsigns before broadcasting.
+					// No precise position: the SSE event carries no coordinate
+					// fields, so resolving them here would be discarded work.
+					confirmed = enrichWithDXCallsigns(confirmed, false)
 					hub.MaybeBroadcast(bandConfig.Name, confirmed, nfm)
 				}
 			}
@@ -247,7 +249,20 @@ type VoiceActivity struct {
 // if a spot exists within the configured TTL.
 // Safe to call with a nil or disabled DX cluster — returns the slice unchanged.
 // Never modifies the original slice header; always operates on the elements in place.
-func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
+//
+// preciseLocation controls whether the coarse CTY/DXCC centroid is refined with
+// a precise per-operator position from the callsign lookup service.  Pass true
+// only when the caller actually serialises DXLatitude/DXLongitude: the SSE
+// broadcast path does not (VoiceActivitySSEEvent carries no coordinate fields),
+// so resolving them there is work whose result is discarded at marshal time —
+// 720 times an hour per band, since the scanner ticks every 5 s.
+//
+// Even when true the refinement is non-blocking: it reads dxLocCache, which
+// answers from memory and resolves misses on a background worker pool.  This
+// matters because the API handlers are polled per viewer every 5 s, so a
+// blocking lookup here would scale QRZ load — and stalled request goroutines —
+// with the number of connected users.
+func enrichWithDXCallsigns(activities []VoiceActivity, preciseLocation bool) []VoiceActivity {
 	if activeDXCluster == nil || !activeDXCluster.config.Enabled {
 		return activities
 	}
@@ -266,16 +281,15 @@ func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
 				activities[i].DXLongitude = &lon
 			}
 
-			// Optionally override with a precise per-operator QRZ position —
-			// same preference order CW skimmer spots use (see
-			// CWSkimmerClient.enrichSpot): QRZ coordinates win over the
-			// CTY/prefix centroid when the lookup service is configured and
-			// returns a hit with real coordinates. Cache-first, so repeat
-			// callsigns are free.
-			if globalQRZService != nil {
-				if qrz, err := globalQRZService.Lookup(entry.DXCall); err == nil && qrz != nil &&
-					(qrz.Lat != 0 || qrz.Lon != 0) {
-					lat, lon := qrz.Lat, qrz.Lon
+			// Optionally override with a precise per-operator position — same
+			// preference order CW skimmer spots use (see
+			// CWSkimmerClient.enrichSpot): looked-up coordinates win over the
+			// CTY/prefix centroid when available.  On a cache miss the centroid
+			// set above stays in place for this response and the next poll
+			// picks up the refined position.
+			if preciseLocation {
+				if qLat, qLon, ok := dxLocCache.Get(entry.DXCall); ok {
+					lat, lon := qLat, qLon
 					activities[i].DXLatitude = &lat
 					activities[i].DXLongitude = &lon
 				}
@@ -1320,8 +1334,10 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	}
 	activities = filteredActivities
 
-	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
-	activities = enrichWithDXCallsigns(activities)
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil).
+	// Precise coordinates requested: this response serialises dx_latitude /
+	// dx_longitude.
+	activities = enrichWithDXCallsigns(activities, true)
 
 	// Get averaged FFT for noise floor calculation and timestamp
 	fft := buffer.GetAveragedFFT(5 * time.Second)
@@ -1397,8 +1413,10 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 		}
 	}
 
-	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
-	filtered = enrichWithDXCallsigns(filtered)
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil).
+	// Precise coordinates requested: this response serialises dx_latitude /
+	// dx_longitude.
+	filtered = enrichWithDXCallsigns(filtered, true)
 
 	return filtered, nil
 }
@@ -1458,8 +1476,10 @@ func GetVoiceActivityResponseForBand(nfm *NoiseFloorMonitor, band string, params
 		}
 	}
 
-	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
-	filtered = enrichWithDXCallsigns(filtered)
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil).
+	// Precise coordinates requested: this response serialises dx_latitude /
+	// dx_longitude.
+	filtered = enrichWithDXCallsigns(filtered, true)
 
 	fft := buffer.GetAveragedFFT(5 * time.Second)
 	var noiseFloor float32

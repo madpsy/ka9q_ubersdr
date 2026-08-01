@@ -403,6 +403,95 @@ func (m *qrzMinuteStats) CurrentHourSnapshot() []QRZMinuteStat {
 }
 
 // ---------------------------------------------------------------------------
+// Per-source lookup attribution
+// ---------------------------------------------------------------------------
+
+// Lookup source labels. Every caller of LookupFrom should pass one of these so
+// that admin tooling can attribute lookup volume to a named component; anything
+// that reaches Lookup() without a label is counted as qrzSourceUnknown, which
+// makes an unattributed call site visible rather than invisible.
+const (
+	qrzSourceAPI           = "api"            // public /api/lookup (browser users)
+	qrzSourceAPIContainer  = "api_container"  // /api/lookup from a trusted addon container
+	qrzSourceCWSkimmer     = "cwskimmer"      // CW skimmer spot enrichment
+	qrzSourceVoiceActivity = "voice_activity" // voice activity DX position cache
+	qrzSourceTelegram      = "telegram"       // Telegram bot command
+	qrzSourceUnknown       = "unknown"        // call site that did not attribute itself
+)
+
+// qrzSourceCount is the running lookup tally for one source.
+type qrzSourceCount struct {
+	lookups   int64 // every Lookup() call made by this source (cache hits included)
+	cacheHits int64 // subset of lookups that were served from cache
+	apiCalls  int64 // outbound QRZ.com fetches triggered by this source
+}
+
+// QRZSourceStat is one source's tally, returned by SourceStats.
+type QRZSourceStat struct {
+	Source    string `json:"source"`     // component label (see the qrzSource* constants)
+	Lookups   int64  `json:"lookups"`    // total Lookup() calls from this source
+	CacheHits int64  `json:"cache_hits"` // of those, served from the in-process cache
+	APICalls  int64  `json:"api_calls"`  // outbound QRZ.com requests triggered by this source
+}
+
+// recordSource adds one lookup to a source's tally. cacheHit and apiCall are
+// mutually exclusive in practice: a lookup is either served from cache, or
+// reaches the network, or (for a singleflight waiter) does neither — see the
+// attribution caveat on SourceStats.
+func (s *QRZService) recordSource(source string, cacheHit, apiCall bool) {
+	if source == "" {
+		source = qrzSourceUnknown
+	}
+
+	s.sourceMu.Lock()
+	defer s.sourceMu.Unlock()
+
+	c := s.sourceStats[source]
+	if c == nil {
+		c = &qrzSourceCount{}
+		s.sourceStats[source] = c
+	}
+	c.lookups++
+	if cacheHit {
+		c.cacheHits++
+	}
+	if apiCall {
+		c.apiCalls++
+	}
+}
+
+// SourceStats returns per-source lookup tallies, busiest first.
+//
+// ATTRIBUTION CAVEAT: Lookups and CacheHits are exact — they are counted once
+// per caller on entry to LookupFrom. APICalls is approximate: outbound fetches
+// are deduplicated by singleflight, so a fetch is attributed to whichever
+// source won the flight while concurrent waiters for the same callsign are
+// credited with neither a cache hit nor an API call. For answering "which
+// component is generating lookup volume" the exact Lookups column is the one
+// to read.
+func (s *QRZService) SourceStats() []QRZSourceStat {
+	s.sourceMu.Lock()
+	out := make([]QRZSourceStat, 0, len(s.sourceStats))
+	for source, c := range s.sourceStats {
+		out = append(out, QRZSourceStat{
+			Source:    source,
+			Lookups:   c.lookups,
+			CacheHits: c.cacheHits,
+			APICalls:  c.apiCalls,
+		})
+	}
+	s.sourceMu.Unlock()
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Lookups != out[j].Lookups {
+			return out[i].Lookups > out[j].Lookups
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out
+}
+
+// ---------------------------------------------------------------------------
 // QRZService
 // ---------------------------------------------------------------------------
 
@@ -479,6 +568,14 @@ type QRZService struct {
 	// API. Incremented alongside apiCallStats in fetchCallsign.
 	apiCallMinuteStats qrzMinuteStats
 
+	// sourceMu guards sourceStats below.
+	sourceMu sync.Mutex
+	// sourceStats counts lookups per calling component (see LookupFrom), so the
+	// admin UI can attribute lookup volume to whatever is actually generating
+	// it. Plain running totals since process start — no time bucketing; the
+	// hourly/minute ring buffers above already cover "when", this covers "who".
+	sourceStats map[string]*qrzSourceCount
+
 	// dailyCountMu guards dailyCount/dailyCountAt below.
 	dailyCountMu sync.Mutex
 	// dailyCount is the most recent value QRZ itself reported in the <Count>
@@ -504,6 +601,7 @@ func NewQRZService(cfg QRZConfig, cacheMaxSize int) *QRZService {
 		cacheMaxSize: cacheMaxSize,
 		cache:        make(map[string]*qrzCacheEntry),
 		inFlight:     make(map[string]struct{}),
+		sourceStats:  make(map[string]*qrzSourceCount),
 		// sf is a zero-value singleflight.Group — no initialisation needed.
 		fetchSem: make(chan struct{}, qrzMaxConcurrentFetches),
 		httpClient: &http.Client{
@@ -601,6 +699,14 @@ type lookupResult struct {
 // writes the result to the cache; the others return the shared value directly
 // without a redundant cache write.
 func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
+	return s.LookupFrom(qrzSourceUnknown, rawCallsign)
+}
+
+// LookupFrom is Lookup with caller attribution: source names the component
+// making the request (see the qrzSource* constants) so that admin tooling can
+// report which parts of the application are generating lookup volume.
+// Behaviour is otherwise identical to Lookup.
+func (s *QRZService) LookupFrom(source, rawCallsign string) (*QRZCallsign, error) {
 	call := NormaliseCallsign(rawCallsign)
 	if call == "" {
 		return nil, fmt.Errorf("qrz: empty callsign after normalisation")
@@ -616,6 +722,7 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	if cs, hit := s.cacheGet(call); hit {
 		s.apiCallStats.recordHit()
 		s.apiCallMinuteStats.recordHit()
+		s.recordSource(source, true, false)
 		return cs, nil
 	}
 
@@ -640,12 +747,19 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	s.inFlight[call] = struct{}{}
 	s.inFlightMu.Unlock()
 
+	// Attribution flags for this caller. Both are written only inside the
+	// closure, which singleflight runs synchronously in the leader's own
+	// goroutine — waiters never execute it — so these stay false for waiters
+	// and need no synchronisation of their own.
+	var didFetch, lateCacheHit bool
+
 	v, err, _ := s.sf.Do(call, func() (interface{}, error) {
 		// Re-check the cache inside the flight: a previous flight for this
 		// key may have just finished and populated the cache while we were
 		// waiting to enter sf.Do. This is still a cache hit, not a genuine
 		// fetch, so it does not notifyLookup.
 		if cs, hit := s.cacheGet(call); hit {
+			lateCacheHit = true
 			return &lookupResult{cs: cs}, nil
 		}
 
@@ -655,6 +769,7 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 		// returns, before the result is written to the cache or returned to
 		// waiters — so the slot is held for the minimum possible time.
 		s.fetchSem <- struct{}{}
+		didFetch = true
 		result, fetchErr := s.fetchWithRetry(call)
 		<-s.fetchSem
 
@@ -678,6 +793,10 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	s.inFlightMu.Lock()
 	delete(s.inFlight, call)
 	s.inFlightMu.Unlock()
+
+	// Attribute this caller's lookup before the error check, so that a failed
+	// fetch still shows up against whichever component asked for it.
+	s.recordSource(source, lateCacheHit, didFetch)
 
 	if err != nil {
 		return nil, err

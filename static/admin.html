@@ -19994,6 +19994,57 @@ const tooltipLine2 = timeStr;
                         : hitRatioPct >= 80 ? '#28a745'
                         : hitRatioPct >= 50 ? '#ff8c00'
                         : '#dc3545';
+
+                    // Per-component attribution: which parts of the application
+                    // are generating lookup volume. Running totals since the
+                    // server process started, not a 24h window.
+                    const _SOURCE_LABELS = {
+                        api:            'Public API (users)',
+                        api_container:  'Addon container',
+                        cwskimmer:      'CW Skimmer',
+                        voice_activity: 'Voice Activity',
+                        telegram:       'Telegram Bot',
+                        unknown:        'Unattributed'
+                    };
+                    const sources = data.sources || [];
+                    const sourceTotal = sources.reduce((a, s) => a + (s.lookups || 0), 0);
+                    const sourcesHTML = sources.length === 0 ? '' : `
+                        <div style="margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 6px;">
+                                Lookups by component (since server start)
+                            </div>
+                            <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead>
+                                    <tr style="text-align: left; color: #666; border-bottom: 1px solid #dee2e6;">
+                                        <th style="padding: 4px 6px;">Component</th>
+                                        <th style="padding: 4px 6px; text-align: right;">Lookups</th>
+                                        <th style="padding: 4px 6px; text-align: right;">Share</th>
+                                        <th style="padding: 4px 6px; text-align: right;">Cache Hits</th>
+                                        <th style="padding: 4px 6px; text-align: right;" title="Outbound QRZ.com requests triggered by this component. Approximate: concurrent requests for the same callsign are deduplicated, and the fetch is credited to whichever component triggered it.">API Calls</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${sources.map(s => {
+                                        const label = _SOURCE_LABELS[s.source] || s.source;
+                                        const share = sourceTotal > 0
+                                            ? Math.round((s.lookups / sourceTotal) * 100) : 0;
+                                        const warn = s.source === 'unknown' && s.lookups > 0;
+                                        return `
+                                    <tr style="border-bottom: 1px solid #f1f3f5;">
+                                        <td style="padding: 4px 6px; ${warn ? 'color: #ff8c00;' : ''}"
+                                            ${warn ? 'title="Lookups from a call site that did not identify itself."' : ''}>${label}</td>
+                                        <td style="padding: 4px 6px; text-align: right; font-weight: bold;">${s.lookups.toLocaleString()}</td>
+                                        <td style="padding: 4px 6px; text-align: right; color: #666;">${share}%</td>
+                                        <td style="padding: 4px 6px; text-align: right; color: #666;">${s.cache_hits.toLocaleString()}</td>
+                                        <td style="padding: 4px 6px; text-align: right; color: ${s.api_calls > 0 ? '#667eea' : '#666'};">${s.api_calls.toLocaleString()}</td>
+                                    </tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            </div>
+                        </div>`;
+
                     displayDiv.innerHTML = `
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px;">
                             <div style="text-align: center;">
@@ -20033,6 +20084,7 @@ const tooltipLine2 = timeStr;
                                 <div style="font-size: 12px; color: #666;">Image Cache Utilisation</div>
                             </div>` : ''}
                         </div>
+                        ${sourcesHTML}
                     `;
                 }
 

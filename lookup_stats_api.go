@@ -34,6 +34,7 @@ type lookupStatsResponse struct {
 	ImageCacheMaxSize  int             `json:"image_cache_max_size"`           // configured image cache size cap (0 = unlimited)
 	QRZDailyCount      int             `json:"qrz_daily_count,omitempty"`      // QRZ's own reported lookup count for the current 24h period (the <Count> field); absent until the first successful lookup
 	QRZDailyCountAt    string          `json:"qrz_daily_count_at,omitempty"`   // RFC3339 timestamp of when QRZ last reported qrz_daily_count
+	Sources            []QRZSourceStat `json:"sources,omitempty"`              // per-component lookup tallies since process start, busiest first
 }
 
 // handleLookupStats handles GET /admin/lookup/stats.
@@ -64,6 +65,7 @@ func handleLookupStats(w http.ResponseWriter, r *http.Request, cfg *Config) {
 	resp.Total24h = globalQRZService.TotalAPICalls24h()
 	resp.CacheHits24h = globalQRZService.TotalCacheHits24h()
 	resp.CacheMisses24h = globalQRZService.TotalCacheMisses24h()
+	resp.Sources = globalQRZService.SourceStats()
 	resp.CacheSize = globalQRZService.CacheSize()
 	resp.CacheMaxSize = globalQRZService.CacheMaxSize()
 	if globalImageProxy != nil {

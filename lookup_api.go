@@ -191,7 +191,13 @@ func handleLookup(
 			writeJSON(w, http.StatusServiceUnavailable, lookupErrorResponse{Error: "lookup provider is not configured"})
 			return
 		}
-		result, err := globalQRZService.Lookup(normalised)
+		// Attribute container traffic separately from browser traffic — the two
+		// have very different volume profiles and the distinction is free here.
+		lookupSource := qrzSourceAPI
+		if isTrustedContainer {
+			lookupSource = qrzSourceAPIContainer
+		}
+		result, err := globalQRZService.LookupFrom(lookupSource, normalised)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, lookupErrorResponse{Error: "lookup failed: " + err.Error()})
 			return

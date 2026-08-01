@@ -1514,7 +1514,7 @@ func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, stri
 	}
 
 	// Full QRZ lookup (cache-first, then live API).
-	result, err := globalQRZService.Lookup(cs)
+	result, err := globalQRZService.LookupFrom(qrzSourceTelegram, cs)
 	if err != nil {
 		msg := fmt.Sprintf("⚠️ QRZ lookup failed: %s", html.EscapeString(err.Error()))
 		apiResp, apiOK := l.sendMessage(chatID, msg)

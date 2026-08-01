@@ -683,7 +683,7 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	// are free); the service caps outbound concurrency and caches not-found
 	// results internally.
 	if c.config.CallsignLookupEnabled && globalQRZService != nil {
-		if qrz, err := globalQRZService.Lookup(spot.DXCall); err == nil && qrz != nil {
+		if qrz, err := globalQRZService.LookupFrom(qrzSourceCWSkimmer, spot.DXCall); err == nil && qrz != nil {
 			if qrz.Lat != 0 || qrz.Lon != 0 {
 				spot.Latitude = qrz.Lat
 				spot.Longitude = qrz.Lon

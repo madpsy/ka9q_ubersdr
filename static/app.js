@@ -988,6 +988,19 @@ function _checkSAMSilenceFallback() {
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
+
+// Depth to rebuild the schedule to when priming or recovering from an underrun.
+// Audio arrives at exactly real time (one 20 ms packet per 20 ms), so the lead
+// never grows back on its own — whatever depth we restore here is the standing
+// tolerance for jitter until the next disruption. Recovering to MIN_BUFFER_MS
+// leaves only 40 ms, which measurement on the ka9q TUI client against this
+// server showed is too shallow: it starved and underran repeatedly until given
+// a 120 ms cushion. Capped below maxBufferMs so priming can never land in the
+// overrun-drop branch.
+const PRIME_BUFFER_MS = 120;
+function primeBufferSec() {
+    return Math.min(Math.max(PRIME_BUFFER_MS, MIN_BUFFER_MS), maxBufferMs * 0.75) / 1000;
+}
 const BUFFER_PRESETS = [50, 100, 150, 200, 300, 500]; // Available preset values
 // Expose nextPlayTime globally for extensions
 window.nextPlayTime = 0;
@@ -4395,8 +4408,10 @@ async function handleBinaryMessage(data) {
             // trips the underrun branch below and leaves the schedule running
             // on the bare minimum lead — every subsequent jitter spike is then
             // another underrun, heard as stuttering after a mode change.
-            nextPlayTime = audioContext.currentTime + (MIN_BUFFER_MS / 1000);
+            nextPlayTime = audioContext.currentTime + primeBufferSec();
             window.nextPlayTime = nextPlayTime;
+            // Not created from a user gesture, so it can come up suspended.
+            audioContext.resume().catch(() => {});
             audioStartTime = audioContext.currentTime;
             // Clear the old _sinkGain so applyAudioSink() creates a fresh one
             audioContext._sinkGain = null;
@@ -5251,8 +5266,9 @@ async function handlePCMAudio(msg) {
         currentAudioContextSampleRate = msg.sampleRate;
         // Prime the schedule, as above: starting at currentTime guarantees an
         // immediate underrun.
-        nextPlayTime = audioContext.currentTime + (MIN_BUFFER_MS / 1000);
+        nextPlayTime = audioContext.currentTime + primeBufferSec();
         window.nextPlayTime = nextPlayTime;
+        audioContext.resume().catch(() => {});
         audioStartTime = audioContext.currentTime;
         // Clear the old _sinkGain so applyAudioSink() creates a fresh one
         audioContext._sinkGain = null;
@@ -5892,7 +5908,7 @@ function playAudioBuffer(buffer) {
 
     // If we're falling behind (underrun), reset the schedule
     if (nextPlayTime < currentTime) {
-        nextPlayTime = currentTime + MIN_BUFFER_SEC; // Add minimum buffer for Chrome
+        nextPlayTime = currentTime + primeBufferSec(); // Rebuild a usable cushion
         window.nextPlayTime = nextPlayTime;
     }
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation

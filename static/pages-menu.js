@@ -1,9 +1,10 @@
 /**
  * pages-menu.js
- * Injects a two-level flyout "Pages" menu at the top-left of the document.
+ * Injects a multi-level flyout "Pages" menu at the top-left of the document.
  *
  * Level 1: dropdown lists group names.
  * Level 2: hovering a group expands its pages to the right.
+ * Subgroups nest arbitrarily deep — each one flies out to the right of its parent.
  * Descriptions are shown as native tooltips on each page link.
  *
  * All visual styling lives in the STYLES constant below — edit it freely
@@ -138,7 +139,7 @@
     display: block;
 }
 
-/* Level 3 — sub-submenu */
+/* Level 3 and deeper — nested sub-submenus */
 .pages-menu-submenu-l3 {
     display: none;
     position: absolute;
@@ -226,9 +227,37 @@
             return link;
         }
 
+        // Helper: build a subgroup row (level 3 and deeper) with its own flyout.
+        // sg: { name, links[], subgroups[] } — subgroups nest arbitrarily deep
+        function buildSubgroupRow(sg) {
+            const sgRow = document.createElement('div');
+            sgRow.className = 'pages-menu-subgroup-row';
+            sgRow.setAttribute('role', 'menuitem');
+            sgRow.setAttribute('aria-haspopup', 'true');
+
+            const sgLabel = document.createElement('span');
+            sgLabel.textContent = sg.name;
+
+            const sgArrow = document.createElement('span');
+            sgArrow.className   = 'pages-menu-group-arrow';
+            sgArrow.textContent = '›';
+
+            const sgSubmenu = document.createElement('div');
+            sgSubmenu.className = 'pages-menu-submenu-l3';
+            sgSubmenu.setAttribute('role', 'menu');
+
+            (sg.links || []).forEach(item => sgSubmenu.appendChild(buildLink(item)));
+            (sg.subgroups || []).forEach(child => sgSubmenu.appendChild(buildSubgroupRow(child)));
+
+            sgRow.appendChild(sgLabel);
+            sgRow.appendChild(sgArrow);
+            sgRow.appendChild(sgSubmenu);
+            return sgRow;
+        }
+
         // Helper: build and append a group row with its level-2 submenu.
         // links:     array of { url, label, tooltip, external } — direct page links
-        // subgroups: array of { name, links[] }                 — nested subgroup rows
+        // subgroups: array of { name, links[], subgroups[] }    — nested subgroup rows
         function addGroupRow(groupName, links, subgroups) {
             const row = document.createElement('div');
             row.className = 'pages-menu-group-row';
@@ -249,31 +278,8 @@
             // Direct links
             (links || []).forEach(item => submenu.appendChild(buildLink(item)));
 
-            // Subgroup rows (level 3)
-            (subgroups || []).forEach(sg => {
-                const sgRow = document.createElement('div');
-                sgRow.className = 'pages-menu-subgroup-row';
-                sgRow.setAttribute('role', 'menuitem');
-                sgRow.setAttribute('aria-haspopup', 'true');
-
-                const sgLabel = document.createElement('span');
-                sgLabel.textContent = sg.name;
-
-                const sgArrow = document.createElement('span');
-                sgArrow.className   = 'pages-menu-group-arrow';
-                sgArrow.textContent = '›';
-
-                const sgSubmenu = document.createElement('div');
-                sgSubmenu.className = 'pages-menu-submenu-l3';
-                sgSubmenu.setAttribute('role', 'menu');
-
-                (sg.links || []).forEach(item => sgSubmenu.appendChild(buildLink(item)));
-
-                sgRow.appendChild(sgLabel);
-                sgRow.appendChild(sgArrow);
-                sgRow.appendChild(sgSubmenu);
-                submenu.appendChild(sgRow);
-            });
+            // Subgroup rows (level 3 and deeper)
+            (subgroups || []).forEach(sg => submenu.appendChild(buildSubgroupRow(sg)));
 
             row.appendChild(label);
             row.appendChild(arrow);
@@ -321,13 +327,18 @@
                 .filter(file => isEnabled(file.depends_on))
                 .map(fileToLink);
 
-            // Build subgroups (each subgroup's files are also mapped)
-            const subgroups = (group.subgroups || []).map(sg => ({
-                name:  sg.name,
-                links: (sg.files || [])
-                    .filter(file => isEnabled(file.depends_on))
-                    .map(fileToLink),
-            })).filter(sg => sg.links.length > 0);
+            // Build subgroups recursively; drop any that end up with nothing to show
+            function mapSubgroups(list) {
+                return (list || []).map(sg => ({
+                    name:      sg.name,
+                    links:     (sg.files || [])
+                        .filter(file => isEnabled(file.depends_on))
+                        .map(fileToLink),
+                    subgroups: mapSubgroups(sg.subgroups),
+                })).filter(sg => sg.links.length > 0 || sg.subgroups.length > 0);
+            }
+
+            const subgroups = mapSubgroups(group.subgroups);
 
             // Skip the group if there's nothing to show
             if (links.length === 0 && subgroups.length === 0) return;

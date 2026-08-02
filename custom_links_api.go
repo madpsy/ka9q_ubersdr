@@ -18,10 +18,12 @@ type PagesLink struct {
 	Download    bool   `json:"download,omitempty"`
 }
 
-// PagesSubgroup represents a named sub-menu inside a group.
+// PagesSubgroup represents a named sub-menu inside a group. Subgroups may nest
+// arbitrarily deep — each level becomes another flyout in the Links menu.
 type PagesSubgroup struct {
-	Name  string      `json:"name"`
-	Files []PagesLink `json:"files,omitempty"`
+	Name      string          `json:"name"`
+	Files     []PagesLink     `json:"files,omitempty"`
+	Subgroups []PagesSubgroup `json:"subgroups,omitempty"`
 }
 
 // PagesGroup represents one top-level group in the pages menu.
@@ -78,8 +80,9 @@ func readCustomLinks(configDir string) (PagesData, error) {
 // Merge rules:
 //   - If a custom group's "group" name matches an existing built-in group name,
 //     its files are appended to that group's files, and its subgroups are merged
-//     by name (matching subgroup names get their files appended; new subgroup
-//     names are appended as new subgroups).
+//     by name (matching subgroup names get their files appended and their own
+//     subgroups merged recursively; new subgroup names are appended as new
+//     subgroups).
 //   - If a custom group's name does not match any built-in group, it is appended
 //     as a new group after all built-in groups.
 func mergePages(builtin, custom PagesData) PagesData {
@@ -93,25 +96,35 @@ func mergePages(builtin, custom PagesData) PagesData {
 		if i, ok := index[cg.Group]; ok {
 			// Extend an existing built-in group.
 			builtin.Groups[i].Files = append(builtin.Groups[i].Files, cg.Files...)
-
-			// Merge subgroups by name.
-			sgIndex := make(map[string]int, len(builtin.Groups[i].Subgroups))
-			for j, sg := range builtin.Groups[i].Subgroups {
-				sgIndex[sg.Name] = j
-			}
-			for _, csg := range cg.Subgroups {
-				if j, ok := sgIndex[csg.Name]; ok {
-					// Append files into existing subgroup.
-					builtin.Groups[i].Subgroups[j].Files = append(
-						builtin.Groups[i].Subgroups[j].Files, csg.Files...)
-				} else {
-					// New subgroup — append.
-					builtin.Groups[i].Subgroups = append(builtin.Groups[i].Subgroups, csg)
-				}
-			}
+			builtin.Groups[i].Subgroups = mergeSubgroups(builtin.Groups[i].Subgroups, cg.Subgroups)
 		} else {
 			// New group — append after all built-ins.
 			builtin.Groups = append(builtin.Groups, cg)
+		}
+	}
+
+	return builtin
+}
+
+// mergeSubgroups merges custom subgroups into built-in ones by name, recursing
+// into nested subgroups. Unmatched names are appended as new subgroups.
+func mergeSubgroups(builtin, custom []PagesSubgroup) []PagesSubgroup {
+	if len(custom) == 0 {
+		return builtin
+	}
+
+	index := make(map[string]int, len(builtin))
+	for i, sg := range builtin {
+		index[sg.Name] = i
+	}
+
+	for _, csg := range custom {
+		if i, ok := index[csg.Name]; ok {
+			builtin[i].Files = append(builtin[i].Files, csg.Files...)
+			builtin[i].Subgroups = mergeSubgroups(builtin[i].Subgroups, csg.Subgroups)
+		} else {
+			index[csg.Name] = len(builtin)
+			builtin = append(builtin, csg)
 		}
 	}
 
@@ -227,31 +240,13 @@ func (ah *AdminHandler) handlePutCustomLinks(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		seenGroups[g.Group] = true
-		for fi, f := range g.Files {
-			if f.Path == "" {
-				http.Error(w, "groups["+itoa(gi)+"].files["+itoa(fi)+"]: path must not be empty", http.StatusBadRequest)
-				return
-			}
-			if f.Name == "" {
-				http.Error(w, "groups["+itoa(gi)+"].files["+itoa(fi)+"]: name must not be empty", http.StatusBadRequest)
-				return
-			}
+		if err := validateLinks("groups["+itoa(gi)+"]", g.Files); err != "" {
+			http.Error(w, err, http.StatusBadRequest)
+			return
 		}
-		for si, sg := range g.Subgroups {
-			if sg.Name == "" {
-				http.Error(w, "groups["+itoa(gi)+"].subgroups["+itoa(si)+"]: name must not be empty", http.StatusBadRequest)
-				return
-			}
-			for fi, f := range sg.Files {
-				if f.Path == "" {
-					http.Error(w, "groups["+itoa(gi)+"].subgroups["+itoa(si)+"].files["+itoa(fi)+"]: path must not be empty", http.StatusBadRequest)
-					return
-				}
-				if f.Name == "" {
-					http.Error(w, "groups["+itoa(gi)+"].subgroups["+itoa(si)+"].files["+itoa(fi)+"]: name must not be empty", http.StatusBadRequest)
-					return
-				}
-			}
+		if err := validateSubgroups("groups["+itoa(gi)+"]", g.Subgroups); err != "" {
+			http.Error(w, err, http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -278,6 +273,39 @@ func (ah *AdminHandler) handlePutCustomLinks(w http.ResponseWriter, r *http.Requ
 	}); err != nil {
 		log.Printf("admin/custom-links PUT encode: %v", err)
 	}
+}
+
+// validateLinks checks that every link has a non-empty path and name.
+// Returns an empty string when valid, otherwise a human-readable error message
+// prefixed with the caller's JSON path.
+func validateLinks(prefix string, files []PagesLink) string {
+	for fi, f := range files {
+		if f.Path == "" {
+			return prefix + ".files[" + itoa(fi) + "]: path must not be empty"
+		}
+		if f.Name == "" {
+			return prefix + ".files[" + itoa(fi) + "]: name must not be empty"
+		}
+	}
+	return ""
+}
+
+// validateSubgroups checks subgroup names, their links, and recurses into any
+// nested subgroups. Returns an empty string when valid.
+func validateSubgroups(prefix string, subgroups []PagesSubgroup) string {
+	for si, sg := range subgroups {
+		path := prefix + ".subgroups[" + itoa(si) + "]"
+		if sg.Name == "" {
+			return path + ": name must not be empty"
+		}
+		if err := validateLinks(path, sg.Files); err != "" {
+			return err
+		}
+		if err := validateSubgroups(path, sg.Subgroups); err != "" {
+			return err
+		}
+	}
+	return ""
 }
 
 // itoa is a tiny helper to avoid importing strconv just for index formatting.

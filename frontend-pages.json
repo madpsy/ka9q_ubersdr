@@ -202,6 +202,66 @@
               "description": "Download the IQ Recorder client for Linux (amd64)."
             }
           ]
+        },
+        {
+          "name": "⌨️ Terminal UI",
+          "subgroups": [
+            {
+              "name": "🪟 Windows",
+              "files": [
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-windows-amd64.exe",
+                  "name": "⬇️ amd64",
+                  "description": "Download the Terminal UI client for Windows (amd64)."
+                },
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-windows-arm64.exe",
+                  "name": "⬇️ arm64",
+                  "description": "Download the Terminal UI client for Windows on ARM (arm64)."
+                }
+              ]
+            },
+            {
+              "name": "🍎 macOS",
+              "files": [
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-darwin-arm64",
+                  "name": "⬇️ Apple Silicon (arm64)",
+                  "description": "Download the Terminal UI client for macOS on Apple Silicon (arm64)."
+                },
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-darwin-amd64",
+                  "name": "⬇️ Intel (amd64)",
+                  "description": "Download the Terminal UI client for macOS on Intel (amd64)."
+                }
+              ]
+            },
+            {
+              "name": "🐧 Linux",
+              "files": [
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-linux-amd64",
+                  "name": "⬇️ amd64",
+                  "description": "Download the Terminal UI client for Linux (amd64)."
+                },
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-linux-arm64",
+                  "name": "⬇️ arm64",
+                  "description": "Download the Terminal UI client for Linux on 64-bit ARM (arm64), e.g. Raspberry Pi 4/5 with a 64-bit OS."
+                },
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-linux-armv7",
+                  "name": "⬇️ armv7",
+                  "description": "Download the Terminal UI client for Linux on 32-bit ARMv7, e.g. Raspberry Pi 2/3/4 with a 32-bit OS."
+                },
+                {
+                  "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-tui-linux-armv6",
+                  "name": "⬇️ armv6",
+                  "description": "Download the Terminal UI client for Linux on 32-bit ARMv6, e.g. Raspberry Pi Zero/1."
+                }
+              ]
+            }
+          ]
         }
       ]
     },

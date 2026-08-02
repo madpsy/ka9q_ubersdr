@@ -2625,7 +2625,8 @@
                         <p style="margin: 0 0 12px 0; color: #555; font-size: 13px;">
                             Add your own links to the <strong>Links</strong> menu visible to all users.
                             You can inject links into any existing built-in group, add links to existing subgroups,
-                            or create entirely new groups. Built-in links are shown in grey and cannot be edited here.
+                            nest subgroups inside subgroups, or create entirely new groups.
+                            Built-in links are shown in grey and cannot be edited here.
                         </p>
                         <div class="alert alert-info" style="margin-bottom: 16px; font-size: 13px;">
                             ✅ <strong>No server restart required.</strong> Changes take effect immediately after saving.
@@ -10164,23 +10165,22 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             // Built-in subgroups (read-only shell + editable additions)
             for (const bsg of (bg.subgroups || [])) {
                 const csg = cg ? (cg.subgroups || []).find(s => s.name === bsg.name) : null;
-                body.appendChild(customLinksRenderBuiltinSubgroup(bg.group, bsg, csg));
+                body.appendChild(customLinksRenderBuiltinSubgroup(bg.group, [], bsg, csg));
             }
 
             // Custom direct files added to this built-in group
             if (cg) {
                 for (let fi = 0; fi < (cg.files || []).length; fi++) {
-                    body.appendChild(customLinksRenderCustomLink(bg.group, null, fi, cg.files[fi]));
+                    body.appendChild(customLinksRenderCustomLink(bg.group, [], fi, cg.files[fi]));
                 }
             }
 
             // Custom subgroups added to this built-in group (new subgroups only)
             if (cg) {
                 const builtinSgNames = new Set((bg.subgroups || []).map(s => s.name));
-                for (let si = 0; si < (cg.subgroups || []).length; si++) {
-                    const csg = cg.subgroups[si];
+                for (const csg of (cg.subgroups || [])) {
                     if (!builtinSgNames.has(csg.name)) {
-                        body.appendChild(customLinksRenderCustomSubgroup(bg.group, si, csg));
+                        body.appendChild(customLinksRenderCustomSubgroup(bg.group, [], csg));
                     }
                 }
             }
@@ -10192,12 +10192,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             addLinkBtn.className = 'btn btn-secondary';
             addLinkBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
             addLinkBtn.textContent = '+ Add Link';
-            addLinkBtn.onclick = () => customLinksShowAddLinkForm(bg.group, null, addRow);
+            addLinkBtn.onclick = () => customLinksShowAddLinkForm(bg.group, [], addRow);
             const addSgBtn = document.createElement('button');
             addSgBtn.className = 'btn btn-secondary';
             addSgBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
             addSgBtn.textContent = '+ Add Subgroup';
-            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(bg.group, addRow);
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(bg.group, [], addRow);
             addRow.appendChild(addLinkBtn);
             addRow.appendChild(addSgBtn);
             body.appendChild(addRow);
@@ -10208,8 +10208,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
         /**
          * Render a built-in subgroup row with its read-only links and any custom additions.
+         * parentPath: array of subgroup names above this one ([] at group level).
+         * Recurses into built-in nested subgroups, pairing each with its custom counterpart.
          */
-        function customLinksRenderBuiltinSubgroup(groupName, bsg, csg) {
+        function customLinksRenderBuiltinSubgroup(groupName, parentPath, bsg, csg) {
+            const path = parentPath.concat(bsg.name);
+
             const wrap = document.createElement('div');
             wrap.style.cssText = 'margin:6px 0 6px 16px; border-left:3px solid #dee2e6; padding-left:10px;';
 
@@ -10234,22 +10238,44 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 wrap.appendChild(customLinksRenderReadonlyLink(f));
             }
 
+            // Built-in nested subgroups (read-only shell + editable additions)
+            for (const childBsg of (bsg.subgroups || [])) {
+                const childCsg = csg ? (csg.subgroups || []).find(s => s.name === childBsg.name) : null;
+                wrap.appendChild(customLinksRenderBuiltinSubgroup(groupName, path, childBsg, childCsg));
+            }
+
             // Custom links added to this built-in subgroup
             if (csg) {
                 for (let fi = 0; fi < (csg.files || []).length; fi++) {
-                    wrap.appendChild(customLinksRenderCustomLink(groupName, bsg.name, fi, csg.files[fi]));
+                    wrap.appendChild(customLinksRenderCustomLink(groupName, path, fi, csg.files[fi]));
                 }
             }
 
-            // Add link button for this subgroup
+            // Custom subgroups added inside this built-in subgroup (new names only)
+            if (csg) {
+                const builtinChildNames = new Set((bsg.subgroups || []).map(s => s.name));
+                for (const childCsg of (csg.subgroups || [])) {
+                    if (!builtinChildNames.has(childCsg.name)) {
+                        wrap.appendChild(customLinksRenderCustomSubgroup(groupName, path, childCsg));
+                    }
+                }
+            }
+
+            // Add link / add subgroup buttons for this subgroup
             const addRow = document.createElement('div');
-            addRow.style.cssText = 'margin-top:4px;';
+            addRow.style.cssText = 'margin-top:4px; display:flex; gap:6px; flex-wrap:wrap;';
             const addBtn = document.createElement('button');
             addBtn.className = 'btn btn-secondary';
             addBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
             addBtn.textContent = '+ Add Link to Subgroup';
-            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, bsg.name, addRow);
+            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, path, addRow);
+            const addSgBtn = document.createElement('button');
+            addSgBtn.className = 'btn btn-secondary';
+            addSgBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
+            addSgBtn.textContent = '+ Add Nested Subgroup';
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(groupName, path, addRow);
             addRow.appendChild(addBtn);
+            addRow.appendChild(addSgBtn);
             wrap.appendChild(addRow);
 
             return wrap;
@@ -10302,12 +10328,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             // Custom direct files
             for (let fi = 0; fi < (cg.files || []).length; fi++) {
-                body.appendChild(customLinksRenderCustomLink(cg.group, null, fi, cg.files[fi]));
+                body.appendChild(customLinksRenderCustomLink(cg.group, [], fi, cg.files[fi]));
             }
 
             // Custom subgroups
-            for (let si = 0; si < (cg.subgroups || []).length; si++) {
-                body.appendChild(customLinksRenderCustomSubgroup(cg.group, si, cg.subgroups[si]));
+            for (const csg of (cg.subgroups || [])) {
+                body.appendChild(customLinksRenderCustomSubgroup(cg.group, [], csg));
             }
 
             // Add link / add subgroup buttons
@@ -10317,12 +10343,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             addLinkBtn.className = 'btn btn-secondary';
             addLinkBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
             addLinkBtn.textContent = '+ Add Link';
-            addLinkBtn.onclick = () => customLinksShowAddLinkForm(cg.group, null, addRow);
+            addLinkBtn.onclick = () => customLinksShowAddLinkForm(cg.group, [], addRow);
             const addSgBtn = document.createElement('button');
             addSgBtn.className = 'btn btn-secondary';
             addSgBtn.style.cssText = 'font-size:12px; padding:4px 10px;';
             addSgBtn.textContent = '+ Add Subgroup';
-            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(cg.group, addRow);
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(cg.group, [], addRow);
             addRow.appendChild(addLinkBtn);
             addRow.appendChild(addSgBtn);
             body.appendChild(addRow);
@@ -10332,9 +10358,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         }
 
         /**
-         * Render a custom subgroup inside a group (either built-in or custom group).
+         * Render a custom subgroup inside a group (either built-in or custom group),
+         * recursing into any nested custom subgroups.
+         * parentPath: array of subgroup names above this one ([] at group level).
          */
-        function customLinksRenderCustomSubgroup(groupName, sgIndex, csg) {
+        function customLinksRenderCustomSubgroup(groupName, parentPath, csg) {
+            const path = parentPath.concat(csg.name);
+
             const wrap = document.createElement('div');
             wrap.style.cssText = 'margin:6px 0 6px 16px; border-left:3px solid #b8daff; padding-left:10px;';
 
@@ -10363,31 +10393,36 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             delSgBtn.title = `Delete subgroup "${csg.name}"`;
             delSgBtn.onclick = () => {
                 if (!confirm(`Delete subgroup "${csg.name}" and all its links?`)) return;
-                const cg = customLinksData.groups.find(g => g.group === groupName);
-                if (cg && cg.subgroups) {
-                    cg.subgroups.splice(sgIndex, 1);
-                    if (cg.subgroups.length === 0) delete cg.subgroups;
-                }
-                customLinksDirty();
-                customLinksRender();
+                customLinksDeleteSubgroup(groupName, path);
             };
             sgHeader.appendChild(delSgBtn);
             wrap.appendChild(sgHeader);
 
             // Links in this custom subgroup
             for (let fi = 0; fi < (csg.files || []).length; fi++) {
-                wrap.appendChild(customLinksRenderCustomLink(groupName, csg.name, fi, csg.files[fi]));
+                wrap.appendChild(customLinksRenderCustomLink(groupName, path, fi, csg.files[fi]));
             }
 
-            // Add link button
+            // Nested custom subgroups
+            for (const childCsg of (csg.subgroups || [])) {
+                wrap.appendChild(customLinksRenderCustomSubgroup(groupName, path, childCsg));
+            }
+
+            // Add link / add subgroup buttons
             const addRow = document.createElement('div');
-            addRow.style.cssText = 'margin-top:4px;';
+            addRow.style.cssText = 'margin-top:4px; display:flex; gap:6px; flex-wrap:wrap;';
             const addBtn = document.createElement('button');
             addBtn.className = 'btn btn-secondary';
             addBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
             addBtn.textContent = '+ Add Link to Subgroup';
-            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, csg.name, addRow);
+            addBtn.onclick = () => customLinksShowAddLinkForm(groupName, path, addRow);
+            const addSgBtn = document.createElement('button');
+            addSgBtn.className = 'btn btn-secondary';
+            addSgBtn.style.cssText = 'font-size:11px; padding:3px 8px;';
+            addSgBtn.textContent = '+ Add Nested Subgroup';
+            addSgBtn.onclick = () => customLinksShowAddSubgroupForm(groupName, path, addRow);
             addRow.appendChild(addBtn);
+            addRow.appendChild(addSgBtn);
             wrap.appendChild(addRow);
 
             return wrap;
@@ -10427,10 +10462,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         /**
          * Render an editable (custom) link row with a delete button.
          * groupName: the group this link belongs to
-         * subgroupName: null for direct group links, or the subgroup name
+         * sgPath: array of subgroup names ([] for links directly on the group)
          * fileIndex: index within the files array
          */
-        function customLinksRenderCustomLink(groupName, subgroupName, fileIndex, f) {
+        function customLinksRenderCustomLink(groupName, sgPath, fileIndex, f) {
             const row = document.createElement('div');
             row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:3px 0;';
             const editIcon = document.createElement('span');
@@ -10465,7 +10500,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             delBtn.textContent = '✕';
             delBtn.title = `Delete "${f.name}"`;
             delBtn.onclick = () => {
-                customLinksDeleteLink(groupName, subgroupName, fileIndex);
+                customLinksDeleteLink(groupName, sgPath, fileIndex);
             };
             row.appendChild(delBtn);
             return row;
@@ -10491,81 +10526,143 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     if (!target.files) target.files = [];
                     target.files.push(...cg.files);
                 }
-                // Merge subgroups by name
-                if (cg.subgroups && cg.subgroups.length > 0) {
-                    if (!target.subgroups) target.subgroups = [];
-                    for (const csg of cg.subgroups) {
-                        const existing = target.subgroups.find(s => s.name === csg.name);
-                        if (existing) {
-                            if (csg.files) {
-                                if (!existing.files) existing.files = [];
-                                existing.files.push(...csg.files);
-                            }
-                        } else {
-                            target.subgroups.push({ name: csg.name, files: csg.files || [] });
-                        }
-                    }
-                }
+                // Merge subgroups by name (recursively, so nested subgroups survive)
+                customLinksMergeSubgroups(target, cg.subgroups);
             }
             customLinksData.groups = merged;
         }
 
         /**
-         * Delete a custom link by group name, optional subgroup name, and file index.
-         * Searches ALL group entries with the matching name (handles legacy duplicates).
+         * Merge a list of subgroups into target.subgroups by name, recursing into
+         * nested subgroups. Used by normaliseCustomLinks().
          */
-        function customLinksDeleteLink(groupName, subgroupName, fileIndex) {
+        function customLinksMergeSubgroups(target, subgroups) {
+            if (!subgroups || subgroups.length === 0) return;
+            if (!target.subgroups) target.subgroups = [];
+            for (const csg of subgroups) {
+                let existing = target.subgroups.find(s => s.name === csg.name);
+                if (!existing) {
+                    existing = { name: csg.name, files: [] };
+                    target.subgroups.push(existing);
+                }
+                if (csg.files && csg.files.length > 0) {
+                    if (!existing.files) existing.files = [];
+                    existing.files.push(...csg.files);
+                }
+                customLinksMergeSubgroups(existing, csg.subgroups);
+            }
+        }
+
+        /**
+         * Walk a subgroup-name path through the custom data and return the chain of
+         * nodes from the group entry down to the addressed subgroup, so callers can
+         * prune empty parents afterwards. Returns null if any step is missing.
+         * create: when true, missing group/subgroup entries are created along the way.
+         */
+        function customLinksResolveChain(groupName, sgPath, create) {
+            let cg = customLinksData.groups.find(g => g.group === groupName);
+            if (!cg) {
+                if (!create) return null;
+                cg = { group: groupName };
+                customLinksData.groups.push(cg);
+            }
+
+            const chain = [cg];
+            for (const name of (sgPath || [])) {
+                const parent = chain[chain.length - 1];
+                let sg = (parent.subgroups || []).find(s => s.name === name);
+                if (!sg) {
+                    if (!create) return null;
+                    if (!parent.subgroups) parent.subgroups = [];
+                    sg = { name, files: [] };
+                    parent.subgroups.push(sg);
+                }
+                chain.push(sg);
+            }
+            return chain;
+        }
+
+        /** True when a subgroup node holds neither links nor nested subgroups. */
+        function customLinksNodeIsEmpty(node) {
+            return (!node.files || node.files.length === 0) &&
+                   (!node.subgroups || node.subgroups.length === 0);
+        }
+
+        /**
+         * Drop now-empty subgroups from the deepest level upwards, then drop the
+         * custom group entry itself if it is an empty extension of a built-in group
+         * (custom-only groups are kept so the user can keep editing them).
+         */
+        function customLinksPruneChain(chain, groupName) {
+            for (let i = chain.length - 1; i >= 1; i--) {
+                const node   = chain[i];
+                const parent = chain[i - 1];
+                if (!customLinksNodeIsEmpty(node)) break;
+                parent.subgroups = (parent.subgroups || []).filter(s => s !== node);
+                if (parent.subgroups.length === 0) delete parent.subgroups;
+            }
+
+            const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
+            if (builtinNames.has(groupName) && customLinksNodeIsEmpty(chain[0])) {
+                customLinksData.groups = customLinksData.groups.filter(g => g.group !== groupName);
+            }
+        }
+
+        /**
+         * Delete a custom link by group name, subgroup path, and file index.
+         * Normalises first so legacy duplicate group entries are collapsed.
+         */
+        function customLinksDeleteLink(groupName, sgPath, fileIndex) {
             // Normalise first to ensure no duplicates before operating
             normaliseCustomLinks();
 
-            const cg = customLinksData.groups.find(g => g.group === groupName);
-            if (!cg) return;
+            const chain = customLinksResolveChain(groupName, sgPath, false);
+            if (!chain) return;
 
-            if (subgroupName === null) {
-                // Direct file on the group
-                if (cg.files) {
-                    cg.files.splice(fileIndex, 1);
-                    if (cg.files.length === 0) delete cg.files;
-                }
-            } else {
-                // File inside a subgroup
-                const sgIdx = (cg.subgroups || []).findIndex(s => s.name === subgroupName);
-                if (sgIdx !== -1) {
-                    const sg = cg.subgroups[sgIdx];
-                    if (sg.files) {
-                        sg.files.splice(fileIndex, 1);
-                        if (sg.files.length === 0) delete sg.files;
-                    }
-                    // Remove the subgroup entry entirely if it has no files left
-                    if (!sg.files || sg.files.length === 0) {
-                        cg.subgroups.splice(sgIdx, 1);
-                        if (cg.subgroups.length === 0) delete cg.subgroups;
-                    }
-                }
+            const target = chain[chain.length - 1];
+            if (target.files) {
+                target.files.splice(fileIndex, 1);
+                if (target.files.length === 0) delete target.files;
             }
 
-            // If the custom group entry is now empty (no files, no subgroups), remove it
-            // only if it's an extension of a built-in group (custom-only groups are kept)
-            const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
-            if (builtinNames.has(groupName)) {
-                const hasFiles = cg.files && cg.files.length > 0;
-                const hasSgs   = cg.subgroups && cg.subgroups.length > 0;
-                if (!hasFiles && !hasSgs) {
-                    customLinksData.groups = customLinksData.groups.filter(g => g.group !== groupName);
-                }
-            }
-
+            customLinksPruneChain(chain, groupName);
             customLinksDirty();
             customLinksRender();
         }
 
         /**
+         * Delete a custom subgroup (and everything under it) at the given path.
+         */
+        function customLinksDeleteSubgroup(groupName, sgPath) {
+            normaliseCustomLinks();
+
+            const chain = customLinksResolveChain(groupName, sgPath, false);
+            if (!chain || chain.length < 2) return;
+
+            const node   = chain[chain.length - 1];
+            const parent = chain[chain.length - 2];
+            parent.subgroups = (parent.subgroups || []).filter(s => s !== node);
+            if (parent.subgroups.length === 0) delete parent.subgroups;
+
+            customLinksPruneChain(chain.slice(0, -1), groupName);
+            customLinksDirty();
+            customLinksRender();
+        }
+
+        /**
+         * Render a group + subgroup path as a breadcrumb for form titles.
+         */
+        function customLinksPathLabel(groupName, sgPath) {
+            return [groupName].concat(sgPath || []).map(n => `"${n}"`).join(' › ');
+        }
+
+        /**
          * Show an inline "Add Link" form below the given anchor element.
          * groupName: the group to add to
-         * subgroupName: null for direct group link, or the subgroup name
+         * sgPath: array of subgroup names ([] for a link directly on the group)
          * anchor: the DOM element to insert the form after
          */
-        function customLinksShowAddLinkForm(groupName, subgroupName, anchor) {
+        function customLinksShowAddLinkForm(groupName, sgPath, anchor) {
             // Remove any existing inline form
             const existing = document.getElementById('customLinksInlineForm');
             if (existing) existing.remove();
@@ -10576,8 +10673,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             const title = document.createElement('p');
             title.style.cssText = 'margin:0 0 8px 0; font-size:12px; font-weight:600; color:#004085;';
-            title.textContent = subgroupName
-                ? `Add link to subgroup "${subgroupName}" in "${groupName}"`
+            title.textContent = (sgPath && sgPath.length > 0)
+                ? `Add link to ${customLinksPathLabel(groupName, sgPath)}`
                 : `Add link to "${groupName}"`;
             form.appendChild(title);
 
@@ -10646,7 +10743,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (desc) entry.description = desc;
                 if (dep)  entry.depends_on  = dep;
 
-                customLinksAddLink(groupName, subgroupName, entry);
+                customLinksAddLink(groupName, sgPath, entry);
                 form.remove();
             };
 
@@ -10665,29 +10762,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         }
 
         /**
-         * Add a link entry to the in-memory state and re-render.
+         * Add a link entry at the given subgroup path, creating the group and any
+         * missing subgroups along the way, then re-render.
          */
-        function customLinksAddLink(groupName, subgroupName, entry) {
-            // Find or create the custom group entry
-            let cg = customLinksData.groups.find(g => g.group === groupName);
-            if (!cg) {
-                cg = { group: groupName };
-                customLinksData.groups.push(cg);
-            }
-
-            if (subgroupName === null) {
-                if (!cg.files) cg.files = [];
-                cg.files.push(entry);
-            } else {
-                if (!cg.subgroups) cg.subgroups = [];
-                let sg = cg.subgroups.find(s => s.name === subgroupName);
-                if (!sg) {
-                    sg = { name: subgroupName, files: [] };
-                    cg.subgroups.push(sg);
-                }
-                if (!sg.files) sg.files = [];
-                sg.files.push(entry);
-            }
+        function customLinksAddLink(groupName, sgPath, entry) {
+            const chain  = customLinksResolveChain(groupName, sgPath, true);
+            const target = chain[chain.length - 1];
+            if (!target.files) target.files = [];
+            target.files.push(entry);
 
             customLinksDirty();
             customLinksRender();
@@ -10695,8 +10777,9 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
         /**
          * Show an inline "Add Subgroup" form below the given anchor element.
+         * parentPath: array of subgroup names to nest under ([] for group level).
          */
-        function customLinksShowAddSubgroupForm(groupName, anchor) {
+        function customLinksShowAddSubgroupForm(groupName, parentPath, anchor) {
             const existing = document.getElementById('customLinksInlineForm');
             if (existing) existing.remove();
 
@@ -10706,7 +10789,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             const title = document.createElement('p');
             title.style.cssText = 'margin:0 0 8px 0; font-size:12px; font-weight:600; color:#004085;';
-            title.textContent = `Add subgroup to "${groupName}"`;
+            title.textContent = `Add subgroup to ${customLinksPathLabel(groupName, parentPath)}`;
             form.appendChild(title);
 
             const nameWrap = document.createElement('div');
@@ -10735,24 +10818,34 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const name = document.getElementById('clf-sg-name').value.trim();
                 if (!name) { alert('Subgroup name is required.'); return; }
 
-                let cg = customLinksData.groups.find(g => g.group === groupName);
-                if (!cg) {
-                    cg = { group: groupName };
-                    customLinksData.groups.push(cg);
+                const parentLabel = customLinksPathLabel(groupName, parentPath);
+
+                // Warn if the name matches a built-in subgroup at this level
+                // (links will be injected into it rather than creating a new one)
+                let builtinParent = (customLinksBuiltin.groups || []).find(g => g.group === groupName);
+                for (const step of (parentPath || [])) {
+                    if (!builtinParent) break;
+                    builtinParent = (builtinParent.subgroups || []).find(s => s.name === step);
                 }
-                if (!cg.subgroups) cg.subgroups = [];
-                // Check for duplicate name in custom data
-                if (cg.subgroups.find(s => s.name === name)) {
-                    alert(`A subgroup named "${name}" already exists in "${groupName}".`);
-                    return;
+                if (builtinParent && (builtinParent.subgroups || []).some(s => s.name === name)) {
+                    if (!confirm(`"${name}" is already a built-in subgroup in ${parentLabel}. Links you add here will be injected into that subgroup. Use the "Add Link to Subgroup" button on the "${name}" row instead for a cleaner workflow.\n\nContinue anyway?`)) return;
                 }
-                // Warn if the name matches a built-in subgroup (links will be injected into it)
-                const bg = (customLinksBuiltin.groups || []).find(g => g.group === groupName);
-                const isBuiltinSg = bg && (bg.subgroups || []).some(s => s.name === name);
-                if (isBuiltinSg) {
-                    if (!confirm(`"${name}" is already a built-in subgroup in "${groupName}". Links you add here will be injected into that subgroup. Use the "Add Link to Subgroup" button on the "${name}" row instead for a cleaner workflow.\n\nContinue anyway?`)) return;
+
+                // Check for duplicate name in custom data at this level before
+                // creating anything, so a rejected add leaves no empty entries behind
+                const existing = customLinksResolveChain(groupName, parentPath, false);
+                if (existing) {
+                    const existingParent = existing[existing.length - 1];
+                    if ((existingParent.subgroups || []).find(s => s.name === name)) {
+                        alert(`A subgroup named "${name}" already exists in ${parentLabel}.`);
+                        return;
+                    }
                 }
-                cg.subgroups.push({ name, files: [] });
+
+                const chain  = customLinksResolveChain(groupName, parentPath, true);
+                const parent = chain[chain.length - 1];
+                if (!parent.subgroups) parent.subgroups = [];
+                parent.subgroups.push({ name, files: [] });
                 customLinksDirty();
                 form.remove();
                 customLinksRender();
@@ -10880,6 +10973,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         }
 
         /**
+         * True when a group or subgroup node holds at least one link, at any depth.
+         */
+        function customLinksHasContent(node) {
+            if (node.files && node.files.length > 0) return true;
+            return (node.subgroups || []).some(customLinksHasContent);
+        }
+
+        /**
          * Save the current custom links state to /admin/custom-links (PUT).
          */
         async function customLinksSave() {
@@ -10894,9 +10995,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             const builtinNames = new Set((customLinksBuiltin.groups || []).map(g => g.group));
             customLinksData.groups = customLinksData.groups.filter(cg => {
                 if (!builtinNames.has(cg.group)) return true; // keep custom-only groups always
-                const hasFiles = cg.files && cg.files.length > 0;
-                const hasSgs   = cg.subgroups && cg.subgroups.some(sg => sg.files && sg.files.length > 0);
-                return hasFiles || hasSgs;
+                return customLinksHasContent(cg);
             });
 
             try {

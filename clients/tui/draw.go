@@ -596,6 +596,29 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	if u.wheelTunes {
 		wheel = "wheel tune " + formatStep(u.StepHz())
 	}
+	// The three things the operator reads at a glance — where the radio is
+	// pointed, what is being demodulated, and how wide the filter is — each get
+	// their own colour, so none of them has to be picked out of a row of
+	// identically dim text.
+	freqStyle := tcell.StyleDefault.Foreground(tcell.NewRGBColor(255, 200, 80)).Bold(true)
+	modeStyle := tcell.StyleDefault.Foreground(tcell.NewRGBColor(90, 200, 255)).Bold(true)
+	bwStyle := tcell.StyleDefault.Foreground(tcell.NewRGBColor(190, 150, 255))
+
+	// A field is drawn as a sequence of runs so one field can carry more than
+	// one colour, and is measured as the sum of them.
+	type run struct {
+		text  string
+		style tcell.Style
+	}
+	// Fields carry a priority so a narrow terminal sheds the least useful ones
+	// instead of dropping the entire right-hand side — which is what an 80
+	// column window used to do, hiding the frequency and audio state outright.
+	type field struct {
+		runs []run
+		prio int // lower is kept longer
+	}
+	plain := func(text string) []run { return []run{{text, dim}} }
+
 	// The marker has no meaningful position until the first config arrives.
 	vfo := "VFO —"
 	if u.vfo > 0 {
@@ -606,31 +629,36 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 			vfo = formatFreq(u.vfo, span)
 		}
 	}
-	// Fields carry a priority so a narrow terminal sheds the least useful ones
-	// instead of dropping the entire right-hand side — which is what an 80
-	// column window used to do, hiding the frequency and audio state outright.
-	type field struct {
-		text string
-		prio int // lower is kept longer
+	// Only the number is coloured; the label stays dim so the colour marks the
+	// value rather than the whole field.
+	vfoRuns := []run{{vfo, freqStyle}}
+	if rest, ok := strings.CutPrefix(vfo, "VFO "); ok {
+		vfoRuns = []run{{"VFO ", dim}, {rest, freqStyle}}
 	}
-	candidates := []field{
-		{vfo, 0},
-		{fmt.Sprintf("span %s", formatSpan(span)), 2},
-		{fmt.Sprintf("%s %.0f/%.0f dB", scaleMode, u.minDB, u.maxDB), 4},
-		{wheel, 6},
-		{u.mode.String(), 5},
-		{fmt.Sprintf("%3.0f fps", u.fps), 7},
-	}
+
+	// Order here is display order: the mode and filter width follow the
+	// frequency directly, since they qualify it — the rest of the row is
+	// settings, which do not.
+	candidates := []field{{vfoRuns, 0}}
 	if u.audioOn {
 		// The full audio field is wide. Where it will not fit beside the VFO,
 		// a compact form carries the part that matters — what is being
 		// demodulated — rather than the field being shed altogether.
-		audio := u.audioField()
-		if runeLen(vfo)+3+runeLen(audio) > l.W-x-2-runeLen(clock) {
-			audio = u.audioFieldCompact()
+		mode, bw, rest := u.audioParts()
+		audio := []run{{mode, modeStyle}, {" ", dim}, {bw, bwStyle}, {" ", dim}, {rest, dim}}
+		if runeLen(vfo)+3+runeLen(u.audioField()) > l.W-x-2-runeLen(clock) {
+			mode, bw, state := u.audioPartsCompact()
+			audio = []run{{mode, modeStyle}, {" ", dim}, {bw, bwStyle}, {state, dim}}
 		}
 		candidates = append(candidates, field{audio, 1})
 	}
+	candidates = append(candidates,
+		field{plain(fmt.Sprintf("span %s", formatSpan(span))), 2},
+		field{plain(fmt.Sprintf("%s %.0f/%.0f dB", scaleMode, u.minDB, u.maxDB)), 4},
+		field{plain(wheel), 6},
+		field{plain(u.mode.String()), 5},
+		field{plain(fmt.Sprintf("%3.0f fps", u.fps)), 7},
+	)
 
 	// Keep the display order stable while choosing what fits by priority.
 	order := make([]int, len(candidates))
@@ -645,11 +673,18 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	// multi-byte, so byte length would overestimate and push the right-hand
 	// block left over the server name.
 	const sepWidth = 3 // " │ "
+	width := func(f field) int {
+		n := 0
+		for _, r := range f.runs {
+			n += runeLen(r.text)
+		}
+		return n
+	}
 	avail := l.W - x - 2 - runeLen(clock)
 	keep := make([]bool, len(candidates))
 	used := 0
 	for _, idx := range order {
-		cost := runeLen(candidates[idx].text)
+		cost := width(candidates[idx])
 		if used > 0 {
 			cost += sepWidth
 		}
@@ -659,34 +694,32 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 		keep[idx] = true
 		used += cost
 	}
-
-	fields := make([]string, 0, len(candidates))
-	for i, c := range candidates {
-		if keep[i] {
-			fields = append(fields, c.text)
-		}
-	}
-	if len(fields) == 0 {
+	if used == 0 {
 		return
 	}
-	right := strings.Join(fields, " │ ") + " "
 
-	// Draw separators in a dimmer colour than the values themselves.
-	//
 	// Every advance is counted in runes, matching where the block was placed.
 	// Counting bytes here pushed each part further right than the one before it
 	// as soon as any of them held a multi-byte glyph — the em dash in the audio
 	// field alone was enough — and shoved the tail of the header off the screen.
-	cx := l.W - runeLen(right) - runeLen(clock)
-	parts := strings.Split(right, "│")
-	for i, part := range parts {
-		drawText(s, cx, 0, dim, part)
-		cx += runeLen(part)
-		// Between the fields only: drawing one after the last used to put a
-		// stray separator against whatever came next on the row.
-		if i < len(parts)-1 && cx < l.W {
-			drawText(s, cx, 0, sep, "│")
-			cx++
+	// The trailing column keeps the block off the right edge.
+	cx := l.W - used - 1 - runeLen(clock)
+	first := true
+	for i, c := range candidates {
+		if !keep[i] {
+			continue
+		}
+		// Separators are dimmer than the values they divide, and are drawn
+		// between fields only: one after the last used to sit against whatever
+		// came next on the row.
+		if !first {
+			drawText(s, cx, 0, sep, " │ ")
+			cx += sepWidth
+		}
+		first = false
+		for _, r := range c.runs {
+			drawText(s, cx, 0, r.style, r.text)
+			cx += runeLen(r.text)
 		}
 	}
 }
@@ -857,6 +890,14 @@ func (u *UI) dspLabel() string {
 // or the state going from "both" to "muted" — would otherwise shift the whole
 // row sideways on almost every frame.
 func (u *UI) audioField() string {
+	mode, bw, rest := u.audioParts()
+	return mode + " " + bw + " " + rest
+}
+
+// audioParts is audioField split at the seams the header colours: the mode and
+// the filter width are drawn in their own colours beside the frequency, and
+// everything after them — noise reduction, routing, level — stays dim.
+func (u *UI) audioParts() (mode, bw, rest string) {
 	name := strings.ToUpper(u.audioMode)
 	if u.autoSideband && isSideband(u.audioMode) {
 		name += "*" // following the 10 MHz convention automatically
@@ -866,7 +907,7 @@ func (u *UI) audioField() string {
 	// the shading already shows which side they fall on and the audio panel has
 	// the numbers; spelling both out here cost 15 columns and pushed the whole
 	// field off an 80-column terminal.
-	bw := fmt.Sprintf("%.1fk", float64(u.bwHigh-u.bwLow)/1000)
+	width := fmt.Sprintf("%.1fk", float64(u.bwHigh-u.bwLow)/1000)
 
 	// Plain words rather than a speaker emoji: emoji are double-width in most
 	// terminals but count as one rune, so they break the width arithmetic the
@@ -885,12 +926,12 @@ func (u *UI) audioField() string {
 		level = fmt.Sprintf("%5.0f", u.signal.Power)
 	}
 
-	return fmt.Sprintf("%s %s %s %s %s dB",
-		padRunes(name, 4),         // USB*, SAM, NFM
-		padRunes(bw, 5),           // 24.0k
-		padRunes(u.dspLabel(), 4), // NR4, DFNR, off, n/a
-		padRunes(state, 5),        // muted, right
-		level)
+	return padRunes(name, 4), // USB*, SAM, NFM
+		padRunes(width, 5), // 24.0k
+		fmt.Sprintf("%s %s %s dB",
+			padRunes(u.dspLabel(), 4), // NR4, DFNR, off, n/a
+			padRunes(state, 5),        // muted, right
+			level)
 }
 
 // audioFieldCompact is the audio state for a narrow header: the mode and the
@@ -900,14 +941,22 @@ func (u *UI) audioField() string {
 // the d panel and the meter — but nothing else on screen says what is being
 // demodulated, so that is what survives.
 func (u *UI) audioFieldCompact() string {
+	mode, bw, state := u.audioPartsCompact()
+	return mode + " " + bw + state
+}
+
+// audioPartsCompact splits the narrow form the same way audioParts splits the
+// wide one. Exactly one of bw and state is set: a muted channel says so in
+// place of the width, since the filter is not what matters at that moment.
+func (u *UI) audioPartsCompact() (mode, bw, state string) {
 	name := strings.ToUpper(u.audioMode)
 	if u.autoSideband && isSideband(u.audioMode) {
 		name += "*"
 	}
 	if u.muted {
-		return padRunes(name, 4) + " muted"
+		return padRunes(name, 4), "", "muted"
 	}
-	return padRunes(name, 4) + fmt.Sprintf(" %.1fk", float64(u.bwHigh-u.bwLow)/1000)
+	return padRunes(name, 4), fmt.Sprintf("%.1fk", float64(u.bwHigh-u.bwLow)/1000), ""
 }
 
 // columnPeaks reduces the bin array to one value per screen column, taking the

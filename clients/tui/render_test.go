@@ -298,6 +298,67 @@ func TestHeaderShowsPlaceholderBeforeFirstConfig(t *testing.T) {
 	}
 }
 
+// TestHeaderGroupsAndColoursTheTuningFields: the mode and filter width belong
+// beside the frequency — they qualify it — and each of the three carries its
+// own colour so none of them has to be picked out of a row of dim text.
+func TestHeaderGroupsAndColoursTheTuningFields(t *testing.T) {
+	ui, screen := newTestUI(140, 24, ViewSpectrum)
+	ui.audioOn = true
+	ui.vfo = 7_100_000
+	ui.ApplyMode("lsb")
+	ui.signal = Signal{Power: -70, Noise: -110}
+	ui.SetFrame(unwrapFFT(syntheticFrame(1024, 0)), 0, 0)
+	ui.Draw(screen)
+
+	cells, w, _ := screen.GetContents()
+	var header strings.Builder
+	for i := 0; i < w; i++ {
+		r := ' '
+		if runes := cells[i].Runes; len(runes) > 0 && runes[0] != 0 {
+			r = runes[0]
+		}
+		header.WriteRune(r)
+	}
+	got := header.String()
+
+	// Indices are in runes, not bytes: the separator and the state glyph are
+	// multi-byte, so a byte offset would not be the column the cell is in.
+	runes := []rune(got)
+	indexRunes := func(want string) int {
+		return len([]rune(got[:max(strings.Index(got, want), 0)]))
+	}
+
+	// Nothing but the separator may come between the frequency and the mode.
+	if !strings.Contains(got, "7.1000 MHz") || !strings.Contains(got, "LSB") ||
+		!strings.Contains(got, "2.6k") {
+		t.Fatalf("header is missing one of frequency, mode or width: %q", got)
+	}
+	freq, mode, bw := indexRunes("7.1000 MHz"), indexRunes("LSB"), indexRunes("2.6k")
+	if between := string(runes[freq+len("7.1000 MHz") : mode]); between != " │ " {
+		t.Errorf("mode is not beside the frequency; %q sits between them", between)
+	}
+	if bw < mode {
+		t.Errorf("filter width precedes the mode: %q", got)
+	}
+
+	// Each of the three is a colour of its own, and none of them is white:
+	// white is the server name's, and the point is to stand apart from it.
+	fgAt := func(col int) int32 {
+		fg, _, _ := cells[col].Style.Decompose()
+		return fg.Hex()
+	}
+	freqFG, modeFG, bwFG := fgAt(freq), fgAt(mode), fgAt(bw)
+	if freqFG == modeFG || freqFG == bwFG || modeFG == bwFG {
+		t.Errorf("frequency, mode and width share a colour: %06x %06x %06x",
+			freqFG, modeFG, bwFG)
+	}
+	for name, fg := range map[string]int32{"frequency": freqFG, "mode": modeFG, "width": bwFG} {
+		if fg == tcell.ColorWhite.Hex() || fg == tcell.ColorSilver.Hex() {
+			t.Errorf("%s is drawn in white: %06x", name, fg)
+		}
+	}
+}
+
 // TestWaterfallResolvesSubColumns is the regression guard for the original
 // complaint: one value per character cell threw away half the frequency detail
 // the terminal could actually show.

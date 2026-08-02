@@ -7901,6 +7901,53 @@ func (ah *AdminHandler) HandleLoadHourlyHistory(w http.ResponseWriter, r *http.R
 	}
 }
 
+// HandleGPUHistory returns the 60-minute GPU history, one entry per successful
+// poll of the whisper GPU stats endpoint. Empty (not an error) when polling is
+// off or has yet to succeed — the admin UI simply draws no chart.
+func (ah *AdminHandler) HandleGPUHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	history := globalGPUStats.GetHistory()
+
+	response := map[string]interface{}{
+		"history": history,
+		"count":   len(history),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding GPU history: %v", err)
+	}
+}
+
+// HandleGPUHourlyHistory returns the 24-hour GPU history (hour means, plus a
+// partial entry for the hour in progress).
+func (ah *AdminHandler) HandleGPUHourlyHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	history := globalGPUStats.GetHourlyHistory()
+
+	response := map[string]interface{}{
+		"history": history,
+		"count":   len(history),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding GPU hourly history: %v", err)
+	}
+}
+
 // LookupIP performs a GeoIP lookup for the given IP address (with reverse DNS).
 // Returns nil if the GeoIP service is not available or the lookup fails.
 func (ah *AdminHandler) LookupIP(ip string) (*GeoIPResult, error) {

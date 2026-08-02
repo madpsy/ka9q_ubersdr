@@ -1897,6 +1897,26 @@
                         <div id="gpuStatsDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
                             <!-- Populated by JavaScript from /admin/system-load -->
                         </div>
+
+                        <!-- Historical tracking chart - 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 60 Minutes)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="gpuHistoryCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Historical tracking chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 24 Hours)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="gpuHourlyCanvas"></canvas>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- QRZ Callsign Lookup Stats Section (static container for charts; only shown when lookups are enabled) -->
@@ -18669,6 +18689,8 @@ const tooltipLine2 = timeStr;
         let lookupStatsHourlyChart = null;
         let ntpHistoryChart = null;
         let ntpHourlyChart = null;
+        let gpuHistoryChart = null;
+        let gpuHourlyChart = null;
 
         async function loadFrontendHistory() {
             try {
@@ -21450,6 +21472,120 @@ const tooltipLine2 = timeStr;
                 </div>`;
 
             display.innerHTML = html;
+
+            // Charts refresh themselves on each monitor poll; failures here must
+            // not take out the stats above, which have already rendered.
+            loadGPUHistory().catch(err => console.log('GPU history unavailable:', err));
+        }
+
+        // Build the dataset list shared by both GPU charts. Utilisation, memory
+        // and fan are percentages on the left axis; temperature gets its own
+        // right-hand axis. spanGaps keeps a line continuous across nulls, which
+        // is how a metric the card does not report is encoded.
+        function gpuChartDatasets(history) {
+            const pick = (key) => history.map(e => (typeof e[key] === 'number' ? e[key] : null));
+            return [
+                { label: 'GPU util', data: pick('utilization_gpu'), borderColor: '#667eea',
+                  backgroundColor: 'rgba(102, 126, 234, 0.1)', yAxisID: 'y' },
+                { label: 'Memory used', data: pick('memory_used_percent'), borderColor: '#f093fb',
+                  backgroundColor: 'rgba(240, 147, 251, 0.1)', yAxisID: 'y' },
+                { label: 'Fan', data: pick('fan_speed'), borderColor: '#17a2b8',
+                  backgroundColor: 'rgba(23, 162, 184, 0.1)', yAxisID: 'y' },
+                { label: 'Temp', data: pick('temperature_c'), borderColor: '#dc3545',
+                  backgroundColor: 'rgba(220, 53, 69, 0.1)', yAxisID: 'y2' },
+            ].map(ds => ({ ...ds, borderWidth: 2, pointRadius: 2, tension: 0.3, spanGaps: true }));
+        }
+
+        function gpuChartOptions(timeUnit) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: true, position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) { label += ': '; }
+                                if (context.parsed.y === null) return label + 'n/a';
+                                return label + (context.dataset.yAxisID === 'y2'
+                                    ? context.parsed.y.toFixed(0) + ' °C'
+                                    : context.parsed.y.toFixed(1) + ' %');
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: timeUnit,
+                            displayFormats: { minute: 'HH:mm', hour: 'HH:mm' },
+                            tooltipFormat: timeUnit === 'hour' ? 'MMM d HH:mm' : 'HH:mm:ss'
+                        },
+                        ticks: { source: 'data' },
+                        bounds: 'data',
+                        offset: false,
+                        title: { display: true, text: 'Time' }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Percent (%)' },
+                        beginAtZero: true,
+                        max: 100
+                    },
+                    y2: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Temp (°C)', color: '#dc3545' },
+                        beginAtZero: true,
+                        ticks: { color: '#dc3545', callback: (v) => v + '°C' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            };
+        }
+
+        // Fetch and draw the two GPU history charts (60 minutes / 24 hours),
+        // mirroring loadLoadHistory. Both series come from the in-memory tracker
+        // fed by the once-a-minute GPU stats poll, so they start empty after a
+        // restart and fill in from there.
+        async function loadGPUHistory() {
+            const draw = async (url, canvasId, chart, timeUnit) => {
+                const response = await authenticatedFetch(url);
+                if (!response || !response.ok) return chart;
+
+                const data = await response.json();
+                const history = data.history || [];
+                if (history.length === 0) return chart;
+
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return chart;
+
+                const labels = history.map(e => new Date(e.timestamp));
+                const datasets = gpuChartDatasets(history);
+
+                if (!chart) {
+                    return new Chart(canvas.getContext('2d'), {
+                        type: 'line',
+                        data: { labels: labels, datasets: datasets },
+                        options: gpuChartOptions(timeUnit)
+                    });
+                }
+
+                chart.data.labels = labels;
+                chart.data.datasets.forEach((ds, i) => { ds.data = datasets[i].data; });
+                chart.update('none');
+                return chart;
+            };
+
+            gpuHistoryChart = await draw('/admin/gpu-history', 'gpuHistoryCanvas', gpuHistoryChart, 'minute');
+            gpuHourlyChart = await draw('/admin/gpu-hourly-history', 'gpuHourlyCanvas', gpuHourlyChart, 'hour');
         }
 
         // Render the NTP history section — mirrors renderSystemLoadHealth pattern exactly.

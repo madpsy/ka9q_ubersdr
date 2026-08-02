@@ -2937,6 +2937,8 @@ func main() {
 	http.HandleFunc("/admin/system-load", adminHandler.AuthMiddleware(adminHandler.HandleSystemLoad))
 	http.HandleFunc("/admin/load-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHistory))
 	http.HandleFunc("/admin/load-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHourlyHistory))
+	http.HandleFunc("/admin/gpu-history", adminHandler.AuthMiddleware(adminHandler.HandleGPUHistory))
+	http.HandleFunc("/admin/gpu-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleGPUHourlyHistory))
 	http.HandleFunc("/admin/ntp-history", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNTPHistory(w, r)
 	}))

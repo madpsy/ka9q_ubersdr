@@ -51,9 +51,10 @@ type WhisperConfig struct {
 	InstanceUUID      string
 	LibreTranslateURL string
 	SummaryURL        string
-	TargetLanguage    string // Target language for translation (from frontend)
-	Task              string // WhisperLive task: "transcribe" or "translate" (empty = "translate")
-	ASRLanguage       string // Language Whisper decodes with (empty = auto-detect)
+	TargetLanguage    string  // Target language for translation (from frontend)
+	Task              string  // WhisperLive task: "transcribe" or "translate" (empty = "translate")
+	ASRLanguage       string  // Language Whisper decodes with (empty = auto-detect)
+	VADThreshold      float64 // VAD speech probability threshold, 0 = VAD disabled
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -303,21 +304,30 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		language = d.config.ASRLanguage
 	}
 
+	// VAD is off unless whisper.vad_threshold is set to a non-zero probability.
+	// Silero VAD is trained on clean wideband speech and readily gates out weak
+	// or noisy narrowband HF audio, so leaving it off means every chunk reaches
+	// Whisper.  When enabled, the configured value is the speech threshold.
+	useVAD := d.config.VADThreshold > 0
+
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
 		"language":              language,
 		"task":                  task,
 		"model":                 d.config.Model,
-		"use_vad":               true,
+		"use_vad":               useVAD,
 		"send_last_n_segments":  1, // Only send current segment, not previous ones
 		"no_speech_thresh":      0.45,
 		"clip_audio":            false,
 		"same_output_threshold": 10,
-		"vad_parameters": map[string]interface{}{
-			"max_speech_duration_s":   15.0, // Force segment breaks every 15 seconds (default: 30)
-			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)
-			"threshold":               0.5,  // Speech detection threshold (default: 0.5)
-		},
+	}
+
+	if useVAD {
+		configMsg["vad_parameters"] = map[string]interface{}{
+			"max_speech_duration_s":   15.0,                  // Force segment breaks every 15 seconds (default: 30)
+			"min_silence_duration_ms": 160,                   // Minimum silence to detect pause (default: 160)
+			"threshold":               d.config.VADThreshold, // Speech detection threshold (WhisperLive default: 0.5)
+		}
 	}
 
 	// Add initial_prompt if configured
@@ -338,8 +348,12 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	if d.config.ASRLanguage != "" {
 		langDesc = d.config.ASRLanguage
 	}
-	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s)",
-		d.config.ServerURL, d.clientUID, d.config.Model, langDesc, task)
+	vadDesc := "off"
+	if useVAD {
+		vadDesc = fmt.Sprintf("%.2f", d.config.VADThreshold)
+	}
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s, vad: %s)",
+		d.config.ServerURL, d.clientUID, d.config.Model, langDesc, task, vadDesc)
 
 	return nil
 }

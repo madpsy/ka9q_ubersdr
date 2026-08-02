@@ -1682,6 +1682,7 @@ func main() {
 		SummaryURL:        config.Whisper.SummaryURL,
 		Task:              config.Whisper.Task,
 		ASRLanguage:       config.Whisper.ASRLanguage,
+		VADThreshold:      config.Whisper.VADThreshold,
 		AllowClientParams: config.Whisper.AllowClientParams,
 
 		TrustedContainersOnly: config.Whisper.TrustedContainersOnly,

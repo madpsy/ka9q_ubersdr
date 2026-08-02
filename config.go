@@ -745,6 +745,14 @@ type WhisperConfig struct {
 	// which selects the LibreTranslate output language.
 	ASRLanguage string `yaml:"asr_language"`
 
+	// VADThreshold sets WhisperLive's voice-activity-detection speech probability
+	// threshold (0.0–1.0).  0 (the default) turns VAD off entirely — use_vad is
+	// not sent and every audio chunk is decoded.  VAD is tuned for clean
+	// wideband speech and tends to gate out weak or noisy narrowband HF audio,
+	// so it is opt-in here.  A typical value when enabling it is 0.5; higher
+	// values require more confident speech before audio is passed to Whisper.
+	VADThreshold float64 `yaml:"vad_threshold"`
+
 	// AllowClientParams permits clients to override initial_prompt, task and
 	// asr_language per attach.  Off by default: on a public instance this lets
 	// any listener steer the prompt sent to a shared upstream WhisperLive server.
@@ -923,6 +931,14 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Whisper.TrustedContainers = []string{"voiceskimmer"}
 	}
 	config.Server.whisperResolveNames = config.Whisper.TrustedContainers
+
+	// whisper.vad_threshold is a probability: 0 = VAD off (the default), and
+	// anything outside 0..1 is meaningless to WhisperLive.  Clamp rather than
+	// fail so a typo cannot stop the server starting.
+	if config.Whisper.VADThreshold < 0 || config.Whisper.VADThreshold > 1 {
+		log.Printf("Warning: whisper.vad_threshold %.3f out of range 0.0-1.0, disabling VAD", config.Whisper.VADThreshold)
+		config.Whisper.VADThreshold = 0
+	}
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)

@@ -135,6 +135,13 @@ ws.onmessage = (event) => {
 | `model` | string | `base` | Whisper model: tiny, base, small, medium, large |
 | `language` | string | `en` | LibreTranslate **output** language — not the recognition language |
 | `send_interval_ms` | number | 100 | Audio send interval in milliseconds |
+| `vad_threshold` | number | `0` (off) | Silero VAD speech-probability threshold, 0.0–1.0. `0` disables VAD (`use_vad: false`); any non-zero value enables it and is used as the threshold |
+
+VAD is off by default because Silero is trained on clean wideband speech and
+gates out weak or noisy narrowband HF audio — exactly the signals worth
+transcribing. Enable it (0.5 is the Silero default) only for strong, clean
+audio where skipping silence upstream is worth the risk. Out-of-range values
+are clamped to `0` with a warning at startup.
 
 ### Per-attach recognition parameters
 

@@ -67,6 +67,7 @@ type ConfigProvider struct {
 	SummaryURL        string
 	Task              string
 	ASRLanguage       string
+	VADThreshold      float64
 	AllowClientParams bool
 
 	// TrustedContainersOnly rejects every attach that does not come from a
@@ -166,6 +167,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			TargetLanguage:    "en", // Default to English
 			Task:              GlobalConfigProvider.Task,
 			ASRLanguage:       GlobalConfigProvider.ASRLanguage,
+			VADThreshold:      GlobalConfigProvider.VADThreshold,
 		}
 		allowClientParams = GlobalConfigProvider.AllowClientParams || isTrusted
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")

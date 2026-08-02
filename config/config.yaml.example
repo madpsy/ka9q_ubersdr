@@ -2028,6 +2028,18 @@ whisper:
   # Default: "" (auto-detect)
   asr_language: ""
 
+  # Voice activity detection threshold, 0.0-1.0 (default: 0 = VAD off)
+  # 0 disables VAD entirely: use_vad is not sent to WhisperLive and every audio
+  # chunk is decoded. Any non-zero value enables VAD and is used as the Silero
+  # speech-probability threshold.
+  # Silero VAD is trained on clean wideband speech and readily discards weak or
+  # noisy narrowband HF audio, so on an HF receiver it tends to gate out exactly
+  # the signals you want transcribed — hence off by default. Enable it (0.5 is
+  # the Silero default, and a sensible starting point) if you are transcribing
+  # strong, clean audio and want to save upstream decode time on silence; raise
+  # it towards 1.0 to require more confident speech before audio is passed on.
+  vad_threshold: 0
+
   # Allow clients to override initial_prompt, task and asr_language per attach
   # (default: false)
   # When false, an attach carrying any of those parameters is rejected.

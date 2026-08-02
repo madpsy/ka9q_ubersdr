@@ -5248,6 +5248,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         content.appendChild(haDashboardInfoDiv);
                     }
 
+                    // Point the whisper section at the self-hosted server project.
+                    // The defaults here are a shared public server, so operators
+                    // need to know a local one is an option and what it costs.
+                    if (section === 'whisper') {
+                        const whisperInfoDiv = document.createElement('div');
+                        whisperInfoDiv.className = 'alert alert-info';
+                        whisperInfoDiv.style.marginBottom = '15px';
+                        whisperInfoDiv.innerHTML = 'ℹ️ A local Whisper server can be installed — see ' +
+                            '<a href="https://github.com/madpsy/ubersdr-whisper" target="_blank" rel="noopener" style="color: #0c5460; font-weight: bold; text-decoration: underline;">ubersdr-whisper</a>. ' +
+                            'An NVIDIA GPU with Tensor Cores is recommended, with a minimum of 4 GB VRAM. ' +
+                            'Follow the installation instructions, then update the config values below with the ones it outputs. ' +
+                            'The Whisper server can run on a different machine to UberSDR, as long as the two have network connectivity.';
+                        content.appendChild(whisperInfoDiv);
+                    }
+
                     // Add "Setup Rotator" button for rotctl section
                     if (section === 'rotctl') {
                         const setupButtonDiv = document.createElement('div');
@@ -21458,8 +21473,8 @@ const tooltipLine2 = timeStr;
                     </div>`;
             });
 
-            // Staleness footer. The server polls once a minute, so an age well
-            // past 60 s means the endpoint has gone quiet.
+            // Staleness footer. The server polls every 10 s while the endpoint
+            // is answering, so an age past a minute means it has gone quiet.
             const age = typeof systemLoad.gpu_age_seconds === 'number' ? systemLoad.gpu_age_seconds : null;
 
             html += `
@@ -21553,8 +21568,8 @@ const tooltipLine2 = timeStr;
 
         // Fetch and draw the two GPU history charts (60 minutes / 24 hours),
         // mirroring loadLoadHistory. Both series come from the in-memory tracker
-        // fed by the once-a-minute GPU stats poll, so they start empty after a
-        // restart and fill in from there.
+        // fed by the GPU stats poller (minute means over that minute's polls),
+        // so they start empty after a restart and fill in from there.
         async function loadGPUHistory() {
             const draw = async (url, canvasId, chart, timeUnit) => {
                 const response = await authenticatedFetch(url);

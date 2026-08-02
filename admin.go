@@ -7901,9 +7901,10 @@ func (ah *AdminHandler) HandleLoadHourlyHistory(w http.ResponseWriter, r *http.R
 	}
 }
 
-// HandleGPUHistory returns the 60-minute GPU history, one entry per successful
-// poll of the whisper GPU stats endpoint. Empty (not an error) when polling is
-// off or has yet to succeed — the admin UI simply draws no chart.
+// HandleGPUHistory returns the 60-minute GPU history: one entry per minute,
+// averaged over that minute's polls of the whisper GPU stats endpoint. Empty
+// (not an error) when polling is off or has yet to succeed — the admin UI simply
+// draws no chart.
 func (ah *AdminHandler) HandleGPUHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

@@ -9,8 +9,10 @@ package main
 // or OpenVINO box, so failures are never logged — GetGPUStats simply reports
 // nothing available. Only 200 responses are parsed.
 //
-// Nothing consumes this yet; it exists so the data (parsed and raw) is on hand
-// for the admin UI / API / MCP later.
+// The poll rate adapts: 10 s while the endpoint is answering (worth the detail,
+// since it is what the graphs are made of), backing off to 60 s the moment it
+// stops. A host with no GPU stats service therefore costs one request a minute
+// forever, while a working one is sampled finely.
 
 import (
 	"context"
@@ -27,8 +29,13 @@ import (
 // config. Set the key to "" to disable polling entirely.
 const DefaultWhisperGPUStatsURL = "http://localhost:8568/gpu"
 
-// gpuStatsPollInterval is how often the endpoint is polled.
-const gpuStatsPollInterval = 1 * time.Minute
+// Poll intervals. The fast rate applies after a 200, the slow rate after any
+// failure, so an endpoint that is not there is barely touched while a live one
+// gives six samples a minute to average over.
+const (
+	gpuStatsFastInterval = 10 * time.Second
+	gpuStatsSlowInterval = 1 * time.Minute
+)
 
 // gpuStatsMaxBody caps the response body read. The payload is a few hundred
 // bytes per GPU; 1 MB is a generous ceiling that still bounds a misbehaving
@@ -102,16 +109,14 @@ type GPUStatsMonitor struct {
 	raw       json.RawMessage
 	fetchedAt time.Time
 
-	// In-memory history, same shape as LoadHistoryTracker: minute entries for
-	// the 60-minute chart, hour means for the 24-hour chart. Nothing is
-	// persisted — a restart legitimately starts the graphs over.
-	//
-	// There is no separate sample tier here: the poller runs once a minute, so
-	// each successful fetch IS the minute entry. Polling faster purely to
-	// average samples would hammer someone else's box for no real gain.
+	// In-memory history, same three tiers as LoadHistoryTracker: raw samples for
+	// the minute in progress, minute means for the 60-minute chart, hour means
+	// for the 24-hour chart. Nothing is persisted — a restart legitimately
+	// starts the graphs over.
 	historyMu     sync.RWMutex
-	history       []GPUHistoryEntry // up to 60 minute entries
-	hourlyHistory []GPUHistoryEntry // up to 24 hour entries
+	samples       []GPUHistoryEntry // this minute's polls (6 at the fast rate)
+	history       []GPUHistoryEntry // up to 60 minute means
+	hourlyHistory []GPUHistoryEntry // up to 24 hour means
 }
 
 // GPUHistoryEntry is one minute (or one hour) of GPU metrics, averaged across
@@ -130,8 +135,11 @@ type GPUHistoryEntry struct {
 }
 
 // gpuHistoryMinutes / gpuHistoryHours bound the two rings, matching the system
-// load charts: 60 minutes and 24 hours.
+// load charts: 60 minutes and 24 hours. gpuHistorySamples is a safety cap on
+// the in-progress minute — the fast rate yields 6, so anything near this ceiling
+// means aggregation has stalled.
 const (
+	gpuHistorySamples = 60
 	gpuHistoryMinutes = 60
 	gpuHistoryHours   = 24
 )
@@ -158,18 +166,41 @@ func NewGPUStatsMonitor(url string) *GPUStatsMonitor {
 	}
 }
 
-// Start fetches once immediately and then every gpuStatsPollInterval.
+// Start fetches once immediately and then keeps polling, at the fast rate while
+// the endpoint answers and the slow rate while it does not.
 func (g *GPUStatsMonitor) Start() {
 	if g == nil {
 		return
 	}
 
-	log.Printf("Starting whisper GPU stats poller (%s, every %s)", g.url, gpuStatsPollInterval)
+	log.Printf("Starting whisper GPU stats poller (%s, every %s while answering, %s otherwise)",
+		g.url, gpuStatsFastInterval, gpuStatsSlowInterval)
 
 	go func() {
-		g.fetch()
+		timer := time.NewTimer(0)
+		defer timer.Stop()
 
-		ticker := time.NewTicker(gpuStatsPollInterval)
+		for {
+			select {
+			case <-g.ctx.Done():
+				return
+			case <-timer.C:
+			}
+
+			// Rate follows the last outcome: a 200 earns the fast rate, anything
+			// else drops straight back to the slow one. No hysteresis — a single
+			// good response is enough to resume detailed sampling.
+			if g.fetch() {
+				timer.Reset(gpuStatsFastInterval)
+			} else {
+				timer.Reset(gpuStatsSlowInterval)
+			}
+		}
+	}()
+
+	// Fold this minute's samples into a minute mean, every minute.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
 		for {
@@ -177,7 +208,7 @@ func (g *GPUStatsMonitor) Start() {
 			case <-g.ctx.Done():
 				return
 			case <-ticker.C:
-				g.fetch()
+				g.aggregateMinute()
 			}
 		}
 	}()
@@ -206,36 +237,36 @@ func (g *GPUStatsMonitor) Stop() {
 	g.cancel()
 }
 
-// fetch retrieves one sample. Every failure path is silent by design: the
-// endpoint is optional and a noisy log every minute on a CPU-only host would be
-// worse than useless. The previous sample is left untouched on failure and ages
-// out via gpuStatsMaxAge.
-func (g *GPUStatsMonitor) fetch() {
+// fetch retrieves one sample and reports whether it was usable, which is what
+// drives the poll rate. Every failure path is silent by design: the endpoint is
+// optional and a noisy log on a CPU-only host would be worse than useless. The
+// previous sample is left untouched on failure and ages out via gpuStatsMaxAge.
+func (g *GPUStatsMonitor) fetch() bool {
 	req, err := http.NewRequestWithContext(g.ctx, http.MethodGet, g.url, nil)
 	if err != nil {
-		return
+		return false
 	}
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
 	// Anything other than 200 is not a payload — don't parse it.
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, gpuStatsMaxBody))
-		return
+		return false
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, gpuStatsMaxBody))
 	if err != nil {
-		return
+		return false
 	}
 
 	var stats GPUStats
 	if err := json.Unmarshal(body, &stats); err != nil {
-		return
+		return false
 	}
 
 	now := time.Now()
@@ -246,13 +277,14 @@ func (g *GPUStatsMonitor) fetch() {
 	g.fetchedAt = now
 	g.mu.Unlock()
 
-	g.recordHistory(&stats, now)
+	g.recordSample(&stats, now)
+	return true
 }
 
-// recordHistory appends one minute entry, averaging each metric across the GPUs
-// that reported it. A single-GPU host — the normal case — therefore charts that
-// GPU's own numbers.
-func (g *GPUStatsMonitor) recordHistory(stats *GPUStats, at time.Time) {
+// recordSample adds one poll to the minute in progress, averaging each metric
+// across the GPUs that reported it. A single-GPU host — the normal case —
+// therefore charts that GPU's own numbers.
+func (g *GPUStatsMonitor) recordSample(stats *GPUStats, at time.Time) {
 	if len(stats.GPUs) == 0 {
 		return
 	}
@@ -285,6 +317,25 @@ func (g *GPUStatsMonitor) recordHistory(stats *GPUStats, at time.Time) {
 
 	g.historyMu.Lock()
 	defer g.historyMu.Unlock()
+
+	g.samples = append(g.samples, entry)
+	if len(g.samples) > gpuHistorySamples {
+		g.samples = g.samples[len(g.samples)-gpuHistorySamples:]
+	}
+}
+
+// aggregateMinute folds this minute's samples into one minute mean and clears
+// them. A minute in which every poll failed contributes no entry at all, so the
+// charts show a gap rather than a flat line through an outage.
+func (g *GPUStatsMonitor) aggregateMinute() {
+	g.historyMu.Lock()
+	defer g.historyMu.Unlock()
+
+	entry, ok := meanOfEntries(g.samples, time.Now())
+	if !ok {
+		return
+	}
+	g.samples = g.samples[:0]
 
 	g.history = append(g.history, entry)
 	if len(g.history) > gpuHistoryMinutes {
@@ -365,7 +416,9 @@ func meanOfEntries(entries []GPUHistoryEntry, at time.Time) (GPUHistoryEntry, bo
 	}, true
 }
 
-// GetHistory returns up to 60 minute entries, oldest first.
+// GetHistory returns up to 60 minute entries, oldest first, plus a partial entry
+// for the minute in progress. Without the partial entry the 60-minute chart
+// would stay empty for the first minute after a restart.
 func (g *GPUStatsMonitor) GetHistory() []GPUHistoryEntry {
 	if g == nil {
 		return nil
@@ -378,13 +431,21 @@ func (g *GPUStatsMonitor) GetHistory() []GPUHistoryEntry {
 	// contents is enough — no deep copy of the pointer fields is needed.
 	out := make([]GPUHistoryEntry, len(g.history))
 	copy(out, g.history)
+
+	if partial, ok := meanOfEntries(g.samples, time.Now()); ok {
+		out = append(out, partial)
+		if len(out) > gpuHistoryMinutes {
+			out = out[len(out)-gpuHistoryMinutes:]
+		}
+	}
+
 	return out
 }
 
 // GetHourlyHistory returns up to 24 hour entries, oldest first, with a partial
-// entry for the hour in progress appended from the retained minute data. The
-// partial entry is what makes the 24-hour chart show something before the
-// server has been up a full hour.
+// entry for the hour in progress appended from the retained minute data (plus
+// the minute still being collected). The partial entry is what makes the
+// 24-hour chart show something before the server has been up a full hour.
 func (g *GPUStatsMonitor) GetHourlyHistory() []GPUHistoryEntry {
 	if g == nil {
 		return nil
@@ -396,7 +457,15 @@ func (g *GPUStatsMonitor) GetHourlyHistory() []GPUHistoryEntry {
 	out := make([]GPUHistoryEntry, len(g.hourlyHistory))
 	copy(out, g.hourlyHistory)
 
-	if partial, ok := meanOfEntries(g.history, time.Now()); ok {
+	// Mean over complete minutes plus the in-progress one. Weighting every
+	// minute equally is what the completed-hour rollup does too, so the partial
+	// entry does not jump when it is finalised.
+	partialSource := g.history
+	if partial, ok := meanOfEntries(g.samples, time.Now()); ok {
+		partialSource = append(append([]GPUHistoryEntry(nil), g.history...), partial)
+	}
+
+	if partial, ok := meanOfEntries(partialSource, time.Now()); ok {
 		out = append(out, partial)
 		if len(out) > gpuHistoryHours {
 			out = out[len(out)-gpuHistoryHours:]

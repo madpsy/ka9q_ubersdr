@@ -325,6 +325,11 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 		binary.BigEndian.PutUint32(msg[5:9], uint32(d.mode.ImgWidth))
 		copy(msg[9:], lineData)
 
+		// Non-blocking, unlike the redraw path: these lines are emitted one per
+		// line time (~278 ms for Scottie S2) from inside the real-time
+		// demodulation loop, so they never fill the channel, and blocking here
+		// would stall consumption of the PCM buffer while the audio feed keeps
+		// writing into it.
 		select {
 		case resultChan <- msg:
 		default:
@@ -358,18 +363,34 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 		log.Printf("[SSTV] Redrawing with corrected parameters: rate=%.1f Hz, skip=%d", adjustedRate, adjustedSkip)
 
 		// Redraw from stored luminance with corrected parameters
-		correctedPixels := d.videoDemod.RedrawFromLuminance(adjustedRate, adjustedSkip)
+		correctedPixels, linesReceived := d.videoDemod.RedrawFromLuminance(adjustedRate, adjustedSkip)
+
+		// Nothing arrived, so there is nothing to realign - leave the frame as it
+		// stands rather than repainting it from samples that were never captured.
+		if linesReceived <= 0 {
+			log.Printf("[SSTV] No lines received, skipping slant correction redraw")
+			d.sendStatus(resultChan, "Slant correction skipped - no lines received")
+			return nil
+		}
 
 		// Signal that corrected image is coming
 		log.Printf("[SSTV] Sending redraw start message to frontend")
 		d.sendRedrawStart(resultChan)
 
-		// Send corrected image data
-		log.Printf("[SSTV] Sending %d corrected image lines...", d.mode.NumLines)
+		// Send only the lines the signal actually delivered. A transmission that
+		// faded or stopped early leaves the rest of the frame blank, and those
+		// rows have no samples to redraw from - sending them would paint the blank
+		// tail black on RGB/GBR modes and bright green on YUV ones (Robot, PD),
+		// because an all-zero YUV pixel converts to (0,132,0).
+		log.Printf("[SSTV] Sending %d of %d corrected image lines...", linesReceived, d.mode.NumLines)
 		startTime := time.Now()
-		d.sendImageData(resultChan, correctedPixels)
+		d.sendImageData(resultChan, correctedPixels, linesReceived)
 		elapsed := time.Since(startTime)
 		log.Printf("[SSTV] Corrected image sent in %v", elapsed)
+
+		if linesReceived < d.mode.NumLines {
+			d.sendStatus(resultChan, fmt.Sprintf("Aligned - signal ended after %d lines", linesReceived))
+		}
 
 		// Send final completion
 		log.Printf("[SSTV] Sending final completion message")
@@ -388,6 +409,31 @@ func (d *SSTVDecoder) decodeFSKID(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 
 	if callsign != "" {
 		d.sendFSKID(resultChan, callsign)
+	}
+}
+
+// send delivers a message to the client, waiting for room in the result channel
+// rather than discarding the message when it is full.
+//
+// The result channel is 100 deep (audio_extension_manager.go) and is drained one
+// WebSocket frame at a time, under a mutex shared with the live audio and
+// spectrum streams. The slant-correction redraw emits a whole frame as one
+// message per image line - 256 for Scottie S2, 616 for PD-290 - in a tight loop
+// that finishes long before the consumer is scheduled. Dropping on a full
+// channel therefore threw away every line past the first 100, and the browser
+// kept the uncorrected progressive image for the rest: a picture aligned at the
+// top, a seam part-way down, and the original slant below it. That reads as a
+// half-applied correction, but the redraw itself was fine - the lines never
+// reached the client.
+//
+// Everything routed through here is produced after demodulation has finished,
+// so there is no real-time deadline and blocking costs nothing. stopChan keeps
+// it bounded: it is closed by Stop() before the manager closes the result
+// channel, so a send can never outlive the decoder.
+func (d *SSTVDecoder) send(resultChan chan<- []byte, msg []byte) {
+	select {
+	case resultChan <- msg:
+	case <-d.stopChan:
 	}
 }
 
@@ -413,10 +459,7 @@ func (d *SSTVDecoder) sendImageStart(resultChan chan<- []byte) {
 	binary.BigEndian.PutUint32(msg[1:5], uint32(m.ImgWidth))
 	binary.BigEndian.PutUint32(msg[5:9], uint32(m.NumLines))
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	d.send(resultChan, msg)
 }
 
 // sendModeDetected sends mode detection message
@@ -430,10 +473,7 @@ func (d *SSTVDecoder) sendModeDetected(resultChan chan<- []byte, modeIdx uint8) 
 	msg[3] = uint8(len(nameBytes))
 	copy(msg[4:], nameBytes)
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	d.send(resultChan, msg)
 }
 
 // sendStatus sends a status update message
@@ -446,17 +486,20 @@ func (d *SSTVDecoder) sendStatus(resultChan chan<- []byte, status string) {
 	binary.BigEndian.PutUint16(msg[2:4], uint16(len(statusBytes)))
 	copy(msg[4:], statusBytes)
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	d.send(resultChan, msg)
 }
 
-// sendImageData sends image data line by line
-func (d *SSTVDecoder) sendImageData(resultChan chan<- []byte, pixels []uint8) {
+// sendImageData sends the first numLines rows of the image, line by line.
+// Rows beyond numLines were never received and are deliberately not sent, so
+// whatever the client already has for them is left in place.
+func (d *SSTVDecoder) sendImageData(resultChan chan<- []byte, pixels []uint8, numLines int) {
 	m := d.mode
 
-	for y := 0; y < m.NumLines; y++ {
+	if numLines > m.NumLines {
+		numLines = m.NumLines
+	}
+
+	for y := 0; y < numLines; y++ {
 		// Extract line data
 		lineOffset := y * m.ImgWidth * 3
 		lineData := pixels[lineOffset : lineOffset+m.ImgWidth*3]
@@ -468,11 +511,7 @@ func (d *SSTVDecoder) sendImageData(resultChan chan<- []byte, pixels []uint8) {
 		binary.BigEndian.PutUint32(msg[5:9], uint32(m.ImgWidth))
 		copy(msg[9:], lineData)
 
-		select {
-		case resultChan <- msg:
-		default:
-			// Channel full, skip this line
-		}
+		d.send(resultChan, msg)
 	}
 }
 
@@ -485,10 +524,7 @@ func (d *SSTVDecoder) sendFSKID(resultChan chan<- []byte, callsign string) {
 	msg[1] = uint8(len(callsignBytes))
 	copy(msg[2:], callsignBytes)
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	d.send(resultChan, msg)
 }
 
 // sendComplete sends completion message
@@ -497,10 +533,11 @@ func (d *SSTVDecoder) sendComplete(resultChan chan<- []byte) {
 	msg[0] = MsgTypeComplete
 	binary.BigEndian.PutUint32(msg[1:5], uint32(d.mode.NumLines))
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	// Follows the redraw burst immediately, so this was the message most likely
+	// to be dropped. The frontend clears its isRedrawing flag here; without it
+	// the next transmission is merged into the current image rather than
+	// starting a new one.
+	d.send(resultChan, msg)
 }
 
 // sendRedrawStart signals that corrected image redraw is starting
@@ -508,10 +545,7 @@ func (d *SSTVDecoder) sendRedrawStart(resultChan chan<- []byte) {
 	msg := make([]byte, 1)
 	msg[0] = MsgTypeRedrawStart
 
-	select {
-	case resultChan <- msg:
-	default:
-	}
+	d.send(resultChan, msg)
 
 	log.Printf("[SSTV] Sent redraw start signal")
 }
@@ -529,6 +563,10 @@ func (d *SSTVDecoder) sendToneFreq(resultChan chan<- []byte, freq float64) {
 	msg[3] = byte(freqTimes10 >> 8)
 	msg[4] = byte(freqTimes10)
 
+	// Deliberately still non-blocking: this is a live readout emitted on every
+	// VIS detection pass, from the audio-feeding loop. A stale reading is worth
+	// nothing, so dropping it is correct - and blocking here would stall audio
+	// ingestion for the sake of a number that is about to be superseded.
 	select {
 	case resultChan <- msg:
 	default:

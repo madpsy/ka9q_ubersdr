@@ -63,6 +63,26 @@ type ModeSpec struct {
 	LineHeight  int           // Height of one scanline in pixels (1 or 2)
 	ColorEnc    ColorEncoding // Color format
 	Unsupported bool          // Whether this mode is supported
+
+	// PDFormat marks the PD family. One PD radio frame carries four channels -
+	// Y(odd), R-Y, B-Y, Y(even) - and so covers TWO image lines, which makes
+	// LineTime the duration of that whole frame rather than of one scanline.
+	// A picture is therefore NumLines/2 frames long, not NumLines.
+	//
+	// This must be stated, never inferred from the image size. It used to be
+	// derived from ImgWidth >= 512, which silently excluded PD-50 and PD-90:
+	// both are 320 px wide, the same as the Robot modes the width test exists to
+	// separate out. Verified against the timings themselves - for every PD mode
+	// SyncTime + PorchTime + 4*(PixelTime*ImgWidth) == LineTime exactly.
+	PDFormat bool
+}
+
+// FrameLines returns the number of image lines carried by one radio frame.
+func (m *ModeSpec) FrameLines() int {
+	if m.PDFormat {
+		return 2
+	}
+	return 1
 }
 
 // ModeSpecs contains all mode specifications (indexed by mode constant)
@@ -281,6 +301,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   256,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 15: PD-90
@@ -296,6 +317,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   256,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 16: PD-120
@@ -311,6 +333,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   496,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 17: PD-160
@@ -326,6 +349,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   400,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 18: PD-180
@@ -341,6 +365,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   496,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 19: PD-240
@@ -356,6 +381,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   496,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 20: PD-290
@@ -371,6 +397,7 @@ var ModeSpecs = []ModeSpec{
 		NumLines:   616,
 		LineHeight: 1,
 		ColorEnc:   ColorYUV,
+		PDFormat:   true,
 	},
 
 	// 21: Pasokon P3

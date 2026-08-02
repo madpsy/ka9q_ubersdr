@@ -35,6 +35,21 @@ type VideoDemodulator struct {
 	// Stored luminance for redrawing
 	storedLum []uint8
 
+	// How much of storedLum holds real samples. The buffer is allocated with
+	// headroom (see maxLength in NewVideoDemodulator) but is only written while
+	// the demodulation loop runs, and that loop stops early when the audio runs
+	// out. Everything from here on is a zero that was never a sample, so it must
+	// not be read back as if it were one.
+	storedLumWritten int
+
+	// Highest image line that received any data, +1 (0 = none). A signal that
+	// fades, is retuned away from, or simply stops leaves the rest of the frame
+	// blank, and the redraw must not repaint those rows. Painting them is not
+	// harmless: an all-zero pixel is black in RGB/GBR but converts to green
+	// (0,132,0) in YUV, so a blank tail on a Robot or PD picture would come back
+	// as a green block.
+	linesReceived int
+
 	// Debug tracking
 	lastSyncLogTime int
 }
@@ -78,7 +93,7 @@ func NewVideoDemodulator(mode *ModeSpec, sampleRate float64, headerShift int, ad
 	// Worst case: slant correction can adjust rate by ~±4% per iteration × 3 retries = ±12%
 	// Add 30% margin plus 15000 samples (~1.25s at 12kHz) to handle extreme cases
 	var maxLength int
-	if mode.ColorEnc == ColorYUV && mode.ImgWidth >= 512 { // PD modes
+	if mode.PDFormat { // one frame carries two image lines
 		maxLength = int(mode.LineTime*float64(mode.NumLines)/2*sampleRate*1.3) + 15000
 	} else {
 		maxLength = int(mode.LineTime*float64(mode.NumLines)*sampleRate*1.3) + 15000
@@ -106,6 +121,17 @@ type PixelInfo struct {
 	Y       int   // Y coordinate
 	Channel uint8 // Color channel (0=R/Y, 1=G/U, 2=B/V, 3=Y for PD)
 	Last    bool  // Is this the last pixel?
+
+	// EndOfLine marks the final write to image line Y, i.e. the point at which
+	// that line is complete and can be sent to the client.
+	//
+	// This is set from the grid's own layout rather than inferred from the
+	// channel index. The old test was `Channel >= numChans-1`, which cannot
+	// express PD: a PD frame has four channels but emits only Channel 0, 1 and 2
+	// (its fourth channel is the second line's Y, written as Channel 0 at Y+1),
+	// so `Channel >= 3` was never true and PD pictures were never drawn while
+	// they were being received.
+	EndOfLine bool
 }
 
 // GetPixelGrid calculates the pixel grid for the mode
@@ -137,7 +163,7 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 		chanStart[1] = chanStart[0] + chanLen[0] + m.SeptrTime
 		chanStart[2] = chanStart[1] + chanLen[1] + m.SyncTime + m.PorchTime
 
-	case m.ColorEnc == ColorYUV && m.ImgWidth >= 512:
+	case m.PDFormat:
 		// PD modes: 4 channels per radio frame, 2 image lines per frame
 		chanLen[0] = m.PixelTime * float64(m.ImgWidth)
 		chanLen[1] = m.PixelTime * float64(m.ImgWidth)
@@ -233,6 +259,19 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 		}
 	}
 
+	// Mark the last surviving write to each image line. Walking backwards means
+	// the first entry seen for a given Y is the last one that will be executed,
+	// which is exactly when that line becomes complete. Done after filtering so a
+	// negative skip cannot strand the marker on a pixel that was dropped.
+	seen := make([]bool, m.NumLines)
+	for i := len(filtered) - 1; i >= 0; i-- {
+		y := filtered[i].Y
+		if y >= 0 && y < m.NumLines && !seen[y] {
+			seen[y] = true
+			filtered[i].EndOfLine = true
+		}
+	}
+
 	return filtered
 }
 
@@ -247,24 +286,13 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	// Calculate signal length
 	var length int
-	if m.ColorEnc == ColorYUV && m.ImgWidth >= 512 { // PD modes
+	if m.PDFormat { // one frame carries two image lines
 		length = int(m.LineTime * float64(m.NumLines) / 2 * v.sampleRate)
 	} else {
 		length = int(m.LineTime * float64(m.NumLines) * v.sampleRate)
 	}
 
 	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
-
-	// Calculate number of channels for this mode (matching GetPixelGrid logic)
-	numChans := 3 // Default for RGB/GBR modes
-	switch {
-	case m.Name == "Robot 36" || m.Name == "Robot 24":
-		numChans = 2
-	case m.ColorEnc == ColorYUV && m.ImgWidth >= 512: // PD modes
-		numChans = 4
-	case m.ColorEnc == ColorBW:
-		numChans = 1
-	}
 
 	// Initialize image buffer
 	image := make([][][]uint8, m.ImgWidth)
@@ -326,6 +354,7 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		lum := clip((freq - (1500.0 + float64(v.headerShift))) / 3.1372549)
 		if sampleNum < len(v.storedLum) {
 			v.storedLum[sampleNum] = lum
+			v.storedLumWritten = sampleNum + 1
 		}
 
 		// Place pixels
@@ -333,6 +362,13 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			p := pixelGrid[pixelIdx]
 
 			image[p.X][p.Y][p.Channel] = lum
+
+			// Track how far down the picture the signal actually got, counted from
+			// pixels the grid actually placed rather than from completed lines: a
+			// fade mid-line still delivered part of that line.
+			if p.Y+1 > v.linesReceived {
+				v.linesReceived = p.Y + 1
+			}
 
 			// Some modes have R-Y & B-Y channels that are twice the height
 			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
@@ -344,7 +380,7 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			// Send line progressively when last pixel of line is placed (like slowrx line 428-457)
 			// Only send after the LAST channel is complete (matching KiwiSDR sstv_video.cpp:483)
 			// This prevents sending the same line multiple times in color modes
-			if lineSender != nil && p.X == m.ImgWidth-1 && int(p.Channel) >= numChans-1 {
+			if lineSender != nil && p.EndOfLine {
 				// Extract line data with proper color conversion (slowrx video.c:432-456)
 				lineData := make([]uint8, m.ImgWidth*3)
 				for x := 0; x < m.ImgWidth; x++ {
@@ -399,7 +435,11 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 // RedrawFromLuminance redraws the image from stored luminance with corrected parameters
 // This matches slowrx's GetVideo(..., TRUE) - redraw from cached luminance
-func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
+//
+// Returns the RGB pixels and the number of image lines the caller may send. Rows
+// beyond that were never received and must be left alone rather than
+// transmitted - see linesReceived for why painting them is not harmless.
+func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) ([]uint8, int) {
 	m := v.mode
 	pixelGrid := v.GetPixelGrid(rate, skip)
 
@@ -414,40 +454,68 @@ func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
 		}
 	}
 
-	// Place pixels from stored luminance
-	outOfBoundsCount := 0
+	// Place pixels from stored luminance.
+	//
+	// The bound is storedLumWritten, not len(storedLum): the buffer is
+	// over-allocated and its tail is zeros that were never captured. Reading
+	// those back produces a plausible-looking picture built from data that does
+	// not exist. Pixels with no sample behind them are left untouched instead,
+	// which is what the caller's line bound then keeps off the wire.
+	missingCount := 0
+	worstOverrun := 0
+	firstBadLine := m.NumLines
 	for _, p := range pixelGrid {
-		if p.Time >= 0 && p.Time < len(v.storedLum) {
-			lum := v.storedLum[p.Time]
-			image[p.X][p.Y][p.Channel] = lum
-
-			// Some modes have R-Y & B-Y channels that are twice the height
-			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
-				if p.Y+1 < m.NumLines {
-					image[p.X][p.Y+1][p.Channel] = lum
-				}
+		if p.Time >= v.storedLumWritten {
+			if over := p.Time - v.storedLumWritten + 1; over > worstOverrun {
+				worstOverrun = over
 			}
-		} else if p.Time >= len(v.storedLum) {
-			// Pixel time exceeds stored buffer - use last available sample
-			// This handles edge cases where rate adjustment pushes pixels beyond buffer
-			lum := v.storedLum[len(v.storedLum)-1]
-			image[p.X][p.Y][p.Channel] = lum
-
-			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
-				if p.Y+1 < m.NumLines {
-					image[p.X][p.Y+1][p.Channel] = lum
-				}
+			if p.Y < firstBadLine {
+				firstBadLine = p.Y
 			}
-			outOfBoundsCount++
+			missingCount++
+			continue
+		}
+
+		lum := v.storedLum[p.Time]
+		image[p.X][p.Y][p.Channel] = lum
+
+		// Some modes have R-Y & B-Y channels that are twice the height
+		if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
+			if p.Y+1 < m.NumLines {
+				image[p.X][p.Y+1][p.Channel] = lum
+			}
 		}
 	}
 
-	if outOfBoundsCount > 0 {
-		log.Printf("[SSTV Video] Warning: %d pixels exceeded stored luminance buffer (used fallback)", outOfBoundsCount)
+	// How many lines the caller may send.
+	//
+	// Normally every line that received data, but the two ways a redraw can run
+	// past the captured samples need telling apart, and their own arithmetic does
+	// it - no flag to keep in step with whether rate correction is enabled:
+	//
+	//   - A sync offset is bounded by a single line, so it can only strand a
+	//     sliver in the bottom-right corner. That happens on every healthy
+	//     picture (the measured skips are tens to a couple of hundred samples)
+	//     and is invisible, so the full frame still goes out. Pulling the bound
+	//     back here would instead leave the last row showing its uncorrected
+	//     version - a one-line seam, which is worse than a few blank pixels.
+	//
+	//   - A signal that stopped strands whole lines. The last row it reached is
+	//     only part-covered, and on YUV modes its uncovered remainder would come
+	//     back green, so the bound drops to the last fully-covered line.
+	linesToSend := v.linesReceived
+	if worstOverrun > int(m.LineTime*rate) && firstBadLine < linesToSend {
+		linesToSend = firstBadLine
+	}
+
+	if missingCount > 0 {
+		log.Printf("[SSTV Video] %d pixels had no captured sample (short by %d samples, %.1f ms); "+
+			"received %d lines, sending %d", missingCount, worstOverrun,
+			float64(worstOverrun)*1000.0/rate, v.linesReceived, linesToSend)
 	}
 
 	// Convert image to RGB byte array
-	return v.convertToRGB(image)
+	return v.convertToRGB(image), linesToSend
 }
 
 // detectSync detects sync pulses for slant correction

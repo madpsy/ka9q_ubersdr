@@ -11344,8 +11344,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!window._spectrumRateApplied || window._lastSpectrumBinBw !== config.binBandwidth) {
                     window._spectrumRateApplied = true;
                     window._lastSpectrumBinBw = config.binBandwidth;
-                    const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
-                    spectrumDisplay.setRate(lineGraphEnabled ? 1 : 3);
+                    // spectrumPreferredDivisor() (spectrum-display.js) only throttles
+                    // on mobile; desktop always stays at divisor=1.
+                    spectrumDisplay.setRate(window.spectrumPreferredDivisor ? window.spectrumPreferredDivisor() : 1);
                 }
 
                 // Track config changes that are significant (not from periodic sync)

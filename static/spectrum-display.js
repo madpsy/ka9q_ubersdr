@@ -10,6 +10,25 @@ function _spectrumIso2ToFlag(code) {
     catch (e) { return ''; }
 }
 
+// ── Poll-rate divisor helper ───────────────────────────────────────────────────
+// Returns the set_rate divisor the spectrum WebSocket should be running at for
+// the current line-graph (spectrum trace) visibility.
+//
+// Hiding the line graph only throttles the poll rate on mobile devices, where
+// the bandwidth and CPU saving is worth the coarser waterfall. Desktops stay at
+// full rate so the waterfall keeps its full time resolution regardless of
+// whether the trace is drawn.
+//
+// Shared by the line-graph toggle (spectrum-display.js), the onConfig re-apply
+// (app.js) and the idle throttle (idle-detector.js) so they cannot disagree.
+function spectrumPreferredDivisor() {
+    const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
+    if (lineGraphEnabled) return 1;
+    return window._isMobile ? 3 : 1;
+}
+// Expose for scripts that load independently of this one.
+window.spectrumPreferredDivisor = spectrumPreferredDivisor;
+
 // Narrowest span (Hz) reachable through the normal UI: + button, scroll wheel,
 // pinch, Max button, zoom slider, bookmark shift-click.
 //
@@ -5098,10 +5117,11 @@ class SpectrumDisplay {
                 localStorage.setItem('spectrumLineGraphEnabled', enabled.toString());
                 this.toggleLineGraphVisibility(enabled);
 
-                // Automatically adjust frame rate: reduced rate when line graph is hidden
-                // (waterfall still runs but the line graph isn't drawn, so full rate
-                // has less benefit). Full rate is restored when the line graph is shown.
-                this.setRate(enabled ? 1 : 3);
+                // Automatically adjust frame rate: on mobile, hiding the line graph
+                // drops to a reduced rate (waterfall still runs but the line graph
+                // isn't drawn, so full rate has less benefit). Desktop stays at full
+                // rate either way. Full rate is restored when the line graph is shown.
+                this.setRate(spectrumPreferredDivisor());
 
                 // Enable/disable smooth and hold checkboxes based on spectrum visibility
                 if (smoothCheckbox) {

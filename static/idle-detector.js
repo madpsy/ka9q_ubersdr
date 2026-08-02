@@ -386,22 +386,31 @@ class IdleDetector {
     }
 
     /**
-     * Drop the spectrum WebSocket to divisor=3 after 1 minute of idle.
-     * Only acts if the spectrum is currently at full rate (divisor=1, i.e.
-     * the line graph is visible) — if it's already at 3 there's nothing to do.
+     * The divisor the spectrum should be running at when the user is active,
+     * for the current line-graph visibility. Defined in spectrum-display.js
+     * (mobile-only throttling); falls back to full rate if unavailable.
+     */
+    _activeDivisor() {
+        return window.spectrumPreferredDivisor ? window.spectrumPreferredDivisor() : 1;
+    }
+
+    /**
+     * Drop the spectrum WebSocket to divisor=2 after 1 minute of idle.
+     * Only acts if the spectrum is currently at full rate — if the line-graph
+     * state already puts it at 2 or worse there's nothing to do.
      */
     _idleRateThrottle() {
         const sd = window.spectrumDisplay;
         if (!sd) return;
         const throttleMins = this._idleRateThrottleTimeout() / 60000;
-        const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
-        if (!lineGraphEnabled) {
-            console.log(`[IdleDetector] ${throttleMins} min idle — spectrum already at divisor=3 (line graph hidden), no change`);
+        const active = this._activeDivisor();
+        if (active >= 2) {
+            console.log(`[IdleDetector] ${throttleMins} min idle — spectrum already at divisor=${active}, no change`);
             return;
         }
-        // Use divisor=2 when spectrum line is visible — less aggressive than 3,
+        // Use divisor=2 — less aggressive than the line-graph-hidden throttle,
         // keeps the trace responsive while still saving bandwidth when idle.
-        console.log(`[IdleDetector] ${throttleMins} min idle — throttling spectrum from divisor=1 → divisor=2 (line graph visible)`);
+        console.log(`[IdleDetector] ${throttleMins} min idle — throttling spectrum from divisor=1 → divisor=2`);
         this._idleThrottled = true;
         sd.setRate(2);
     }
@@ -415,9 +424,8 @@ class IdleDetector {
         this._idleThrottled = false;
         const sd = window.spectrumDisplay;
         if (!sd) return;
-        const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
-        const divisor = lineGraphEnabled ? 1 : 3;
-        console.log(`[IdleDetector] User active after idle throttle — restoring spectrum to divisor=${divisor} (line graph ${lineGraphEnabled ? 'visible' : 'hidden'})`);
+        const divisor = this._activeDivisor();
+        console.log(`[IdleDetector] User active after idle throttle — restoring spectrum to divisor=${divisor}`);
         sd.setRate(divisor);
     }
 

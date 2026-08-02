@@ -734,6 +734,16 @@ type WhisperConfig struct {
 	LibreTranslateURL string `yaml:"libretranslate_url"` // LibreTranslate API URL for translation (default: https://whisper.ubersdr.org/translate)
 	SummaryURL        string `yaml:"summary_url"`        // Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
 
+	// GPUStatsURL is the endpoint reporting GPU statistics for the machine
+	// running WhisperLive.  Polled once a minute while whisper.enabled is true;
+	// non-200 responses are ignored and failures are silent (the endpoint is
+	// optional and absent on CPU-only hosts).
+	//
+	// A pointer so an explicit `gpu_stats: ""` can disable polling — with a
+	// plain string, "absent from config" and "deliberately blank" are the same
+	// value and the default would be unavoidable.  Absent => default below.
+	GPUStatsURL *string `yaml:"gpu_stats"`
+
 	// Task selects the WhisperLive task: "transcribe" (verbatim, in the spoken
 	// language) or "translate" (always English output).  Empty = "translate",
 	// preserving the historical hardcoded behaviour.
@@ -931,6 +941,13 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Whisper.TrustedContainers = []string{"voiceskimmer"}
 	}
 	config.Server.whisperResolveNames = config.Whisper.TrustedContainers
+
+	// whisper.gpu_stats defaults to the local GPU stats sidecar when absent.
+	// An explicit empty string turns the poller off.
+	if config.Whisper.GPUStatsURL == nil {
+		def := DefaultWhisperGPUStatsURL
+		config.Whisper.GPUStatsURL = &def
+	}
 
 	// whisper.vad_threshold is a probability: 0 = VAD off (the default), and
 	// anything outside 0..1 is meaningless to WhisperLive.  Clamp rather than
@@ -2491,4 +2508,13 @@ func (c *Config) GetWhisperConfig() WhisperConfig {
 // IsWhisperEnabled returns whether the Whisper extension is enabled
 func (c *Config) IsWhisperEnabled() bool {
 	return c.Whisper.Enabled
+}
+
+// GetWhisperGPUStatsURL returns the GPU statistics endpoint, or "" when GPU
+// stats polling is disabled (whisper off, or gpu_stats explicitly blank).
+func (c *Config) GetWhisperGPUStatsURL() string {
+	if !c.Whisper.Enabled || c.Whisper.GPUStatsURL == nil {
+		return ""
+	}
+	return *c.Whisper.GPUStatsURL
 }

@@ -3207,7 +3207,10 @@ func (ah *AdminHandler) HandleChannelStatus(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleSystemLoad returns system load averages from /proc/loadavg, CPU core count,
-// and current CPU temperature with the configured threshold.
+// and current CPU temperature with the configured threshold. When whisper GPU
+// stats polling is on and a fresh sample is cached, the last reading is included
+// under "gpu" — admin-only, so it is added here rather than in getSystemLoad(),
+// which also feeds the MQTT system_load topic.
 func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -3219,6 +3222,14 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 	// Load averages + CPU temp; getSystemLoad already applies the configured
 	// server.cpu_temp_threshold_c to both the reported limit and the status.
 	response := getSystemLoad()
+
+	// GPU stats from the whisper host. Absent entirely when polling is off or
+	// the last sample is stale, which is what hides the section in the admin UI.
+	if stats, fetchedAt := globalGPUStats.GetGPUStats(); stats != nil {
+		response["gpu"] = stats
+		response["gpu_fetched_at"] = fetchedAt.UTC().Format(time.RFC3339)
+		response["gpu_age_seconds"] = int(time.Since(fetchedAt).Seconds())
+	}
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {

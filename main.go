@@ -1344,6 +1344,13 @@ func main() {
 	spaceWeatherMonitor.SetDB(dbManager.DB())
 	spaceWeatherMonitor.SetReadDB(dbManager.ReadDB())
 
+	// Poll the whisper host's GPU statistics endpoint (whisper.gpu_stats).
+	// Only runs while whisper is enabled; nothing consumes the data yet.
+	gpuStatsMonitor := NewGPUStatsMonitor(config.GetWhisperGPUStatsURL())
+	globalGPUStats = gpuStatsMonitor
+	gpuStatsMonitor.Start()
+	defer gpuStatsMonitor.Stop()
+
 	// Initialize EiBi shortwave broadcast schedule
 	eibiSchedule := NewEiBiSchedule(&config.EiBi)
 	if err := eibiSchedule.Start(); err != nil {

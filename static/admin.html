@@ -1891,6 +1891,14 @@
                         </div>
                     </div>
 
+                    <!-- GPU Section (only shown when whisper is enabled and the GPU stats endpoint is answering) -->
+                    <div id="gpuStatsSection" class="config-section" style="display: none;">
+                        <h3 id="gpuStatsTitle">🎮 GPU</h3>
+                        <div id="gpuStatsDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <!-- Populated by JavaScript from /admin/system-load -->
+                        </div>
+                    </div>
+
                     <!-- QRZ Callsign Lookup Stats Section (static container for charts; only shown when lookups are enabled) -->
                     <div id="lookupStatsSection" class="config-section" style="display: none;">
                         <h3 id="lookupStatsTitle">📇 Callsign Lookup (QRZ)</h3>
@@ -21292,8 +21300,156 @@ const tooltipLine2 = timeStr;
 
             displayDiv.innerHTML = displayHTML;
 
+            // GPU stats ride along on the same /admin/system-load payload
+            renderGPUStats(systemLoad);
+
             // Load the charts (only once, they will update themselves)
             await loadLoadHistory();
+        }
+
+        // Render the GPU section from the "gpu" block of /admin/system-load.
+        // The block is only present when whisper is enabled and the GPU stats
+        // endpoint (whisper.gpu_stats) returned a fresh sample, so its absence
+        // is the normal case and simply hides the section.
+        function renderGPUStats(systemLoad) {
+            const section = document.getElementById('gpuStatsSection');
+            const display = document.getElementById('gpuStatsDisplay');
+            if (!section || !display) return;
+
+            const gpu = systemLoad && systemLoad.gpu;
+            const gpus = (gpu && Array.isArray(gpu.gpus)) ? gpu.gpus : [];
+            if (!gpus.length) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = 'block';
+
+            // nvidia-smi reports "N/A" for fields a card does not expose (power
+            // draw on many consumer GPUs), which arrives here as null. Anything
+            // non-numeric is shown as an em dash rather than as 0.
+            const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
+            const fmt = (v, digits = 0) => (v === null) ? '—' : v.toFixed(digits);
+
+            const memUnits = gpu.memory_units || 'MiB';
+            const tempUnits = gpu.temperature_units || 'C';
+
+            // Memory and temperature thresholds. Running out of VRAM is what
+            // actually breaks transcription, and 85°C is roughly where NVIDIA
+            // parts start thermal slowdown.
+            //
+            // GPU utilisation is deliberately NOT colour-coded: a card pinned at
+            // 100% while transcribing is the expected, healthy state, so warning
+            // colours there would only cry wolf.
+            const memColor = (v) => v === null ? '#666' : v >= 90 ? '#dc3545' : v >= 70 ? '#ff8c00' : '#28a745';
+            const tempColor = (v) => v === null ? '#666' : v >= 85 ? '#dc3545' : v >= 70 ? '#ff8c00' : '#28a745';
+            const neutralColor = '#555';
+
+            // nvidia-smi performance states. P0 is maximum clocks, and the
+            // number rises as the card idles down — counter-intuitive enough
+            // that the raw code alone tells an operator nothing.
+            const pstates = {
+                P0:  ['Max performance', 'Maximum performance: highest core and memory clocks, for demanding workloads'],
+                P1:  ['Near-max',        'Near-maximum performance: often used for compute workloads, or when slightly lower clocks suffice'],
+                P2:  ['Compute',         'High-performance compute state: on many consumer GPUs CUDA workloads run here, which may reduce memory clocks compared to P0'],
+                P3:  ['Moderate',        'Intermediate performance state for moderate GPU usage'],
+                P4:  ['Moderate',        'Intermediate performance state for moderate GPU usage'],
+                P5:  ['Moderate',        'Intermediate performance state for moderate GPU usage'],
+                P8:  ['Idle',            'Idle or light desktop use: much lower clocks to save power'],
+                P12: ['Deep idle',       'Deep idle (older GPUs): minimal power consumption'],
+            };
+            const pstateChip = (code) => {
+                if (!code) return '';
+                const known = pstates[String(code).toUpperCase()];
+                const label = known ? `${code} · ${known[0]}` : code;
+                const title = known ? known[1] : 'Performance state reported by nvidia-smi';
+                return `<span title="${title}" style="font-size:12px;color:#667eea;background:#f0f2ff;
+                            border:1px solid #c5caf5;border-radius:3px;padding:1px 7px;">${label}</span>`;
+            };
+
+            const bar = (pct, color) => {
+                if (pct === null) return '';
+                const w = Math.max(0, Math.min(100, pct));
+                return `<div style="height:6px;background:#e9ecef;border-radius:3px;overflow:hidden;margin-top:6px;">
+                            <div style="height:100%;width:${w}%;background:${color};"></div>
+                        </div>`;
+            };
+
+            const tile = (value, label, color, barHTML = '') => `
+                <div style="text-align:center;">
+                    <div style="font-size:28px;font-weight:bold;color:${color};line-height:1.2;">${value}</div>
+                    <div style="font-size:12px;color:#666;">${label}</div>
+                    ${barHTML}
+                </div>`;
+
+            // Section title tracks the worst state across all GPUs, matching the
+            // System Load section above it. Driven by memory and temperature
+            // only, for the same reason utilisation is not colour-coded.
+            let worst = 'ok';
+            gpus.forEach(g => {
+                const t = num(g['temperature.gpu']);
+                let m = num(g['memory.used_percent']);
+                if (m === null && num(g['memory.used']) !== null && num(g['memory.total'])) {
+                    m = (num(g['memory.used']) / num(g['memory.total'])) * 100;
+                }
+                if ((t !== null && t >= 85) || (m !== null && m >= 90)) worst = 'critical';
+                else if (worst !== 'critical' && ((t !== null && t >= 70) || (m !== null && m >= 70))) worst = 'warning';
+            });
+            const titleColor = worst === 'critical' ? '#dc3545' : worst === 'warning' ? '#ff8c00' : '#28a745';
+            const titleEl = document.getElementById('gpuStatsTitle');
+            if (titleEl) titleEl.style.color = titleColor;
+
+            let html = '';
+
+            gpus.forEach((g, i) => {
+                const util = num(g['utilization.gpu']);
+                const temp = num(g['temperature.gpu']);
+                const memTotal = num(g['memory.total']);
+                const memUsed = num(g['memory.used']);
+                let memPct = num(g['memory.used_percent']);
+                if (memPct === null && memUsed !== null && memTotal) memPct = (memUsed / memTotal) * 100;
+                const fan = num(g['fan.speed']);
+
+                html += `
+                    <div style="background:#fff;border:1px solid #dee2e6;border-radius:5px;padding:15px;${i > 0 ? 'margin-top:15px;' : ''}">
+                        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                            <strong style="font-size:16px;">${g.name || 'GPU'}</strong>
+                            <span style="font-size:12px;color:#666;">GPU ${g.index ?? i}</span>
+                            ${pstateChip(g.pstate)}
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;">
+                            ${tile(
+                                util === null ? '—' : `${fmt(util, 0)}<span style="font-size:16px;color:#666;">%</span>`,
+                                'GPU utilisation', neutralColor, bar(util, '#667eea'))}
+                            ${tile(
+                                memPct === null ? '—' : `${fmt(memPct, 1)}<span style="font-size:16px;color:#666;">%</span>`,
+                                memUsed !== null && memTotal !== null
+                                    ? `Memory used (${fmt(memUsed, 0)} / ${fmt(memTotal, 0)} ${memUnits})`
+                                    : 'Memory used',
+                                memColor(memPct), bar(memPct, memColor(memPct)))}
+                            ${tile(
+                                temp === null ? '—' : `${fmt(temp, 0)}<span style="font-size:16px;color:#666;">°${tempUnits}</span>`,
+                                'Temperature', tempColor(temp))}
+                            ${tile(
+                                fan === null ? '—' : `${fmt(fan, 0)}<span style="font-size:16px;color:#666;">%</span>`,
+                                'Fan speed', neutralColor)}
+                        </div>
+                    </div>`;
+            });
+
+            // Staleness footer. The server polls once a minute, so an age well
+            // past 60 s means the endpoint has gone quiet.
+            const age = typeof systemLoad.gpu_age_seconds === 'number' ? systemLoad.gpu_age_seconds : null;
+
+            html += `
+                <div style="text-align:center;color:#999;font-size:12px;margin-top:12px;">
+                    ${age !== null ? `updated <strong>${age < 60 ? `${age}s` : `${Math.round(age / 60)}m`}</strong> ago&nbsp;•&nbsp;` : ''}
+                    <span style="color:#28a745;">●</span> OK&nbsp;
+                    <span style="color:#ff8c00;">●</span> WARNING (memory ≥ 70%, temp ≥ 70°C)&nbsp;
+                    <span style="color:#dc3545;">●</span> CRITICAL (memory ≥ 90%, temp ≥ 85°C)&nbsp;
+                    <span style="color:#555;">●</span> utilisation is not a health signal — 100% while transcribing is normal
+                </div>`;
+
+            display.innerHTML = html;
         }
 
         // Render the NTP history section — mirrors renderSystemLoadHealth pattern exactly.
@@ -21755,6 +21911,7 @@ const tooltipLine2 = timeStr;
                 { id: 'dspHealthSection',          label: 'DSP' },
                 { id: 'frequencyReferenceSection', label: 'Freq Reference' },
                 { id: 'systemLoadHistorySection',  label: 'System Load' },
+                { id: 'gpuStatsSection',           label: 'GPU' },
                 { id: 'lookupStatsSection',        label: 'Lookup Stats' },
                 { id: 'gpsdoHealthSection',        label: 'GPSDO' },
                 { id: 'ntpHistorySection',         label: 'NTP' },

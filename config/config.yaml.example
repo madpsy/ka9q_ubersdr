@@ -2009,6 +2009,23 @@ whisper:
   # Example: "https://whisper.ubersdr.org/summarise"
   summary_url: "https://whisper.ubersdr.org/summarise"
 
+  # GPU statistics URL (default: "http://localhost:8568/gpu")
+  # Polled once a minute while whisper.enabled is true, to record the state of
+  # the GPU doing the transcription (utilisation, temperature, memory, power).
+  # The endpoint must return 200 with JSON of the form:
+  #   {"timestamp":"...","driver_version":"595.71.05","gpu_count":1,
+  #    "gpus":[{"index":0,"name":"NVIDIA GeForce GTX 1650","temperature.gpu":37,
+  #             "utilization.gpu":0,"memory.total":4096,"memory.used":9,
+  #             "power.draw":null,"fan.speed":50, ...}],
+  #    "processes":[],"memory_units":"MiB","power_units":"W",
+  #    "temperature_units":"C"}
+  # Anything else (non-200, unreachable host, unparseable body) is ignored
+  # silently — no logging — since the endpoint is optional and absent on
+  # CPU-only or OpenVINO hosts.
+  # Set to "" to disable polling entirely.
+  # Default: "http://localhost:8568/gpu"
+  gpu_stats: "http://localhost:8568/gpu"
+
   # WhisperLive task (default: "translate")
   #   translate  - always emit English, whatever the spoken language
   #   transcribe - emit the spoken language verbatim

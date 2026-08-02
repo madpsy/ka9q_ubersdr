@@ -2058,6 +2058,18 @@ whisper:
   trusted_containers:
     - "voiceskimmer"
 
+  # Restrict whisper to the trusted_containers list above (default: false)
+  # When false (the default), enabling whisper makes transcription available to
+  # every listener on this instance, subject only to max_users.
+  # When true, only the containers listed in trusted_containers may attach the
+  # whisper extension — attaches from ordinary clients are rejected even though
+  # the extension is enabled. Use this to run whisper purely as a back-end
+  # service for a server-side addon (e.g. the voiceskimmer addon) without
+  # exposing your WhisperLive server to the public.
+  # NOTE: with trusted_containers set to [], this disables whisper entirely.
+  # Default: false
+  trusted_containers_only: false
+
 # ==============================================================================
 # EiBi Shortwave Broadcast Schedule
 # ==============================================================================

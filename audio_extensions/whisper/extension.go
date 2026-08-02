@@ -68,6 +68,10 @@ type ConfigProvider struct {
 	Task              string
 	ASRLanguage       string
 	AllowClientParams bool
+
+	// TrustedContainersOnly rejects every attach that does not come from a
+	// container listed in whisper.trusted_containers.
+	TrustedContainersOnly bool
 }
 
 // GlobalConfigProvider is set by main package
@@ -130,6 +134,12 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	// does not count towards max_users.
 	trustedContainer, _ := extensionParams["trusted_container"].(string)
 	isTrusted := trustedContainer != ""
+
+	// whisper.trusted_containers_only turns the extension into a back-end
+	// service for server-side addons only: enabled, but closed to listeners.
+	if GlobalConfigProvider != nil && GlobalConfigProvider.TrustedContainersOnly && !isTrusted {
+		return nil, fmt.Errorf("whisper extension is restricted to trusted containers on this instance")
+	}
 
 	// Validate audio parameters
 	if audioParams.Channels != 1 {

@@ -767,6 +767,19 @@ type WhisperConfig struct {
 	//
 	// Default: ["voiceskimmer"].  Set to [] to disable.
 	TrustedContainers []string `yaml:"trusted_containers"`
+
+	// TrustedContainersOnly restricts whisper attaches to the containers listed
+	// in TrustedContainers — every other attach is rejected even though the
+	// extension is enabled.  Off by default, which is the historical behaviour:
+	// with whisper.enabled: true any listener may transcribe any channel, which
+	// on a public instance means unmetered use of a possibly-shared upstream
+	// WhisperLive server.  Turn this on to run whisper purely as a back-end
+	// service for a server-side addon (e.g. the voiceskimmer addon) with no
+	// public access.
+	//
+	// Setting this with an empty TrustedContainers list disables whisper for
+	// everyone.
+	TrustedContainersOnly bool `yaml:"trusted_containers_only"`
 }
 
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension

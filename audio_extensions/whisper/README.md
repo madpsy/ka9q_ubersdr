@@ -169,6 +169,14 @@ grants only these whisper privileges — it never confers trusted-proxy status,
 so such a container cannot spoof `X-Real-IP` / `X-Forwarded-For`. Set to `[]` to
 disable.
 
+`whisper.trusted_containers_only` (default `false`) inverts the relationship:
+with it set, *only* the listed containers may attach, and every other attach is
+rejected with `whisper extension is restricted to trusted containers on this
+instance`. By default whisper is open to every listener on the instance once
+`whisper.enabled: true`, so this is the switch to use when whisper exists purely
+as a back-end for a server-side addon. Combined with `trusted_containers: []` it
+disables whisper for everyone.
+
 ### Control messages
 
 Sent as `audio_extension_control` on the DX WebSocket:

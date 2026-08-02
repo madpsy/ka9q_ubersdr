@@ -1683,11 +1683,20 @@ func main() {
 		Task:              config.Whisper.Task,
 		ASRLanguage:       config.Whisper.ASRLanguage,
 		AllowClientParams: config.Whisper.AllowClientParams,
+
+		TrustedContainersOnly: config.Whisper.TrustedContainersOnly,
 	}
 	whisperInfo := whisper.GetInfo()
 
 	if len(config.Whisper.TrustedContainers) > 0 {
 		log.Printf("Whisper trusted containers %v: client params always allowed, max_users bypassed", config.Whisper.TrustedContainers)
+	}
+	if config.Whisper.Enabled && config.Whisper.TrustedContainersOnly {
+		if len(config.Whisper.TrustedContainers) > 0 {
+			log.Printf("Whisper restricted to trusted containers %v: attaches from all other clients are rejected", config.Whisper.TrustedContainers)
+		} else {
+			log.Printf("WARNING: whisper.trusted_containers_only is set but whisper.trusted_containers is empty — every whisper attach will be rejected")
+		}
 	}
 
 	whisperFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {

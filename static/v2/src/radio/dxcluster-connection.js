@@ -85,6 +85,8 @@ export class DXClusterConnection extends Emitter {
         // Consumers that want the socket but no stream — see hold().
         this.holds = 0;
         this.opening = false;
+        // The session UUID this socket was opened with — see `stale`.
+        this.openedWith = null;
     }
 
     get connected() {
@@ -139,12 +141,37 @@ export class DXClusterConnection extends Emitter {
         return this.holds > 0 || STREAMS.some((s) => this.wants(s));
     }
 
+    // True when this socket is registered to a session that no longer exists.
+    //
+    // The UUID travels in the URL and is fixed for the life of the socket, but
+    // starting the receiver mints a new one — so a socket that outlives a power
+    // cycle is still identified as the old session. The server keys real
+    // behaviour on that: chat presence, and which audio session an extension
+    // attaches to, which is why an attach on a stale socket comes back "no
+    // active audio session found" while everything looks connected.
+    get stale() {
+        return !!this.ws && this.openedWith !== getSessionId();
+    }
+
+    // Reopens a stale socket, and answers whether it did. Reopening restores
+    // the subscriptions — the ref counts survive a disconnect and are replayed
+    // on open — so this costs a round trip and nothing else.
+    refresh() {
+        if (!this.stale) return false;
+        this.disconnect();
+        this.connect();
+        return true;
+    }
+
     // Opens or closes to match demand. The last release closes the socket
     // rather than leaving an idle connection counted against the session.
     _sync() {
-        const wanted = this._wanted();
-        if (wanted) this.connect();
-        else if (this.ws || this.reconnectTimer || this.opening) this.disconnect();
+        if (!this._wanted()) {
+            if (this.ws || this.reconnectTimer || this.opening) this.disconnect();
+            return;
+        }
+        if (this.refresh()) return;
+        this.connect();
     }
 
     async connect() {
@@ -166,10 +193,12 @@ export class DXClusterConnection extends Emitter {
         // Everyone may have let go while the check was in flight.
         if (this.closedByUser || !this._wanted()) return false;
 
-        const q = new URLSearchParams({ user_session_id: getSessionId() });
+        const sessionId = getSessionId();
+        const q = new URLSearchParams({ user_session_id: sessionId });
         const password = getBypassPassword();
         if (password) q.set('password', password);
 
+        this.openedWith = sessionId;
         this._setState('connecting');
         let ws;
         try {

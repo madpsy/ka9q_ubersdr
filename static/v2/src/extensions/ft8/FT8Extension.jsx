@@ -100,7 +100,13 @@ function SpectrumStrip({ labels }) {
 }
 
 export default function FT8Extension() {
-    const { running, tuning, actions, serverInfo } = useRadio();
+    const { running, audioState, tuning, actions, serverInfo } = useRadio();
+    // Attaching needs the audio session, not merely the power switch: the
+    // server finds the session by the UUID this browser's audio socket opened
+    // with, so between pressing Listen and that socket being up there is
+    // nothing to attach to. Using this as the gate also restarts the decoder by
+    // itself after an audio reconnect, which replaces the session server-side.
+    const live = running && audioState === 'open';
 
     const [decoding, setDecoding] = useState(false);
     const [messages, setMessages] = useState([]);
@@ -149,13 +155,14 @@ export default function FT8Extension() {
     const { state, error } = useAudioExtension({
         name: 'ft8',
         params: PARAMS,
-        active: decoding && running,
+        active: decoding && live,
         onResult,
     });
 
     // Powering the receiver off takes the audio session with it, so there is
     // nothing left to decode from — stop rather than leave a Stop button that
-    // stops nothing.
+    // stops nothing. An audio *reconnect* is not that: it drops `live` for a
+    // few seconds and the hook re-attaches on its own, so decoding stays on.
     useEffect(() => { if (!running && decoding) setDecoding(false); }, [running, decoding]);
 
     useEffect(() => {
@@ -287,13 +294,14 @@ export default function FT8Extension() {
 
                 {decoding
                     ? <Button size="sm" onClick={() => setDecoding(false)} icon={<Icon.Stop size={13} />}>Stop</Button>
-                    : <Button size="sm" variant="primary" onClick={start} disabled={!running} icon={<Icon.Power size={13} />}>Start</Button>}
+                    : <Button size="sm" variant="primary" onClick={start} disabled={!live} icon={<Icon.Power size={13} />}>Start</Button>}
                 <Button size="sm" variant="ghost" onClick={clear} disabled={!messages.length} icon={<Icon.Trash size={13} />} title="Clear decodes" />
                 <Button size="sm" variant="ghost" onClick={exportCSV} disabled={!messages.length} icon={<Icon.Download size={13} />} title="Export CSV" />
             </div>
 
             {!running && <div className="note note--tight">Start the receiver to decode.</div>}
-            {running && !decoding && <div className="note note--tight">Tune to an FT8 frequency in USB, then press Start.</div>}
+            {running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
+            {live && !decoding && <div className="note note--tight">Tune to an FT8 frequency in USB, then press Start.</div>}
             {/* The decoder takes whatever audio the session produces, so a wrong
                 mode does not fail — it just never decodes anything. */}
             {decoding && tuning.mode !== FT8_MODE && (

@@ -79,6 +79,21 @@ export function decodeResult(data) {
     }
 }
 
+// How the server spells "your audio session is not there (yet)" — the one
+// refusal that is worth retrying.
+//
+// It means the UUID this socket was opened with has no live audio session:
+// either the audio socket is not up yet, or it reconnected and replaced the
+// session under us, or this socket outlived the session id it carries. All
+// three clear on their own within a second or two. Everything else the server
+// refuses with — a disabled extension, a decoder that will not start — is
+// permanent, and retrying it would only hide the message.
+const TRANSIENT_ATTACH_ERROR = /no active audio session/i;
+
+export function isTransientAttachError(message) {
+    return TRANSIENT_ATTACH_ERROR.test(String(message || ''));
+}
+
 /**
  * Normalise a control reply into { kind, name, error }.
  *

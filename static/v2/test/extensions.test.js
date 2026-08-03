@@ -8,10 +8,28 @@
 // still looks sorted. None of them throw.
 
 const assert = require('assert');
+
+// The socket module is browser code: stub what it touches before loading it.
+// A captured fake WebSocket is enough to see which session id each connection
+// was opened with, which is the whole point of the staleness rule below.
+const sockets = [];
+global.window = global;
+global.crypto = require('crypto').webcrypto;
+global.location = { protocol: 'https:', host: 'sdr.test', search: '' };
+global.sessionStorage = { getItem: () => null, setItem: () => {} };
+global.fetch = () => Promise.resolve({ status: 200, json: () => Promise.resolve({ allowed: true }) });
+global.WebSocket = class {
+    constructor(url) { this.url = url; this.readyState = 1; sockets.push(this); }
+    close() { this.closed = true; this.readyState = 3; }
+    send() {}
+};
+global.WebSocket.OPEN = 1;
+
+const { DXClusterConnection } = require('./.build/dxcluster.cjs');
 const {
     ATTACH, DETACH, CONTROL, STATUS,
     attachMessage, detachMessage, controlMessage, statusMessage,
-    decodeResult, extensionEvent,
+    decodeResult, extensionEvent, isTransientAttachError,
 } = require('./.build/extprotocol.cjs');
 const {
     MAX_MESSAGES, AUTO_CLEAR_KEEP, CYCLE_SEC, FT8_BANDWIDTH, FT8_FREQUENCIES, COLUMNS,
@@ -22,6 +40,12 @@ const { labelsFor, layoutLabels } = require('./.build/ft8spectrum.cjs');
 let pass = 0;
 const t = (name, fn) => {
     try { fn(); console.log('ok    ' + name); pass++; }
+    catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
+};
+
+// The same, for a test that has to wait for a connection to settle.
+const ta = async (name, fn) => {
+    try { await fn(); console.log('ok    ' + name); pass++; }
     catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
 };
 
@@ -99,6 +123,26 @@ t('both ways the server reports a failure flatten to one kind', () => {
     assert.strictEqual(extensionEvent({ type: 'audio_extension_status', active: false }).active, false);
     assert.strictEqual(extensionEvent({ type: 'chat_message' }), null);
 });
+
+t('only the missing-session refusal is worth retrying', () => {
+    // It means the UUID this socket carries has no live audio session yet —
+    // the audio socket is still coming up, or reconnected and replaced it.
+    // Retrying anything else would hide a message the operator needs to read.
+    assert.strictEqual(isTransientAttachError('no active audio session found'), true);
+    assert.strictEqual(isTransientAttachError('audio extensions are disabled on this server'), false);
+    assert.strictEqual(isTransientAttachError('failed to create extension: FT8 requires mono audio'), false);
+    assert.strictEqual(isTransientAttachError(''), false);
+    assert.strictEqual(isTransientAttachError(undefined), false);
+});
+
+// --- holding the control socket --------------------------------------------
+//
+// An extension needs the socket open but subscribes to nothing, and the socket
+// carries the session UUID in its URL. Both facts have bitten: a decoder cut
+// off when the last spot panel closed, and an attach answered "no active audio
+// session found" on a socket that outlived the session it was opened with.
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // --- FT8 decodes -----------------------------------------------------------
 
@@ -275,4 +319,73 @@ t('crowded labels stack instead of overlapping', () => {
     assert.ok(Math.abs(placed[0].x - (1000 / 3000) * 900) < 0.001);
 });
 
-console.log(`\n${pass} extension checks passed`);
+// The socket tests are async: the connection opens after a /connection check.
+(async () => {
+    await ta('a hold opens the socket without subscribing to anything', async () => {
+        const c = new DXClusterConnection();
+        const release = c.hold();
+        await settle();
+        const ws = sockets[sockets.length - 1];
+        assert.ok(ws && ws.url.includes('/ws/dxcluster'), 'socket opened');
+        assert.strictEqual(c.holds, 1);
+        // No stream was asked for, so no subscribe is owed and none is confirmed.
+        assert.ok(Object.values(c.refs).every((n) => n === 0));
+        release();
+        assert.ok(ws.closed, 'the last release closes it');
+        release();   // a double release must not go negative
+        assert.strictEqual(c.holds, 0);
+    });
+
+    await ta('a hold keeps the socket up after the last stream is released', async () => {
+        const c = new DXClusterConnection();
+        const releaseHold = c.hold();
+        const releaseStream = c.acquire('dx_spots');
+        await settle();
+        const ws = sockets[sockets.length - 1];
+        releaseStream();
+        assert.ok(!ws.closed, 'a decoder is not cut off by a panel closing');
+        releaseHold();
+        assert.ok(ws.closed);
+    });
+
+    await ta('a socket opened under an older session id is stale, and refresh reopens it', async () => {
+        const c = new DXClusterConnection();
+        const release = c.hold();
+        await settle();
+        const first = sockets[sockets.length - 1];
+        assert.strictEqual(c.stale, false);
+
+        // What a power cycle does: a new UUID is minted while this socket still
+        // carries the old one. Every attach on it is answered "no active audio
+        // session found", because server-side that session is gone.
+        c.openedWith = 'a-previous-session-id';
+        assert.strictEqual(c.stale, true);
+
+        assert.strictEqual(c.refresh(), true);
+        await settle();
+        const second = sockets[sockets.length - 1];
+        assert.ok(first.closed, 'the stale socket is closed');
+        assert.notStrictEqual(second, first);
+        assert.strictEqual(c.stale, false, 'the new one carries the current id');
+        assert.ok(second.url.includes(c.openedWith));
+        // A healthy socket is left alone — refresh must not become a reconnect loop.
+        assert.strictEqual(c.refresh(), false);
+        release();
+    });
+
+    await ta('a stale socket is reopened on the next hold, not left in place', async () => {
+        const c = new DXClusterConnection();
+        const release = c.hold();
+        await settle();
+        const first = sockets[sockets.length - 1];
+        c.openedWith = 'stale';
+        const second = c.hold();
+        await settle();
+        assert.ok(first.closed);
+        assert.notStrictEqual(sockets[sockets.length - 1], first);
+        second();
+        release();
+    });
+
+    console.log(`\n${pass} extension checks passed`);
+})();

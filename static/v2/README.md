@@ -211,9 +211,27 @@ server-side session has no extension in it), and detaches on unmount so closing
 a window really does stop the decoder. Results arrive as binary frames holding
 UTF-8 JSON; a malformed one is dropped rather than thrown on.
 
-Attaching needs a live audio session, so the receiver must be running. The server
-adds the tuned frequency, mode, passband, receiver locator and CTY database to
-the attach itself — none of those belong in `params`.
+The server adds the tuned frequency, mode, passband, receiver locator and CTY
+database to the attach itself — none of those belong in `params`.
+
+**Attaching needs a live *audio* session, and the identity of that session is the
+socket's URL.** The server finds it by the UUID `/ws/dxcluster` was opened with,
+so `active` should be "the audio connection is up" (`audioState === 'open'`), not
+just "the receiver is on" — `running` flips before the audio socket connects.
+Three things can still put the two out of step, and all three are handled rather
+than surfaced as an error to clear by hand:
+
+* the audio socket **reconnects**, replacing the session server-side — using the
+  audio state as the gate re-attaches on its own;
+* the attach lands in the gap — `no active audio session found` is the one
+  refusal that is retried (`isTransientAttachError`), because it clears within a
+  second or two; everything else is permanent and shown;
+* the control socket **outlives the session id it carries**. Starting the
+  receiver mints a new UUID, so a socket that survives a power cycle is
+  registered to a session that no longer exists and *every* attach on it fails
+  while everything looks connected. `dxcluster.stale` says so and
+  `dxcluster.refresh()` reopens it; the ref counts survive, so the
+  subscriptions come back with it.
 
 ### Adding an extension
 

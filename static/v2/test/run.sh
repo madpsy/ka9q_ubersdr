@@ -58,6 +58,8 @@ esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
     --outfile=.build/webmidi.cjs --log-level=warning
 esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
+esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dxcluster.cjs --log-level=warning
 esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
     --outfile=.build/extprotocol.cjs --log-level=warning
 esbuild ../src/extensions/ft8/messages.js --bundle --format=cjs --platform=node \

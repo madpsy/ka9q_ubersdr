@@ -400,12 +400,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 7px 10px 7px 12px;
+    /* The label is a 10px caption and the collapse button is 20px, so the row
+       needs no padding of its own to stay legible — same trim as the panel
+       headers below it. */
+    padding: 2px 8px 2px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
 }
 .dock__name {
     font-size: calc(10px * var(--ui-scale));
+    line-height: 1.15;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--text-faint);
@@ -413,8 +417,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dock__collapse {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border: 0;
     border-radius: 6px;
     background: transparent;
@@ -550,12 +554,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .section__head:active { cursor: grabbing; }
 
+/* Kept as tight as the 16px panel icon allows: 4px of padding either side puts
+   the header at 24px, which is still a comfortable click target for the
+   chevron and the grip beside it. */
 .section__toggle {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px 4px 9px 10px;
+    gap: 7px;
+    padding: 4px 4px 4px 9px;
+    line-height: 1.15;
     border: 0;
     background: transparent;
     color: var(--text);
@@ -575,6 +583,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-size: calc(12.5px * var(--ui-scale));
     font-weight: 600;
     letter-spacing: 0.01em;
+    line-height: 1.15;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -583,8 +592,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .section__grip {
     display: grid;
     place-items: center;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border-radius: 6px;
     color: var(--text-faint);
     cursor: pointer;
@@ -829,6 +838,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .badge {
     padding: 2px 7px;
+    line-height: 1.2;
     border-radius: 4px;
     font-size: calc(9.5px * var(--ui-scale));
     font-weight: 700;
@@ -1490,7 +1500,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 6px 7px 10px;
+    /* Same trim as a dock section's header — see .section__toggle. */
+    padding: 4px 5px 4px 9px;
+    line-height: 1.15;
     background: var(--surface-3);
     border-bottom: 1px solid var(--border);
     cursor: grab;
@@ -1512,8 +1524,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: grid;
     place-items: center;
     flex: none;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border: 0;
     border-radius: 6px;
     background: transparent;

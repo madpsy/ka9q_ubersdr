@@ -140,12 +140,19 @@ export default function Dock({ side }) {
 
     return (
         <div className={`dock dock--${side}`} style={style}>
-            <div className="dock__header">
+            {/* The whole header collapses the dock, the way a panel's header
+                opens and closes it. One button rather than a bar with a button
+                inside it, so there is no nested click target to disagree. */}
+            <button
+                type="button"
+                className="dock__header"
+                title={`Collapse ${side} panels`}
+                aria-expanded="true"
+                onClick={() => toggleDock(side)}
+            >
                 <span className="dock__name">{side} panels</span>
-                <button type="button" className="dock__collapse" title="Collapse" onClick={() => toggleDock(side)}>
-                    {COLLAPSE_ICON[side].open}
-                </button>
-            </div>
+                <span className="dock__collapse">{COLLAPSE_ICON[side].open}</span>
+            </button>
 
             <div
                 className={`dock__body${dropping ? ' is-dropping' : ''}`}

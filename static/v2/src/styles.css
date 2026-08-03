@@ -404,9 +404,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
        needs no padding of its own to stay legible — same trim as the panel
        headers below it. */
     padding: 2px 8px 2px 12px;
+    width: 100%;
+    border: 0;
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
+    cursor: pointer;
+    text-align: left;
 }
+.dock__header:hover { background: var(--surface-3); }
+.dock__header:hover .dock__name, .dock__header:hover .dock__collapse { color: var(--text); }
 .dock__name {
     font-size: calc(10px * var(--ui-scale));
     line-height: 1.15;
@@ -419,13 +425,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     place-items: center;
     width: 20px;
     height: 20px;
-    border: 0;
     border-radius: 6px;
-    background: transparent;
     color: var(--text-dim);
-    cursor: pointer;
+    flex: none;
 }
-.dock__collapse:hover { background: var(--surface-hover); color: var(--text); }
 
 .dock__body {
     flex: 1;

@@ -22,6 +22,7 @@ import Icon from '../components/icons.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
 import BookmarksPanel from './BookmarksPanel.jsx';
+import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
 import AudioPanel from './AudioPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
@@ -69,6 +70,7 @@ export const PANELS = [
     },
 
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
+    { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', Component: SignalPanel },

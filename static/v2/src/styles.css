@@ -1100,6 +1100,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Local bookmarks
+   ========================================================================= */
+
+.lb-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.lb-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.lb-form__row { display: flex; gap: 6px; }
+.lb-form__row > * { flex: 1; min-width: 0; }
+
+.lb-row { display: flex; align-items: stretch; gap: 2px; }
+.lb-row__main { flex: 1; min-width: 0; text-align: left; }
+/* Kept out of the way until the row is hovered, so a list of bookmarks reads
+   as a list rather than as a grid of buttons — but never hidden outright, or a
+   delete you started could vanish mid-gesture. */
+.lb-row__actions { display: flex; align-items: center; gap: 1px; opacity: 0.25; transition: opacity var(--dur) var(--ease); }
+.lb-row:hover .lb-row__actions, .lb-row:focus-within .lb-row__actions { opacity: 1; }
+.lb-row__note { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+
+/* =========================================================================
    Rotator and antenna switch panels
    ========================================================================= */
 

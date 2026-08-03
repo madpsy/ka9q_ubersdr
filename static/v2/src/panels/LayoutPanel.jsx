@@ -5,11 +5,13 @@ import React from '../react.js';
 import { PLACEMENTS, useLayout } from '../layout/LayoutContext.jsx';
 import { PANELS } from './registry.jsx';
 import { Button, Icon, Segmented, Switch } from '../components/ui.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 
 const PLACEMENT_LABEL = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Float' };
 
 export default function LayoutPanel() {
     const { sections, movePanel, setSectionHidden, resetLayout, placementOf } = useLayout();
+    const { serverInfo } = useRadio();
 
     return (
         <div className="stack">
@@ -21,7 +23,7 @@ export default function LayoutPanel() {
             </div>
 
             <div className="layout-list">
-                {PANELS.filter((p) => p.id !== 'layout').map((p) => (
+                {PANELS.filter((p) => p.id !== 'layout' && (!p.requires || p.requires(serverInfo))).map((p) => (
                     <div key={p.id} className="layout-row">
                         <div className="layout-row__head">
                             <span className="layout-row__icon">{p.icon}</span>

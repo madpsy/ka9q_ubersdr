@@ -141,6 +141,9 @@ Add one entry to `src/panels/registry.jsx`:
 ```
 
 It then appears in its dock, in the layout manager, and in the mobile tab bar.
+An optional `requires: (serverInfo) => bool` keeps a panel out of all three when
+it does not apply to the connected receiver — the Addons panel uses it, so a
+server with no addons never shows an empty slot explaining that it has none.
 Saved layouts reconcile against the registry on load: unknown ids are dropped
 and newly registered panels are appended to their declared dock, so shipping a
 panel never disturbs an existing user's arrangement.

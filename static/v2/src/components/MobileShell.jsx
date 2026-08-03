@@ -8,15 +8,19 @@
 import React, { useState } from '../react.js';
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 
 export default function MobileShell() {
     const { sections } = useLayout();
+    const { serverInfo } = useRadio();
     const [openId, setOpenId] = useState(null);
 
-    const visible = PANELS.filter((p) => !sections[p.id]?.hidden);
+    const visible = PANELS.filter(
+        (p) => !sections[p.id]?.hidden && (!p.requires || p.requires(serverInfo)),
+    );
     const panel = openId ? PANEL_BY_ID[openId] : null;
 
     return (

@@ -13,6 +13,7 @@
 //   defaultHidden true to ship hidden (still listed in the layout manager)
 //   fill         true if the body should stretch to the dock height
 //   Badge        optional component rendered in the header, for unread counts
+//   requires     optional (serverInfo) => bool; false hides the panel entirely
 //   Component    the panel body
 
 import React from '../react.js';
@@ -29,9 +30,20 @@ import LayoutPanel from './LayoutPanel.jsx';
 import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
 import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
+import AddonsPanel, { addonList } from './AddonsPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
+    {
+        id: 'addons',
+        title: 'Addons',
+        icon: <Icon.Puzzle />,
+        dock: 'left',
+        Component: AddonsPanel,
+        // Nothing to show on a receiver with no addons, so the panel does not
+        // appear at all rather than occupying a slot to say so.
+        requires: (serverInfo) => addonList(serverInfo).length > 0,
+    },
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 

@@ -1410,3 +1410,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .section:hover .section__grip-size { opacity: 1; }
 .section__grip-size:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
+
+.addon { flex-direction: row; align-items: center; justify-content: space-between; text-decoration: none; color: inherit; }
+.addon__go { display: grid; place-items: center; color: var(--text-faint); }
+.addon:hover .addon__go { color: var(--accent); }

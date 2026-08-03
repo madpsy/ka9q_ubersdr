@@ -4,6 +4,9 @@
 const assert = require('assert');
 const { SpectrumConnection } = require('./.build/spectrum.cjs');
 const { AudioConnection } = require('./.build/audio.cjs');
+const {
+    SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, squelchEnabled, squelchThreshold,
+} = require('./.build/constants.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -165,6 +168,120 @@ t('config message updates geometry and clears stale deltas', () => {
     c._onControl({ type: 'config', centerFreq: 14200000, binCount: 4, binBandwidth: 25, defaultBinCount: 8, defaultBinBandwidth: 50 });
     assert.strictEqual(cfg.span, 100);
     assert.strictEqual(c._float, null, 'bin-count change must drop the delta accumulator');
+});
+
+// --- zoom stepping ---------------------------------------------------------
+//
+// The server quantises binBandwidth onto a fixed ladder before applying it
+// (user_spectrum_websocket.go). A zoom step gentler than the ladder's spacing
+// rounds back to the rung it started on, so the view never changes. These tests
+// exist to stop the step size drifting back to something "smoother".
+
+// Mirrors the server's safe-bin_bw rounding.
+function serverLadder(binBW) {
+    if (binBW < 0.75) return 0.5;
+    if (binBW < 1.5) return 1;
+    if (binBW < 3) return 2;
+    if (binBW < 7) return 5;
+    if (binBW < 15) return 10;
+    if (binBW < 35) return 20;
+    if (binBW < 75) return 50;
+    if (binBW < 150) return 100;
+    if (binBW < 250) return 200;
+    if (binBW < 400) return 300;
+    if (binBW < 750) return 500;
+    if (binBW < 1500) return 1000;
+    if (binBW < 3500) return 2000;
+    if (binBW < 7500) return 5000;
+    return binBW;   // pass-through for full-bandwidth views
+}
+
+// The only bin bandwidths a session can actually be sitting at — the ladder is
+// not a power-of-two series, so stepping has to be checked from these, not from
+// arbitrary values.
+const RUNGS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 300, 500, 1000, 2000, 5000];
+
+t('halving moves to a lower rung from every reachable rung', () => {
+    for (const bw of RUNGS.slice(1)) {
+        const landed = serverLadder(bw / 2);
+        assert.ok(landed < bw, `halving ${bw} landed on ${landed}`);
+    }
+});
+
+t('doubling moves to a higher rung from every reachable rung', () => {
+    for (const bw of RUNGS) {
+        const landed = serverLadder(bw * 2);
+        assert.ok(landed > bw, `doubling ${bw} landed on ${landed}`);
+    }
+});
+
+t('a gentle 1.25x step stalls — this is why the step is 2x', () => {
+    // Reproduces the original bug: from the 5000 Hz/bin rung neither direction
+    // moves, so the spectrum appears frozen at three or four zoom levels.
+    assert.strictEqual(serverLadder(5000 * 1.25), 5000);
+    assert.strictEqual(serverLadder(5000 * 0.8), 5000);
+});
+
+t('UI zoom floor is a span, independent of bin count', () => {
+    const c = new SpectrumConnection();
+    c._onControl({ type: 'config', centerFreq: 15e6, binCount: 1024, binBandwidth: 29296.875, defaultBinCount: 1024, defaultBinBandwidth: 29296.875 });
+    assert.strictEqual(c.minBinBandwidthForUI() * 1024, 10240);
+    const d = new SpectrumConnection();
+    d._onControl({ type: 'config', centerFreq: 15e6, binCount: 2048, binBandwidth: 14648.4375, defaultBinCount: 2048, defaultBinBandwidth: 14648.4375 });
+    assert.strictEqual(d.minBinBandwidthForUI() * 2048, 10240);
+});
+
+t('full-span bin bandwidth survives a missing server default', () => {
+    const c = new SpectrumConnection();
+    // Server that omits defaultBinBandwidth: must still yield the full-view
+    // value, or zoom-out clamps to wherever the user happens to be.
+    c._onControl({ type: 'config', centerFreq: 15e6, binCount: 2048, binBandwidth: 14648.4375 });
+    assert.strictEqual(c.fullSpanBinBandwidth(), 14648.4375);
+    assert.ok(c.fullSpanBinBandwidth() * 2048 > 29e6);
+});
+
+// --- squelch ---------------------------------------------------------------
+//
+// Squelch is the server-side audio gate. The slider's floor doubles as "off",
+// which is what v1 does — a separate enable flag can disagree with the value.
+
+t('slider floor means off, and sends the sentinel', () => {
+    assert.strictEqual(squelchThreshold(SQUELCH_MIN), SQUELCH_SENTINEL);
+    assert.strictEqual(squelchEnabled(SQUELCH_MIN), false);
+    // Anything at or below the floor is off, so a stale stored value cannot
+    // resurrect as a live threshold.
+    assert.strictEqual(squelchThreshold(SQUELCH_MIN - 10), SQUELCH_SENTINEL);
+    assert.strictEqual(squelchEnabled(0), false);
+});
+
+t('above the floor the slider value is the threshold in dB SNR', () => {
+    assert.strictEqual(squelchThreshold(SQUELCH_MIN + 0.5), SQUELCH_MIN + 0.5);
+    assert.strictEqual(squelchEnabled(SQUELCH_MIN + 0.5), true);
+    assert.strictEqual(squelchThreshold(SQUELCH_MAX), SQUELCH_MAX);
+});
+
+t('setAudioGate emits the server field names and records for reconnect', () => {
+    const a = new AudioConnection();
+    const sent = [];
+    a.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+    global.WebSocket = { OPEN: 1 };
+
+    a.setAudioGate({ minSnr: 30 });
+    assert.deepStrictEqual(sent[0], { type: 'set_audio_gate', min_snr: 30 });
+    assert.deepStrictEqual(a.lastGate, { minSnr: 30, minPower: undefined });
+
+    a.setAudioGate({ minSnr: SQUELCH_SENTINEL });
+    assert.deepStrictEqual(sent[1], { type: 'set_audio_gate', min_snr: -999 });
+});
+
+t('setAudioGate with no thresholds is not sent', () => {
+    const a = new AudioConnection();
+    const sent = [];
+    a.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+    global.WebSocket = { OPEN: 1 };
+    // The server rejects a gate message carrying neither field.
+    assert.strictEqual(a.setAudioGate({}), false);
+    assert.strictEqual(sent.length, 0);
 });
 
 // --- audio -----------------------------------------------------------------

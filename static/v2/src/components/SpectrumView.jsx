@@ -19,6 +19,7 @@ import { Button, Icon } from './ui.jsx';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
+const MIN_WATERFALL_H = 40;
 
 export default function SpectrumView() {
     const radio = useRadio();
@@ -60,8 +61,10 @@ export default function SpectrumView() {
     const [hoverInfo, setHoverInfo] = useState(null);
     const [sizes, setSizes] = useState({ w: 0, h: 0 });
 
-    // Fraction of the centre area given to the spectrum; the rest is waterfall.
-    const split = display.split;
+    // How the centre area is divided. The scale sits between the two panes, so
+    // in spectrum-only it ends up along the bottom and in waterfall-only along
+    // the top — both the conventional placement — with no special casing.
+    const viewMode = display.viewMode || 'split';
 
     // ---- sizing ---------------------------------------------------------
 
@@ -76,8 +79,19 @@ export default function SpectrumView() {
         return () => ro.disconnect();
     }, []);
 
-    const specH = Math.max(MIN_SPECTRUM_H, Math.round((sizes.h - SCALE_H) * split));
-    const wfH = Math.max(0, sizes.h - SCALE_H - specH);
+    const avail = Math.max(0, sizes.h - SCALE_H);
+    let specH;
+    if (viewMode === 'spectrum') {
+        specH = avail;
+    } else if (viewMode === 'waterfall') {
+        specH = 0;
+    } else {
+        // Keep both panes usable, but never demand more height than exists.
+        const minSpec = Math.min(MIN_SPECTRUM_H, avail);
+        const minWf = Math.min(MIN_WATERFALL_H, Math.max(0, avail - minSpec));
+        specH = clamp(Math.round(avail * display.split), minSpec, avail - minWf);
+    }
+    const wfH = avail - specH;
 
     // Size the backing stores for device pixels and rebuild the waterfall ring.
     useEffect(() => {
@@ -230,10 +244,18 @@ export default function SpectrumView() {
         setHoverInfo(null);
     }, []);
 
+    // Trackpads emit many small deltas per physical gesture, so accumulate to a
+    // threshold — otherwise one flick would fire a dozen factor-of-two zooms.
+    const wheelAcc = useRef(0);
     const onWheel = useCallback((e) => {
         e.preventDefault();
+        const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+        wheelAcc.current += step;
+        if (Math.abs(wheelAcc.current) < 50) return;
+        const dir = wheelAcc.current < 0 ? -1 : 1;
+        wheelAcc.current = 0;
         const f = freqAtX(e.clientX);
-        actions.zoomBy(e.deltaY > 0 ? 1.25 : 0.8, f);
+        if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
     }, [actions, freqAtX]);
 
     // React's onWheel is passive, so preventDefault there is a no-op — the
@@ -256,8 +278,8 @@ export default function SpectrumView() {
                     {hoverInfo && <span className="tag tag--ghost">{formatFreqShort(hoverInfo.freq, span)}</span>}
                 </div>
                 <div className="spectrum__tools">
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomBy(1.6)} />
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in" onClick={() => actions.zoomBy(0.625)} />
+                    <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />
+                    <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in" onClick={() => actions.zoomIn()} />
                     <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                     <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
                 </div>
@@ -272,9 +294,9 @@ export default function SpectrumView() {
                 onPointerCancel={onPointerUp}
                 onPointerLeave={onPointerLeave}
             >
-                <canvas ref={specRef} className="spectrum__pane" />
+                {specH > 0 && <canvas ref={specRef} className="spectrum__pane" />}
                 <canvas ref={scaleRef} className="spectrum__pane spectrum__pane--scale" />
-                <canvas ref={wfRef} className="spectrum__pane" />
+                {wfH > 0 && <canvas ref={wfRef} className="spectrum__pane" />}
             </div>
         </div>
     );
@@ -288,10 +310,41 @@ export default function SpectrumView() {
 // recalculation, so calling it inside the draw loop would cost more than the
 // rendering itself.
 const THEME_VARS = [
-    '--spec-bg', '--spec-grid', '--spec-trace', '--spec-fill-a', '--spec-fill-b',
-    '--spec-band', '--spec-vfo', '--scale-bg', '--scale-text', '--scale-tick', '--accent',
+    '--spec-bg', '--spec-grid', '--spec-band', '--spec-vfo',
+    '--scale-bg', '--scale-text', '--scale-tick', '--accent',
 ];
 let themeCache = null;
+
+// Vertical palette gradients for the spectrum, so the trace and its fill use
+// the same colour-per-amplitude mapping as the waterfall: hot at the top of the
+// dB range, cold at the bottom, with the same `contrast` gamma applied.
+//
+// The trace is drawn from a compressed slice of the palette (TRACE_FLOOR..1)
+// because most palettes start at near-black, which would make weak signals
+// invisible against the dark background. The fill uses the full palette with an
+// alpha ramp instead.
+const TRACE_FLOOR = 0.35;
+const GRAD_STOPS = 24;
+
+function paletteGradients(c, H, palette, contrast) {
+    const lut = getPalette(palette);
+    const gammaInv = 1 / contrast;
+    const trace = c.createLinearGradient(0, 0, 0, H);
+    const fill = c.createLinearGradient(0, 0, 0, H);
+
+    for (let i = 0; i <= GRAD_STOPS; i++) {
+        const offset = i / GRAD_STOPS;        // 0 = top of the range
+        let amp = 1 - offset;                 // amplitude fraction at this height
+        if (contrast !== 1) amp = Math.pow(amp, gammaInv);
+
+        const fi = Math.round(amp * 255) * 3;
+        fill.addColorStop(offset, `rgba(${lut[fi]},${lut[fi + 1]},${lut[fi + 2]},${(0.62 * amp + 0.04).toFixed(3)})`);
+
+        const ti = Math.round((TRACE_FLOOR + amp * (1 - TRACE_FLOOR)) * 255) * 3;
+        trace.addColorStop(offset, `rgb(${lut[ti]},${lut[ti + 1]},${lut[ti + 2]})`);
+    }
+    return { trace, fill };
+}
 
 function colors() {
     const theme = document.documentElement.dataset.theme || 'dark';
@@ -342,7 +395,8 @@ function autoRange(px, g) {
 
 function drawFrame(g, d, ctx) {
     const { spec, wf, scale, cfg, tuning, width, specH, wfH, commitRow } = ctx;
-    if (!spec || !width) return;
+    // Either pane may be absent — the view mode can hide one of them entirely.
+    if (!width) return;
 
     const dpr = g.dpr;
     const pxW = Math.max(1, Math.round(width * dpr));
@@ -417,6 +471,7 @@ function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow) {
 }
 
 function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW) {
+    if (!spec || specH <= 0) return;
     const c = spec.getContext('2d', { alpha: false });
     const H = Math.max(1, Math.round(specH * g.dpr));
     const dpr = g.dpr;
@@ -424,11 +479,21 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     const col = colors();
     const colBg = col['--spec-bg'] || '#0a0d14';
     const colGrid = col['--spec-grid'] || 'rgba(255,255,255,0.06)';
-    const colTrace = col['--spec-trace'] || '#5fd8e8';
-    const colFillA = col['--spec-fill-a'] || 'rgba(95,216,232,0.35)';
-    const colFillB = col['--spec-fill-b'] || 'rgba(95,216,232,0.02)';
     const colBand = col['--spec-band'] || 'rgba(124,108,247,0.20)';
     const colVfo = col['--spec-vfo'] || '#ffd166';
+
+    // Gradients depend only on palette, contrast and height — not on the live
+    // dB range — so they survive auto-levelling and are rebuilt rarely. Keyed on
+    // the canvas too: a CanvasGradient belongs to the context that made it, and
+    // switching view modes can replace the element at the same height.
+    const gradKey = `${d.palette}|${d.contrast}|${H}`;
+    if (g.gradKey !== gradKey || g.gradCanvas !== spec) {
+        const grads = paletteGradients(c, H, d.palette, d.contrast);
+        g.traceGrad = grads.trace;
+        g.fillGrad = grads.fill;
+        g.gradKey = gradKey;
+        g.gradCanvas = spec;
+    }
 
     c.fillStyle = colBg;
     c.fillRect(0, 0, pxW, H);
@@ -489,10 +554,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     for (let x = 0; x < pxW; x++) c.lineTo(x, yOf(trace[x]));
     c.lineTo(pxW, H);
     c.closePath();
-    const grad = c.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, colFillA);
-    grad.addColorStop(1, colFillB);
-    c.fillStyle = grad;
+    c.fillStyle = g.fillGrad;
     c.fill();
 
     c.beginPath();
@@ -500,7 +562,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         const y = yOf(trace[x]);
         if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
     }
-    c.strokeStyle = colTrace;
+    c.strokeStyle = g.traceGrad;
     c.lineWidth = 1.25 * dpr;
     c.stroke();
 

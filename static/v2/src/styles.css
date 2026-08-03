@@ -29,9 +29,8 @@
 
     --spec-bg: #0a0e15;
     --spec-grid: rgba(255, 255, 255, 0.055);
-    --spec-trace: #5fe3ef;
-    --spec-fill-a: rgba(61, 219, 232, 0.34);
-    --spec-fill-b: rgba(61, 219, 232, 0.015);
+    /* The spectrum trace and fill are coloured from the active waterfall
+       palette, not from tokens — see paletteGradients() in SpectrumView.jsx. */
     --spec-band: rgba(139, 124, 248, 0.22);
     --spec-vfo: #ffd166;
     --scale-bg: #0d121b;
@@ -633,6 +632,41 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .slider:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.slider-wrap { position: relative; }
+.slider-marker {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 15px;
+    margin-left: -1px;
+    border-radius: 1px;
+    transform: translateY(-50%);
+    pointer-events: none;
+    background: var(--accent);
+    transition: left 90ms linear, background var(--dur) var(--ease);
+}
+.slider-marker--closed { background: var(--bad); }
+
+.squelch-status { display: flex; align-items: center; gap: 6px; }
+.squelch-status__snr {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.badge {
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    background: var(--surface-hover);
+    color: var(--text-faint);
+}
+.badge--open { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.badge--closed { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
 
 .switch {
     display: inline-flex;

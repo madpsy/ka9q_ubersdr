@@ -22,6 +22,12 @@ import { checkConnection, getBypassPassword, getSessionId, wsBase } from './sess
 
 const HEADER_BYTES = 22;
 
+// Narrowest span (Hz) the normal zoom controls will reach. Matches v1's
+// MIN_ZOOM_SPAN_HZ so both frontends stop at the same place. It is a *span*,
+// not a Hz/bin value, so zoom depth does not change with spectrum.bin_count.
+// The server allows down to 0.5 Hz/bin for explicit requests.
+const MIN_ZOOM_SPAN_HZ = 10240;
+
 export class SpectrumConnection extends Emitter {
     constructor() {
         super();
@@ -39,6 +45,7 @@ export class SpectrumConnection extends Emitter {
         this.binBandwidth = 0;
         this.defaultBinCount = 0;
         this.defaultBinBandwidth = 0;
+        this.initialBinBandwidth = 0;   // first value seen, i.e. the full-span view
 
         // Delta-decode accumulators, in raw radiod bin order.
         this._float = null;   // Float32Array
@@ -53,6 +60,21 @@ export class SpectrumConnection extends Emitter {
 
     get span() {
         return this.binCount * this.binBandwidth;
+    }
+
+    // Hz/bin at the narrowest view the zoom controls will produce. Uses the
+    // *default* bin count deliberately: the server's deep-zoom path reduces
+    // session.BinCount, and the floor must not move when it does.
+    minBinBandwidthForUI() {
+        const bins = this.defaultBinCount || this.binCount || 1024;
+        return Math.max(0.5, MIN_ZOOM_SPAN_HZ / bins);
+    }
+
+    // Hz/bin at full zoom-out (the whole 0–30 MHz view).
+    fullSpanBinBandwidth() {
+        if (this.defaultBinBandwidth > 0) return this.defaultBinBandwidth;
+        if (this.initialBinBandwidth > 0) return this.initialBinBandwidth;
+        return 30000000 / (this.defaultBinCount || this.binCount || 1024);
     }
 
     async connect(initial) {
@@ -178,7 +200,10 @@ export class SpectrumConnection extends Emitter {
         if (msg.type === 'config' || msg.type === 'status') {
             if (msg.centerFreq) this.centerFreq = msg.centerFreq;
             if (msg.binCount) this.binCount = msg.binCount;
-            if (msg.binBandwidth) this.binBandwidth = msg.binBandwidth;
+            if (msg.binBandwidth) {
+                this.binBandwidth = msg.binBandwidth;
+                if (!this.initialBinBandwidth) this.initialBinBandwidth = msg.binBandwidth;
+            }
             if (msg.defaultBinCount) this.defaultBinCount = msg.defaultBinCount;
             if (msg.defaultBinBandwidth) this.defaultBinBandwidth = msg.defaultBinBandwidth;
             // Bin count changes invalidate the delta accumulators.

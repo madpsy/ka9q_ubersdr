@@ -44,5 +44,28 @@ export function stepLabel(hz) {
     return hz + ' Hz';
 }
 
-// Squelch is expressed in dB SNR; -999 is the server's "always open" sentinel.
-export const SQUELCH_ALWAYS_OPEN = -999;
+// Squelch.
+//
+// This is the server-side audio gate (`set_audio_gate` with `min_snr`), not
+// radiod's `set_squelch`. v1 ships with `FM_SQUELCH_ENABLED = false` and only
+// ever sends squelchOpen -999, so the gate is the control users actually have.
+// The gate drops audio before encoding and keeps the signal-quality packets
+// flowing, so SNR stays live on screen while muted.
+export const SQUELCH_MIN = 24;        // far-left slider position — means "off"
+export const SQUELCH_MAX = 80;
+export const SQUELCH_STEP = 0.5;
+export const SQUELCH_SENTINEL = -999; // value the server reads as "disabled"
+
+// Server-side gate behaviour, mirrored so the open/closed indicator matches
+// what the server is actually doing (see audioGateAllows in websocket.go).
+export const SQUELCH_HANG_MS = 500;
+
+// Slider position -> threshold to send. The floor doubles as the off switch.
+export function squelchThreshold(sliderValue) {
+    const v = Number(sliderValue);
+    return v <= SQUELCH_MIN ? SQUELCH_SENTINEL : v;
+}
+
+export function squelchEnabled(sliderValue) {
+    return squelchThreshold(sliderValue) > SQUELCH_SENTINEL + 1;
+}

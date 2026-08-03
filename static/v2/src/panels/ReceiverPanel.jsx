@@ -53,8 +53,10 @@ export default function ReceiverPanel() {
             </div>
 
             <Field label="Mode">
+                {/* Wraps to as many rows as the dock width needs: 4x2 at the
+                    default width, never fewer than 3 columns when narrowed. */}
                 <Segmented
-                    columns={4}
+                    minItemWidth={54}
                     size="sm"
                     value={tuning.mode}
                     onChange={actions.setMode}

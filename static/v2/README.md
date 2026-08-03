@@ -89,6 +89,24 @@ panel never disturbs an existing user's arrangement.
   click; browsers block it otherwise.
 * **Spectrum uses `binary8`.** ~75% less bandwidth than float32, and the 1 dB
   quantisation is finer than a waterfall can show.
+* **Squelch is the audio gate, not `set_squelch`.** v1 ships with
+  `FM_SQUELCH_ENABLED = false` and only ever sends `squelchOpen: -999`, so
+  radiod's squelch is never engaged; the control users actually have is
+  `set_audio_gate` with `min_snr`. The slider runs 24–80 dB SNR with the floor
+  doubling as "off" (sends `-999`), matching v1. The gate substitutes silence
+  rather than dropping packets, and signal-quality packets keep flowing, so SNR
+  stays live on screen while muted. The open/closed badge mirrors the server's
+  500 ms hang timer — without it the badge flickers closed between syllables.
+  A new session starts with the gate disabled, so it is re-applied on every
+  socket open, including reconnects.
+* **Zoom steps must halve or double `binBandwidth`.** The server snaps
+  `binBandwidth` onto a fixed ladder (0.5, 1, 2, 5, 10, 20, 50 … 5000 Hz/bin,
+  then pass-through) before applying it. Any gentler step rounds back to the
+  rung it started from, so the view silently stops changing — a 1.25× step
+  strands you at 5000 Hz/bin in both directions. Zooming out past the full-span
+  value sends `reset` rather than a `zoom`, which also returns the session to
+  the shared radiod channel. The zoom-in floor is a *span* (10240 Hz), matching
+  v1, so depth does not vary with `spectrum.bin_count`.
 * **FFT bins must be unwrapped.** radiod emits raw FFT order,
   `[DC..+Nyquist, -Nyquist..DC]`; the two halves are swapped in
   `spectrum-connection.js` to get ascending frequency. Skipping this shifts the
@@ -97,6 +115,15 @@ panel never disturbs an existing user's arrangement.
   and the swap happens on the way out. v1 does the same thing in
   `spectrum-display.js`, in the shared `case 'spectrum'` both its JSON and
   binary paths funnel into.
+* **One colour mapping for both panes.** The Display panel's View control picks
+  split / spectrum-only / waterfall-only. The palette drives both: the spectrum's
+  trace and fill are painted with a vertical gradient built from the same LUT and
+  the same `contrast` gamma the waterfall uses, so a given amplitude is the same
+  colour in either pane. The trace uses a compressed slice of the palette
+  (0.35–1.0) because most palettes start at near-black, which would make weak
+  signals invisible against the dark background; the fill uses the full range
+  with an alpha ramp. Controls that affect only one pane are hidden when that
+  pane is off.
 * **The waterfall is a ring buffer.** Rows are written into an offscreen canvas
   at a decrementing index and the visible canvas is painted from two slices —
   O(row) per frame, and unlike blitting the canvas onto itself it never

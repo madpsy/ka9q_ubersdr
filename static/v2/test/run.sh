@@ -16,5 +16,7 @@ esbuild ../src/radio/spectrum-connection.js --bundle --format=cjs --platform=nod
     --outfile=.build/spectrum.cjs --log-level=warning
 esbuild ../src/radio/audio-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/audio.cjs --log-level=warning
+esbuild ../src/radio/constants.js --bundle --format=cjs --platform=node \
+    --outfile=.build/constants.cjs --log-level=warning
 
 node protocol.test.js

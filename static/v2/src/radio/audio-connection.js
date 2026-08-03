@@ -11,7 +11,6 @@
 
 import { Emitter } from './emitter.js';
 import { checkConnection, getBypassPassword, getSessionId, wsBase } from './session.js';
-import { SQUELCH_ALWAYS_OPEN } from './constants.js';
 
 // Version 2 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
@@ -119,16 +118,18 @@ export class AudioConnection extends Emitter {
         return this.send(msg);
     }
 
-    setSquelch(openDb, closeDb) {
-        return this.send({
-            type: 'set_squelch',
-            squelchOpen: openDb,
-            squelchClose: closeDb != null ? closeDb : openDb - 3,
-        });
-    }
-
-    openSquelch() {
-        return this.setSquelch(SQUELCH_ALWAYS_OPEN, SQUELCH_ALWAYS_OPEN);
+    // Squelch. Uses the server-side audio gate rather than radiod's set_squelch,
+    // matching v1 — see the note in constants.js. Pass SQUELCH_SENTINEL to
+    // disable a threshold; omitted fields are left unchanged by the server.
+    setAudioGate({ minSnr, minPower } = {}) {
+        const msg = { type: 'set_audio_gate' };
+        if (minSnr != null) msg.min_snr = minSnr;
+        if (minPower != null) msg.min_power = minPower;
+        if (msg.min_snr == null && msg.min_power == null) return false;
+        // Remembered so a reconnect can restore the gate — a fresh session
+        // starts with both thresholds disabled.
+        this.lastGate = { minSnr, minPower };
+        return this.send(msg);
     }
 
     setAGC(params) {

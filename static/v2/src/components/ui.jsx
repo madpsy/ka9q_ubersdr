@@ -17,8 +17,26 @@ export function Button({ children, variant = 'default', size = 'md', active, ico
 }
 
 // Row of mutually exclusive options. `options` is [{value,label,title}].
-export function Segmented({ options, value, onChange, size = 'md', columns }) {
-    const style = columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined;
+//
+// By default the options share one row. Pass `minItemWidth` to let them wrap
+// onto as many rows as needed — the grid fits as many columns as will hold an
+// item of that width, so labels never get ellipsed in a narrow dock. `columns`
+// pins an exact column count instead.
+export function Segmented({ options, value, onChange, size = 'md', columns, minItemWidth }) {
+    let style;
+    if (minItemWidth) {
+        // auto-flow must become `row`, or the items extend the track sideways
+        // into implicit columns instead of wrapping.
+        style = {
+            gridTemplateColumns: `repeat(auto-fit, minmax(${minItemWidth}px, 1fr))`,
+            gridAutoFlow: 'row',
+        };
+    } else if (columns) {
+        style = {
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gridAutoFlow: 'row',
+        };
+    }
     return (
         <div className={`segmented segmented--${size}`} style={style} role="group">
             {options.map((o) => (
@@ -48,10 +66,13 @@ export function Field({ label, hint, children, inline }) {
     );
 }
 
-export function Slider({ value, min, max, step = 1, onChange, onCommit, disabled }) {
+// `marker` overlays a live value on the track (e.g. current SNR against a
+// squelch threshold). It is in the same units as the slider and is positioned
+// inside the thumb's travel, so it lines up with where the thumb would sit.
+export function Slider({ value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle }) {
     // Percentage drives the filled-track gradient without a second element.
     const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
-    return (
+    const input = (
         <input
             type="range"
             className="slider"
@@ -64,6 +85,19 @@ export function Slider({ value, min, max, step = 1, onChange, onCommit, disabled
             onChange={(e) => onChange(Number(e.target.value))}
             onPointerUp={onCommit ? () => onCommit() : undefined}
         />
+    );
+    if (marker == null || !Number.isFinite(marker)) return input;
+
+    const frac = max === min ? 0 : Math.max(0, Math.min(1, (marker - min) / (max - min)));
+    return (
+        <div className="slider-wrap">
+            {input}
+            <span
+                className={`slider-marker${markerTone ? ` slider-marker--${markerTone}` : ''}`}
+                style={{ left: `calc(7px + ${frac} * (100% - 14px))` }}
+                title={markerTitle}
+            />
+        </div>
     );
 }
 

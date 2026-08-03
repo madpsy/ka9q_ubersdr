@@ -14,11 +14,30 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
-import { MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, SQUELCH_ALWAYS_OPEN } from './constants.js';
+import {
+    MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES,
+    SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, squelchEnabled, squelchThreshold,
+} from './constants.js';
 import { clamp } from '../lib/format.js';
 import { throttle } from '../lib/throttle.js';
 
 const RadioContext = createContext(null);
+
+// Centre frequency for a zoom step: keeps `aboutHz` (the cursor) over the same
+// point on screen, then pulls the view back inside 0–30 MHz so neither edge
+// hangs off the end of the band.
+function zoomCenter(conn, newBinBW, aboutHz) {
+    const newSpan = newBinBW * conn.binCount;
+    const span = conn.span;
+    let center = conn.centerFreq;
+    if (aboutHz != null && span > 0) {
+        center = aboutHz - (aboutHz - center) * (newSpan / span);
+    }
+    const half = newSpan / 2;
+    const lo = Math.max(MIN_FREQ, half);
+    const hi = Math.max(lo, MAX_FREQ - half);
+    return clamp(center, lo, hi);
+}
 
 const SETTINGS_KEY = 'ubersdr.v2.radio';
 
@@ -67,10 +86,11 @@ export function RadioProvider({ children }) {
         muted: !!saved.muted,
         bufferSec: saved.bufferSec != null ? saved.bufferSec : 0.2,
     });
-    const [squelch, setSquelch] = useState({
-        enabled: !!saved.squelchEnabled,
-        threshold: saved.squelchThreshold != null ? saved.squelchThreshold : 6,
-    });
+    // One number: the slider position. Its floor doubles as "off", which is how
+    // v1 behaves and avoids an enabled flag that can disagree with the value.
+    const [squelchValue, setSquelchValue] = useState(
+        saved.squelchValue != null ? saved.squelchValue : SQUELCH_MIN,
+    );
     const [agc, setAgc] = useState(null);
     const [dsp, setDsp] = useState({ filter: saved.dspFilter || 'nr2', enabled: !!saved.dspEnabled });
     const [followTuning, setFollowTuning] = useState(saved.followTuning !== false);
@@ -85,6 +105,8 @@ export function RadioProvider({ children }) {
         underruns: 0,
         frameAgeMs: 0,
         lastFrameAt: 0,
+        squelchOpen: true,      // is the server currently passing audio?
+        lastGateOpenAt: 0,
     });
 
     const conn = useRef(null);
@@ -112,6 +134,10 @@ export function RadioProvider({ children }) {
     // When the last local tune happened, so a lagging server echo cannot snap
     // the dial back while the user is still turning it.
     const lastLocalTune = useRef(0);
+    // Active gate threshold in dB SNR, or null when off. Read from the audio
+    // packet handler, which must not re-subscribe when the slider moves.
+    const gateRef = useRef(null);
+    gateRef.current = squelchEnabled(squelchValue) ? squelchThreshold(squelchValue) : null;
 
     // ---- wiring ---------------------------------------------------------
 
@@ -130,6 +156,21 @@ export function RadioProvider({ children }) {
             m.basebandPower = basebandPower;
             m.noiseDensity = noiseDensity;
             m.snr = basebandPower != null && noiseDensity != null ? basebandPower - noiseDensity : null;
+
+            // Mirror audioGateAllows() so the indicator reflects what the
+            // server is doing, including its 500 ms hang timer — otherwise the
+            // badge flickers closed on every syllable gap in speech.
+            const threshold = gateRef.current;
+            const now = performance.now();
+            if (threshold == null) {
+                m.squelchOpen = true;
+                m.lastGateOpenAt = now;
+            } else if (m.snr != null && m.snr >= threshold) {
+                m.squelchOpen = true;
+                m.lastGateOpenAt = now;
+            } else {
+                m.squelchOpen = now - m.lastGateOpenAt < SQUELCH_HANG_MS;
+            }
         }));
         offs.push(audioConn.on('message', (msg) => {
             if (msg.type === 'status') {
@@ -151,7 +192,17 @@ export function RadioProvider({ children }) {
         }));
         offs.push(audioConn.on('error', (e) => pushLog('error', e.message || 'audio error')));
         offs.push(audioConn.on('close', () => pushLog('warn', 'Audio stream closed')));
-        offs.push(audioConn.on('open', () => pushLog('info', 'Audio stream connected')));
+        offs.push(audioConn.on('open', () => {
+            pushLog('info', 'Audio stream connected');
+            // A new session starts with the gate disabled, so re-apply it on
+            // every open — including reconnects, which would otherwise silently
+            // un-squelch the receiver.
+            const threshold = gateRef.current;
+            audioConn.setAudioGate({ minSnr: threshold == null ? SQUELCH_SENTINEL : threshold });
+            const m = meters.current;
+            m.squelchOpen = true;
+            m.lastGateOpenAt = performance.now();
+        }));
 
         offs.push(spectrumConn.on('state', setSpectrumState));
         offs.push(spectrumConn.on('config', (cfg) => setView(cfg)));
@@ -195,17 +246,19 @@ export function RadioProvider({ children }) {
             volume: audio.volume,
             muted: audio.muted,
             bufferSec: audio.bufferSec,
-            squelchEnabled: squelch.enabled,
-            squelchThreshold: squelch.threshold,
+            squelchValue,
             dspFilter: dsp.filter,
             dspEnabled: dsp.enabled,
             followTuning,
         });
-    }, [tuning, audio, squelch, dsp, followTuning]);
+    }, [tuning, audio, squelchValue, dsp, followTuning]);
 
     // ---- actions --------------------------------------------------------
 
     const sendTune = useMemo(() => throttle((params) => audioConn.tune(params), 70), []);
+    // Dragging the squelch slider would otherwise emit a command per pixel and
+    // trip the server's command rate limit.
+    const sendGate = useMemo(() => throttle((minSnr) => audioConn.setAudioGate({ minSnr }), 90), []);
 
     const actions = useMemo(() => {
         const recenterIfNeeded = (freq) => {
@@ -238,8 +291,6 @@ export function RadioProvider({ children }) {
                 const t = tuningRef.current;
                 await audioConn.connect(t);
                 await spectrumConn.connect({});
-                if (squelch.enabled) audioConn.setSquelch(squelch.threshold);
-                else audioConn.openSquelch();
                 audioConn.requestAGC();
             },
 
@@ -282,10 +333,16 @@ export function RadioProvider({ children }) {
                 setAudio((a) => ({ ...a, bufferSec: sec }));
             },
 
-            setSquelch(enabled, threshold) {
-                setSquelch({ enabled, threshold });
-                if (enabled) audioConn.setSquelch(threshold);
-                else audioConn.setSquelch(SQUELCH_ALWAYS_OPEN, SQUELCH_ALWAYS_OPEN);
+            // `value` is the raw slider position; its floor means "off".
+            setSquelch(value) {
+                setSquelchValue(value);
+                gateRef.current = squelchEnabled(value) ? squelchThreshold(value) : null;
+                sendGate(squelchThreshold(value));
+                if (!squelchEnabled(value)) {
+                    const m = meters.current;
+                    m.squelchOpen = true;
+                    m.lastGateOpenAt = performance.now();
+                }
             },
 
             setAgcParams(params) {
@@ -306,25 +363,43 @@ export function RadioProvider({ children }) {
             },
 
             setSpan(spanHz) {
-                const bins = spectrumConn.binCount || view.binCount;
-                if (!bins) return;
-                const maxSpan = (spectrumConn.defaultBinCount || bins) * (spectrumConn.defaultBinBandwidth || 1);
-                const span = clamp(spanHz, 2000, maxSpan || spanHz);
-                spectrumConn.setView(null, span / bins);
-            },
-
-            zoomBy(factor, aboutHz) {
                 const bins = spectrumConn.binCount;
                 if (!bins) return;
-                const span = spectrumConn.span;
-                const maxSpan = (spectrumConn.defaultBinCount || bins) * (spectrumConn.defaultBinBandwidth || 0) || span;
-                const newSpan = clamp(span * factor, 2000, maxSpan);
-                let center = spectrumConn.centerFreq;
-                if (aboutHz != null && newSpan !== span) {
-                    // Keep the cursor over the same frequency while the span changes.
-                    center = aboutHz - (aboutHz - center) * (newSpan / span);
+                const binBW = clamp(
+                    spanHz / bins,
+                    spectrumConn.minBinBandwidthForUI(),
+                    spectrumConn.fullSpanBinBandwidth(),
+                );
+                spectrumConn.setView(null, binBW);
+            },
+
+            // Zoom steps halve or double binBandwidth exactly.
+            //
+            // The server snaps binBandwidth to a fixed ladder (0.5, 1, 2, 5, 10,
+            // 20, 50 … 5000 Hz/bin — see user_spectrum_websocket.go). Anything
+            // gentler than a factor of two rounds back to the rung it started
+            // on, so the view simply never changes. Factor-of-two steps always
+            // cross a rung, which is what v1 does too.
+            zoomIn(aboutHz) {
+                const c = spectrumConn;
+                if (!c.binCount || !c.binBandwidth) return;
+                const next = c.binBandwidth / 2;
+                if (next < c.minBinBandwidthForUI()) return;   // already fully zoomed in
+                c.setView(zoomCenter(c, next, aboutHz), next);
+            },
+
+            zoomOut(aboutHz) {
+                const c = spectrumConn;
+                if (!c.binCount || !c.binBandwidth) return;
+                const next = c.binBandwidth * 2;
+                // Reaching full span goes through `reset`, which also hands the
+                // session back to the shared radiod channel instead of leaving a
+                // private one allocated at default parameters.
+                if (next >= c.fullSpanBinBandwidth()) {
+                    c.reset();
+                    return;
                 }
-                spectrumConn.setView(clamp(center, MIN_FREQ, MAX_FREQ), newSpan / bins);
+                c.setView(zoomCenter(c, next, aboutHz), next);
             },
 
             resetSpectrum() { spectrumConn.reset(); },
@@ -334,7 +409,13 @@ export function RadioProvider({ children }) {
             clearLog() { setLog([]); },
             log: pushLog,
         };
-    }, [squelch.enabled, squelch.threshold, view.binCount]);
+    }, []);
+
+    const squelch = useMemo(() => ({
+        value: squelchValue,
+        enabled: squelchEnabled(squelchValue),
+        threshold: squelchThreshold(squelchValue),
+    }), [squelchValue]);
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log,

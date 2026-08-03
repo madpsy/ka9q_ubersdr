@@ -18,7 +18,9 @@ export const DEFAULTS = {
     grid: true,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row
+    viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
+                            // (only consulted in 'split' mode)
     snapHz: 1,              // click-to-tune rounding
     theme: 'dark',
 };

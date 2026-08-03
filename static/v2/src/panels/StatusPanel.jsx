@@ -24,12 +24,18 @@ export default function StatusPanel() {
     return (
         <div className="stack">
             <div className="kv-list">
+                <Row label="Name" value={rx.name} />
                 <Row label="Callsign" value={rx.callsign} />
-                <Row label="Antenna" value={rx.antenna} />
+                <Row label="Location" value={rx.location} />
+                <Row label="Grid" value={gps.maidenhead} />
                 <Row
-                    label="Location"
-                    value={gps.lat != null && gps.lon != null ? `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}` : null}
+                    label="Coordinates"
+                    // 0,0 is the config default, not a real position.
+                    value={gps.lat || gps.lon ? `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}` : null}
                 />
+                <Row label="Altitude" value={rx.asl != null ? `${rx.asl} m ASL` : null} />
+                <Row label="Antenna" value={rx.antenna} />
+                <Row label="Timezone" value={rx.timezone} />
                 <Row label="Listeners" value={`${(serverInfo.max_clients || 0) - (serverInfo.available_clients || 0)} / ${serverInfo.max_clients || '?'}`} />
                 <Row label="Version" value={serverInfo.version} />
             </div>

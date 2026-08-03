@@ -1,28 +1,43 @@
 import React from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
-import { Button, Field, Icon, Slider, Switch } from '../components/ui.jsx';
+import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
+
+const SNAP_STEPS = [1, 10, 100, 500, 1000, 5000];
 
 export default function DisplayPanel() {
     const d = useDisplay();
+    const viewMode = d.viewMode || 'split';
+
+    // Controls that only affect one pane are hidden when that pane is not on
+    // screen — otherwise the panel offers settings with no visible effect.
+    const hasSpectrum = viewMode !== 'waterfall';
+    const hasWaterfall = viewMode !== 'spectrum';
 
     return (
         <div className="stack">
-            <Field label="Palette">
-                <div className="palette-grid">
-                    {PALETTE_NAMES.map((name) => (
-                        <button
-                            key={name}
-                            type="button"
-                            title={name}
-                            className={`palette${d.palette === name ? ' is-active' : ''}`}
-                            style={{ backgroundImage: paletteGradient(name) }}
-                            onClick={() => d.set({ palette: name })}
-                        />
-                    ))}
-                </div>
+            <Field label="View">
+                <Segmented
+                    size="sm"
+                    value={viewMode}
+                    onChange={(v) => d.set({ viewMode: v })}
+                    options={[
+                        { value: 'split', label: 'Split', title: 'Spectrum above waterfall' },
+                        { value: 'spectrum', label: 'Spectrum', title: 'Spectrum only' },
+                        { value: 'waterfall', label: 'Waterfall', title: 'Waterfall only' },
+                    ]}
+                />
             </Field>
 
+            {viewMode === 'split' && (
+                <Field label="Split" hint={`${Math.round(d.split * 100)} % spectrum`}>
+                    <Slider value={Math.round(d.split * 100)} min={10} max={85} onChange={(v) => d.set({ split: v / 100 })} />
+                </Field>
+            )}
+
+            <div className="divider" />
+
+            {/* Level mapping drives both panes. */}
             <Field label="Auto level" hint={d.autoRange ? 'tracking noise floor' : 'manual'} inline>
                 <Switch checked={d.autoRange} onChange={(v) => d.set({ autoRange: v })} />
             </Field>
@@ -38,46 +53,66 @@ export default function DisplayPanel() {
                 </>
             )}
 
+            {/* Palette and contrast colour both panes — the spectrum trace and
+                its fill use the same amplitude-to-colour mapping as the
+                waterfall — so they stay visible in every view mode. */}
+            <Field label="Palette">
+                <div className="palette-grid">
+                    {PALETTE_NAMES.map((name) => (
+                        <button
+                            key={name}
+                            type="button"
+                            title={name}
+                            className={`palette${d.palette === name ? ' is-active' : ''}`}
+                            style={{ backgroundImage: paletteGradient(name) }}
+                            onClick={() => d.set({ palette: name })}
+                        />
+                    ))}
+                </div>
+            </Field>
+
             <Field label="Contrast" hint={d.contrast.toFixed(2)}>
                 <Slider value={d.contrast} min={0.4} max={2.5} step={0.05} onChange={(v) => d.set({ contrast: v })} />
             </Field>
 
-            <div className="divider" />
+            {hasWaterfall && (
+                <>
+                    <Field label="Waterfall speed" hint={`${d.waterfallRate} rows/s`}>
+                        <Slider value={d.waterfallRate} min={2} max={40} onChange={(v) => d.set({ waterfallRate: v })} />
+                    </Field>
 
-            <Field label="Trace smoothing" hint={d.smoothing === 0 ? 'off' : d.smoothing.toFixed(2)}>
-                <Slider value={d.smoothing} min={0} max={0.92} step={0.02} onChange={(v) => d.set({ smoothing: v })} />
-            </Field>
+                    <Field label="Row height" hint={`${d.rowHeight} px`}>
+                        <Slider value={d.rowHeight} min={1} max={4} onChange={(v) => d.set({ rowHeight: v })} />
+                    </Field>
+                </>
+            )}
 
-            <Field label="Peak hold" inline>
-                <Switch checked={d.peakHold} onChange={(v) => d.set({ peakHold: v })} />
-            </Field>
+            {hasSpectrum && (
+                <>
+                    <div className="divider" />
 
-            <Field label="dB grid" inline>
-                <Switch checked={d.grid} onChange={(v) => d.set({ grid: v })} />
-            </Field>
+                    <Field label="Trace smoothing" hint={d.smoothing === 0 ? 'off' : d.smoothing.toFixed(2)}>
+                        <Slider value={d.smoothing} min={0} max={0.92} step={0.02} onChange={(v) => d.set({ smoothing: v })} />
+                    </Field>
 
-            <div className="divider" />
+                    <Field label="Peak hold" inline>
+                        <Switch checked={d.peakHold} onChange={(v) => d.set({ peakHold: v })} />
+                    </Field>
 
-            <Field label="Waterfall speed" hint={`${d.waterfallRate} rows/s`}>
-                <Slider value={d.waterfallRate} min={2} max={40} onChange={(v) => d.set({ waterfallRate: v })} />
-            </Field>
-
-            <Field label="Row height" hint={`${d.rowHeight} px`}>
-                <Slider value={d.rowHeight} min={1} max={4} onChange={(v) => d.set({ rowHeight: v })} />
-            </Field>
-
-            <Field label="Spectrum / waterfall split" hint={`${Math.round(d.split * 100)} %`}>
-                <Slider value={Math.round(d.split * 100)} min={10} max={85} onChange={(v) => d.set({ split: v / 100 })} />
-            </Field>
+                    <Field label="dB grid" inline>
+                        <Switch checked={d.grid} onChange={(v) => d.set({ grid: v })} />
+                    </Field>
+                </>
+            )}
 
             <div className="divider" />
 
             <Field label="Click-to-tune snap" hint={d.snapHz > 1 ? `${d.snapHz} Hz` : 'off'}>
                 <Slider
-                    value={[1, 10, 100, 500, 1000, 5000].indexOf(d.snapHz) < 0 ? 0 : [1, 10, 100, 500, 1000, 5000].indexOf(d.snapHz)}
+                    value={Math.max(0, SNAP_STEPS.indexOf(d.snapHz))}
                     min={0}
-                    max={5}
-                    onChange={(i) => d.set({ snapHz: [1, 10, 100, 500, 1000, 5000][i] })}
+                    max={SNAP_STEPS.length - 1}
+                    onChange={(i) => d.set({ snapHz: SNAP_STEPS[i] })}
                 />
             </Field>
 

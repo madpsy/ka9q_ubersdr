@@ -61,6 +61,7 @@ esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
 
 node unresolved.js
 node protocol.test.js
+node modes.test.js
 node zoom.test.js
 node voice.test.js
 node callsign.test.js

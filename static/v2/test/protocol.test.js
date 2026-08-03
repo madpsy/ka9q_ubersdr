@@ -742,19 +742,29 @@ t('a missing or malformed reply yields defaults, not a crash', () => {
 
 // --- filter width limits ---------------------------------------------------
 
-t('am, sam, fm and nfm top out at a 12 kHz filter', () => {
-    for (const mode of ['am', 'sam', 'fm', 'nfm']) {
+t('am, sam and nfm top out at a 12 kHz filter', () => {
+    for (const mode of ['am', 'sam', 'nfm']) {
         assert.strictEqual(maxFilterWidth(mode), 12000, `${mode} allows ${maxFilterWidth(mode)} Hz`);
         const l = bandwidthLimits(mode);
         assert.deepStrictEqual([l.min, l.max], [-6000, 6000], mode);
     }
 });
 
+t('FM reaches ±8 kHz, which is both its default and v1’s limit', () => {
+    // Not folded into the case above: FM's own default passband is ±8000, so
+    // the shared ±6000 limit silently narrowed it the moment anything clamped.
+    // v1 sets minLow -8000 / maxHigh 8000 for this mode. See modes.test.js.
+    assert.deepStrictEqual(bandwidthLimits('fm'), { min: -8000, max: 8000, sideband: 'both' });
+    assert.strictEqual(maxFilterWidth('fm'), 16000);
+});
+
 t('sideband modes keep their own widths', () => {
     assert.strictEqual(maxFilterWidth('usb'), 6000);
     assert.strictEqual(maxFilterWidth('lsb'), 6000);
-    assert.strictEqual(maxFilterWidth('cwu'), 2000);
-    assert.strictEqual(maxFilterWidth('cwl'), 2000);
+    // CW is symmetric, so its width is both sides of ±500 — v1's slider range.
+    // It was 2000 here while CW was wrongly modelled as single-sideband.
+    assert.strictEqual(maxFilterWidth('cwu'), 1000);
+    assert.strictEqual(maxFilterWidth('cwl'), 1000);
 });
 
 t('an unknown mode falls back to the symmetric limit', () => {

@@ -211,7 +211,11 @@ appear under everything else for anyone who had used the app before.
   frequency and timestamp so a replayed buffer does not duplicate rows already on
   screen. Column tracks are declared once on the *list*, not per row: a grid per
   row sizes its tracks from its own content, so no two rows agree on where a
-  column starts — which v1 gets for free by using a real `<table>`.
+  column starts — which v1 gets for free by using a real `<table>`. The panel is
+  the scroller, not the list: scrolling only inside the list pinned the filters
+  to the top forever, and on a short dock they took most of the height with no
+  way to push them aside. The column heading strip is `sticky`, so it stays put
+  as the filters scroll away above it.
 * **DX and CW spots also appear as markers; digital spots do not.** Green for DX
   and cyan for CW, v1's colours, with a switch each in the Display panel beside
   the other marker toggles — and each switch present only where that feed is.

@@ -2243,9 +2243,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
    Spots
    ========================================================================= */
 
-/* A `fill` panel: an unbounded stream, so the list scrolls itself rather than
-   growing the dock. Same exception as chat — see the README. */
-.spots { min-height: 0; height: 100%; }
+/* A `fill` panel: an unbounded stream, so it scrolls itself rather than growing
+   the dock. Same exception as chat — see the README.
+ *
+ * The whole panel is the scroller, not just the list. Scrolling only inside the
+ * list pinned the filters to the top forever: on a short dock they took most of
+ * the height and there was no way to push them out of the way to see more rows.
+ * One scroller also means no nested scroll areas to get stuck in. */
+.spots {
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    /* Room for the scrollbar so it does not sit on top of the row text. */
+    scrollbar-gutter: stable;
+}
 
 .spots__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .spots__count {
@@ -2275,10 +2286,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .spots__filter--check span { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
 
-/* Always worth a few rows even in a short dock — the filters must not be able
-   to squeeze the list to nothing, which is what a bare `flex: 1` allowed.
-   Same reasoning as the chat log's min-height. */
-.spots__list { flex: 1; min-height: 96px; overflow-y: auto; }
+/* Grows to whatever the rows need; `.spots` above does the scrolling. `flex: 1`
+   here would have it absorb the free space and compete with that scroller. */
+.spots__list { flex: none; min-height: 0; }
 
 /* Columns are declared once per tab on the *list*, and inherited by the header
    and every row, so they line up. Each row being its own grid — which is what

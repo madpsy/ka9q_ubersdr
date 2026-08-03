@@ -32,9 +32,22 @@ export function bandwidthLimits(mode) {
     switch (mode) {
         case 'usb': return { min: 0, max: 6000, sideband: 'upper' };
         case 'lsb': return { min: -6000, max: 0, sideband: 'lower' };
-        case 'cwu': return { min: 0, max: 2000, sideband: 'upper' };
-        case 'cwl': return { min: -2000, max: 0, sideband: 'lower' };
-        // am, sam, fm, nfm — 12 kHz maximum width.
+        // CW is symmetric about the carrier in both sidebands, not one-sided.
+        // The name says which sideband the tone is on; the filter still sits
+        // either side of the dial — v1's combinedValueToLowHigh returns [-v, v]
+        // for cwu and cwl alike, and its sliders run -500..0 and 0..500.
+        //
+        // Declaring it 'upper'/'lower' clamped the mode's own ±200 default down
+        // to 0..200, so tuning to a CW spot drew a narrow one-sided passband on
+        // the spectrum instead of a symmetric one, and the width and shift
+        // sliders edited the wrong edge.
+        case 'cwu':
+        case 'cwl':
+            return { min: -500, max: 500, sideband: 'both' };
+        // v1: minLow -8000, maxHigh 8000. The shared default below is ±6000,
+        // which would clamp FM's own ±8000 default the same way CW's was.
+        case 'fm': return { min: -8000, max: 8000, sideband: 'both' };
+        // am, sam, nfm — 12 kHz maximum width.
         default: return { min: -6000, max: 6000, sideband: 'both' };
     }
 }

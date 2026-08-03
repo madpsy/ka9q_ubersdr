@@ -142,6 +142,16 @@ panel never disturbs an existing user's arrangement.
   replays the first server-reported values rather than 1.1 / 20 / −15. There is
   no enable switch: the server accepts `agcEnable` but never reports it back, so
   a toggle would show a state nothing else agrees with.
+* **A new session UUID per session start.** Minted when the user starts
+  listening, not persisted, and shared by both sockets — the server pairs audio
+  and spectrum by UUID. It then stays fixed for that session, including across
+  automatic reconnects, because the server keys real behaviour on it: it detects
+  a reconnect and *replaces* the old session rather than stacking a second one,
+  counts `max_sessions` by unique live UUID, limits unique UUIDs per IP, and
+  rate-limits session creation per UUID to damp reconnect loops. Minting a new
+  one mid-session would defeat all of that. Per-IP and per-session limits count
+  live sessions only and are cleaned up on destroy, so a fresh UUID per start
+  costs nothing.
 * **Squelch is the audio gate, not `set_squelch`.** v1 ships with
   `FM_SQUELCH_ENABLED = false` and only ever sends `squelchOpen: -999`, so
   radiod's squelch is never engaged; the control users actually have is

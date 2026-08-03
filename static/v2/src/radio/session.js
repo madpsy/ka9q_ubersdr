@@ -4,8 +4,6 @@
 // is called, and both WebSocket endpoints reject UUIDs it has not seen. So the
 // handshake has to happen once, before either socket is opened.
 
-const STORAGE_KEY = 'ubersdr.v2.sessionId';
-
 function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     // Fallback for non-secure contexts, where randomUUID is unavailable.
@@ -17,16 +15,29 @@ function uuid() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// A fresh UUID is minted each time the user starts a session, and is not
+// persisted — v1 does the same, generating one per page load.
+//
+// It stays fixed for the life of that session, including across automatic
+// reconnects, because the server keys real behaviour on it: it links the audio
+// and spectrum sessions into one user, detects a reconnect and replaces the old
+// session instead of stacking a second one, and rate-limits session creation
+// per UUID specifically to damp reconnect loops. Minting a new one mid-session
+// would defeat all three.
+// Generated lazily, never at module load: importing a connection module must
+// not touch `window`, or the module cannot be loaded outside a browser.
+let currentId = null;
+
 export function getSessionId() {
-    let id = null;
-    try {
-        id = sessionStorage.getItem(STORAGE_KEY);
-    } catch (e) { /* private mode */ }
-    if (!id) {
-        id = uuid();
-        try { sessionStorage.setItem(STORAGE_KEY, id); } catch (e) { /* ignore */ }
-    }
-    return id;
+    if (!currentId) currentId = uuid();
+    return currentId;
+}
+
+// Called when starting a session. Both sockets must then use the same id — the
+// server pairs audio and spectrum by UUID.
+export function newSessionId() {
+    currentId = uuid();
+    return currentId;
 }
 
 export function getBypassPassword() {

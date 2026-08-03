@@ -14,6 +14,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
+import { newSessionId } from './session.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -420,6 +421,9 @@ export function RadioProvider({ children }) {
                 const ok = await player.start();
                 if (!ok) pushLog('warn', 'Audio context did not start — tap again');
                 setRunning(true);
+                // A new session gets a new identity. Minted before either socket
+                // opens so audio and spectrum are paired under the same UUID.
+                newSessionId();
                 const t = tuningRef.current;
                 await audioConn.connect(t);
                 await spectrumConn.connect({});

@@ -26,7 +26,10 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
         // the button's click depends on, and setPointerCapture() would redirect
         // the rest of the gesture to the header — between them the menu never
         // opens and the close button never fires.
-        if (mode === 'move' && e.target && e.target.closest && e.target.closest('.floatwin__ctl')) return;
+        // `.menu` covers the dropdown as well as its trigger: the panel renders
+        // inside this header, so a press on a menu item would otherwise reach
+        // the drag handler and have its click swallowed the same way.
+        if (mode === 'move' && e.target && e.target.closest && e.target.closest('.floatwin__ctl, .menu')) return;
         e.preventDefault();
         e.stopPropagation();
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }

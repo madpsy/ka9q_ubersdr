@@ -14,9 +14,9 @@ export const DEFAULTS = {
     floorDb: -110,
     ceilDb: -40,
     smoothing: 0.5,         // 0 = off, ->1 = heavier temporal averaging
-    fill: true,             // shade the area under the spectrum trace
+    fill: true,             // solid area under the spectrum trace
     peakHold: false,
-    peakDecay: 3,           // dB per second; 0 = hold indefinitely
+    peakDecay: 6,           // dB per second; 0 = hold indefinitely
     grid: false,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row

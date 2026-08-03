@@ -3,7 +3,7 @@ import { useRadio, useMeters } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
-import { formatHz, sUnitLabel } from '../lib/format.js';
+import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 
 export default function TopBar({ compact }) {
@@ -37,7 +37,7 @@ export default function TopBar({ compact }) {
                     <div className="topbar__bar">
                         <div
                             className="topbar__bar-fill"
-                            style={{ width: `${Math.max(0, Math.min(100, ((meters.basebandPower ?? -140) + 140) / 1.2))}%` }}
+                            style={{ width: `${sUnitFraction(meters.basebandPower) * 100}%` }}
                         />
                     </div>
                     <span className="topbar__snr">{meters.snr == null ? '—' : `${meters.snr.toFixed(0)} dB`}</span>

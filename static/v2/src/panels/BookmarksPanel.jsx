@@ -7,7 +7,7 @@ import { formatFreqShort } from '../lib/format.js';
 
 // Panels do not scroll on their own, so a few hundred bookmarks would make the
 // dock unusably long. Render a page at a time and grow on demand.
-const PAGE = 25;
+const PAGE = 10;
 
 export default function BookmarksPanel() {
     const { actions } = useRadio();

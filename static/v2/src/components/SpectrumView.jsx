@@ -352,10 +352,14 @@ let themeCache = null;
 // the same colour-per-amplitude mapping as the waterfall: hot at the top of the
 // dB range, cold at the bottom, with the same `contrast` gamma applied.
 //
+// The fill is opaque. A translucent wash reads as a tint rather than a filled
+// spectrum, and leaving it solid is what makes the backdrop image work: the
+// image shows in the open area above the trace, with the signal a solid block
+// below it.
+//
 // The trace is drawn from a compressed slice of the palette (TRACE_FLOOR..1)
 // because most palettes start at near-black, which would make weak signals
-// invisible against the dark background. The fill uses the full palette with an
-// alpha ramp instead.
+// invisible against the dark background.
 const TRACE_FLOOR = 0.35;
 const GRAD_STOPS = 24;
 
@@ -371,7 +375,7 @@ function paletteGradients(c, H, palette, contrast) {
         if (contrast !== 1) amp = Math.pow(amp, gammaInv);
 
         const fi = Math.round(amp * 255) * 3;
-        fill.addColorStop(offset, `rgba(${lut[fi]},${lut[fi + 1]},${lut[fi + 2]},${(0.55 * amp + 0.18).toFixed(3)})`);
+        fill.addColorStop(offset, `rgb(${lut[fi]},${lut[fi + 1]},${lut[fi + 2]})`);
 
         const ti = Math.round((TRACE_FLOOR + amp * (1 - TRACE_FLOOR)) * 255) * 3;
         trace.addColorStop(offset, `rgb(${lut[ti]},${lut[ti + 1]},${lut[ti + 2]})`);
@@ -612,8 +616,8 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         g.peakAt = 0;
     }
 
-    // Area under the trace. Turning this off leaves a bare line, which shows
-    // more of the backdrop and makes overlapping signals easier to separate.
+    // Solid area under the trace. Turning this off leaves a bare line, which
+    // shows the whole backdrop and makes overlapping signals easier to separate.
     if (d.fill !== false) {
         c.beginPath();
         c.moveTo(0, H);

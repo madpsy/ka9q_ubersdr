@@ -58,11 +58,34 @@ export function clamp(v, lo, hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }
 
-// S-meter: S9 = -73 dBm, 6 dB per S-unit below that, dB over S9 above.
+// S-meter, matching v1's s-meter-needle.js so both frontends read the same.
+//
+// ITU: S9 = -73 dBFS with 6 dB per S-unit below it, so S1 = -121 dBFS. Above S9
+// the scale switches to 10 dB per unit, which is what makes the printed scale
+// (S1 S3 S5 S7 S9 +20 +40 +60) evenly spaced: those land on S-units
+// 1, 3, 5, 7, 9, 11, 13, 15.
+export const S_UNITS_MIN = 1;    // S1,     -121 dBFS
+export const S_UNITS_MAX = 15;   // S9+60,   -13 dBFS
+
+export function dbfsToSUnits(dbfs) {
+    if (dbfs < -121) return 0;
+    if (dbfs < -73) return 1 + (dbfs + 121) / 6;
+    return 9 + (dbfs + 73) / 10;
+}
+
+// Position on the S-meter bar, 0..1. Bars must use this rather than a linear
+// dBFS ramp, or the needle disagrees with both the printed scale and the S
+// value next to it — the scale is not linear in dB.
+export function sUnitFraction(dbfs) {
+    if (dbfs == null || dbfs <= -998) return 0;
+    const s = dbfsToSUnits(dbfs);
+    return clamp((s - S_UNITS_MIN) / (S_UNITS_MAX - S_UNITS_MIN), 0, 1);
+}
+
 export function sUnitLabel(dbfs) {
     if (dbfs == null || dbfs <= -998) return '--';
-    // dBFS from radiod tracks dBm closely enough for a relative meter.
-    const s = (dbfs + 127) / 6;
-    if (s >= 9) return 'S9+' + Math.round((s - 9) * 6);
-    return 'S' + clamp(Math.round(s), 0, 9);
+    const s = dbfsToSUnits(dbfs);
+    if (s < 1) return 'S0';
+    if (s <= 9) return 'S' + Math.round(s);
+    return 'S9+' + Math.round(dbfs + 73);
 }

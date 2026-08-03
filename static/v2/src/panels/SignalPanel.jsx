@@ -4,7 +4,7 @@
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
-import { sUnitLabel } from '../lib/format.js';
+import { sUnitFraction, sUnitLabel } from '../lib/format.js';
 
 const HISTORY = 120;   // ~10 s at 12 Hz
 
@@ -56,7 +56,10 @@ export default function SignalPanel() {
                 <div className="meter__scale">
                     {['1', '3', '5', '7', '9', '+20', '+40', '+60'].map((s) => <span key={s}>{s}</span>)}
                 </div>
-                <Bar value={power == null ? -140 : power} min={-140} max={-20} tone="signal" />
+                {/* Plotted in S-units, not dBFS: the printed scale above is
+                    6 dB per step to S9 then 10 dB per step, so a linear dBFS
+                    bar would not line up with it or with the S value below. */}
+                <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
                 <div className="meter__value">{sUnitLabel(power)}</div>
             </div>
 

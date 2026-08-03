@@ -10,6 +10,7 @@ const {
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
+const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -315,6 +316,68 @@ t('setAudioGate with no thresholds is not sent', () => {
     // The server rejects a gate message carrying neither field.
     assert.strictEqual(a.setAudioGate({}), false);
     assert.strictEqual(sent.length, 0);
+});
+
+// --- S-meter ---------------------------------------------------------------
+//
+// Mapping matches v1's s-meter-needle.js: S9 = -73 dBFS, 6 dB per S-unit below,
+// 10 dB per unit above. The bar and the S label must agree, and both must line
+// up with the printed scale.
+
+t('S-unit mapping matches v1 (S1 = -121, S9 = -73 dBFS)', () => {
+    assert.strictEqual(dbfsToSUnits(-121), 1);
+    assert.strictEqual(dbfsToSUnits(-97), 5);
+    assert.strictEqual(dbfsToSUnits(-73), 9);
+    assert.strictEqual(dbfsToSUnits(-53), 11);   // S9+20, 10 dB per unit above S9
+    assert.strictEqual(dbfsToSUnits(-13), 15);   // S9+60
+    assert.strictEqual(dbfsToSUnits(-130), 0);
+});
+
+t('labels read the same as v1', () => {
+    assert.strictEqual(sUnitLabel(-121), 'S1');
+    assert.strictEqual(sUnitLabel(-97), 'S5');
+    assert.strictEqual(sUnitLabel(-73), 'S9');
+    assert.strictEqual(sUnitLabel(-53), 'S9+20');
+    assert.strictEqual(sUnitLabel(-13), 'S9+60');
+    assert.strictEqual(sUnitLabel(-130), 'S0');
+    assert.strictEqual(sUnitLabel(null), '--');
+    assert.strictEqual(sUnitLabel(-999), '--');
+});
+
+t('the bar lines up with the printed scale', () => {
+    // The scale prints eight evenly spaced ticks, so each must land on an even
+    // fraction of the bar. A linear dBFS bar put S1 at 16% and clipped +60.
+    const ticks = [
+        ['S1', -121], ['S3', -109], ['S5', -97], ['S7', -85],
+        ['S9', -73], ['+20', -53], ['+40', -33], ['+60', -13],
+    ];
+    ticks.forEach(([name, dbfs], i) => {
+        const want = i / (ticks.length - 1);
+        const got = sUnitFraction(dbfs);
+        assert.ok(Math.abs(got - want) < 1e-9,
+            `${name} at ${(got * 100).toFixed(1)}%, printed scale puts it at ${(want * 100).toFixed(1)}%`);
+    });
+});
+
+t('the bar and the S label never disagree', () => {
+    // Walk the whole range: wherever the label says S9, the bar must be at the
+    // S9 tick, and so on.
+    for (let dbfs = -130; dbfs <= -10; dbfs += 0.5) {
+        const frac = sUnitFraction(dbfs);
+        const units = S_UNITS_MIN + frac * (S_UNITS_MAX - S_UNITS_MIN);
+        const fromLabel = dbfsToSUnits(dbfs);
+        if (fromLabel >= S_UNITS_MIN && fromLabel <= S_UNITS_MAX) {
+            assert.ok(Math.abs(units - fromLabel) < 1e-9,
+                `at ${dbfs} dBFS bar=${units.toFixed(2)} label=${fromLabel.toFixed(2)} S-units`);
+        }
+    }
+});
+
+t('the bar clamps instead of overflowing', () => {
+    assert.strictEqual(sUnitFraction(-200), 0);
+    assert.strictEqual(sUnitFraction(0), 1);
+    assert.strictEqual(sUnitFraction(null), 0);
+    assert.strictEqual(sUnitFraction(-999), 0);
 });
 
 // --- operator UI config ----------------------------------------------------

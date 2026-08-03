@@ -8,7 +8,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
 
-const PAGE = 25;
+const PAGE = 10;
 
 // The API packs a second line after a "|" and sometimes uses tabs as spacing.
 function cleanLabel(raw) {
@@ -44,7 +44,7 @@ export default function BandsPanel() {
     }, [filtered, tuning.frequency]);
 
     // Show the current band in context rather than the bottom of the LF end.
-    const start = query.trim() || activeIndex < 0 ? 0 : Math.max(0, activeIndex - 4);
+    const start = query.trim() || activeIndex < 0 ? 0 : Math.max(0, activeIndex - 2);
     const visible = filtered ? filtered.slice(start, start + limit) : [];
 
     if (!filtered) return <Empty>Loading bands…</Empty>;

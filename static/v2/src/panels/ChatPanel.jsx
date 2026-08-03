@@ -26,6 +26,7 @@ export default function ChatPanel() {
     const [name, setName] = useState(chat.username);
     const [nameError, setNameError] = useState(null);
     const inputRef = useRef(null);
+    const logRef = useRef(null);
 
     // Our own name is always included, even when the server's user list has not
     // caught up — a mention of us is the one that must never fail to highlight.
@@ -42,6 +43,17 @@ export default function ChatPanel() {
     // Reading the panel is what clears the alert.
     useEffect(() => {
         if (chat.unreadMentions > 0) chat.actions.markMentionsRead();
+    }, [chat.messages.length]);
+
+    // Follow the conversation, but only when already at the bottom — otherwise
+    // reading scrollback would be yanked away by every new message. Safe to
+    // scroll here, unlike other panels: the log is its own scroller, so this
+    // cannot move the dock.
+    useEffect(() => {
+        const el = logRef.current;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        if (nearBottom) el.scrollTop = el.scrollHeight;
     }, [chat.messages.length]);
 
     const complete = (username) => {
@@ -96,7 +108,7 @@ export default function ChatPanel() {
     return (
         <div className="chat">
             <div className="chat__stream">
-                <div className="chat__log">
+                <div className="chat__log" ref={logRef}>
                     {chat.messages.length === 0 && <Empty>No messages yet.</Empty>}
                     {chat.messages.map((m) => (
                         m.system ? (

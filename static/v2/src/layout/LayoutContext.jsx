@@ -36,7 +36,7 @@ function defaultLayout() {
         docks[p.dock].panels.push(p.id);
         sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden };
     }
-    return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {} };
+    return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {}, heights: {} };
 }
 
 // Merges a stored layout with the current panel registry.
@@ -66,6 +66,12 @@ function reconcile(stored) {
     base.weights = {};
     for (const [id, w] of Object.entries(stored.weights || {})) {
         if (PANEL_BY_ID[id] && Number.isFinite(Number(w)) && Number(w) > 0) base.weights[id] = Number(w);
+    }
+    // Explicit heights for bottom-dock panels. Absent means "auto" — content
+    // height, or the dock height for a `fill` panel.
+    base.heights = {};
+    for (const [id, h] of Object.entries(stored.heights || {})) {
+        if (PANEL_BY_ID[id] && Number.isFinite(Number(h)) && Number(h) > 0) base.heights[id] = Number(h);
     }
 
     const seen = new Set(floatOrder);
@@ -234,6 +240,22 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // null clears the override and returns the panel to automatic height.
+    const setPanelHeight = useCallback((id, h) => {
+        setLayout((l) => {
+            const heights = { ...l.heights };
+            if (h == null) {
+                if (!(id in heights)) return l;
+                delete heights[id];
+            } else {
+                const next = Math.max(90, Math.round(h));
+                if (heights[id] === next) return l;
+                heights[id] = next;
+            }
+            return { ...l, heights };
+        });
+    }, []);
+
     const resetLayout = useCallback(() => setLayout(defaultLayout()), []);
 
     const value = useMemo(() => ({
@@ -244,6 +266,8 @@ export function LayoutProvider({ children }) {
         floatOrder: layout.floatOrder,
         weights: layout.weights,
         setWeights,
+        heights: layout.heights,
+        setPanelHeight,
         setFloat,
         raiseFloat,
         placementOf,
@@ -255,7 +279,7 @@ export function LayoutProvider({ children }) {
         movePanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel,
-        setFloat, raiseFloat, placementOf, setWeights, resetLayout]);
+        setFloat, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

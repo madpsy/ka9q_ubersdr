@@ -87,11 +87,15 @@ sheet list, since a draggable window on a phone is not useful.
 Three levels, deliberately not four:
 
 * **Dock size** — drag a dock's edge (all three docks).
-* **Panel share within the bottom dock** — drag the splitter between two
-  neighbours. The bottom dock is the only one that lays panels out side by side,
-  so it is the only one where they compete for space. A drag converts a pixel
-  delta into a share of *that pair's* combined width, so the rest of the row
-  never shifts; double-clicking a splitter evens the pair out.
+* **Panels within the bottom dock** — drag the splitter between two neighbours
+  to trade width, or a panel's own corner grip to set width *and* height at
+  once. Width is always a trade with one neighbour, so the row's total never
+  changes and the other panels do not shift. Height is the panel's own: the
+  bottom dock lays panels out from the top, so each may be a different height
+  and the dock scrolls if one is taller than it. Both snap to an 8 px grid —
+  fine enough to feel free-form, coarse enough that neighbours line up.
+  Double-click a splitter to even a pair out, or a grip to return that panel to
+  automatic height.
 * **Floating windows** — free position and size.
 
 Side docks are deliberately *not* per-panel resizable. Panels there size to
@@ -112,6 +116,11 @@ overlay and so has to scroll itself — but that is the container, not the panel
 
 Two consequences worth knowing when writing a panel:
 
+* **A `fill` panel is the exception.** Chat and the event log are unbounded
+  streams: in the bottom dock they stretch to the dock's height and scroll their
+  own body. Without that they grow with every message and drag the dock with
+  them. Same justification as the mobile sheet — a fixed-height container, where
+  scrollback is the entire point. Everything else still follows the rule below.
 * **Do not let a section shrink.** `.section` sets `flex: none` because the dock
   body is a flex column: without it, sections compress below their content once
   the dock overflows and clip each other instead of the dock scrolling.

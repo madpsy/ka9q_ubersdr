@@ -68,7 +68,7 @@ const COLLAPSE_ICON = {
 };
 
 export default function Dock({ side }) {
-    const { docks, sections, toggleDock, setDockSize, movePanel, weights, setWeights } = useLayout();
+    const { docks, sections, toggleDock, setDockSize, movePanel, weights, setWeights, heights } = useLayout();
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
     const resizeRef = useRef(null);
@@ -173,6 +173,7 @@ export default function Dock({ side }) {
                             dock={side}
                             index={i}
                             weight={side === 'bottom' ? (weights[id] || 1) : undefined}
+                            height={side === 'bottom' ? heights[id] : undefined}
                         />
                     </React.Fragment>
                 ))}

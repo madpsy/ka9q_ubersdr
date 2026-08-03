@@ -5,15 +5,21 @@
 // the native HTML5 API so no pointer bookkeeping is needed and the browser
 // supplies the drag image for free.
 
-import React, { useCallback, useState } from '../react.js';
+import React, { useCallback, useRef, useState } from '../react.js';
 import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
-export default function Section({ panel, dock, index, weight }) {
-    const { sections, toggleSection, setSectionHidden, movePanel } = useLayout();
+// Snap step for in-dock resizing. Fine enough to feel free-form, coarse enough
+// that neighbouring panels line up instead of being a pixel out.
+const SNAP = 8;
+const snap = (v) => Math.round(v / SNAP) * SNAP;
+
+export default function Section({ panel, dock, index, weight, height }) {
+    const { sections, toggleSection, setSectionHidden, movePanel, weights, setWeights, setPanelHeight } = useLayout();
+    const grip = useRef(null);
     const [dropEdge, setDropEdge] = useState(null);   // 'before' | 'after' | null
 
     // Same reason as the dock: a drop landing elsewhere must still clear this
@@ -59,15 +65,58 @@ export default function Section({ panel, dock, index, weight }) {
     ].filter(Boolean).join(' ');
 
     // In the bottom dock the panels share one row, so their width is a weight
-    // the user can drag rather than a fixed basis.
-    const style = weight != null && state.open
-        ? { flexGrow: weight, flexShrink: 1, flexBasis: 0 }
+    // the user can drag rather than a fixed basis, and each may carry its own
+    // height.
+    const inRow = weight != null && state.open;
+    const style = inRow
+        ? { flexGrow: weight, flexShrink: 1, flexBasis: 0, ...(height ? { height, alignSelf: 'flex-start' } : {}) }
         : undefined;
+
+    // Corner grip: horizontal drag trades width with a neighbour (so the row's
+    // total is unchanged, as with the splitters), vertical sets this panel's
+    // own height. Same affordance as a floating window.
+    const onGripDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const me = e.currentTarget.parentElement;
+        const sibling = me.nextElementSibling?.nextElementSibling || me.previousElementSibling?.previousElementSibling;
+        grip.current = {
+            x: e.clientX,
+            y: e.clientY,
+            h: me.getBoundingClientRect().height,
+            mw: me.getBoundingClientRect().width,
+            sw: sibling ? sibling.getBoundingClientRect().width : 0,
+            other: sibling ? sibling.dataset.panel : null,
+            // Which side the partner is on decides the sign of the trade.
+            after: !!me.nextElementSibling?.nextElementSibling,
+        };
+    };
+
+    const onGripMove = (e) => {
+        const g = grip.current;
+        if (!g) return;
+        setPanelHeight(panel.id, snap(g.h + (e.clientY - g.y)));
+        if (!g.other) return;
+        const total = g.mw + g.sw;
+        const MIN = 140;
+        const dx = (g.after ? 1 : -1) * (e.clientX - g.x);
+        const mine = Math.max(MIN, Math.min(total - MIN, snap(g.mw + dx)));
+        const sum = (weights[panel.id] || 1) + (weights[g.other] || 1);
+        const w = (mine / total) * sum;
+        setWeights([[panel.id, w], [g.other, sum - w]]);
+    };
+
+    const onGripUp = (e) => {
+        grip.current = null;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    };
 
     return (
         <section
             className={cls}
             style={style}
+            data-panel={panel.id}
             onDragOver={onDragOver}
             onDragLeave={() => setDropEdge(null)}
             onDrop={onDrop}
@@ -105,6 +154,18 @@ export default function Section({ panel, dock, index, weight }) {
                 <div className="section__body">
                     <panel.Component />
                 </div>
+            )}
+
+            {inRow && (
+                <span
+                    className="section__grip-size"
+                    title="Drag to resize — double-click for automatic height"
+                    onPointerDown={onGripDown}
+                    onPointerMove={onGripMove}
+                    onPointerUp={onGripUp}
+                    onPointerCancel={onGripUp}
+                    onDoubleClick={() => setPanelHeight(panel.id, null)}
+                />
             )}
         </section>
     );

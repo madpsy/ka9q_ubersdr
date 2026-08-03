@@ -291,7 +291,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .dock--bottom .section { flex: 1 1 280px; min-width: 220px; }
 .dock--bottom .section.is-closed { flex: 0 0 auto; min-width: 0; }
-.dock--bottom .section--fill { flex: 2 1 380px; }
+
+/* A `fill` panel is an unbounded stream (chat, the event log). It takes the
+   dock's full height and scrolls its own body — the one sanctioned exception to
+   "panels never scroll", for the same reason as the mobile sheet: the container
+   has a fixed height, and scrollback is the entire point. Without this the
+   panel grows with every message and drags the whole dock with it. */
+.dock--bottom .section--fill { align-self: stretch; min-height: 0; }
+.dock--bottom .section--fill .section__body { flex: 1; min-height: 0; overflow: hidden; }
 
 .dock__empty {
     margin: auto;
@@ -1277,18 +1284,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ── Chat ─────────────────────────────────────────────────────────────────── */
 
-.chat { display: flex; gap: 10px; align-items: stretch; min-height: 0; padding-top: 8px; }
-.chat__stream { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.chat {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+    padding-top: 8px;
+}
+.chat__stream { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .chat__users {
     flex: 0 0 170px;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-height: 0;
+    overflow-y: auto;
     border-left: 1px solid var(--border);
     padding-left: 8px;
 }
 
-.chat__log { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+/* The message log is the scroller, so the panel itself stays the dock's height
+   however long the conversation gets. */
+.chat__log {
+    flex: 1;
+    min-height: 60px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+}
 .chat__row { display: flex; gap: 7px; align-items: baseline; }
 .chat__time { font-family: var(--mono); font-size: 10px; color: var(--text-faint); flex: none; }
 .chat__who { font-weight: 650; color: var(--accent); flex: none; }
@@ -1366,3 +1392,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
     transition: background var(--dur) var(--ease);
 }
 .dock__split:hover, .dock__split:active { background: var(--accent-line); }
+
+/* Corner grip on bottom-dock panels: width traded with a neighbour, height
+   this panel's own. Mirrors the floating-window grip. */
+.section__grip-size {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    touch-action: none;
+    opacity: 0;
+    background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%);
+    border-bottom-right-radius: var(--radius);
+    transition: opacity var(--dur) var(--ease);
+}
+.section:hover .section__grip-size { opacity: 1; }
+.section__grip-size:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }

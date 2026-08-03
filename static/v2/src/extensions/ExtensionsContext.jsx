@@ -9,8 +9,8 @@
 // The panel lists the first and marks each entry with whether the second has
 // it, so an extension we support but the operator has not enabled reads as
 // "not enabled here" rather than silently failing at attach time. The reverse
-// case — enabled on the receiver but not yet written for v2 — is reported as a
-// single line naming the slugs, because that list is a to-do, not a control.
+// case — enabled on the receiver but not written for v2 — is simply not shown:
+// this is a launcher, and a row nothing can open is not a control.
 //
 // Exactly one extension is open at a time. That is not a UI preference: the
 // server allows one audio extension per session and tears the previous one down
@@ -18,7 +18,7 @@
 // one is decoding. Opening a second therefore closes the first.
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
-import { EXTENSIONS, EXTENSION_BY_ID, PORTED_AS_PANELS } from './registry.jsx';
+import { EXTENSIONS, EXTENSION_BY_ID } from './registry.jsx';
 
 const STORAGE_KEY = 'ubersdr.v2.extensions';
 
@@ -76,20 +76,6 @@ export function ExtensionsProvider({ children }) {
         enabled: enabled == null ? false : enabled.includes(e.id),
     })), [enabled]);
 
-    // Enabled on this receiver but not implemented here yet — genuinely
-    // missing, as opposed to the ones v2 rebuilt as panels.
-    const missing = useMemo(
-        () => (enabled || []).filter((slug) => !EXTENSION_BY_ID[slug] && !PORTED_AS_PANELS[slug]),
-        [enabled],
-    );
-
-    // Enabled here and answered by a panel. Named so "where did the DX cluster
-    // go?" has an answer in the place the question is asked.
-    const inPanels = useMemo(() => {
-        const names = (enabled || []).map((slug) => PORTED_AS_PANELS[slug]).filter(Boolean);
-        return [...new Set(names)].sort();
-    }, [enabled]);
-
     const open = useCallback((id) => {
         if (!EXTENSION_BY_ID[id]) return;
         setActiveId(id);
@@ -123,8 +109,6 @@ export function ExtensionsProvider({ children }) {
 
     const value = useMemo(() => ({
         list,
-        missing,
-        inPanels,
         activeId,
         active: activeId ? EXTENSION_BY_ID[activeId] : null,
         open,
@@ -132,7 +116,7 @@ export function ExtensionsProvider({ children }) {
         toggle,
         geometryOf,
         setFloat,
-    }), [list, missing, inPanels, enabled, activeId, open, close, toggle, geometryOf, setFloat]);
+    }), [list, activeId, open, close, toggle, geometryOf, setFloat]);
 
     return <ExtensionsContext.Provider value={value}>{children}</ExtensionsContext.Provider>;
 }

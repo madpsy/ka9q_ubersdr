@@ -7,8 +7,19 @@ import (
 )
 
 var (
-	// Callsign pattern (basic validation) - allows portable suffix like /P, /M, /6, etc.
-	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)
+	// Callsign pattern (basic validation).
+	//
+	// Both compound forms are allowed, because both are on the air every day:
+	//
+	//	suffix   TJ1GD/P, R9KC/6      the operator's own call, qualified
+	//	prefix   OZ/DG1ATN, F/G4ABC   a visitor, working from another entity
+	//
+	// The prefix form used to be rejected, so "CQ OZ/DG1ATN" yielded no
+	// transmitter callsign at all — and with it no country, distance or
+	// bearing, since every one of those hangs off the callsign. It is the more
+	// interesting of the two to miss: a prefix call is by definition someone
+	// operating away from home.
+	callsignPattern = regexp.MustCompile(`^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]{1,4})?$`)
 
 	// Grid locator pattern (4 characters for FT8)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}$`)
@@ -88,22 +99,27 @@ func extractCallsignLocator(message string) (string, string) {
 	return transmitterCall, locator
 }
 
-// normalizeCallsign strips angle brackets and portable suffixes for CTY lookups
+// normalizeCallsign strips the angle brackets a hashed callsign is printed in,
+// and nothing else.
+//
+// It used to cut the callsign at the first "/", which threw away the very part
+// that decides the country. CTY.DAT is built for whole callsigns: it carries
+// exact entries for portable calls (=R9KC/6 is European Russia, while R9KC
+// alone is Asiatic Russia) and resolves a prefix call from its prefix
+// (OZ/DG1ATN is Denmark, not Germany). Handing it the full callsign gets all of
+// that for free; handing it a truncated one gets the wrong country, or none.
+//
 // Examples:
 //
 //	<II0LOVE> → II0LOVE
-//	R9KC/6 → R9KC
-//	DM4KJ → DM4KJ (unchanged)
+//	OZ/DG1ATN → OZ/DG1ATN   (Denmark, from the prefix)
+//	R9KC/6 → R9KC/6         (European Russia, from CTY's exact entry)
+//	DM4KJ → DM4KJ           (unchanged)
+//
+// Both frontends reduce a compound to its base call before a QRZ or lookup
+// query, so keeping it whole here costs them nothing.
 func normalizeCallsign(call string) string {
-	// Strip angle brackets
-	call = strings.Trim(call, "<>")
-
-	// Strip portable suffix (everything after and including /)
-	if idx := strings.Index(call, "/"); idx != -1 {
-		call = call[:idx]
-	}
-
-	return call
+	return strings.Trim(call, "<>")
 }
 
 // isValidCallsign checks if a string looks like a valid amateur radio callsign

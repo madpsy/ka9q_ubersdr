@@ -24,7 +24,7 @@ import { Button, Empty, Icon, ShowMore, Switch } from '../../components/ui.jsx';
 import { countryFlag } from '../../lib/format.js';
 import { subscribeAudioSpectrum } from '../../lib/audioSpectrum.js';
 import { openCallsignLookup } from '../../compat/legacyBridge.js';
-import { requestLookup } from '../../lib/callsign.js';
+import { normaliseCallsign, requestLookup } from '../../lib/callsign.js';
 import { getSessionId } from '../../radio/session.js';
 import { useAudioExtension } from '../useAudioExtension.js';
 import {
@@ -247,7 +247,9 @@ export default function FT8Extension() {
         if (serverInfo && serverInfo.lookup_service) {
             openCallsignLookup({ uuid: getSessionId(), callsign: call });
         } else {
-            window.open(`https://www.qrz.com/db/${encodeURIComponent(call)}`, '_blank', 'noopener');
+            // QRZ has no page for a compound call, so ask for the base one —
+            // the same reduction the lookup popup does.
+            window.open(`https://www.qrz.com/db/${encodeURIComponent(normaliseCallsign(call) || call)}`, '_blank', 'noopener');
         }
     };
 

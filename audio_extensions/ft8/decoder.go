@@ -60,7 +60,7 @@ type DecodeResult struct {
 	DeltaT         float32  `json:"delta_t"`                // Time offset from slot start (seconds)
 	Frequency      float32  `json:"frequency"`              // Audio frequency (Hz)
 	Callsign       string   `json:"callsign"`               // Transmitter callsign (original from message)
-	TxCallsign     string   `json:"tx_callsign,omitempty"`  // Normalized TX callsign used for CTY lookup (without <>, /)
+	TxCallsign     string   `json:"tx_callsign,omitempty"`  // TX callsign used for the CTY lookup: angle brackets stripped, compound calls kept whole
 	Locator        string   `json:"locator,omitempty"`      // Grid square locator
 	DistanceKm     *float64 `json:"distance_km,omitempty"`  // Distance from receiver in km
 	BearingDeg     *float64 `json:"bearing_deg,omitempty"`  // Bearing from receiver in degrees
@@ -315,7 +315,9 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 		return
 	}
 
-	// Normalize the callsign for CTY lookup (strip angle brackets and portable suffixes)
+	// Normalize the callsign for CTY lookup (strip the angle brackets a hashed
+	// callsign is printed in; a compound call goes to CTY whole — see
+	// normalizeCallsign)
 	normalizedCall := normalizeCallsign(result.Callsign)
 	result.TxCallsign = normalizedCall
 

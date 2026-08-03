@@ -181,9 +181,10 @@ this build can render, crossed with what the operator has enabled:
   and answers `{ available: [{slug, displayName}], default }`.
 
 Something we support but the operator has not enabled is listed and disabled with
-the reason, rather than left out. The other two cases each get a line: extensions
-v2 rebuilt as panels (DX cluster, digital and CW spots → Spots; FlexControl, MIDI
-and Radio Sync → Radio control) and extensions still to be written.
+the reason, rather than left out — the answer to "why is FT8 not here?" lives in
+`extensions.yaml`, and a missing row cannot say that. What the receiver enables
+and v2 has no component for is simply not shown: this is a launcher, not an
+inventory of the v1 extension set.
 
 ### The shared decoder client
 

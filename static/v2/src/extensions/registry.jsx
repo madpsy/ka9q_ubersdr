@@ -40,19 +40,3 @@ export const EXTENSIONS = [
 
 export const EXTENSION_BY_ID = Object.fromEntries(EXTENSIONS.map((e) => [e.id, e]));
 
-// v1 extensions that v2 ships as ordinary panels instead, and where they went.
-//
-// The operator enabled these in extensions.yaml, so they come back from
-// `/api/extensions` and would otherwise be reported as missing from v2 — which
-// is the opposite of true. They are not extensions here because none of them is
-// a decoder you open and close: two are permanent readouts and three are
-// hardware control surfaces that belong beside the other controls.
-export const PORTED_AS_PANELS = {
-    'dx-cluster': 'Spots',
-    'digital-spots': 'Spots',
-    'cw-spots': 'Spots',
-    flexcontrol: 'Radio control',
-    'midi-control': 'Radio control',
-    'radio-sync': 'Radio control',
-    stats: 'Receiver info',
-};

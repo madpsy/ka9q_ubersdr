@@ -4,7 +4,7 @@
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
-import { snrColour, snrFraction, sUnitFraction, sUnitLabel, SNR_MAX, SNR_MIN } from '../lib/format.js';
+import { audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel, SNR_MAX, SNR_MIN } from '../lib/format.js';
 
 const HISTORY = 120;   // ~10 s at 12 Hz
 
@@ -102,7 +102,7 @@ export default function SignalPanel() {
                     unit="dB"
                     color={snr == null ? undefined : snrColour(snr)}
                 />
-                <Readout label="Audio" value={(m.level * 100).toFixed(0)} unit="%" />
+                <Readout label="Audio" value={audioLevelPercent(m.level).toFixed(0)} unit="%" />
             </div>
 
             <div className="sparkline">

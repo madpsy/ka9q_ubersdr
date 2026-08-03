@@ -116,3 +116,17 @@ export function snrColour(snr) {
     const hue = Math.round(((c - SNR_COLOUR_MIN) / (SNR_COLOUR_MAX - SNR_COLOUR_MIN)) * 120);
     return `hsl(${hue}, 90%, 55%)`;
 }
+
+// Audio level, on v1's VU scale (app.js updateVUMeter).
+//
+// The player reports a linear RMS amplitude, where ordinary speech sits around
+// 0.05–0.2 — reading that as a percentage makes loud audio look like 10%. v1
+// converts to dBFS and maps −60 dB..0 dB onto 0..100%, which is what a VU meter
+// is expected to do, so 0.1 RMS (−20 dBFS) shows as 67%.
+export const AUDIO_FLOOR_DB = -60;
+
+export function audioLevelPercent(rms) {
+    if (rms == null || !Number.isFinite(rms) || rms <= 0) return 0;
+    const db = clamp(20 * Math.log10(rms), AUDIO_FLOOR_DB, 0);
+    return ((db - AUDIO_FLOOR_DB) / -AUDIO_FLOOR_DB) * 100;
+}

@@ -25,24 +25,9 @@ import {
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
+import { zoomCenter } from '../lib/zoom.js';
 
 const RadioContext = createContext(null);
-
-// Centre frequency for a zoom step: keeps `aboutHz` (the cursor) over the same
-// point on screen, then pulls the view back inside 0–30 MHz so neither edge
-// hangs off the end of the band.
-function zoomCenter(conn, newBinBW, aboutHz) {
-    const newSpan = newBinBW * conn.binCount;
-    const span = conn.span;
-    let center = conn.centerFreq;
-    if (aboutHz != null && span > 0) {
-        center = aboutHz - (aboutHz - center) * (newSpan / span);
-    }
-    const half = newSpan / 2;
-    const lo = Math.max(MIN_FREQ, half);
-    const hi = Math.max(lo, MAX_FREQ - half);
-    return clamp(center, lo, hi);
-}
 
 const SETTINGS_KEY = 'ubersdr.v2.radio';
 
@@ -688,7 +673,7 @@ export function RadioProvider({ children }) {
                 if (!c.binCount || !c.binBandwidth) return;
                 const next = c.binBandwidth / 2;
                 if (next < c.minBinBandwidthForUI()) return;   // already fully zoomed in
-                c.setView(zoomCenter(c, next, aboutHz), next);
+                c.setView(zoomCenter(c, next, aboutHz, tuningRef.current.frequency), next);
             },
 
             zoomOut(aboutHz) {
@@ -702,7 +687,7 @@ export function RadioProvider({ children }) {
                     c.reset();
                     return;
                 }
-                c.setView(zoomCenter(c, next, aboutHz), next);
+                c.setView(zoomCenter(c, next, aboutHz, tuningRef.current.frequency), next);
             },
 
             resetSpectrum() { spectrumConn.reset(); },

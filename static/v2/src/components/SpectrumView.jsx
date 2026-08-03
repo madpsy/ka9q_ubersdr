@@ -565,8 +565,8 @@ export default function SpectrumView() {
                     <ClipTag />
                 </div>
                 <div className="spectrum__tools">
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in" onClick={() => actions.zoomIn()} />
+                    <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
+                    <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
                     <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                     <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
                 </div>

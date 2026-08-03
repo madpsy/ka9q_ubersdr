@@ -36,7 +36,10 @@ esbuild ../src/lib/mentions.js --bundle --format=cjs --platform=node \
     --outfile=.build/mentions.cjs --log-level=warning
 esbuild ../src/lib/recorder.js --bundle --format=cjs --platform=node \
     --outfile=.build/recorder.cjs --log-level=warning
+esbuild ../src/lib/zoom.js --bundle --format=cjs --platform=node \
+    --outfile=.build/zoom.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
+node zoom.test.js
 node recorder.test.js

@@ -40,6 +40,60 @@ function Clock({ tzOffset }) {
     );
 }
 
+// Same compact summary v1 pins to the bottom-right corner: solar flux, K, A,
+// solar wind Bz and the derived propagation quality, refreshed every minute.
+// /api/spaceweather is only meaningful when the operator enabled the monitor,
+// so the caller mounts this on serverInfo.space_weather.
+const SW_TONE = { Poor: 'bad', Fair: 'warn', Good: 'good', Excellent: 'good' };
+
+function SpaceWeather({ clickable }) {
+    const [sw, setSw] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        const load = () => fetch('/api/spaceweather')
+            .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+            .then((d) => { if (!cancelled) setSw(d); })
+            .catch(() => { /* non-fatal — the summary just stays as it was */ });
+        load();
+        const id = setInterval(load, 60000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    if (!sw) return null;
+
+    const flux = sw.solar_flux != null ? Math.round(sw.solar_flux) : '--';
+    const k = sw.k_index != null ? sw.k_index : '--';
+    const a = sw.a_index != null ? sw.a_index : '--';
+    const bz = sw.solar_wind_bz != null ? sw.solar_wind_bz.toFixed(1) : '--';
+    const quality = sw.propagation_quality || '--';
+
+    const tip = [
+        `Solar Flux: ${flux} SFU`,
+        `K-Index: ${k} (${sw.k_index_status || 'Unknown'})`,
+        `A-Index: ${a}`,
+        `Solar Wind Bz: ${bz} nT`,
+        `Propagation Quality: ${quality}`,
+        clickable ? '\nClick for band conditions' : '',
+    ].filter(Boolean).join('\n');
+
+    return (
+        <div
+            className={`topbar__sw${clickable ? ' is-clickable' : ''}`}
+            title={tip}
+            role={clickable ? 'button' : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onClick={clickable ? () => window.open('/bandconditions.html', '_blank') : undefined}
+        >
+            <span>S:{flux}</span>
+            <span>K:{k}</span>
+            <span>A:{a}</span>
+            <span>W:{bz}</span>
+            <span className={`topbar__sw-p is-${SW_TONE[quality] || 'idle'}`}>P:{quality}</span>
+        </div>
+    );
+}
+
 export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo, audio } = useRadio();
     const display = useDisplay();
@@ -88,6 +142,10 @@ export default function TopBar({ compact }) {
             )}
 
             <div className="topbar__spacer" />
+
+            {!compact && serverInfo?.space_weather && (
+                <SpaceWeather clickable={!!serverInfo?.noise_floor} />
+            )}
 
             {!compact && (
                 <div className="topbar__zoom" role="group" aria-label="Text size">

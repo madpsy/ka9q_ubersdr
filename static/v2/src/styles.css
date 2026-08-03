@@ -242,6 +242,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__snr { font-family: var(--mono); font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); min-width: 46px; text-align: right; }
 
 .topbar__spacer { flex: 1; }
+.topbar__sw {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-3);
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.topbar__sw.is-clickable { cursor: pointer; }
+.topbar__sw.is-clickable:hover { border-color: var(--border-strong); color: var(--text); }
+.topbar__sw-p.is-good { color: var(--good); }
+.topbar__sw-p.is-warn { color: var(--warn); }
+.topbar__sw-p.is-bad { color: var(--bad); }
+
 .topbar__zoom { display: flex; align-items: center; gap: 2px; }
 .topbar__zoom-val {
     font-family: var(--mono);

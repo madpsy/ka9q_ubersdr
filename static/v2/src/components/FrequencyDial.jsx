@@ -15,6 +15,7 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
     const [draft, setDraft] = useState('');
     const inputRef = useRef(null);
     const dragRef = useRef(null);
+    const rootRef = useRef(null);
 
     useEffect(() => {
         if (editing && inputRef.current) {
@@ -38,6 +39,23 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
         freqRef.current = next;
         onChange(next);
     }, [onChange]);
+
+    // Wheel-to-tune has to be a native non-passive listener. React registers
+    // its wheel handlers passively, so preventDefault() there is ignored and
+    // the dock scrolled along with the digit being tuned.
+    useEffect(() => {
+        const el = rootRef.current;
+        if (!el) return undefined;
+        const onWheel = (e) => {
+            if (disabled) return;
+            const cell = e.target.closest && e.target.closest('[data-place]');
+            if (!cell) return;
+            e.preventDefault();
+            bump(Number(cell.dataset.place), e.deltaY < 0 ? 1 : -1);
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, [disabled, bump, editing]);
 
     if (editing) {
         return (
@@ -70,11 +88,7 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
                 key={i}
                 className={`dial__digit${leading ? ' is-dim' : ''}`}
                 title={`${place >= 1000 ? place / 1000 + ' kHz' : place + ' Hz'} step — scroll or drag`}
-                onWheel={(e) => {
-                    if (disabled) return;
-                    e.preventDefault();
-                    bump(place, e.deltaY < 0 ? 1 : -1);
-                }}
+                data-place={place}
                 onPointerDown={(e) => {
                     if (disabled) return;
                     e.currentTarget.setPointerCapture(e.pointerId);
@@ -111,7 +125,7 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
     }
 
     return (
-        <div className={`dial${disabled ? ' is-disabled' : ''}`}>
+        <div className={`dial${disabled ? ' is-disabled' : ''}`} ref={rootRef}>
             <div className="dial__digits">{cells}</div>
             <span className="dial__unit">Hz</span>
         </div>

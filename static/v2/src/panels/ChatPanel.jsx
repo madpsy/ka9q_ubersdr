@@ -196,6 +196,12 @@ export default function ChatPanel() {
         if (chat.actions.send(draft)) setDraft('');
     };
 
+    // Sent straight away rather than dropped into the box: sharing where you
+    // are is one action, and anything already half-typed is left alone.
+    const shareFrequency = () => {
+        chat.actions.send(freqMessage(tuning.frequency, tuning.mode));
+    };
+
     return (
         <div className="chat" ref={rootRef}>
             <div className="chat__stream">
@@ -275,8 +281,9 @@ export default function ChatPanel() {
                             <button
                                 type="button"
                                 className="chat__tool chat__tool--icon"
-                                title={`Share ${formatFreqShort(tuning.frequency)} ${String(tuning.mode).toUpperCase()}`}
-                                onClick={() => insert(freqMessage(tuning.frequency, tuning.mode))}
+                                title={`Send ${formatFreqShort(tuning.frequency)} ${String(tuning.mode).toUpperCase()} to the room`}
+                                disabled={!chat.connected}
+                                onClick={shareFrequency}
                             >
                                 <Icon.Radio size={15} />
                             </button>

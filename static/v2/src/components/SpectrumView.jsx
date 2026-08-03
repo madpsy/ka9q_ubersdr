@@ -10,7 +10,7 @@
 // canvas onto itself, never accumulates resampling artefacts.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
@@ -21,6 +21,24 @@ import MarkerBar from './MarkerBar.jsx';
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
 const MIN_WATERFALL_H = 40;
+
+// Squelch state in the spectrum toolbar. Split into its own component so the
+// 10 Hz meter sampling re-renders this tag alone — SpectrumView owns the draw
+// loop and must not re-render at meter rate.
+function SquelchTag() {
+    const { squelch } = useRadio();
+    const m = useMeters(10);
+    if (!squelch.enabled) return null;
+    const open = m.squelchOpen;
+    return (
+        <span
+            className={`tag tag--${open ? 'good' : 'bad'}`}
+            title={`Squelch ≥ ${squelch.value.toFixed(1)} dB SNR — ${open ? 'passing audio' : 'muted'}`}
+        >
+            SQ {open ? 'open' : 'closed'}
+        </span>
+    );
+}
 
 export default function SpectrumView() {
     const radio = useRadio();
@@ -310,6 +328,7 @@ export default function SpectrumView() {
                     <span className="tag tag--accent">{formatSpan(span)}</span>
                     <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>
                     {hoverInfo && <span className="tag tag--ghost">{formatFreqShort(hoverInfo.freq, span)}</span>}
+                    <SquelchTag />
                 </div>
                 <div className="spectrum__tools">
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />

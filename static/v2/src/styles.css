@@ -493,6 +493,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .tag--accent { background: var(--accent-soft); color: var(--accent); }
 .tag--ghost { background: transparent; border: 1px solid var(--border-strong); }
+.tag--good { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.tag--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
 
 /* =========================================================================
    Controls

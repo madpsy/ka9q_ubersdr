@@ -39,6 +39,7 @@ import AntennaPanel from './AntennaPanel.jsx';
 import RecorderPanel from './RecorderPanel.jsx';
 import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 import CallsignPanel from './CallsignPanel.jsx';
+import RadioControlPanel from './RadioControlPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -75,6 +76,18 @@ export const PANELS = [
     },
 
     { id: 'recorder', title: 'Recorder', icon: <Icon.Record />, dock: 'left', defaultOpen: false, Component: RecorderPanel },
+
+    // Hardware control surfaces and CAT sync. Collapsed by default: it does
+    // nothing until someone attaches a device, and its Hamlib download only
+    // starts when Radio Sync is chosen inside it.
+    {
+        id: 'radiocontrol',
+        title: 'Radio control',
+        icon: <Icon.Knob />,
+        dock: 'left',
+        defaultOpen: false,
+        Component: RadioControlPanel,
+    },
 
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
     { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },

@@ -286,4 +286,41 @@ appear under everything else for anyone who had used the app before.
 * **State persists in `localStorage`** under `ubersdr.v2.*` (tuning, display,
   layout). The session UUID is in `sessionStorage`, so each tab is its own
   receiver session.
+* **Radio control is native, not a hosted extension.** v1 ships FlexControl,
+  MIDI Control and Radio Sync as three separate extensions; the first two are
+  near-identical 900-line files that each carry their own copy of the mapping
+  engine and discover control ranges by reading v1's sliders out of the DOM
+  (`document.getElementById('bandwidth-low').min`). Here they are one panel with
+  one function catalogue in `controls/functions.js`, and everything goes through
+  `actions`, so a mapped control takes the same path as a click. Hardware is
+  normalised to three event kinds — `relative` (encoder detents), `absolute`
+  (a fader's position, 0..1) and `trigger` (a button) — and each function
+  declares which it accepts, because a fader read as an encoder slews the
+  receiver across the band rather than setting a level. A MIDI CC cannot be told
+  apart from one message, so the mapping carries an encoder/fader switch instead
+  of guessing. Mapping records and the export envelope are v1's byte for byte,
+  and v1's `localStorage` mappings are adopted on first run. `nb_toggle` and
+  `vfo_ab_toggle` have no v2 equivalent and are listed in `RETIRED` so an
+  imported file shows them struck through rather than dropping them silently;
+  `mode_cw` aliases to `mode_cwu` since v2 splits the sidebands. Noise reduction
+  entries are generated from the server's DSP schema — nothing hardcodes nr2.
+* **One control source at a time, and it outlives the panel.** Two surfaces
+  mapped to frequency would fight, and Radio Sync driving the receiver would
+  fight both, so choosing a source releases the others (`controls/sources.js`).
+  The sources are module singletons rather than component state for a reason
+  specific to this UI: a panel unmounts every time it is dragged to another dock,
+  floated or opened on mobile, and that must not close a serial port, drop a CAT
+  link, or throw away Hamlib. Hardware is released on a source change or an
+  explicit Disconnect, never on unmount.
+* **Hamlib is fetched only when Radio Sync is chosen.** `hamlib.wasm` is 14 MB,
+  so `ensureLoaded()` is the one place it is pulled, it caches its promise on the
+  singleton, and it deliberately does *not* cache a rejection — a transient
+  failure on a 14 MB download must not leave the panel dead until a reload. The
+  module is built with plain `-sASYNCIFY`, which permits one in-flight call, so
+  every `cwrap` goes through a serialising queue: the 10 Hz poll loop overlapping
+  a `set_freq` on a slow serial link corrupts Asyncify's stack and Hamlib's
+  shared buffers, which surfaces as PTT flipping at random. A rig sitting in a
+  data mode (PKTUSB, RTTY) is displayed but pushed in neither direction — the
+  receiver has no equivalent, and recording it would make the next comparison
+  drag the rig back out of data mode.
 * **Deep links**: `/v2/?freq=7100000&mode=lsb`.

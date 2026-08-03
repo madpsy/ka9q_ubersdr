@@ -62,6 +62,9 @@ export const Icon = {
     Search: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></Svg>,
     Mic: (p) => <Svg {...p}><rect x="9" y="3" width="6" height="10" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></Svg>,
     Trash: (p) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><path d="M10 11v6M14 11v6" /></Svg>,
+    Upload: (p) => <Svg {...p}><path d="M12 14V3" /><path d="m7.5 7 4.5-4 4.5 4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
+    // A control-surface knob: a dial with an index mark and detent ticks.
+    Knob: (p) => <Svg {...p}><circle cx="12" cy="12" r="6.5" /><path d="M12 5.5v3" /><path d="M12 2.6v1.2M19.6 7.5l-1 .6M19.6 16.5l-1-.6M12 21.4v-1.2M4.4 16.5l1-.6M4.4 7.5l1 .6" /></Svg>,
 };
 
 export default Icon;

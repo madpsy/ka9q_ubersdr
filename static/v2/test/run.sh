@@ -46,6 +46,16 @@ esbuild ../src/compat/legacyBridge.js --bundle --format=cjs --platform=node \
     --outfile=.build/compat.cjs --log-level=warning
 esbuild ../src/lib/callsign.js --bundle --format=cjs --platform=node \
     --outfile=.build/callsign.cjs --log-level=warning
+esbuild ../src/controls/functions.js --bundle --format=cjs --platform=node \
+    --outfile=.build/functions.cjs --log-level=warning
+esbuild ../src/controls/mappings.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mappings.cjs --log-level=warning
+esbuild ../src/controls/flexcontrol.js --bundle --format=cjs --platform=node \
+    --outfile=.build/flexcontrol.cjs --log-level=warning
+esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
+    --outfile=.build/webmidi.cjs --log-level=warning
+esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
+    --outfile=.build/radiosync.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -54,3 +64,4 @@ node voice.test.js
 node callsign.test.js
 node compat.test.js
 node recorder.test.js
+node controls.test.js

@@ -2129,3 +2129,112 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .addon { flex-direction: row; align-items: center; justify-content: space-between; text-decoration: none; color: inherit; }
 .addon__go { display: grid; place-items: center; color: var(--text-faint); }
 .addon:hover .addon__go { color: var(--accent); }
+
+/* =========================================================================
+   Radio control
+   ========================================================================= */
+
+.rc-conn { display: flex; align-items: center; gap: 7px; }
+.rc-conn__state { font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); }
+
+.rc-learn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+}
+.rc-learn__msg { flex: 1; font-size: calc(11.5px * var(--ui-scale)); color: var(--accent); }
+
+/* One row per mapping. The key is monospaced and fixed-ish so a column of them
+   lines up; the function name takes the slack and ellipses rather than wrapping
+   the row onto two lines. */
+.rc-map { display: flex; flex-direction: column; gap: 3px; }
+.rc-map__row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.rc-map__key {
+    flex: none;
+    max-width: 42%;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.rc-map__fn {
+    flex: 1;
+    min-width: 0;
+    font-size: calc(11.5px * var(--ui-scale));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* A function this build no longer has — an imported v1 mapping for the noise
+   blanker or VFO A/B. Shown struck through rather than dropped, so the row
+   explains itself instead of silently disappearing on import. */
+.rc-map__fn.is-retired { color: var(--text-faint); text-decoration: line-through; }
+.rc-map__del {
+    flex: none;
+    display: grid;
+    place-items: center;
+    padding: 2px;
+    border: 0;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+.rc-map__del:hover { color: var(--bad); background: var(--surface-hover); }
+
+/* The rig readout. Big enough to read across a shack, which is the whole point
+   of having the radio's own frequency on screen next to the receiver's. */
+.rc-rig {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+.rc-rig__freq {
+    font-family: var(--mono);
+    font-size: calc(22px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+.rc-rig__unit {
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+    margin-left: 5px;
+}
+.rc-rig__row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.rc-rig__mode {
+    font-size: calc(11px * var(--ui-scale));
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.rc-rig__tx {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--surface-3);
+    color: var(--text-faint);
+}
+.rc-rig__tx.is-tx { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
+
+.rc-log__clear {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-faint);
+}
+.rc-log__clear:hover { color: var(--accent); }

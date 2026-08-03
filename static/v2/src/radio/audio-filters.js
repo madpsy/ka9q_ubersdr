@@ -76,7 +76,7 @@ export const FILTER_DEFAULTS = {
         attack: 10,         // ms
         release: 250,       // ms
         knee: 12,
-        makeup: 6,          // dB
+        makeup: 0,          // dB, manual only — auto starts from what it measures
         autoMakeup: true,
     },
     stereo: {
@@ -100,10 +100,15 @@ export const FILTER_DEFAULTS = {
 export const MAKEUP_FACTOR = 0.9;
 export const MAKEUP_MAX_DB = 12;
 
-// Where the output is allowed to peak. Everything downstream — volume, the
-// stereo widener's sum, the browser's own conversion — happens below 0 dBFS,
-// and leaving a decibel of room is the difference between "loud" and "buzzing".
+// Two different numbers, which is the point.
+//
+// CEILING_DB is where the safety limiter stands. MAKEUP_TARGET_DB is what auto
+// makeup aims for, and it sits well below: aiming at the ceiling means the
+// limiter is engaged continuously, and a brickwall that never lets go is
+// exactly what audible distortion sounds like. Five decibels of daylight
+// between them leaves the limiter to catch transients, which is its job.
 export const CEILING_DB = -1;
+export const MAKEUP_TARGET_DB = -6;
 
 export function makeupFromReduction(reductionDb) {
     // `reduction` is negative dB (or 0 when nothing is being compressed).
@@ -125,7 +130,7 @@ export function makeupFromReduction(reductionDb) {
  * Asymmetric on purpose: back off fast, come back slowly. Distortion is
  * immediate and obvious; a slow recovery is inaudible.
  */
-export function nextMakeupDb({ current, reductionDb, peakDb, ceilingDb = CEILING_DB }) {
+export function nextMakeupDb({ current, reductionDb, peakDb, ceilingDb = MAKEUP_TARGET_DB }) {
     const want = makeupFromReduction(reductionDb);
 
     // How much this could change and still land on the ceiling. With no peak
@@ -273,24 +278,8 @@ export function buildChain(ctx, spec) {
         // whatever the slider says.
         makeup.gain.value = c.autoMakeup ? 1 : Math.pow(10, c.makeup / 20);
 
-        // Watches the makeup's own output, so the loop can see the peak it is
-        // creating rather than the one it started from.
-        const meter = ctx.createAnalyser();
-        meter.fftSize = 1024;
-
-        // Safety limiter, always present with the compressor. Auto makeup aims
-        // to stay off it, and manual makeup can be set to anything at all — a
-        // brickwall a decibel below full scale is what stops either of those
-        // reaching the point where it buzzes.
-        const limiter = ctx.createDynamicsCompressor();
-        limiter.threshold.value = CEILING_DB;
-        limiter.knee.value = 0;
-        limiter.ratio.value = 20;
-        limiter.attack.value = 0.002;
-        limiter.release.value = 0.1;
-
-        nodes.push(comp, makeup, meter, limiter);
-        if (c.autoMakeup) compressor = { node: comp, makeup, meter, db: 0 };
+        nodes.push(comp, makeup);
+        if (c.autoMakeup) compressor = { node: comp, makeup, db: 0 };
     }
 
     // Stereo widener, last. Everything upstream is one signal; this is where it
@@ -298,27 +287,38 @@ export function buildChain(ctx, spec) {
     // the other, which is the classic mono-to-stereo trick: at these delays the
     // ear reads it as space rather than as an echo, and the two sides still sum
     // back to the original if something downstream folds to mono.
+    //
+    // Normalised by 1/(1+w). Without it each side can reach (1+w) times the
+    // input — 3.5 dB at 50% width, 6 dB at 100% — which lands past full scale
+    // however carefully the stages before it were levelled. It also means
+    // sweeping the width changes the image without changing the loudness.
     let stereoTail = null;
     if (spec.stereo && spec.stereo.enabled) {
         const input = ctx.createGain();
         const delay = ctx.createDelay(0.1);
         delay.delayTime.value = Math.max(0.001, Math.min(0.1, spec.stereo.delay / 1000));
+
         const w = Math.max(0, Math.min(1, spec.stereo.width / 100));
+        const norm = 1 / (1 + w);
+
+        const dry = ctx.createGain();
+        dry.gain.value = norm;
         const wet = ctx.createGain();
-        wet.gain.value = w;
+        wet.gain.value = w * norm;
         const wetInv = ctx.createGain();
-        wetInv.gain.value = -w;
+        wetInv.gain.value = -w * norm;
         const merger = ctx.createChannelMerger(2);
 
-        input.connect(merger, 0, 0);
-        input.connect(merger, 0, 1);
+        input.connect(dry);
+        dry.connect(merger, 0, 0);
+        dry.connect(merger, 0, 1);
         input.connect(delay);
         delay.connect(wetInv);
         delay.connect(wet);
         wetInv.connect(merger, 0, 0);
         wet.connect(merger, 0, 1);
 
-        stereoTail = { input, output: merger, extra: [delay, wet, wetInv] };
+        stereoTail = { input, output: merger, extra: [delay, dry, wet, wetInv] };
     }
 
     if (!nodes.length && !stereoTail) return null;
@@ -333,6 +333,32 @@ export function buildChain(ctx, spec) {
         output = stereoTail.output;
         nodes.push(stereoTail.input, stereoTail.output, ...stereoTail.extra);
     }
+
+    // Both of these belong at the very end, after every stage that can add
+    // gain — including the widener, which used to sit downstream of the
+    // limiter and could therefore undo it.
+    //
+    //   meter    what auto makeup measures: the real output peak
+    //   limiter  a brickwall just under full scale, so nothing here can buzz,
+    //            whatever the sliders are set to
+    const meter = ctx.createAnalyser();
+    meter.fftSize = 1024;
+    // Deliberately not a hard brickwall: a soft knee and a gentler ratio are
+    // far less audible on the occasions it does engage, and auto makeup is
+    // aiming 5 dB below it anyway so it should rarely have to.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = CEILING_DB;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.005;
+    limiter.release.value = 0.2;
+
+    output.connect(meter);
+    meter.connect(limiter);
+    nodes.push(meter, limiter);
+    output = limiter;
+
+    if (compressor) compressor.meter = meter;
 
     return { input, output, nodes, gate, compressor };
 }

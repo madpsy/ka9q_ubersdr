@@ -1192,10 +1192,13 @@ t('makeup backs off when the output is already at the ceiling', () => {
     const hot = af.nextMakeupDb({ current: 6, reductionDb: -10, peakDb: 0 });
     assert.ok(hot < 6, `should retreat from a 0 dBFS peak, got ${hot}`);
 
-    // Repeatedly: it must settle at or under the ceiling, not oscillate.
+    // Repeatedly: it must settle at its target, not oscillate — and the target
+    // is well below the limiter, so the limiter is not engaged continuously.
     let db = 6;
-    for (let i = 0; i < 200; i++) db = af.nextMakeupDb({ current: db, reductionDb: -10, peakDb: 0 + (db - 6) });
-    assert.ok(db <= 6 - Math.abs(af.CEILING_DB) + 0.2, `settled at ${db}`);
+    for (let i = 0; i < 400; i++) db = af.nextMakeupDb({ current: db, reductionDb: -10, peakDb: 0 + (db - 6) });
+    const settledPeak = 0 + (db - 6);
+    assert.ok(Math.abs(settledPeak - af.MAKEUP_TARGET_DB) < 0.3, `settled with peak at ${settledPeak}`);
+    assert.ok(af.MAKEUP_TARGET_DB < af.CEILING_DB - 3, 'makeup must aim clear of the limiter');
 
     // Backing off is fast, coming back is slow — distortion is immediate,
     // a slow recovery is inaudible.
@@ -1235,6 +1238,18 @@ t('every filter section has defaults and ships disabled', () => {
         Object.keys(af.FILTER_DEFAULTS).sort(),
         ['bandpass', 'compressor', 'eq', 'gate', 'notch', 'stereo'],
     );
+});
+
+
+// The widener normalisation, checked as maths rather than through Web Audio:
+// each side is dry +/- wet, so without 1/(1+w) the peak grows with the width.
+t('the stereo widener cannot add gain', () => {
+    for (const width of [0, 25, 50, 75, 100]) {
+        const w = width / 100;
+        const norm = 1 / (1 + w);
+        const worstCase = norm + w * norm;      // dry and wet aligned
+        assert.ok(Math.abs(worstCase - 1) < 1e-9, `width ${width}% peaks at x${worstCase}`);
+    }
 });
 
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

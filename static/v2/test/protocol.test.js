@@ -951,4 +951,61 @@ t('a degenerate rate or bin count yields no bins', () => {
     assert.strictEqual(ab.audioBins(50, 2700, 12000, 0).count, 0);
 });
 
+
+// ── Chat message parts: mentions, URLs and tunable frequencies ──────────────
+// v1 linkifies URLs, then frequencies, then mentions (chat-ui.js:2067). The
+// frequency form is the one its "share frequency" button produces, and both
+// frontends must agree or a link shared from one is dead text in the other.
+
+t('a shared frequency becomes a tunable part', () => {
+    const parts = mn.splitMessage('on 14175.000 KHz (USB) now', []);
+    const freq = parts.find((p) => p.freq);
+    assert.deepStrictEqual(freq.freq, { hz: 14175000, mode: 'usb' });
+    assert.strictEqual(parts.map((p) => p.text).join(''), 'on 14175.000 KHz (USB) now');
+});
+
+t('frequency forms v1 accepts are accepted here', () => {
+    for (const [text, hz, mode] of [
+        ['7100 KHz (LSB)', 7100000, 'lsb'],
+        ['198 kHz (am)', 198000, 'am'],
+        ['10125.5 KHz (CWU)', 10125500, 'cwu'],
+    ]) {
+        const p = mn.splitMessage(text, []).find((x) => x.freq);
+        assert.ok(p, text);
+        assert.strictEqual(p.freq.hz, hz);
+        assert.strictEqual(p.freq.mode, mode);
+    }
+});
+
+t('out-of-band or unknown-mode frequencies stay plain text', () => {
+    // v1 validates 10 kHz-30 MHz and a known mode before linking.
+    for (const text of ['5 KHz (USB)', '45000 KHz (USB)', '14175.000 KHz (XYZ)']) {
+        const parts = mn.splitMessage(text, []);
+        assert.ok(!parts.some((p) => p.freq), text);
+        assert.strictEqual(parts.map((p) => p.text).join(''), text);
+    }
+});
+
+t('URLs are linked, and a URL wins over anything inside it', () => {
+    const parts = mn.splitMessage('see https://example.com/7100-KHz-(LSB) ok', []);
+    assert.strictEqual(parts.filter((p) => p.url).length, 1);
+    assert.ok(!parts.some((p) => p.freq));
+    assert.strictEqual(parts.map((p) => p.text).join(''), 'see https://example.com/7100-KHz-(LSB) ok');
+});
+
+t('mentions, links and frequencies coexist in one message', () => {
+    const text = '@bob try 14175.000 KHz (USB) or https://example.com';
+    const parts = mn.splitMessage(text, ['bob']);
+    assert.strictEqual(parts.filter((p) => p.mention).length, 1);
+    assert.strictEqual(parts.filter((p) => p.freq).length, 1);
+    assert.strictEqual(parts.filter((p) => p.url).length, 1);
+    // Nothing may be lost or duplicated by the single-pass split.
+    assert.strictEqual(parts.map((p) => p.text).join(''), text);
+});
+
+t('a plain message survives the split unchanged', () => {
+    const text = 'hello, nothing special here';
+    assert.deepStrictEqual(mn.splitMessage(text, ['bob']), [{ text }]);
+});
+
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

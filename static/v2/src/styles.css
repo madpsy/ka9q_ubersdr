@@ -1664,6 +1664,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chat__sys { color: var(--text-faint); font-style: italic; }
 
 .chat__join, .chat__compose { display: flex; gap: 6px; align-items: center; }
+.chat__link {
+    color: var(--accent);
+    text-decoration: underline;
+    overflow-wrap: anywhere;
+}
+.chat__link--freq {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+.chat__link:hover { color: var(--text); }
+
 .chat__tools { position: relative; display: flex; align-items: center; gap: 2px; }
 .chat__tool {
     border: 0;

@@ -5,7 +5,7 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/chat-connection.js';
 import { formatFreqShort } from '../lib/format.js';
-import { applyCompletion, matchUsernames, mentionQuery, splitMentions } from '../lib/mentions.js';
+import { applyCompletion, matchUsernames, mentionQuery, splitMessage } from '../lib/mentions.js';
 import { clamp } from '../lib/format.js';
 
 // The user list can be dragged narrower or wider. Bounds keep both halves
@@ -196,6 +196,14 @@ export default function ChatPanel() {
         if (chat.actions.send(draft)) setDraft('');
     };
 
+    // Clicking a frequency someone shared tunes there, as v1 does. setMode
+    // applies that mode's default passband, which is what v1 does by hand.
+    const tuneTo = ({ hz, mode }) => {
+        radio.setMode(mode);
+        radio.setFrequency(hz);
+        radio.ensureVisible(hz);
+    };
+
     // Sent straight away rather than dropped into the box: sharing where you
     // are is one action, and anything already half-typed is left alone.
     const shareFrequency = () => {
@@ -221,11 +229,39 @@ export default function ChatPanel() {
                                 <span className="chat__time">{time(m.timestamp)}</span>
                                 <span className="chat__who">{m.username}</span>
                                 <span className="chat__text">
-                                    {splitMentions(m.message, names).map((part, i) => (
-                                        part.mention
-                                            ? <mark key={i} className={`chat__at${part.mention.toLowerCase() === (chat.username || '').toLowerCase() ? ' is-me' : ''}`}>{part.text}</mark>
-                                            : <React.Fragment key={i}>{part.text}</React.Fragment>
-                                    ))}
+                                    {splitMessage(m.message, names).map((part, i) => {
+                                        if (part.mention) {
+                                            const me = part.mention.toLowerCase() === (chat.username || '').toLowerCase();
+                                            return <mark key={i} className={`chat__at${me ? ' is-me' : ''}`}>{part.text}</mark>;
+                                        }
+                                        if (part.url) {
+                                            return (
+                                                <a
+                                                    key={i}
+                                                    className="chat__link"
+                                                    href={part.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                >
+                                                    {part.text}
+                                                </a>
+                                            );
+                                        }
+                                        if (part.freq) {
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    type="button"
+                                                    className="chat__link chat__link--freq"
+                                                    title={`Tune to ${part.text}`}
+                                                    onClick={() => tuneTo(part.freq)}
+                                                >
+                                                    {part.text}
+                                                </button>
+                                            );
+                                        }
+                                        return <React.Fragment key={i}>{part.text}</React.Fragment>;
+                                    })}
                                 </span>
                             </div>
                         )

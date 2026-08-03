@@ -29,4 +29,5 @@ esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
 esbuild ../src/lib/mentions.js --bundle --format=cjs --platform=node \
     --outfile=.build/mentions.cjs --log-level=warning
 
+node unresolved.js
 node protocol.test.js

@@ -4,7 +4,10 @@
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
-import { audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel, SNR_MAX, SNR_MIN } from '../lib/format.js';
+import {
+    audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel,
+    SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
+} from '../lib/format.js';
 
 const HISTORY = 120;   // ~10 s at 12 Hz
 

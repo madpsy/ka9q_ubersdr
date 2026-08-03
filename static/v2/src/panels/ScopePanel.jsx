@@ -63,6 +63,7 @@ export default function ScopePanel() {
     const [view, setView] = useState(display.scopeView || 'both');
     const [fftSize, setFftSize] = useState(display.scopeFft || 4096);
     const [timebase, setTimebase] = useState(display.scopeTimebase || 20);   // ms across the scope
+    const [contrast, setContrast] = useState(display.scopeContrast || 1);
     const [rate, setRate] = useState(null);   // audio sample rate, once known
 
     const scopeRef = useRef(null);
@@ -79,8 +80,11 @@ export default function ScopePanel() {
     const showWf = view !== 'scope';
 
     // Persist the choices with the other display settings.
-    useEffect(() => { display.set({ scopeView: view, scopeFft: fftSize, scopeTimebase: timebase }); },
-        [view, fftSize, timebase]);   // eslint-disable-line
+    useEffect(() => {
+        display.set({
+            scopeView: view, scopeFft: fftSize, scopeTimebase: timebase, scopeContrast: contrast,
+        });
+    }, [view, fftSize, timebase, contrast]);   // eslint-disable-line
 
     useEffect(() => {
         const analyser = player.acquireAnalyser(fftSize);
@@ -103,7 +107,10 @@ export default function ScopePanel() {
 
             if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase, scope.current);
             if (showWf) {
-                drawWaterfall(wfRef.current, ring.current, a, bins, sr, tuning, display.palette, level.current);
+                drawWaterfall(
+                    wfRef.current, ring.current, a, bins, sr, tuning,
+                    display.palette, contrast, level.current,
+                );
                 drawRuler(rulerRef.current, tuning, sr, a.frequencyBinCount);
             }
         };
@@ -113,7 +120,7 @@ export default function ScopePanel() {
             cancelAnimationFrame(raf);
             player.releaseAnalyser();
         };
-    }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, rate]);
+    }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, contrast, rate]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -137,6 +144,12 @@ export default function ScopePanel() {
             {showScope && (
                 <Field label="Timebase" hint={`${timebase} ms`}>
                     <Slider value={timebase} min={2} max={200} step={1} onChange={setTimebase} />
+                </Field>
+            )}
+
+            {showWf && (
+                <Field label="Contrast" hint={contrast.toFixed(2)}>
+                    <Slider value={contrast} min={0.4} max={2.5} step={0.05} onChange={setContrast} />
                 </Field>
             )}
 
@@ -260,7 +273,7 @@ function drawScope(canvas, analyser, wave, sampleRate, timebaseMs, state) {
     c.stroke();
 }
 
-function drawWaterfall(canvas, ring, analyser, bins, sampleRate, tuning, palette, level) {
+function drawWaterfall(canvas, ring, analyser, bins, sampleRate, tuning, palette, contrast, level) {
     if (!canvas) return;
     if (bins.length !== analyser.frequencyBinCount) return;
     analyser.getFloatFrequencyData(bins);
@@ -319,6 +332,9 @@ function drawWaterfall(canvas, ring, analyser, bins, sampleRate, tuning, palette
             for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
             let t = (v - level.floor) / range;
             t = t < 0 ? 0 : t > 1 ? 1 : t;
+            // Same gamma the RF waterfall uses: above 1 lifts weak signals out
+            // of the noise, below 1 pushes them back down.
+            if (contrast !== 1) t = Math.pow(t, 1 / contrast);
             const idx = (t * 255) | 0;
             const o = x * 4;
             data[o] = lut[idx * 3];

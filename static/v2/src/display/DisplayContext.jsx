@@ -35,6 +35,7 @@ export const DEFAULTS = {
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
+    scopeContrast: 1.0,     // gamma on the audio waterfall's colour mapping
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };

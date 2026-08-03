@@ -28,7 +28,13 @@ export const DEFAULTS = {
     floatOpacity: 1,        // resting opacity of floating panel windows
     snapHz: 1,              // click-to-tune rounding
     theme: 'dark',
+    uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };
+
+// Text-size range and step for the top bar's zoom buttons.
+export const UI_SCALE_MIN = 0.75;
+export const UI_SCALE_MAX = 1.6;
+export const UI_SCALE_STEP = 0.05;
 
 function load() {
     try {
@@ -70,6 +76,12 @@ export function DisplayProvider({ children }) {
     useEffect(() => {
         document.documentElement.style.setProperty('--float-opacity', String(state.floatOpacity ?? 1));
     }, [state.floatOpacity]);
+
+    // Every font-size in styles.css is calc(Npx * var(--ui-scale)), so this one
+    // property resizes all the text — including panels that are not mounted yet.
+    useEffect(() => {
+        document.documentElement.style.setProperty('--ui-scale', String(state.uiScale ?? 1));
+    }, [state.uiScale]);
 
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
     const reset = useCallback(() => setState({ ...DEFAULTS }), []);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from '../react.js';
 import { useRadio, useMeters } from '../radio/RadioContext.jsx';
-import { useDisplay } from '../display/DisplayContext.jsx';
+import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
@@ -46,6 +46,13 @@ export default function TopBar({ compact }) {
     const { docks, toggleDock } = useLayout();
     const meters = useMeters(8);
 
+    // Text size: one clamped number, stored with the rest of the display
+    // settings so it survives a reload like the theme does.
+    const scale = display.uiScale ?? 1;
+    const setScale = (v) => display.set({
+        uiScale: Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v)) * 100) / 100,
+    });
+
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
             : audioState === 'rejected' ? 'bad' : 'idle';
@@ -56,7 +63,7 @@ export default function TopBar({ compact }) {
                 <span className="topbar__logo"><Icon.Radio size={18} /></span>
                 <div className="topbar__id">
                     <span className="topbar__name">{serverInfo?.receiver?.callsign || 'UberSDR'}</span>
-                    {!compact && <span className="topbar__sub">WebSDR</span>}
+                    {!compact && <span className="topbar__sub">UberSDR</span>}
                 </div>
             </div>
 
@@ -81,6 +88,35 @@ export default function TopBar({ compact }) {
             )}
 
             <div className="topbar__spacer" />
+
+            {!compact && (
+                <div className="topbar__zoom" role="group" aria-label="Text size">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Icon.ZoomOut />}
+                        title="Smaller text"
+                        onClick={() => setScale(scale - UI_SCALE_STEP)}
+                        disabled={scale <= UI_SCALE_MIN + 1e-6}
+                    />
+                    <button
+                        type="button"
+                        className="topbar__zoom-val"
+                        title="Reset text size"
+                        onClick={() => display.set({ uiScale: 1 })}
+                    >
+                        {Math.round(scale * 100)}%
+                    </button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Icon.ZoomIn />}
+                        title="Larger text"
+                        onClick={() => setScale(scale + UI_SCALE_STEP)}
+                        disabled={scale >= UI_SCALE_MAX - 1e-6}
+                    />
+                </div>
+            )}
 
             {!compact && (
                 <div className="topbar__volume">

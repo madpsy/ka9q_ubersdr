@@ -49,6 +49,11 @@
     --dur: 160ms;
     --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
+    /* Multiplier applied to every font-size in this file, driven by the top
+       bar's text-size buttons. Boxes keep their pixel geometry — only type
+       scales — so the spectrum canvas is untouched by it. */
+    --ui-scale: 1;
+
     color-scheme: dark;
 }
 
@@ -92,7 +97,7 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font);
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-scale));
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
@@ -174,7 +179,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .topbar__id { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .topbar__name { font-weight: 650; letter-spacing: 0.01em; }
-.topbar__sub { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }
+.topbar__sub { font-size: calc(10.5px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }
 
 .topbar__clock {
     display: flex;
@@ -186,12 +191,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__clock-line { display: flex; align-items: baseline; gap: 5px; }
 .topbar__clock-time {
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
 }
 .topbar__clock-tag {
-    font-size: 9px;
+    font-size: calc(9px * var(--ui-scale));
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-faint);
@@ -209,19 +214,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .topbar__hz {
     font-family: var(--mono);
-    font-size: 16px;
+    font-size: calc(16px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
 }
 .topbar__mode {
-    font-size: 10.5px;
+    font-size: calc(10.5px * var(--ui-scale));
     font-weight: 650;
     letter-spacing: 0.08em;
     color: var(--accent);
 }
 
 .topbar__meter { display: flex; align-items: center; gap: 9px; min-width: 180px; }
-.topbar__s { font-family: var(--mono); font-size: 12px; color: var(--text-dim); min-width: 46px; }
+.topbar__s { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 46px; }
 .topbar__bar {
     flex: 1;
     height: 6px;
@@ -234,15 +239,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: linear-gradient(90deg, var(--good), var(--warn) 72%, var(--bad));
     transition: width 90ms linear;
 }
-.topbar__snr { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); min-width: 46px; text-align: right; }
+.topbar__snr { font-family: var(--mono); font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); min-width: 46px; text-align: right; }
 
 .topbar__spacer { flex: 1; }
+.topbar__zoom { display: flex; align-items: center; gap: 2px; }
+.topbar__zoom-val {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    background: none;
+    border: 0;
+    padding: 2px 2px;
+    min-width: 42px;
+    text-align: center;
+    cursor: pointer;
+}
+.topbar__zoom-val:hover { color: var(--text); }
 .topbar__volume { display: flex; align-items: center; gap: 8px; width: 150px; }
 .topbar__docks { display: flex; gap: 2px; padding-left: 4px; border-left: 1px solid var(--border); }
 .topbar__status { display: grid; place-items: center; }
 
 .topbar--compact { gap: 9px; padding: 7px 10px; }
-.topbar--compact .topbar__hz { font-size: 14px; }
+.topbar--compact .topbar__hz { font-size: calc(14px * var(--ui-scale)); }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); }
 .dot--good { background: var(--good); box-shadow: 0 0 0 3px rgba(69, 214, 154, 0.16); }
@@ -277,7 +296,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: var(--surface-2);
 }
 .dock__name {
-    font-size: 10px;
+    font-size: calc(10px * var(--ui-scale));
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--text-faint);
@@ -328,7 +347,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px dashed var(--border-strong);
     border-radius: var(--radius);
     color: var(--text-faint);
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-scale));
     text-align: center;
 }
 
@@ -358,7 +377,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .dock--right .dock__rail-label { transform: rotate(180deg); }
 .dock__rail-label {
-    font-size: 10.5px;
+    font-size: calc(10.5px * var(--ui-scale));
     letter-spacing: 0.1em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -444,7 +463,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .section.is-closed .section__chevron { transform: rotate(-90deg); }
 .section__icon { display: grid; place-items: center; color: var(--accent); }
 .section__title {
-    font-size: 12.5px;
+    font-size: calc(12.5px * var(--ui-scale));
     font-weight: 600;
     letter-spacing: 0.01em;
     white-space: nowrap;
@@ -513,7 +532,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .tag {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     padding: 2px 7px;
     border-radius: 99px;
     background: var(--surface-3);
@@ -545,7 +564,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text);
-    font-size: 12.5px;
+    font-size: calc(12.5px * var(--ui-scale));
     font-weight: 550;
     cursor: pointer;
     white-space: nowrap;
@@ -569,7 +588,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn--ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); border-color: transparent; }
 .btn--ghost.is-active { color: var(--accent); background: var(--accent-soft); }
 
-.btn--sm { padding: 5px 9px; font-size: 11.5px; }
+.btn--sm { padding: 5px 9px; font-size: calc(11.5px * var(--ui-scale)); }
 .btn--icon { padding: 7px; }
 .btn--sm.btn--icon { padding: 5px; }
 
@@ -588,7 +607,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 5px;
     background: transparent;
     color: var(--text-dim);
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     font-weight: 600;
     letter-spacing: 0.02em;
     cursor: pointer;
@@ -603,7 +622,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent-ink);
     box-shadow: var(--shadow-sm);
 }
-.segmented--sm .segmented__item { padding: 5px 4px; font-size: 11px; }
+.segmented--sm .segmented__item { padding: 5px 4px; font-size: calc(11px * var(--ui-scale)); }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field--inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
@@ -612,14 +631,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     align-items: baseline;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
 .field__hint {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     letter-spacing: 0;
     text-transform: none;
     color: var(--text-dim);
@@ -684,7 +703,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 10px;
+    font-size: calc(10px * var(--ui-scale));
     font-weight: 650;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -695,14 +714,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .squelch-status__snr {
     flex: 1;
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     color: var(--text-dim);
 }
 
 .badge {
     padding: 2px 7px;
     border-radius: 4px;
-    font-size: 9.5px;
+    font-size: calc(9.5px * var(--ui-scale));
     font-weight: 700;
     letter-spacing: 0.09em;
     background: var(--surface-hover);
@@ -742,7 +761,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .switch.is-on .switch__track { background: var(--accent); border-color: var(--accent); }
 .switch.is-on .switch__thumb { transform: translateX(16px); background: var(--accent-ink); }
 .switch:disabled { opacity: 0.45; cursor: not-allowed; }
-.switch__label { font-size: 12px; color: var(--text-dim); }
+.switch__label { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 
 .input, .select {
     width: 100%;
@@ -751,7 +770,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text);
-    font-size: 12.5px;
+    font-size: calc(12.5px * var(--ui-scale));
 }
 .input:focus, .select:focus { border-color: var(--accent); outline: none; }
 .select { cursor: pointer; }
@@ -761,7 +780,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: var(--accent-soft);
     border-left: 2px solid var(--accent);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     color: var(--text-dim);
 }
 .note--tight { background: transparent; border-left-color: var(--border-strong); padding: 2px 0 2px 9px; }
@@ -770,7 +789,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     padding: 18px 10px;
     text-align: center;
     color: var(--text-faint);
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-scale));
 }
 
 .chip {
@@ -780,7 +799,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 4px;
     background: var(--surface-hover);
     color: var(--text-dim);
-    font-size: 10px;
+    font-size: calc(10px * var(--ui-scale));
     font-weight: 650;
     letter-spacing: 0.04em;
 }
@@ -792,7 +811,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px solid var(--border);
     background: var(--surface-3);
     color: var(--text-dim);
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     border-radius: 99px;
     cursor: pointer;
     white-space: nowrap;
@@ -834,7 +853,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dial__digit:hover { background: var(--accent-soft); color: var(--accent); }
 .dial__digit.is-dim { color: var(--text-faint); }
 .dial__sep { color: var(--text-faint); padding: 0 1px; }
-.dial__unit { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.dial__unit { font-size: calc(10px * var(--ui-scale)); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
 .dial--editing { padding: 8px; }
 .dial__input {
     flex: 1;
@@ -844,7 +863,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px solid var(--accent);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
-    font-size: 20px;
+    font-size: calc(20px * var(--ui-scale));
     text-align: center;
 }
 .dial.is-disabled { opacity: 0.6; pointer-events: none; }
@@ -856,7 +875,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     align-items: center;
     justify-content: space-between;
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     color: var(--text-faint);
 }
 .passband__mode { color: var(--accent); font-weight: 650; }
@@ -870,12 +889,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: flex;
     justify-content: space-between;
     font-family: var(--mono);
-    font-size: 9.5px;
+    font-size: calc(9.5px * var(--ui-scale));
     color: var(--text-faint);
 }
 .meter__value {
     font-family: var(--mono);
-    font-size: 19px;
+    font-size: calc(19px * var(--ui-scale));
     font-weight: 600;
     text-align: center;
     color: var(--accent);
@@ -902,18 +921,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
     min-width: 0;
 }
 .readout__label {
-    font-size: 9.5px;
+    font-size: calc(9.5px * var(--ui-scale));
     letter-spacing: 0.11em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
 .readout__value {
     font-family: var(--mono);
-    font-size: 15px;
+    font-size: calc(15px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
-.readout__unit { font-size: 10px; color: var(--text-faint); margin-left: 3px; }
+.readout__unit { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); margin-left: 3px; }
 .readout--good .readout__value { color: var(--good); }
 .readout--ok .readout__value { color: var(--text); }
 .readout--weak .readout__value { color: var(--warn); }
@@ -924,7 +943,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     position: absolute;
     top: 0;
     right: 0;
-    font-size: 9.5px;
+    font-size: calc(9.5px * var(--ui-scale));
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-faint);
@@ -956,15 +975,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .list__row:hover { background: var(--surface-hover); }
 .list__row.is-active { background: var(--accent-soft); border-color: var(--accent-line); }
 .list__title {
-    font-size: 12.5px;
+    font-size: calc(12.5px * var(--ui-scale));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.list__meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); }
+.list__meta { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
 
 .kv-list { display: flex; flex-direction: column; gap: 5px; }
-.kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.kv { display: flex; justify-content: space-between; gap: 10px; font-size: calc(12px * var(--ui-scale)); }
 .kv__k { color: var(--text-faint); }
 .kv__v { font-family: var(--mono); text-align: right; overflow-wrap: anywhere; }
 
@@ -973,12 +992,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .state--connecting, .state--reconnecting { color: var(--warn); }
 .state--rejected { color: var(--bad); }
 
-.prose { font-size: 12px; color: var(--text-dim); }
+.prose { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 .prose a { color: var(--accent); }
 
 .log {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -1021,7 +1040,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 6px;
     background: transparent;
     color: var(--text);
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-scale));
     text-align: left;
     cursor: pointer;
 }
@@ -1055,10 +1074,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .layout-row__head { display: flex; align-items: center; gap: 8px; }
 .layout-row__icon { display: grid; place-items: center; color: var(--accent); }
-.layout-row__name { flex: 1; font-size: 12.5px; }
+.layout-row__name { flex: 1; font-size: calc(12.5px * var(--ui-scale)); }
 
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
-.volume-row__value { font-family: var(--mono); font-size: 12px; color: var(--text-dim); min-width: 26px; text-align: right; }
+.volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }
 
 /* =========================================================================
    Mobile
@@ -1091,7 +1110,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .tabbar__item.is-active { background: var(--accent-soft); color: var(--accent); }
 .tabbar__icon { display: grid; place-items: center; }
-.tabbar__label { font-size: 9.5px; letter-spacing: 0.03em; white-space: nowrap; }
+.tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
 
 .sheet__scrim {
     position: fixed;
@@ -1137,7 +1156,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 99px;
     background: var(--border-strong);
 }
-.sheet__title { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+.sheet__title { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: calc(13px * var(--ui-scale)); }
 .sheet__icon { display: grid; place-items: center; color: var(--accent); }
 .sheet__close {
     display: grid;
@@ -1164,7 +1183,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 .param-help {
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     line-height: 1.35;
     color: var(--text-faint);
     margin-top: -4px;
@@ -1177,15 +1196,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-dim);
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     cursor: pointer;
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .show-more:hover { background: var(--surface-hover); color: var(--text); }
-.show-more__count { color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; }
+.show-more__count { color: var(--text-faint); font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); }
 .list__count {
     text-align: center;
-    font-size: 10.5px;
+    font-size: calc(10.5px * var(--ui-scale));
     color: var(--text-faint);
     font-family: var(--mono);
 }
@@ -1209,7 +1228,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: var(--surface-3);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow);
-    font-size: 11px;
+    font-size: calc(11px * var(--ui-scale));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1263,7 +1282,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .floatwin__icon { display: grid; place-items: center; color: var(--accent); }
 .floatwin__title {
     flex: 1;
-    font-size: 12.5px;
+    font-size: calc(12.5px * var(--ui-scale));
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -1335,23 +1354,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: flex;
     flex-direction: column;
     gap: 3px;
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-scale));
 }
 .chat__row { display: flex; gap: 7px; align-items: baseline; }
-.chat__time { font-family: var(--mono); font-size: 10px; color: var(--text-faint); flex: none; }
+.chat__time { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); flex: none; }
 .chat__who { font-weight: 650; color: var(--accent); flex: none; }
 .chat__row.is-me .chat__who { color: var(--good); }
 .chat__text { overflow-wrap: anywhere; }
 .chat__sys { color: var(--text-faint); font-style: italic; }
 
 .chat__join, .chat__compose { display: flex; gap: 6px; align-items: center; }
-.chat__hint { font-size: 11px; color: var(--warn); }
+.chat__hint { font-size: calc(11px * var(--ui-scale)); color: var(--warn); }
 .chat__error {
     padding: 5px 8px;
     border-radius: var(--radius-sm);
     background: rgba(242, 100, 106, 0.16);
     color: var(--bad);
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--ui-scale));
     cursor: pointer;
 }
 
@@ -1369,8 +1388,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chat__user:hover:not(:disabled) { background: var(--surface-hover); }
 .chat__user:disabled { cursor: default; }
 .chat__user.is-idle { opacity: 0.55; }
-.chat__user-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat__user-meta { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+.chat__user-name { font-size: calc(12px * var(--ui-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat__user-meta { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
 
 .chat__row.is-mention { background: rgba(242, 181, 68, 0.12); border-radius: 4px; }
 .chat__at { background: transparent; color: var(--accent); font-weight: 650; }
@@ -1397,7 +1416,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 4px;
     background: transparent;
     color: var(--text);
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-scale));
     text-align: left;
     cursor: pointer;
 }

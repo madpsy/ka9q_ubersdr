@@ -15,6 +15,7 @@ import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
+import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
 
@@ -203,6 +204,7 @@ export default function SpectrumView() {
     dispRef.current = display;
 
     const [hoverInfo, setHoverInfo] = useState(null);
+    const hovering = hoverInfo != null;
     const [sizes, setSizes] = useState({ w: 0, h: 0 });
 
     // How the centre area is divided. The scale sits between the two panes, so
@@ -443,6 +445,32 @@ export default function SpectrumView() {
         const f = freqAtX(e.clientX);
         if (f != null) actions.setFrequency(dispRef.current.snapHz > 1 ? Math.round(f / dispRef.current.snapHz) * dispRef.current.snapHz : f);
     }, [actions, freqAtX]);
+
+    // The readout has to follow the data, not the mouse: standing still over a
+    // signal and watching it fade should change the numbers. Recomputed from
+    // the last pointer position a few times a second — frame rate would be
+    // pointless React churn for a two-line label.
+    useEffect(() => {
+        if (!hovering) return undefined;
+        const id = setInterval(() => {
+            const g = gfx.current;
+            const cfg = cfgRef.current;
+            if (!g.hover || !g.px || !g.px.length) return;
+            const px = g.px;
+            const i = clamp(Math.round(g.hover.x * g.dpr), 0, px.length - 1);
+            let best = 0;
+            for (let k = 1; k < px.length; k++) if (px[k] > px[best]) best = k;
+            setHoverInfo((prev) => (prev ? {
+                ...prev,
+                db: px[i],
+                peakDb: px[best],
+                peakFreq: cfg.span
+                    ? cfg.centerFreq - cfg.span / 2 + (best / px.length) * cfg.span
+                    : null,
+            } : prev));
+        }, 150);
+        return () => clearInterval(id);
+    }, [hovering]);
 
     const onPointerLeave = useCallback(() => {
         gfx.current.hover = null;
@@ -689,12 +717,42 @@ function drawFrame(g, d, ctx) {
     const ceil = d.autoRange ? g.autoCeil : d.ceilDb;
     const range = Math.max(1, ceil - floor);
 
-    drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow);
-    drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width);
+    // Soft enough to read as context beside the dial line; v1's colour name.
+    const colEdge = bandwidthColor(d.server.bandwidthColorName, 0.38);
+    const colVfoLine = colors()['--spec-vfo'] || '#ffd166';
+
+    drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
+    drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width);
 }
 
-function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow) {
+// The tuned frequency and the edges of what is being demodulated, drawn on
+// both panes so the waterfall shows what you are listening to rather than
+// leaving you to line it up against the spectrum above.
+//
+// The dial line is the loud one — dashed, in the VFO colour. The passband edges
+// are deliberately quieter: they are context, not the thing you are aiming
+// with, and two more bright lines either side of the dial just adds noise.
+// Their colour is the operator's bandwidth_indicator_color, as in v1.
+function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, edgeColor) {
+    if (!cfg.span) return;
+    const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
+
+    for (const edge of [tuning.frequency + tuning.bandwidthLow, tuning.frequency + tuning.bandwidthHigh]) {
+        const x = hzToX(edge);
+        if (x < 0 || x > pxW) continue;
+        c.strokeStyle = edgeColor;
+        c.lineWidth = dpr;
+        c.setLineDash([2 * dpr, 4 * dpr]);
+        c.beginPath();
+        c.moveTo(Math.round(x) + 0.5, 0);
+        c.lineTo(Math.round(x) + 0.5, H);
+        c.stroke();
+        c.setLineDash([]);
+    }
+}
+
+function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {
     if (!wf || wfH <= 0 || !g.ring) return;
     const ring = g.ring;
     const rctx = g.ringCtx;
@@ -735,9 +793,35 @@ function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow) {
     if (firstH < H) {
         octx.drawImage(ring, 0, 0, pxW, H - firstH, 0, firstH, pxW, H - firstH);
     }
+
+    // Markers go on the visible canvas, never into the ring — otherwise they
+    // would scroll away with the history instead of standing still.
+    if (g.hover) {
+        const hx = Math.round(g.hover.x * g.dpr) + 0.5;
+        octx.strokeStyle = 'rgba(255,255,255,0.25)';
+        octx.lineWidth = 1;
+        octx.beginPath();
+        octx.moveTo(hx, 0);
+        octx.lineTo(hx, H);
+        octx.stroke();
+    }
+    drawTuningMarks(octx, pxW, H, cfg, tuning, g.dpr, colEdge);
+    if (cfg.span) {
+        const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
+        if (x >= 0 && x <= pxW) {
+            octx.strokeStyle = colVfo;
+            octx.lineWidth = g.dpr;
+            octx.setLineDash([4 * g.dpr, 3 * g.dpr]);
+            octx.beginPath();
+            octx.moveTo(x, 0);
+            octx.lineTo(x, H);
+            octx.stroke();
+            octx.setLineDash([]);
+        }
+    }
 }
 
-function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW) {
+function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW, colEdge) {
     if (!spec || specH <= 0) return;
     const c = spec.getContext('2d', { alpha: false });
     const H = Math.max(1, Math.round(specH * g.dpr));
@@ -883,6 +967,8 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     c.lineWidth = 1.25 * dpr;
     c.stroke();
 
+    drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colEdge);
+
     // VFO marker.
     if (cfg.span) {
         const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
@@ -898,8 +984,10 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         }
     }
 
-    // Hover crosshair.
-    if (g.hover && g.hover.y < specH) {
+    // Hover crosshair. Drawn whenever the pointer is anywhere over the view,
+    // not only when it is over this pane: the two panes share one frequency
+    // axis, and a line on just one of them makes you eyeball the other.
+    if (g.hover) {
         const x = Math.round(g.hover.x * dpr) + 0.5;
         c.strokeStyle = 'rgba(255,255,255,0.25)';
         c.lineWidth = 1;

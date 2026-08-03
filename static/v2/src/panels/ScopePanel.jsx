@@ -75,6 +75,8 @@ export default function ScopePanel() {
     // Latest FFT frame plus the window it covers, so the hover readout can be
     // answered from the pointer handler without running its own analysis.
     const last = useRef(null);
+    const hover = useRef(null);      // pointer position while over the waterfall
+    const tipAt = useRef(0);
     const [tip, setTip] = useState(null);
     // Smoothed vertical gain for the scope, so the trace does not jump as the
     // gate opens and closes.
@@ -112,6 +114,7 @@ export default function ScopePanel() {
             if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase, scope.current);
             if (showWf) {
                 last.current = { bins, sampleRate: sr, binCount: a.frequencyBinCount, tuning };
+                refreshTip(hover.current, last.current, tipAt, setTip);
                 drawWaterfall(
                     wfRef.current, ring.current, a, bins, sr, tuning,
                     display.palette, contrast, level.current,
@@ -130,34 +133,12 @@ export default function ScopePanel() {
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
     // Cursor and peak, the two lines v1 shows over its audio spectrum and
-    // waterfall (app.js updateAudioSpectrumTooltip).
+    // waterfall (app.js updateAudioSpectrumTooltip). The pointer position is
+    // only stored here — the numbers are refreshed from the draw loop, so they
+    // track the audio while the mouse sits still.
     const onHover = (e) => {
-        const l = last.current;
-        const el = e.currentTarget;
-        if (!l) return;
-        const r = el.getBoundingClientRect();
-        const x = e.clientX - r.left;
-        const frac = Math.max(0, Math.min(1, x / r.width));
-
-        const { start, count, startFreq, endFreq } = audioBins(
-            l.tuning.bandwidthLow, l.tuning.bandwidthHigh, l.sampleRate, l.binCount,
-        );
-        if (!count) return;
-
-        const at = start + Math.min(count - 1, Math.floor(frac * count));
-        let peak = start;
-        for (let i = start; i < start + count; i++) if (l.bins[i] > l.bins[peak]) peak = i;
-
-        const freqOf = (bin) => startFreq + ((bin - start) / count) * (endFreq - startFreq);
-        setTip({
-            x,
-            y: e.clientY - r.top,
-            w: r.width,
-            freq: freqOf(at),
-            db: l.bins[at],
-            peakFreq: freqOf(peak),
-            peakDb: l.bins[peak],
-        });
+        const r = e.currentTarget.getBoundingClientRect();
+        hover.current = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width };
     };
 
     const tipText = (hz, db) => `${fmtHz(hz)} Hz | ${Number.isFinite(db) ? db.toFixed(1) : '-∞'} dB`;
@@ -179,7 +160,7 @@ export default function ScopePanel() {
                         className="scope__canvas"
                         style={{ height: WF_H }}
                         onPointerMove={onHover}
-                        onPointerLeave={() => setTip(null)}
+                        onPointerLeave={() => { hover.current = null; setTip(null); }}
                     />
                     <canvas ref={rulerRef} className="scope__canvas scope__ruler" style={{ height: RULER_H }} />
                     {tip && (
@@ -233,6 +214,38 @@ export default function ScopePanel() {
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
+
+// A few times a second, not per frame: the numbers must follow the audio while
+// the pointer is still, but a two-line label does not need 60 Hz of React.
+const TIP_MS = 150;
+
+function refreshTip(at, l, tipAt, setTip) {
+    if (!at || !l) return;
+    const now = performance.now();
+    if (now - tipAt.current < TIP_MS) return;
+    tipAt.current = now;
+
+    const { start, count, startFreq, endFreq } = audioBins(
+        l.tuning.bandwidthLow, l.tuning.bandwidthHigh, l.sampleRate, l.binCount,
+    );
+    if (!count) return;
+
+    const frac = Math.max(0, Math.min(1, at.x / at.w));
+    const cursor = start + Math.min(count - 1, Math.floor(frac * count));
+    let peak = start;
+    for (let i = start; i < start + count; i++) if (l.bins[i] > l.bins[peak]) peak = i;
+
+    const freqOf = (bin) => startFreq + ((bin - start) / count) * (endFreq - startFreq);
+    setTip({
+        x: at.x,
+        y: at.y,
+        w: at.w,
+        freq: freqOf(cursor),
+        db: l.bins[cursor],
+        peakFreq: freqOf(peak),
+        peakDb: l.bins[peak],
+    });
+}
 
 function sized(canvas, cssH) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);

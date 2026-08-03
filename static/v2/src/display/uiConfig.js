@@ -27,7 +27,25 @@ export const UI_CONFIG_DEFAULTS = {
     stationIdOverlay: true,     // absent key means show, as in v1
     stationIdColor: '#ffffff',
     autoMinSpan: 30,            // operator's default minimum dynamic range, dB
+    bandwidthColor: 'rgba(0, 255, 0, 1)',   // passband edges, v1's default green
 };
+
+// v1's palette for the bandwidth indicator (spectrum-display.js
+// getBandwidthIndicatorColor), so the passband markers match between frontends.
+const BANDWIDTH_COLORS = {
+    green: '0, 255, 0',
+    red: '255, 0, 0',
+    cyan: '0, 255, 255',
+    white: '255, 255, 255',
+    yellow: '255, 255, 0',
+    orange: '255, 165, 0',
+    magenta: '255, 0, 255',
+};
+
+export function bandwidthColor(name, alpha) {
+    const rgb = BANDWIDTH_COLORS[String(name || '').toLowerCase()] || BANDWIDTH_COLORS.green;
+    return `rgba(${rgb}, ${alpha})`;
+}
 
 export function parseUiConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return { ...UI_CONFIG_DEFAULTS };
@@ -48,6 +66,8 @@ export function parseUiConfig(cfg) {
             : UI_CONFIG_DEFAULTS.bgOpacity,
         stationIdOverlay: cfg.station_id_overlay !== false,
         stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : UI_CONFIG_DEFAULTS.stationIdColor,
+        bandwidthColorName: typeof cfg.bandwidth_indicator_color === 'string'
+            ? cfg.bandwidth_indicator_color : 'green',
         autoMinSpan: Number.isFinite(minSpan)
             ? Math.max(0, Math.min(60, minSpan))
             : UI_CONFIG_DEFAULTS.autoMinSpan,

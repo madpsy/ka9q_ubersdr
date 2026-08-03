@@ -1,0 +1,209 @@
+// Antenna switch — the v1 control panel's "📡 Antenna" tab as a dock panel.
+//
+// Same endpoints and same behaviour as static/rotator-ui.js: poll
+// /api/ant-switch/status every 5 s, select an antenna or ground everything
+// through /api/ant-switch/command, and show the recent change log from
+// /api/ant-switch/history ten entries to a page. Switching is blocked while
+// the operator has thunderstorm mode on, which the server enforces with a 403.
+//
+// Only mounted when /api/description reports ant_switch.enabled — see the
+// registry's `requires`.
+
+import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import { Empty, Icon } from '../components/ui.jsx';
+import { PasswordRow, usePassword } from './hardwareAuth.jsx';
+
+const POLL_MS = 5000;
+const PER_PAGE = 10;
+
+const ACTION_ICON = {
+    select: '📡',
+    ground: '⏚',
+    add: '➕',
+    remove: '➖',
+    default: '⭐',
+    startup: '⏻',
+    thunderstorm_on: '⚡',
+    thunderstorm_off: '✅',
+};
+
+export function antennaLabel(status, n) {
+    const labels = status.antenna_labels || [];
+    return labels[n - 1] || `Antenna ${n}`;
+}
+
+export default function AntennaPanel() {
+    const [status, setStatus] = useState(null);
+    const [history, setHistory] = useState([]);
+    const [page, setPage] = useState(0);
+    // The command waiting on a password, e.g. {command:'select', antenna:2}.
+    const [pending, setPending] = useState(null);
+    const [error, setError] = useState('');
+    const { password, save, clear } = usePassword('ant_switch_password');
+
+    // The poll callback must see the latest password without restarting the
+    // interval, and send() is called from the password row before React has
+    // re-rendered with the new value.
+    const pwRef = useRef(password);
+    pwRef.current = password;
+
+    const refresh = useCallback(() => {
+        fetch('/api/ant-switch/status')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (d) setStatus(d); })
+            .catch(() => { /* keep the last known state */ });
+        fetch('/api/ant-switch/history')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (d && Array.isArray(d.history)) setHistory(d.history); })
+            .catch(() => { /* history is decoration */ });
+    }, []);
+
+    useEffect(() => {
+        refresh();
+        const id = setInterval(refresh, POLL_MS);
+        return () => clearInterval(id);
+    }, [refresh]);
+
+    const send = useCallback(async (cmd, pw) => {
+        try {
+            const resp = await fetch('/api/ant-switch/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw, ...cmd }),
+            });
+
+            if (resp.status === 401) {
+                // Wrong or missing password — forget it and ask again.
+                clear();
+                setPending(cmd);
+                setError('Incorrect password');
+                return;
+            }
+            if (resp.status === 403) return;   // thunderstorm; the banner says so
+
+            setError('');
+            const result = await resp.json().catch(() => ({}));
+            if (result.selected !== undefined) {
+                // The reply carries the verified hardware state, so the buttons
+                // update now rather than at the next poll.
+                setStatus((s) => ({ ...s, selected: result.selected, grounded: result.grounded }));
+            }
+            refresh();
+        } catch (e) {
+            setError('Command failed');
+        }
+    }, [clear, refresh]);
+
+    const run = useCallback((cmd) => {
+        if (!pwRef.current) {
+            setPending(cmd);
+            setError('');
+            return;
+        }
+        send(cmd, pwRef.current);
+    }, [send]);
+
+    if (!status) return <Empty>Loading antenna switch…</Empty>;
+
+    const count = status.num_antennas || 0;
+    const selected = status.selected || [];
+    const locked = !!status.thunderstorm;
+
+    const totalPages = Math.max(1, Math.ceil(history.length / PER_PAGE));
+    const p = Math.min(page, totalPages - 1);
+    const entries = history.slice(p * PER_PAGE, p * PER_PAGE + PER_PAGE);
+
+    return (
+        <div className="stack">
+            {locked && (
+                <div className="note note--warn">⚡ Thunderstorm mode — switching disabled</div>
+            )}
+
+            <div className="ant-grid">
+                {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+                    <button
+                        key={n}
+                        type="button"
+                        className={`chip chip--button${selected.includes(n) && !status.grounded ? ' is-active' : ''}`}
+                        disabled={locked}
+                        onClick={() => run({ command: 'select', antenna: n })}
+                    >
+                        {antennaLabel(status, n)}
+                    </button>
+                ))}
+            </div>
+
+            <div className="row-end">
+                <button
+                    type="button"
+                    className={`btn btn--sm${status.grounded ? ' btn--danger' : ' btn--ghost'}`}
+                    disabled={locked}
+                    onClick={() => run({ command: 'ground' })}
+                >
+                    ⏚ Ground all
+                </button>
+                <a className="btn btn--ghost btn--sm" href="/switch.html" target="_blank" rel="noopener noreferrer">
+                    Controls <Icon.External size={12} />
+                </a>
+            </div>
+
+            {pending && (
+                <PasswordRow
+                    error={error}
+                    onSubmit={(pw) => { save(pw); setPending(null); send(pending, pw); }}
+                    onCancel={() => { setPending(null); setError(''); }}
+                />
+            )}
+
+            {error && !pending && <div className="note note--warn">{error}</div>}
+
+            <div className="kv-list">
+                <div className="kv">
+                    <span className="kv__k">Active</span>
+                    <span className="kv__v">
+                        {status.grounded
+                            ? 'Grounded'
+                            : selected.length
+                                ? selected.map((n) => antennaLabel(status, n)).join(', ')
+                                : 'None'}
+                    </span>
+                </div>
+            </div>
+
+            <div className="divider" />
+
+            <div className="ant-hist__head">
+                <span className="section-label">History</span>
+                <div className="ant-hist__nav">
+                    <button type="button" className="btn btn--ghost btn--sm btn--icon" disabled={p === 0} onClick={() => setPage(p - 1)}>
+                        <Icon.ChevronLeft size={13} />
+                    </button>
+                    <span className="ant-hist__page">{p + 1}/{totalPages}</span>
+                    <button type="button" className="btn btn--ghost btn--sm btn--icon" disabled={p >= totalPages - 1} onClick={() => setPage(p + 1)}>
+                        <Icon.ChevronRight size={13} />
+                    </button>
+                </div>
+            </div>
+
+            {entries.length === 0 ? (
+                <div className="note note--tight">No changes recorded yet.</div>
+            ) : (
+                <div className="list">
+                    {entries.map((e, i) => (
+                        <div className="ant-hist__row" key={`${e.time}-${i}`}>
+                            <span className="ant-hist__time">
+                                {new Date(e.time).toLocaleTimeString(undefined, {
+                                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                })}
+                            </span>
+                            <span className="ant-hist__label">
+                                {ACTION_ICON[e.action] || '•'} {e.label || e.action}
+                            </span>
+                            <span className="ant-hist__src">{e.source}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}

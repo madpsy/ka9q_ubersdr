@@ -152,7 +152,9 @@ class RotatorDisplay {
 
         // Load and draw world map
         try {
-            const response = await fetch('countries-110m.json');
+            // Absolute so the module also works when loaded from a page that is
+            // not at the site root — the v2 frontend lives under /v2/.
+            const response = await fetch('/countries-110m.json');
             const world = await response.json();
             const countries = topojson.feature(world, world.objects.countries);
 

@@ -31,6 +31,8 @@ import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
 import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
 import AddonsPanel, { addonList } from './AddonsPanel.jsx';
+import RotatorPanel from './RotatorPanel.jsx';
+import AntennaPanel from './AntennaPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -44,6 +46,28 @@ export const PANELS = [
         // appear at all rather than occupying a slot to say so.
         requires: (serverInfo) => addonList(serverInfo).length > 0,
     },
+    // Rotator and antenna switch are independent options — an instance may run
+    // either, both or neither, so each panel gates on its own flag and is
+    // absent entirely (not just empty) when the operator has not enabled it.
+    {
+        id: 'rotator',
+        title: 'Rotator',
+        icon: <Icon.Compass />,
+        dock: 'left',
+        defaultOpen: false,
+        Component: RotatorPanel,
+        requires: (serverInfo) => !!(serverInfo && serverInfo.rotator && serverInfo.rotator.enabled),
+    },
+    {
+        id: 'antenna',
+        title: 'Antenna switch',
+        icon: <Icon.Antenna />,
+        dock: 'left',
+        defaultOpen: false,
+        Component: AntennaPanel,
+        requires: (serverInfo) => !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled),
+    },
+
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 

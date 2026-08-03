@@ -970,6 +970,89 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Rotator and antenna switch panels
+   ========================================================================= */
+
+.note--warn { background: rgba(242, 181, 68, 0.12); border-left-color: var(--warn); color: var(--text); }
+
+.pw-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pw-row__input { flex: 1; min-width: 90px; }
+.pw-row__error { flex-basis: 100%; font-size: calc(11px * var(--ui-scale)); color: var(--bad); }
+
+/* ---- rotator ---- */
+
+.rot-head { display: flex; align-items: baseline; gap: 8px; }
+.rot-head__az {
+    font-family: var(--mono);
+    font-size: calc(20px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+}
+.rot-head__state {
+    font-size: calc(10.5px * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+}
+
+.rot-dial { width: 100%; max-width: 220px; align-self: center; cursor: crosshair; touch-action: none; }
+.rot-dial.is-readonly { cursor: default; }
+.rot-dial__face { fill: var(--surface-3); stroke: var(--border); }
+.rot-dial__beam { fill: var(--accent-soft); }
+.rot-dial__tick { stroke: var(--border-strong); stroke-width: 1.5; }
+.rot-dial__card {
+    fill: var(--text-faint);
+    font-size: 13px;
+    font-weight: 650;
+    font-family: var(--font);
+}
+.rot-dial__target { stroke: var(--text-faint); stroke-width: 2; stroke-dasharray: 4 3; }
+.rot-dial__needle { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.rot-dial__hub { fill: var(--accent); }
+
+/* Host for v1's azimuthal map. Its own SVG carries the styling; this only
+   places and clips it. */
+.rot-map { align-self: center; position: relative; overflow: hidden; border-radius: var(--radius); }
+.rot-map svg { display: block; width: 100%; height: 100%; }
+
+.rot-entry { display: flex; align-items: center; gap: 6px; }
+.rot-entry__input { width: 74px; flex: none; }
+
+.rot-beam { display: flex; flex-wrap: wrap; gap: 5px; }
+.rot-beam__deg { font-family: var(--mono); color: var(--text-faint); }
+
+/* ---- antenna switch ---- */
+
+.ant-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 5px; }
+.ant-grid .chip--button { text-align: center; overflow: hidden; text-overflow: ellipsis; }
+.ant-grid .chip--button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ant-hist__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ant-hist__nav { display: flex; align-items: center; gap: 2px; }
+.ant-hist__page {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.ant-hist__row {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 3px 0;
+    font-size: calc(11.5px * var(--ui-scale));
+    border-bottom: 1px solid var(--border);
+}
+.ant-hist__row:last-child { border-bottom: 0; }
+.ant-hist__time { font-family: var(--mono); color: var(--text-faint); flex: none; }
+.ant-hist__label { flex: 1; overflow-wrap: anywhere; }
+.ant-hist__src {
+    flex: none;
+    font-size: calc(9.5px * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+}
+
+/* =========================================================================
    Lists, key/value, log
    ========================================================================= */
 

@@ -72,6 +72,10 @@ export default function ScopePanel() {
     // Waterfall history, kept as an offscreen canvas so a row is one blit.
     const ring = useRef({ canvas: null, ctx: null, w: 0, h: 0, head: 0, at: 0 });
     const level = useRef({ floor: -100, ceil: -30 });
+    // Latest FFT frame plus the window it covers, so the hover readout can be
+    // answered from the pointer handler without running its own analysis.
+    const last = useRef(null);
+    const [tip, setTip] = useState(null);
     // Smoothed vertical gain for the scope, so the trace does not jump as the
     // gate opens and closes.
     const scope = useRef({ gain: 1 });
@@ -107,6 +111,7 @@ export default function ScopePanel() {
 
             if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase, scope.current);
             if (showWf) {
+                last.current = { bins, sampleRate: sr, binCount: a.frequencyBinCount, tuning };
                 drawWaterfall(
                     wfRef.current, ring.current, a, bins, sr, tuning,
                     display.palette, contrast, level.current,
@@ -124,6 +129,39 @@ export default function ScopePanel() {
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
+    // Cursor and peak, the two lines v1 shows over its audio spectrum and
+    // waterfall (app.js updateAudioSpectrumTooltip).
+    const onHover = (e) => {
+        const l = last.current;
+        const el = e.currentTarget;
+        if (!l) return;
+        const r = el.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const frac = Math.max(0, Math.min(1, x / r.width));
+
+        const { start, count, startFreq, endFreq } = audioBins(
+            l.tuning.bandwidthLow, l.tuning.bandwidthHigh, l.sampleRate, l.binCount,
+        );
+        if (!count) return;
+
+        const at = start + Math.min(count - 1, Math.floor(frac * count));
+        let peak = start;
+        for (let i = start; i < start + count; i++) if (l.bins[i] > l.bins[peak]) peak = i;
+
+        const freqOf = (bin) => startFreq + ((bin - start) / count) * (endFreq - startFreq);
+        setTip({
+            x,
+            y: e.clientY - r.top,
+            w: r.width,
+            freq: freqOf(at),
+            db: l.bins[at],
+            peakFreq: freqOf(peak),
+            peakDb: l.bins[peak],
+        });
+    };
+
+    const tipText = (hz, db) => `${fmtHz(hz)} Hz | ${Number.isFinite(db) ? db.toFixed(1) : '-∞'} dB`;
+
     return (
         <div className="stack">
             <Segmented options={VIEWS} value={view} onChange={setView} size="sm" />
@@ -135,9 +173,28 @@ export default function ScopePanel() {
             )}
 
             {showWf && (
-                <div className="scope">
-                    <canvas ref={wfRef} className="scope__canvas" style={{ height: WF_H }} />
+                <div className="scope scope--hover">
+                    <canvas
+                        ref={wfRef}
+                        className="scope__canvas"
+                        style={{ height: WF_H }}
+                        onPointerMove={onHover}
+                        onPointerLeave={() => setTip(null)}
+                    />
                     <canvas ref={rulerRef} className="scope__canvas scope__ruler" style={{ height: RULER_H }} />
+                    {tip && (
+                        <div
+                            className="spec-tip"
+                            style={{
+                                left: tip.x + (tip.x > tip.w - 150 ? -12 : 12),
+                                top: tip.y + 10,
+                                transform: tip.x > tip.w - 150 ? 'translateX(-100%)' : undefined,
+                            }}
+                        >
+                            <div>Cursor: {tipText(tip.freq, tip.db)}</div>
+                            <div>Peak: {tipText(tip.peakFreq, tip.peakDb)}</div>
+                        </div>
+                    )}
                 </div>
             )}
 

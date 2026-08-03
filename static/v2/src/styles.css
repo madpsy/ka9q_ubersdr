@@ -1106,6 +1106,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-faint);
 }
 
+/* Cursor/peak readout over the spectrum, the waterfall and the audio scope —
+   v1 shows the same two lines on all of them. */
+.spec-tip {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    padding: 4px 7px;
+    background: rgba(6, 10, 16, 0.88);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    line-height: 1.35;
+    color: #e9eef6;
+    white-space: nowrap;
+}
+
 /* =========================================================================
    Audio scope
    ========================================================================= */
@@ -1118,6 +1135,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     overflow: hidden;
     background: var(--spec-bg);
 }
+.scope--hover { position: relative; cursor: crosshair; }
 .scope__canvas { display: block; width: 100%; }
 .scope__ruler { border-top: 1px solid var(--border); }
 

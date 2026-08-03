@@ -397,7 +397,30 @@ export default function SpectrumView() {
 
         const cfg = cfgRef.current;
         const f = freqAtX(e.clientX);
-        if (f != null) setHoverInfo({ freq: f, x: e.clientX - r.left });
+        if (f != null) {
+            // v1's readout: what is under the cursor, and the strongest signal
+            // in view (spectrum-display.js:3303). g.px is the per-pixel dB
+            // column the trace is drawn from, so both come out of one array.
+            const px = g.px;
+            let db = null;
+            let peakDb = null;
+            let peakFreq = null;
+            if (px && px.length) {
+                const i = clamp(Math.round((e.clientX - r.left) * g.dpr), 0, px.length - 1);
+                db = px[i];
+                let best = 0;
+                for (let k = 1; k < px.length; k++) if (px[k] > px[best]) best = k;
+                peakDb = px[best];
+                peakFreq = cfg.span
+                    ? cfg.centerFreq - cfg.span / 2 + (best / px.length) * cfg.span
+                    : null;
+            }
+            setHoverInfo({
+                freq: f, db, peakDb, peakFreq,
+                x: e.clientX - r.left,
+                y: e.clientY - r.top,
+            });
+        }
 
         if (g.drag) {
             const dx = e.clientX - g.drag.startX;
@@ -481,6 +504,23 @@ export default function SpectrumView() {
                 onPointerCancel={onPointerUp}
                 onPointerLeave={onPointerLeave}
             >
+                {hoverInfo && hoverInfo.db != null && (
+                    <div
+                        className="spec-tip"
+                        style={{
+                            // Sits right of the cursor, flipping left near the
+                            // edge so it never leaves the canvas — as v1 does.
+                            left: hoverInfo.x + (hoverInfo.x > sizes.w - 150 ? -14 : 14),
+                            top: hoverInfo.y + 12,
+                            transform: hoverInfo.x > sizes.w - 150 ? 'translateX(-100%)' : undefined,
+                        }}
+                    >
+                        <div>Cursor: {formatFreqShort(hoverInfo.freq, span)} | {hoverInfo.db.toFixed(1)} dB</div>
+                        {hoverInfo.peakFreq != null && (
+                            <div>Peak: {formatFreqShort(hoverInfo.peakFreq, span)} | {hoverInfo.peakDb.toFixed(1)} dB</div>
+                        )}
+                    </div>
+                )}
                 {specH > 0 && <canvas ref={specRef} className="spectrum__pane" />}
                 <canvas ref={scaleRef} className="spectrum__pane spectrum__pane--scale" />
                 {wfH > 0 && <canvas ref={wfRef} className="spectrum__pane" />}

@@ -27,13 +27,18 @@ function walk(dir, out = []) {
 
 // Strip comments and string/template literals so a name mentioned in prose or
 // in a class name does not count as a use.
+// Every literal matcher here is line-bounded on purpose. A multi-line-capable
+// template-literal pattern went runaway on an unpaired backtick and silently
+// swallowed half of ui.jsx — including the very usage this file exists to
+// catch. Templates and strings in this codebase never span lines, so refusing
+// to cross one costs nothing and cannot delete real code.
 function code(src) {
     return src
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
         .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-        .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, '``')
-        .replace(/'(?:\\.|[^'\\])*'/g, "''")
-        .replace(/"(?:\\.|[^"\\])*"/g, '""');
+        .replace(/`[^`\n]*`/g, '``')
+        .replace(/'[^'\n]*'/g, "''")
+        .replace(/"[^"\n]*"/g, '""');
 }
 
 const files = walk(SRC);
@@ -48,6 +53,15 @@ for (const file of files) {
     for (const m of src.matchAll(/export\s*\{([^}]*)\}/g)) {
         for (const n of m[1].split(',')) {
             const name = n.trim().split(/\s+as\s+/).pop().trim();
+            if (name) exported.add(name);
+        }
+    }
+    // `export const { useState, useEffect, … } = React` — how react.js
+    // re-exports the hooks. Missing this let a hook used without importing it
+    // slip straight through, which is the exact bug this file is here for.
+    for (const m of src.matchAll(/export\s+(?:const|let|var)\s*\{([^}]*)\}\s*=/g)) {
+        for (const n of m[1].split(',')) {
+            const name = n.trim().split(':').pop().trim();
             if (name) exported.add(name);
         }
     }
@@ -73,8 +87,20 @@ for (const file of files) {
     const declared = new Set(
         [...src.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
     );
+    // Destructured declarations count as declared — react.js pulls the hooks
+    // off the global with one, and would otherwise flag its own exports.
+    for (const m of src.matchAll(/(?:const|let|var)\s*\{([^}]*)\}\s*=/g)) {
+        for (const n of m[1].split(',')) {
+            const name = n.trim().split(':').pop().trim();
+            if (name) declared.add(name);
+        }
+    }
 
-    const body = src.replace(/^\s*import[\s\S]*?from\s*[^\n]*$/gm, '');
+    // Strip the import statements themselves, so importing a name does not
+    // count as using it. Bounded by the semicolon: a lazy match up to `from`
+    // silently ate the rest of the file, which is why a missing hook import
+    // slipped through this check once already.
+    const body = src.replace(/^\s*import\b[^;]*;/gm, ' ');
     for (const name of exported) {
         if (imported.has(name) || declared.has(name) || ALLOWED.has(name)) continue;
         const used = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(body);

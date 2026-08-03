@@ -106,7 +106,7 @@ export default function QuickBandsPanel() {
 
     return (
         <div className="stack">
-            <div className="chip-row chip-row--wrap">
+            <div className="chip-row chip-row--wrap chip-row--center">
                 {HAM_BANDS.map(([name, min, max]) => {
                     const state = states[name];
                     // v1 shows a band with no data as open rather than greying
@@ -134,7 +134,7 @@ export default function QuickBandsPanel() {
             {custom.length > 0 && (
                 <>
                     <div className="divider" />
-                    <div className="chip-row chip-row--wrap">
+                    <div className="chip-row chip-row--wrap chip-row--center">
                         {custom.map((b) => {
                             const active = tuning.frequency >= b.start && tuning.frequency <= b.end;
                             const tip = [

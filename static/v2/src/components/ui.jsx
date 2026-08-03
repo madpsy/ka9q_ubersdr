@@ -2,7 +2,7 @@
 // them here means a new panel is markup plus a handler, and restyling the whole
 // app is a change to styles.css rather than to twenty components.
 
-import React, { useEffect, useRef, useState } from '../react.js';
+import React, { useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 import Icon from './icons.jsx';
 
 export function Button({ children, variant = 'default', size = 'md', active, icon, ...rest }) {
@@ -146,6 +146,24 @@ export function Bar({ value, min = 0, max = 1, peak, tone = 'accent', color }) {
 export function Menu({ trigger, children, align = 'end' }) {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
+    const panelRef = useRef(null);
+    // Horizontal nudge that keeps the panel on screen. A menu anchored in a
+    // narrow side dock — or one whose trigger has wrapped to the dock's edge —
+    // would otherwise open past the edge of the window and be unreadable.
+    const [shift, setShift] = useState(0);
+
+    useLayoutEffect(() => {
+        if (!open) {
+            setShift(0);
+            return;
+        }
+        const el = panelRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const pad = 8;
+        if (r.left < pad) setShift(pad - r.left);
+        else if (r.right > window.innerWidth - pad) setShift(window.innerWidth - pad - r.right);
+    }, [open]);
 
     useEffect(() => {
         if (!open) return undefined;
@@ -165,7 +183,12 @@ export function Menu({ trigger, children, align = 'end' }) {
         <div className="menu" ref={ref}>
             <span onClick={() => setOpen((o) => !o)}>{trigger}</span>
             {open && (
-                <div className={`menu__panel menu__panel--${align}`} onClick={() => setOpen(false)}>
+                <div
+                    ref={panelRef}
+                    className={`menu__panel menu__panel--${align}`}
+                    style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+                    onClick={() => setOpen(false)}
+                >
                     {children}
                 </div>
             )}

@@ -21,12 +21,14 @@ export const DEFAULTS = {
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row
     markerBands: true,      // band allocations in the marker bar
-    markerBookmarks: true,  // bookmark pills in the marker bar
+    markerBookmarks: true,       // bookmark pills the receiver publishes
+    markerLocalBookmarks: true,  // bookmark pills saved in this browser
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
     floatOpacity: 1,        // resting opacity of floating panel windows
     snapHz: 1,              // click-to-tune rounding
+    chatUsersWidth: 170,    // px given to the chat user list, drag to change
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };

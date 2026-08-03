@@ -44,8 +44,11 @@ export default function DisplayPanel() {
             <Field label="Band allocations" inline>
                 <Switch checked={d.markerBands !== false} onChange={(v) => d.set({ markerBands: v })} />
             </Field>
-            <Field label="Bookmarks" inline>
+            <Field label="Server bookmarks" inline>
                 <Switch checked={d.markerBookmarks !== false} onChange={(v) => d.set({ markerBookmarks: v })} />
+            </Field>
+            <Field label="Local bookmarks" inline>
+                <Switch checked={d.markerLocalBookmarks !== false} onChange={(v) => d.set({ markerLocalBookmarks: v })} />
             </Field>
 
             <div className="divider" />

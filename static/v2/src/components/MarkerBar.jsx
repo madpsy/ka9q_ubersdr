@@ -39,7 +39,10 @@ export default function MarkerBar({ width }) {
     const [tip, setTip] = useState(null);
 
     const showBands = display.markerBands !== false;
-    const showBookmarks = display.markerBookmarks !== false;
+    // Server and local bookmarks toggle independently — the handful you saved
+    // are worth keeping on screen even when 2450 published ones are not.
+    const showServer = display.markerBookmarks !== false;
+    const showLocal = display.markerLocalBookmarks !== false;
 
     const colors = useMemo(
         () => bandColors(display.server.config.band_color_intensity),
@@ -51,8 +54,8 @@ export default function MarkerBar({ width }) {
     // server side is a couple of thousand entries that would otherwise be
     // re-sorted every time a local bookmark is added or deleted.
     const marks = useMemo(() => {
-        const server = catalog.bookmarks || [];
-        const local = catalog.local || [];
+        const server = showServer ? (catalog.bookmarks || []) : [];
+        const local = showLocal ? (catalog.local || []) : [];
         if (!local.length) return server;
         if (!server.length) return local;
         const out = new Array(server.length + local.length);
@@ -65,7 +68,7 @@ export default function MarkerBar({ width }) {
         while (i < server.length) out[k++] = server[i++];
         while (j < local.length) out[k++] = local[j++];
         return out;
-    }, [catalog.bookmarks, catalog.local]);
+    }, [catalog.bookmarks, catalog.local, showServer, showLocal]);
 
     const centerFreq = view.centerFreq;
     const span = view.span;
@@ -129,7 +132,7 @@ export default function MarkerBar({ width }) {
         }
 
         // ---- bookmarks ---------------------------------------------------
-        if (showBookmarks && marks.length) {
+        if (marks.length) {
             c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
             c.textBaseline = 'middle';
             c.textAlign = 'center';
@@ -186,7 +189,7 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
-    }, [width, centerFreq, span, catalog.bands, marks, showBands, showBookmarks, colors, tuning.frequency]);
+    }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -238,7 +241,7 @@ export default function MarkerBar({ width }) {
         }
     }, [locate, actions]);
 
-    if (!showBands && !showBookmarks) return null;
+    if (!showBands && !showServer && !showLocal) return null;
 
     return (
         <div className="markerbar" style={{ height: MARKER_BAR_H }}>

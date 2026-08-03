@@ -13,7 +13,6 @@ import { audioBins, audioWindow } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audioWaterfall.js';
 import { bandLevels, bandWeights, meterFractions } from '../lib/eqLevels.js';
-import { getPalette } from '../lib/palettes.js';
 import {
     BP_WIDTH_MAX, BP_WIDTH_MIN, EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN,
     FILTER_DEFAULTS, MAX_NOTCHES, bandpassRange, detectPreset, presetGains,
@@ -34,14 +33,6 @@ const PRESETS = [
 const EQ_CUT = '#e74c3c';
 const EQ_FLAT = '#f39c12';
 const EQ_BOOST = '#2ecc71';
-
-// Meter colour comes from the waterfall palette, so a loud band reads the same
-// way here as it does on the preview above.
-function meterColor(palette, t) {
-    const lut = getPalette(palette);
-    const i = Math.max(0, Math.min(255, Math.round(t * 255))) * 3;
-    return `rgb(${lut[i]}, ${lut[i + 1]}, ${lut[i + 2]})`;
-}
 
 function bandTrack(i, total) {
     // 0 at 60 Hz to 1 at 8 kHz, used only to shift how saturated the ramp is,
@@ -244,7 +235,6 @@ function Section({ title, enabled, onToggle, children, extra }) {
 
 export default function AudioFiltersPanel() {
     const { filters, actions, tuning } = useRadio();
-    const display = useDisplay();
     const [tab, setTab] = useState('eq');
     const levels = useBandLevels(tab === 'eq');
 
@@ -324,26 +314,17 @@ export default function AudioFiltersPanel() {
                         {EQ_FREQUENCIES.map((freq, i) => (
                             <div className="eqband" key={freq}>
                                 <span className="eqband__hz">{fmtBand(freq)}</span>
-                                <div className="eqband__slider">
-                                    <Slider
-                                        value={eq.gains[i] || 0}
-                                        min={EQ_GAIN_MIN}
-                                        max={EQ_GAIN_MAX}
-                                        step={0.5}
-                                        track={bandTrack(i, EQ_FREQUENCIES.length)}
-                                        onChange={(v) => setBand(i, v)}
-                                    />
-                                    {/* What this band is hearing right now. */}
-                                    <div className="eqband__meter">
-                                        <div
-                                            className="eqband__meter-fill"
-                                            style={{
-                                                width: `${((levels && levels[i]) || 0) * 100}%`,
-                                                background: meterColor(display.palette, (levels && levels[i]) || 0),
-                                            }}
-                                        />
-                                    </div>
-                                </div>
+                                {/* The track doubles as this band's level
+                                    meter — see the `level` prop. */}
+                                <Slider
+                                    value={eq.gains[i] || 0}
+                                    min={EQ_GAIN_MIN}
+                                    max={EQ_GAIN_MAX}
+                                    step={0.5}
+                                    track={bandTrack(i, EQ_FREQUENCIES.length)}
+                                    level={(levels && levels[i]) || 0}
+                                    onChange={(v) => setBand(i, v)}
+                                />
                                 <span className="eqband__db">{fmtGain(eq.gains[i] || 0)}</span>
                             </div>
                         ))}

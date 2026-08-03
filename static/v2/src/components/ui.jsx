@@ -70,7 +70,8 @@ export function Field({ label, hint, children, inline }) {
 // squelch threshold). It is in the same units as the slider and is positioned
 // inside the thumb's travel, so it lines up with where the thumb would sit.
 export function Slider({
-    value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle, track,
+    value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle,
+    track, level,
 }) {
     // Percentage drives the filled-track gradient without a second element.
     const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
@@ -80,7 +81,13 @@ export function Slider({
         <input
             type="range"
             className={`slider${track ? ' slider--track' : ''}`}
-            style={{ '--fill': `${pct}%`, ...(track ? { '--track': track } : {}) }}
+            style={{
+                '--fill': `${pct}%`,
+                ...(track ? { '--track': track } : {}),
+                // A live level lights the track up from the left, so the
+                // control and its meter are one object rather than two.
+                ...(level != null ? { '--level': `${Math.max(0, Math.min(1, level)) * 100}%` } : {}),
+            }}
             value={value}
             min={min}
             max={max}

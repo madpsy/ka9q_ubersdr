@@ -89,6 +89,25 @@ panel never disturbs an existing user's arrangement.
   click; browsers block it otherwise.
 * **Spectrum uses `binary8`.** ~75% less bandwidth than float32, and the 1 dB
   quantisation is finer than a waterfall can show.
+* **Noise reduction is entirely schema-driven.** `get_dsp_filters` returns each
+  enabled filter and its parameters (`name, type, default, min, max,
+  description, runtime_safe`), and `lib/dsp.js` turns a descriptor into a
+  control — bool → switch, int enumerated in its description → labelled choices,
+  anything with a range → slider, otherwise text. Nothing about nr2/rn2/nr4/dfnr
+  is hardcoded, so a filter added to the DSP container appears on its own.
+  Parameters travel as strings both ways. `runtime_safe: false` params are hidden
+  (the server rejects mid-stream changes to them), `set_dsp_params` is only valid
+  while the insert runs, and the server's `dsp_status` echo is authoritative.
+* **AGC is USB/LSB only, and the server owns the values.** `agc_state` (from
+  `get_agc`, and included in every `status`) returns the operator's `config.yaml`
+  `ssb_agc` defaults for anything the session has not overridden — so the client
+  must *read* them, never seed sliders from its own constants. `set_agc` pins a
+  per-session override that cannot be cleared, which is why the panel stays
+  disabled until the server answers, why AGC is not persisted to localStorage
+  (a new session starts from the operator defaults again), and why "Defaults"
+  replays the first server-reported values rather than 1.1 / 20 / −15. There is
+  no enable switch: the server accepts `agcEnable` but never reports it back, so
+  a toggle would show a state nothing else agrees with.
 * **Squelch is the audio gate, not `set_squelch`.** v1 ships with
   `FM_SQUELCH_ENABLED = false` and only ever sends `squelchOpen: -999`, so
   radiod's squelch is never engaged; the control users actually have is

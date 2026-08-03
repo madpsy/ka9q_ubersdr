@@ -5,8 +5,10 @@ const assert = require('assert');
 const { SpectrumConnection } = require('./.build/spectrum.cjs');
 const { AudioConnection } = require('./.build/audio.cjs');
 const {
-    SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, squelchEnabled, squelchThreshold,
+    SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, SQUELCH_STEP,
+    autoSquelchValue, bandwidthLimits, maxFilterWidth, squelchEnabled, squelchThreshold,
 } = require('./.build/constants.cjs');
+const dspLib = require('./.build/dsp.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -260,6 +262,36 @@ t('above the floor the slider value is the threshold in dB SNR', () => {
     assert.strictEqual(squelchThreshold(SQUELCH_MAX), SQUELCH_MAX);
 });
 
+t('auto-set sits ABOVE the recent noise, not below it', () => {
+    // The gate opens at snr >= threshold, so a threshold under the measured
+    // noise leaves it permanently open — the bug this guards against.
+    const noise = [30, 30, 30, 30, 30];
+    const v = autoSquelchValue(noise);
+    assert.ok(v > 30, `auto gave ${v}, which would never close the gate`);
+    assert.strictEqual(v, 33);   // avg + 3 dB headroom
+});
+
+t('auto-set averages the last five readings only', () => {
+    // Older, unrepresentative readings must not drag the result.
+    const history = [0, 0, 0, 0, 0, 40, 40, 40, 40, 40];
+    assert.strictEqual(autoSquelchValue(history), 43);
+});
+
+t('auto-set rounds to the slider step and stays in range', () => {
+    assert.strictEqual(autoSquelchValue([30.1, 30.2]) % SQUELCH_STEP, 0);
+    // Below the floor it must not land on "off".
+    const low = autoSquelchValue([-50]);
+    assert.ok(low > SQUELCH_MIN, `${low} would read as off`);
+    assert.strictEqual(squelchEnabled(low), true);
+    // Above the ceiling it clamps.
+    assert.strictEqual(autoSquelchValue([500]), SQUELCH_MAX);
+});
+
+t('auto-set with no history does nothing', () => {
+    assert.strictEqual(autoSquelchValue([]), null);
+    assert.strictEqual(autoSquelchValue(null), null);
+});
+
 t('setAudioGate emits the server field names and records for reconnect', () => {
     const a = new AudioConnection();
     const sent = [];
@@ -282,6 +314,151 @@ t('setAudioGate with no thresholds is not sent', () => {
     // The server rejects a gate message carrying neither field.
     assert.strictEqual(a.setAudioGate({}), false);
     assert.strictEqual(sent.length, 0);
+});
+
+// --- filter width limits ---------------------------------------------------
+
+t('am, sam, fm and nfm top out at a 12 kHz filter', () => {
+    for (const mode of ['am', 'sam', 'fm', 'nfm']) {
+        assert.strictEqual(maxFilterWidth(mode), 12000, `${mode} allows ${maxFilterWidth(mode)} Hz`);
+        const l = bandwidthLimits(mode);
+        assert.deepStrictEqual([l.min, l.max], [-6000, 6000], mode);
+    }
+});
+
+t('sideband modes keep their own widths', () => {
+    assert.strictEqual(maxFilterWidth('usb'), 6000);
+    assert.strictEqual(maxFilterWidth('lsb'), 6000);
+    assert.strictEqual(maxFilterWidth('cwu'), 2000);
+    assert.strictEqual(maxFilterWidth('cwl'), 2000);
+});
+
+t('an unknown mode falls back to the symmetric limit', () => {
+    assert.strictEqual(maxFilterWidth('whatever'), 12000);
+});
+
+// --- DSP filter schemas -----------------------------------------------------
+//
+// Schemas below are the verbatim `get_dsp_filters` reply from a live server, so
+// these test the shapes actually sent rather than an idealised version.
+
+const NR2 = {
+    name: 'nr2',
+    description: 'SpectralNR — MMSE-LSA + OSMS spectral subtraction',
+    params: [
+        { name: 'gain-method', type: 'int', default: '2', min: '0', max: '3', description: 'Gain method: 0=Linear 1=Log 2=Gamma 3=Trained', runtime_safe: true },
+        { name: 'npe-method', type: 'int', default: '0', min: '0', max: '2', description: 'NPE method: 0=OSMS 1=MMSE 2=NSTAT', runtime_safe: true },
+        { name: 'gain-max', type: 'float', default: '1.0', min: '0', max: '2.0', description: 'Max gain cap', runtime_safe: true },
+        { name: 'gain-smooth', type: 'float', default: '0.85', min: '0', max: '1.0', description: 'Temporal gain smoothing', runtime_safe: true },
+        { name: 'qspp', type: 'float', default: '0.2', min: '0', max: '1.0', description: 'Speech presence probability prior', runtime_safe: true },
+        { name: 'ae', type: 'bool', default: 'true', description: 'Artifact elimination post-processing', runtime_safe: true },
+    ],
+};
+const RN2 = { name: 'rn2', description: 'RNNoise — Mozilla/Xiph RNN-based suppressor', params: null };
+const DFNR = {
+    name: 'dfnr',
+    description: 'DeepFilterNet3 — neural network denoiser',
+    params: [
+        { name: 'model', type: 'string', default: '', description: 'Model path', runtime_safe: false },
+        { name: 'atten-limit', type: 'float', default: '20', min: '0', max: '100', description: 'Attenuation limit', runtime_safe: true },
+        { name: 'pf-beta', type: 'float', default: '0', min: '0', max: '0.3', description: 'Post-filter beta', runtime_safe: true },
+    ],
+};
+
+t('init-only params are hidden — the server would reject them', () => {
+    const names = dspLib.runtimeParams(DFNR).map((p) => p.name);
+    assert.deepStrictEqual(names, ['atten-limit', 'pf-beta']);
+    assert.ok(!names.includes('model'));
+});
+
+t('a filter with no params is handled, not crashed', () => {
+    assert.deepStrictEqual(dspLib.runtimeParams(RN2), []);
+    assert.deepStrictEqual(dspLib.defaultParams(RN2), {});
+});
+
+t('defaults come from the schema, as strings', () => {
+    assert.deepStrictEqual(dspLib.defaultParams(NR2), {
+        'gain-method': '2', 'npe-method': '0', 'gain-max': '1.0',
+        'gain-smooth': '0.85', 'qspp': '0.2', 'ae': 'true',
+    });
+});
+
+t('control kind follows the declared type and range', () => {
+    const kind = (f, n) => dspLib.controlKind(f.params.find((p) => p.name === n));
+    assert.strictEqual(kind(NR2, 'ae'), 'bool');
+    assert.strictEqual(kind(NR2, 'gain-method'), 'enum');   // enumerated in its description
+    assert.strictEqual(kind(NR2, 'npe-method'), 'enum');
+    assert.strictEqual(kind(NR2, 'gain-max'), 'slider');
+    assert.strictEqual(kind(DFNR, 'model'), 'text');        // string, no range
+});
+
+t('enum options are parsed from the description', () => {
+    const p = NR2.params.find((x) => x.name === 'gain-method');
+    assert.deepStrictEqual(dspLib.parseEnum(p), [
+        { value: 0, label: 'Linear' }, { value: 1, label: 'Log' },
+        { value: 2, label: 'Gamma' }, { value: 3, label: 'Trained' },
+    ]);
+});
+
+t('a description that does not cover the full range is not an enum', () => {
+    // Only two labels for a 0..3 range — rendering it as choices would hide
+    // values the filter accepts, so it must stay a slider.
+    const p = { name: 'x', type: 'int', min: '0', max: '3', description: 'Mode: 0=A 1=B' };
+    assert.strictEqual(dspLib.parseEnum(p), null);
+    assert.strictEqual(dspLib.controlKind(p), 'slider');
+});
+
+t('integer sliders step by 1', () => {
+    // A 0..3 range would otherwise inherit a 0.1 step and send fractions.
+    const p = { name: 'x', type: 'int', min: '0', max: '3', description: '' };
+    assert.strictEqual(dspLib.computeStep(p), 1);
+});
+
+t('float slider steps scale with the range', () => {
+    const step = (min, max) => dspLib.computeStep({ type: 'float', min, max });
+    assert.strictEqual(step('0', '0.3'), 0.01);
+    assert.strictEqual(step('0', '2.0'), 0.1);
+    assert.strictEqual(step('0', '40'), 1);
+    assert.strictEqual(step('0', '1000'), 100);
+});
+
+t('values format according to type and range', () => {
+    const f = (v, p) => dspLib.formatParamValue(v, p);
+    assert.strictEqual(f('2', { type: 'int', min: '0', max: '3' }), '2');
+    assert.strictEqual(f('0.85', { type: 'float', min: '0', max: '1.0' }), '0.850');
+    assert.strictEqual(f('1.0', { type: 'float', min: '0', max: '2.0' }), '1.00');
+    assert.strictEqual(f('10', { type: 'float', min: '0', max: '40' }), '10.0');
+});
+
+t('enum labels are not repeated in the help text', () => {
+    const p = NR2.params.find((x) => x.name === 'gain-method');
+    assert.strictEqual(dspLib.paramHelp(p), 'Gain method');
+    // Non-enum help is passed through untouched.
+    assert.strictEqual(dspLib.paramHelp(NR2.params.find((x) => x.name === 'qspp')),
+        'Speech presence probability prior');
+});
+
+t('names read as labels', () => {
+    assert.strictEqual(dspLib.formatParamName('gain-method'), 'Gain method');
+    assert.strictEqual(dspLib.formatParamName('atten_limit'), 'Atten limit');
+});
+
+t('params go on the wire as strings', () => {
+    assert.strictEqual(dspLib.toWire(true), 'true');
+    assert.strictEqual(dspLib.toWire(false), 'false');
+    assert.strictEqual(dspLib.toWire(0.85), '0.85');
+    assert.strictEqual(dspLib.toWire('2'), '2');
+});
+
+t('setDSPParams sends the server message shape, and skips empty updates', () => {
+    const a = new AudioConnection();
+    const sent = [];
+    a.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+    global.WebSocket = { OPEN: 1 };
+    a.setDSPParams({ reduction: '20' });
+    assert.deepStrictEqual(sent[0], { type: 'set_dsp_params', params: { reduction: '20' } });
+    assert.strictEqual(a.setDSPParams({}), false);
+    assert.strictEqual(sent.length, 1);
 });
 
 // --- audio -----------------------------------------------------------------

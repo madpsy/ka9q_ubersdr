@@ -1,0 +1,164 @@
+// Server-side noise reduction.
+//
+// Which filters exist, and which parameters each one has, comes entirely from
+// the server's `get_dsp_filters` reply — nothing about nr2/rn2/nr4/dfnr is
+// hardcoded here, so a filter added to the DSP container shows up on its own.
+// Controls are chosen from each parameter's declared type and range by
+// lib/dsp.js.
+
+import React from '../react.js';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import {
+    boolValue, computeStep, controlKind, formatParamName, formatParamValue,
+    paramHelp, parseEnum, runtimeParams,
+} from '../lib/dsp.js';
+
+function Param({ param, value, onChange }) {
+    const kind = controlKind(param);
+    const help = paramHelp(param);
+
+    if (kind === 'bool') {
+        return (
+            <>
+                <Field label={formatParamName(param.name)} inline>
+                    <Switch checked={boolValue(value)} onChange={(v) => onChange(v)} />
+                </Field>
+                {help && <div className="param-help">{help}</div>}
+            </>
+        );
+    }
+
+    if (kind === 'enum') {
+        const options = parseEnum(param).map((o) => ({ value: String(o.value), label: o.label }));
+        return (
+            <>
+                <Field label={formatParamName(param.name)}>
+                    <Segmented
+                        size="sm"
+                        minItemWidth={64}
+                        value={String(Math.round(Number(value)))}
+                        onChange={onChange}
+                        options={options}
+                    />
+                </Field>
+                {help && <div className="param-help">{help}</div>}
+            </>
+        );
+    }
+
+    if (kind === 'slider') {
+        return (
+            <>
+                <Field label={formatParamName(param.name)} hint={formatParamValue(value, param)}>
+                    <Slider
+                        value={Number(value)}
+                        min={Number(param.min)}
+                        max={Number(param.max)}
+                        step={computeStep(param)}
+                        onChange={onChange}
+                    />
+                </Field>
+                {help && <div className="param-help">{help}</div>}
+            </>
+        );
+    }
+
+    return (
+        <Field label={formatParamName(param.name)} hint={help || undefined}>
+            <input
+                className="input"
+                value={value ?? ''}
+                placeholder={param.default || ''}
+                onChange={(e) => onChange(e.target.value)}
+            />
+        </Field>
+    );
+}
+
+export default function DspControl() {
+    const { dsp, actions, running } = useRadio();
+
+    // Nothing is known until a session is up and the server has answered.
+    if (!running || dsp.schemas === null) {
+        return (
+            <>
+                <div className="divider" />
+                <div className="section-label"><span>Noise reduction</span></div>
+                <div className="note note--tight">
+                    {running ? 'Reading filters from the receiver…' : 'Start the receiver to load noise reduction.'}
+                </div>
+            </>
+        );
+    }
+
+    if (dsp.schemas.length === 0) {
+        return (
+            <>
+                <div className="divider" />
+                <div className="section-label"><span>Noise reduction</span></div>
+                <div className="note note--tight">
+                    {dsp.unavailableReason || 'Not available on this receiver.'}
+                </div>
+            </>
+        );
+    }
+
+    const schema = dsp.schemas.find((f) => f.name === dsp.filter);
+    const params = runtimeParams(schema);
+    const values = (dsp.params && dsp.params[dsp.filter]) || {};
+
+    return (
+        <>
+            <div className="divider" />
+            <div className="section-label">
+                <span>Noise reduction</span>
+                {dsp.enabled && params.length > 0 && (
+                    <button type="button" className="chip chip--button" onClick={actions.resetDspParams}>
+                        Defaults
+                    </button>
+                )}
+            </div>
+
+            <Field label="Filter" hint={dsp.enabled ? 'on' : 'off'} inline>
+                <Switch
+                    checked={dsp.enabled}
+                    onChange={(on) => actions.setDsp(dsp.filter, on)}
+                />
+            </Field>
+
+            <div className="chip-row chip-row--wrap">
+                {dsp.schemas.map((f) => (
+                    <button
+                        key={f.name}
+                        type="button"
+                        title={f.description || f.name}
+                        className={`chip chip--button${dsp.filter === f.name ? ' is-active' : ''}`}
+                        onClick={() => actions.setDsp(f.name, dsp.enabled)}
+                    >
+                        {f.name.toUpperCase()}
+                    </button>
+                ))}
+            </div>
+
+            {schema && schema.description && (
+                <div className="param-help">{schema.description}</div>
+            )}
+
+            {/* Parameters belong to the running filter, so they are only shown
+                — and only accepted by the server — while the insert is on. */}
+            {dsp.enabled && params.length === 0 && (
+                <div className="note note--tight">This filter has no adjustable settings.</div>
+            )}
+
+            {dsp.enabled && params.map((p) => (
+                <Param
+                    key={p.name}
+                    param={p}
+                    value={values[p.name] ?? p.default}
+                    onChange={(v) => actions.setDspParam(p.name, v)}
+                />
+            ))}
+        </>
+    );
+}

@@ -648,6 +648,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .slider-marker--closed { background: var(--bad); }
 
+.section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
 .squelch-status { display: flex; align-items: center; gap: 6px; }
 .squelch-status__snr {
     flex: 1;
@@ -1123,4 +1135,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
         animation-duration: 0.01ms !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+.param-help {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-faint);
+    margin-top: -4px;
 }

@@ -2,7 +2,52 @@ import React, { useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
-import { MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, stepLabel } from '../radio/constants.js';
+import {
+    AGC_CONTROLS, MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, hasAGCSettings,
+    maxFilterWidth, stepLabel,
+} from '../radio/constants.js';
+
+// AGC, shown only for USB and LSB — the only modes v1 exposes it for.
+//
+// Values are whatever the server reports: `agc_state` returns the operator's
+// config.yaml `ssb_agc` defaults for anything this session has not overridden.
+// Until that arrives the controls stay disabled rather than showing invented
+// numbers, because `set_agc` pins an override that cannot be cleared.
+function AGCSettings() {
+    const { agc, actions, running } = useRadio();
+
+    return (
+        <>
+            <div className="divider" />
+            <div className="section-label">
+                <span>AGC</span>
+                {agc && (
+                    <button type="button" className="chip chip--button" onClick={actions.resetAgc}>
+                        Defaults
+                    </button>
+                )}
+            </div>
+
+            {!agc && (
+                <div className="note note--tight">
+                    {running ? 'Reading settings from the receiver…' : 'Start the receiver to load AGC settings.'}
+                </div>
+            )}
+
+            {agc && AGC_CONTROLS.map((c) => (
+                <Field key={c.id} label={c.label} hint={`${agc[c.id].toFixed(c.decimals)} ${c.unit}`}>
+                    <Slider
+                        value={agc[c.id]}
+                        min={c.min}
+                        max={c.max}
+                        step={c.step}
+                        onChange={(v) => actions.setAgcParams({ [c.id]: v })}
+                    />
+                </Field>
+            ))}
+        </>
+    );
+}
 
 export default function ReceiverPanel() {
     const { tuning, actions, running } = useRadio();
@@ -64,11 +109,11 @@ export default function ReceiverPanel() {
                 />
             </Field>
 
-            <Field label="Filter width" hint={`${width} Hz`}>
+            <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
                 <Slider
-                    value={width}
+                    value={Math.min(width, maxFilterWidth(tuning.mode))}
                     min={100}
-                    max={Math.abs(limits.max - limits.min)}
+                    max={maxFilterWidth(tuning.mode)}
                     step={50}
                     onChange={setWidth}
                 />
@@ -83,6 +128,8 @@ export default function ReceiverPanel() {
                 <span className="passband__mode">{mode.label}</span>
                 <span>{tuning.bandwidthHigh} Hz</span>
             </div>
+
+            {hasAGCSettings(tuning.mode) && <AGCSettings />}
 
             {!running && <div className="note">Press <strong>Listen</strong> to start the receiver.</div>}
         </div>

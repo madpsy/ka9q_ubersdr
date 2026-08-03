@@ -15,10 +15,12 @@ import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
 import {
-    MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES,
-    SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, squelchEnabled, squelchThreshold,
+    AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
+    SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL,
+    autoSquelchValue, squelchEnabled, squelchThreshold,
 } from './constants.js';
 import { clamp } from '../lib/format.js';
+import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
 
 const RadioContext = createContext(null);
@@ -62,11 +64,15 @@ function initialTuning() {
 
     const mode = MODE_BY_ID[urlMode] ? urlMode : (MODE_BY_ID[saved.mode] ? saved.mode : 'lsb');
     const def = MODE_BY_ID[mode];
+    const restore = saved.mode === mode;
+    // A layout saved before the limits changed can hold a wider passband than
+    // the mode now allows, so restored edges are clamped too.
+    const l = bandwidthLimits(mode);
     return {
         frequency: clamp(urlFreq > 0 ? urlFreq : (saved.frequency || 7100000), MIN_FREQ, MAX_FREQ),
         mode,
-        bandwidthLow: saved.mode === mode && saved.bandwidthLow != null ? saved.bandwidthLow : def.low,
-        bandwidthHigh: saved.mode === mode && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high,
+        bandwidthLow: clamp(restore && saved.bandwidthLow != null ? saved.bandwidthLow : def.low, l.min, l.max),
+        bandwidthHigh: clamp(restore && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high, l.min, l.max),
     };
 }
 
@@ -91,8 +97,19 @@ export function RadioProvider({ children }) {
     const [squelchValue, setSquelchValue] = useState(
         saved.squelchValue != null ? saved.squelchValue : SQUELCH_MIN,
     );
+    // null until the server reports. `agc_state` carries the operator's
+    // config.yaml `ssb_agc` values for anything this session has not
+    // overridden, so seeding from our own constants would show the wrong
+    // numbers on any receiver whose operator changed them.
     const [agc, setAgc] = useState(null);
-    const [dsp, setDsp] = useState({ filter: saved.dspFilter || 'nr2', enabled: !!saved.dspEnabled });
+    // `schemas` is the server's filter list (null until it answers); `params`
+    // is keyed by filter name so switching filters and back keeps your settings.
+    const [dsp, setDsp] = useState({
+        filter: saved.dspFilter || '',
+        enabled: false,          // the server decides; a new session starts off
+        schemas: null,
+        params: saved.dspParams || {},
+    });
     const [followTuning, setFollowTuning] = useState(saved.followTuning !== false);
 
     // Mutable, high-rate values. Never a dependency of a render.
@@ -107,6 +124,7 @@ export function RadioProvider({ children }) {
         lastFrameAt: 0,
         squelchOpen: true,      // is the server currently passing audio?
         lastGateOpenAt: 0,
+        snrHistory: [],         // recent SNR readings, for the squelch auto-set
     });
 
     const conn = useRef(null);
@@ -138,6 +156,36 @@ export function RadioProvider({ children }) {
     // packet handler, which must not re-subscribe when the slider moves.
     const gateRef = useRef(null);
     gateRef.current = squelchEnabled(squelchValue) ? squelchThreshold(squelchValue) : null;
+    const agcRef = useRef(agc);
+    agcRef.current = agc;
+    const lastLocalAgc = useRef(0);
+    // The first values the server reports, before this session overrides
+    // anything — i.e. the operator's configured defaults. `set_agc` persists an
+    // override with no way to clear it, so Reset has to replay these rather
+    // than push our own constants and pin the wrong values.
+    const serverAgcDefaults = useRef(null);
+    const agcRefreshTimer = useRef(null);
+    const agcDirty = useRef(false);
+    const dspRef = useRef(dsp);
+    dspRef.current = dsp;
+
+    // Adopts server-reported AGC values, ignoring an echo that would otherwise
+    // snap a slider back while it is still being dragged.
+    const applyServerAGC = useRef((incoming) => {
+        if (!incoming || Date.now() - lastLocalAgc.current < 1500) return;
+        const next = { ...agcRef.current };
+        let changed = false;
+        for (const c of AGC_CONTROLS) {
+            if (typeof incoming[c.id] === 'number' && incoming[c.id] !== next[c.id]) {
+                next[c.id] = incoming[c.id];
+                changed = true;
+            }
+        }
+        if (serverAgcDefaults.current === null) serverAgcDefaults.current = next;
+        if (!changed && agcRef.current !== null) return;
+        agcRef.current = next;
+        setAgc(next);
+    }).current;
 
     // ---- wiring ---------------------------------------------------------
 
@@ -156,6 +204,10 @@ export function RadioProvider({ children }) {
             m.basebandPower = basebandPower;
             m.noiseDensity = noiseDensity;
             m.snr = basebandPower != null && noiseDensity != null ? basebandPower - noiseDensity : null;
+            if (m.snr != null) {
+                m.snrHistory.push(m.snr);
+                if (m.snrHistory.length > SQUELCH_AUTO_SAMPLES) m.snrHistory.shift();
+            }
 
             // Mirror audioGateAllows() so the indicator reflects what the
             // server is doing, including its 500 ms hang timer — otherwise the
@@ -184,10 +236,44 @@ export function RadioProvider({ children }) {
                     tuningRef.current = next;
                     return next;
                 });
-            } else if (msg.type === 'agc_state' && msg.agc) {
-                // The server reports parameter values but not whether AGC is
-                // engaged, so that flag is tracked client-side.
-                setAgc((prev) => ({ agcEnable: prev?.agcEnable !== false, ...msg.agc }));
+                // status carries the AGC block too, which is how a mode change
+                // surfaces the operator defaults the server just re-applied.
+                applyServerAGC(msg.agc);
+            } else if (msg.type === 'agc_state') {
+                applyServerAGC(msg.agc);
+            } else if (msg.type === 'dsp_filters') {
+                const info = msg.info || {};
+                setDsp((d) => {
+                    const schemas = info.available ? (info.filters || []) : [];
+                    // Seed any filter we have no stored params for, so a slider
+                    // never starts at a value the filter does not actually have.
+                    const params = { ...d.params };
+                    for (const f of schemas) {
+                        params[f.name] = { ...defaultParams(f), ...(params[f.name] || {}) };
+                    }
+                    const filter = d.filter && schemas.some((f) => f.name === d.filter)
+                        ? d.filter
+                        : (schemas[0] ? schemas[0].name : '');
+                    const next = { ...d, schemas, params, filter, unavailableReason: info.reason || '' };
+                    dspRef.current = next;
+                    return next;
+                });
+            } else if (msg.type === 'dsp_status') {
+                const info = msg.info || {};
+                setDsp((d) => {
+                    const next = { ...d, enabled: !!info.enabled };
+                    if (info.filter) next.filter = info.filter;
+                    // The server echoes the full merged parameter set, which is
+                    // what the filter is actually running with.
+                    if (info.filter && info.params) {
+                        next.params = {
+                            ...d.params,
+                            [info.filter]: { ...(d.params[info.filter] || {}), ...info.params },
+                        };
+                    }
+                    dspRef.current = next;
+                    return next;
+                });
             }
         }));
         offs.push(audioConn.on('error', (e) => pushLog('error', e.message || 'audio error')));
@@ -199,6 +285,16 @@ export function RadioProvider({ children }) {
             // un-squelch the receiver.
             const threshold = gateRef.current;
             audioConn.setAudioGate({ minSnr: threshold == null ? SQUELCH_SENTINEL : threshold });
+
+            // A reconnect makes a fresh session, which starts at the operator's
+            // defaults again. Replay the user's AGC only if they actually
+            // changed something — pushing on first connect would pin an
+            // override before we even know what the defaults are.
+            if (agcDirty.current && agcRef.current) audioConn.setAGC(agcRef.current);
+            else audioConn.requestAGC();
+
+            // Parameter schemas are per-server, so fetch them once a session is up.
+            audioConn.requestDSPFilters();
             const m = meters.current;
             m.squelchOpen = true;
             m.lastGateOpenAt = performance.now();
@@ -248,7 +344,7 @@ export function RadioProvider({ children }) {
             bufferSec: audio.bufferSec,
             squelchValue,
             dspFilter: dsp.filter,
-            dspEnabled: dsp.enabled,
+            dspParams: dsp.params,
             followTuning,
         });
     }, [tuning, audio, squelchValue, dsp, followTuning]);
@@ -259,6 +355,9 @@ export function RadioProvider({ children }) {
     // Dragging the squelch slider would otherwise emit a command per pixel and
     // trip the server's command rate limit.
     const sendGate = useMemo(() => throttle((minSnr) => audioConn.setAudioGate({ minSnr }), 90), []);
+    const sendAgc = useMemo(() => throttle((values) => audioConn.setAGC(values), 120), []);
+    // Dragging a DSP slider must not emit a command per pixel.
+    const sendDspParams = useMemo(() => throttle((params) => audioConn.setDSPParams(params), 120), []);
 
     const actions = useMemo(() => {
         const recenterIfNeeded = (freq) => {
@@ -283,6 +382,17 @@ export function RadioProvider({ children }) {
             recenterIfNeeded(next.frequency);
         };
 
+        const applySquelch = (value) => {
+            setSquelchValue(value);
+            gateRef.current = squelchEnabled(value) ? squelchThreshold(value) : null;
+            sendGate(squelchThreshold(value));
+            if (!squelchEnabled(value)) {
+                const m = meters.current;
+                m.squelchOpen = true;
+                m.lastGateOpenAt = performance.now();
+            }
+        };
+
         return {
             async powerOn() {
                 const ok = await player.start();
@@ -291,7 +401,6 @@ export function RadioProvider({ children }) {
                 const t = tuningRef.current;
                 await audioConn.connect(t);
                 await spectrumConn.connect({});
-                audioConn.requestAGC();
             },
 
             powerOff() {
@@ -309,10 +418,23 @@ export function RadioProvider({ children }) {
                 const def = MODE_BY_ID[mode];
                 if (!def) return;
                 applyTuning({ mode, bandwidthLow: def.low, bandwidthHigh: def.high });
+                // radiod reloads its preset on a mode change and the server
+                // waits 500 ms before re-applying the operator's SSB AGC
+                // defaults, so ask for the settled values after that.
+                if (hasAGCSettings(mode)) {
+                    clearTimeout(agcRefreshTimer.current);
+                    agcRefreshTimer.current = setTimeout(() => audioConn.requestAGC(), 800);
+                }
             },
 
             setBandwidth(low, high) {
-                applyTuning({ bandwidthLow: Math.round(low), bandwidthHigh: Math.round(high) });
+                // Clamped here rather than only in the slider, so a stored or
+                // deep-linked passband cannot exceed the mode's limit either.
+                const l = bandwidthLimits(tuningRef.current.mode);
+                applyTuning({
+                    bandwidthLow: clamp(Math.round(low), l.min, l.max),
+                    bandwidthHigh: clamp(Math.round(high), l.min, l.max),
+                });
             },
 
             setVolume(v) {
@@ -334,25 +456,71 @@ export function RadioProvider({ children }) {
             },
 
             // `value` is the raw slider position; its floor means "off".
-            setSquelch(value) {
-                setSquelchValue(value);
-                gateRef.current = squelchEnabled(value) ? squelchThreshold(value) : null;
-                sendGate(squelchThreshold(value));
-                if (!squelchEnabled(value)) {
-                    const m = meters.current;
-                    m.squelchOpen = true;
-                    m.lastGateOpenAt = performance.now();
-                }
+            setSquelch: applySquelch,
+
+            // Sits just above the noise the receiver is currently hearing.
+            autoSquelch() {
+                const value = autoSquelchValue(meters.current.snrHistory);
+                if (value == null) return;
+                applySquelch(value);
             },
 
-            setAgcParams(params) {
-                audioConn.setAGC(params);
-                setAgc((prev) => ({ ...(prev || {}), ...params }));
+            // v1 pushes all three values on every change, so the server never
+            // sees a partial set; mirrored here.
+            setAgcParams(patch) {
+                const next = { ...agcRef.current, ...patch };
+                agcRef.current = next;
+                agcDirty.current = true;
+                lastLocalAgc.current = Date.now();
+                setAgc(next);
+                sendAgc(next);
+            },
+
+            // Restores the operator's defaults, not ours.
+            resetAgc() {
+                const next = { ...(serverAgcDefaults.current || defaultAGC()) };
+                agcRef.current = next;
+                agcDirty.current = true;
+                lastLocalAgc.current = Date.now();
+                setAgc(next);
+                sendAgc(next);
             },
 
             setDsp(filter, enabled) {
-                setDsp({ filter, enabled });
-                audioConn.setDSP(filter, enabled);
+                const d = dspRef.current;
+                const params = d.params[filter] || {};
+                const next = { ...d, filter, enabled };
+                dspRef.current = next;
+                setDsp(next);
+                // Enabling starts the insert with this filter's current values;
+                // the server replies with dsp_status carrying what it applied.
+                audioConn.setDSP(filter, enabled, enabled ? params : {});
+            },
+
+            setDspParam(name, value) {
+                const d = dspRef.current;
+                const filter = d.filter;
+                if (!filter) return;
+                const wire = toWire(value);
+                const next = {
+                    ...d,
+                    params: { ...d.params, [filter]: { ...(d.params[filter] || {}), [name]: wire } },
+                };
+                dspRef.current = next;
+                setDsp(next);
+                // Live parameter updates are only valid while the insert runs.
+                if (d.enabled) sendDspParams({ [name]: wire });
+            },
+
+            resetDspParams() {
+                const d = dspRef.current;
+                const schema = (d.schemas || []).find((f) => f.name === d.filter);
+                if (!schema) return;
+                const params = defaultParams(schema);
+                const next = { ...d, params: { ...d.params, [d.filter]: params } };
+                dspRef.current = next;
+                setDsp(next);
+                if (d.enabled && Object.keys(params).length) sendDspParams(params);
             },
 
             setFollowTuning,

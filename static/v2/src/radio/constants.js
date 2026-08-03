@@ -22,16 +22,27 @@ export const MODES = [
 
 export const MODE_BY_ID = Object.fromEntries(MODES.map((m) => [m.id, m]));
 
-// Widest passband edge the bandwidth sliders will offer, per mode family.
+// Widest passband the bandwidth sliders will offer, per mode family.
+//
+// These are passband *edges* relative to the tuned frequency, so a symmetric
+// mode's maximum filter width is twice the edge: ±6000 Hz gives a 12 kHz
+// filter. Single-sideband modes only occupy one side, so their edge value is
+// the width directly.
 export function bandwidthLimits(mode) {
     switch (mode) {
         case 'usb': return { min: 0, max: 6000, sideband: 'upper' };
         case 'lsb': return { min: -6000, max: 0, sideband: 'lower' };
         case 'cwu': return { min: 0, max: 2000, sideband: 'upper' };
         case 'cwl': return { min: -2000, max: 0, sideband: 'lower' };
-        case 'fm': return { min: -12000, max: 12000, sideband: 'both' };
-        default: return { min: -10000, max: 10000, sideband: 'both' };
+        // am, sam, fm, nfm — 12 kHz maximum width.
+        default: return { min: -6000, max: 6000, sideband: 'both' };
     }
+}
+
+// Widest filter the sliders allow for a mode, in Hz.
+export function maxFilterWidth(mode) {
+    const l = bandwidthLimits(mode);
+    return Math.abs(l.max - l.min);
 }
 
 // CW modes are tuned to the carrier, so the audible tone sits at the offset.
@@ -42,6 +53,31 @@ export const TUNING_STEPS = [1, 10, 100, 500, 1000, 5000, 9000, 10000, 100000];
 export function stepLabel(hz) {
     if (hz >= 1000) return (hz / 1000) + ' kHz';
     return hz + ' Hz';
+}
+
+// AGC.
+//
+// Only USB and LSB expose these — v1 keys them off a per-mode settings table
+// containing just those two. There is deliberately no enable/disable switch:
+// the server accepts `agcEnable` but v1 never sends it and never reports it
+// back, so a toggle would show a state nothing else agrees with.
+//
+// Defaults match share/presets.conf. The server applies the operator's
+// config.yaml `ssb_agc` values over them for every new SSB session and again on
+// each mode change, then reports the result via `agc_state`, so the server is
+// the authority and these are only a first guess.
+export const AGC_CONTROLS = [
+    { id: 'agcHangTime', label: 'Hang time', min: 0, max: 10, step: 0.1, default: 1.1, unit: 's', decimals: 1 },
+    { id: 'agcRecoveryRate', label: 'Recovery', min: 1, max: 100, step: 1, default: 20, unit: 'dB/s', decimals: 0 },
+    { id: 'agcThreshold', label: 'Threshold', min: -30, max: 0, step: 1, default: -15, unit: 'dB', decimals: 0 },
+];
+
+export function hasAGCSettings(mode) {
+    return mode === 'usb' || mode === 'lsb';
+}
+
+export function defaultAGC() {
+    return Object.fromEntries(AGC_CONTROLS.map((c) => [c.id, c.default]));
 }
 
 // Squelch.
@@ -68,4 +104,21 @@ export function squelchThreshold(sliderValue) {
 
 export function squelchEnabled(sliderValue) {
     return squelchThreshold(sliderValue) > SQUELCH_SENTINEL + 1;
+}
+
+// Auto-set, mirroring v1: average the last few SNR readings and sit a few dB
+// *above* them, so the threshold lands just over the noise the receiver is
+// actually hearing. Sitting below it would leave the gate permanently open.
+export const SQUELCH_AUTO_SAMPLES = 5;
+export const SQUELCH_AUTO_HEADROOM_DB = 3;
+
+// `snrHistory` is oldest-first. Returns a slider position, or null if there is
+// nothing to measure yet.
+export function autoSquelchValue(snrHistory) {
+    if (!snrHistory || snrHistory.length === 0) return null;
+    const recent = snrHistory.slice(-SQUELCH_AUTO_SAMPLES);
+    const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const stepped = Math.round((avg + SQUELCH_AUTO_HEADROOM_DB) / SQUELCH_STEP) * SQUELCH_STEP;
+    // Never land on the floor, which would read as "off".
+    return Math.max(SQUELCH_MIN + SQUELCH_STEP, Math.min(SQUELCH_MAX, stepped));
 }

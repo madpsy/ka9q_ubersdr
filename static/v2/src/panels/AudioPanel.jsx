@@ -1,6 +1,7 @@
 import React from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Icon, Slider, Switch } from '../components/ui.jsx';
+import { Button, Field, Icon, Slider } from '../components/ui.jsx';
+import DspControl from './DspControl.jsx';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
 
 // Split out so the 12 Hz meter sampling that drives the live SNR marker and the
@@ -38,11 +39,9 @@ function SquelchControl() {
                 <button
                     type="button"
                     className="chip chip--button"
-                    title="Set the threshold just under the current signal"
+                    title="Set the threshold just above the recent noise level"
                     disabled={snr == null}
-                    onClick={() => actions.setSquelch(
-                        Math.max(SQUELCH_MIN + SQUELCH_STEP, Math.min(SQUELCH_MAX, Math.round((snr - 3) * 2) / 2)),
-                    )}
+                    onClick={actions.autoSquelch}
                 >
                     Auto
                 </button>
@@ -57,9 +56,7 @@ function SquelchControl() {
 }
 
 export default function AudioPanel() {
-    const { audio, actions, agc, dsp, serverInfo, running } = useRadio();
-    const dspFilters = (serverInfo && serverInfo.dsp && serverInfo.dsp.filters) || [];
-    const dspAvailable = !!(serverInfo && serverInfo.dsp && serverInfo.dsp.enabled) && dspFilters.length > 0;
+    const { audio, actions } = useRadio();
 
     return (
         <div className="stack">
@@ -101,70 +98,8 @@ export default function AudioPanel() {
                 live SNR — set the threshold just above the noise.
             </div>
 
-            {dspAvailable && (
-                <>
-                    <div className="divider" />
-                    <Field label="Noise reduction" hint={dsp.enabled ? dsp.filter : 'off'} inline>
-                        <Switch
-                            checked={dsp.enabled}
-                            disabled={!running}
-                            onChange={(on) => actions.setDsp(dsp.filter, on)}
-                        />
-                    </Field>
-                    <div className="chip-row">
-                        {dspFilters.map((f) => (
-                            <button
-                                key={f}
-                                type="button"
-                                className={`chip chip--button${dsp.filter === f ? ' is-active' : ''}`}
-                                onClick={() => actions.setDsp(f, dsp.enabled)}
-                            >
-                                {f.toUpperCase()}
-                            </button>
-                        ))}
-                    </div>
-                </>
-            )}
+            <DspControl />
 
-            {agc && (
-                <>
-                    <div className="divider" />
-                    <Field label="AGC" inline>
-                        <Switch
-                            checked={agc.agcEnable !== false}
-                            onChange={(on) => actions.setAgcParams({ agcEnable: on })}
-                        />
-                    </Field>
-                    <Field label="Hang time" hint={`${Number(agc.agcHangTime ?? 1.1).toFixed(1)} s`}>
-                        <Slider
-                            value={Number(agc.agcHangTime ?? 1.1)}
-                            min={0}
-                            max={10}
-                            step={0.1}
-                            disabled={agc.agcEnable === false}
-                            onChange={(v) => actions.setAgcParams({ agcHangTime: v })}
-                        />
-                    </Field>
-                    <Field label="Recovery" hint={`${Math.round(agc.agcRecoveryRate ?? 20)} dB/s`}>
-                        <Slider
-                            value={Math.round(agc.agcRecoveryRate ?? 20)}
-                            min={1}
-                            max={100}
-                            disabled={agc.agcEnable === false}
-                            onChange={(v) => actions.setAgcParams({ agcRecoveryRate: v })}
-                        />
-                    </Field>
-                    <Field label="Threshold" hint={`${Math.round(agc.agcThreshold ?? -15)} dB`}>
-                        <Slider
-                            value={Math.round(agc.agcThreshold ?? -15)}
-                            min={-60}
-                            max={0}
-                            disabled={agc.agcEnable === false}
-                            onChange={(v) => actions.setAgcParams({ agcThreshold: v })}
-                        />
-                    </Field>
-                </>
-            )}
         </div>
     );
 }

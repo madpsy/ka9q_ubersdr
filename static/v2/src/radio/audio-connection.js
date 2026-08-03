@@ -144,6 +144,18 @@ export class AudioConnection extends Emitter {
         return this.send({ type: 'set_dsp', filter, enabled, params: params || {} });
     }
 
+    // Adjusts parameters of the running filter without restarting it. Only
+    // valid while a DSP insert is active.
+    setDSPParams(params) {
+        if (!params || Object.keys(params).length === 0) return false;
+        return this.send({ type: 'set_dsp_params', params });
+    }
+
+    // Asks for the filter list and each filter's parameter schema.
+    requestDSPFilters() {
+        return this.send({ type: 'get_dsp_filters' });
+    }
+
     setMuted(muted) {
         return this.send({ type: 'set_mute', muted });
     }

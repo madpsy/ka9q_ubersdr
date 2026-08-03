@@ -103,6 +103,18 @@ export default function DisplayPanel() {
                         <Switch checked={d.peakHold} onChange={(v) => d.set({ peakHold: v })} />
                     </Field>
 
+                    {d.peakHold && (
+                        <Field label="Peak decay" hint={d.peakDecay > 0 ? `${d.peakDecay} dB/s` : 'hold'}>
+                            <Slider
+                                value={d.peakDecay}
+                                min={0}
+                                max={20}
+                                step={0.5}
+                                onChange={(v) => d.set({ peakDecay: v })}
+                            />
+                        </Field>
+                    )}
+
                     <Field label="dB grid" inline>
                         <Switch checked={d.grid} onChange={(v) => d.set({ grid: v })} />
                     </Field>

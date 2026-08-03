@@ -16,8 +16,8 @@ export const DEFAULTS = {
     smoothing: 0.5,         // 0 = off, ->1 = heavier temporal averaging
     fill: true,             // shade the area under the spectrum trace
     peakHold: false,
-    peakDecay: 0.25,        // dB per frame
-    grid: true,
+    peakDecay: 3,           // dB per second; 0 = hold indefinitely
+    grid: false,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'

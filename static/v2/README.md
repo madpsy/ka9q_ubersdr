@@ -171,6 +171,11 @@ panel never disturbs an existing user's arrangement.
   only looks at the waterfall. While a backdrop is showing, the dB grid and its
   labels switch to solid white with a dark text shadow: the usual 6%-white
   gridlines read fine on black but vanish on most images.
+* **Peak hold decays in dB per second, not per frame.** The draw rate follows
+  the server's frame rate, so a per-frame decay made the hold time depend on how
+  fast the spectrum happened to be arriving — slow on a busy server, fast on an
+  idle one. `peakDecay` is dB/s and 0 holds indefinitely. The peak line is drawn
+  *above* the trace fill; underneath it the fill washed it out.
 * **One colour mapping for both panes.** The Display panel's View control picks
   split / spectrum-only / waterfall-only. The palette drives both: the spectrum's
   trace and fill are painted with a vertical gradient built from the same LUT and

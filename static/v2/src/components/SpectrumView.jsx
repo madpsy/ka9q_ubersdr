@@ -35,6 +35,7 @@ export default function SpectrumView() {
     const gfx = useRef({
         bins: null,
         peak: null,
+        peakAt: 0,
         smoothed: null,
         ring: null,          // offscreen canvas
         ringCtx: null,
@@ -370,7 +371,7 @@ function paletteGradients(c, H, palette, contrast) {
         if (contrast !== 1) amp = Math.pow(amp, gammaInv);
 
         const fi = Math.round(amp * 255) * 3;
-        fill.addColorStop(offset, `rgba(${lut[fi]},${lut[fi + 1]},${lut[fi + 2]},${(0.62 * amp + 0.04).toFixed(3)})`);
+        fill.addColorStop(offset, `rgba(${lut[fi]},${lut[fi + 1]},${lut[fi + 2]},${(0.55 * amp + 0.18).toFixed(3)})`);
 
         const ti = Math.round((TRACE_FLOOR + amp * (1 - TRACE_FLOOR)) * 255) * 3;
         trace.addColorStop(offset, `rgb(${lut[ti]},${lut[ti + 1]},${lut[ti + 2]})`);
@@ -594,21 +595,21 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     }
 
     // Peak hold, drawn beneath the live trace.
+    // Peak hold decays in dB per *second*, not per frame: the draw rate follows
+    // the server's frame rate, so a per-frame decay made the hold time depend
+    // on how fast the spectrum happened to be arriving. 0 holds indefinitely.
     if (d.peakHold) {
+        const now = performance.now();
+        const dt = g.peakAt ? Math.min(1, (now - g.peakAt) / 1000) : 0;
+        g.peakAt = now;
+        const drop = (d.peakDecay || 0) * dt;
         for (let x = 0; x < pxW; x++) {
             const v = trace[x];
-            g.peak[x] = v > g.peak[x] ? v : g.peak[x] - d.peakDecay;
+            g.peak[x] = v > g.peak[x] ? v : g.peak[x] - drop;
         }
-        c.strokeStyle = 'rgba(255,255,255,0.35)';
-        c.lineWidth = dpr;
-        c.beginPath();
-        for (let x = 0; x < pxW; x++) {
-            const y = yOf(g.peak[x]);
-            if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
-        }
-        c.stroke();
     } else if (g.peak) {
         g.peak.fill(-200);
+        g.peakAt = 0;
     }
 
     // Area under the trace. Turning this off leaves a bare line, which shows
@@ -621,6 +622,17 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.closePath();
         c.fillStyle = g.fillGrad;
         c.fill();
+    }
+
+    if (d.peakHold) {
+        c.beginPath();
+        for (let x = 0; x < pxW; x++) {
+            const y = yOf(g.peak[x]);
+            if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+        }
+        c.strokeStyle = 'rgba(255,255,255,0.55)';
+        c.lineWidth = dpr;
+        c.stroke();
     }
 
     c.beginPath();

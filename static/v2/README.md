@@ -70,6 +70,19 @@ stutter:
 * **Spectrum frames** never reach React at all. `SpectrumView` subscribes to the
   connection directly and paints the canvas.
 
+### One scroller per dock
+
+Panels never scroll internally — no `overflow` and no `max-height` on a panel
+body, list or log. The dock is the only scroller, so a long band list makes the
+dock scroll rather than trapping a small scroll area inside a section. The
+bottom dock scrolls on both axes and sizes its sections to content rather than
+stretching them. The one exception is the mobile sheet, which is a fixed-height
+overlay and so has to scroll itself — but that is the container, not the panel.
+
+A consequence worth knowing when writing a panel: you cannot scroll your own
+content into view, because that would drag the whole dock. The event log puts
+newest entries first for that reason instead of auto-scrolling to the bottom.
+
 ### Adding a panel
 
 Add one entry to `src/panels/registry.jsx`:

@@ -285,9 +285,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .dock--bottom .dock__body {
     flex-direction: row;
-    align-items: stretch;
-    overflow-x: auto;
-    overflow-y: hidden;
+    align-items: flex-start;
+    overflow: auto;
 }
 .dock--bottom .section { flex: 1 1 280px; min-width: 220px; }
 .dock--bottom .section.is-closed { flex: 0 0 auto; min-width: 0; }
@@ -364,7 +363,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     transition: border-color var(--dur) var(--ease);
 }
 .section:hover { border-color: var(--border-strong); }
-.section--fill { flex: 1; }
 
 .section.is-drop-before::before,
 .section.is-drop-after::after {
@@ -433,12 +431,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .section__body {
     padding: 4px 10px 12px;
     border-top: 1px solid var(--border);
-    min-height: 0;
-    overflow: auto;
     display: flex;
     flex-direction: column;
 }
-.section--fill .section__body { flex: 1; }
 
 /* =========================================================================
    Spectrum
@@ -498,7 +493,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
    ========================================================================= */
 
 .stack { display: flex; flex-direction: column; gap: 11px; padding-top: 8px; min-width: 0; }
-.stack--fill { flex: 1; min-height: 0; }
 
 .divider { height: 1px; background: var(--border); margin: 1px 0; }
 
@@ -907,8 +901,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     display: flex;
     flex-direction: column;
     gap: 2px;
-    max-height: 320px;
-    overflow-y: auto;
     margin: 0 -4px;
     padding: 0 4px;
 }
@@ -948,9 +940,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .prose a { color: var(--accent); }
 
 .log {
-    flex: 1;
-    min-height: 90px;
-    overflow-y: auto;
     font-family: var(--mono);
     font-size: 11px;
     display: flex;
@@ -962,6 +951,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .log__text { overflow-wrap: anywhere; }
 .log__row--error .log__text { color: var(--bad); }
 .log__row--warn .log__text { color: var(--warn); }
+.log__more { color: var(--text-faint); padding-top: 4px; }
 
 /* =========================================================================
    Menu
@@ -1128,7 +1118,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     overflow-y: auto;
     padding: 4px 14px calc(16px + env(safe-area-inset-bottom));
 }
-.sheet__body .list { max-height: 46dvh; }
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

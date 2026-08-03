@@ -138,6 +138,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 .shell__center {
+    position: relative;   /* anchor for the floating panel layer */
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1184,3 +1185,78 @@ button, input, select, textarea { font: inherit; color: inherit; }
     pointer-events: none;
     z-index: 30;
 }
+
+/* ── Floating panels ──────────────────────────────────────────────────────── */
+
+.floatlayer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;   /* only the windows themselves are interactive */
+    overflow: hidden;
+}
+
+.floatwin {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    min-height: 120px;
+    pointer-events: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.floatwin__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 6px 7px 10px;
+    background: var(--surface-3);
+    border-bottom: 1px solid var(--border);
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+    flex: none;
+}
+.floatwin__head:active { cursor: grabbing; }
+.floatwin__icon { display: grid; place-items: center; color: var(--accent); }
+.floatwin__title {
+    flex: 1;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.floatwin__btn {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.floatwin__btn:hover { background: var(--surface-hover); color: var(--text); }
+
+/* Fixed height, so this is the scroller — panels never scroll themselves. */
+.floatwin__body { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 10px; }
+
+.floatwin__grip {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    touch-action: none;
+    background:
+        linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 100%);
+    border-bottom-right-radius: var(--radius);
+}
+.floatwin__grip:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }

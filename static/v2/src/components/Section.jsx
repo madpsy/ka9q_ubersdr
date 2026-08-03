@@ -78,6 +78,7 @@ export default function Section({ panel, dock, index }) {
                             Move to {DOCK_LABEL[d]}
                         </MenuItem>
                     ))}
+                    <MenuItem onClick={() => movePanel(panel.id, 'float', null)}>Float</MenuItem>
                     <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
                 </Menu>
             </header>

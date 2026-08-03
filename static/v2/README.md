@@ -70,6 +70,18 @@ stutter:
 * **Spectrum frames** never reach React at all. `SpectrumView` subscribes to the
   connection directly and paints the canvas.
 
+### Floating panels
+
+A panel's placement is one of four values — `left`, `right`, `bottom` or
+`float` — so floating needed no change to the panels themselves: the same
+component renders in a dock section, a mobile sheet, or a draggable window.
+`movePanel(id, 'float')` detaches it; the × on the title bar (or a double-click)
+returns it to its registry `dock`. Position and size persist per panel, windows
+cascade so a second float does not land on the first, and clicking one raises it.
+
+Floating is desktop-only — `MobileShell` ignores it and shows every panel in its
+sheet list, since a draggable window on a phone is not useful.
+
 ### One scroller per dock
 
 Panels never scroll internally — no `overflow` and no `max-height` on a panel

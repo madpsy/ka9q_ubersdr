@@ -7,6 +7,7 @@ import Dock from './components/Dock.jsx';
 import TopBar from './components/TopBar.jsx';
 import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
+import FloatingLayer from './components/FloatingLayer.jsx';
 
 function DesktopShell() {
     return (
@@ -17,6 +18,7 @@ function DesktopShell() {
                 <div className="shell__column">
                     <main className="shell__center">
                         <SpectrumView />
+                        <FloatingLayer />
                     </main>
                     <Dock side="bottom" />
                 </div>

@@ -2,22 +2,22 @@
 // dragging (which is awkward on touch, and impossible for a hidden panel).
 
 import React from '../react.js';
-import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
+import { PLACEMENTS, useLayout } from '../layout/LayoutContext.jsx';
 import { PANELS } from './registry.jsx';
 import { Button, Icon, Segmented, Switch } from '../components/ui.jsx';
 
-const DOCK_LABEL = { left: 'Left', right: 'Right', bottom: 'Bottom' };
+const PLACEMENT_LABEL = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Float' };
 
 export default function LayoutPanel() {
-    const { docks, sections, movePanel, setSectionHidden, resetLayout } = useLayout();
-
-    const dockOf = (id) => DOCKS.find((d) => docks[d].panels.includes(id)) || 'left';
+    const { sections, movePanel, setSectionHidden, resetLayout, placementOf } = useLayout();
 
     return (
         <div className="stack">
             <div className="note note--tight">
                 Drag a panel by its header to move it between docks, or set its
-                home here. Drag a dock edge to resize.
+                place here. Drag a dock edge to resize. <strong>Float</strong>
+                detaches a panel into a window you can move and resize; drop it
+                back with the × on its title bar.
             </div>
 
             <div className="layout-list">
@@ -33,9 +33,9 @@ export default function LayoutPanel() {
                         </div>
                         <Segmented
                             size="sm"
-                            value={dockOf(p.id)}
+                            value={placementOf(p.id)}
                             onChange={(dock) => movePanel(p.id, dock, null)}
-                            options={DOCKS.map((d) => ({ value: d, label: DOCK_LABEL[d] }))}
+                            options={PLACEMENTS.map((d) => ({ value: d, label: PLACEMENT_LABEL[d] }))}
                         />
                     </div>
                 ))}

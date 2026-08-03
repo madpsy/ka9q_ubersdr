@@ -13,6 +13,12 @@ const STORAGE_KEY = 'ubersdr.v2.layout';
 const VERSION = 1;
 
 export const DOCKS = ['left', 'right', 'bottom'];
+// A panel is in exactly one place: one of the docks, or floating free.
+export const PLACEMENTS = [...DOCKS, 'float'];
+
+const FLOAT_DEFAULT = { w: 320, h: 320 };
+const FLOAT_MIN = { w: 220, h: 120 };
+const FLOAT_CASCADE = 26;
 
 const DOCK_DEFAULTS = {
     left: { size: 320, collapsed: false, minSize: 220, maxSize: 560 },
@@ -30,7 +36,7 @@ function defaultLayout() {
         docks[p.dock].panels.push(p.id);
         sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden };
     }
-    return { version: VERSION, docks, sections };
+    return { version: VERSION, docks, sections, floats: {}, floatOrder: [] };
 }
 
 // Merges a stored layout with the current panel registry.
@@ -38,7 +44,25 @@ function reconcile(stored) {
     const base = defaultLayout();
     if (!stored || stored.version !== VERSION) return base;
 
-    const seen = new Set();
+    // Floating panels belong to no dock, so they are resolved first and then
+    // excluded from every dock list.
+    const floats = {};
+    const floatOrder = [];
+    for (const id of stored.floatOrder || Object.keys(stored.floats || {})) {
+        const g = (stored.floats || {})[id];
+        if (!PANEL_BY_ID[id] || !g || floats[id]) continue;
+        floats[id] = {
+            x: Number(g.x) || 0,
+            y: Number(g.y) || 0,
+            w: Math.max(FLOAT_MIN.w, Number(g.w) || FLOAT_DEFAULT.w),
+            h: Math.max(FLOAT_MIN.h, Number(g.h) || FLOAT_DEFAULT.h),
+        };
+        floatOrder.push(id);
+    }
+    base.floats = floats;
+    base.floatOrder = floatOrder;
+
+    const seen = new Set(floatOrder);
     for (const dock of DOCKS) {
         const list = (stored.docks?.[dock]?.panels || []).filter((id) => {
             if (!PANEL_BY_ID[id] || seen.has(id)) return false;
@@ -55,6 +79,9 @@ function reconcile(stored) {
     // Panels added since the layout was saved land in their default dock.
     for (const p of PANELS) {
         if (!seen.has(p.id)) base.docks[p.dock].panels.push(p.id);
+    }
+    for (const dock of DOCKS) {
+        base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);
     }
     base.sections = {};
     for (const p of PANELS) {
@@ -122,20 +149,71 @@ export function LayoutProvider({ children }) {
     }, []);
 
     // Moves a panel to `dock` at `index` (append when index is null).
+    // `dock` may also be 'float', which detaches it from every dock.
     const movePanel = useCallback((id, dock, index) => {
         setLayout((l) => {
             const docks = {};
             for (const d of DOCKS) {
                 docks[d] = { ...l.docks[d], panels: l.docks[d].panels.filter((p) => p !== id) };
             }
+            const floats = { ...l.floats };
+            let floatOrder = l.floatOrder.filter((f) => f !== id);
+            const sections = { ...l.sections, [id]: { ...l.sections[id], hidden: false } };
+
+            if (dock === 'float') {
+                if (!floats[id]) {
+                    // Cascade so a second float does not land exactly on the first.
+                    const n = floatOrder.length;
+                    floats[id] = {
+                        x: 48 + n * FLOAT_CASCADE,
+                        y: 40 + n * FLOAT_CASCADE,
+                        ...FLOAT_DEFAULT,
+                    };
+                }
+                floatOrder = [...floatOrder, id];
+                // A floating panel is always expanded; a collapsed window with
+                // nothing but a title bar is just clutter.
+                sections[id] = { ...sections[id], open: true };
+                return { ...l, docks, floats, floatOrder, sections };
+            }
+
+            delete floats[id];
             const target = docks[dock];
             const at = index == null ? target.panels.length : Math.max(0, Math.min(target.panels.length, index));
             target.panels = [...target.panels.slice(0, at), id, ...target.panels.slice(at)];
             // Moving a panel into a collapsed dock should reveal it.
             if (target.collapsed) target.collapsed = false;
-            return { ...l, docks, sections: { ...l.sections, [id]: { ...l.sections[id], hidden: false } } };
+            return { ...l, docks, floats, floatOrder, sections };
         });
     }, []);
+
+    const setFloat = useCallback((id, geom) => {
+        setLayout((l) => {
+            const cur = l.floats[id];
+            if (!cur) return l;
+            const next = {
+                x: Math.round(geom.x ?? cur.x),
+                y: Math.round(geom.y ?? cur.y),
+                w: Math.round(Math.max(FLOAT_MIN.w, geom.w ?? cur.w)),
+                h: Math.round(Math.max(FLOAT_MIN.h, geom.h ?? cur.h)),
+            };
+            if (next.x === cur.x && next.y === cur.y && next.w === cur.w && next.h === cur.h) return l;
+            return { ...l, floats: { ...l.floats, [id]: next } };
+        });
+    }, []);
+
+    // Click-to-front: the last id in floatOrder paints on top.
+    const raiseFloat = useCallback((id) => {
+        setLayout((l) => {
+            if (!l.floats[id] || l.floatOrder[l.floatOrder.length - 1] === id) return l;
+            return { ...l, floatOrder: [...l.floatOrder.filter((f) => f !== id), id] };
+        });
+    }, []);
+
+    const placementOf = useCallback((id) => {
+        if (layout.floats[id]) return 'float';
+        return DOCKS.find((d) => layout.docks[d].panels.includes(id)) || 'left';
+    }, [layout]);
 
     const resetLayout = useCallback(() => setLayout(defaultLayout()), []);
 
@@ -143,6 +221,11 @@ export function LayoutProvider({ children }) {
         layout,
         docks: layout.docks,
         sections: layout.sections,
+        floats: layout.floats,
+        floatOrder: layout.floatOrder,
+        setFloat,
+        raiseFloat,
+        placementOf,
         toggleDock,
         setDockCollapsed,
         setDockSize,
@@ -150,7 +233,8 @@ export function LayoutProvider({ children }) {
         setSectionHidden,
         movePanel,
         resetLayout,
-    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel, resetLayout]);
+    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel,
+        setFloat, raiseFloat, placementOf, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

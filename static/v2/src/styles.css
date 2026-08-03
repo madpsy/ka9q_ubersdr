@@ -1324,6 +1324,45 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Recorder panel
+   ========================================================================= */
+
+.rec-status { display: flex; align-items: center; gap: 8px; }
+.rec-status__hint {
+    flex: 1;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+
+/* The clock is the thing the eye goes to while a recording runs, so it is
+   sized like a readout rather than like body text. Tabular figures keep the
+   digits from shuffling as the seconds tick. */
+.rec-time {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(28px * var(--ui-scale));
+    line-height: 1.1;
+    text-align: center;
+    color: var(--text-dim);
+    padding: 4px 0;
+}
+.rec-time.is-live { color: var(--bad); }
+
+.rec-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* Red, and pulsing, for the same reason every other recorder does it: a static
+   badge is easy to leave running by accident. */
+.badge--rec { background: rgba(242, 100, 106, 0.18); color: var(--bad); animation: rec-pulse 1.6s ease-in-out infinite; }
+
+@keyframes rec-pulse { 50% { opacity: 0.45; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .badge--rec { animation: none; }
+}
+
+/* =========================================================================
    Lists, key/value, log
    ========================================================================= */
 

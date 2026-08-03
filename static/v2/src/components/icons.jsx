@@ -54,6 +54,12 @@ export const Icon = {
     Minus: (p) => <Svg {...p}><path d="M5 12h14" /></Svg>,
     Compass: (p) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5z" /></Svg>,
     Antenna: (p) => <Svg {...p}><path d="M12 4v16" /><path d="m5 20 7-9 7 9" /><path d="M8.4 6.4a5 5 0 0 1 7.2 0" /><path d="M6 3.6a9 9 0 0 1 12 0" /></Svg>,
+    // Filled, unlike its neighbours: a record button is a solid dot everywhere
+    // else, and an outline reads as "off".
+    Record: (p) => <Svg {...p}><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none" /></Svg>,
+    Stop: (p) => <Svg {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></Svg>,
+    Download: (p) => <Svg {...p}><path d="M12 3v11" /><path d="m7.5 10 4.5 4 4.5-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
+    Trash: (p) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><path d="M10 11v6M14 11v6" /></Svg>,
 };
 
 export default Icon;

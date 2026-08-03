@@ -56,6 +56,11 @@ export class AudioPlayer {
         this.clipping = false;      // output hit full scale recently
         this.peakDb = -Infinity;    // output peak, dBFS
         this._clipUntil = 0;
+        this.recordTap = null;      // unity node the recorder hangs off
+        // Bumped every time the context is rebuilt. A recording holds nodes
+        // belonging to one context, so anything capturing audio has to notice
+        // when that context has been thrown away (see lib/recorder.js).
+        this.contextEpoch = 0;
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -220,6 +225,13 @@ export class AudioPlayer {
         // actually being played.
         this.merger.connect(this.analyser);
         this.analyser.connect(this.ctx.destination);
+        // Recorder tap, at the point v1 takes it (app.js "Step 10"): after the
+        // filter chain and the volume/mute fader, but before the L/R output
+        // routing — so a recording holds the processed audio as heard, in both
+        // channels, whichever side the operator happens to be listening on.
+        this.recordTap = this.ctx.createGain();
+        this.gain.connect(this.recordTap);
+        this.contextEpoch++;
         this._applyGain();
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);

@@ -36,6 +36,7 @@ import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
 import AddonsPanel, { addonList } from './AddonsPanel.jsx';
 import RotatorPanel from './RotatorPanel.jsx';
 import AntennaPanel from './AntennaPanel.jsx';
+import RecorderPanel from './RecorderPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -70,6 +71,8 @@ export const PANELS = [
         Component: AntennaPanel,
         requires: (serverInfo) => !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled),
     },
+
+    { id: 'recorder', title: 'Recorder', icon: <Icon.Record />, dock: 'left', defaultOpen: false, Component: RecorderPanel },
 
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
     { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },

@@ -38,10 +38,12 @@ import {
 // and the newest spots — the ones worth seeing — are at the top either way.
 const PAGE = 10;
 
-// Ages tick over on their own, so the list re-renders on a slow clock rather
-// than per spot. One second would be needless work for a column that reads in
-// minutes; ten is fast enough that nothing looks stuck.
-const AGE_TICK_MS = 10000;
+// Ages count up on their own rather than freezing at whatever they read when
+// the spot arrived. A second, because the column reads in seconds for the first
+// minute and a coarser tick makes it visibly jump — and because the same clock
+// drives the age filter, so a spot leaves the list when it actually expires.
+// Only a page of rows is mounted, so this is ten-odd cheap re-renders a second.
+const AGE_TICK_MS = 1000;
 
 // Which feeds this instance has. The stream names and event names live in
 // lib/spotStore.js, which is what actually talks to the socket.

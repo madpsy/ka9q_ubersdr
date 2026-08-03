@@ -9,7 +9,7 @@
 // the ring. That is O(row) per frame and, unlike scrolling by blitting the
 // canvas onto itself, never accumulates resampling artefacts.
 
-import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
@@ -52,6 +52,113 @@ function NoiseReductionTag() {
             NR {dsp.filter.toUpperCase()}
         </span>
     );
+}
+
+// ---------------------------------------------------------------------------
+// Station ID overlay
+//
+// The block v1 paints in the top-right of its spectrum, reproduced line for
+// line so both UIs read identically:
+//
+//   1  bold 13px   "<callsign> - <name>"
+//   2  11px, 75%   location (+ the receiver's UTC offset)
+//   3  11px, 75%   local weather, when /api/weather is configured
+//   4  11px, 75%   active antenna, when the antenna switch is enabled
+//
+// Colour and the on/off switch are the operator's station_id_color and
+// station_id_overlay from /api/ui-config — the same values v1 reads.
+const WIND_DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
+
+function weatherLine(wd) {
+    if (!wd || !wd.weather || !wd.weather.length) return null;
+    const desc = String(wd.weather[0].description || '')
+        .split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const temp = wd.main && wd.main.temp !== undefined
+        ? `\u{1F321}️${Math.round(wd.main.temp)}°C` : '';
+    let wind = '';
+    if (wd.wind && wd.wind.speed !== undefined) {
+        const kmh = Math.round(wd.wind.speed * 3.6);
+        const dir = wd.wind.deg !== undefined ? WIND_DIRS[Math.round(wd.wind.deg / 45) % 8] : '';
+        wind = `\u{1F4A8}${kmh} km/h${dir ? ' ' + dir : ''}`;
+    }
+    return [desc, temp, wind].filter(Boolean).join('  ') || null;
+}
+
+function antennaLine(ant) {
+    if (!ant || !ant.enabled) return null;
+    if (ant.grounded) return 'Grounded';
+    if (ant.active_labels && ant.active_labels.length) return ant.active_labels.join(', ');
+    if (ant.selected && ant.selected.length) {
+        return ant.selected.map((n) => (ant.antenna_labels && ant.antenna_labels[n - 1]) || `Antenna ${n}`).join(', ');
+    }
+    return null;
+}
+
+// Only fetched while the overlay is actually on screen, so a waterfall-only
+// session makes neither request.
+function useStationOverlay(enabled) {
+    const { serverInfo } = useRadio();
+    const [weather, setWeather] = useState(null);
+    const [antenna, setAntenna] = useState(null);
+
+    const antEnabled = enabled && !!serverInfo?.ant_switch?.enabled;
+
+    useEffect(() => {
+        if (!enabled) return undefined;
+        let cancelled = false;
+        const load = () => fetch('/api/weather')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (!cancelled) setWeather(weatherLine(d)); })
+            .catch(() => { /* weather is optional — leave the line off */ });
+        load();
+        // 15 minutes, matching the server-side cache interval v1 tracks.
+        const id = setInterval(load, 15 * 60 * 1000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, [enabled]);
+
+    useEffect(() => {
+        if (!antEnabled) return undefined;
+        let cancelled = false;
+        setAntenna(antennaLine(serverInfo.ant_switch));   // seed from /api/description
+        const load = () => fetch('/api/ant-switch/status')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (!cancelled && d && d.enabled) setAntenna(antennaLine(d)); })
+            .catch(() => { /* keep the last known label */ });
+        load();
+        const id = setInterval(load, 30000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, [antEnabled, serverInfo]);
+
+    // Memoised: SpectrumView re-renders on every pointer move, and the draw
+    // loop only needs a new array when the text itself changes.
+    const rx = serverInfo?.receiver;
+    return useMemo(() => {
+        if (!enabled || !rx) return null;
+
+        const callsign = (rx.callsign || '').trim();
+        const name = (rx.name || '').trim();
+        if (!callsign && !name) return null;
+
+        // "Dalgety Bay, Scotland, UK (UTC +1h)" — v1 appends the offset, in
+        // hours and minutes, whenever the operator configured a timezone.
+        let tzSuffix = '';
+        if (typeof rx.timezone_offset === 'number') {
+            const sign = rx.timezone_offset >= 0 ? '+' : '-';
+            const abs = Math.abs(rx.timezone_offset);
+            const h = Math.floor(abs / 60);
+            const m = abs % 60;
+            tzSuffix = m > 0 ? ` (UTC ${sign}${h}h${m}m)` : ` (UTC ${sign}${h}h)`;
+        }
+        const location = (rx.location || '').trim();
+        const locationLine = location ? location + tzSuffix : tzSuffix.trim();
+
+        return [
+            { text: callsign && name ? `${callsign} - ${name}` : (callsign || name), bold: true, size: 13, alpha: 1 },
+            ...[locationLine, weather, antenna]
+                .filter(Boolean)
+                .map((text) => ({ text, bold: false, size: 11, alpha: 0.75 })),
+        ];
+    }, [enabled, rx, weather, antenna]);
 }
 
 export default function SpectrumView() {
@@ -102,6 +209,16 @@ export default function SpectrumView() {
     // in spectrum-only it ends up along the bottom and in waterfall-only along
     // the top — both the conventional placement — with no special casing.
     const viewMode = display.viewMode || 'split';
+
+    // Station ID overlay: split view only, and only if the operator left it on.
+    // The lines go into the gfx ref because the draw loop, not React, paints
+    // them — they change every few minutes at most.
+    const station = useStationOverlay(viewMode === 'split' && display.server.stationIdOverlay);
+    useEffect(() => {
+        gfx.current.station = station;
+        gfx.current.stationColor = display.server.stationIdColor;
+        gfx.current.dirty = true;
+    }, [station, display.server.stationIdColor]);
 
     // ---- sizing ---------------------------------------------------------
 
@@ -710,6 +827,35 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.lineTo(x, H);
         c.stroke();
     }
+
+    drawStationId(g, c, pxW, dpr);
+}
+
+// Top-right station block. Geometry is v1's: 6 px inset, 16 px line pitch, and
+// a 1 px black drop shadow under every line so the text stays legible over a
+// bright backdrop image or a strong signal.
+function drawStationId(g, c, pxW, dpr) {
+    const lines = g.station;
+    if (!lines || !lines.length) return;
+
+    const rightX = pxW - 6 * dpr;
+    let y = 6 * dpr;
+    const col = g.stationColor || '#ffffff';
+
+    c.save();
+    c.textAlign = 'right';
+    c.textBaseline = 'top';
+    for (const line of lines) {
+        c.font = `${line.bold ? 'bold ' : ''}${line.size * dpr}px ui-sans-serif, system-ui, sans-serif`;
+        c.globalAlpha = 1;
+        c.fillStyle = 'rgba(0,0,0,0.55)';
+        c.fillText(line.text, rightX + dpr, y + dpr);
+        c.globalAlpha = line.alpha;
+        c.fillStyle = col;
+        c.fillText(line.text, rightX, y);
+        y += 16 * dpr;
+    }
+    c.restore();
 }
 
 function drawScale(g, d, scale, pxW, cfg, tuning, cssW) {

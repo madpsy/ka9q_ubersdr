@@ -840,6 +840,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chip--button:hover { color: var(--text); border-color: var(--border-strong); }
 .chip--button.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
+/* Band buttons: condition colours are v1's, so the two UIs read the same at a
+   glance — green excellent, amber good, orange fair, red poor. */
+.band-chip { color: #fff; font-weight: 650; }
+.band-chip--excellent { background: #22c55e; border-color: #22c55e; }
+.band-chip--good { background: #fbbf24; border-color: #fbbf24; color: #14202e; }
+.band-chip--fair { background: #ff9800; border-color: #ff9800; color: #14202e; }
+.band-chip--poor { background: #ef4444; border-color: #ef4444; }
+.band-chip--none { background: var(--surface-3); border-color: var(--border); color: var(--text-dim); }
+.band-chip:hover { color: #fff; filter: brightness(1.1); }
+.band-chip--good:hover, .band-chip--fair:hover { color: #14202e; }
+.band-chip--none:hover { color: var(--text); filter: none; }
+/* Tuned band: v1 rings the active badge in white rather than recolouring it. */
+.band-chip.is-current { box-shadow: 0 0 0 2px var(--text), 0 0 10px rgba(255, 255, 255, 0.35); }
+
 /* =========================================================================
    Frequency dial
    ========================================================================= */

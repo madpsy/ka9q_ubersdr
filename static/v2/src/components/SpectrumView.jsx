@@ -700,6 +700,11 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.restore();
     }
 
+    // Station block sits on the backdrop, under everything else: the trace, the
+    // fill and the passband shading pass over it, so it reads as part of the
+    // background rather than as a label floating above the signal.
+    drawStationId(g, c, pxW, dpr);
+
     const yOf = (db) => H - ((db - floor) / range) * H;
 
     // dB gridlines every 10 dB, labelled on the left.
@@ -827,8 +832,6 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.lineTo(x, H);
         c.stroke();
     }
-
-    drawStationId(g, c, pxW, dpr);
 }
 
 // Top-right station block. Geometry is v1's: 6 px inset, 16 px line pitch, and

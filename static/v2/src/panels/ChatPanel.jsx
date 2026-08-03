@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from '../react.js';
 import { useChat } from '../chat/ChatContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
@@ -27,6 +27,7 @@ export default function ChatPanel() {
     const [nameError, setNameError] = useState(null);
     const inputRef = useRef(null);
     const logRef = useRef(null);
+    const jumped = useRef(false);
 
     // Our own name is always included, even when the server's user list has not
     // caught up — a mention of us is the one that must never fail to highlight.
@@ -45,13 +46,25 @@ export default function ChatPanel() {
         if (chat.unreadMentions > 0) chat.actions.markMentionsRead();
     }, [chat.messages.length]);
 
-    // Follow the conversation, but only when already at the bottom — otherwise
-    // reading scrollback would be yanked away by every new message. Safe to
-    // scroll here, unlike other panels: the log is its own scroller, so this
-    // cannot move the dock.
-    useEffect(() => {
+    // Start at the newest message, then follow the conversation — but only
+    // while already at the bottom, so reading scrollback is not yanked away by
+    // every new message.
+    //
+    // The first jump has to be unconditional: the buffered history arrives in
+    // one burst with the log still scrolled to the top, so the "near the bottom"
+    // test is false exactly when it matters and you land on the oldest message.
+    //
+    // Layout effect, not effect: this runs before paint, so the log never
+    // flashes at the top first. Safe to scroll here, unlike other panels — the
+    // log owns its scroller, so it cannot move the dock.
+    useLayoutEffect(() => {
         const el = logRef.current;
-        if (!el) return;
+        if (!el || chat.messages.length === 0) return;
+        if (!jumped.current) {
+            jumped.current = true;
+            el.scrollTop = el.scrollHeight;
+            return;
+        }
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
         if (nearBottom) el.scrollTop = el.scrollHeight;
     }, [chat.messages.length]);

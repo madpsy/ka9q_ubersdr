@@ -1664,6 +1664,49 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chat__sys { color: var(--text-faint); font-style: italic; }
 
 .chat__join, .chat__compose { display: flex; gap: 6px; align-items: center; }
+.chat__tools { position: relative; display: flex; align-items: center; gap: 2px; }
+.chat__tool {
+    border: 0;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 6px;
+    font-size: calc(14px * var(--ui-scale));
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.75;
+}
+.chat__tool:hover, .chat__tool.is-open { opacity: 1; background: var(--surface-hover); }
+/* The frequency button is a real icon rather than an emoji, so it inherits the
+   theme's colours and matches the rest of the chrome. */
+.chat__tool--icon { display: grid; place-items: center; padding: 4px; color: var(--text-dim); }
+.chat__tool--icon:hover { color: var(--accent); }
+
+/* Opens upward: the compose row sits at the bottom of the panel. */
+.chat__emoji {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 1px;
+    padding: 5px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.chat__emoji-item {
+    border: 0;
+    background: transparent;
+    padding: 3px;
+    border-radius: 5px;
+    font-size: calc(15px * var(--ui-scale));
+    line-height: 1;
+    cursor: pointer;
+}
+.chat__emoji-item:hover { background: var(--surface-hover); }
+
 .chat__hint { font-size: calc(11px * var(--ui-scale)); color: var(--warn); }
 .chat__error {
     padding: 5px 8px;

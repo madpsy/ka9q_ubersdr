@@ -18,6 +18,22 @@ function time(ts) {
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// The picker's set, in v1's order (chat-ui.js showEmojiPicker). Keeping it
+// identical means the same faces are one tap away in both frontends — and they
+// are the same characters v1's :shortcode: entry produces.
+const EMOJI = [
+    '😊', '😂', '🤣', '😍', '😎', '🤔', '👍', '👎',
+    '❤️', '🎉', '🔥', '⭐', '✨', '💯', '🚀', '🎯',
+    '👋', '🙏', '💪', '🤝', '👏', '🎵', '📻', '📡',
+    '🌟', '💡', '⚡', '🌈', '☀️', '🌙', '⚙️', '🔧',
+];
+
+// v1's wording exactly: "5242.252 KHz (USB)", so a frequency shared from either
+// frontend reads the same in the room.
+function freqMessage(frequency, mode) {
+    return `${(frequency / 1000).toFixed(3)} KHz (${String(mode).toUpperCase()})`;
+}
+
 function flag(code) {
     if (!code || code.length !== 2) return '';
     // Regional indicator letters: 'GB' -> 🇬🇧
@@ -26,12 +42,13 @@ function flag(code) {
 
 export default function ChatPanel() {
     const chat = useChat();
-    const { actions: radio, running } = useRadio();
+    const { actions: radio, running, tuning } = useRadio();
     const [draft, setDraft] = useState('');
     const [cursor, setCursor] = useState(0);
     const [sel, setSel] = useState(0);
     const [name, setName] = useState(chat.username);
     const [nameError, setNameError] = useState(null);
+    const [emojiOpen, setEmojiOpen] = useState(false);
     const inputRef = useRef(null);
     const logRef = useRef(null);
     const rootRef = useRef(null);
@@ -157,6 +174,23 @@ export default function ChatPanel() {
         if (!err) chat.actions.join(name.trim());
     };
 
+    // Inserts at the caret and keeps focus, so several emoji (or an emoji and a
+    // frequency) can be added without the caret jumping to the end each time.
+    const insert = (text) => {
+        const el = inputRef.current;
+        const at = el ? el.selectionStart : draft.length;
+        const to = el ? el.selectionEnd : draft.length;
+        const next = draft.slice(0, at) + text + draft.slice(to);
+        setDraft(next);
+        const pos = at + text.length;
+        setCursor(pos);
+        requestAnimationFrame(() => {
+            if (!el) return;
+            el.focus();
+            el.setSelectionRange(pos, pos);
+        });
+    };
+
     const submitMessage = (e) => {
         e.preventDefault();
         if (chat.actions.send(draft)) setDraft('');
@@ -237,6 +271,38 @@ export default function ChatPanel() {
                             onBlur={() => setSel(0)}
                             onKeyDown={onKeyDown}
                         />
+                        <div className="chat__tools">
+                            <button
+                                type="button"
+                                className="chat__tool chat__tool--icon"
+                                title={`Share ${formatFreqShort(tuning.frequency)} ${String(tuning.mode).toUpperCase()}`}
+                                onClick={() => insert(freqMessage(tuning.frequency, tuning.mode))}
+                            >
+                                <Icon.Radio size={15} />
+                            </button>
+                            <button
+                                type="button"
+                                className={`chat__tool${emojiOpen ? ' is-open' : ''}`}
+                                title="Insert emoji"
+                                onClick={() => setEmojiOpen((o) => !o)}
+                            >
+                                😊
+                            </button>
+                            {emojiOpen && (
+                                <div className="chat__emoji">
+                                    {EMOJI.map((e2) => (
+                                        <button
+                                            type="button"
+                                            key={e2}
+                                            className="chat__emoji-item"
+                                            onMouseDown={(ev) => { ev.preventDefault(); insert(e2); }}
+                                        >
+                                            {e2}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                         <Button type="submit" variant="primary" size="sm" disabled={!chat.connected}>Send</Button>
                         <Button
                             variant="ghost"

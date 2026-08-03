@@ -44,6 +44,21 @@ import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
+    // DX, digital and CW spots. One tab per feed the instance actually has, and
+    // the panel is absent entirely when it has none — no empty slot explaining
+    // that this receiver publishes no spots.
+    {
+        id: 'spots',
+        title: 'Spots',
+        icon: <Icon.Target />,
+        dock: 'left',
+        // As with the callsign panel: `fill` only bites in the bottom dock, so
+        // it stays declared for anyone who drags it there. The table is wide,
+        // and a side dock is not, so this is a panel people will often float.
+        fill: true,
+        Component: SpotsPanel,
+        requires: (serverInfo) => spotTabs(serverInfo).length > 0,
+    },
     {
         id: 'callsign',
         title: 'Callsign lookup',
@@ -129,18 +144,6 @@ export const PANELS = [
         // permanently empty — the same gate v1's service applies before it
         // starts polling.
         requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
-    },
-    // DX, digital and CW spots. One tab per feed the instance actually has, and
-    // the panel is absent entirely when it has none — no empty slot explaining
-    // that this receiver publishes no spots.
-    {
-        id: 'spots',
-        title: 'Spots',
-        icon: <Icon.Target />,
-        dock: 'bottom',
-        fill: true,
-        Component: SpotsPanel,
-        requires: (serverInfo) => spotTabs(serverInfo).length > 0,
     },
     { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
     // Off by default: a diagnostic, not something to occupy a slot in the dock

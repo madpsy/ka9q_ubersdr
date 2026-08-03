@@ -19,6 +19,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Empty, Icon, Segmented } from '../components/ui.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import { countryFlag } from '../lib/format.js';
+import { lookupCallsign } from '../compat/legacyBridge.js';
 import {
     POLL_MS, confidenceTone, countActivities, dialFreq, endpoint, groupByBand,
 } from '../lib/voiceActivity.js';
@@ -63,7 +64,7 @@ function Row({ activity, onTune, current }) {
                 san != null ? `Signal above noise: ${san.toFixed(1)} dB` : null,
                 activity.dx_country ? `${call} — ${activity.dx_country}` : null,
             ].filter(Boolean).join('\n')}
-            onClick={() => onTune(hz, (activity.mode || 'lsb').toLowerCase())}
+            onClick={() => onTune(hz, (activity.mode || 'lsb').toLowerCase(), call)}
         >
             <div className="va-row__top">
                 <span className="va-row__freq">{(hz / 1000).toFixed(1)}</span>
@@ -113,11 +114,14 @@ export default function VoiceActivityPanel() {
         return () => { cancelled = true; clearInterval(id); };
     }, []);
 
-    const tune = (hz, mode) => {
-        // Mode first: it resets the passband to that mode's default, which is
-        // what v1's popup asks for when it tunes (setMode(mode, false)).
-        actions.setMode(mode);
-        actions.setFrequency(hz);
+    const tune = (hz, mode, callsign) => {
+        // One tune, rather than a mode change that resets the passband followed
+        // by a frequency change. v1's popup asks for the mode's default
+        // passband too (setMode(mode, false)).
+        actions.tuneTo({ frequency: hz, mode });
+        // And route the callsign to the lookup popup if one is open — the same
+        // pairing v1's popup rows do. Never opens a window.
+        if (callsign) lookupCallsign(callsign);
     };
 
     const shown = scope === 'all'

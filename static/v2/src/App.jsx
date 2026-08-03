@@ -9,6 +9,7 @@ import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
+import LegacyBridge from './compat/LegacyBridge.jsx';
 
 function DesktopShell() {
     return (
@@ -53,6 +54,7 @@ export default function App() {
                 <RadioProvider>
                     <ChatProvider>
                         <PageTitle />
+                        <LegacyBridge />
                         {mobile ? <MobileShell /> : <DesktopShell />}
                     </ChatProvider>
                 </RadioProvider>

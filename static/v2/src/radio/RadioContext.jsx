@@ -514,6 +514,33 @@ export function RadioProvider({ children }) {
                 }
             },
 
+            // Frequency, mode and passband in one tune. The v1 popup pages set
+            // all three together (tuneToChannel), and doing it as separate
+            // actions would walk the receiver through an intermediate state —
+            // setMode resets the passband, so the old width would be sent for
+            // the new mode before the real one arrived.
+            tuneTo({ frequency, mode, bandwidthLow, bandwidthHigh }) {
+                const t = tuningRef.current;
+                const next = MODE_BY_ID[mode] ? mode : t.mode;
+                const def = MODE_BY_ID[next];
+                const l = bandwidthLimits(next);
+                const lo = bandwidthLow != null ? bandwidthLow : (next === t.mode ? t.bandwidthLow : def.low);
+                const hi = bandwidthHigh != null ? bandwidthHigh : (next === t.mode ? t.bandwidthHigh : def.high);
+                applyTuning({
+                    ...(frequency != null ? { frequency } : {}),
+                    mode: next,
+                    bandwidthLow: clamp(Math.round(lo), l.min, l.max),
+                    bandwidthHigh: clamp(Math.round(hi), l.min, l.max),
+                });
+                // Same reason as setMode: radiod reloads its preset on a mode
+                // change and the server re-applies the operator's SSB AGC
+                // defaults 500 ms later.
+                if (next !== t.mode && hasAGCSettings(next)) {
+                    clearTimeout(agcRefreshTimer.current);
+                    agcRefreshTimer.current = setTimeout(() => audioConn.requestAGC(), 800);
+                }
+            },
+
             setBandwidth(low, high) {
                 // Clamped here rather than only in the slider, so a stored or
                 // deep-linked passband cannot exceed the mode's limit either.

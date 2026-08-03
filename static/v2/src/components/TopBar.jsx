@@ -6,6 +6,8 @@ import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
+import { getSessionId } from '../radio/session.js';
+import { openCallsignLookup } from '../compat/legacyBridge.js';
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -240,6 +242,19 @@ export default function TopBar({ compact }) {
             </div>
 
             <SessionClock />
+
+            {/* v1 pins this next to the voice activity button on the band
+                bar, on the same condition. The page it opens is a v1 one and
+                talks to us through compat/LegacyBridge. */}
+            {!compact && serverInfo?.lookup_service && (
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Icon.Search />}
+                    title="Callsign lookup"
+                    onClick={() => openCallsignLookup({ uuid: getSessionId() })}
+                />
+            )}
 
             <Button
                 variant="ghost"

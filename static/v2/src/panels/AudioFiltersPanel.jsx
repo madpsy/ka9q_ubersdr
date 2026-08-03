@@ -241,7 +241,10 @@ export default function AudioFiltersPanel() {
     const eq = filters.eq;
     const notch = filters.notch;
     const bp = filters.bandpass;
-    const preset = detectPreset(eq.gains) || 'flat';
+    // Flat is a preset like any other; anything else that matches no preset is
+    // the user's own curve, so no button is lit and the label says so.
+    const flat = eq.gains.every((g) => !g) && !eq.makeup;
+    const preset = flat ? 'flat' : detectPreset(eq.gains);
 
     // The bandpass can only sit inside the audio this mode carries, which is
     // what v1 recomputes whenever the passband changes.
@@ -305,9 +308,10 @@ export default function AudioFiltersPanel() {
                     title="Equaliser"
                     enabled={eq.enabled}
                     onToggle={(v) => setEq({ enabled: v })}
-                    extra={<span className="section-label__note">{preset}</span>}
+                    extra={<span className="section-label__note">{preset || 'custom'}</span>}
                 >
-                    <Segmented options={PRESETS} value={preset} onChange={applyPreset} size="sm" />
+                    {/* An empty value matches no option, so nothing is lit. */}
+                    <Segmented options={PRESETS} value={preset || ''} onChange={applyPreset} size="sm" />
 
                     {/* Twelve bands, 60 Hz to 8 kHz, ±12 dB — v1's set. */}
                     <div className="eqbands">

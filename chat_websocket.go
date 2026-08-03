@@ -1188,9 +1188,47 @@ func (cm *ChatManager) GetActiveUserCount() int {
 	return len(cm.activeUsers)
 }
 
+// resolveMissingCountries fills in the country of any user who joined chat
+// before their audio session existed, and caches what it finds.
+//
+// A user's country comes from their audio session (GetSessionCountry), but it
+// is read once, in SetUsername. A client that starts listening and joins chat in
+// the same breath opens two sockets at once, and the chat one has less work to
+// do — so the join regularly wins the race and the user is recorded with no
+// country at all, for the rest of their session. The symptom is a missing flag
+// beside a name in the user list, on a receiver whose GeoIP is working fine for
+// everything else.
+//
+// Re-reading here rather than at join time makes it self-healing: the lookup
+// costs nothing once it has succeeded, and it succeeds as soon as the audio
+// session registers.
+func (cm *ChatManager) resolveMissingCountries(users []ChatUser) []ChatUser {
+	for i := range users {
+		if users[i].CountryCode != "" || users[i].Country != "" {
+			continue
+		}
+		// Deliberately not holding activeUsersMu across this: it takes the
+		// session manager's lock, and the two must never be nested.
+		country, code := cm.GetSessionCountry(users[i].SessionID)
+		if country == "" && code == "" {
+			continue
+		}
+		users[i].Country = country
+		users[i].CountryCode = code
+
+		cm.activeUsersMu.Lock()
+		if held, ok := cm.activeUsers[users[i].SessionID]; ok && held.CountryCode == "" && held.Country == "" {
+			held.Country = country
+			held.CountryCode = code
+		}
+		cm.activeUsersMu.Unlock()
+	}
+	return users
+}
+
 // SendActiveUsers sends the list of active users to a specific client
 func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
-	users := cm.GetActiveUsers()
+	users := cm.resolveMissingCountries(cm.GetActiveUsers())
 
 	userList := make([]map[string]interface{}, 0, len(users))
 	for _, user := range users {
@@ -1258,7 +1296,7 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 // BroadcastActiveUsers sends the list of active users to all clients
 // Kept for compatibility with user join/leave events
 func (cm *ChatManager) BroadcastActiveUsers() {
-	users := cm.GetActiveUsers()
+	users := cm.resolveMissingCountries(cm.GetActiveUsers())
 
 	userList := make([]map[string]interface{}, 0, len(users))
 	for _, user := range users {

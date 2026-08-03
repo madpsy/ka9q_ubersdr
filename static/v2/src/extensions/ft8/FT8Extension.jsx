@@ -93,7 +93,11 @@ function SpectrumStrip({ labels }) {
     }), [player]);
 
     return (
-        <div className="ft8__spectrum" style={{ height: SPECTRUM_H }}>
+        <div
+            className="ft8__spectrum"
+            style={{ height: SPECTRUM_H }}
+            title="Audio spectrum, 0–3 kHz. Labels are the callsigns decoded in the last cycle that transmitted on this alternation, at the tone each used"
+        >
             <canvas ref={canvas} className="ft8__spectrum-canvas" />
         </div>
     );
@@ -111,12 +115,16 @@ export default function FT8Extension() {
     const [decoding, setDecoding] = useState(false);
     const [messages, setMessages] = useState([]);
     const [stats, setStats] = useState(EMPTY_STATS);
+    // The spectrum starts off, unlike v1. It is a diagnostic — "is there
+    // anything in the passband?" — not something you read while working the
+    // decodes, and it costs the window 120 px and an FFT read per frame that
+    // nothing pays for until it is switched on.
     const [opts, setOpts] = useState({
         cqOnly: false,
         autoClear: false,
         autoScroll: true,
         latestOnly: true,
-        showSpectrum: true,
+        showSpectrum: false,
     });
     const [filterText, setFilterText] = useState('');
     const [sort, setSort] = useState({ column: null, dir: 'asc' });
@@ -261,15 +269,28 @@ export default function FT8Extension() {
     return (
         <div className="ft8">
             <div className="ft8__bar">
-                <span className={`ft8__status ft8__status--${statusTone}`}>{statusLabel}</span>
-                <span className="ft8__readout">
+                <span
+                    className={`ft8__status ft8__status--${statusTone}`}
+                    title="Whether the decoder is attached to your audio session on the server"
+                >
+                    {statusLabel}
+                </span>
+                <span className="ft8__readout" title="What the receiver is tuned to — the decoder hears exactly this">
                     FT8 · {(tuning.frequency / 1e6).toFixed(3)} MHz {tuning.mode.toUpperCase()} · BW {bandwidth} Hz
                 </span>
-                <span className="ft8__readout">Slot {stats.currentSlot || '--'}</span>
-                <span className={`ft8__readout${synced ? ' ft8__readout--ok' : ''}`}>
+                <span className="ft8__readout" title="The 15-second transmission cycle being decoded, counted from when the decoder started">
+                    Slot {stats.currentSlot || '--'}
+                </span>
+                <span
+                    className={`ft8__readout${synced ? ' ft8__readout--ok' : ''}`}
+                    title={`Whether anything decoded in the last ${Math.round(SYNC_TIMEOUT_MS / 1000)} seconds. Persistently waiting on a busy band usually means the receiver's clock is off`}
+                >
                     {synced ? 'Sync OK' : 'Sync waiting'}
                 </span>
-                <span className="ft8__readout">
+                <span
+                    className="ft8__readout"
+                    title="Decodes held, decodes in this cycle, then the decoder's own counters for the last cycle: candidate signals examined, and those thrown out by the error-correction and checksum tests"
+                >
                     {messages.length} held · {stats.slotCount} this slot
                     {stats.candidates != null ? ` · ${stats.candidates} cand` : ''}
                     {stats.ldpc != null ? ` · ${stats.ldpc} LDPC` : ''}
@@ -293,10 +314,36 @@ export default function FT8Extension() {
                 </select>
 
                 {decoding
-                    ? <Button size="sm" onClick={() => setDecoding(false)} icon={<Icon.Stop size={13} />}>Stop</Button>
-                    : <Button size="sm" variant="primary" onClick={start} disabled={!live} icon={<Icon.Power size={13} />}>Start</Button>}
-                <Button size="sm" variant="ghost" onClick={clear} disabled={!messages.length} icon={<Icon.Trash size={13} />} title="Clear decodes" />
-                <Button size="sm" variant="ghost" onClick={exportCSV} disabled={!messages.length} icon={<Icon.Download size={13} />} title="Export CSV" />
+                    ? (
+                        <Button
+                            size="sm"
+                            onClick={() => setDecoding(false)}
+                            icon={<Icon.Stop size={13} />}
+                            title="Stop decoding and release the decoder on the server"
+                        >
+                            Stop
+                        </Button>
+                    )
+                    : (
+                        <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={start}
+                            disabled={!live}
+                            icon={<Icon.Power size={13} />}
+                            title={live
+                                ? 'Start decoding the audio this receiver is tuned to'
+                                : 'Start the receiver first — the decoder runs on your audio session'}
+                        >
+                            Start
+                        </Button>
+                    )}
+                <Button size="sm" variant="ghost" onClick={clear} disabled={!messages.length} icon={<Icon.Trash size={13} />} title="Clear every decode held" />
+                <Button size="sm" variant="ghost" onClick={exportCSV} disabled={!messages.length} icon={<Icon.Download size={13} />} title="Download every decode held as CSV, oldest first" />
+                {/* Beside the transport controls rather than down among the
+                    filters: it says when the next decodes are due, which is
+                    what you look at after pressing Start. */}
+                <CycleProgress />
             </div>
 
             {!running && <div className="note note--tight">Start the receiver to decode.</div>}
@@ -309,20 +356,48 @@ export default function FT8Extension() {
             )}
             {state === 'error' && <div className="note note--warn">{error}</div>}
 
+            {/* Each switch says what it does on hover: two words of label is
+                not enough to distinguish "latest cycle" (a view filter) from
+                "auto-clear" (which actually discards decodes). */}
             <div className="ft8__controls">
-                <Switch label="CQ only" checked={opts.cqOnly} onChange={(v) => set({ cqOnly: v })} />
-                <Switch label="Latest cycle" checked={opts.latestOnly} onChange={(v) => set({ latestOnly: v })} />
-                <Switch label="Auto-clear" checked={opts.autoClear} onChange={(v) => set({ autoClear: v })} />
-                <Switch label="Auto-scroll" checked={opts.autoScroll} onChange={(v) => set({ autoScroll: v })} />
-                <Switch label="Spectrum" checked={opts.showSpectrum} onChange={(v) => set({ showSpectrum: v })} />
+                <Switch
+                    label="CQ only"
+                    title="Show only stations calling CQ, hiding replies, reports and 73s"
+                    checked={opts.cqOnly}
+                    onChange={(v) => set({ cqOnly: v })}
+                />
+                <Switch
+                    label="Latest cycle"
+                    title="Show only the cycle being decoded now. Off shows every decode still held — nothing is discarded either way"
+                    checked={opts.latestOnly}
+                    onChange={(v) => set({ latestOnly: v })}
+                />
+                <Switch
+                    label="Auto-clear"
+                    title={`Discard all but the newest ${AUTO_CLEAR_KEEP} decodes when a new cycle starts, and clear the list when you press Start`}
+                    checked={opts.autoClear}
+                    onChange={(v) => set({ autoClear: v })}
+                />
+                <Switch
+                    label="Auto-scroll"
+                    title="Keep the newest decode in view. Ignored while a column is sorted, since a new row can land anywhere"
+                    checked={opts.autoScroll}
+                    onChange={(v) => set({ autoScroll: v })}
+                />
+                <Switch
+                    label="Spectrum"
+                    title="Show the 0–3 kHz audio spectrum, labelled with the callsigns from the last cycle that transmitted on the same alternation"
+                    checked={opts.showSpectrum}
+                    onChange={(v) => set({ showSpectrum: v })}
+                />
                 <input
                     className="input ft8__filter"
                     type="text"
                     placeholder="Filter message or country…"
+                    title="Show only decodes whose message or country contains this text"
                     value={filterText}
                     onChange={(e) => setFilterText(e.target.value)}
                 />
-                <CycleProgress />
             </div>
 
             {opts.showSpectrum && running && <SpectrumStrip labels={labels} />}

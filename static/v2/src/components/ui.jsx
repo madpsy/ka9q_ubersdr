@@ -112,13 +112,17 @@ export function Slider({
     );
 }
 
-export function Switch({ checked, onChange, label, disabled }) {
+// `title` is the hover explanation. A switch's label has room for two words at
+// most, which is rarely enough to say what turning it on actually does, so the
+// sentence goes here rather than into the label or a note beside it.
+export function Switch({ checked, onChange, label, disabled, title }) {
     return (
         <button
             type="button"
             role="switch"
             aria-checked={!!checked}
             disabled={disabled}
+            title={title}
             className={`switch${checked ? ' is-on' : ''}`}
             onClick={() => onChange(!checked)}
         >

@@ -26,6 +26,7 @@ export const DEFAULTS = {
     markerBands: true,      // band allocations in the marker bar
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser
+    markerVoice: true,           // detected voice activity (only where the receiver has it)
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)

@@ -70,3 +70,93 @@ export function countActivities(groups) {
     for (const g of groups) n += g.activities.length;
     return n;
 }
+
+// What a marker says: the spotted callsign when the cluster gave us one,
+// otherwise "Voice" with the band, so a zoomed-out view showing several bands
+// can still tell them apart. v1's activityLabel.
+export function activityLabel(a) {
+    if (!a) return 'Voice';
+    return a.dx_callsign || `Voice${a.band ? ` ${a.band}` : ''}`;
+}
+
+// --- shared polling ---------------------------------------------------------
+//
+// One poll for the whole app, as v1's voice-activity-service.js is: the panel
+// and the marker bar both want this, the endpoint is rate limited per IP, and
+// two independent 5 s loops would burn that budget for the same bytes.
+//
+// Lazy in both directions — nothing is fetched until something subscribes, and
+// polling stops when the last subscriber goes. That matters because the panel
+// is unmounted while its section is collapsed and the markers are behind a
+// toggle, so the common case is nobody watching.
+
+const subscribers = new Set();
+let timer = null;
+let latest = null;
+let inFlight = false;
+
+function emit(state) {
+    latest = state;
+    for (const fn of subscribers) {
+        try { fn(state); } catch (err) { console.error('voice activity subscriber threw', err); }
+    }
+}
+
+function load() {
+    if (inFlight) return;
+    inFlight = true;
+    fetch(endpoint())
+        .then((r) => {
+            // Rate limited: keep what we have. The detector holds each
+            // frequency for 90 s after it was last seen, so a missed poll is
+            // not the signal going away.
+            if (r.status === 429) return null;
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
+        .then((d) => {
+            if (!d) return;
+            const groups = groupByBand(d.bands);
+            emit({ groups, activities: flatten(groups), error: '', at: Date.now() });
+        })
+        .catch((err) => {
+            // Keep the last good data and report alongside it, rather than
+            // blanking the panel and the markers on one failed request.
+            emit({
+                groups: (latest && latest.groups) || [],
+                activities: (latest && latest.activities) || [],
+                error: err.message || String(err),
+                at: latest ? latest.at : 0,
+            });
+        })
+        .finally(() => { inFlight = false; });
+}
+
+export function subscribeVoiceActivity(fn) {
+    subscribers.add(fn);
+    // Replay, so a panel opening mid-cycle renders immediately instead of
+    // showing "Loading…" for up to five seconds.
+    if (latest) {
+        try { fn(latest); } catch (err) { console.error('voice activity subscriber threw', err); }
+    }
+    if (timer === null) {
+        load();
+        timer = setInterval(load, POLL_MS);
+    }
+    return () => {
+        subscribers.delete(fn);
+        if (subscribers.size === 0 && timer !== null) {
+            clearInterval(timer);
+            timer = null;
+        }
+    };
+}
+
+// Test seam.
+export function _resetVoiceActivity() {
+    subscribers.clear();
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+    latest = null;
+    inFlight = false;
+}

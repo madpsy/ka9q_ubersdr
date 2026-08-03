@@ -9,8 +9,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
+import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
 import { formatFreqShort } from '../lib/format.js';
+import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
 const ROW_H = 15;         // one bookmark row
@@ -31,8 +32,14 @@ const SERVER_INK = '#000000';
 const LOCAL_PILL = 'rgba(52, 152, 219, 0.95)';
 const LOCAL_INK = '#ffffff';
 
+// Voice activity: purple, as v1 paints it (voice-activity-markers.js). The
+// point of a third colour is that these are not bookmarks — nobody chose them,
+// they are what the detector heard in the last 90 seconds.
+const VOICE_PILL = 'rgba(155, 89, 182, 0.95)';
+const VOICE_INK = '#ffffff';
+
 export default function MarkerBar({ width }) {
-    const { view, actions, catalog, tuning } = useRadio();
+    const { view, actions, catalog, tuning, serverInfo } = useRadio();
     const display = useDisplay();
     const canvasRef = useRef(null);
     const hitsRef = useRef({ bookmarks: [], bands: [] });
@@ -43,6 +50,17 @@ export default function MarkerBar({ width }) {
     // are worth keeping on screen even when 2450 published ones are not.
     const showServer = display.markerBookmarks !== false;
     const showLocal = display.markerLocalBookmarks !== false;
+    // Off unless the receiver runs the detector at all — the toggle would
+    // otherwise promise markers that can never appear.
+    const showVoice = display.markerVoice !== false && !!(serverInfo && serverInfo.noise_floor);
+
+    // One shared poll with the voice activity panel; subscribing is what starts
+    // it, so with the toggle off nothing is fetched.
+    const [voice, setVoice] = useState([]);
+    useEffect(() => {
+        if (!showVoice) { setVoice([]); return undefined; }
+        return subscribeVoiceActivity((state) => setVoice(state.activities || []));
+    }, [showVoice]);
 
     const colors = useMemo(
         () => bandColors(display.server.config.band_color_intensity),
@@ -87,7 +105,7 @@ export default function MarkerBar({ width }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, width, MARKER_BAR_H);
 
-        hitsRef.current = { bookmarks: [], bands: [] };
+        hitsRef.current = { bookmarks: [], bands: [], voice: [] };
         if (!span) return;
 
         const startFreq = centerFreq - span / 2;
@@ -132,6 +150,8 @@ export default function MarkerBar({ width }) {
         }
 
         // ---- bookmarks ---------------------------------------------------
+        // Kept so the voice layer below can avoid the space they took.
+        let placedMarks = [];
         if (marks.length) {
             c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
             c.textBaseline = 'middle';
@@ -149,11 +169,11 @@ export default function MarkerBar({ width }) {
                 return w;
             };
 
-            const placed = layoutBookmarks({
+            placedMarks = layoutBookmarks({
                 sorted: marks, startFreq, endFreq, width, measure,
             });
 
-            for (const p of placed) {
+            for (const p of placedMarks) {
                 const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
                 const x = p.x;
                 const w = p.width;
@@ -184,12 +204,58 @@ export default function MarkerBar({ width }) {
             }
         }
 
+        // ---- voice activity ----------------------------------------------
+        // After the bookmarks, and seeded with where they landed, so a
+        // detection never covers a bookmark. Same order v1 draws in.
+        if (showVoice && voice.length) {
+            c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+
+            const items = [];
+            for (const a of voice) {
+                const freq = dialFreq(a);
+                if (!freq || freq < startFreq || freq > endFreq) continue;
+                const label = activityLabel(a);
+                items.push({
+                    activity: a,
+                    label,
+                    x: ((freq - startFreq) / span) * width,
+                    width: Math.min(140, c.measureText(label).width + 10),
+                });
+            }
+            items.sort((a, b) => a.x - b.x);
+
+            for (const p of assignRows(items, placedMarks)) {
+                const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
+                const { x, width: w } = p;
+
+                c.strokeStyle = 'rgba(155, 89, 182, 0.55)';
+                c.lineWidth = 1;
+                c.beginPath();
+                c.moveTo(Math.round(x) + 0.5, y + PILL_H);
+                c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+                c.stroke();
+
+                c.fillStyle = VOICE_PILL;
+                roundRect(c, x - w / 2, y, w, PILL_H, 3);
+                c.fill();
+                c.strokeStyle = 'rgba(255,255,255,0.55)';
+                c.stroke();
+
+                c.fillStyle = VOICE_INK;
+                clipText(c, p.label, x, y + PILL_H / 2, w - 6);
+
+                hitsRef.current.voice.push({ x, y, w, h: PILL_H, activity: p.activity, label: p.label });
+            }
+        }
+
         // Baseline the stems land on.
         c.fillStyle = dim;
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
-    }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency]);
+    }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency, showVoice, voice]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -201,6 +267,10 @@ export default function MarkerBar({ width }) {
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
         if (hit) return { kind: 'bookmark', ...hit };
+        const v = hitsRef.current.voice.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (v) return { kind: 'voice', ...v };
         if (y <= BAND_H) {
             // Narrow allocations are drawn last (on top), so search backwards.
             for (let i = hitsRef.current.bands.length - 1; i >= 0; i--) {
@@ -219,14 +289,20 @@ export default function MarkerBar({ width }) {
             x: e.clientX - r.left,
             text: hit.kind === 'bookmark'
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
-                : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
+                : hit.kind === 'voice'
+                    ? voiceTip(hit.activity)
+                    : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
         });
     }, [locate]);
 
     const onClick = useCallback((e) => {
         const hit = locate(e);
         if (!hit) return;
-        if (hit.kind === 'bookmark') {
+        if (hit.kind === 'voice') {
+            const freq = dialFreq(hit.activity);
+            actions.tuneTo({ frequency: freq, mode: (hit.activity.mode || 'lsb').toLowerCase() });
+            actions.ensureVisible(freq);
+        } else if (hit.kind === 'bookmark') {
             if (hit.item.mode) actions.setMode(hit.item.mode);
             actions.setFrequency(hit.item.frequency);
             // A pill sits at the edge of the bar as often as the middle, and
@@ -241,7 +317,7 @@ export default function MarkerBar({ width }) {
         }
     }, [locate, actions]);
 
-    if (!showBands && !showServer && !showLocal) return null;
+    if (!showBands && !showServer && !showLocal && !showVoice) return null;
 
     return (
         <div className="markerbar" style={{ height: MARKER_BAR_H }}>
@@ -262,6 +338,18 @@ export default function MarkerBar({ width }) {
             )}
         </div>
     );
+}
+
+// What the detector found, not what someone named — so the tooltip leads with
+// the measurement rather than repeating the label already on the pill.
+function voiceTip(a) {
+    const parts = [
+        `${formatFreqShort(dialFreq(a))} ${(a.mode || 'LSB').toUpperCase()}`,
+        a.dx_callsign ? (a.dx_country ? `${a.dx_callsign} — ${a.dx_country}` : a.dx_callsign) : 'Voice activity',
+    ];
+    if (a.signal_above_noise != null) parts.push(`${a.signal_above_noise.toFixed(1)} dB`);
+    if (a.confidence != null) parts.push(`${Math.round(a.confidence * 100)}%`);
+    return parts.join(' · ');
 }
 
 function roundRect(c, x, y, w, h, r) {

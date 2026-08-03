@@ -37,7 +37,12 @@ export function visibleBookmarks(sorted, startFreq, endFreq) {
 // reshuffling which ones survive.
 export const ROW_GAP_PX = 3;
 
-export function assignRows(items) {
+// `occupied` is space already taken by an earlier layer — the voice activity
+// markers are placed after the bookmarks and must not land on top of them.
+// Entries need only `{ x, width, row }`; they are seeded into the rows but
+// never returned, since their own layer has already drawn them. v1 does the
+// same thing by pre-seeding from the bookmark/DX/CW position arrays.
+export function assignRows(items, occupied = []) {
     // Two rows, each holding its placed markers in x order.
     const rows = [[], []];
     const out = [];
@@ -74,6 +79,11 @@ export function assignRows(items) {
         rows[row].splice(seek(rows[row], item.x), 0, item);
         out.push(item);
     };
+
+    for (const o of occupied) {
+        const r = o.row === 1 ? 1 : 0;
+        rows[r].splice(seek(rows[r], o.x), 0, { x: o.x, width: o.width });
+    }
 
     // Local bookmarks claim their space first. They are yours and there are a
     // handful; a published bookmark 3 px away should be the one that gives way.

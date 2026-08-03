@@ -128,6 +128,20 @@ t('the count is across every group', () => {
     assert.strictEqual(va.countActivities(va.groupByBand(sample)), 4);
 });
 
+// --- marker labels ----------------------------------------------------------
+
+t('a correlated spot is labelled with its callsign', () => {
+    assert.strictEqual(va.activityLabel({ dx_callsign: 'DK7DX', band: '40m' }), 'DK7DX');
+});
+
+t('an uncorrelated one says Voice, with the band to tell them apart', () => {
+    // Zoomed out the spectrum spans several bands, and a row of identical
+    // "Voice" pills would say nothing about which is which.
+    assert.strictEqual(va.activityLabel({ band: '20m' }), 'Voice 20m');
+    assert.strictEqual(va.activityLabel({}), 'Voice');
+    assert.strictEqual(va.activityLabel(null), 'Voice');
+});
+
 // --- endpoint ---------------------------------------------------------------
 
 t('the endpoint carries v1\'s confidence filter', () => {
@@ -135,5 +149,109 @@ t('the endpoint carries v1\'s confidence filter', () => {
     assert.strictEqual(va.endpoint(), '/api/noisefloor/voice-activity/all?min_confidence=0.7');
 });
 
-if (process.exitCode) console.log('\nvoice activity tests FAILED');
-else console.log(`\nall ${pass} voice activity tests passed`);
+// --- the shared poll --------------------------------------------------------
+//
+// The panel and the marker bar both want this data, and the endpoint is rate
+// limited per IP — so there must be exactly one loop however many are watching,
+// and none at all when nobody is.
+
+// The service is a module singleton, so these must not overlap.
+const ta = (name, fn) => {
+    chain = chain.then(() => fn().then(
+        () => { console.log('ok    ' + name); pass++; },
+        (e) => { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; },
+    ));
+};
+let chain = Promise.resolve();
+
+// Lets the service's promise chain settle without waiting on real timers.
+const settle = () => new Promise((r) => setImmediate(r));
+
+function stubFetch(payload) {
+    const state = { calls: 0 };
+    global.fetch = () => {
+        state.calls++;
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+    };
+    return state;
+}
+
+ta('two subscribers share one request, not one each', async () => {
+    va._resetVoiceActivity();
+    const f = stubFetch({ bands: sample });
+    const a = [];
+    const b = [];
+    const offA = va.subscribeVoiceActivity((s) => a.push(s));
+    const offB = va.subscribeVoiceActivity((s) => b.push(s));
+    await settle();
+    assert.strictEqual(f.calls, 1, `${f.calls} requests for two subscribers`);
+    assert.strictEqual(a.length, 1);
+    assert.strictEqual(b.length, 1);
+    assert.deepStrictEqual(a[0].groups.map((g) => g.band), ['160m', '20m', '10m']);
+    offA(); offB();
+});
+
+ta('a late subscriber gets the last state at once', async () => {
+    va._resetVoiceActivity();
+    stubFetch({ bands: sample });
+    const offA = va.subscribeVoiceActivity(() => {});
+    await settle();
+    let replayed = null;
+    const offB = va.subscribeVoiceActivity((s) => { replayed = s; });
+    // Synchronously, not on the next poll — otherwise a panel opening
+    // mid-cycle shows "Loading…" for five seconds.
+    assert.ok(replayed, 'no replay to the late subscriber');
+    assert.strictEqual(va.countActivities(replayed.groups), 4);
+    offA(); offB();
+});
+
+ta('nothing is fetched until something subscribes', async () => {
+    va._resetVoiceActivity();
+    const f = stubFetch({ bands: sample });
+    await settle();
+    assert.strictEqual(f.calls, 0);
+    const off = va.subscribeVoiceActivity(() => {});
+    await settle();
+    assert.strictEqual(f.calls, 1);
+    off();
+});
+
+ta('a failed request keeps the last data and reports alongside it', async () => {
+    va._resetVoiceActivity();
+    stubFetch({ bands: sample });
+    const off = va.subscribeVoiceActivity(() => {});
+    await settle();
+
+    // Dropping the last subscriber stops the loop but keeps the data, so
+    // resubscribing drives a fresh request without waiting on the 5 s timer —
+    // and is a real path anyway (the panel being closed and reopened).
+    off();
+    global.fetch = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve(null) });
+
+    const seen = [];
+    const off2 = va.subscribeVoiceActivity((s) => seen.push(s));
+    await settle();
+
+    const last = seen[seen.length - 1];
+    assert.ok(/500/.test(last.error), `expected the error to be reported, got ${last.error}`);
+    // The detector holds each frequency for 90 s, so one bad poll must not
+    // blank the panel and the markers.
+    assert.strictEqual(va.countActivities(last.groups), 4);
+    off2();
+});
+
+ta('a rate-limited reply is not an error and changes nothing', async () => {
+    va._resetVoiceActivity();
+    global.fetch = () => Promise.resolve({ ok: false, status: 429, json: () => Promise.resolve(null) });
+    const seen = [];
+    const off = va.subscribeVoiceActivity((s) => seen.push(s));
+    await settle();
+    assert.deepStrictEqual(seen, [], 'a 429 should leave the display alone');
+    off();
+});
+
+chain.then(() => {
+    va._resetVoiceActivity();
+    if (process.exitCode) console.log('\nvoice activity tests FAILED');
+    else console.log(`\nall ${pass} voice activity tests passed`);
+});

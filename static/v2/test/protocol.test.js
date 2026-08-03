@@ -418,6 +418,42 @@ t('the visible window is sliced, not scanned', () => {
     assert.ok(mk.visibleBookmarks(MARKS, exact, exact).some((b) => b.frequency === exact));
 });
 
+// Voice activity markers are laid out after the bookmarks and must not land on
+// them — assignRows takes the bookmark placements as already-occupied space.
+t('a seeded row is not handed out again', () => {
+    const occupied = [{ x: 100, width: 60, row: 0 }];
+    const placed = mk.assignRows([{ x: 100, width: 60 }], occupied);
+    assert.strictEqual(placed.length, 1);
+    assert.strictEqual(placed[0].row, 1, 'should have been pushed to the free row');
+});
+
+t('seeded markers are never returned as placements of their own', () => {
+    const occupied = [{ x: 10, width: 20, row: 0 }, { x: 200, width: 20, row: 1 }];
+    const placed = mk.assignRows([{ x: 100, width: 20 }], occupied);
+    assert.strictEqual(placed.length, 1);
+    assert.strictEqual(placed[0].x, 100);
+});
+
+t('a marker with both rows taken at that x is dropped, not stacked', () => {
+    const occupied = [{ x: 50, width: 40, row: 0 }, { x: 50, width: 40, row: 1 }];
+    assert.deepStrictEqual(mk.assignRows([{ x: 50, width: 40 }], occupied), []);
+});
+
+t('seeding leaves clear space usable', () => {
+    const occupied = [{ x: 50, width: 40, row: 0 }, { x: 50, width: 40, row: 1 }];
+    const placed = mk.assignRows([{ x: 300, width: 40 }], occupied);
+    assert.strictEqual(placed.length, 1);
+    assert.strictEqual(placed[0].row, 0);
+});
+
+t('with nothing seeded the layout is unchanged', () => {
+    const items = [{ x: 10, width: 20 }, { x: 100, width: 20 }];
+    assert.deepStrictEqual(
+        mk.assignRows(items.map((i) => ({ ...i }))),
+        mk.assignRows(items.map((i) => ({ ...i })), []),
+    );
+});
+
 t('lowerBound finds the first index at or after the target', () => {
     const arr = [10, 20, 30, 40].map((f) => ({ frequency: f }));
     assert.strictEqual(mk.lowerBound(arr, 5), 0);

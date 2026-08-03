@@ -1,5 +1,6 @@
 import React from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
@@ -7,6 +8,7 @@ import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui
 
 export default function DisplayPanel() {
     const d = useDisplay();
+    const { serverInfo } = useRadio();
     const { floatOrder } = useLayout();
     const viewMode = d.viewMode || 'split';
     const hasFloats = floatOrder.length > 0;
@@ -64,6 +66,13 @@ export default function DisplayPanel() {
             <Field label="Local bookmarks" inline>
                 <Switch checked={d.markerLocalBookmarks !== false} onChange={(v) => d.set({ markerLocalBookmarks: v })} />
             </Field>
+            {/* Only where the receiver runs the detector: with no noise floor
+                monitor there is nothing behind this switch. */}
+            {serverInfo?.noise_floor && (
+                <Field label="Voice activity" inline>
+                    <Switch checked={d.markerVoice !== false} onChange={(v) => d.set({ markerVoice: v })} />
+                </Field>
+            )}
 
             <div className="divider" />
 

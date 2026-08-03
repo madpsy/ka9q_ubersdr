@@ -207,13 +207,14 @@ function withFetch(impl, fn) {
     return Promise.resolve(fn()).finally(() => { global.fetch = prev; });
 }
 
+// Sequential: each of these swaps global.fetch for its own stub.
 const ta = (name, fn) => {
-    pending.push(fn().then(
+    chain = chain.then(() => fn().then(
         () => { console.log('ok    ' + name); pass++; },
         (e) => { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; },
     ));
 };
-const pending = [];
+let chain = Promise.resolve();
 
 ta('the request carries the callsign and the session UUID', () => withFetch(
     (url) => {
@@ -305,7 +306,7 @@ t('an empty callsign is never dispatched', () => {
     off();
 });
 
-Promise.all(pending).then(() => {
+chain.then(() => {
     if (process.exitCode) console.log('\ncallsign tests FAILED');
     else console.log(`\nall ${pass} callsign tests passed`);
 });

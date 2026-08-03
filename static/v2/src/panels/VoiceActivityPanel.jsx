@@ -21,9 +21,7 @@ import { bandForFrequency } from '../lib/bands.js';
 import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
-import {
-    POLL_MS, confidenceTone, countActivities, dialFreq, endpoint, groupByBand,
-} from '../lib/voiceActivity.js';
+import { confidenceTone, countActivities, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 
 // v1's popup geometry (app.js openAllBandsVoiceActivityPopup).
 const POPUP_W = 550;
@@ -90,30 +88,13 @@ export default function VoiceActivityPanel() {
 
     const band = bandForFrequency(tuning.frequency);
 
-    useEffect(() => {
-        let cancelled = false;
-
-        const load = () => {
-            fetch(endpoint())
-                .then((r) => {
-                    // Rate limited: keep whatever is on screen rather than
-                    // blanking the panel, exactly as v1's service does.
-                    if (r.status === 429) return null;
-                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                    return r.json();
-                })
-                .then((d) => {
-                    if (cancelled || !d) return;
-                    setGroups(groupByBand(d.bands));
-                    setError('');
-                })
-                .catch((err) => { if (!cancelled) setError(err.message || String(err)); });
-        };
-
-        load();
-        const id = setInterval(load, POLL_MS);
-        return () => { cancelled = true; clearInterval(id); };
-    }, []);
+    // One poll shared with the marker bar — see lib/voiceActivity.js. The
+    // subscription is what starts it, and dropping it when this panel is
+    // collapsed is what stops it (unless the markers are still watching).
+    useEffect(() => subscribeVoiceActivity((state) => {
+        setGroups(state.groups);
+        setError(state.error || '');
+    }), []);
 
     const tune = (hz, mode, callsign) => {
         // One tune, rather than a mode change that resets the passband followed

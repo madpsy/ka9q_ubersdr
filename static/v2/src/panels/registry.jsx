@@ -28,6 +28,7 @@ import SignalPanel from './SignalPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
+import ScopePanel from './ScopePanel.jsx';
 import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
 import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
@@ -75,7 +76,8 @@ export const PANELS = [
 
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', Component: SignalPanel },
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', Component: AudioPanel },
-    { id: 'display', title: 'Display', icon: <Icon.Waves />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
+    { id: 'scope', title: 'Audio scope', icon: <Icon.Waves />, dock: 'right', defaultOpen: false, Component: ScopePanel },
+    { id: 'display', title: 'Display', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
     { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 

@@ -15,11 +15,17 @@ function getOpusDecoderClass() {
     return null;
 }
 
+// Resting FFT size. Nothing reads the analyser unless the scope panel is open,
+// and a rebuilt context should not come back at whatever size that panel last
+// asked for.
+const ANALYSER_IDLE_FFT = 1024;
+
 export class AudioPlayer {
     constructor() {
         this.ctx = null;
         this.gain = null;
         this.analyser = null;
+        this.analyserFft = ANALYSER_IDLE_FFT;
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -126,6 +132,24 @@ export class AudioPlayer {
         if (this.started) this.ctx.resume().catch(() => {});
     }
 
+    // Called by the audio scope while it is mounted. Returns the analyser to
+    // read from, or null before audio has started. Releasing drops the FFT back
+    // to its resting size so a collapsed panel costs nothing.
+    acquireAnalyser(fftSize) {
+        this.analyserFft = fftSize;
+        if (this.analyser) {
+            try { this.analyser.fftSize = fftSize; } catch (e) { /* invalid size */ }
+        }
+        return this.analyser;
+    }
+
+    releaseAnalyser() {
+        this.analyserFft = ANALYSER_IDLE_FFT;
+        if (this.analyser) {
+            try { this.analyser.fftSize = ANALYSER_IDLE_FFT; } catch (e) { /* ignore */ }
+        }
+    }
+
     _createContext(sampleRate) {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         this.requestedRate = sampleRate;
@@ -139,7 +163,11 @@ export class AudioPlayer {
         this.sampleRate = this.ctx.sampleRate;
         this.gain = this.ctx.createGain();
         this.analyser = this.ctx.createAnalyser();
-        this.analyser.fftSize = 1024;
+        // Sized for whoever is looking: the node is always in the graph, but it
+        // only does FFT work when something reads it, and the audio scope
+        // raises this while it is on screen (see acquireAnalyser).
+        this.analyser.fftSize = this.analyserFft || ANALYSER_IDLE_FFT;
+        this.analyser.smoothingTimeConstant = 0.5;
         this.gain.connect(this.analyser);
         this.analyser.connect(this.ctx.destination);
         this._applyGain();

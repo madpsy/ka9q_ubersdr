@@ -32,6 +32,9 @@ export const DEFAULTS = {
     floatOpacity: 1,        // resting opacity of floating panel windows
     snapHz: 1,              // click-to-tune rounding
     chatUsersWidth: 170,    // px given to the chat user list, drag to change
+    scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
+    scopeFft: 4096,         // analyser FFT size while that panel is open
+    scopeTimebase: 20,      // ms across the oscilloscope
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };

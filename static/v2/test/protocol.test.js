@@ -10,6 +10,7 @@ const {
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
 const mk = require('./.build/markers.cjs');
+const ab = require('./.build/audioband.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
@@ -902,6 +903,52 @@ t('JSON PCM fallback deinterleaves stereo', () => {
     assert.strictEqual(pcm.channels, 2);
     assert.ok(Math.abs(pcm.planes[0][0] - 1000 / 32768) < 1e-6);
     assert.ok(Math.abs(pcm.planes[1][0] + 1000 / 32768) < 1e-6);
+});
+
+
+// ── Audio scope: which part of the decoded audio carries the signal ──────────
+// v1 works this out in app.js getFrequencyBinMapping. Getting it wrong shows an
+// empty waterfall (LSB mapped to negative bins) or a mostly-empty one (drawing
+// the whole Nyquist when only 2.7 kHz is in use).
+
+t('USB shows its passband', () => {
+    assert.deepStrictEqual(ab.audioWindow(50, 2700), { startFreq: 50, endFreq: 2700 });
+});
+
+t('LSB is mirrored into positive audio frequencies', () => {
+    // -2700..-50 demodulates to 50..2700 Hz of audio, not to negative bins.
+    assert.deepStrictEqual(ab.audioWindow(-2700, -50), { startFreq: 50, endFreq: 2700 });
+});
+
+t('AM straddles zero, so the window starts at DC', () => {
+    assert.deepStrictEqual(ab.audioWindow(-5000, 5000), { startFreq: 0, endFreq: 5000 });
+});
+
+t('CW is centred on the 500 Hz tone offset', () => {
+    // radiod puts the CW note at 500 Hz, so a +/-200 Hz filter is 300..700 Hz.
+    assert.deepStrictEqual(ab.audioWindow(-200, 200), { startFreq: 300, endFreq: 700 });
+    assert.ok(ab.isCwPassband(-200, 200));
+    assert.ok(!ab.isCwPassband(50, 2700));
+});
+
+t('bins cover the passband, not the whole Nyquist', () => {
+    // 12 kHz stream -> 6 kHz Nyquist; USB 50..2700 is under half of it.
+    const { start, count } = ab.audioBins(50, 2700, 12000, 1024);
+    assert.strictEqual(start, Math.floor((50 / 6000) * 1024));
+    assert.strictEqual(count, Math.round((2650 / 6000) * 1024));
+    assert.ok(start + count <= 1024);
+});
+
+t('a passband wider than the stream is clamped to Nyquist', () => {
+    // AM +/-8 kHz on a 12 kHz stream: the audio above 6 kHz does not exist.
+    const r = ab.audioBins(-8000, 8000, 12000, 1024);
+    assert.strictEqual(r.endFreq, 6000);
+    assert.ok(r.start + r.count <= 1024);
+});
+
+t('a degenerate rate or bin count yields no bins', () => {
+    assert.strictEqual(ab.audioBins(50, 2700, 0, 1024).count, 0);
+    assert.strictEqual(ab.audioBins(50, 2700, 12000, 0).count, 0);
 });
 
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

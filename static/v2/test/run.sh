@@ -26,6 +26,8 @@ esbuild ../src/lib/format.js --bundle --format=cjs --platform=node \
     --outfile=.build/format.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
+esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audioband.cjs --log-level=warning
 esbuild ../src/lib/mentions.js --bundle --format=cjs --platform=node \
     --outfile=.build/mentions.cjs --log-level=warning
 

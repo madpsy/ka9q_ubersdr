@@ -1106,6 +1106,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Audio scope
+   ========================================================================= */
+
+.scope {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--spec-bg);
+}
+.scope__canvas { display: block; width: 100%; }
+.scope__ruler { border-top: 1px solid var(--border); }
+
+/* =========================================================================
    Local bookmarks
    ========================================================================= */
 

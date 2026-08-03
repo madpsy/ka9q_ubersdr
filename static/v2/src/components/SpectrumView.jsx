@@ -533,7 +533,8 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     // Operator backdrop, stretched to the spectrum area and blended over the
     // background colour — split view only, where there is enough height for it
     // to read as anything other than a smear.
-    if (d.viewMode === 'split' && g.bgImage && g.bgOpacity > 0) {
+    const overImage = d.viewMode === 'split' && !!g.bgImage && g.bgOpacity > 0;
+    if (overImage) {
         c.save();
         c.globalAlpha = Math.max(0, Math.min(1, g.bgOpacity));
         c.drawImage(g.bgImage, 0, 0, pxW, H);
@@ -543,22 +544,42 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     const yOf = (db) => H - ((db - floor) / range) * H;
 
     // dB gridlines every 10 dB, labelled on the left.
+    //
+    // Over a backdrop the usual near-transparent white is invisible on anything
+    // but a dark image, so the lines are strengthened and the labels drawn solid
+    // white with a dark shadow — which keeps them readable over a light image
+    // too. Lines and labels are drawn in separate passes so the shadow applies
+    // only to the text.
     if (d.grid) {
-        c.strokeStyle = colGrid;
-        c.lineWidth = 1;
-        c.font = `${10 * dpr}px ui-monospace, monospace`;
-        c.fillStyle = colGrid;
-        c.textBaseline = 'bottom';
         const step = range > 80 ? 20 : 10;
         const startDb = Math.ceil(floor / step) * step;
-        for (let db = startDb; db < floor + range; db += step) {
+        const ticks = [];
+        for (let db = startDb; db < floor + range; db += step) ticks.push(db);
+
+        c.strokeStyle = overImage ? 'rgba(255,255,255,0.32)' : colGrid;
+        c.lineWidth = 1;
+        for (const db of ticks) {
             const y = Math.round(yOf(db)) + 0.5;
             c.beginPath();
             c.moveTo(0, y);
             c.lineTo(pxW, y);
             c.stroke();
+        }
+
+        c.font = `${10 * dpr}px ui-monospace, monospace`;
+        c.textBaseline = 'bottom';
+        c.textAlign = 'left';
+        c.fillStyle = overImage ? '#ffffff' : colGrid;
+        if (overImage) {
+            c.save();
+            c.shadowColor = 'rgba(0,0,0,0.85)';
+            c.shadowBlur = 3 * dpr;
+        }
+        for (const db of ticks) {
+            const y = Math.round(yOf(db)) + 0.5;
             c.fillText(`${db.toFixed(0)}`, 4 * dpr, y - 2 * dpr);
         }
+        if (overImage) c.restore();
     }
 
     // Passband shading around the tuned frequency.
@@ -590,14 +611,17 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         g.peak.fill(-200);
     }
 
-    // Filled trace.
-    c.beginPath();
-    c.moveTo(0, H);
-    for (let x = 0; x < pxW; x++) c.lineTo(x, yOf(trace[x]));
-    c.lineTo(pxW, H);
-    c.closePath();
-    c.fillStyle = g.fillGrad;
-    c.fill();
+    // Area under the trace. Turning this off leaves a bare line, which shows
+    // more of the backdrop and makes overlapping signals easier to separate.
+    if (d.fill !== false) {
+        c.beginPath();
+        c.moveTo(0, H);
+        for (let x = 0; x < pxW; x++) c.lineTo(x, yOf(trace[x]));
+        c.lineTo(pxW, H);
+        c.closePath();
+        c.fillStyle = g.fillGrad;
+        c.fill();
+    }
 
     c.beginPath();
     for (let x = 0; x < pxW; x++) {

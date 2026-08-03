@@ -95,6 +95,10 @@ export default function DisplayPanel() {
                         <Slider value={d.smoothing} min={0} max={0.92} step={0.02} onChange={(v) => d.set({ smoothing: v })} />
                     </Field>
 
+                    <Field label="Fill under trace" inline>
+                        <Switch checked={d.fill !== false} onChange={(v) => d.set({ fill: v })} />
+                    </Field>
+
                     <Field label="Peak hold" inline>
                         <Switch checked={d.peakHold} onChange={(v) => d.set({ peakHold: v })} />
                     </Field>

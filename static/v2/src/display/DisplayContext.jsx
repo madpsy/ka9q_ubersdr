@@ -14,6 +14,7 @@ export const DEFAULTS = {
     floorDb: -110,
     ceilDb: -40,
     smoothing: 0.5,         // 0 = off, ->1 = heavier temporal averaging
+    fill: true,             // shade the area under the spectrum trace
     peakHold: false,
     peakDecay: 0.25,        // dB per frame
     grid: true,

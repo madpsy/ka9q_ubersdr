@@ -168,7 +168,9 @@ panel never disturbs an existing user's arrangement.
   with the same cache-busting query v1 uses so a freshly uploaded image is
   picked up. It is not even fetched outside split view — the image can be
   several hundred kilobytes and there is no point pulling it for someone who
-  only looks at the waterfall.
+  only looks at the waterfall. While a backdrop is showing, the dB grid and its
+  labels switch to solid white with a dark text shadow: the usual 6%-white
+  gridlines read fine on black but vanish on most images.
 * **One colour mapping for both panes.** The Display panel's View control picks
   split / spectrum-only / waterfall-only. The palette drives both: the spectrum's
   trace and fill are painted with a vertical gradient built from the same LUT and

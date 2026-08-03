@@ -88,9 +88,30 @@ function reconcile(stored) {
             panels: list,
         };
     }
-    // Panels added since the layout was saved land in their default dock.
+    // Panels added since the layout was saved land in their default dock, at
+    // the position the registry declares for them — after the nearest sibling
+    // that is already there, or before the nearest one that follows.
+    //
+    // Appending instead would drop every new panel at the bottom of an existing
+    // user's dock, so a panel declared "directly under Receiver" would show up
+    // under everything else for anyone who had used the app before.
     for (const p of PANELS) {
-        if (!seen.has(p.id)) base.docks[p.dock].panels.push(p.id);
+        if (seen.has(p.id)) continue;
+        const list = base.docks[p.dock].panels;
+        const siblings = PANELS.filter((q) => q.dock === p.dock).map((q) => q.id);
+        const mine = siblings.indexOf(p.id);
+
+        let at = -1;
+        for (let i = mine - 1; i >= 0 && at < 0; i--) {
+            const k = list.indexOf(siblings[i]);
+            if (k >= 0) at = k + 1;
+        }
+        for (let i = mine + 1; i < siblings.length && at < 0; i++) {
+            const k = list.indexOf(siblings[i]);
+            if (k >= 0) at = k;
+        }
+        // No sibling is in this dock — the user moved them all away.
+        list.splice(at < 0 ? list.length : at, 0, p.id);
     }
     for (const dock of DOCKS) {
         base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);

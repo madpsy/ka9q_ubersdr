@@ -1,10 +1,44 @@
-import React from '../react.js';
+import React, { useEffect, useState } from '../react.js';
 import { useRadio, useMeters } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
+
+// UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
+// receiver's wall clock, not the browser's: timezone_offset is the server's
+// DST-adjusted offset in minutes, so shifting the UTC epoch by it and reading
+// the UTC fields back gives the operator's time wherever you are listening
+// from. Until /api/description answers we fall back to the browser clock.
+function Clock({ tzOffset }) {
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, []);
+
+    const utc = new Date(now).toISOString().slice(11, 19);
+    const local = typeof tzOffset === 'number'
+        ? new Date(now + tzOffset * 60000).toISOString().slice(11, 19)
+        : new Date(now).toLocaleTimeString('en-GB', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        });
+
+    return (
+        <div className="topbar__clock" title="Receiver time">
+            <span className="topbar__clock-line">
+                <span className="topbar__clock-time">{utc}</span>
+                <span className="topbar__clock-tag">UTC</span>
+            </span>
+            <span className="topbar__clock-line">
+                <span className="topbar__clock-time">{local}</span>
+                <span className="topbar__clock-tag">Local</span>
+            </span>
+        </div>
+    );
+}
 
 export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo, audio } = useRadio();
@@ -25,6 +59,8 @@ export default function TopBar({ compact }) {
                     {!compact && <span className="topbar__sub">WebSDR</span>}
                 </div>
             </div>
+
+            {!compact && <Clock tzOffset={serverInfo?.receiver?.timezone_offset} />}
 
             <div className="topbar__freq">
                 <span className="topbar__hz">{formatHz(tuning.frequency)}</span>

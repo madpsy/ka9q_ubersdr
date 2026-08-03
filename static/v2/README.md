@@ -144,9 +144,12 @@ It then appears in its dock, in the layout manager, and in the mobile tab bar.
 An optional `requires: (serverInfo) => bool` keeps a panel out of all three when
 it does not apply to the connected receiver — the Addons panel uses it, so a
 server with no addons never shows an empty slot explaining that it has none.
-Saved layouts reconcile against the registry on load: unknown ids are dropped
-and newly registered panels are appended to their declared dock, so shipping a
-panel never disturbs an existing user's arrangement.
+Saved layouts reconcile against the registry on load: unknown ids are dropped,
+and a newly registered panel is inserted at the position the registry declares
+for it — after the nearest sibling already in that dock, or before the nearest
+one that follows. Appending instead would drop every new panel at the bottom of
+an existing user's dock, so a panel declared "directly under Receiver" would
+appear under everything else for anyone who had used the app before.
 
 ## Behaviour notes
 

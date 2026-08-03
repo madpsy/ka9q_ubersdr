@@ -1,5 +1,5 @@
-import React from './react.js';
-import { RadioProvider } from './radio/RadioContext.jsx';
+import React, { useEffect } from './react.js';
+import { RadioProvider, useRadio } from './radio/RadioContext.jsx';
 import { DisplayProvider } from './display/DisplayContext.jsx';
 import { LayoutProvider } from './layout/LayoutContext.jsx';
 import { MOBILE_QUERY, useMediaQuery } from './lib/useMediaQuery.js';
@@ -29,6 +29,22 @@ function DesktopShell() {
     );
 }
 
+// Keeps the browser tab in step with the dial, in v1's format (app.js
+// updatePageTitle): "<callsign> UberSDR - 14.175 MHz USB", with the callsign
+// dropped until /api/description answers. Renders nothing.
+function PageTitle() {
+    const { tuning, serverInfo } = useRadio();
+
+    useEffect(() => {
+        const mhz = (tuning.frequency / 1000000).toFixed(3);
+        const callsign = serverInfo && serverInfo.receiver && serverInfo.receiver.callsign;
+        const prefix = callsign ? `${callsign} ` : '';
+        document.title = `${prefix}UberSDR - ${mhz} MHz ${String(tuning.mode).toUpperCase()}`;
+    }, [tuning.frequency, tuning.mode, serverInfo]);
+
+    return null;
+}
+
 export default function App() {
     const mobile = useMediaQuery(MOBILE_QUERY);
     return (
@@ -36,6 +52,7 @@ export default function App() {
             <LayoutProvider>
                 <RadioProvider>
                     <ChatProvider>
+                        <PageTitle />
                         {mobile ? <MobileShell /> : <DesktopShell />}
                     </ChatProvider>
                 </RadioProvider>

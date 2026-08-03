@@ -98,14 +98,46 @@ function LinkItem({ item, onDone }) {
     );
 }
 
-// One row that opens a flyout. Nesting is pure CSS hover, as in v1, so a deep
-// tree needs no open/close state per level.
+// One row that opens a flyout. Opening stays pure CSS hover, as in v1, so depth
+// needs no open/close state — but placement cannot be: this menu nests three
+// and four levels deep, and by then a chain of right-opening panels runs past
+// the edge of the screen. On hover the panel is measured once and, if it would
+// overflow, flipped to the left of its parent and/or lifted up.
 function GroupRow({ node, onDone }) {
+    const ref = useRef(null);
+    const [fit, setFit] = useState({ flip: false, shiftUp: 0 });
+
+    const measure = () => {
+        // The CSS :hover has applied by the next frame, so the panel is laid out
+        // and has a real rect to measure.
+        requestAnimationFrame(() => {
+            const el = ref.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            setFit((prev) => {
+                const flip = prev.flip || r.right > window.innerWidth - 8;
+                const shiftUp = Math.max(prev.shiftUp, Math.round(r.bottom - (window.innerHeight - 8)));
+                return flip === prev.flip && shiftUp === prev.shiftUp ? prev : { flip, shiftUp: Math.max(0, shiftUp) };
+            });
+        });
+    };
+
     return (
-        <div className="links__row" role="menuitem" aria-haspopup="true">
+        <div
+            className="links__row"
+            role="menuitem"
+            aria-haspopup="true"
+            onMouseEnter={measure}
+            onMouseLeave={() => setFit({ flip: false, shiftUp: 0 })}
+        >
             <span className="links__label">{node.name}</span>
-            <span className="links__arrow">›</span>
-            <div className="links__flyout" role="menu">
+            <span className="links__arrow">{fit.flip ? '‹' : '›'}</span>
+            <div
+                ref={ref}
+                className={`links__flyout${fit.flip ? ' is-flipped' : ''}`}
+                style={fit.shiftUp ? { top: `${-5 - fit.shiftUp}px` } : undefined}
+                role="menu"
+            >
                 {node.links.map((item) => <LinkItem key={item.url} item={item} onDone={onDone} />)}
                 {node.subgroups.map((sg) => <GroupRow key={sg.name} node={sg} onDone={onDone} />)}
             </div>

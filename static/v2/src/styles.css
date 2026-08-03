@@ -231,8 +231,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
     top: -5px;
     left: 100%;
     min-width: 230px;
-    max-height: 70vh;
-    overflow-y: auto;
+    /* Deliberately not scrollable: an overflow container clips its absolutely
+       positioned children, which hid every third- and fourth-level flyout. */
     padding: 4px;
     background: var(--surface-3);
     border: 1px solid var(--border-strong);
@@ -241,6 +241,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
     z-index: 1;
 }
 .links__row:hover > .links__flyout { display: block; }
+/* Ran out of room to the right — open back over the parent instead. */
+.links__flyout.is-flipped { left: auto; right: 100%; }
 
 .links__item {
     display: block;

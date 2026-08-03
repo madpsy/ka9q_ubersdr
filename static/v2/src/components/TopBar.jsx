@@ -3,6 +3,7 @@ import { useRadio, useMeters } from '../radio/RadioContext.jsx';
 import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
+import LinksMenu from './LinksMenu.jsx';
 import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 
@@ -114,7 +115,7 @@ export default function TopBar({ compact }) {
     return (
         <header className={`topbar${compact ? ' topbar--compact' : ''}`}>
             <div className="topbar__brand">
-                <span className="topbar__logo"><Icon.Radio size={18} /></span>
+                <LinksMenu serverInfo={serverInfo} compact={compact} />
                 <div className="topbar__id">
                     <span className="topbar__name">{serverInfo?.receiver?.callsign || 'UberSDR'}</span>
                     {!compact && <span className="topbar__sub">UberSDR</span>}

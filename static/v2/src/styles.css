@@ -177,6 +177,75 @@ button, input, select, textarea { font: inherit; color: inherit; }
     flex: none;
 }
 
+/* Links menu — the logo doubles as its trigger. */
+.links { position: relative; display: inline-flex; }
+.links__btn { border: 0; cursor: pointer; padding: 0; }
+.links__btn:hover, .links__btn.is-open { background: var(--accent); color: var(--accent-ink); }
+
+.links__panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 210px;
+    padding: 4px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    z-index: 80;
+    animation: menu-in 120ms var(--ease);
+}
+
+.links__row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: default;
+}
+.links__row:hover { background: var(--surface-hover); }
+.links__arrow { color: var(--text-faint); font-size: calc(11px * var(--ui-scale)); }
+
+/* Flyouts are hover-driven, like v1's, so arbitrary nesting needs no state.
+   The negative offset keeps the child's first row level with its parent. */
+.links__flyout {
+    display: none;
+    position: absolute;
+    top: -5px;
+    left: 100%;
+    min-width: 230px;
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    z-index: 1;
+}
+.links__row:hover > .links__flyout { display: block; }
+
+.links__item {
+    display: block;
+    padding: 6px 9px;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.links__item:hover { background: var(--surface-hover); color: var(--text); }
+
+.links__note { padding: 7px 9px; color: var(--text-faint); font-size: calc(11.5px * var(--ui-scale)); }
+
 .topbar__id { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .topbar__name { font-weight: 650; letter-spacing: 0.01em; }
 .topbar__sub { font-size: calc(10.5px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }

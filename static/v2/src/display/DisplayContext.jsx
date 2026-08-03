@@ -25,6 +25,7 @@ export const DEFAULTS = {
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
+    floatOpacity: 1,        // resting opacity of floating panel windows
     snapHz: 1,              // click-to-tune rounding
     theme: 'dark',
 };
@@ -62,6 +63,13 @@ export function DisplayProvider({ children }) {
     useEffect(() => {
         document.documentElement.dataset.theme = state.theme;
     }, [state.theme]);
+
+    // Exposed as a custom property rather than an inline style so every
+    // floating window picks it up without re-rendering — the same approach v1
+    // uses for its controls_opacity setting.
+    useEffect(() => {
+        document.documentElement.style.setProperty('--float-opacity', String(state.floatOpacity ?? 1));
+    }, [state.floatOpacity]);
 
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
     const reset = useCallback(() => setState({ ...DEFAULTS }), []);

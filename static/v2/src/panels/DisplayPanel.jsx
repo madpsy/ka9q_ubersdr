@@ -1,5 +1,6 @@
 import React from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
+import { useLayout } from '../layout/LayoutContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 
@@ -7,7 +8,9 @@ const SNAP_STEPS = [1, 10, 100, 500, 1000, 5000];
 
 export default function DisplayPanel() {
     const d = useDisplay();
+    const { floatOrder } = useLayout();
     const viewMode = d.viewMode || 'split';
+    const hasFloats = floatOrder.length > 0;
 
     // Controls that only affect one pane are hidden when that pane is not on
     // screen — otherwise the panel offers settings with no visible effect.
@@ -128,6 +131,25 @@ export default function DisplayPanel() {
                     <Field label="dB grid" inline>
                         <Switch checked={d.grid} onChange={(v) => d.set({ grid: v })} />
                     </Field>
+                </>
+            )}
+
+            {hasFloats && (
+                <>
+                    <div className="divider" />
+                    <Field label="Float opacity" hint={`${Math.round(d.floatOpacity * 100)} %`}>
+                        <Slider
+                            value={Math.round(d.floatOpacity * 100)}
+                            min={30}
+                            max={100}
+                            step={5}
+                            onChange={(v) => d.set({ floatOpacity: v / 100 })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Floating windows fade to this while idle and go solid
+                        when you point at them.
+                    </div>
                 </>
             )}
 

@@ -21,6 +21,12 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
     // over `{x, y}` would silently overwrite it and make the window jump to the
     // cursor on the first move.
     const start = useCallback((e, mode) => {
+        // A press that begins on a title-bar control must not start a drag.
+        // preventDefault() here would suppress the compatibility mouse events
+        // the button's click depends on, and setPointerCapture() would redirect
+        // the rest of the gesture to the header — between them the menu never
+        // opens and the close button never fires.
+        if (mode === 'move' && e.target && e.target.closest && e.target.closest('.floatwin__ctl')) return;
         e.preventDefault();
         e.stopPropagation();
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -69,7 +75,7 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
             >
                 <span className="floatwin__icon">{panel.icon}</span>
                 <span className="floatwin__title">{panel.title}</span>
-                <Menu trigger={<span className="floatwin__btn" title="Panel options"><Icon.Drag size={14} /></span>}>
+                <Menu trigger={<span className="floatwin__btn floatwin__ctl" title="Panel options"><Icon.Drag size={14} /></span>}>
                     {DOCKS.map((d) => (
                         <MenuItem key={d} onClick={() => movePanel(panel.id, d, null)}>
                             Dock to {DOCK_LABEL[d]}
@@ -79,7 +85,7 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
                 </Menu>
                 <button
                     type="button"
-                    className="floatwin__btn"
+                    className="floatwin__btn floatwin__ctl"
                     title="Return to its dock"
                     onClick={() => movePanel(panel.id, panel.dock, null)}
                 >

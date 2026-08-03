@@ -220,3 +220,18 @@ bundle_esm "$STATIC/local-bookmarks-ui.js" "$DIST/local-bookmarks.bundle.min.js"
 echo ""
 echo "==> Done. Output:"
 ls -lh "$DIST/"*.js 2>/dev/null
+
+# ── v2 frontend (static/v2, served at /v2/) ───────────────────────────────────
+# Self-contained: its own React sources bundled by static/v2/build.sh. Nothing
+# above depends on it, so a failure here must not fail the v1 build.
+echo ""
+echo "==> Building v2 frontend"
+if [[ -x "$STATIC/v2/build.sh" ]]; then
+    if $DEV; then
+        "$STATIC/v2/build.sh" --dev
+    else
+        "$STATIC/v2/build.sh"
+    fi
+else
+    echo "  skipped — $STATIC/v2/build.sh not found"
+fi

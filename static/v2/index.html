@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b0e14">
+    <title>UberSDR</title>
+    <link rel="icon" href="/favicon.ico">
+    <link rel="stylesheet" href="dist/v2.css">
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React 18 UMD (vendored — see vendor/README.md) -->
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <!-- Opus decoder shared with the v1 frontend; exposes window["opus-decoder"] -->
+    <script src="/opus-decoder.min.js"></script>
+
+    <script src="dist/v2.js"></script>
+</body>
+</html>

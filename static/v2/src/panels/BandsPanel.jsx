@@ -1,11 +1,14 @@
 // Band list from /api/bands. The server returns every allocation across
-// 0–30 MHz — hundreds of entries — so the list is searchable and the current
-// frequency's band is highlighted and scrolled into view.
+// 0–30 MHz — hundreds of entries — and panels do not scroll on their own, so
+// the list renders a page at a time. With no search term the page is positioned
+// around the band the receiver is currently in, which is the part worth seeing.
 
-import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Empty } from '../components/ui.jsx';
+import { Empty, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
+
+const PAGE = 25;
 
 // The API packs a second line after a "|" and sometimes uses tabs as spacing.
 function cleanLabel(raw) {
@@ -16,7 +19,7 @@ export default function BandsPanel() {
     const { tuning, actions } = useRadio();
     const [bands, setBands] = useState(null);
     const [query, setQuery] = useState('');
-    const activeRef = useRef(null);
+    const [limit, setLimit] = useState(PAGE);
 
     useEffect(() => {
         fetch('/api/bands')
@@ -24,6 +27,9 @@ export default function BandsPanel() {
             .then((list) => setBands(Array.isArray(list) ? list : []))
             .catch(() => setBands([]));
     }, []);
+
+    // A new search starts from the top again.
+    useEffect(() => { setLimit(PAGE); }, [query]);
 
     const filtered = useMemo(() => {
         if (!bands) return null;
@@ -37,9 +43,9 @@ export default function BandsPanel() {
         return filtered.findIndex((b) => tuning.frequency >= b.start && tuning.frequency < b.end);
     }, [filtered, tuning.frequency]);
 
-    useEffect(() => {
-        if (activeRef.current) activeRef.current.scrollIntoView({ block: 'nearest' });
-    }, [activeIndex]);
+    // Show the current band in context rather than the bottom of the LF end.
+    const start = query.trim() || activeIndex < 0 ? 0 : Math.max(0, activeIndex - 4);
+    const visible = filtered ? filtered.slice(start, start + limit) : [];
 
     if (!filtered) return <Empty>Loading bands…</Empty>;
 
@@ -53,12 +59,11 @@ export default function BandsPanel() {
             />
             <div className="list">
                 {filtered.length === 0 && <Empty>No match</Empty>}
-                {filtered.map((b, i) => (
+                {visible.map((b, i) => (
                     <button
-                        key={`${b.start}-${i}`}
+                        key={`${b.start}-${start + i}`}
                         type="button"
-                        ref={i === activeIndex ? activeRef : null}
-                        className={`list__row${i === activeIndex ? ' is-active' : ''}`}
+                        className={`list__row${start + i === activeIndex ? ' is-active' : ''}`}
                         onClick={() => {
                             const centre = Math.round((b.start + b.end) / 2);
                             if (b.mode) actions.setMode(b.mode);
@@ -74,6 +79,11 @@ export default function BandsPanel() {
                     </button>
                 ))}
             </div>
+            <ShowMore
+                shown={Math.min(start + limit, filtered.length) - start}
+                total={filtered.length - start}
+                onMore={() => setLimit((n) => n + PAGE)}
+            />
         </div>
     );
 }

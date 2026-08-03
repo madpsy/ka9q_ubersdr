@@ -48,6 +48,9 @@ export default function SpectrumView() {
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px
         drag: null,
+        bgImage: null,       // operator backdrop, split view only
+        bgOpacity: 0,
+        bgUrl: '',
     });
 
     // Mirrors of React values the draw loop reads; refs avoid re-subscribing.
@@ -180,6 +183,35 @@ export default function SpectrumView() {
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => { gfx.current.dirty = true; }, [display]);
+
+    // Operator-supplied backdrop for the spectrum, behind the trace.
+    //
+    // Only fetched once split view is actually used — the image can be a
+    // several-hundred-kilobyte PNG, and there is no reason to pull it for
+    // someone who only ever looks at the waterfall. Once loaded it is kept, so
+    // toggling view modes does not re-fetch it.
+    const { bgImage: bgUrl, bgOpacity } = display.server;
+    useEffect(() => {
+        const g = gfx.current;
+        g.bgOpacity = bgOpacity;
+        g.dirty = true;
+        if (viewMode !== 'split' || !bgUrl || g.bgUrl === bgUrl) return undefined;
+
+        g.bgUrl = bgUrl;
+        const img = new Image();
+        img.onload = () => {
+            if (gfx.current.bgUrl !== bgUrl) return;   // config changed mid-flight
+            gfx.current.bgImage = img;
+            gfx.current.dirty = true;
+        };
+        img.onerror = () => {
+            console.warn('spectrum: background image failed to load', bgUrl);
+            if (gfx.current.bgUrl === bgUrl) gfx.current.bgImage = null;
+        };
+        // Cache-bust so a freshly uploaded image is picked up, as v1 does.
+        img.src = bgUrl + (bgUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+        return () => { img.onload = null; img.onerror = null; };
+    }, [bgUrl, bgOpacity, viewMode]);
 
     // ---- pointer interaction --------------------------------------------
 
@@ -497,6 +529,16 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
 
     c.fillStyle = colBg;
     c.fillRect(0, 0, pxW, H);
+
+    // Operator backdrop, stretched to the spectrum area and blended over the
+    // background colour — split view only, where there is enough height for it
+    // to read as anything other than a smear.
+    if (d.viewMode === 'split' && g.bgImage && g.bgOpacity > 0) {
+        c.save();
+        c.globalAlpha = Math.max(0, Math.min(1, g.bgOpacity));
+        c.drawImage(g.bgImage, 0, 0, pxW, H);
+        c.restore();
+    }
 
     const yOf = (db) => H - ((db - floor) / range) * H;
 

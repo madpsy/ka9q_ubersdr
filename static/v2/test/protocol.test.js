@@ -9,6 +9,7 @@ const {
     autoSquelchValue, bandwidthLimits, maxFilterWidth, squelchEnabled, squelchThreshold,
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
+const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -314,6 +315,46 @@ t('setAudioGate with no thresholds is not sent', () => {
     // The server rejects a gate message carrying neither field.
     assert.strictEqual(a.setAudioGate({}), false);
     assert.strictEqual(sent.length, 0);
+});
+
+// --- operator UI config ----------------------------------------------------
+//
+// ui-config.sample.json is a verbatim /api/ui-config reply from a live server.
+
+const UI_SAMPLE = JSON.parse(require('fs').readFileSync(__dirname + '/ui-config.sample.json', 'utf8'));
+
+t('the whole ui-config is kept, not just the keys in use', () => {
+    const parsed = parseUiConfig(UI_SAMPLE);
+    assert.strictEqual(parsed.loaded, true);
+    // Every operator setting must stay reachable for future features.
+    for (const k of Object.keys(UI_SAMPLE)) {
+        assert.ok(k in parsed.config, `dropped ${k}`);
+    }
+    assert.deepStrictEqual(parsed.config, UI_SAMPLE);
+    // Nested objects survive intact too.
+    assert.strictEqual(typeof parsed.config.theme, 'object');
+});
+
+t('backdrop settings are parsed and validated onto the top level', () => {
+    const parsed = parseUiConfig(UI_SAMPLE);
+    assert.strictEqual(parsed.bgImage, UI_SAMPLE.spectrum_bg_image);
+    assert.strictEqual(parsed.bgOpacity, UI_SAMPLE.spectrum_bg_opacity);
+});
+
+t('opacity is clamped and survives odd values', () => {
+    assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: 5 }).bgOpacity, 1);
+    assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: -2 }).bgOpacity, 0);
+    // A string is what an older server sends; a bad one falls back.
+    assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: '0.42' }).bgOpacity, 0.42);
+    assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: 'nope' }).bgOpacity, UI_CONFIG_DEFAULTS.bgOpacity);
+});
+
+t('a missing or malformed reply yields defaults, not a crash', () => {
+    for (const bad of [null, undefined, 'oops', [], 42]) {
+        const p = parseUiConfig(bad);
+        assert.strictEqual(p.loaded, false, String(bad));
+        assert.strictEqual(p.bgImage, '');
+    }
 });
 
 // --- filter width limits ---------------------------------------------------

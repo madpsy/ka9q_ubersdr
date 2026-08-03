@@ -3,6 +3,7 @@
 // canvas can read a single object out of a ref).
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
+import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 
 const STORAGE_KEY = 'ubersdr.v2.display';
 
@@ -35,8 +36,21 @@ function load() {
 
 const DisplayContext = createContext(null);
 
+
 export function DisplayProvider({ children }) {
     const [state, setState] = useState(load);
+    const [server, setServer] = useState(UI_CONFIG_DEFAULTS);
+
+    useEffect(() => {
+        let cancelled = false;
+        fetch('/api/ui-config')
+            .then((r) => r.json())
+            .then((cfg) => {
+                if (!cancelled) setServer(parseUiConfig(cfg));
+            })
+            .catch(() => { /* non-fatal — the spectrum just has no backdrop */ });
+        return () => { cancelled = true; };
+    }, []);
 
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -49,7 +63,7 @@ export function DisplayProvider({ children }) {
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
     const reset = useCallback(() => setState({ ...DEFAULTS }), []);
 
-    const value = useMemo(() => ({ ...state, set, reset }), [state, set, reset]);
+    const value = useMemo(() => ({ ...state, server, set, reset }), [state, server, set, reset]);
     return <DisplayContext.Provider value={value}>{children}</DisplayContext.Provider>;
 }
 

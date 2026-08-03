@@ -79,9 +79,18 @@ bottom dock scrolls on both axes and sizes its sections to content rather than
 stretching them. The one exception is the mobile sheet, which is a fixed-height
 overlay and so has to scroll itself — but that is the container, not the panel.
 
-A consequence worth knowing when writing a panel: you cannot scroll your own
-content into view, because that would drag the whole dock. The event log puts
-newest entries first for that reason instead of auto-scrolling to the bottom.
+Two consequences worth knowing when writing a panel:
+
+* **Do not let a section shrink.** `.section` sets `flex: none` because the dock
+  body is a flex column: without it, sections compress below their content once
+  the dock overflows and clip each other instead of the dock scrolling.
+* **You cannot scroll your own content into view** — that would drag the whole
+  dock. The event log puts newest entries first for this reason rather than
+  auto-scrolling to the bottom.
+
+Long lists render a page at a time (`ShowMore` in `components/ui.jsx`) rather
+than everything: this server publishes 202 bands and 2450 bookmarks, which would
+otherwise make the dock scroll for thousands of pixels.
 
 ### Adding a panel
 
@@ -147,6 +156,19 @@ panel never disturbs an existing user's arrangement.
   and the swap happens on the way out. v1 does the same thing in
   `spectrum-display.js`, in the shared `case 'spectrum'` both its JSON and
   binary paths funnel into.
+* **Operator settings come from `/api/ui-config`.** `display/uiConfig.js` keeps
+  the reply verbatim under `display.server.config`, so every key the operator
+  sets stays reachable — palette, contrast, theme colours, meter styles, station
+  ID overlay and the rest — even though only the spectrum backdrop is consumed
+  so far. Values that drive rendering are also parsed and validated onto the top
+  level so the draw path never re-parses a string. None of it is persisted
+  locally: the server owns it and the admin page can change it at any time.
+* **The spectrum backdrop is split-view only.** `spectrum_bg_image` is drawn
+  behind the trace at `spectrum_bg_opacity`, stretched to the spectrum pane,
+  with the same cache-busting query v1 uses so a freshly uploaded image is
+  picked up. It is not even fetched outside split view — the image can be
+  several hundred kilobytes and there is no point pulling it for someone who
+  only looks at the waterfall.
 * **One colour mapping for both panes.** The Display panel's View control picks
   split / spectrum-only / waterfall-only. The palette drives both: the spectrum's
   trace and fill are painted with a vertical gradient built from the same LUT and

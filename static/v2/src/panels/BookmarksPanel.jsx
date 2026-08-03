@@ -2,14 +2,19 @@
 
 import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Empty } from '../components/ui.jsx';
+import { Empty, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
+
+// Panels do not scroll on their own, so a few hundred bookmarks would make the
+// dock unusably long. Render a page at a time and grow on demand.
+const PAGE = 25;
 
 export default function BookmarksPanel() {
     const { actions } = useRadio();
     const [items, setItems] = useState(null);
     const [query, setQuery] = useState('');
     const [group, setGroup] = useState('');
+    const [limit, setLimit] = useState(PAGE);
 
     useEffect(() => {
         fetch('/api/bookmarks')
@@ -17,6 +22,9 @@ export default function BookmarksPanel() {
             .then((list) => setItems(Array.isArray(list) ? list : []))
             .catch(() => setItems([]));
     }, []);
+
+    // Narrowing the search starts from the top again.
+    useEffect(() => { setLimit(PAGE); }, [query, group]);
 
     const groups = useMemo(() => {
         if (!items) return [];
@@ -52,7 +60,7 @@ export default function BookmarksPanel() {
             )}
             <div className="list">
                 {filtered.length === 0 && <Empty>No match</Empty>}
-                {filtered.slice(0, 400).map((b, i) => (
+                {filtered.slice(0, limit).map((b, i) => (
                     <button
                         key={`${b.frequency}-${i}`}
                         type="button"
@@ -71,8 +79,12 @@ export default function BookmarksPanel() {
                         </span>
                     </button>
                 ))}
-                {filtered.length > 400 && <Empty>Showing first 400 of {filtered.length} — refine the search.</Empty>}
             </div>
+            <ShowMore
+                shown={Math.min(limit, filtered.length)}
+                total={filtered.length}
+                onMore={() => setLimit((n) => n + PAGE)}
+            />
         </div>
     );
 }

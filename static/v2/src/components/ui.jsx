@@ -184,4 +184,18 @@ export function Empty({ children }) {
     return <div className="empty">{children}</div>;
 }
 
+// Panels have no scroller of their own — the dock scrolls — so a list of a few
+// hundred rows would make the dock unusably long. Lists render a page at a time
+// and grow on demand instead.
+export function ShowMore({ shown, total, onMore, label = 'Show more' }) {
+    if (shown >= total) {
+        return total > 0 ? <div className="list__count">{total} shown</div> : null;
+    }
+    return (
+        <button type="button" className="show-more" onClick={onMore}>
+            {label} <span className="show-more__count">{shown} of {total}</span>
+        </button>
+    );
+}
+
 export { Icon };

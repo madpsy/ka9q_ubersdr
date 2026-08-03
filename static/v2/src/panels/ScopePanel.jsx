@@ -42,6 +42,16 @@ const WF_H = 120;
 const RULER_H = 13;
 const ROW_MS = 33;          // one waterfall row, ~30 fps as in v1
 
+// Silence guards. With the squelch closed the server sends nothing, or sends
+// dither a hundred dB down, and an unbounded auto-scale turns that into a
+// full-height mess of quantisation noise and a boiling waterfall. Both views
+// therefore refuse to magnify beyond a point, and fall back to a flat line and
+// a dark waterfall — which is what "no audio" should look like.
+const SCOPE_MIN_PEAK = 0.05;   // fraction of full scale; below this, no extra gain
+const SCOPE_SILENT_LSB = 2;    // +/-2/128 or less is the gate closed, not a signal
+const WF_FLOOR_DB = -110;      // never map anything quieter than this
+const WF_MIN_SPAN_DB = 45;     // and never stretch a narrower range than this
+
 function fmtHz(hz) {
     return hz >= 1000 ? `${(hz / 1000).toFixed(hz % 1000 ? 1 : 0)}k` : `${Math.round(hz)}`;
 }
@@ -61,6 +71,9 @@ export default function ScopePanel() {
     // Waterfall history, kept as an offscreen canvas so a row is one blit.
     const ring = useRef({ canvas: null, ctx: null, w: 0, h: 0, head: 0, at: 0 });
     const level = useRef({ floor: -100, ceil: -30 });
+    // Smoothed vertical gain for the scope, so the trace does not jump as the
+    // gate opens and closes.
+    const scope = useRef({ gain: 1 });
 
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
@@ -88,7 +101,7 @@ export default function ScopePanel() {
             const sr = player.sampleRate || 48000;
             if (sr !== rate) setRate(sr);
 
-            if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase);
+            if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase, scope.current);
             if (showWf) {
                 drawWaterfall(wfRef.current, ring.current, a, bins, sr, tuning, display.palette, level.current);
                 drawRuler(rulerRef.current, tuning, sr, a.frequencyBinCount);
@@ -167,7 +180,7 @@ function css(name, fallback) {
     return v || fallback;
 }
 
-function drawScope(canvas, analyser, wave, sampleRate, timebaseMs) {
+function drawScope(canvas, analyser, wave, sampleRate, timebaseMs, state) {
     if (!canvas) return;
     if (wave.length !== analyser.fftSize) return;      // resized between frames
     analyser.getByteTimeDomainData(wave);
@@ -209,13 +222,32 @@ function drawScope(canvas, analyser, wave, sampleRate, timebaseMs) {
     }
     const count = Math.min(n, wave.length - start);
 
-    // Auto-scale: fit the peak in this window to 90% of the height.
-    let peak = 1;
+    // Auto-scale: fit the peak in this window to 90% of the height, but never
+    // amplify a silent line — with the gate closed the only thing left is +/-1
+    // LSB of quantisation noise, and full-scaling that looks like a fault.
+    // The gain is eased so the trace settles rather than snapping.
+    let peak = 0;
     for (let i = start; i < start + count; i++) {
         const d = Math.abs(wave[i] - 128);
         if (d > peak) peak = d;
     }
-    const gain = (h / 2) * 0.9 / peak;
+    // Flat line rather than magnified dither: a closed gate is silence, and
+    // drawing it as a jagged full-height trace reads as a broken receiver.
+    if (peak <= SCOPE_SILENT_LSB) {
+        c.strokeStyle = css('--text-faint', '#5c6779');
+        c.lineWidth = 1.4 * dpr;
+        c.beginPath();
+        c.moveTo(0, h / 2);
+        c.lineTo(w, h / 2);
+        c.stroke();
+        state.gain = 0;
+        return;
+    }
+
+    const usable = Math.max(peak / 128, SCOPE_MIN_PEAK) * 128;
+    const target = (h / 2) * 0.9 / usable;
+    state.gain = state.gain > 0 ? state.gain + (target - state.gain) * 0.15 : target;
+    const gain = state.gain;
 
     c.beginPath();
     for (let i = 0; i < count; i++) {
@@ -263,10 +295,14 @@ function drawWaterfall(canvas, ring, analyser, bins, sampleRate, tuning, palette
         if (v > max) max = v;
     }
     if (Number.isFinite(min)) {
-        level.floor += (min - 3 - level.floor) * 0.05;
-        level.ceil += (Math.max(min + 20, max + 5) - level.ceil) * 0.05;
+        // Bounded: silence sits far below WF_FLOOR_DB and simply maps to the
+        // bottom of the palette instead of being stretched across all of it.
+        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
+        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
+        level.floor += (targetFloor - level.floor) * 0.05;
+        level.ceil += (targetCeil - level.ceil) * 0.05;
     }
-    const range = Math.max(1, level.ceil - level.floor);
+    const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
 
     const now = performance.now();
     if (now - ring.at >= ROW_MS) {

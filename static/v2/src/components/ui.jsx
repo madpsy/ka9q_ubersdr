@@ -117,11 +117,13 @@ export function Switch({ checked, onChange, label, disabled }) {
     );
 }
 
-export function Readout({ label, value, unit, tone }) {
+// `tone` picks one of the themed colours; `color` overrides it outright, for
+// values that carry a continuous scale of their own (the SNR ramp).
+export function Readout({ label, value, unit, tone, color }) {
     return (
         <div className={`readout${tone ? ` readout--${tone}` : ''}`}>
             <div className="readout__label">{label}</div>
-            <div className="readout__value">
+            <div className="readout__value" style={color ? { color } : undefined}>
                 {value}
                 {unit && <span className="readout__unit">{unit}</span>}
             </div>
@@ -130,11 +132,11 @@ export function Readout({ label, value, unit, tone }) {
 }
 
 // Horizontal bar for levels, with an optional peak tick.
-export function Bar({ value, min = 0, max = 1, peak, tone = 'accent' }) {
+export function Bar({ value, min = 0, max = 1, peak, tone = 'accent', color }) {
     const clampPct = (v) => Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
     return (
         <div className={`bar bar--${tone}`}>
-            <div className="bar__fill" style={{ width: `${clampPct(value)}%` }} />
+            <div className="bar__fill" style={{ width: `${clampPct(value)}%`, background: color || undefined }} />
             {peak != null && <div className="bar__peak" style={{ left: `${clampPct(peak)}%` }} />}
         </div>
     );

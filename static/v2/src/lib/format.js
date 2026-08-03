@@ -89,3 +89,30 @@ export function sUnitLabel(dbfs) {
     if (s <= 9) return 'S' + Math.round(s);
     return 'S9+' + Math.round(dbfs + 73);
 }
+
+// SNR meter, matching v1's scales so a signal reads the same in both UIs.
+//
+// v1 puts SNR on a 30–60 dB meter (s-meter-needle.js `snrMin`/`snrMax`, mirrored
+// in signal-meter.js as SNR_MIN/SNR_MAX) and colours it on a shorter ramp: red
+// at or below 30 dB through yellow at 40 to green at or above 50
+// (s-meter-needle.js `snrColour`, app.js `snrColourForValue`). The two are
+// deliberately different: the meter has headroom above the point where a signal
+// is already as good as it gets.
+export const SNR_MIN = 30;
+export const SNR_MAX = 60;
+export const SNR_COLOUR_MIN = 30;
+export const SNR_COLOUR_MAX = 50;
+
+// Position on an SNR meter, 0..1.
+export function snrFraction(snr) {
+    if (snr == null || !Number.isFinite(snr)) return 0;
+    return clamp((snr - SNR_MIN) / (SNR_MAX - SNR_MIN), 0, 1);
+}
+
+// v1's hue ramp: 0 (red) at 30 dB to 120 (green) at 50 dB.
+export function snrColour(snr) {
+    if (snr == null || !Number.isFinite(snr)) return 'hsl(0, 0%, 55%)';
+    const c = clamp(snr, SNR_COLOUR_MIN, SNR_COLOUR_MAX);
+    const hue = Math.round(((c - SNR_COLOUR_MIN) / (SNR_COLOUR_MAX - SNR_COLOUR_MIN)) * 120);
+    return `hsl(${hue}, 90%, 55%)`;
+}

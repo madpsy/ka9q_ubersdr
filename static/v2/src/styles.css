@@ -1006,13 +1006,27 @@ button, input, select, textarea { font: inherit; color: inherit; }
    ========================================================================= */
 
 .meter { display: flex; flex-direction: column; gap: 5px; }
+/* Labels are placed at their true position on the scale, not spread evenly —
+   see S_TICKS in SignalPanel.jsx. */
 .meter__scale {
-    display: flex;
-    justify-content: space-between;
+    position: relative;
+    height: calc(11px * var(--ui-scale));
     font-family: var(--mono);
     font-size: calc(9.5px * var(--ui-scale));
     color: var(--text-faint);
 }
+.meter__tick { position: absolute; top: 0; white-space: nowrap; }
+
+.meter__track { position: relative; }
+.meter__notches { position: absolute; inset: 0; pointer-events: none; border-radius: 99px; overflow: hidden; }
+.meter__notches i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.22);
+}
+[data-theme="light"] .meter__notches i { background: rgba(0, 0, 0, 0.18); }
 .meter__value {
     font-family: var(--mono);
     font-size: calc(19px * var(--ui-scale));

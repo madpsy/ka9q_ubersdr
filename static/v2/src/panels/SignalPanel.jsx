@@ -8,6 +8,51 @@ import { audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel, S
 
 const HISTORY = 120;   // ~10 s at 12 Hz
 
+// Printed scales, as [label, position 0..1]. The position is computed from the
+// same mapping the bar fill uses, because neither scale is linear in its own
+// units: the S scale is 6 dB per unit to S9 and 10 dB above it, and both are
+// drawn across a fixed-width track. Spacing the labels evenly with
+// `space-between` — which is what this did — put them wherever their differing
+// text widths landed, so S9+20 read a notch away from where the bar stopped.
+const S_TICKS = [['1', 1], ['3', 3], ['5', 5], ['7', 7], ['9', 9], ['+20', 11], ['+40', 13], ['+60', 15]]
+    .map(([label, s]) => [label, (s - S_UNITS_MIN) / (S_UNITS_MAX - S_UNITS_MIN)]);
+
+const SNR_TICKS = [SNR_MIN, 40, 50, SNR_MAX].map((v) => [String(v), snrFraction(v)]);
+
+// Labels sit centred on their tick, except the outermost pair, which align to
+// the ends of the track so they cannot hang off the panel.
+function MeterScale({ ticks }) {
+    return (
+        <div className="meter__scale">
+            {ticks.map(([label, f]) => (
+                <span
+                    key={label}
+                    className="meter__tick"
+                    style={{
+                        left: `${f * 100}%`,
+                        transform: f <= 0 ? 'none' : f >= 1 ? 'translateX(-100%)' : 'translateX(-50%)',
+                    }}
+                >
+                    {label}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+// The same positions drawn on the track, so it is obvious which notch a reading
+// has reached.
+function MeterTrack({ ticks, children }) {
+    return (
+        <div className="meter__track">
+            {children}
+            <div className="meter__notches">
+                {ticks.map(([label, f]) => <i key={label} style={{ left: `${f * 100}%` }} />)}
+            </div>
+        </div>
+    );
+}
+
 export default function SignalPanel() {
     const { running } = useRadio();
     const m = useMeters(15);
@@ -69,13 +114,13 @@ export default function SignalPanel() {
     return (
         <div className="stack">
             <div className="meter">
-                <div className="meter__scale">
-                    {['1', '3', '5', '7', '9', '+20', '+40', '+60'].map((s) => <span key={s}>{s}</span>)}
-                </div>
+                <MeterScale ticks={S_TICKS} />
                 {/* Plotted in S-units, not dBFS: the printed scale above is
                     6 dB per step to S9 then 10 dB per step, so a linear dBFS
                     bar would not line up with it or with the S value below. */}
-                <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
+                <MeterTrack ticks={S_TICKS}>
+                    <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
+                </MeterTrack>
                 <div className="meter__value">{sUnitLabel(power)}</div>
             </div>
 
@@ -83,10 +128,10 @@ export default function SignalPanel() {
                 (s-meter-needle.js snrMin/snrMax), filled in the same red→green
                 ramp its needle uses. */}
             <div className="meter">
-                <div className="meter__scale">
-                    {[SNR_MIN, 40, 50, SNR_MAX].map((s) => <span key={s}>{s}</span>)}
-                </div>
-                <Bar value={snrFraction(snr)} min={0} max={1} color={snr == null ? undefined : snrColour(snr)} />
+                <MeterScale ticks={SNR_TICKS} />
+                <MeterTrack ticks={SNR_TICKS}>
+                    <Bar value={snrFraction(snr)} min={0} max={1} color={snr == null ? undefined : snrColour(snr)} />
+                </MeterTrack>
                 <div className="meter__value">{snr == null ? '--' : `${snr.toFixed(1)} dB`}</div>
             </div>
 

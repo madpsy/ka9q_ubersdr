@@ -81,12 +81,13 @@ function Row({ activity, onTune, current }) {
 }
 
 export default function VoiceActivityPanel() {
-    const { tuning, actions } = useRadio();
+    const { tuning, actions, serverInfo } = useRadio();
     const [scope, setScope] = useState('band');
     const [groups, setGroups] = useState(null);   // null until the first reply
     const [error, setError] = useState('');
 
     const band = bandForFrequency(tuning.frequency);
+    const lookups = !!(serverInfo && serverInfo.lookup_service);
 
     // One poll shared with the marker bar — see lib/voiceActivity.js. The
     // subscription is what starts it, and dropping it when this panel is
@@ -104,7 +105,7 @@ export default function VoiceActivityPanel() {
         // And look the callsign up, pairing tune-with-lookup as v1's popup rows
         // do. The in-app panel wins when it is open; otherwise the v1 popup gets
         // it, if that is open. Neither is ever opened by a click here.
-        if (callsign && !requestLookup(callsign)) lookupCallsign(callsign);
+        if (lookups && callsign && !requestLookup(callsign)) lookupCallsign(callsign);
     };
 
     const shown = scope === 'all'

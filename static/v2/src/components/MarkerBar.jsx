@@ -12,6 +12,8 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
 import { formatFreqShort } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
+import { requestLookup } from '../lib/callsign.js';
+import { lookupCallsign } from '../compat/legacyBridge.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
 const ROW_H = 15;         // one bookmark row
@@ -53,6 +55,7 @@ export default function MarkerBar({ width }) {
     // Off unless the receiver runs the detector at all — the toggle would
     // otherwise promise markers that can never appear.
     const showVoice = display.markerVoice !== false && !!(serverInfo && serverInfo.noise_floor);
+    const lookups = !!(serverInfo && serverInfo.lookup_service);
 
     // One shared poll with the voice activity panel; subscribing is what starts
     // it, so with the toggle off nothing is fetched.
@@ -302,6 +305,11 @@ export default function MarkerBar({ width }) {
             const freq = dialFreq(hit.activity);
             actions.tuneTo({ frequency: freq, mode: (hit.activity.mode || 'lsb').toLowerCase() });
             actions.ensureVisible(freq);
+            // Pair the tune with a lookup, as the voice activity panel's rows
+            // do: the in-app panel takes it when open, otherwise the v1 popup
+            // if that is. Neither is ever opened by this click.
+            const call = hit.activity.dx_callsign;
+            if (lookups && call && !requestLookup(call)) lookupCallsign(call);
         } else if (hit.kind === 'bookmark') {
             if (hit.item.mode) actions.setMode(hit.item.mode);
             actions.setFrequency(hit.item.frequency);
@@ -315,7 +323,7 @@ export default function MarkerBar({ width }) {
             actions.setFrequency(centre);
             actions.setSpectrumCenter(centre);
         }
-    }, [locate, actions]);
+    }, [locate, actions, lookups]);
 
     if (!showBands && !showServer && !showLocal && !showVoice) return null;
 

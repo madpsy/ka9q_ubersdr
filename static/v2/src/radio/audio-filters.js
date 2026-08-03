@@ -100,11 +100,41 @@ export const FILTER_DEFAULTS = {
 export const MAKEUP_FACTOR = 0.9;
 export const MAKEUP_MAX_DB = 12;
 
+// Where the output is allowed to peak. Everything downstream — volume, the
+// stereo widener's sum, the browser's own conversion — happens below 0 dBFS,
+// and leaving a decibel of room is the difference between "loud" and "buzzing".
+export const CEILING_DB = -1;
+
 export function makeupFromReduction(reductionDb) {
     // `reduction` is negative dB (or 0 when nothing is being compressed).
     if (!Number.isFinite(reductionDb)) return 0;
     const give = Math.max(0, -reductionDb) * MAKEUP_FACTOR;
     return Math.min(MAKEUP_MAX_DB, give);
+}
+
+/**
+ * The next makeup value, given what the compressor took and what the output is
+ * actually peaking at.
+ *
+ * Reduction alone is not enough. It says how much the compressor pulled the
+ * peaks down, not how much room is left above them: a signal already near full
+ * scale has none, and handing back "what was taken" then clips. So the
+ * reduction sets the ambition and the measured peak sets the limit, and the
+ * limit wins.
+ *
+ * Asymmetric on purpose: back off fast, come back slowly. Distortion is
+ * immediate and obvious; a slow recovery is inaudible.
+ */
+export function nextMakeupDb({ current, reductionDb, peakDb, ceilingDb = CEILING_DB }) {
+    const want = makeupFromReduction(reductionDb);
+
+    // How much this could change and still land on the ceiling. With no peak
+    // reading yet, trust the reduction alone.
+    const allowed = Number.isFinite(peakDb) ? current + (ceilingDb - peakDb) : want;
+    const target = Math.max(0, Math.min(MAKEUP_MAX_DB, Math.min(want, allowed)));
+
+    const rate = target < current ? 0.5 : 0.08;
+    return current + (target - current) * rate;
 }
 
 // Whether the gate should be open, given the level now and whether it was open
@@ -242,8 +272,25 @@ export function buildChain(ctx, spec) {
         // Auto starts at unity and follows the measured reduction; manual is
         // whatever the slider says.
         makeup.gain.value = c.autoMakeup ? 1 : Math.pow(10, c.makeup / 20);
-        nodes.push(comp, makeup);
-        if (c.autoMakeup) compressor = { node: comp, makeup, db: 0 };
+
+        // Watches the makeup's own output, so the loop can see the peak it is
+        // creating rather than the one it started from.
+        const meter = ctx.createAnalyser();
+        meter.fftSize = 1024;
+
+        // Safety limiter, always present with the compressor. Auto makeup aims
+        // to stay off it, and manual makeup can be set to anything at all — a
+        // brickwall a decibel below full scale is what stops either of those
+        // reaching the point where it buzzes.
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = CEILING_DB;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.1;
+
+        nodes.push(comp, makeup, meter, limiter);
+        if (c.autoMakeup) compressor = { node: comp, makeup, meter, db: 0 };
     }
 
     // Stereo widener, last. Everything upstream is one signal; this is where it

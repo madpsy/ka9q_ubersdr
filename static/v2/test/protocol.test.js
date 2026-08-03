@@ -1185,6 +1185,32 @@ t('frame level is RMS in dBFS', () => {
     assert.ok(Math.abs(af.frameLevelDb(half) + 6) < 0.3, af.frameLevelDb(half));
 });
 
+t('makeup backs off when the output is already at the ceiling', () => {
+    // The bug this guards: reduction says how far the peaks were pulled down,
+    // not how much room is left above them. A signal already at full scale has
+    // none, and handing back "what was taken" clipped it.
+    const hot = af.nextMakeupDb({ current: 6, reductionDb: -10, peakDb: 0 });
+    assert.ok(hot < 6, `should retreat from a 0 dBFS peak, got ${hot}`);
+
+    // Repeatedly: it must settle at or under the ceiling, not oscillate.
+    let db = 6;
+    for (let i = 0; i < 200; i++) db = af.nextMakeupDb({ current: db, reductionDb: -10, peakDb: 0 + (db - 6) });
+    assert.ok(db <= 6 - Math.abs(af.CEILING_DB) + 0.2, `settled at ${db}`);
+
+    // Backing off is fast, coming back is slow — distortion is immediate,
+    // a slow recovery is inaudible.
+    const down = 6 - af.nextMakeupDb({ current: 6, reductionDb: -10, peakDb: 3 });
+    const up = af.nextMakeupDb({ current: 0, reductionDb: -10, peakDb: -40 }) - 0;
+    assert.ok(down > up, `retreat ${down} should outpace recovery ${up}`);
+
+    // Headroom to spare: it may rise, but never past what was compressed away.
+    const quiet = af.nextMakeupDb({ current: 0, reductionDb: -6, peakDb: -40 });
+    assert.ok(quiet > 0 && quiet <= af.makeupFromReduction(-6));
+
+    // No peak reading yet (a node that has not run): fall back to reduction.
+    assert.ok(af.nextMakeupDb({ current: 0, reductionDb: -6, peakDb: -Infinity }) > 0);
+});
+
 t('auto makeup only gives back what the compressor took', () => {
     // The bug this guards: estimating makeup from threshold and ratio assumes
     // the audio peaks at 0 dBFS. On a signal peaking near -20 that handed back

@@ -5,7 +5,7 @@
 // arrival. When the schedule falls behind the cushion is re-primed, which is
 // audible as a single gap instead of continuous stuttering.
 
-import { buildChain, frameLevelDb, gateOpen, makeupFromReduction } from './audio-filters.js';
+import { buildChain, frameLevelDb, gateOpen, nextMakeupDb } from './audio-filters.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
 // time, and a timer is the right tool: this must keep working with no panel
@@ -253,20 +253,35 @@ export class AudioPlayer {
         }
     }
 
-    // Auto makeup follows what the compressor is really doing, read from the
-    // node's own reduction meter. Smoothed hard: makeup that tracks every
-    // syllable is just a slower compressor fighting the fast one.
+    // Auto makeup, from what the compressor is really doing *and* what the
+    // output is really peaking at — see nextMakeupDb. Runs at 40 ms, which is
+    // fast enough to catch a peak building before it lands on the limiter.
     _runMakeup(comp) {
+        const buf = new Float32Array(comp.meter.fftSize);
+
         this.makeupTimer = setInterval(() => {
             if (!this.ctx) return;
-            const db = makeupFromReduction(comp.node.reduction);
-            // Ease towards it rather than stepping, and keep the number for the
-            // panel to display.
-            this.makeupDb += (db - this.makeupDb) * 0.2;
+
+            // Float, not byte: byte time-domain data is clamped to +/-1, so an
+            // overshoot would read as exactly full scale and the loop could not
+            // tell "just right" from "far too loud".
+            comp.meter.getFloatTimeDomainData(buf);
+            let peak = 0;
+            for (let i = 0; i < buf.length; i++) {
+                const v = buf[i] < 0 ? -buf[i] : buf[i];
+                if (v > peak) peak = v;
+            }
+            const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+
+            this.makeupDb = nextMakeupDb({
+                current: this.makeupDb,
+                reductionDb: comp.node.reduction,
+                peakDb,
+            });
             comp.makeup.gain.setTargetAtTime(
-                Math.pow(10, this.makeupDb / 20), this.ctx.currentTime, 0.08,
+                Math.pow(10, this.makeupDb / 20), this.ctx.currentTime, 0.05,
             );
-        }, 60);
+        }, 40);
     }
 
     // The gate is a gain node the player rides: Web Audio has no gate, and

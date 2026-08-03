@@ -119,6 +119,11 @@ export class SpectrumConnection extends Emitter {
             this.emit('open');
             clearInterval(this.pingTimer);
             this.pingTimer = setInterval(() => this.send({ type: 'ping' }), 20000);
+            if (this.pendingView) {
+                const p = this.pendingView;
+                this.pendingView = null;
+                this.send({ type: 'zoom', ...p });
+            }
         };
         ws.onmessage = (ev) => this._onMessage(ev);
         ws.onerror = () => this.emit('error', { kind: 'socket', message: 'spectrum socket error' });
@@ -148,11 +153,22 @@ export class SpectrumConnection extends Emitter {
 
     // A single message moves and rescales the view; the server treats "zoom"
     // and "pan" identically and applies whichever fields are present.
+    //
+    // A request made while the socket is down is remembered and replayed on the
+    // next open, rather than being dropped: clicking a bookmark during a
+    // reconnect used to tune the receiver and leave the view where it was, so
+    // the signal you asked for was off screen with no sign of why.
     setView(centerFreq, binBandwidth) {
         const msg = { type: 'zoom' };
         if (centerFreq != null) msg.frequency = Math.round(centerFreq);
         if (binBandwidth != null) msg.binBandwidth = binBandwidth;
-        return this.send(msg);
+        if (this.send(msg)) return true;
+        this.pendingView = {
+            ...(this.pendingView || {}),
+            ...(msg.frequency != null ? { frequency: msg.frequency } : {}),
+            ...(msg.binBandwidth != null ? { binBandwidth: msg.binBandwidth } : {}),
+        };
+        return false;
     }
 
     reset() {

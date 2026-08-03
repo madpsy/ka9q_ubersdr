@@ -573,6 +573,24 @@ export function RadioProvider({ children }) {
                 spectrumConn.setView(clamp(hz, MIN_FREQ, MAX_FREQ), null);
             },
 
+            // Guarantee a frequency is on screen without moving the view when
+            // it already is. Unlike recenterIfNeeded this ignores the
+            // follow-tuning setting: it answers a direct request ("show me this
+            // bookmark"), not automatic tracking of the dial. The window is the
+            // middle 60% of the span, so a hit near the edge — where the
+            // passband would be half cut off — still recentres.
+            ensureVisible(hz) {
+                const target = clamp(hz, MIN_FREQ, MAX_FREQ);
+                const span = spectrumConn.span;
+                if (!span || !spectrumConn.centerFreq) {
+                    spectrumConn.setView(target, null);
+                    return;
+                }
+                if (Math.abs(target - spectrumConn.centerFreq) > span * 0.3) {
+                    spectrumConn.setView(target, null);
+                }
+            },
+
             setSpan(spanHz) {
                 const bins = spectrumConn.binCount;
                 if (!bins) return;

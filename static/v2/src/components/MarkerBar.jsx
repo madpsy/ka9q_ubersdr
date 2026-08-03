@@ -196,6 +196,10 @@ export default function MarkerBar({ width }) {
         if (hit.kind === 'bookmark') {
             if (hit.item.mode) actions.setMode(hit.item.mode);
             actions.setFrequency(hit.item.frequency);
+            // A pill sits at the edge of the bar as often as the middle, and
+            // with follow-tuning off nothing else would move the view — so the
+            // signal you just clicked could end up half off screen.
+            actions.ensureVisible(hit.item.frequency);
         } else {
             const centre = Math.round((hit.band.start + hit.band.end) / 2);
             if (hit.band.mode) actions.setMode(hit.band.mode);

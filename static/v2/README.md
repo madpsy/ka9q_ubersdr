@@ -176,9 +176,15 @@ panel never disturbs an existing user's arrangement.
   "visible". `lib/markers.js` therefore: binary-searches the sorted bookmark list
   for the visible window rather than scanning it; caps the draw list at 100,
   sampled evenly across the x axis so survivors stay spread over the full width
-  instead of bunching at one end; and stacks onto two rows, checking only the
-  last marker placed in each row (the list is x-sorted, so that is O(n) rather
-  than v1's O(n²)). Label widths are measured once per name. The bar redraws on
+  instead of bunching at one end; then stacks onto two rows and **drops whatever
+  fits neither**. That last part is the one place this deliberately departs from
+  v1, which keeps a colliding marker and draws it on row 0 anyway — its cap
+  bounds how many markers are drawn but nothing bounds how many are drawn on top
+  of each other, so at wide spans the bar becomes an illegible pile. Dropping is
+  stable: placement is greedy left-to-right over an x-sorted list, so panning
+  slides markers rather than reshuffling which ones survive. Row assignment only
+  compares against the last marker placed in each row (the list is x-sorted), so
+  it is O(n) rather than v1's O(n²). Label widths are measured once per name. The bar redraws on
   view/data/toggle changes only, never per spectrum frame. Bands are drawn
   widest-first so narrow allocations land on top, and their labels repeat at a
   spacing derived from the label width — laid out across the range the label

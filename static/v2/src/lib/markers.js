@@ -26,30 +26,36 @@ export function visibleBookmarks(sorted, startFreq, endFreq) {
     return out;
 }
 
-// Two rows, as in v1: a marker goes on row 0 unless it would collide, then row 1,
-// and if both are taken it stays on row 0 (overlapping) rather than vanishing.
+// Two rows. A marker takes row 0 unless it would collide, then row 1, and if it
+// fits neither it is dropped.
+//
+// v1 keeps it and draws it on row 0 anyway, which is what makes its bar
+// illegible when zoomed out: the density cap bounds how many are drawn but
+// nothing bounds how many are drawn *on top of each other*. Dropping is what
+// "don't overload" actually requires, and it is stable — placement is greedy
+// left-to-right over an x-sorted list, so panning slides markers rather than
+// reshuffling which ones survive.
 export const ROW_GAP_PX = 3;
 
 export function assignRows(items) {
-    const rows = [[], []];
+    const rows = [null, null];   // last placed marker in each row
+    const out = [];
     const clashes = (a, b) => {
         const aL = a.x - a.width / 2;
-        const aR = a.x + a.width / 2;
-        const bL = b.x - b.width / 2;
         const bR = b.x + b.width / 2;
-        return !(aR + ROW_GAP_PX < bL || aL - ROW_GAP_PX > bR);
+        // Items arrive x-sorted, so only the previous marker in a row can
+        // collide — O(n) rather than v1's O(n²) scan of the whole row.
+        return aL - ROW_GAP_PX <= bR;
     };
     for (const item of items) {
-        // Only the last placed marker in a row can overlap, since items arrive
-        // sorted by x — so this stays O(n) instead of v1's O(n²) scan.
-        const fits = (row) => {
-            const last = rows[row][rows[row].length - 1];
-            return !last || !clashes(item, last);
-        };
-        item.row = fits(0) ? 0 : fits(1) ? 1 : 0;
-        rows[item.row].push(item);
+        const fits = (row) => !rows[row] || !clashes(item, rows[row]);
+        const row = fits(0) ? 0 : fits(1) ? 1 : -1;
+        if (row < 0) continue;
+        item.row = row;
+        rows[row] = item;
+        out.push(item);
     }
-    return items;
+    return out;
 }
 
 // Density cap. Above `max`, sample evenly across the x-sorted list so the
@@ -75,8 +81,9 @@ export function layoutBookmarks({ sorted, startFreq, endFreq, width, measure, ma
         width: measure(b),
     }));
     placed.sort((a, b) => a.x - b.x);
-    // Cap before stacking: rows assigned to markers that get dropped would be
-    // wasted work, and dropping after stacking leaves gaps in row 1.
+    // Two stages: the even sample bounds the work and keeps the survivors
+    // spread across the whole width; the row assignment then drops whatever
+    // still will not fit, so the bar never overlaps itself.
     return assignRows(capDensity(placed, max));
 }
 

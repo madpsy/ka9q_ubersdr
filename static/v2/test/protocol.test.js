@@ -348,12 +348,39 @@ t('lowerBound finds the first index at or after the target', () => {
     assert.strictEqual(mk.lowerBound(arr, 99), 4);
 });
 
-t('full span with 2450 bookmarks is capped, not drawn whole', () => {
+t('full span with 2450 bookmarks yields a readable handful', () => {
     const placed = mk.layoutBookmarks({
         sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 1600, measure,
     });
     assert.ok(placed.length <= mk.MAX_MARKERS, `${placed.length} markers`);
-    assert.ok(placed.length > 50, `only ${placed.length} survived the cap`);
+    // Enough to be useful, few enough to read. v1 draws 100 here, most of them
+    // stacked on top of each other.
+    assert.ok(placed.length >= 15, `only ${placed.length} survived`);
+});
+
+t('markers never overlap, at any zoom', () => {
+    // The point of dropping: whatever the span or width, no row collides with
+    // itself. This is the check that would have caught the overloaded bar.
+    for (const [lo, hi, w] of [
+        [0, 30e6, 1600], [0, 30e6, 400], [7.0e6, 7.3e6, 1200],
+        [7.1e6, 7.11e6, 800], [0, 30e6, 3000],
+    ]) {
+        const placed = mk.layoutBookmarks({ sorted: MARKS, startFreq: lo, endFreq: hi, width: w, measure });
+        for (const row of [0, 1]) {
+            const inRow = placed.filter((p) => p.row === row);
+            for (let i = 1; i < inRow.length; i++) {
+                const gap = (inRow[i].x - inRow[i].width / 2) - (inRow[i - 1].x + inRow[i - 1].width / 2);
+                assert.ok(gap >= mk.ROW_GAP_PX,
+                    `span ${(hi - lo) / 1e6}MHz w=${w} row ${row}: ${gap.toFixed(1)}px gap`);
+            }
+        }
+    }
+});
+
+t('a narrower bar keeps fewer markers', () => {
+    const wide = mk.layoutBookmarks({ sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 2400, measure });
+    const narrow = mk.layoutBookmarks({ sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 400, measure });
+    assert.ok(wide.length > narrow.length, `${wide.length} vs ${narrow.length}`);
 });
 
 t('capped markers stay spread across the width', () => {
@@ -367,19 +394,12 @@ t('capped markers stay spread across the width', () => {
     assert.ok(Math.max(...xs) > 1400, `rightmost at ${Math.max(...xs)}`);
 });
 
-t('markers stack onto two rows and no row overlaps itself', () => {
+t('both rows are used before anything is dropped', () => {
     const placed = mk.layoutBookmarks({
         sorted: MARKS, startFreq: 7000000, endFreq: 7300000, width: 1200, measure,
     });
     assert.ok(placed.some((p) => p.row === 1), 'nothing was pushed to the second row');
-    for (const row of [0, 1]) {
-        const inRow = placed.filter((p) => p.row === row).sort((a, b) => a.x - b.x);
-        for (let i = 1; i < inRow.length; i++) {
-            const gap = (inRow[i].x - inRow[i].width / 2) - (inRow[i - 1].x + inRow[i - 1].width / 2);
-            // Row 0 is the overflow row: an item that fits nowhere lands there.
-            if (row === 1) assert.ok(gap >= mk.ROW_GAP_PX, `row 1 overlap: gap ${gap.toFixed(1)}px`);
-        }
-    }
+    assert.ok(placed.some((p) => p.row === 0), 'nothing on the first row');
 });
 
 t('an empty or absent catalogue lays out nothing', () => {

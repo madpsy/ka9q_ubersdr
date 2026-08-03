@@ -9,10 +9,26 @@
 // So each bin is weighted by that filter's influence at that frequency. For a
 // peaking filter the influence follows the bandpass prototype it is built from:
 //
-//     w(f) = 1 / sqrt(1 + Q^2 * (f/f0 - f0/f)^2)
+//     bp(f) = 1 / sqrt(1 + Q^2 * (f/f0 - f0/f)^2)
 //
 // which is 1 at the centre and 0.707 at the -3 dB points, where the band's
 // width is f0/Q. Power is then averaged with w^2, since w is an amplitude.
+//
+// But bp's tails decay only as 1/(Q*ratio), and audio is nothing like flat: on
+// speech, 500 Hz sits ~40 dB above 8 kHz, while its weight in the 8 kHz band is
+// only -24 dB. The far-off energy therefore dominated that band's average, and
+// every meter read roughly the same thing — boosting a band by 12 dB moved its
+// own meter by about 1 dB, which is what made the display look broken while the
+// audio plainly changed.
+//
+// So the response is gated: anything at or below the -6 dB point contributes
+// nothing, rescaled so the centre still reads 1.
+//
+//     w(f) = clamp((bp(f) - 0.5) * 2, 0, 1)
+//
+// That leaves each band about an octave either side of its centre at Q=1 —
+// enough overlap to be honest about neighbouring bands, with no far leakage. A
+// +12 dB boost now moves its own meter by 12 dB.
 
 // Weights are per (band set, Q, sample rate, bin count) and change only when
 // the stream does, so they are built once and reused.
@@ -29,7 +45,8 @@ export function bandWeights(freqs, q, sampleRate, binCount) {
             // Bin centre. Bin 0 is DC, where the response is zero anyway.
             const f = ((i + 0.5) / binCount) * nyquist;
             const ratio = f / f0 - f0 / f;
-            w[i] = 1 / Math.sqrt(1 + q * q * ratio * ratio);
+            const bp = 1 / Math.sqrt(1 + q * q * ratio * ratio);
+            w[i] = Math.max(0, Math.min(1, (bp - 0.5) * 2));
         }
         return w;
     });
@@ -53,7 +70,7 @@ export function bandLevels(bins, weights, out) {
         let den = 0;
         for (let i = 0; i < w.length; i++) {
             const wi = w[i];
-            if (wi < 0.02) continue;              // negligible, and most bins are
+            if (wi <= 0) continue;                // outside this band entirely
             const db = bins[i];
             if (!Number.isFinite(db)) continue;
             const p = Math.pow(10, db / 10);      // dB -> power

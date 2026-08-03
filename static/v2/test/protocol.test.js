@@ -1080,22 +1080,23 @@ t('the bandpass range follows the mode passband', () => {
 // Each band's meter is weighted by that band's own filter response, so a wide
 // band reads what it actually controls rather than a fixed slice of bins.
 
-t('band weighting peaks at the centre and falls to -3 dB at f0/Q', () => {
+t('band weighting peaks at the centre and stops at the -6 dB point', () => {
     const sr = 16000;
     const bins = 512;
     const [w] = eql.bandWeights([1000], 1.0, sr, bins);
     const at = (hz) => w[Math.floor((hz / (sr / 2)) * bins)];
 
     assert.ok(at(1000) > 0.99, `centre ${at(1000)}`);
-    // Q of 1 means a width of f0, so the -3 dB points sit either side of it.
-    // 0.707 is -3 dB in amplitude.
-    const lower = at(618);   // (sqrt(5)-1)/2 * f0, the analytic -3 dB point
-    const upper = at(1618);
-    assert.ok(Math.abs(lower - 0.707) < 0.02, `lower ${lower}`);
-    assert.ok(Math.abs(upper - 0.707) < 0.02, `upper ${upper}`);
-    // Far out, this band has almost no say. (7 kHz, not Nyquist itself —
-    // there is no bin at exactly sr/2.)
-    assert.ok(at(7000) < 0.15, `far ${at(7000)}`);
+    // The -3 dB points of the underlying bandpass still read about half way up
+    // the rescaled weight.
+    assert.ok(at(618) > 0.35 && at(618) < 0.5, `lower ${at(618)}`);
+    assert.ok(at(1618) > 0.35 && at(1618) < 0.5, `upper ${at(1618)}`);
+    // Beyond the -6 dB point the band has no say at all. Without this gate,
+    // loud low-frequency speech leaked into every high band and a 12 dB boost
+    // moved its own meter by ~1 dB.
+    assert.strictEqual(at(400), 0, 'below the band');
+    assert.strictEqual(at(2500), 0, 'above the band');
+    assert.strictEqual(at(7000), 0, 'far above the band');
 });
 
 t('a higher Q makes a narrower band', () => {
@@ -1106,6 +1107,27 @@ t('a higher Q makes a narrower band', () => {
     const at = (w, hz) => w[Math.floor((hz / (sr / 2)) * bins)];
     assert.ok(at(narrow, 1500) < at(wide, 1500));
     assert.ok(at(narrow, 1000) > 0.99 && at(wide, 1000) > 0.99);
+});
+
+t('boosting a band moves that band\'s meter, not its neighbours', () => {
+    // The bug this guards: with un-gated weights, loud audio elsewhere in the
+    // spectrum dominated every band's average.
+    const sr = 16000;
+    const bins = 1024;
+    const freqs = [500, 8000];
+    const weights = eql.bandWeights(freqs, 1.0, sr, bins);
+
+    const data = new Float32Array(bins).fill(-100);
+    const binOf = (hz) => Math.floor((hz / (sr / 2)) * bins);
+    for (let i = binOf(400); i < binOf(650); i++) data[i] = -30;    // loud speech
+    for (let i = binOf(7000); i < binOf(7990); i++) data[i] = -70;  // quiet hiss
+
+    const before = eql.bandLevels(data, weights);
+    for (let i = binOf(7000); i < binOf(7990); i++) data[i] = -58;  // +12 dB
+    const after = eql.bandLevels(data, weights);
+
+    assert.ok(after[1] - before[1] > 10, `8k band moved ${(after[1] - before[1]).toFixed(1)} dB`);
+    assert.ok(Math.abs(after[0] - before[0]) < 0.5, 'the 500 Hz band must not move');
 });
 
 t('a tone lands in the band that controls it', () => {

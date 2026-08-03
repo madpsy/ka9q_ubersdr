@@ -18,7 +18,7 @@
 // on the way out, into a separate buffer.
 
 import { Emitter } from './emitter.js';
-import { checkConnection, getBypassPassword, getSessionId, wsBase } from './session.js';
+import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
 
 const HEADER_BYTES = 22;
 
@@ -82,7 +82,7 @@ export class SpectrumConnection extends Emitter {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
 
-        const check = await checkConnection();
+        const check = await connectionCheck();
         if (!check.allowed) {
             this._setState('rejected');
             this.emit('error', { kind: 'rejected', message: check.reason });

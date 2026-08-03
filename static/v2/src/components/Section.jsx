@@ -5,15 +5,21 @@
 // the native HTML5 API so no pointer bookkeeping is needed and the browser
 // supplies the drag image for free.
 
-import React, { useState } from '../react.js';
+import React, { useCallback, useState } from '../react.js';
 import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
+import { useDragEndReset } from '../lib/useDragEnd.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
 export default function Section({ panel, dock, index }) {
     const { sections, toggleSection, setSectionHidden, movePanel } = useLayout();
     const [dropEdge, setDropEdge] = useState(null);   // 'before' | 'after' | null
+
+    // Same reason as the dock: a drop landing elsewhere must still clear this
+    // section's insertion marker.
+    const clearEdge = useCallback(() => setDropEdge(null), []);
+    useDragEndReset(dropEdge !== null, clearEdge);
     const state = sections[panel.id] || { open: true };
 
     const onDragStart = (e) => {
@@ -37,7 +43,11 @@ export default function Section({ panel, dock, index }) {
         setDropEdge(null);
         if (!id || id === panel.id) return;
         e.preventDefault();
-        e.stopPropagation();
+        // Deliberately not stopPropagation: the dock needs to see the drop to
+        // clear its own hover tint. Marking the event tells it the placement is
+        // already decided. (React reuses one synthetic event along the path, so
+        // the flag survives the bubble.)
+        e.panelDropHandled = true;
         movePanel(id, dock, dropEdge === 'after' ? index + 1 : index);
     };
 

@@ -10,7 +10,7 @@
 // unavailable; that path is handled too so the UI still works on such a server.
 
 import { Emitter } from './emitter.js';
-import { checkConnection, getBypassPassword, getSessionId, wsBase } from './session.js';
+import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
 
 // Version 2 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
@@ -38,7 +38,7 @@ export class AudioConnection extends Emitter {
         this.reconnectTimer = null;
         this.params = { ...params };
 
-        const check = await checkConnection();
+        const check = await connectionCheck();
         if (!check.allowed) {
             this._setState('rejected');
             this.emit('error', { kind: 'rejected', message: check.reason });

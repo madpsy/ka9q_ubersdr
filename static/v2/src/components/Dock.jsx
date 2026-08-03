@@ -6,6 +6,7 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { PANEL_BY_ID } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
+import { useDragEndReset } from '../lib/useDragEnd.js';
 
 const COLLAPSE_ICON = {
     left: { open: <Icon.ChevronLeft size={14} />, closed: <Icon.ChevronRight size={14} /> },
@@ -18,6 +19,13 @@ export default function Dock({ side }) {
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
     const resizeRef = useRef(null);
+
+    // Covers a cancelled drag (Escape), where no drop fires at all. It cannot
+    // cover a completed drop: moving the panel unmounts the drag source, so its
+    // dragend no longer bubbles to the window — the drop itself clears that,
+    // which is why Section lets the event through instead of stopping it.
+    const clearDropping = useCallback(() => setDropping(false), []);
+    useDragEndReset(dropping, clearDropping);
 
     const visible = dock.panels.filter((id) => PANEL_BY_ID[id] && !sections[id]?.hidden);
 
@@ -88,6 +96,8 @@ export default function Dock({ side }) {
                 onDragLeave={() => setDropping(false)}
                 onDrop={(e) => {
                     setDropping(false);
+                    // A section inside this dock may have placed it already.
+                    if (e.panelDropHandled) return;
                     const id = e.dataTransfer.getData('text/ubersdr-panel');
                     if (id) movePanel(id, side, null);
                 }}

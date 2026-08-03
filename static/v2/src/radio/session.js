@@ -37,7 +37,37 @@ export function getSessionId() {
 // server pairs audio and spectrum by UUID.
 export function newSessionId() {
     currentId = uuid();
+    registration = null;
     return currentId;
+}
+
+// `/connection` registers the UUID against this IP and User-Agent, which both
+// WebSocket endpoints require before they will accept it. Two sockets open per
+// session, so the result is shared rather than each of them POSTing: the
+// endpoint is rate-limited to 10 requests per minute per IP, and burning two
+// per session start (plus two more per reconnect) would eat that budget for no
+// benefit.
+//
+// The registration is cached only briefly. Server-side it survives while any
+// session is live and for five minutes after the last one ends, so a long
+// reconnect outage needs a fresh POST — this TTL is comfortably inside that
+// window while still collapsing the normal burst to one request.
+const REGISTRATION_TTL_MS = 120000;
+let registration = null;
+
+export function connectionCheck() {
+    const id = getSessionId();
+    const now = Date.now();
+    if (registration && registration.id === id && now - registration.at < REGISTRATION_TTL_MS) {
+        return registration.promise;
+    }
+    const promise = checkConnection();
+    registration = { id, at: now, promise };
+    // A refusal must not be cached — the next attempt should ask again.
+    promise.then((r) => {
+        if (!r || !r.allowed) registration = null;
+    }, () => { registration = null; });
+    return promise;
 }
 
 export function getBypassPassword() {

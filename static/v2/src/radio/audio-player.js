@@ -12,6 +12,15 @@ import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey
 // open, which rules out hanging it off a view's animation frame.
 const GATE_TICK_MS = 20;
 
+// Clip watch. The only place audio really clips is the destination, after the
+// volume control, so that is where this measures — the stages before it are
+// float and can run hot without harm. The hold is what makes a badge useful:
+// clipping happens on transients, and a light that is on for one frame is a
+// light nobody sees.
+const CLIP_TICK_MS = 50;
+const CLIP_PEAK = 0.997;
+const CLIP_HOLD_MS = 1200;
+
 const DEFAULT_BUFFER_SEC = 0.2;
 const MIN_LEAD_SEC = 0.02;
 
@@ -43,6 +52,10 @@ export class AudioPlayer {
         this.gateTimer = null;
         this.makeupTimer = null;
         this.makeupDb = 0;          // live compressor makeup, dB
+        this.clipTimer = null;
+        this.clipping = false;      // output hit full scale recently
+        this.peakDb = -Infinity;    // output peak, dBFS
+        this._clipUntil = 0;
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -210,6 +223,7 @@ export class AudioPlayer {
         this._applyGain();
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);
+        this._runClipWatch();
         this.nextPlayTime = this.ctx.currentTime + this.bufferSec;
     }
 
@@ -259,6 +273,31 @@ export class AudioPlayer {
         } else {
             this.head.connect(this.gain);
         }
+    }
+
+    // Watches the output for full scale, so the UI can say so rather than
+    // leaving the operator to wonder whether the crunch is the band or us.
+    _runClipWatch() {
+        clearInterval(this.clipTimer);
+        let buf = new Float32Array(this.analyser.fftSize);
+
+        this.clipTimer = setInterval(() => {
+            const a = this.analyser;
+            if (!this.ctx || this.ctx.state !== 'running' || !a) return;
+            if (buf.length !== a.fftSize) buf = new Float32Array(a.fftSize);
+            a.getFloatTimeDomainData(buf);
+
+            let peak = 0;
+            for (let i = 0; i < buf.length; i++) {
+                const v = buf[i] < 0 ? -buf[i] : buf[i];
+                if (v > peak) peak = v;
+            }
+            this.peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+
+            const now = performance.now();
+            if (peak >= CLIP_PEAK) this._clipUntil = now + CLIP_HOLD_MS;
+            this.clipping = now < this._clipUntil;
+        }, CLIP_TICK_MS);
     }
 
     // Auto makeup, from what the compressor is really doing *and* what the

@@ -146,6 +146,8 @@ export function RadioProvider({ children }) {
         level: 0,
         channels: 0,            // channels in the stream now playing
         makeupDb: 0,            // live compressor makeup gain
+        clipping: false,        // output hit full scale in the last moment
+        peakDb: -Infinity,      // output peak, dBFS
         queuedSec: 0,
         underruns: 0,
         frameAgeMs: 0,
@@ -361,6 +363,8 @@ export function RadioProvider({ children }) {
             m.underruns = player.underruns;
             m.channels = player.channels;
             m.makeupDb = player.makeupDb;
+            m.clipping = player.clipping;
+            m.peakDb = player.peakDb;
             m.frameAgeMs = m.lastFrameAt ? performance.now() - m.lastFrameAt : 0;
         }, 100);
         return () => clearInterval(t);

@@ -58,6 +58,19 @@ function NoiseReductionTag() {
 // The client-side audio filters that are on. Just their names — the settings
 // live in the Audio filters panel; this is here so you can see at a glance that
 // the audio is being shaped, without hunting for which panel did it.
+// Output clipping. Deliberately its own tag rather than part of FilterTags:
+// this is a fault to fix, not a setting that is on, and it can happen with no
+// filters enabled at all.
+function ClipTag() {
+    const m = useMeters(8);
+    if (!m.clipping) return null;
+    return (
+        <span className="tag tag--bad" title="Audio is hitting full scale — reduce volume, makeup or EQ boost">
+            CLIP
+        </span>
+    );
+}
+
 function FilterTags() {
     const { filters } = useRadio();
     const on = [
@@ -549,6 +562,7 @@ export default function SpectrumView() {
                     <SquelchTag />
                     <NoiseReductionTag />
                     <FilterTags />
+                    <ClipTag />
                 </div>
                 <div className="spectrum__tools">
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />

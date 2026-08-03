@@ -150,7 +150,15 @@ export default function SignalPanel() {
                     unit="dB"
                     color={snr == null ? undefined : snrColour(snr)}
                 />
-                <Readout label="Audio" value={audioLevelPercent(m.level).toFixed(0)} unit="%" />
+                {/* Red the moment the output hits full scale — the number
+                    itself keeps reading, since RMS barely moves when peaks
+                    clip and would otherwise hide it. */}
+                <Readout
+                    label={m.clipping ? 'Audio · clip' : 'Audio'}
+                    value={audioLevelPercent(m.level).toFixed(0)}
+                    unit="%"
+                    color={m.clipping ? 'var(--bad)' : undefined}
+                />
             </div>
 
             <div className="sparkline">

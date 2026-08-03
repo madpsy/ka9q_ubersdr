@@ -32,9 +32,11 @@ import {
     ageLabel, countriesIn, filterSpots, modeForSpot,
 } from '../lib/spots.js';
 
-// Rows rendered before "show more". The lists run to thousands and the dock is
-// the only scroller — see the note in the README.
-const PAGE = 60;
+// Rows rendered before "show more", and how many each press adds. Kept small
+// because this panel is usually a few rows tall in a dock: a page much larger
+// than what fits just moves the scrolling from a button press to a long drag,
+// and the newest spots — the ones worth seeing — are at the top either way.
+const PAGE = 10;
 
 // Ages tick over on their own, so the list re-renders on a slow clock rather
 // than per spot. One second would be needless work for a column that reads in

@@ -209,12 +209,101 @@ export function bandpassRange(window) {
     };
 }
 
+/**
+ * What the graph looks like, as opposed to what it is set to.
+ *
+ * Two specs with the same shape can be swapped by retuning the nodes that are
+ * already there. Anything that changes the shape — a section switched on, a
+ * notch added, a different number of bandpass stages — needs a rebuild.
+ */
+export function shapeKey(spec) {
+    return [
+        spec.gate && spec.gate.enabled ? 'g' : '',
+        spec.bandpass.enabled ? `b${spec.bandpass.stages}` : '',
+        spec.notch.enabled ? `n${Math.min(MAX_NOTCHES, spec.notch.items.length)}` : '',
+        spec.eq.enabled ? 'e' : '',
+        spec.compressor && spec.compressor.enabled ? (spec.compressor.autoMakeup ? 'ca' : 'cm') : '',
+        spec.stereo && spec.stereo.enabled ? 's' : '',
+    ].join('|');
+}
+
+/**
+ * Retune an existing chain to a new spec of the same shape.
+ *
+ * Rebuilding the graph on every slider move tore the audio: disconnecting the
+ * chain drops whatever was in flight, and the new nodes start from silence. All
+ * of these are AudioParams, so they can be moved smoothly instead — quickly
+ * enough to feel immediate, slowly enough not to click.
+ */
+const GLIDE = 0.02;   // seconds; a param ramp this short is inaudible
+
+export function applyParams(chain, spec, ctx) {
+    const at = ctx.currentTime;
+    const parts = chain.parts;
+    const set = (param, value) => {
+        if (!Number.isFinite(value)) return;
+        param.setTargetAtTime(value, at, GLIDE);
+    };
+
+    if (parts.bandpass.length) {
+        const q = bandpassQ(spec.bandpass);
+        for (const f of parts.bandpass) {
+            set(f.frequency, Math.abs(spec.bandpass.center));
+            set(f.Q, q);
+        }
+    }
+
+    parts.notches.forEach((stages, i) => {
+        const n = spec.notch.items[i];
+        if (!n) return;
+        const q = notchQ(n.center, n.width);
+        for (const f of stages) {
+            set(f.frequency, Math.abs(n.center));
+            set(f.Q, q);
+        }
+    });
+
+    parts.eq.forEach((f, i) => set(f.gain, spec.eq.gains[i] || 0));
+    if (parts.eqMakeup) set(parts.eqMakeup.gain, Math.pow(10, (spec.eq.makeup || 0) / 20));
+
+    if (parts.comp) {
+        const c = spec.compressor;
+        set(parts.comp.threshold, c.threshold);
+        set(parts.comp.ratio, c.ratio);
+        set(parts.comp.knee, c.knee);
+        // Attack and release are k-rate and cannot be ramped; they are also
+        // never audible as a step, since they only change how the next
+        // envelope is followed.
+        parts.comp.attack.value = Math.max(0, c.attack) / 1000;
+        parts.comp.release.value = Math.max(1, c.release) / 1000;
+        // Auto makeup is driven by the meter loop; only touch it when manual.
+        if (!c.autoMakeup && parts.compMakeup) {
+            set(parts.compMakeup.gain, Math.pow(10, c.makeup / 20));
+        }
+    }
+
+    if (parts.stereo) {
+        const w = Math.max(0, Math.min(1, spec.stereo.width / 100));
+        const norm = 1 / (1 + w);
+        set(parts.stereo.delay.delayTime, Math.max(0.001, Math.min(0.1, spec.stereo.delay / 1000)));
+        set(parts.stereo.dry.gain, norm);
+        set(parts.stereo.wet.gain, w * norm);
+        set(parts.stereo.wetInv.gain, -w * norm);
+    }
+
+    // The gate's thresholds are read by the player's timer, not by a node.
+    if (chain.gate && spec.gate) chain.gate.spec = spec.gate;
+}
+
 // Builds the node chain for a spec and returns { input, output } to splice in.
 // Returns null when nothing is enabled, so the caller can bypass entirely
 // rather than paying for a chain of no-ops.
 export function buildChain(ctx, spec) {
     const nodes = [];
     let gate = null;
+    // Node references by section, so a slider move can retune what is already
+    // playing instead of rebuilding the graph underneath it — see applyParams.
+    const parts = { bandpass: [], notches: [], eq: [], eqMakeup: null, comp: null, compMakeup: null, stereo: null };
 
     // Gate first: an analyser to watch the level, and a gain the player drives.
     if (spec.gate && spec.gate.enabled) {
@@ -234,18 +323,22 @@ export function buildChain(ctx, spec) {
             f.frequency.value = Math.abs(spec.bandpass.center);
             f.Q.value = q;
             nodes.push(f);
+            parts.bandpass.push(f);
         }
     }
 
     if (spec.notch.enabled) {
         for (const n of spec.notch.items.slice(0, MAX_NOTCHES)) {
             const q = notchQ(n.center, n.width);
+            const stages = [];
+            parts.notches.push(stages);
             for (let i = 0; i < NOTCH_STAGES; i++) {
                 const f = ctx.createBiquadFilter();
                 f.type = 'notch';
                 f.frequency.value = Math.abs(n.center);
                 f.Q.value = q;
                 nodes.push(f);
+                stages.push(f);
             }
         }
     }
@@ -258,10 +351,12 @@ export function buildChain(ctx, spec) {
             f.Q.value = 1.0;
             f.gain.value = spec.eq.gains[i] || 0;
             nodes.push(f);
+            parts.eq.push(f);
         });
         const makeup = ctx.createGain();
         makeup.gain.value = Math.pow(10, (spec.eq.makeup || 0) / 20);
         nodes.push(makeup);
+        parts.eqMakeup = makeup;
     }
 
     let compressor = null;
@@ -279,6 +374,8 @@ export function buildChain(ctx, spec) {
         makeup.gain.value = c.autoMakeup ? 1 : Math.pow(10, c.makeup / 20);
 
         nodes.push(comp, makeup);
+        parts.comp = comp;
+        parts.compMakeup = makeup;
         if (c.autoMakeup) compressor = { node: comp, makeup, db: 0 };
     }
 
@@ -319,6 +416,7 @@ export function buildChain(ctx, spec) {
         wet.connect(merger, 0, 1);
 
         stereoTail = { input, output: merger, extra: [delay, dry, wet, wetInv] };
+        parts.stereo = { delay, dry, wet, wetInv };
     }
 
     if (!nodes.length && !stereoTail) return null;
@@ -360,5 +458,5 @@ export function buildChain(ctx, spec) {
 
     if (compressor) compressor.meter = meter;
 
-    return { input, output, nodes, gate, compressor };
+    return { input, output, nodes, gate, compressor, parts, shape: shapeKey(spec) };
 }

@@ -1252,4 +1252,52 @@ t('the stereo widener cannot add gain', () => {
     }
 });
 
+
+// Which filter edits need the graph rebuilt, and which can be retuned live.
+// Getting this wrong is audible: rebuilding drops whatever is in flight, which
+// is what tore the audio on every compressor slider move.
+t('parameter changes keep the same chain shape', () => {
+    const base = JSON.parse(JSON.stringify(af.FILTER_DEFAULTS));
+    base.compressor.enabled = true;
+    base.eq.enabled = true;
+    base.bandpass.enabled = true;
+    base.notch.enabled = true;
+    base.notch.items = [{ center: 1000, width: 50 }];
+    const shape = af.shapeKey(base);
+
+    const tweak = (fn) => { const s2 = JSON.parse(JSON.stringify(base)); fn(s2); return af.shapeKey(s2); };
+
+    // Values only — retune, do not rebuild.
+    assert.strictEqual(tweak((s2) => { s2.compressor.threshold = -40; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.compressor.ratio = 8; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.compressor.attack = 40; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.compressor.knee = 0; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.eq.gains[3] = 6; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.eq.makeup = 3; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.bandpass.center = 1200; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.bandpass.width = 400; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.notch.items[0].center = 1800; }), shape);
+    assert.strictEqual(tweak((s2) => { s2.stereo.width = 80; }), shape);
+});
+
+t('structural changes do force a rebuild', () => {
+    const base = JSON.parse(JSON.stringify(af.FILTER_DEFAULTS));
+    base.compressor.enabled = true;
+    base.bandpass.enabled = true;
+    base.notch.enabled = true;
+    base.notch.items = [{ center: 1000, width: 50 }];
+    const shape = af.shapeKey(base);
+    const tweak = (fn) => { const s2 = JSON.parse(JSON.stringify(base)); fn(s2); return af.shapeKey(s2); };
+
+    assert.notStrictEqual(tweak((s2) => { s2.eq.enabled = true; }), shape, 'a section switched on');
+    assert.notStrictEqual(tweak((s2) => { s2.compressor.enabled = false; }), shape, 'a section switched off');
+    assert.notStrictEqual(tweak((s2) => { s2.bandpass.stages = 6; }), shape, 'more filter stages');
+    assert.notStrictEqual(
+        tweak((s2) => { s2.notch.items.push({ center: 2000, width: 50 }); }), shape, 'another notch',
+    );
+    assert.notStrictEqual(
+        tweak((s2) => { s2.compressor.autoMakeup = false; }), shape, 'makeup changes who drives the gain',
+    );
+});
+
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

@@ -5,7 +5,7 @@
 // arrival. When the schedule falls behind the cushion is re-primed, which is
 // audible as a single gap instead of continuous stuttering.
 
-import { buildChain, frameLevelDb, gateOpen, nextMakeupDb } from './audio-filters.js';
+import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey } from './audio-filters.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
 // time, and a timer is the right tool: this must keep working with no panel
@@ -226,6 +226,14 @@ export class AudioPlayer {
     setFilters(spec) {
         this.filterSpec = spec;
         if (!this.ctx || !this.head) return;
+
+        // Same graph, different numbers: retune it. Rebuilding on every slider
+        // move tore the audio, because tearing the chain down drops whatever
+        // was in flight through it.
+        if (this.chain && spec && this.chain.shape === shapeKey(spec)) {
+            applyParams(this.chain, spec, this.ctx);
+            return;
+        }
 
         clearInterval(this.gateTimer);
         this.gateTimer = null;

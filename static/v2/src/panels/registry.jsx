@@ -45,6 +45,20 @@ import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
     {
+        id: 'callsign',
+        title: 'Callsign lookup',
+        icon: <Icon.Search />,
+        dock: 'left',
+        // `fill` only takes effect in the bottom dock, so it stays declared: it
+        // says what this panel should do if someone moves it there. In a side
+        // dock the result pane's own max-height caps it instead.
+        fill: true,
+        Component: CallsignPanel,
+        // The lookup provider is configured per instance; without it every
+        // request would 503, so the panel is absent rather than broken.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.lookup_service),
+    },
+    {
         id: 'addons',
         title: 'Addons',
         icon: <Icon.Puzzle />,
@@ -115,17 +129,6 @@ export const PANELS = [
         // permanently empty — the same gate v1's service applies before it
         // starts polling.
         requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
-    },
-    {
-        id: 'callsign',
-        title: 'Callsign lookup',
-        icon: <Icon.Search />,
-        dock: 'bottom',
-        fill: true,
-        Component: CallsignPanel,
-        // The lookup provider is configured per instance; without it every
-        // request would 503, so the panel is absent rather than broken.
-        requires: (serverInfo) => !!(serverInfo && serverInfo.lookup_service),
     },
     // DX, digital and CW spots. One tab per feed the instance actually has, and
     // the panel is absent entirely when it has none — no empty slot explaining

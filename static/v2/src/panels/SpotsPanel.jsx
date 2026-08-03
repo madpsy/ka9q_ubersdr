@@ -157,8 +157,15 @@ function Row({ spot, tab, now, tuned, onTune }) {
     const flag = countryFlag(spot.countryCode);
     const utc = new Date(spot.at).toISOString().slice(11, 16);
 
+    // Digital rows do not tune. Every station in a decoder band transmits on the
+    // same dial frequency — what varies is the audio offset within it — so the
+    // frequency on the row is where the station sat in the passband, not
+    // somewhere to point the receiver. Tuning there would leave you listening to
+    // one corner of an FT8 slot. Same reason these get no spectrum markers.
+    const clickable = tab !== 'digital';
+
     const title = [
-        `${mhz} MHz — ${modeForSpot(spot).toUpperCase()}`,
+        clickable ? `${mhz} MHz — ${modeForSpot(spot).toUpperCase()}` : `${mhz} MHz`,
         spot.country ? `${spot.callsign} · ${spot.country}` : spot.callsign,
         spot.spotter ? `Spotted by ${spot.spotter}` : null,
         spot.grid ? `Grid ${spot.grid}` : null,
@@ -168,6 +175,34 @@ function Row({ spot, tab, now, tuned, onTune }) {
         spot.message || spot.comment || null,
     ].filter(Boolean).join('\n');
 
+    const cells = (
+        <>
+            <span className="spot-row__time">{utc}</span>
+            <span className="spot-row__age">{ageLabel(spot.at, now)}</span>
+            <span className="spot-row__freq">{mhz}</span>
+            <span className="spot-row__call">{flag ? `${flag} ${spot.callsign}` : spot.callsign}</span>
+            {tab === 'digital' && <span className="spot-row__mode">{spot.submode ? `${spot.mode}/${spot.submode}` : spot.mode}</span>}
+            {tab === 'cw' && <span className="spot-row__mode">{spot.wpm != null ? `${spot.wpm}` : ''}</span>}
+            <span className="spot-row__country">{spot.country}</span>
+            {tab !== 'dx' && (
+                <span className="spot-row__snr">{spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr}` : ''}</span>
+            )}
+            {tab !== 'dx' && (
+                <span className="spot-row__dist">
+                    {spot.distanceKm != null ? `${Math.round(spot.distanceKm)}` : ''}
+                </span>
+            )}
+            <span className="spot-row__note">{spot.message || spot.comment || (spot.spotter ? `de ${spot.spotter}` : '')}</span>
+        </>
+    );
+
+    // A div rather than a disabled button: this is a reading row, not a control
+    // that happens to be unavailable, and a disabled button would dim its text
+    // and take it out of the accessibility tree.
+    if (!clickable) {
+        return <div className="list__row spot-row spot-row--static" title={title}>{cells}</div>;
+    }
+
     return (
         <button
             type="button"
@@ -175,21 +210,36 @@ function Row({ spot, tab, now, tuned, onTune }) {
             title={title}
             onClick={() => onTune(spot)}
         >
-            <span className="spot-row__time">{utc}</span>
-            <span className="spot-row__age">{ageLabel(spot.at, now)}</span>
-            <span className="spot-row__freq">{mhz}</span>
-            <span className="spot-row__call">{flag ? `${flag} ${spot.callsign}` : spot.callsign}</span>
-            {tab === 'digital' && <span className="spot-row__mode">{spot.submode ? `${spot.mode}/${spot.submode}` : spot.mode}</span>}
-            {tab === 'cw' && <span className="spot-row__mode">{spot.wpm != null ? `${spot.wpm} wpm` : ''}</span>}
-            <span className="spot-row__country">{spot.country}</span>
-            {tab !== 'dx' && (
-                <span className="spot-row__snr">{spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr}` : ''}</span>
-            )}
-            <span className="spot-row__dist">
-                {spot.distanceKm != null ? `${Math.round(spot.distanceKm)} km` : ''}
-            </span>
-            <span className="spot-row__note">{spot.message || spot.comment || (spot.spotter ? `de ${spot.spotter}` : '')}</span>
+            {cells}
         </button>
+    );
+}
+
+// Column headings, in the same grid as the rows so they line up with them — and
+// so the numbers underneath have a name. Each carries the cell class its column
+// uses, because the numeric columns are right-aligned and a left-aligned heading
+// over them would look misaligned even though the grid is not.
+const T = 'spot-row__time';
+const A = 'spot-row__age';
+const F = 'spot-row__freq';
+const C = 'spot-row__call';
+const N = 'spot-row__mode';       // mode / WPM — a right-aligned narrow column
+const S = 'spot-row__snr';
+const D = 'spot-row__dist';
+const X = 'spot-row__country';
+const O = 'spot-row__note';
+
+const HEADINGS = {
+    dx: [[T, 'UTC'], [A, 'Age'], [F, 'MHz'], [C, 'Call'], [X, 'Country'], [O, 'Comment']],
+    digital: [[T, 'UTC'], [A, 'Age'], [F, 'MHz'], [C, 'Call'], [N, 'Mode'], [X, 'Country'], [S, 'SNR'], [D, 'km'], [O, 'Message']],
+    cw: [[T, 'UTC'], [A, 'Age'], [F, 'MHz'], [C, 'Call'], [N, 'WPM'], [X, 'Country'], [S, 'SNR'], [D, 'km'], [O, 'Spotter']],
+};
+
+function Head({ tab }) {
+    return (
+        <div className="spot-row spot-row--head" aria-hidden="true">
+            {HEADINGS[tab].map(([cls, label]) => <span key={label} className={cls}>{label}</span>)}
+        </div>
     );
 }
 
@@ -294,7 +344,7 @@ export default function SpotsPanel() {
 
             <Filters tab={active} filters={f} set={set} countries={countries} />
 
-            <div className="list spots__list">
+            <div className={`list spots__list spots__list--${active}`}>
                 {page.length === 0 && (
                     <Empty>
                         {list.length === 0
@@ -302,6 +352,7 @@ export default function SpotsPanel() {
                             : 'No spots match these filters.'}
                     </Empty>
                 )}
+                {page.length > 0 && <Head tab={active} />}
                 {page.map((spot) => (
                     <Row
                         key={spot.key}

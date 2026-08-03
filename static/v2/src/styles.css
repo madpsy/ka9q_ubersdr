@@ -2256,34 +2256,79 @@ button, input, select, textarea { font: inherit; color: inherit; }
     white-space: nowrap;
 }
 
-/* Filters wrap onto as many rows as the panel's width needs: floated wide it is
-   one row, in the bottom dock at half width it is two or three. */
-.spots__filters { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; }
-.spots__filter { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.spots__filter .select, .spots__filter .input { min-width: 90px; }
+/* Label and control on one line, so the whole filter block stays about two rows
+   tall. Stacked labels pushed the list out of a bottom dock entirely: the
+   section is only as tall as the dock, and 150 px of filters left nothing. */
+.spots__filters { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.spots__filter { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.spots__filter .select, .spots__filter .input {
+    min-width: 74px;
+    padding: 2px 6px;
+    font-size: calc(11px * var(--ui-scale));
+}
 .spots__filter-label {
     font-size: calc(9.5px * var(--ui-scale));
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-faint);
+    white-space: nowrap;
 }
-.spots__filter--check { flex-direction: row; align-items: center; gap: 5px; padding-bottom: 5px; }
 .spots__filter--check span { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
 
-.spots__list { flex: 1; min-height: 0; overflow-y: auto; }
+/* Always worth a few rows even in a short dock — the filters must not be able
+   to squeeze the list to nothing, which is what a bare `flex: 1` allowed.
+   Same reasoning as the chat log's min-height. */
+.spots__list { flex: 1; min-height: 96px; overflow-y: auto; }
 
-/* One row is a grid rather than a table: the columns differ per tab, and a
-   grid lets a narrow panel drop the trailing ones off the end instead of
-   forcing a horizontal scroll on the whole dock. */
+/* Columns are declared once per tab on the *list*, and inherited by the header
+   and every row, so they line up. Each row being its own grid — which is what
+   this was — sizes its tracks from its own content, so no two rows agreed on a
+   column position. The tracks are therefore fixed rather than content-derived;
+   only the free-text tails flex, and they flex by the same fraction in every
+   row because the row widths are identical. */
+.spots__list--dx { --spot-cols: 38px 30px 62px 92px minmax(0, 1fr) minmax(0, 1.8fr); }
+.spots__list--digital { --spot-cols: 38px 30px 62px 92px 58px minmax(0, 1fr) 34px 46px minmax(0, 1.6fr); }
+.spots__list--cw { --spot-cols: 38px 30px 62px 92px 34px minmax(0, 1fr) 34px 46px minmax(0, 1fr); }
+
 .spot-row {
     display: grid;
-    grid-template-columns: auto auto minmax(58px, auto) minmax(0, 1.1fr) minmax(0, 1fr) auto auto minmax(0, 1.6fr);
+    grid-template-columns: var(--spot-cols);
     align-items: baseline;
     gap: 8px;
     width: 100%;
     text-align: left;
 }
 .spot-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Digital rows are read, not clicked — see the note in SpotsPanel. No pointer
+   and no hover lift, so the row never offers an interaction it will not honour.
+   Text stays at full contrast: it is information, not a disabled control. */
+.spot-row--static { cursor: default; }
+.spot-row--static:hover { background: transparent; }
+
+/* The heading strip. Sticky so the columns stay named while the list scrolls
+   under it — the whole point of naming them. */
+.spot-row--head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    /* Matches a row's 8px padding plus its 1px transparent border, so the
+       heading sits directly over the column it names. */
+    padding: 2px 9px 3px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+/* The heading text overrides each cell's own type, but not its alignment —
+   that has to keep coming from the cell class. */
+.spot-row--head > span {
+    font-family: var(--font);
+    font-size: calc(9px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
 .spot-row__time, .spot-row__age {
     font-family: var(--mono);
     font-size: calc(10px * var(--ui-scale));
@@ -2295,10 +2340,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-size: calc(11.5px * var(--ui-scale));
 }
 .spot-row__call { font-weight: 600; font-size: calc(11.5px * var(--ui-scale)); }
+/* Right-aligned: these are quantities, and a ragged left edge on a column of
+   numbers is exactly what makes a list look unaligned even when it is not. */
 .spot-row__mode, .spot-row__snr, .spot-row__dist {
     font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
     font-size: calc(10px * var(--ui-scale));
     color: var(--text-dim);
+    text-align: right;
 }
 .spot-row__country, .spot-row__note {
     font-size: calc(10.5px * var(--ui-scale));

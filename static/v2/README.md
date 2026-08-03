@@ -201,9 +201,17 @@ appear under everything else for anyone who had used the app before.
   defaults are v1's, and so are the tuning rules in `lib/spots.js` — CW and voice
   cross sidebands at 10 MHz, digital is always USB, and a DX spot (which carries
   no mode) takes FT8/FT4 or CW from the spotter's comment before falling back to
-  the band. Frequencies are Hz in every feed; the server converts the cluster's
-  kHz on the way in. Spots are keyed by feed, callsign, frequency and timestamp
-  so a replayed buffer does not duplicate rows already on screen.
+  the band. **Digital rows do not tune**, and are plain rows rather than
+  buttons: every station in a decoder band transmits on the same dial frequency
+  and only the audio offset differs, so the frequency on the row is where the
+  station sat in the passband, not somewhere to point the receiver — clicking it
+  would leave you listening to one corner of an FT8 slot. Same reason digital
+  spots get no spectrum markers. Frequencies are Hz in every feed; the server
+  converts the cluster's kHz on the way in. Spots are keyed by feed, callsign,
+  frequency and timestamp so a replayed buffer does not duplicate rows already on
+  screen. Column tracks are declared once on the *list*, not per row: a grid per
+  row sizes its tracks from its own content, so no two rows agree on where a
+  column starts — which v1 gets for free by using a real `<table>`.
 * **DX and CW spots also appear as markers; digital spots do not.** Green for DX
   and cyan for CW, v1's colours, with a switch each in the Display panel beside
   the other marker toggles — and each switch present only where that feed is.

@@ -11,6 +11,9 @@ export const DEFAULTS = {
     palette: 'turbo',
     contrast: 1.0,          // gamma applied to the waterfall colour mapping
     autoRange: true,
+    // Minimum dynamic range in auto-level mode, dB. null follows the operator's
+    // `min_span` from /api/ui-config; 0 means no minimum ("Auto"), as in v1.
+    autoMinSpan: null,
     floorDb: -110,
     ceilDb: -40,
     smoothing: 0.5,         // 0 = off, ->1 = heavier temporal averaging

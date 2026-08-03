@@ -566,6 +566,38 @@ function binsToPixels(bins, width, out) {
     return out;
 }
 
+// Minimum dynamic range, v1's `autoMinSpan` (spectrum-display.js updateAutoRange).
+//
+// On a quiet band auto-levelling compresses the window until noise wobble fills
+// the whole height and every ripple looks like a signal. This guarantees at
+// least `minSpan` dB are shown, expanding 75% upward (headroom for signals) and
+// 25% downward, and only re-commits when the new edges move more than 3 dB —
+// without that dead-band the grid ticks jitter as the smoothed values drift.
+const CLAMP_HYSTERESIS = 3;
+
+function applyMinSpan(g, minSpan) {
+    if (!(minSpan > 0)) {
+        g.clampedFloor = null;
+        return;
+    }
+    const range = g.autoCeil - g.autoFloor;
+    if (range >= minSpan) {
+        g.clampedFloor = null;
+        return;
+    }
+    const deficit = minSpan - range;
+    const ceil = Math.round(g.autoCeil + deficit * 0.75);
+    const floor = Math.round(g.autoFloor - deficit * 0.25);
+    if (g.clampedFloor == null
+        || Math.abs(floor - g.clampedFloor) > CLAMP_HYSTERESIS
+        || Math.abs(ceil - g.clampedCeil) > CLAMP_HYSTERESIS) {
+        g.clampedFloor = floor;
+        g.clampedCeil = ceil;
+    }
+    g.autoFloor = g.clampedFloor;
+    g.autoCeil = g.clampedCeil;
+}
+
 function autoRange(px, g) {
     // Robust floor: a low percentile is immune to the strong carriers that
     // would drag a plain minimum or mean around.
@@ -608,7 +640,11 @@ function drawFrame(g, d, ctx) {
         trace = g.smoothed;
     }
 
-    if (d.autoRange) autoRange(g.px, g);
+    if (d.autoRange) {
+        autoRange(g.px, g);
+        // null means "follow the operator's default"; 0 means no minimum.
+        applyMinSpan(g, d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan);
+    }
     const floor = d.autoRange ? g.autoFloor : d.floorDb;
     const ceil = d.autoRange ? g.autoCeil : d.ceilDb;
     const range = Math.max(1, ceil - floor);

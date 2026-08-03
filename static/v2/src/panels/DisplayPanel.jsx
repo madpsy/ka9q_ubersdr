@@ -11,6 +11,9 @@ export default function DisplayPanel() {
     const { floatOrder } = useLayout();
     const viewMode = d.viewMode || 'split';
     const hasFloats = floatOrder.length > 0;
+    // null means the operator's default is in force; the slider shows that
+    // value so moving it starts from what you are actually looking at.
+    const minSpan = d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan;
 
     // Controls that only affect one pane are hidden when that pane is not on
     // screen — otherwise the panel offers settings with no visible effect.
@@ -57,6 +60,25 @@ export default function DisplayPanel() {
             <Field label="Auto level" hint={d.autoRange ? 'tracking noise floor' : 'manual'} inline>
                 <Switch checked={d.autoRange} onChange={(v) => d.set({ autoRange: v })} />
             </Field>
+
+            {d.autoRange && (
+                /* v1's "minimum dynamic range" slider: guarantees at least this
+                   many dB are shown, so a quiet band does not get magnified
+                   until noise ripple fills the height. 0 turns it off. The
+                   default is the operator's `min_span` from /api/ui-config. */
+                <Field
+                    label="Min dynamic range"
+                    hint={minSpan === 0 ? 'auto' : `${minSpan} dB`}
+                >
+                    <Slider
+                        value={minSpan}
+                        min={0}
+                        max={60}
+                        step={5}
+                        onChange={(v) => d.set({ autoMinSpan: v })}
+                    />
+                </Field>
+            )}
 
             {!d.autoRange && (
                 <>

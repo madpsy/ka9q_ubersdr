@@ -26,12 +26,19 @@ export const UI_CONFIG_DEFAULTS = {
     bgOpacity: 0.3,
     stationIdOverlay: true,     // absent key means show, as in v1
     stationIdColor: '#ffffff',
+    autoMinSpan: 30,            // operator's default minimum dynamic range, dB
 };
 
 export function parseUiConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return { ...UI_CONFIG_DEFAULTS };
     const o = parseFloat(cfg.spectrum_bg_opacity);
     const col = typeof cfg.station_id_color === 'string' ? cfg.station_id_color.trim() : '';
+    // `min_span` is the operator's default for the auto-level minimum dynamic
+    // range, in dB (0 = no minimum). Sent as a plain number, but the config
+    // type carries min/max too, so an object with a `default` is accepted.
+    const minSpan = parseFloat(
+        cfg.min_span && typeof cfg.min_span === 'object' ? cfg.min_span.default : cfg.min_span,
+    );
     return {
         loaded: true,
         config: cfg,
@@ -41,5 +48,8 @@ export function parseUiConfig(cfg) {
             : UI_CONFIG_DEFAULTS.bgOpacity,
         stationIdOverlay: cfg.station_id_overlay !== false,
         stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : UI_CONFIG_DEFAULTS.stationIdColor,
+        autoMinSpan: Number.isFinite(minSpan)
+            ? Math.max(0, Math.min(60, minSpan))
+            : UI_CONFIG_DEFAULTS.autoMinSpan,
     };
 }

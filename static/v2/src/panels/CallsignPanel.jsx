@@ -18,12 +18,13 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
-import { Button, Empty, Icon } from '../components/ui.jsx';
+import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
 import {
     displayName, distanceBearing, isValidCallsign, lookupCallsignData,
     normaliseCallsign, onLookupRequest, positionOf,
 } from '../lib/callsign.js';
+import { openCallsignLookup } from '../compat/legacyBridge.js';
 
 const ROTCTL_PW = 'rotctl_password';
 
@@ -119,6 +120,7 @@ function Beam({ position, serverInfo }) {
 }
 
 function Result({ call, data, serverInfo }) {
+    const [photo, setPhoto] = useState(false);
     const name = displayName(data);
     const cty = data.cty || {};
     const country = data.country || cty.country || '';
@@ -175,11 +177,26 @@ function Result({ call, data, serverInfo }) {
 
             {/* Served through the same origin: the server rewrites the
                 provider's URL to /api/lookup/image/<uuid> (lookup_image_proxy.go),
-                so no request leaves for a third party. */}
+                so no request leaves for a third party.
+
+                The thumbnail is deliberately small — most of these are portraits
+                or shack photos and the panel is not a gallery — so clicking
+                opens it full size rather than sending anyone to a new tab. */}
             {data.image && (
-                <a href={data.image} target="_blank" rel="noopener noreferrer" className="cs-photo">
+                <button
+                    type="button"
+                    className="cs-photo"
+                    title="Show full size"
+                    onClick={() => setPhoto(true)}
+                >
                     <img src={data.image} alt={call} loading="lazy" />
-                </a>
+                </button>
+            )}
+
+            {photo && data.image && (
+                <Modal onClose={() => setPhoto(false)} label={`${call} photo`}>
+                    <img className="cs-photo-full" src={data.image} alt={call} />
+                </Modal>
             )}
         </div>
     );
@@ -251,6 +268,20 @@ export default function CallsignPanel() {
                     icon={<Icon.Search />}
                     disabled={busy || !entry.trim()}
                     title="Look up"
+                />
+                {/* The v1 page, which carries the bio, the map and the QSL
+                    details this panel does not. Whatever is in the box goes
+                    with it. Icon only — it sits next to the primary action and
+                    a second label would compete with it. */}
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Icon.External />}
+                    title="Open the full callsign lookup page"
+                    onClick={() => openCallsignLookup({
+                        uuid: getSessionId(),
+                        callsign: isValidCallsign(normaliseCallsign(entry)) ? entry : '',
+                    })}
                 />
             </form>
 

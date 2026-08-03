@@ -2,7 +2,7 @@
 // them here means a new panel is markup plus a handler, and restyling the whole
 // app is a change to styles.css rather than to twenty components.
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from '../react.js';
+import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 import Icon from './icons.jsx';
 
 export function Button({ children, variant = 'default', size = 'md', active, icon, ...rest }) {
@@ -204,6 +204,40 @@ export function Menu({ trigger, children, align = 'end' }) {
                 </div>
             )}
         </div>
+    );
+}
+
+// Centred overlay, closed by Escape, by clicking the backdrop, or by the close
+// button. Same dismissal rules as Menu above.
+//
+// Rendered through a portal into <body> rather than in place: panels that fill
+// their dock clip their body (`overflow: hidden`), and a dialog inside one has
+// no business being cropped to it or inheriting its stacking order.
+export function Modal({ children, onClose, label }) {
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    return ReactDOM.createPortal(
+        <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={label}
+            // Backdrop only: a click that started inside the content and
+            // drifted out (selecting text, dragging an image) must not close it.
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+            <div className="modal__body">
+                {children}
+                <button type="button" className="modal__close" title="Close" onClick={onClose}>
+                    <Icon.Close size={18} />
+                </button>
+            </div>
+        </div>,
+        document.body,
     );
 }
 

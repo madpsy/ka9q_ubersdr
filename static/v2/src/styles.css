@@ -1324,6 +1324,45 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Modal
+   ========================================================================= */
+
+/* Above everything the shell puts on screen — the highest of those is the
+   mobile sheet at 80, and floating panels sit at 50. */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+.modal__body { position: relative; max-width: 100%; max-height: 100%; display: flex; }
+.modal__close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    color: #fff;
+    /* Its own scrim: the close button sits over the content, which may be any
+       colour at that corner. */
+    background: rgba(0, 0, 0, 0.55);
+    transition: background var(--dur) var(--ease);
+}
+.modal__close:hover { background: rgba(0, 0, 0, 0.8); }
+
+/* =========================================================================
    Callsign lookup panel
    ========================================================================= */
 
@@ -1359,7 +1398,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cs-beam { display: inline-flex; align-items: center; gap: 6px; }
 .cs-beam .chip--button { padding: 2px 8px; font-size: calc(10.5px * var(--ui-scale)); }
 
-.cs-photo { display: block; margin-top: 8px; }
+.cs-photo {
+    display: block;
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+    width: 100%;
+}
 .cs-photo img {
     display: block;
     width: 100%;
@@ -1367,6 +1414,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
     object-fit: contain;
     border-radius: var(--radius-sm);
     background: var(--surface-3);
+}
+
+/* Fits the viewport whatever shape the photo is, without cropping it. */
+.cs-photo-full {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 48px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius);
 }
 
 /* =========================================================================

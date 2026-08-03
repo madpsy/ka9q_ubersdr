@@ -1183,6 +1183,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: var(--spec-bg);
 }
 .scope--hover { position: relative; cursor: crosshair; }
+.scope__canvas.is-draggable { touch-action: none; }
+.scope__canvas.is-grabbing { cursor: col-resize; }
+.scope__hint {
+    padding: 3px 7px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-faint);
+    font-size: calc(9.5px * var(--ui-scale));
+}
 .scope__canvas { display: block; width: 100%; }
 .scope__ruler { border-top: 1px solid var(--border); }
 

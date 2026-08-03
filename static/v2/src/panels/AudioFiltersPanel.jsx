@@ -5,10 +5,13 @@
 // The parameter maths and the node building live in radio/audio-filters.js;
 // this is the controls.
 
-import React, { useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
-import { audioWindow } from '../lib/audioBand.js';
+import { audioBins, audioWindow } from '../lib/audioBand.js';
+import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
+import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audioWaterfall.js';
 import {
     EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN, FILTER_DEFAULTS, MAX_NOTCHES,
     bandpassRange, detectPreset, presetGains,
@@ -20,6 +23,148 @@ const PRESETS = [
     { value: 'cw', label: 'CW' },
     { value: 'music', label: 'Music' },
 ];
+
+const PREVIEW_H = 84;
+const PREVIEW_FFT = 4096;
+
+// Where each filter sits, for the preview's marker lines: the centre solid,
+// the edges dashed and dimmer, so a notch reads as "here, this wide" at a
+// glance rather than needing the numbers.
+function filterMarks(notch, bandpass) {
+    const marks = [];
+    const notchColor = cssVar('--bad', '#f2646a');
+    const bpColor = cssVar('--good', '#45d69a');
+
+    if (notch.enabled) {
+        notch.items.forEach((n, i) => {
+            // Numbered to match the list below, so "notch 2" is one glance.
+            marks.push({ hz: n.center, color: notchColor, label: String(i + 1) });
+            marks.push({ hz: n.center - n.width / 2, color: notchColor, soft: true });
+            marks.push({ hz: n.center + n.width / 2, color: notchColor, soft: true });
+        });
+    }
+    if (bandpass.enabled) {
+        marks.push({ hz: bandpass.center, color: bpColor, label: 'BPF' });
+        marks.push({ hz: bandpass.center - bandpass.width / 2, color: bpColor, soft: true });
+        marks.push({ hz: bandpass.center + bandpass.width / 2, color: bpColor, soft: true });
+    }
+    return marks;
+}
+
+// The audio waterfall, with the active filters drawn over it. Shown only when
+// a notch or the bandpass is on: it exists to show you where they are sitting,
+// and it shares the audio scope's FFT rather than starting a second one.
+function Preview({ notch, bandpass, onBandpass, range }) {
+    const { player, tuning } = useRadio();
+    const display = useDisplay();
+    const wfRef = useRef(null);
+    const rulerRef = useRef(null);
+    const ring = useRef(newRing());
+    const marks = useRef([]);
+    marks.current = filterMarks(notch, bandpass);
+
+    // The window the canvas currently spans, so pointer x can be turned into
+    // audio Hz. Written by the draw callback, read by the drag handlers.
+    const frame = useRef(null);
+    const drag = useRef(null);
+    const [grab, setGrab] = useState(false);
+
+    // Which bandpass line is under the pointer, if any. Edges are what you
+    // reach for to set the width, the centre to move the whole filter.
+    const hitTest = (clientX, el) => {
+        const f = frame.current;
+        if (!f || !bandpass.enabled) return null;
+        const r = el.getBoundingClientRect();
+        const { startFreq, endFreq } = f;
+        if (!(endFreq > startFreq)) return null;
+        const xOf = (hz) => ((hz - startFreq) / (endFreq - startFreq)) * r.width;
+        const x = clientX - r.left;
+        const targets = [
+            { what: 'low', x: xOf(bandpass.center - bandpass.width / 2) },
+            { what: 'high', x: xOf(bandpass.center + bandpass.width / 2) },
+            { what: 'center', x: xOf(bandpass.center) },
+        ];
+        let best = null;
+        for (const t of targets) {
+            const d = Math.abs(t.x - x);
+            if (d <= 7 && (!best || d < best.d)) best = { what: t.what, d };
+        }
+        return best ? best.what : null;
+    };
+
+    const hzAt = (clientX, el) => {
+        const f = frame.current;
+        const r = el.getBoundingClientRect();
+        const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+        return f.startFreq + frac * (f.endFreq - f.startFreq);
+    };
+
+    const onDown = (e) => {
+        const what = hitTest(e.clientX, e.currentTarget);
+        if (!what) return;
+        e.preventDefault();
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        drag.current = { what };
+    };
+
+    const onMove = (e) => {
+        const el = e.currentTarget;
+        if (!drag.current) {
+            setGrab(!!hitTest(e.clientX, el));
+            return;
+        }
+        const hz = hzAt(e.clientX, el);
+        if (drag.current.what === 'center') {
+            onBandpass({ center: Math.round(Math.max(range.min, Math.min(range.max, hz)) / 10) * 10 });
+        } else {
+            // Either edge sets the width symmetrically about the centre, which
+            // is what the filter actually is — there is one centre and one Q.
+            const width = Math.round(Math.abs(hz - bandpass.center) * 2 / 10) * 10;
+            onBandpass({ width: Math.max(20, Math.min(1000, width)) });
+        }
+    };
+
+    const onUp = (e) => {
+        drag.current = null;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    };
+
+    useEffect(() => subscribeAudioSpectrum(player, { fftSize: PREVIEW_FFT, bins: true }, (f) => {
+        const win = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, f.sampleRate, f.binCount);
+        frame.current = { startFreq: win.startFreq, endFreq: win.endFreq };
+        drawAudioWaterfall({
+            canvas: wfRef.current,
+            ring: ring.current,
+            bins: f.bins,
+            binCount: f.binCount,
+            sampleRate: f.sampleRate,
+            tuning,
+            palette: display.palette,
+            contrast: display.scopeContrast || 1,
+            marks: marks.current,
+        });
+        drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
+    }), [player, tuning, display.palette, display.scopeContrast]);
+
+    return (
+        <div className="scope">
+            <canvas
+                ref={wfRef}
+                className={`scope__canvas${bandpass.enabled ? ' is-draggable' : ''}${grab ? ' is-grabbing' : ''}`}
+                style={{ height: PREVIEW_H }}
+                onPointerDown={onDown}
+                onPointerMove={onMove}
+                onPointerUp={onUp}
+                onPointerCancel={onUp}
+                onPointerLeave={() => setGrab(false)}
+            />
+            <canvas ref={rulerRef} className="scope__canvas scope__ruler" style={{ height: 13 }} />
+            {bandpass.enabled && (
+                <div className="scope__hint">Drag the green lines to move the bandpass or set its width</div>
+            )}
+        </div>
+    );
+}
 
 const fmtGain = (g) => `${g > 0 ? '+' : ''}${g.toFixed(1)}`;
 const fmtBand = (f) => (f >= 1000 ? `${f / 1000}k` : String(f));
@@ -86,8 +231,14 @@ export default function AudioFiltersPanel() {
         setNotch({ items });
     };
 
+    const showPreview = (notch.enabled && notch.items.length > 0) || bp.enabled;
+
     return (
         <div className="stack">
+            {showPreview && (
+                <Preview notch={notch} bandpass={{ ...bp, center: centre }} onBandpass={setBp} range={range} />
+            )}
+
             <Segmented
                 options={[
                     { value: 'eq', label: 'EQ' },

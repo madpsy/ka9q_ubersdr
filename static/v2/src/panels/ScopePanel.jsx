@@ -21,8 +21,9 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Field, Segmented, Slider } from '../components/ui.jsx';
-import { getPalette } from '../lib/palettes.js';
 import { audioBins } from '../lib/audioBand.js';
+import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
+import { cssVar, drawAudioRuler, drawAudioWaterfall, fmtHz, newRing, sizedCanvas } from '../lib/audioWaterfall.js';
 
 const VIEWS = [
     { value: 'both', label: 'Both' },
@@ -40,8 +41,6 @@ const FFT_SIZES = [
 const SCOPE_H = 96;
 const WF_H = 120;
 const RULER_H = 13;
-const ROW_MS = 33;          // one waterfall row, ~30 fps as in v1
-
 // Silence guards. With the squelch closed the server sends nothing, or sends
 // dither a hundred dB down, and an unbounded auto-scale turns that into a
 // full-height mess of quantisation noise and a boiling waterfall. Both views
@@ -49,12 +48,6 @@ const ROW_MS = 33;          // one waterfall row, ~30 fps as in v1
 // a dark waterfall — which is what "no audio" should look like.
 const SCOPE_MIN_PEAK = 0.05;   // fraction of full scale; below this, no extra gain
 const SCOPE_SILENT_LSB = 2;    // +/-2/128 or less is the gate closed, not a signal
-const WF_FLOOR_DB = -110;      // never map anything quieter than this
-const WF_MIN_SPAN_DB = 45;     // and never stretch a narrower range than this
-
-function fmtHz(hz) {
-    return hz >= 1000 ? `${(hz / 1000).toFixed(hz % 1000 ? 1 : 0)}k` : `${Math.round(hz)}`;
-}
 
 export default function ScopePanel() {
     const { player, running, tuning } = useRadio();
@@ -70,8 +63,7 @@ export default function ScopePanel() {
     const wfRef = useRef(null);
     const rulerRef = useRef(null);
     // Waterfall history, kept as an offscreen canvas so a row is one blit.
-    const ring = useRef({ canvas: null, ctx: null, w: 0, h: 0, head: 0, at: 0 });
-    const level = useRef({ floor: -100, ceil: -30 });
+    const ring = useRef(newRing());
     // Latest FFT frame plus the window it covers, so the hover readout can be
     // answered from the pointer handler without running its own analysis.
     const last = useRef(null);
@@ -93,41 +85,27 @@ export default function ScopePanel() {
     }, [view, fftSize, timebase, contrast]);   // eslint-disable-line
 
     useEffect(() => {
-        const analyser = player.acquireAnalyser(fftSize);
-        if (!analyser) return () => player.releaseAnalyser();
-
-        // Reallocated on demand: a mode change can rebuild the audio context at
-        // a different sample rate, which replaces the analyser under us.
-        let bins = new Float32Array(analyser.frequencyBinCount);
-        let wave = new Uint8Array(analyser.fftSize);
-        let raf = 0;
-
-        const loop = () => {
-            raf = requestAnimationFrame(loop);
-            const a = player.analyser;
-            if (!a) return;
-            if (bins.length !== a.frequencyBinCount) bins = new Float32Array(a.frequencyBinCount);
-            if (wave.length !== a.fftSize) wave = new Uint8Array(a.fftSize);
-            const sr = player.sampleRate || 48000;
-            if (sr !== rate) setRate(sr);
-
-            if (showScope) drawScope(scopeRef.current, a, wave, sr, timebase, scope.current);
+        // One shared FFT: the filter panel's preview reads the same node, and
+        // whichever of them is open drives it (see lib/audioSpectrum.js).
+        return subscribeAudioSpectrum(player, { fftSize, bins: showWf, wave: showScope }, (f) => {
+            if (f.sampleRate !== rate) setRate(f.sampleRate);
+            if (showScope) drawScope(scopeRef.current, f.wave, f.sampleRate, timebase, scope.current);
             if (showWf) {
-                last.current = { bins, sampleRate: sr, binCount: a.frequencyBinCount, tuning };
+                last.current = { bins: f.bins, sampleRate: f.sampleRate, binCount: f.binCount, tuning };
                 refreshTip(hover.current, last.current, tipAt, setTip);
-                drawWaterfall(
-                    wfRef.current, ring.current, a, bins, sr, tuning,
-                    display.palette, contrast, level.current,
-                );
-                drawRuler(rulerRef.current, tuning, sr, a.frequencyBinCount);
+                drawAudioWaterfall({
+                    canvas: wfRef.current,
+                    ring: ring.current,
+                    bins: f.bins,
+                    binCount: f.binCount,
+                    sampleRate: f.sampleRate,
+                    tuning,
+                    palette: display.palette,
+                    contrast,
+                });
+                drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
-        };
-        raf = requestAnimationFrame(loop);
-
-        return () => {
-            cancelAnimationFrame(raf);
-            player.releaseAnalyser();
-        };
+        });
     }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, contrast, rate]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
@@ -247,34 +225,17 @@ function refreshTip(at, l, tipAt, setTip) {
     });
 }
 
-function sized(canvas, cssH) {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    const h = Math.max(1, Math.round(cssH * dpr));
-    if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-    }
-    return { w, h, dpr };
-}
 
-function css(name, fallback) {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback;
-}
 
-function drawScope(canvas, analyser, wave, sampleRate, timebaseMs, state) {
-    if (!canvas) return;
-    if (wave.length !== analyser.fftSize) return;      // resized between frames
-    analyser.getByteTimeDomainData(wave);
-
-    const { w, h, dpr } = sized(canvas, canvas.clientHeight || 96);
+function drawScope(canvas, wave, sampleRate, timebaseMs, state) {
+    if (!canvas || !wave || !wave.length) return;
+    const { w, h, dpr } = sizedCanvas(canvas);
     const c = canvas.getContext('2d');
-    c.fillStyle = css('--spec-bg', '#0a0e15');
+    c.fillStyle = cssVar('--spec-bg', '#0a0e15');
     c.fillRect(0, 0, w, h);
 
     // Grid: a line every 25% vertically, and one per millisecond-ish column.
-    c.strokeStyle = css('--spec-grid', 'rgba(255,255,255,0.06)');
+    c.strokeStyle = cssVar('--spec-grid', 'rgba(255,255,255,0.06)');
     c.lineWidth = 1;
     for (let i = 1; i < 4; i++) {
         const y = Math.round((h * i) / 4) + 0.5;
@@ -317,7 +278,7 @@ function drawScope(canvas, analyser, wave, sampleRate, timebaseMs, state) {
     // Flat line rather than magnified dither: a closed gate is silence, and
     // drawing it as a jagged full-height trace reads as a broken receiver.
     if (peak <= SCOPE_SILENT_LSB) {
-        c.strokeStyle = css('--text-faint', '#5c6779');
+        c.strokeStyle = cssVar('--text-faint', '#5c6779');
         c.lineWidth = 1.4 * dpr;
         c.beginPath();
         c.moveTo(0, h / 2);
@@ -338,114 +299,9 @@ function drawScope(canvas, analyser, wave, sampleRate, timebaseMs, state) {
         const y = h / 2 - (wave[start + i] - 128) * gain;
         if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
     }
-    c.strokeStyle = css('--accent', '#3ddbe8');
+    c.strokeStyle = cssVar('--accent', '#3ddbe8');
     c.lineWidth = 1.4 * dpr;
     c.stroke();
 }
 
-function drawWaterfall(canvas, ring, analyser, bins, sampleRate, tuning, palette, contrast, level) {
-    if (!canvas) return;
-    if (bins.length !== analyser.frequencyBinCount) return;
-    analyser.getFloatFrequencyData(bins);
 
-    const { w, h } = sized(canvas, canvas.clientHeight || 120);
-
-    if (!ring.canvas || ring.w !== w || ring.h !== h) {
-        const off = document.createElement('canvas');
-        off.width = w;
-        off.height = h;
-        const octx = off.getContext('2d', { alpha: false });
-        octx.fillStyle = '#05070c';
-        octx.fillRect(0, 0, w, h);
-        ring.canvas = off;
-        ring.ctx = octx;
-        ring.w = w;
-        ring.h = h;
-        ring.head = 0;
-    }
-
-    const { start, count } = audioBins(
-        tuning.bandwidthLow, tuning.bandwidthHigh, sampleRate, analyser.frequencyBinCount,
-    );
-
-    // Auto level, eased, so a loud signal does not wash the whole panel out.
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = start; i < start + count; i++) {
-        const v = bins[i];
-        if (!Number.isFinite(v)) continue;
-        if (v < min) min = v;
-        if (v > max) max = v;
-    }
-    if (Number.isFinite(min)) {
-        // Bounded: silence sits far below WF_FLOOR_DB and simply maps to the
-        // bottom of the palette instead of being stretched across all of it.
-        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
-        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
-        level.floor += (targetFloor - level.floor) * 0.05;
-        level.ceil += (targetCeil - level.ceil) * 0.05;
-    }
-    const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
-
-    const now = performance.now();
-    if (now - ring.at >= ROW_MS) {
-        ring.at = now;
-        const lut = getPalette(palette);
-        const img = ring.ctx.createImageData(w, 1);
-        const data = img.data;
-        for (let x = 0; x < w; x++) {
-            // Nearest bin for this column, taking the max over the span so a
-            // narrow tone survives being squeezed into a panel-width canvas.
-            const lo = start + Math.floor((x / w) * count);
-            const hi = Math.max(lo + 1, start + Math.floor(((x + 1) / w) * count));
-            let v = -Infinity;
-            for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
-            let t = (v - level.floor) / range;
-            t = t < 0 ? 0 : t > 1 ? 1 : t;
-            // Same gamma the RF waterfall uses: above 1 lifts weak signals out
-            // of the noise, below 1 pushes them back down.
-            if (contrast !== 1) t = Math.pow(t, 1 / contrast);
-            const idx = (t * 255) | 0;
-            const o = x * 4;
-            data[o] = lut[idx * 3];
-            data[o + 1] = lut[idx * 3 + 1];
-            data[o + 2] = lut[idx * 3 + 2];
-            data[o + 3] = 255;
-        }
-        ring.head = (ring.head - 1 + h) % h;
-        ring.ctx.putImageData(img, 0, ring.head);
-    }
-
-    const c = canvas.getContext('2d', { alpha: false });
-    c.imageSmoothingEnabled = false;
-    const firstH = Math.min(h - ring.head, h);
-    c.drawImage(ring.canvas, 0, ring.head, w, firstH, 0, 0, w, firstH);
-    if (firstH < h) c.drawImage(ring.canvas, 0, 0, w, h - firstH, 0, firstH, w, h - firstH);
-}
-
-function drawRuler(canvas, tuning, sampleRate, binCount) {
-    if (!canvas) return;
-    const { w, h, dpr } = sized(canvas, canvas.clientHeight || 13);
-    const c = canvas.getContext('2d');
-    c.fillStyle = css('--scale-bg', '#0d121b');
-    c.fillRect(0, 0, w, h);
-
-    const { startFreq, endFreq } = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, sampleRate, binCount);
-    const span = endFreq - startFreq;
-    if (!(span > 0)) return;
-
-    const step = span > 4000 ? 1000 : span > 1500 ? 500 : span > 600 ? 200 : 100;
-    c.font = `${8.5 * dpr}px ui-monospace, monospace`;
-    c.textBaseline = 'middle';
-    c.textAlign = 'center';
-    for (let f = Math.ceil(startFreq / step) * step; f <= endFreq; f += step) {
-        const x = ((f - startFreq) / span) * w;
-        c.strokeStyle = css('--scale-tick', 'rgba(255,255,255,0.16)');
-        c.beginPath();
-        c.moveTo(Math.round(x) + 0.5, 0);
-        c.lineTo(Math.round(x) + 0.5, 3 * dpr);
-        c.stroke();
-        c.fillStyle = css('--scale-text', '#8b96a9');
-        c.fillText(fmtHz(f), x, h * 0.62);
-    }
-}

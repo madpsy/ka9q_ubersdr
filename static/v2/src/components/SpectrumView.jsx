@@ -55,6 +55,26 @@ function NoiseReductionTag() {
     );
 }
 
+// The client-side audio filters that are on. Just their names — the settings
+// live in the Audio filters panel; this is here so you can see at a glance that
+// the audio is being shaped, without hunting for which panel did it.
+function FilterTags() {
+    const { filters } = useRadio();
+    const on = [
+        filters.eq.enabled && 'EQ',
+        filters.notch.enabled && filters.notch.items.length > 0 && 'NOTCH',
+        filters.bandpass.enabled && 'BPF',
+    ].filter(Boolean);
+    if (!on.length) return null;
+    return (
+        <>
+            {on.map((name) => (
+                <span key={name} className="tag tag--accent" title={`${name} filter active`}>{name}</span>
+            ))}
+        </>
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Station ID overlay
 //
@@ -525,6 +545,7 @@ export default function SpectrumView() {
                     {hoverInfo && <span className="tag tag--ghost">{formatFreqShort(hoverInfo.freq, span)}</span>}
                     <SquelchTag />
                     <NoiseReductionTag />
+                    <FilterTags />
                 </div>
                 <div className="spectrum__tools">
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />

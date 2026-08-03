@@ -27,7 +27,6 @@ export default function ChatPanel() {
     const [nameError, setNameError] = useState(null);
     const inputRef = useRef(null);
     const logRef = useRef(null);
-    const jumped = useRef(false);
 
     // Our own name is always included, even when the server's user list has not
     // caught up — a mention of us is the one that must never fail to highlight.
@@ -46,27 +45,35 @@ export default function ChatPanel() {
         if (chat.unreadMentions > 0) chat.actions.markMentionsRead();
     }, [chat.messages.length]);
 
-    // Start at the newest message, then follow the conversation — but only
-    // while already at the bottom, so reading scrollback is not yanked away by
-    // every new message.
+    // Stay pinned to the newest message unless the user scrolls away from it.
     //
-    // The first jump has to be unconditional: the buffered history arrives in
-    // one burst with the log still scrolled to the top, so the "near the bottom"
-    // test is false exactly when it matters and you land on the oldest message.
+    // Tracking "is the user at the bottom" from their own scrolling, rather
+    // than inferring it per update, is what makes this reliable: the buffered
+    // history can arrive as one message and then a batch of twenty more, and
+    // any per-update "were we near the bottom before this render" test fails on
+    // that second batch and strands you at the top.
     //
-    // Layout effect, not effect: this runs before paint, so the log never
-    // flashes at the top first. Safe to scroll here, unlike other panels — the
-    // log owns its scroller, so it cannot move the dock.
+    // Layout effect, not effect: runs before paint, so the log never flashes at
+    // the top first. Safe to scroll here, unlike other panels — the log owns its
+    // scroller, so it cannot move the dock.
+    const pinned = useRef(true);
+
+    const onLogScroll = (e) => {
+        const el = e.currentTarget;
+        pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    };
+
     useLayoutEffect(() => {
         const el = logRef.current;
-        if (!el || chat.messages.length === 0) return;
-        if (!jumped.current) {
-            jumped.current = true;
-            el.scrollTop = el.scrollHeight;
-            return;
-        }
-        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-        if (nearBottom) el.scrollTop = el.scrollHeight;
+        if (!el || !pinned.current) return;
+        el.scrollTop = el.scrollHeight;
+        // Rows can still be growing as fonts and wrapping settle, so land on the
+        // bottom once more after the browser has finished laying out.
+        const raf = requestAnimationFrame(() => {
+            const cur = logRef.current;
+            if (cur && pinned.current) cur.scrollTop = cur.scrollHeight;
+        });
+        return () => cancelAnimationFrame(raf);
     }, [chat.messages.length]);
 
     const complete = (username) => {
@@ -121,7 +128,7 @@ export default function ChatPanel() {
     return (
         <div className="chat">
             <div className="chat__stream">
-                <div className="chat__log" ref={logRef}>
+                <div className="chat__log" ref={logRef} onScroll={onLogScroll}>
                     {chat.messages.length === 0 && <Empty>No messages yet.</Empty>}
                     {chat.messages.map((m) => (
                         m.system ? (

@@ -44,10 +44,13 @@ esbuild ../src/lib/voiceActivity.js --bundle --format=cjs --platform=node \
     --outfile=.build/voice.cjs --log-level=warning
 esbuild ../src/compat/legacyBridge.js --bundle --format=cjs --platform=node \
     --outfile=.build/compat.cjs --log-level=warning
+esbuild ../src/lib/callsign.js --bundle --format=cjs --platform=node \
+    --outfile=.build/callsign.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
 node zoom.test.js
 node voice.test.js
+node callsign.test.js
 node compat.test.js
 node recorder.test.js

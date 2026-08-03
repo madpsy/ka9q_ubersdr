@@ -38,6 +38,7 @@ import RotatorPanel from './RotatorPanel.jsx';
 import AntennaPanel from './AntennaPanel.jsx';
 import RecorderPanel from './RecorderPanel.jsx';
 import VoiceActivityPanel from './VoiceActivityPanel.jsx';
+import CallsignPanel from './CallsignPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -100,6 +101,17 @@ export const PANELS = [
         // permanently empty — the same gate v1's service applies before it
         // starts polling.
         requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
+    },
+    {
+        id: 'callsign',
+        title: 'Callsign lookup',
+        icon: <Icon.Search />,
+        dock: 'bottom',
+        fill: true,
+        Component: CallsignPanel,
+        // The lookup provider is configured per instance; without it every
+        // request would 503, so the panel is absent rather than broken.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.lookup_service),
     },
     { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
     // Off by default: a diagnostic, not something to occupy a slot in the dock

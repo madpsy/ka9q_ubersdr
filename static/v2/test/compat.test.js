@@ -28,24 +28,8 @@ const t = (name, fn) => {
 
 const reset = () => { calls.length = 0; b._setLookupWindow(null); };
 
-// --- callsign normalisation -------------------------------------------------
-
-t('a portable suffix is stripped to the callsign', () => {
-    assert.strictEqual(b.baseCallsign('GB4XYZ/P'), 'GB4XYZ');
-    assert.strictEqual(b.baseCallsign('GB4XYZ/MM'), 'GB4XYZ');
-});
-
-t('a DXCC prefix is stripped to the callsign', () => {
-    assert.strictEqual(b.baseCallsign('F/GB4XYZ'), 'GB4XYZ');
-    assert.strictEqual(b.baseCallsign('PA/M0ABC/P'), 'M0ABC');
-});
-
-t('a plain callsign is left alone, and nothing is not a crash', () => {
-    assert.strictEqual(b.baseCallsign('M0ABC'), 'M0ABC');
-    assert.strictEqual(b.baseCallsign(''), '');
-    assert.strictEqual(b.baseCallsign(null), '');
-    assert.strictEqual(b.baseCallsign(undefined), '');
-});
+// Callsign normalisation itself is covered in callsign.test.js — the bridge
+// shares that one rule rather than carrying its own.
 
 // --- lookup URL -------------------------------------------------------------
 

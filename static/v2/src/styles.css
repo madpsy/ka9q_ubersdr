@@ -1324,6 +1324,52 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Callsign lookup panel
+   ========================================================================= */
+
+.cs { height: 100%; min-height: 0; }
+.cs-form { display: flex; gap: 6px; align-items: center; }
+.cs-form__input { flex: 1; min-width: 0; text-transform: uppercase; font-family: var(--mono); }
+
+/* Same arrangement as the voice panel: `fill` gives it the dock height and the
+   result scrolls inside, with a cap for when it is dragged to a side dock. */
+.cs-result { flex: 1; min-height: 0; max-height: 340px; overflow-y: auto; }
+.dock--bottom .section--fill .cs-result { max-height: none; }
+
+.cs-result__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; }
+.cs-result__call {
+    font-family: var(--mono);
+    font-size: calc(16px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    text-decoration: none;
+}
+.cs-result__call:hover { text-decoration: underline; }
+.cs-result__name {
+    flex: 1;
+    min-width: 0;
+    font-size: calc(12.5px * var(--ui-scale));
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cs-beam { display: inline-flex; align-items: center; gap: 6px; }
+.cs-beam .chip--button { padding: 2px 8px; font-size: calc(10.5px * var(--ui-scale)); }
+
+.cs-photo { display: block; margin-top: 8px; }
+.cs-photo img {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+}
+
+/* =========================================================================
    Voice activity panel
    ========================================================================= */
 

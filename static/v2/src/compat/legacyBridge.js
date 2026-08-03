@@ -43,6 +43,9 @@ export const LEGACY_MESSAGES = [
 // entry point and this needs implementing at the same time.
 export const LEGACY_UNSUPPORTED = ['activeChannels'];
 
+// One normalisation rule for the whole app — see lib/callsign.js.
+import { normaliseCallsign } from '../lib/callsign.js';
+
 // v1's geometry (app.js initializeCallsignLookupButton).
 const LOOKUP_W = 520;
 const LOOKUP_H = 800;
@@ -68,19 +71,11 @@ export function lookupUrl(uuid, callsign) {
     return s ? `/callsign_lookup.html?${s}` : '/callsign_lookup.html';
 }
 
-// v1's normalisation (voice-activity.html lookupDXCallsign): a spot may be
-// "GB4XYZ/P" or "F/GB4XYZ", and the longest slash-separated segment is the
-// callsign in both shapes.
-export function baseCallsign(raw) {
-    if (!raw) return '';
-    return String(raw).split('/').reduce((a, b) => (b.length > a.length ? b : a), '');
-}
-
 // Opens the lookup popup, or focuses the one already open and pushes the new
 // callsign into it. v1 does exactly this, and the difference matters: reloading
 // the page would throw away the map and the history the operator is looking at.
 export function openCallsignLookup({ uuid, callsign } = {}) {
-    const call = baseCallsign(callsign);
+    const call = normaliseCallsign(callsign);
     const open = callsignLookupWindow();
 
     if (open) {
@@ -109,7 +104,7 @@ export function openCallsignLookup({ uuid, callsign } = {}) {
 // exist. Same rule as v1's lookupDXCallsign.
 export function lookupCallsign(callsign) {
     const win = callsignLookupWindow();
-    const call = baseCallsign(callsign);
+    const call = normaliseCallsign(callsign);
     if (!win || !call) return false;
     try {
         win.postMessage({ type: 'callsign_lookup', callsign: call }, window.location.origin);

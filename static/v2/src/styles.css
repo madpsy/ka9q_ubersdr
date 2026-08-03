@@ -2364,3 +2364,184 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-faint);
 }
 .spot-row.is-active .spot-row__freq { color: var(--accent); }
+
+/* ── Extensions ───────────────────────────────────────────────────────────── */
+
+/* The launcher list. Two lines per row like every other list, with the icon in
+   a fixed gutter so the titles line up whatever the icon is. */
+.ext-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 9px;
+}
+.ext-row:disabled { cursor: default; opacity: 0.55; }
+.ext-row:disabled:hover { background: transparent; }
+.ext-row__icon { flex: none; display: grid; place-items: center; color: var(--accent); }
+.ext-row:disabled .ext-row__icon { color: var(--text-faint); }
+.ext-row__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ext-row__title { font-size: calc(12.5px * var(--ui-scale)); }
+.ext-row__summary {
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ext-row__state {
+    flex: none;
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+/* An extension window. Same chrome as a floating panel, but it always sits
+   above them and its body does not scroll — the extension lays itself out and
+   scrolls whichever part of itself is the list. */
+.floatwin--ext { z-index: 60; }
+.floatwin__body--ext {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow: hidden;
+    padding: 6px 10px 10px;
+}
+/* Same on mobile, where the extension is a sheet rather than a window. A
+   decoder needs the height a panel does not, so this sheet is taller. */
+.sheet--ext { max-height: 88dvh; }
+.sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
+
+/* ── FT8 ──────────────────────────────────────────────────────────────────── */
+
+.ft8 { display: flex; flex-direction: column; gap: 7px; min-height: 0; flex: 1; }
+
+.ft8__bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.ft8__bar-gap { flex: 1; }
+.ft8__status {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--surface-3);
+    color: var(--text-dim);
+}
+.ft8__status--on { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.ft8__status--wait { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+.ft8__status--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
+.ft8__readout {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.ft8__readout--ok { color: var(--good); }
+.ft8__freq { max-width: 220px; }
+
+.ft8__controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.ft8__filter { flex: 1; min-width: 140px; }
+
+/* The 15-second cycle position. Fixed width so the bar does not resize as the
+   seconds readout changes width. */
+.ft8__cycle {
+    position: relative;
+    flex: none;
+    width: 132px;
+    height: 18px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    overflow: hidden;
+}
+.ft8__cycle-bar { height: 100%; background: var(--accent-soft); border-right: 1px solid var(--accent-line); }
+.ft8__cycle-text {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.ft8__spectrum { flex: none; border-radius: var(--radius-sm); overflow: hidden; background: var(--spec-bg); }
+.ft8__spectrum-canvas { display: block; width: 100%; height: 100%; }
+
+/* The decode table is the scroller: it is the part with unbounded content, and
+   auto-scroll only means something if the rows scroll rather than the window. */
+.ft8__table {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border-top: 1px solid var(--border);
+}
+.ft8__row {
+    display: grid;
+    grid-template-columns:
+        58px 46px 42px 52px 52px 44px minmax(90px, 1fr) 38px 78px minmax(150px, 2fr) 46px;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 4px;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.3;
+    border-bottom: 1px solid var(--border);
+}
+.ft8__row:not(.ft8__row--head):hover { background: var(--surface-hover); }
+.ft8__row--head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-strong);
+    padding: 0 4px;
+}
+.ft8__head {
+    border: 0;
+    background: transparent;
+    padding: 4px 0;
+    text-align: left;
+    cursor: pointer;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.ft8__head:hover { color: var(--text-dim); }
+.ft8__head.is-sorted { color: var(--accent); }
+.ft8__head.ft8__c-num { text-align: right; }
+
+.ft8__c-time, .ft8__c-num, .ft8__c-call {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+.ft8__c-time { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
+.ft8__c-num { text-align: right; color: var(--text-dim); }
+.ft8__c-country, .ft8__c-cont {
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ft8__c-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft8__c-msg--cq { color: var(--good); }
+.ft8__snr--high { color: var(--good); }
+.ft8__snr--mid { color: var(--warn); }
+.ft8__snr--low { color: var(--text-faint); }
+.ft8__call {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+}
+.ft8__call:hover { text-decoration: underline; }

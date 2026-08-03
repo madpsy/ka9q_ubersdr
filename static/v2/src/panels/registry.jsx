@@ -13,11 +13,14 @@
 //   defaultHidden true to ship hidden (still listed in the layout manager)
 //   fill         true if the body should stretch to the dock height
 //   Badge        optional component rendered in the header, for unread counts
-//   requires     optional (serverInfo) => bool; false hides the panel entirely
+//   requires     optional (serverInfo, env) => bool; false hides the panel
+//                entirely — see usePanelApplies() at the foot of this file
 //   Component    the panel body
 
-import React from '../react.js';
+import React, { useCallback } from '../react.js';
 import Icon from '../components/icons.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 
 import ReceiverPanel from './ReceiverPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
@@ -41,6 +44,7 @@ import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
+import ExtensionsPanel from './ExtensionsPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -132,6 +136,23 @@ export const PANELS = [
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
     { id: 'quickbands', title: 'Quick bands', icon: <Icon.Grid />, dock: 'bottom', Component: QuickBandsPanel },
+    // The launcher for the extensions, not the extensions themselves: an open
+    // extension is a window of its own (extensions/ExtensionWindow.jsx) and
+    // never joins the dock layout.
+    {
+        id: 'extensions',
+        title: 'Extensions',
+        icon: <Icon.Plug />,
+        dock: 'bottom',
+        Component: ExtensionsPanel,
+        // Present only when this receiver enables at least one extension v2 can
+        // actually render. A receiver with none — or one whose extensions are
+        // all still to be written for v2 — gets no panel rather than a list of
+        // things that cannot be opened. `enabled` is false until
+        // /api/extensions answers, so the panel appears with the reply instead
+        // of flashing up empty first.
+        requires: (serverInfo, env) => env.extensions.list.some((e) => e.enabled),
+    },
     {
         id: 'voice',
         title: 'Voice activity',
@@ -161,3 +182,24 @@ export const PANELS = [
 ];
 
 export const PANEL_BY_ID = Object.fromEntries(PANELS.map((p) => [p.id, p]));
+
+/**
+ * A predicate for "does this panel apply to the receiver we are connected to".
+ *
+ * Every place that lists panels — both docks, the mobile tab bar and the layout
+ * manager — has to agree, or a panel could be hidden in one and offered in
+ * another. So the gate lives here rather than being spelled out three times.
+ *
+ * `requires` gets `/api/description` first, because that is what nearly every
+ * gate asks about, and an environment object second for the ones that need
+ * something else: the Extensions panel depends on `/api/extensions`, a separate
+ * endpoint that answers separately.
+ */
+export function usePanelApplies() {
+    const { serverInfo } = useRadio();
+    const extensions = useExtensions();
+    return useCallback(
+        (p) => !p.requires || p.requires(serverInfo, { extensions }),
+        [serverInfo, extensions],
+    );
+}

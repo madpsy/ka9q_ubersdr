@@ -47,6 +47,7 @@ export const Icon = {
     Info: (p) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></Svg>,
     External: (p) => <Svg {...p}><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></Svg>,
     Puzzle: (p) => <Svg {...p}><path d="M10 3h4v2.2a1.8 1.8 0 1 0 3.6 0V3H21v3.4h-2.2a1.8 1.8 0 1 0 0 3.6H21V21h-3.4v-2.2a1.8 1.8 0 1 0-3.6 0V21H3v-4h2.2a1.8 1.8 0 1 0 0-3.6H3V3z" /></Svg>,
+    Plug: (p) => <Svg {...p}><path d="M9 2v6M15 2v6" /><path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z" /><path d="M12 17v5" /></Svg>,
     Chat: (p) => <Svg {...p}><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 1 1 21 12z" /><path d="M8.5 11h7M8.5 14h4" /></Svg>,
     Bookmark: (p) => <Svg {...p}><path d="M6 4h12v17l-6-4-6 4z" /></Svg>,
     Eye: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></Svg>,

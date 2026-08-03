@@ -31,9 +31,12 @@ bundled React later is a one-file change. See `vendor/README.md`.
 ./test/run.sh
 ```
 
-Covers the two binary wire formats, where an off-by-one produces plausible
-garbage rather than an error: spectrum `SPEC` frames (float32 and uint8, full
-and delta) and the v2 Opus audio header. Needs only esbuild and node.
+Covers the wire formats and the pure logic where a mistake is silent rather than
+loud: spectrum `SPEC` frames (float32 and uint8, full and delta), the v2 Opus
+audio header, the audio-extension protocol, and the parts of a panel that sort,
+filter or export — an attach with the wrong field name is answered with a
+generic error, and a numeric column compared as text still looks sorted. Needs
+only esbuild and node.
 
 ## Layout
 
@@ -51,6 +54,7 @@ src/
     constants.js        modes, passband defaults, limits
     RadioContext.jsx    the one place that owns the radio
   display/          spectrum/waterfall appearance settings
+  extensions/       decoders that open in their own window — see "Extensions"
   layout/           dock layout state and persistence
   components/       chrome: docks, sections, top bar, spectrum canvas
   panels/           panel bodies + registry.jsx
@@ -141,15 +145,88 @@ Add one entry to `src/panels/registry.jsx`:
 ```
 
 It then appears in its dock, in the layout manager, and in the mobile tab bar.
-An optional `requires: (serverInfo) => bool` keeps a panel out of all three when
-it does not apply to the connected receiver — the Addons panel uses it, so a
-server with no addons never shows an empty slot explaining that it has none.
+An optional `requires: (serverInfo, env) => bool` keeps a panel out of all three
+when it does not apply to the connected receiver — the Addons panel uses it, so a
+server with no addons never shows an empty slot explaining that it has none. The
+first argument is the `/api/description` reply, which is what nearly every gate
+asks about; `env` carries the rest (`env.extensions` for the Extensions panel,
+whose answer comes from a different endpoint). All three call sites go through
+`usePanelApplies()` so they cannot disagree about whether a panel exists.
 Saved layouts reconcile against the registry on load: unknown ids are dropped,
 and a newly registered panel is inserted at the position the registry declares
 for it — after the nearest sibling already in that dock, or before the nearest
 one that follows. Appending instead would drop every new panel at the bottom of
 an existing user's dock, so a panel declared "directly under Receiver" would
 appear under everything else for anyone who had used the app before.
+
+## Extensions
+
+Extensions are the decoders and tools v1 ships in `static/extensions/`. They are
+*not* panels: an extension opens in a window of its own, floats and only floats,
+and closing it stops it. Exactly one is open at a time, because the server allows
+one audio extension per session and tears the previous one down when a second
+attaches — two windows would show one live decoder and one that had silently
+stopped.
+
+The Extensions panel (bottom dock) is the launcher, and it is **absent unless at
+least one extension is both written for v2 and enabled on this receiver** — the
+same rule the Addons, Spots and rotator panels follow, for the same reason: a
+panel that can only say "nothing here" is worse than no panel. It lists what
+this build can render, crossed with what the operator has enabled:
+
+* **what v2 can render** — `src/extensions/registry.jsx`, a static list, because
+  v2 extensions are React components compiled into the bundle rather than
+  templates the server inlines and evals;
+* **what the receiver has on** — `/api/extensions`, which reads `extensions.yaml`
+  and answers `{ available: [{slug, displayName}], default }`.
+
+Something we support but the operator has not enabled is listed and disabled with
+the reason, rather than left out. The other two cases each get a line: extensions
+v2 rebuilt as panels (DX cluster, digital and CW spots → Spots; FlexControl, MIDI
+and Radio Sync → Radio control) and extensions still to be written.
+
+### The shared decoder client
+
+Every server-side decoder rides `/ws/dxcluster` and speaks the same four
+messages, so that lives in one place:
+
+```
+extensions/protocol.js        attach/detach/control message shapes, result decoding
+extensions/useAudioExtension.js   attach, read results, detach — the whole lifecycle
+```
+
+A panel says what it wants and gets a state back:
+
+```jsx
+const { state, error } = useAudioExtension({
+    name: 'ft8', params: { max_candidates: 100 }, active: decoding && running,
+    onResult: (msg) => …,
+});
+```
+
+`active` is the only control. The hook holds the socket open (`dxcluster.hold()`
+— a reference count with no stream subscription, since a decoder has nothing to
+subscribe to), waits for it to be ready, re-attaches after a reconnect (the new
+server-side session has no extension in it), and detaches on unmount so closing
+a window really does stop the decoder. Results arrive as binary frames holding
+UTF-8 JSON; a malformed one is dropped rather than thrown on.
+
+Attaching needs a live audio session, so the receiver must be running. The server
+adds the tuned frequency, mode, passband, receiver locator and CTY database to
+the attach itself — none of those belong in `params`.
+
+### Adding an extension
+
+Add one entry to `src/extensions/registry.jsx` with the slug the server uses:
+
+```jsx
+{ id: 'sstv', title: 'SSTV Decoder', icon: <Icon.Image />, summary: '…',
+  requiresAudio: true, float: { w: 720, h: 560 }, Component: SSTVExtension }
+```
+
+Keep the pure parts (payload normalisation, filtering, sorting, export) in their
+own module beside the component, as `ft8/messages.js` does — that is what the
+tests exercise, and it is where a silent mistake actually lives.
 
 ## Behaviour notes
 
@@ -178,11 +255,14 @@ appear under everything else for anyone who had used the app before.
   a toggle would show a state nothing else agrees with.
 * **`/ws/dxcluster` is one shared, reference-counted socket.** Despite the name
   it is a multiplexer: DX spots, digital-mode spots, CW skimmer spots and chat,
-  each opted into separately, and the v1 extensions run their audio-decoder
-  control and results over it too. So `radio/dxcluster-connection.js` is a
+  each opted into separately, plus the audio-extension decoders' control
+  messages and their binary results. So `radio/dxcluster-connection.js` is a
   singleton with a ref count per stream: consumers call `acquire(stream)` and
   get a release function, the socket opens on the first acquire and closes on
-  the last release. Ref counting is not tidiness — a plain unsubscribe would let
+  the last release. A decoder has nothing to subscribe to, so it calls `hold()`
+  instead — the same reference count without a `subscribe_*` — which is what
+  stops an extension being cut off when the last spot panel closes, or keeping
+  the socket alive after it detaches. Ref counting is not tidiness — a plain unsubscribe would let
   the first panel to close cut off every other consumer of that stream, and a
   socket per panel would mean three connections each carrying the whole
   channel's chat traffic. Demand is the *only* thing that opens it; there is

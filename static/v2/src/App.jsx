@@ -9,6 +9,7 @@ import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
+import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import { subscribeSpots } from './lib/spotStore.js';
 
@@ -85,10 +86,12 @@ export default function App() {
             <LayoutProvider>
                 <RadioProvider>
                     <ChatProvider>
-                        <PageTitle />
-                        <LegacyBridge />
-                        <SpotStreams />
-                        {mobile ? <MobileShell /> : <DesktopShell />}
+                        <ExtensionsProvider>
+                            <PageTitle />
+                            <LegacyBridge />
+                            <SpotStreams />
+                            {mobile ? <MobileShell /> : <DesktopShell />}
+                        </ExtensionsProvider>
                     </ChatProvider>
                 </RadioProvider>
             </LayoutProvider>

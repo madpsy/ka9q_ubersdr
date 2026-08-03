@@ -1,9 +1,15 @@
-// Overlay holding every floating panel. Covers the centre area only, so a
+// Overlay holding every floating window. Covers the centre area only, so a
 // window can never hide the top bar, and is click-through except over a window.
+//
+// Two kinds of window live here: panels the user detached from a dock, and the
+// open extension — which only ever floats. They share this layer so they share
+// its measured bounds, and so an extension is dragged and clamped by exactly
+// the same rules as a panel.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { PANEL_BY_ID } from '../panels/registry.jsx';
+import ExtensionWindow from '../extensions/ExtensionWindow.jsx';
 import FloatingPanel from './FloatingPanel.jsx';
 
 export default function FloatingLayer() {
@@ -52,6 +58,10 @@ export default function FloatingLayer() {
                     bounds={bounds}
                 />
             ))}
+            {/* Last, so an extension always paints above the panels: it is the
+                thing the user just opened, and it has no raise-to-front of its
+                own because there is only ever one. */}
+            <ExtensionWindow bounds={bounds} />
         </div>
     );
 }

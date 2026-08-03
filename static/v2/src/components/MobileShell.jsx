@@ -4,24 +4,32 @@
 // bar that opens them as bottom sheets over a full-bleed spectrum. The panel
 // components are reused unchanged — only the chrome differs, which is why the
 // registry has no notion of "mobile panels".
+//
+// An open extension is a sheet too. Floating is a desktop idea — a draggable
+// window on a phone is not useful — so the window chrome is dropped and the
+// extension gets the same sheet a panel would, opened from the Extensions
+// panel rather than from the tab bar.
 
 import React, { useState } from '../react.js';
-import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
+import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 
 export default function MobileShell() {
     const { sections } = useLayout();
-    const { serverInfo } = useRadio();
+    const applies = usePanelApplies();
+    const { active: extension, close: closeExtension } = useExtensions();
     const [openId, setOpenId] = useState(null);
 
     const visible = PANELS.filter(
-        (p) => !sections[p.id]?.hidden && (!p.requires || p.requires(serverInfo)),
+        (p) => !sections[p.id]?.hidden && applies(p),
     );
-    const panel = openId ? PANEL_BY_ID[openId] : null;
+    // The extension wins the sheet: opening one is the more recent choice, and
+    // it is opened from a panel that would otherwise sit on top of it.
+    const panel = extension ? null : (openId ? PANEL_BY_ID[openId] : null);
 
     return (
         <div className="shell shell--mobile">
@@ -47,6 +55,27 @@ export default function MobileShell() {
                         </div>
                         <div className="sheet__body">
                             <panel.Component />
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {extension && (
+                <>
+                    <div className="sheet__scrim" onClick={closeExtension} />
+                    <div className="sheet sheet--ext" role="dialog" aria-label={extension.title}>
+                        <div className="sheet__head">
+                            <span className="sheet__grip" />
+                            <span className="sheet__title">
+                                <span className="sheet__icon">{extension.icon}</span>
+                                {extension.title}
+                            </span>
+                            <button type="button" className="sheet__close" onClick={closeExtension} aria-label="Close">
+                                <Icon.Close size={18} />
+                            </button>
+                        </div>
+                        <div className="sheet__body sheet__body--ext">
+                            <extension.Component />
                         </div>
                     </div>
                 </>

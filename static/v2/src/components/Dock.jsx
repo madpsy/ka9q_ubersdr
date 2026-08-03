@@ -3,8 +3,7 @@
 
 import React, { useCallback, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
-import { useRadio } from '../radio/RadioContext.jsx';
-import { PANEL_BY_ID } from '../panels/registry.jsx';
+import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
@@ -70,7 +69,7 @@ const COLLAPSE_ICON = {
 
 export default function Dock({ side }) {
     const { docks, sections, toggleDock, setDockSize, movePanel, weights, setWeights, heights } = useLayout();
-    const { serverInfo } = useRadio();
+    const applies = usePanelApplies();
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
     const resizeRef = useRef(null);
@@ -87,7 +86,7 @@ export default function Dock({ side }) {
         if (!p || sections[id]?.hidden) return false;
         // A panel that does not apply to this server is not merely hidden — it
         // is absent, so it never shows an empty slot or a "not available" note.
-        return !p.requires || p.requires(serverInfo);
+        return applies(p);
     });
 
     const onResizeDown = useCallback((e) => {

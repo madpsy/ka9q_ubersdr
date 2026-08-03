@@ -4,63 +4,24 @@
 // The panel body is unchanged — same component as in a dock. Only the chrome
 // differs, which is the whole point of the registry: placement is data.
 
-import React, { useCallback, useRef } from '../react.js';
+import React from '../react.js';
 import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
+import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
-const EDGE_KEEP = 60;   // px of the window that must stay reachable on screen
 
 export default function FloatingPanel({ panel, geom, z, bounds }) {
     const { setFloat, raiseFloat, movePanel, setSectionHidden } = useLayout();
-    const drag = useRef(null);
 
-    // Both dragging and resizing run through one pointer handler; `mode` says
-    // whether the pointer delta moves the window or grows it. The pointer
-    // origin is deliberately named apart from the geometry — spreading `geom`
-    // over `{x, y}` would silently overwrite it and make the window jump to the
-    // cursor on the first move.
-    const start = useCallback((e, mode) => {
-        // A press that begins on a title-bar control must not start a drag.
-        // preventDefault() here would suppress the compatibility mouse events
-        // the button's click depends on, and setPointerCapture() would redirect
-        // the rest of the gesture to the header — between them the menu never
-        // opens and the close button never fires.
-        // `.menu` covers the dropdown as well as its trigger: the panel renders
-        // inside this header, so a press on a menu item would otherwise reach
-        // the drag handler and have its click swallowed the same way.
-        if (mode === 'move' && e.target && e.target.closest && e.target.closest('.floatwin__ctl, .menu')) return;
-        e.preventDefault();
-        e.stopPropagation();
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        raiseFloat(panel.id);
-        drag.current = { mode, px: e.clientX, py: e.clientY, ...geom };
-    }, [geom, panel.id, raiseFloat]);
-
-    const move = useCallback((e) => {
-        const d = drag.current;
-        if (!d) return;
-        const dx = e.clientX - d.px;
-        const dy = e.clientY - d.py;
-        const max = bounds.current;
-        if (d.mode === 'move') {
-            // Clamp so a window can never be dragged fully out of reach.
-            setFloat(panel.id, {
-                x: Math.max(EDGE_KEEP - d.w, Math.min((max ? max.width : Infinity) - EDGE_KEEP, d.x + dx)),
-                y: Math.max(0, Math.min((max ? max.height : Infinity) - 28, d.y + dy)),
-            });
-        } else {
-            setFloat(panel.id, { w: d.w + dx, h: d.h + dy });
-        }
-    }, [panel.id, setFloat, bounds]);
-
-    const end = useCallback((e) => {
-        drag.current = null;
-        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    }, []);
-
-    const onMoveDown = (e) => start(e, 'move');
-    const onSizeDown = (e) => start(e, 'size');
+    // The size floor lives in LayoutContext (setFloat clamps), so none is
+    // passed here — this only has to stop the gesture running away.
+    const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
+        geom,
+        bounds,
+        onChange: (patch) => setFloat(panel.id, patch),
+        onRaise: () => raiseFloat(panel.id),
+    });
 
     return (
         <section
@@ -71,9 +32,9 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
             <header
                 className="floatwin__head"
                 onPointerDown={onMoveDown}
-                onPointerMove={move}
-                onPointerUp={end}
-                onPointerCancel={end}
+                onPointerMove={onMove}
+                onPointerUp={onEnd}
+                onPointerCancel={onEnd}
                 onDoubleClick={() => movePanel(panel.id, panel.dock, null)}
             >
                 <span className="floatwin__icon">{panel.icon}</span>
@@ -106,9 +67,9 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
                 className="floatwin__grip"
                 title="Resize"
                 onPointerDown={onSizeDown}
-                onPointerMove={move}
-                onPointerUp={end}
-                onPointerCancel={end}
+                onPointerMove={onMove}
+                onPointerUp={onEnd}
+                onPointerCancel={onEnd}
             />
         </section>
     );

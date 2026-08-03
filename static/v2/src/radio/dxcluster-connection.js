@@ -2,10 +2,11 @@
 //
 // Despite the name this socket is a multiplexer, not a DX cluster feed: it
 // carries DX spots, digital-mode spots, CW skimmer spots and chat, each opted
-// into separately, and the v1 extensions also run their audio-decoder control
-// and results over it. Nothing arrives until the matching `subscribe_*` has
-// been sent — the server answers "you must subscribe to chat first" otherwise —
-// and that subscription is also what replays the server's recent buffer.
+// into separately, and the audio-extension decoders run their control messages
+// and their results over it too. Nothing arrives until the matching
+// `subscribe_*` has been sent — the server answers "you must subscribe to chat
+// first" otherwise — and that subscription is also what replays the server's
+// recent buffer.
 //
 // So this is one shared connection with reference-counted subscriptions rather
 // than a socket per feature. Each consumer calls `acquire(stream)` and gets a
@@ -13,6 +14,11 @@
 // last release. That matters beyond tidiness: the server counts sockets per
 // session, and a panel per stream would mean three connections carrying three
 // copies of the chat traffic.
+//
+// Audio extensions have nothing to subscribe to — their traffic is the
+// attach/detach control messages and the binary result frames that come back —
+// so they call `hold()` instead, which keeps the socket open on the same
+// reference count without asking for a stream.
 //
 // Client -> server
 //   subscribe_dx_spots / subscribe_digital_spots / subscribe_cw_spots
@@ -32,6 +38,11 @@
 //   chat_idle_updates   {data:{users[]}}
 //   chat_error          {error}
 //   subscription_status {stream, enabled}
+//
+// Audio extensions (see extensions/protocol.js for the message shapes)
+//   client -> server  audio_extension_attach / _detach / _control / _status
+//   server -> client  audio_extension_attached / _detached / _error / _status
+//                     plus one binary frame per decoder result
 
 import { Emitter } from './emitter.js';
 import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
@@ -71,6 +82,8 @@ export class DXClusterConnection extends Emitter {
         // close would cut off every other one.
         this.refs = Object.fromEntries(STREAMS.map((s) => [s, 0]));
         this.confirmed = Object.fromEntries(STREAMS.map((s) => [s, false]));
+        // Consumers that want the socket but no stream — see hold().
+        this.holds = 0;
         this.opening = false;
     }
 
@@ -105,10 +118,31 @@ export class DXClusterConnection extends Emitter {
         };
     }
 
+    // Keeps the socket open without subscribing to anything, for consumers
+    // whose traffic is not a stream: the audio extensions send an attach and
+    // read the frames that come back. Same reference count as `acquire`, so an
+    // extension cannot be cut off by the last spot panel closing, nor keep the
+    // socket alive after it detaches.
+    hold() {
+        this.holds += 1;
+        this._sync();
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            this.holds -= 1;
+            this._sync();
+        };
+    }
+
+    _wanted() {
+        return this.holds > 0 || STREAMS.some((s) => this.wants(s));
+    }
+
     // Opens or closes to match demand. The last release closes the socket
     // rather than leaving an idle connection counted against the session.
     _sync() {
-        const wanted = STREAMS.some((s) => this.wants(s));
+        const wanted = this._wanted();
         if (wanted) this.connect();
         else if (this.ws || this.reconnectTimer || this.opening) this.disconnect();
     }
@@ -130,7 +164,7 @@ export class DXClusterConnection extends Emitter {
             return false;
         }
         // Everyone may have let go while the check was in flight.
-        if (this.closedByUser || !STREAMS.some((s) => this.wants(s))) return false;
+        if (this.closedByUser || !this._wanted()) return false;
 
         const q = new URLSearchParams({ user_session_id: getSessionId() });
         const password = getBypassPassword();
@@ -146,6 +180,10 @@ export class DXClusterConnection extends Emitter {
             return false;
         }
         this.ws = ws;
+        // Decoder results arrive as binary frames. Asking for ArrayBuffers
+        // rather than the default Blob keeps their handling synchronous, so a
+        // result cannot be delivered after the extension has detached.
+        ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
             this.attempts = 0;
@@ -161,10 +199,13 @@ export class DXClusterConnection extends Emitter {
             this.emit('open');
         };
         ws.onmessage = (ev) => {
-            // Binary frames belong to the audio-extension decoders, which will
-            // attach their own listener to `ws` directly. Ignored here rather
-            // than fed to JSON.parse.
-            if (typeof ev.data !== 'string') return;
+            // Binary frames are decoder results, one per frame. Emitted rather
+            // than parsed here: this socket does not know what any extension's
+            // payload means — see extensions/protocol.js.
+            if (typeof ev.data !== 'string') {
+                this.emit('binary', ev.data);
+                return;
+            }
             let msg;
             try { msg = JSON.parse(ev.data); } catch (e) { return; }
             this._onMessage(msg);
@@ -294,7 +335,12 @@ export class DXClusterConnection extends Emitter {
                 break;
             }
             default:
-                break;   // pong, and the audio-extension replies
+                // Audio-extension control replies, forwarded whole: the shapes
+                // differ per message and only the extension client cares.
+                if (typeof msg.type === 'string' && msg.type.startsWith('audio_extension_')) {
+                    this.emit('extension', msg);
+                }
+                break;   // and pong
         }
     }
 

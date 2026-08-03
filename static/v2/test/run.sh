@@ -58,6 +58,12 @@ esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
     --outfile=.build/webmidi.cjs --log-level=warning
 esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
+esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
+    --outfile=.build/extprotocol.cjs --log-level=warning
+esbuild ../src/extensions/ft8/messages.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ft8messages.cjs --log-level=warning
+esbuild ../src/extensions/ft8/spectrum.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ft8spectrum.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -69,3 +75,4 @@ node compat.test.js
 node recorder.test.js
 node controls.test.js
 node spots.test.js
+node extensions.test.js

@@ -6,9 +6,10 @@ const { SpectrumConnection } = require('./.build/spectrum.cjs');
 const { AudioConnection } = require('./.build/audio.cjs');
 const {
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, SQUELCH_STEP,
-    autoSquelchValue, bandwidthLimits, maxFilterWidth, squelchEnabled, squelchThreshold,
+    autoSquelchValue, bandwidthLimits, maxFilterWidth, snapStep, squelchEnabled, squelchThreshold,
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
+const mk = require('./.build/markers.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
 
@@ -316,6 +317,166 @@ t('setAudioGate with no thresholds is not sent', () => {
     // The server rejects a gate message carrying neither field.
     assert.strictEqual(a.setAudioGate({}), false);
     assert.strictEqual(sent.length, 0);
+});
+
+// --- marker bar ------------------------------------------------------------
+//
+// Sample payloads are verbatim from a live server: 2450 bookmarks and 202 band
+// allocations. At full span every one is "visible", which is exactly the case
+// the density cap and the binary-search window exist for.
+
+const MARKS = JSON.parse(require('fs').readFileSync(__dirname + '/bookmarks.sample.json', 'utf8'))
+    .sort((a, b) => a.frequency - b.frequency);
+const BANDS = JSON.parse(require('fs').readFileSync(__dirname + '/bands.sample.json', 'utf8'));
+const measure = (b) => Math.min(140, b.name.length * 6 + 10);
+
+t('the visible window is sliced, not scanned', () => {
+    // A 10 kHz window out of 0-30 MHz must yield a handful, not thousands.
+    const win = mk.visibleBookmarks(MARKS, 7100000, 7110000);
+    assert.ok(win.length < 50, `${win.length} in a 10 kHz window`);
+    assert.ok(win.every((b) => b.frequency >= 7100000 && b.frequency <= 7110000));
+    // And the boundaries are inclusive on both ends.
+    const exact = MARKS[100].frequency;
+    assert.ok(mk.visibleBookmarks(MARKS, exact, exact).some((b) => b.frequency === exact));
+});
+
+t('lowerBound finds the first index at or after the target', () => {
+    const arr = [10, 20, 30, 40].map((f) => ({ frequency: f }));
+    assert.strictEqual(mk.lowerBound(arr, 5), 0);
+    assert.strictEqual(mk.lowerBound(arr, 20), 1);
+    assert.strictEqual(mk.lowerBound(arr, 25), 2);
+    assert.strictEqual(mk.lowerBound(arr, 99), 4);
+});
+
+t('full span with 2450 bookmarks is capped, not drawn whole', () => {
+    const placed = mk.layoutBookmarks({
+        sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 1600, measure,
+    });
+    assert.ok(placed.length <= mk.MAX_MARKERS, `${placed.length} markers`);
+    assert.ok(placed.length > 50, `only ${placed.length} survived the cap`);
+});
+
+t('capped markers stay spread across the width', () => {
+    const placed = mk.layoutBookmarks({
+        sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 1600, measure,
+    });
+    // Evenly sampled, so both edges of the canvas must be represented — a naive
+    // "first 100" would bunch everything at the left.
+    const xs = placed.map((p) => p.x);
+    assert.ok(Math.min(...xs) < 200, `leftmost at ${Math.min(...xs)}`);
+    assert.ok(Math.max(...xs) > 1400, `rightmost at ${Math.max(...xs)}`);
+});
+
+t('markers stack onto two rows and no row overlaps itself', () => {
+    const placed = mk.layoutBookmarks({
+        sorted: MARKS, startFreq: 7000000, endFreq: 7300000, width: 1200, measure,
+    });
+    assert.ok(placed.some((p) => p.row === 1), 'nothing was pushed to the second row');
+    for (const row of [0, 1]) {
+        const inRow = placed.filter((p) => p.row === row).sort((a, b) => a.x - b.x);
+        for (let i = 1; i < inRow.length; i++) {
+            const gap = (inRow[i].x - inRow[i].width / 2) - (inRow[i - 1].x + inRow[i - 1].width / 2);
+            // Row 0 is the overflow row: an item that fits nowhere lands there.
+            if (row === 1) assert.ok(gap >= mk.ROW_GAP_PX, `row 1 overlap: gap ${gap.toFixed(1)}px`);
+        }
+    }
+});
+
+t('an empty or absent catalogue lays out nothing', () => {
+    assert.deepStrictEqual(mk.layoutBookmarks({ sorted: [], startFreq: 0, endFreq: 1e6, width: 100, measure }), []);
+    assert.deepStrictEqual(mk.visibleBookmarks(null, 0, 1e6), []);
+    assert.deepStrictEqual(mk.layoutBands({ bands: null, startFreq: 0, endFreq: 1e6, width: 100 }), []);
+});
+
+t('a zero-width or zero-span view lays out nothing', () => {
+    assert.deepStrictEqual(mk.layoutBookmarks({ sorted: MARKS, startFreq: 0, endFreq: 0, width: 100, measure }), []);
+    assert.deepStrictEqual(mk.layoutBookmarks({ sorted: MARKS, startFreq: 0, endFreq: 1e6, width: 0, measure }), []);
+});
+
+t('bands are clipped to the view and ordered widest first', () => {
+    const spans = mk.layoutBands({ bands: BANDS, startFreq: 7000000, endFreq: 7300000, width: 1000 });
+    assert.ok(spans.length > 0);
+    for (const s of spans) {
+        assert.ok(s.x0 >= 0 && s.x1 <= 1000, `${s.x0}..${s.x1} outside the canvas`);
+    }
+    // Widest first, so narrow allocations paint on top of the wide ones.
+    for (let i = 1; i < spans.length; i++) {
+        const prev = spans[i - 1].band.end - spans[i - 1].band.start;
+        const cur = spans[i].band.end - spans[i].band.start;
+        assert.ok(prev >= cur, 'bands are not widest-first');
+    }
+});
+
+t('band labels repeat without overlapping, however long the name', () => {
+    const xs = mk.bandLabelPositions({ x0: 0, x1: 1000, labelWidth: 80 });
+    assert.ok(xs.length >= 2, `${xs.length} labels across 1000px`);
+    for (let i = 1; i < xs.length; i++) {
+        assert.ok(xs[i] - xs[i - 1] >= 80, `labels ${(xs[i] - xs[i - 1]).toFixed(0)}px apart, need 80`);
+    }
+    // A very long name simply repeats less often rather than colliding.
+    const wide = mk.bandLabelPositions({ x0: 0, x1: 1000, labelWidth: 400 });
+    for (let i = 1; i < wide.length; i++) {
+        assert.ok(wide[i] - wide[i - 1] >= 400, 'long labels collide');
+    }
+});
+
+t('narrow bands get no label, and labels stay inside the band', () => {
+    assert.deepStrictEqual(mk.bandLabelPositions({ x0: 0, x1: 20, labelWidth: 40 }), []);
+    const xs = mk.bandLabelPositions({ x0: 100, x1: 200, labelWidth: 60 });
+    for (const x of xs) {
+        assert.ok(x - 30 >= 100 - 0.001 && x + 30 <= 200 + 0.001, `label at ${x} escapes 100..200`);
+    }
+});
+
+t('band colours follow v1 intensity', () => {
+    const mid = mk.bandColors(0.5);
+    assert.strictEqual(mid.length, 10);
+    assert.ok(mid[0].endsWith('0.2)'), mid[0]);
+    const full = mk.bandColors(1);
+    assert.ok(full[0].endsWith('0.8)'), full[0]);
+    // Out-of-range or missing config falls back to the pastel default.
+    assert.deepStrictEqual(mk.bandColors(undefined), mid);
+    assert.deepStrictEqual(mk.bandColors(0), mid);
+});
+
+// --- tuning steps ----------------------------------------------------------
+
+t('stepping snaps to the step boundary from an odd frequency', () => {
+    // 7.100123 MHz, 500 Hz step -> 7.100500 up, 7.100000 down.
+    assert.strictEqual(snapStep(7100123, 500, 1), 7100500);
+    assert.strictEqual(snapStep(7100123, 500, -1), 7100000);
+    assert.strictEqual(snapStep(7100001, 1000, 1), 7101000);
+    assert.strictEqual(snapStep(7100999, 1000, -1), 7100000);
+});
+
+t('already on a boundary, a press moves one whole step', () => {
+    assert.strictEqual(snapStep(7100000, 500, 1), 7100500);
+    assert.strictEqual(snapStep(7100000, 500, -1), 7099500);
+    assert.strictEqual(snapStep(14200000, 100000, 1), 14300000);
+});
+
+t('a press never moves the opposite way', () => {
+    // Rounding to nearest would send + downwards when just past a boundary.
+    for (const step of [1, 10, 100, 500, 1000, 5000, 9000, 10000]) {
+        for (const f of [7100001, 7100499, 7100999, 14200321, 9599999]) {
+            assert.ok(snapStep(f, step, 1) > f, `+${step} from ${f}`);
+            assert.ok(snapStep(f, step, -1) < f, `-${step} from ${f}`);
+        }
+    }
+});
+
+t('every landing point is a multiple of the step', () => {
+    for (const step of [10, 100, 500, 1000, 9000, 10000]) {
+        for (const f of [123456, 7100123, 14200321, 29999999]) {
+            assert.strictEqual(snapStep(f, step, 1) % step, 0, `+${step} from ${f}`);
+            assert.strictEqual(snapStep(f, step, -1) % step, 0, `-${step} from ${f}`);
+        }
+    }
+});
+
+t('a 1 Hz step still moves by exactly 1 Hz', () => {
+    assert.strictEqual(snapStep(7100123, 1, 1), 7100124);
+    assert.strictEqual(snapStep(7100123, 1, -1), 7100122);
 });
 
 // --- S-meter ---------------------------------------------------------------

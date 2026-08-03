@@ -16,7 +16,7 @@ import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
-    SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL,
+    SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold,
 } from './constants.js';
 import { clamp } from '../lib/format.js';
@@ -101,6 +101,11 @@ export function RadioProvider({ children }) {
     // config.yaml `ssb_agc` values for anything this session has not
     // overridden, so seeding from our own constants would show the wrong
     // numbers on any receiver whose operator changed them.
+    // Bands and bookmarks, fetched once and shared: the panels and the marker
+    // bar all need them, and this server publishes 2450 bookmarks — not a
+    // payload to pull three times. Bookmarks are kept sorted by frequency so
+    // the marker bar can binary-search the visible window.
+    const [catalog, setCatalog] = useState({ bands: null, bookmarks: null });
     const [agc, setAgc] = useState(null);
     // `schemas` is the server's filter list (null until it answers); `params`
     // is keyed by filter name so switching filters and back keeps your settings.
@@ -326,6 +331,23 @@ export function RadioProvider({ children }) {
     }, []);
 
     useEffect(() => {
+        let cancelled = false;
+        Promise.all([
+            fetch('/api/bands').then((r) => r.json()).catch(() => []),
+            fetch('/api/bookmarks').then((r) => r.json()).catch(() => []),
+        ]).then(([bands, bookmarks]) => {
+            if (cancelled) return;
+            setCatalog({
+                bands: Array.isArray(bands) ? bands : [],
+                bookmarks: Array.isArray(bookmarks)
+                    ? [...bookmarks].sort((a, b) => a.frequency - b.frequency)
+                    : [],
+            });
+        });
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
         fetch('/api/description')
             .then((r) => r.json())
             .then((d) => setServerInfo(d))
@@ -413,6 +435,12 @@ export function RadioProvider({ children }) {
             setFrequency(hz) { applyTuning({ frequency: hz }); },
 
             nudge(delta) { applyTuning({ frequency: tuningRef.current.frequency + delta }); },
+
+            // Steps to the next multiple of `step`, rather than adding to
+            // whatever odd frequency happens to be tuned.
+            stepBy(step, dir) {
+                applyTuning({ frequency: snapStep(tuningRef.current.frequency, step, dir) });
+            },
 
             setMode(mode) {
                 const def = MODE_BY_ID[mode];
@@ -587,10 +615,10 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log,
-        audio, squelch, agc, dsp, followTuning,
+        audio, squelch, agc, dsp, followTuning, catalog,
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, audio, squelch, agc, dsp, followTuning, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, audio, squelch, agc, dsp, followTuning, catalog, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

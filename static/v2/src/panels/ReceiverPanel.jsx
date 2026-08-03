@@ -90,11 +90,11 @@ export default function ReceiverPanel() {
             <FrequencyDial frequency={tuning.frequency} onChange={actions.setFrequency} />
 
             <div className="tune-row">
-                <Button variant="ghost" icon={<Icon.Minus />} title={`− ${stepLabel(step)}`} onClick={() => actions.nudge(-step)} />
+                <Button variant="ghost" icon={<Icon.Minus />} title={`− ${stepLabel(step)}`} onClick={() => actions.stepBy(step, -1)} />
                 <select className="select" value={step} onChange={(e) => setStep(Number(e.target.value))}>
                     {TUNING_STEPS.map((s) => <option key={s} value={s}>{stepLabel(s)}</option>)}
                 </select>
-                <Button variant="ghost" icon={<Icon.Plus />} title={`+ ${stepLabel(step)}`} onClick={() => actions.nudge(step)} />
+                <Button variant="ghost" icon={<Icon.Plus />} title={`+ ${stepLabel(step)}`} onClick={() => actions.stepBy(step, 1)} />
             </div>
 
             <Field label="Mode">

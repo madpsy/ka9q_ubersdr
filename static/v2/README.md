@@ -171,6 +171,20 @@ panel never disturbs an existing user's arrangement.
   only looks at the waterfall. While a backdrop is showing, the dB grid and its
   labels switch to solid white with a dark text shadow: the usual 6%-white
   gridlines read fine on black but vanish on most images.
+* **The marker bar is built for thousands of entries.** This server publishes
+  202 band allocations and 2450 bookmarks, so at full span everything is
+  "visible". `lib/markers.js` therefore: binary-searches the sorted bookmark list
+  for the visible window rather than scanning it; caps the draw list at 100,
+  sampled evenly across the x axis so survivors stay spread over the full width
+  instead of bunching at one end; and stacks onto two rows, checking only the
+  last marker placed in each row (the list is x-sorted, so that is O(n) rather
+  than v1's O(n²)). Label widths are measured once per name. The bar redraws on
+  view/data/toggle changes only, never per spectrum frame. Bands are drawn
+  widest-first so narrow allocations land on top, and their labels repeat at a
+  spacing derived from the label width — laid out across the range the label
+  *centres* can occupy, which is where v1 goes wrong: it spreads them over the
+  whole band then clamps strays back inside, squeezing the end pair together so
+  long names overlap anyway.
 * **Peak hold decays in dB per second, not per frame.** The draw rate follows
   the server's frame rate, so a per-frame decay made the hold time depend on how
   fast the spectrum happened to be arriving — slow on a busy server, fast on an

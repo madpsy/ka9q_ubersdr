@@ -37,6 +37,16 @@ export default function DisplayPanel() {
 
             <div className="divider" />
 
+            <div className="section-label"><span>Markers</span></div>
+            <Field label="Band allocations" inline>
+                <Switch checked={d.markerBands !== false} onChange={(v) => d.set({ markerBands: v })} />
+            </Field>
+            <Field label="Bookmarks" inline>
+                <Switch checked={d.markerBookmarks !== false} onChange={(v) => d.set({ markerBookmarks: v })} />
+            </Field>
+
+            <div className="divider" />
+
             {/* Level mapping drives both panes. */}
             <Field label="Auto level" hint={d.autoRange ? 'tracking noise floor' : 'manual'} inline>
                 <Switch checked={d.autoRange} onChange={(v) => d.set({ autoRange: v })} />

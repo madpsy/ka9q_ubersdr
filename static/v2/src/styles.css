@@ -1157,3 +1157,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-faint);
     font-family: var(--mono);
 }
+
+/* ── Marker bar ───────────────────────────────────────────────────────────── */
+
+.markerbar {
+    position: relative;
+    flex: none;
+    background: rgba(0, 0, 0, 0.22);
+    border-bottom: 1px solid var(--border);
+}
+.markerbar__canvas { display: block; cursor: pointer; }
+.markerbar__tip {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    transform: translateX(-50%);
+    max-width: 340px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    z-index: 30;
+}

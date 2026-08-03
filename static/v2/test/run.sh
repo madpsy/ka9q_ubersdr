@@ -24,5 +24,7 @@ esbuild ../src/display/uiConfig.js --bundle --format=cjs --platform=node \
     --outfile=.build/uiconfig.cjs --log-level=warning
 esbuild ../src/lib/format.js --bundle --format=cjs --platform=node \
     --outfile=.build/format.cjs --log-level=warning
+esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
+    --outfile=.build/markers.cjs --log-level=warning
 
 node protocol.test.js

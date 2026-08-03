@@ -55,6 +55,18 @@ export function stepLabel(hz) {
     return hz + ' Hz';
 }
 
+// Next frequency on a `step` boundary in the given direction.
+//
+// Stepping is a snap, not an add: from 7.100123 MHz with a 500 Hz step, up lands
+// on 7.100500 and down on 7.100000, so the dial ends up on round numbers however
+// it got to where it was. Already on a boundary, it moves a full step.
+export function snapStep(frequency, step, dir) {
+    if (!(step > 0)) return frequency;
+    const f = frequency / step;
+    // floor/ceil rather than round, so a press never moves the opposite way.
+    return (dir > 0 ? Math.floor(f) + 1 : Math.ceil(f) - 1) * step;
+}
+
 // AGC.
 //
 // Only USB and LSB expose these — v1 keys them off a per-mode settings table

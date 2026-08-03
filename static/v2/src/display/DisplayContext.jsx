@@ -20,6 +20,8 @@ export const DEFAULTS = {
     grid: false,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row
+    markerBands: true,      // band allocations in the marker bar
+    markerBookmarks: true,  // bookmark pills in the marker bar
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)

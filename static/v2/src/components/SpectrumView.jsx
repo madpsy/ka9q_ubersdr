@@ -16,6 +16,7 @@ import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Icon } from './ui.jsx';
+import MarkerBar from './MarkerBar.jsx';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
@@ -317,6 +318,8 @@ export default function SpectrumView() {
                     <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
                 </div>
             </div>
+
+            <MarkerBar width={sizes.w} />
 
             <div
                 className="spectrum__canvas"

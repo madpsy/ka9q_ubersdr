@@ -10,18 +10,11 @@ import { formatFreqShort } from '../lib/format.js';
 const PAGE = 10;
 
 export default function BookmarksPanel() {
-    const { actions } = useRadio();
-    const [items, setItems] = useState(null);
+    const { actions, catalog } = useRadio();
+    const items = catalog.bookmarks;
     const [query, setQuery] = useState('');
     const [group, setGroup] = useState('');
     const [limit, setLimit] = useState(PAGE);
-
-    useEffect(() => {
-        fetch('/api/bookmarks')
-            .then((r) => r.json())
-            .then((list) => setItems(Array.isArray(list) ? list : []))
-            .catch(() => setItems([]));
-    }, []);
 
     // Narrowing the search starts from the top again.
     useEffect(() => { setLimit(PAGE); }, [query, group]);

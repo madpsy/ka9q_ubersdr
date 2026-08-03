@@ -16,17 +16,10 @@ function cleanLabel(raw) {
 }
 
 export default function BandsPanel() {
-    const { tuning, actions } = useRadio();
-    const [bands, setBands] = useState(null);
+    const { tuning, actions, catalog } = useRadio();
+    const bands = catalog.bands;
     const [query, setQuery] = useState('');
     const [limit, setLimit] = useState(PAGE);
-
-    useEffect(() => {
-        fetch('/api/bands')
-            .then((r) => r.json())
-            .then((list) => setBands(Array.isArray(list) ? list : []))
-            .catch(() => setBands([]));
-    }, []);
 
     // A new search starts from the top again.
     useEffect(() => { setLimit(PAGE); }, [query]);

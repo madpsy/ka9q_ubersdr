@@ -1124,6 +1124,53 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Audio filters
+   ========================================================================= */
+
+.section-label__note { color: var(--text-faint); text-transform: none; letter-spacing: 0.04em; }
+
+/* Twelve bands as rows rather than v1's vertical faders: a dock panel is tall
+   and narrow, which is the wrong way round for a graphic EQ. */
+.eqbands { display: flex; flex-direction: column; gap: 3px; }
+.eqband { display: flex; align-items: center; gap: 7px; }
+.eqband__hz {
+    flex: none;
+    width: 30px;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    text-align: right;
+}
+.eqband__db {
+    flex: none;
+    width: 38px;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    text-align: right;
+}
+.eqband .slider-wrap, .eqband .slider { flex: 1; min-width: 0; }
+
+.notch {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 7px 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.notch__head { display: flex; align-items: center; justify-content: space-between; }
+.notch__name {
+    font-size: calc(11px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+/* =========================================================================
    Audio scope
    ========================================================================= */
 

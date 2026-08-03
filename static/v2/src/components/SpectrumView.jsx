@@ -443,7 +443,11 @@ export default function SpectrumView() {
         try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         if (drag.moved) return;
         const f = freqAtX(e.clientX);
-        if (f != null) actions.setFrequency(dispRef.current.snapHz > 1 ? Math.round(f / dispRef.current.snapHz) * dispRef.current.snapHz : f);
+        if (f == null) return;
+        // Snap to whatever the Receiver panel's step is set to, so clicking the
+        // spectrum and pressing +/- agree about where the channels are.
+        const step = dispRef.current.tuneStep || 1;
+        actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
     }, [actions, freqAtX]);
 
     // The readout has to follow the data, not the mouse: standing still over a
@@ -488,6 +492,15 @@ export default function SpectrumView() {
         if (Math.abs(wheelAcc.current) < 50) return;
         const dir = wheelAcc.current < 0 ? -1 : 1;
         wheelAcc.current = 0;
+
+        // Wheel either zooms or tunes, per the Display panel. Tuning uses the
+        // Receiver panel's step and its snapping, so it agrees with the +/-
+        // buttons and with click-to-tune; scrolling up goes up in frequency,
+        // matching the frequency dial's digits.
+        if (dispRef.current.wheelAction === 'tune') {
+            actions.stepBy(dispRef.current.tuneStep || 500, dir < 0 ? 1 : -1);
+            return;
+        }
         const f = freqAtX(e.clientX);
         if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
     }, [actions, freqAtX]);

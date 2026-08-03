@@ -1,5 +1,6 @@
-import React, { useState } from '../react.js';
+import React from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import {
@@ -51,7 +52,10 @@ function AGCSettings() {
 
 export default function ReceiverPanel() {
     const { tuning, actions, running } = useRadio();
-    const [step, setStep] = useState(1000);
+    // Shared with click-to-tune on the spectrum, so both land on the same grid.
+    const display = useDisplay();
+    const step = display.tuneStep || 500;
+    const setStep = (hz) => display.set({ tuneStep: hz });
 
     const mode = MODE_BY_ID[tuning.mode] || MODES[0];
     const limits = bandwidthLimits(tuning.mode);

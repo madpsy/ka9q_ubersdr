@@ -24,6 +24,7 @@ import BandsPanel from './BandsPanel.jsx';
 import BookmarksPanel from './BookmarksPanel.jsx';
 import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
 import AudioPanel from './AudioPanel.jsx';
+import AudioFiltersPanel from './AudioFiltersPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
@@ -76,6 +77,7 @@ export const PANELS = [
 
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', Component: SignalPanel },
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', Component: AudioPanel },
+    { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
     { id: 'scope', title: 'Audio scope', icon: <Icon.Waves />, dock: 'right', defaultOpen: false, Component: ScopePanel },
     { id: 'display', title: 'Display', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
     { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },

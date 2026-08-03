@@ -11,6 +11,7 @@ const {
 const dspLib = require('./.build/dsp.cjs');
 const mk = require('./.build/markers.cjs');
 const ab = require('./.build/audioband.cjs');
+const af = require('./.build/audiofilters.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
@@ -1006,6 +1007,71 @@ t('mentions, links and frequencies coexist in one message', () => {
 t('a plain message survives the split unchanged', () => {
     const text = 'hello, nothing special here';
     assert.deepStrictEqual(mn.splitMessage(text, ['bob']), [{ text }]);
+});
+
+
+// ── Audio filters: EQ, notch and bandpass parameters ────────────────────────
+// The maths that turns a slider into a biquad's Q is v1's (static/filters.js).
+// A mistake here is inaudible until someone notices the notch is in the wrong
+// place, so the numbers are pinned.
+
+t('bandpass Q follows centre, width and stage count', () => {
+    // v1: Q = max(0.7, (centre / width) * (stages / 2))
+    assert.strictEqual(af.bandpassQ({ center: 800, width: 200, stages: 4, autoQ: true }), 8);
+    assert.strictEqual(af.bandpassQ({ center: 800, width: 200, stages: 2, autoQ: true }), 4);
+    // A wide, low filter must not drop below the floor.
+    assert.strictEqual(af.bandpassQ({ center: 300, width: 1000, stages: 1, autoQ: true }), 0.7);
+});
+
+t('manual Q scales the automatic value', () => {
+    const spec = { center: 800, width: 200, stages: 4, autoQ: false, qMultiplier: 0.5 };
+    assert.strictEqual(af.bandpassQ(spec), 4);
+});
+
+t('notch Q spreads width across its six stages', () => {
+    // v1: Q = max(0.7, centre / (width * 3)) with NOTCH_STAGES cascaded.
+    assert.strictEqual(af.notchQ(1500, 50), 10);
+    assert.strictEqual(af.notchQ(1500, 100), 5);
+    assert.strictEqual(af.notchQ(100, 500), 0.7);
+    assert.strictEqual(af.NOTCH_STAGES, 6);
+});
+
+t('EQ presets are v1\'s tables', () => {
+    const voice = af.presetGains('voice');
+    assert.strictEqual(voice.gains.length, af.EQ_FREQUENCIES.length);
+    assert.strictEqual(voice.gains[0], -6);      // 60 Hz
+    assert.strictEqual(voice.gains[5], 4);       // 1500 Hz
+    assert.strictEqual(af.presetGains('cw').gains[3], 6);      // 600 Hz
+    assert.strictEqual(af.presetGains('music').gains[0], 4);   // 60 Hz
+    assert.strictEqual(af.presetGains('nope'), null);
+});
+
+t('a boosting preset pulls the makeup gain down', () => {
+    // v1 compensates by 70% of the average positive band gain, so a preset
+    // cannot clip on the way in.
+    for (const name of ['voice', 'cw', 'music']) {
+        const p = af.presetGains(name);
+        assert.ok(p.makeup <= 0, `${name} makeup ${p.makeup}`);
+        assert.ok(p.makeup >= af.EQ_GAIN_MIN);
+    }
+    assert.strictEqual(af.presetGains('voice').makeup, -2);
+});
+
+t('the live preset is detected from the band gains', () => {
+    assert.strictEqual(af.detectPreset(af.presetGains('cw').gains), 'cw');
+    assert.strictEqual(af.detectPreset(af.EQ_FREQUENCIES.map(() => 0)), null);
+    const tweaked = af.presetGains('voice').gains.slice();
+    tweaked[0] += 0.5;
+    assert.strictEqual(af.detectPreset(tweaked), null);
+});
+
+t('the bandpass range follows the mode passband', () => {
+    // LSB is mirrored, so the controls work in positive audio frequencies.
+    assert.deepStrictEqual(af.bandpassRange(ab.audioWindow(-2700, -50)), { min: 50, max: 2700 });
+    // AM starts at DC, but a bandpass centred below 50 Hz is not useful.
+    assert.strictEqual(af.bandpassRange(ab.audioWindow(-5000, 5000)).min, 50);
+    // CW sits around the 500 Hz tone.
+    assert.deepStrictEqual(af.bandpassRange(ab.audioWindow(-200, 200)), { min: 300, max: 700 });
 });
 
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

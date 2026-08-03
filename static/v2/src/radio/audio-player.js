@@ -5,6 +5,8 @@
 // arrival. When the schedule falls behind the cushion is re-primed, which is
 // audible as a single gap instead of continuous stuttering.
 
+import { buildChain } from './audio-filters.js';
+
 const DEFAULT_BUFFER_SEC = 0.2;
 const MIN_LEAD_SEC = 0.02;
 
@@ -30,6 +32,9 @@ export class AudioPlayer {
         // modes, and stereo Opus); a mono stream ignores it.
         this.channelMode = 'both';
         this.channels = 0;          // channels in the stream last scheduled
+        this.head = null;           // filter chain input
+        this.chain = null;          // active EQ/notch/bandpass nodes
+        this.filterSpec = null;
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -165,6 +170,10 @@ export class AudioPlayer {
             this.ctx = new Ctx({ latencyHint: 'playback' });
         }
         this.sampleRate = this.ctx.sampleRate;
+        // Everything scheduled enters here, so the client-side filter chain can
+        // be spliced between this and the volume control without touching the
+        // packet path.
+        this.head = this.ctx.createGain();
         this.gain = this.ctx.createGain();
         // Per-side output routing, as v1 does (app.js initializeStereoChannels):
         // split the stereo pair, gate each side with its own gain, merge back.
@@ -180,6 +189,7 @@ export class AudioPlayer {
         // raises this while it is on screen (see acquireAnalyser).
         this.analyser.fftSize = this.analyserFft || ANALYSER_IDLE_FFT;
         this.analyser.smoothingTimeConstant = 0.5;
+        this.head.connect(this.gain);
         this.gain.connect(this.splitter);
         this.splitter.connect(this.leftGain, 0);
         this.splitter.connect(this.rightGain, 1);
@@ -191,6 +201,7 @@ export class AudioPlayer {
         this.analyser.connect(this.ctx.destination);
         this._applyGain();
         this._applyChannelMode();
+        if (this.filterSpec) this.setFilters(this.filterSpec);
         this.nextPlayTime = this.ctx.currentTime + this.bufferSec;
     }
 
@@ -199,6 +210,31 @@ export class AudioPlayer {
         const target = this.muted ? 0 : this.volume;
         // Ramp rather than step, so volume changes do not click.
         this.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.015);
+    }
+
+    // Rebuilds the EQ/notch/bandpass chain from a plain spec. Cheap enough to
+    // do on every change: biquads are a handful of coefficients, and rebuilding
+    // avoids the bookkeeping of reconnecting a chain whose shape can change.
+    setFilters(spec) {
+        this.filterSpec = spec;
+        if (!this.ctx || !this.head) return;
+
+        try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
+        if (this.chain) {
+            for (const n of this.chain.nodes) {
+                try { n.disconnect(); } catch (e) { /* ignore */ }
+            }
+            this.chain = null;
+        }
+
+        const chain = spec ? buildChain(this.ctx, spec) : null;
+        if (chain) {
+            this.head.connect(chain.input);
+            chain.output.connect(this.gain);
+            this.chain = chain;
+        } else {
+            this.head.connect(this.gain);
+        }
     }
 
     setChannelMode(mode) {
@@ -238,7 +274,7 @@ export class AudioPlayer {
 
         const src = ctx.createBufferSource();
         src.buffer = buffer;
-        src.connect(this.gain);
+        src.connect(this.head);
 
         if (this.nextPlayTime < ctx.currentTime + MIN_LEAD_SEC) {
             // Fell behind: re-prime the full cushion instead of chasing the

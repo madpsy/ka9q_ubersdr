@@ -16,6 +16,7 @@ import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
 import { connectionCheck, newSessionId } from './session.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
+import { FILTER_DEFAULTS } from './audio-filters.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -126,6 +127,13 @@ export function RadioProvider({ children }) {
         params: saved.dspParams || {},
     });
     const [followTuning, setFollowTuning] = useState(saved.followTuning !== false);
+    // Client-side EQ / notch / bandpass. Merged per section so a spec saved
+    // before a field existed still loads.
+    const [filters, setFilterState] = useState(() => ({
+        eq: { ...FILTER_DEFAULTS.eq, ...(saved.filters && saved.filters.eq) },
+        notch: { ...FILTER_DEFAULTS.notch, ...(saved.filters && saved.filters.notch) },
+        bandpass: { ...FILTER_DEFAULTS.bandpass, ...(saved.filters && saved.filters.bandpass) },
+    }));
 
     // Mutable, high-rate values. Never a dependency of a render.
     const meters = useRef({
@@ -213,6 +221,7 @@ export function RadioProvider({ children }) {
         player.setMuted(audio.muted);
         player.setBufferSec(audio.bufferSec);
         player.setChannelMode(audio.channel);
+        player.setFilters(filters);
     }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
@@ -408,12 +417,13 @@ export function RadioProvider({ children }) {
             muted: audio.muted,
             bufferSec: audio.bufferSec,
             channel: audio.channel,
+            filters,
             squelchValue,
             dspFilter: dsp.filter,
             dspParams: dsp.params,
             followTuning,
         });
-    }, [tuning, audio, squelchValue, dsp, followTuning]);
+    }, [tuning, audio, squelchValue, dsp, followTuning, filters]);
 
     // ---- actions --------------------------------------------------------
 
@@ -536,6 +546,19 @@ export function RadioProvider({ children }) {
             setBufferSec(sec) {
                 player.setBufferSec(sec);
                 setAudio((a) => ({ ...a, bufferSec: sec }));
+            },
+
+            // A patch per section: { eq: {...} } leaves notch and bandpass alone.
+            setFilters(patch) {
+                setFilterState((f) => {
+                    const next = {
+                        eq: { ...f.eq, ...(patch.eq || {}) },
+                        notch: { ...f.notch, ...(patch.notch || {}) },
+                        bandpass: { ...f.bandpass, ...(patch.bandpass || {}) },
+                    };
+                    player.setFilters(next);
+                    return next;
+                });
             },
 
             setChannel(mode) {
@@ -693,11 +716,11 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log, session,
-        audio, squelch, agc, dsp, followTuning,
+        audio, squelch, agc, dsp, followTuning, filters,
         catalog: { ...catalog, local: localMarks },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, catalog, localMarks, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, catalog, localMarks, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

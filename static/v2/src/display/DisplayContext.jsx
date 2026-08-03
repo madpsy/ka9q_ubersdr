@@ -30,7 +30,12 @@ export const DEFAULTS = {
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
     floatOpacity: 1,        // resting opacity of floating panel windows
-    snapHz: 1,              // click-to-tune rounding
+    // The Receiver panel's step size, shared so click-to-tune on the spectrum
+    // lands on the same grid as the +/- buttons. 500 Hz suits SSB, which is
+    // what most of this band is.
+    tuneStep: 500,
+    // What the wheel does over the spectrum: 'zoom' or 'tune' by tuneStep.
+    wheelAction: 'zoom',
     chatUsersWidth: 170,    // px given to the chat user list, drag to change
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open

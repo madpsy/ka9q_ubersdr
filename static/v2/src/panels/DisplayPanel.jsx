@@ -4,7 +4,6 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 
-const SNAP_STEPS = [1, 10, 100, 500, 1000, 5000];
 
 export default function DisplayPanel() {
     const d = useDisplay();
@@ -40,6 +39,18 @@ export default function DisplayPanel() {
                     <Slider value={Math.round(d.split * 100)} min={10} max={85} onChange={(v) => d.set({ split: v / 100 })} />
                 </Field>
             )}
+
+            <Field label="Scroll wheel" hint={d.wheelAction === 'tune' ? `steps ${d.tuneStep || 500} Hz` : undefined}>
+                <Segmented
+                    size="sm"
+                    value={d.wheelAction || 'zoom'}
+                    onChange={(v) => d.set({ wheelAction: v })}
+                    options={[
+                        { value: 'zoom', label: 'Zoom', title: 'Wheel zooms the spectrum' },
+                        { value: 'tune', label: 'Tune', title: 'Wheel steps the frequency' },
+                    ]}
+                />
+            </Field>
 
             <div className="divider" />
 
@@ -178,16 +189,6 @@ export default function DisplayPanel() {
                 </>
             )}
 
-            <div className="divider" />
-
-            <Field label="Click-to-tune snap" hint={d.snapHz > 1 ? `${d.snapHz} Hz` : 'off'}>
-                <Slider
-                    value={Math.max(0, SNAP_STEPS.indexOf(d.snapHz))}
-                    min={0}
-                    max={SNAP_STEPS.length - 1}
-                    onChange={(i) => d.set({ snapHz: SNAP_STEPS[i] })}
-                />
-            </Field>
 
             <div className="row-end">
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>

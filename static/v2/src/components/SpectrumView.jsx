@@ -40,6 +40,20 @@ function SquelchTag() {
     );
 }
 
+// Which noise-reduction filter is running, if any. `dsp.enabled` comes from the
+// server's dsp_status echo, so this reflects what the server is actually doing
+// rather than what was requested.
+function NoiseReductionTag() {
+    const { dsp } = useRadio();
+    if (!dsp.enabled || !dsp.filter) return null;
+    const schema = (dsp.schemas || []).find((f) => f.name === dsp.filter);
+    return (
+        <span className="tag tag--accent" title={schema ? schema.description : 'Noise reduction'}>
+            NR {dsp.filter.toUpperCase()}
+        </span>
+    );
+}
+
 export default function SpectrumView() {
     const radio = useRadio();
     const display = useDisplay();
@@ -329,6 +343,7 @@ export default function SpectrumView() {
                     <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>
                     {hoverInfo && <span className="tag tag--ghost">{formatFreqShort(hoverInfo.freq, span)}</span>}
                     <SquelchTag />
+                    <NoiseReductionTag />
                 </div>
                 <div className="spectrum__tools">
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out" onClick={() => actions.zoomOut()} />

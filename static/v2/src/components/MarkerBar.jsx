@@ -14,6 +14,8 @@ import { formatFreqShort } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
+import { subscribeSpots } from '../lib/spotStore.js';
+import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
 const ROW_H = 15;         // one bookmark row
@@ -40,6 +42,15 @@ const LOCAL_INK = '#ffffff';
 const VOICE_PILL = 'rgba(155, 89, 182, 0.95)';
 const VOICE_INK = '#ffffff';
 
+// Spot colours are v1's, so a green pill means the same thing in both
+// frontends: green for DX cluster spots (dx-cluster drawDXSpotsOnSpectrum),
+// cyan for the CW skimmer's (cw-spots drawCWSpotsOnSpectrum). Both take white
+// text, as they do there.
+const SPOT_STYLE = {
+    dx: { pill: 'rgba(40, 167, 69, 0.95)', stem: 'rgba(40, 167, 69, 0.55)', ink: '#ffffff' },
+    cw: { pill: 'rgba(23, 162, 184, 0.95)', stem: 'rgba(23, 162, 184, 0.55)', ink: '#ffffff' },
+};
+
 export default function MarkerBar({ width }) {
     const { view, actions, catalog, tuning, serverInfo } = useRadio();
     const display = useDisplay();
@@ -55,6 +66,13 @@ export default function MarkerBar({ width }) {
     // Off unless the receiver runs the detector at all — the toggle would
     // otherwise promise markers that can never appear.
     const showVoice = display.markerVoice !== false && !!(serverInfo && serverInfo.noise_floor);
+    // Spot markers, each gated on its own feed existing. The streams themselves
+    // are held open for the session by <SpotStreams> in App.jsx — both are
+    // low-rate — so a toggle here decides only what is drawn, and turning one on
+    // shows the spots already collected rather than an empty bar. Digital spots
+    // have no marker layer: a decoder band puts every station on one frequency.
+    const showDx = display.markerDxSpots !== false && !!(serverInfo && serverInfo.dx_cluster);
+    const showCw = display.markerCwSpots !== false && !!(serverInfo && serverInfo.cw_skimmer);
     const lookups = !!(serverInfo && serverInfo.lookup_service);
 
     // One shared poll with the voice activity panel; subscribing is what starts
@@ -64,6 +82,29 @@ export default function MarkerBar({ width }) {
         if (!showVoice) { setVoice([]); return undefined; }
         return subscribeVoiceActivity((state) => setVoice(state.activities || []));
     }, [showVoice]);
+
+    // Read from the same store the Spots panel reads — see lib/spotStore.js.
+    // Subscribing here only registers for updates; the stream is already up.
+    const [dxSpots, setDxSpots] = useState([]);
+    const [cwSpots, setCwSpots] = useState([]);
+    useEffect(() => {
+        if (!showDx) { setDxSpots([]); return undefined; }
+        return subscribeSpots('dx', setDxSpots);
+    }, [showDx]);
+    useEffect(() => {
+        if (!showCw) { setCwSpots([]); return undefined; }
+        return subscribeSpots('cw', setCwSpots);
+    }, [showCw]);
+
+    // Spots age out of the marker window on their own, so the layer is rebuilt
+    // on a slow clock as well as when spots arrive. Ten seconds is far finer
+    // than the 10–30 minute windows involved.
+    const [ageTick, setAgeTick] = useState(0);
+    useEffect(() => {
+        if (!showDx && !showCw) return undefined;
+        const id = setInterval(() => setAgeTick((n) => n + 1), 10000);
+        return () => clearInterval(id);
+    }, [showDx, showCw]);
 
     const colors = useMemo(
         () => bandColors(display.server.config.band_color_intensity),
@@ -108,7 +149,7 @@ export default function MarkerBar({ width }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, width, MARKER_BAR_H);
 
-        hitsRef.current = { bookmarks: [], bands: [], voice: [] };
+        hitsRef.current = { bookmarks: [], bands: [], voice: [], spots: [] };
         if (!span) return;
 
         const startFreq = centerFreq - span / 2;
@@ -229,7 +270,8 @@ export default function MarkerBar({ width }) {
             }
             items.sort((a, b) => a.x - b.x);
 
-            for (const p of assignRows(items, placedMarks)) {
+            const placedVoice = assignRows(items, placedMarks);
+            for (const p of placedVoice) {
                 const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
                 const { x, width: w } = p;
 
@@ -251,6 +293,60 @@ export default function MarkerBar({ width }) {
 
                 hitsRef.current.voice.push({ x, y, w, h: PILL_H, activity: p.activity, label: p.label });
             }
+            // The spot layer below must avoid these too, not just the bookmarks.
+            placedMarks = placedMarks.concat(placedVoice);
+        }
+
+        // ---- DX and CW spots ---------------------------------------------
+        // Last, and seeded with everything already placed, so a spot never
+        // covers a bookmark or a detection. Both layers share the same two rows
+        // and are laid out together, so a DX and a CW spot on neighbouring
+        // frequencies stack rather than overlap.
+        if (showDx || showCw) {
+            c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+
+            const items = [];
+            const collect = (list, kind) => {
+                for (const s of markerSpots({ spots: list, kind, startFreq, endFreq, now: Date.now() })) {
+                    const label = s.callsign || '?';
+                    items.push({
+                        spot: s,
+                        kind,
+                        label,
+                        x: ((s.frequency - startFreq) / span) * width,
+                        width: Math.min(140, c.measureText(label).width + 10),
+                    });
+                }
+            };
+            if (showDx) collect(dxSpots, 'dx');
+            if (showCw) collect(cwSpots, 'cw');
+            items.sort((a, b) => a.x - b.x);
+
+            for (const p of assignRows(items, placedMarks)) {
+                const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
+                const { x, width: w } = p;
+                const style = SPOT_STYLE[p.kind];
+
+                c.strokeStyle = style.stem;
+                c.lineWidth = 1;
+                c.beginPath();
+                c.moveTo(Math.round(x) + 0.5, y + PILL_H);
+                c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+                c.stroke();
+
+                c.fillStyle = style.pill;
+                roundRect(c, x - w / 2, y, w, PILL_H, 3);
+                c.fill();
+                c.strokeStyle = 'rgba(255,255,255,0.55)';
+                c.stroke();
+
+                c.fillStyle = style.ink;
+                clipText(c, p.label, x, y + PILL_H / 2, w - 6);
+
+                hitsRef.current.spots.push({ x, y, w, h: PILL_H, spot: p.spot });
+            }
         }
 
         // Baseline the stems land on.
@@ -258,7 +354,8 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
-    }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency, showVoice, voice]);
+    }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
+        showVoice, voice, showDx, showCw, dxSpots, cwSpots, ageTick]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -274,6 +371,10 @@ export default function MarkerBar({ width }) {
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
         if (v) return { kind: 'voice', ...v };
+        const s = hitsRef.current.spots.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (s) return { kind: 'spot', ...s };
         if (y <= BAND_H) {
             // Narrow allocations are drawn last (on top), so search backwards.
             for (let i = hitsRef.current.bands.length - 1; i >= 0; i--) {
@@ -294,7 +395,9 @@ export default function MarkerBar({ width }) {
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
                 : hit.kind === 'voice'
                     ? voiceTip(hit.activity)
-                    : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
+                    : hit.kind === 'spot'
+                        ? spotTip(hit.spot)
+                        : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
         });
     }, [locate]);
 
@@ -309,6 +412,14 @@ export default function MarkerBar({ width }) {
             // do: the in-app panel takes it when open, otherwise the v1 popup
             // if that is. Neither is ever opened by this click.
             const call = hit.activity.dx_callsign;
+            if (lookups && call && !requestLookup(call)) lookupCallsign(call);
+        } else if (hit.kind === 'spot') {
+            // One tune with the mode the feed implies, as the Spots panel's
+            // rows do — see modeForSpot for where those rules come from.
+            const freq = Math.round(hit.spot.frequency);
+            actions.tuneTo({ frequency: freq, mode: modeForSpot(hit.spot) });
+            actions.ensureVisible(freq);
+            const call = hit.spot.callsign;
             if (lookups && call && !requestLookup(call)) lookupCallsign(call);
         } else if (hit.kind === 'bookmark') {
             if (hit.item.mode) actions.setMode(hit.item.mode);
@@ -325,7 +436,7 @@ export default function MarkerBar({ width }) {
         }
     }, [locate, actions, lookups]);
 
-    if (!showBands && !showServer && !showLocal && !showVoice) return null;
+    if (!showBands && !showServer && !showLocal && !showVoice && !showDx && !showCw) return null;
 
     return (
         <div className="markerbar" style={{ height: MARKER_BAR_H }}>
@@ -357,6 +468,23 @@ function voiceTip(a) {
     ];
     if (a.signal_above_noise != null) parts.push(`${a.signal_above_noise.toFixed(1)} dB`);
     if (a.confidence != null) parts.push(`${Math.round(a.confidence * 100)}%`);
+    return parts.join(' · ');
+}
+
+// Who, where, how long ago — and who heard them. Age leads the second line
+// because a spot's usefulness falls off with it: a five-second-old cluster spot
+// means someone is there now, a twenty-minute-old one means they were.
+function spotTip(s) {
+    const parts = [
+        `${formatFreqShort(s.frequency)} ${modeForSpot(s).toUpperCase()}`,
+        s.country ? `${s.callsign} — ${s.country}` : s.callsign,
+        ageLabel(s.at),
+    ];
+    if (s.snr != null) parts.push(`${s.snr > 0 ? '+' : ''}${s.snr} dB`);
+    if (s.wpm != null) parts.push(`${s.wpm} WPM`);
+    if (s.spotter) parts.push(`de ${s.spotter}`);
+    const note = s.comment || s.message;
+    if (note) parts.push(note);
     return parts.join(' · ');
 }
 

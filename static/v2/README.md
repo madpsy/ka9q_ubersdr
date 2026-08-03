@@ -176,10 +176,54 @@ appear under everything else for anyone who had used the app before.
   replays the first server-reported values rather than 1.1 / 20 / −15. There is
   no enable switch: the server accepts `agcEnable` but never reports it back, so
   a toggle would show a state nothing else agrees with.
-* **Chat rides on `/ws/dxcluster`, not its own endpoint.** That socket
-  multiplexes DX / digital / CW spot streams and chat, each opted into
-  separately, and nothing chat-related is accepted until `subscribe_chat` has
-  been sent — the server answers "you must subscribe to chat first" otherwise.
+* **`/ws/dxcluster` is one shared, reference-counted socket.** Despite the name
+  it is a multiplexer: DX spots, digital-mode spots, CW skimmer spots and chat,
+  each opted into separately, and the v1 extensions run their audio-decoder
+  control and results over it too. So `radio/dxcluster-connection.js` is a
+  singleton with a ref count per stream: consumers call `acquire(stream)` and
+  get a release function, the socket opens on the first acquire and closes on
+  the last release. Ref counting is not tidiness — a plain unsubscribe would let
+  the first panel to close cut off every other consumer of that stream, and a
+  socket per panel would mean three connections each carrying the whole
+  channel's chat traffic. Demand is the *only* thing that opens it; there is
+  deliberately no separate connect for a caller to get out of step with.
+* **Spots are one panel with a tab per feed the instance actually has.** v1
+  ships DX, digital and CW spots as three extensions the operator enables by
+  hand, only one of which can be open at a time. Here `/api/description` decides:
+  `dx_cluster`, `digital_decodes` and `cw_skimmer` each add a tab, and the panel
+  is absent entirely when none apply. `dx_cluster` was added to that endpoint for
+  this — `dxcluster.enabled` gates only the *upstream* cluster connection, while
+  `POST /api/dxcluster/inject` feeds the identical pipeline and is what the
+  `dxcluster` addon uses, so the flag is true for either. Only the visible tab is
+  subscribed: every subscribe replays that stream's server-side buffer, so
+  switching tabs restores the history rather than losing it, and nobody carries a
+  busy digital feed for a tab they are not reading. Columns, filters and their
+  defaults are v1's, and so are the tuning rules in `lib/spots.js` — CW and voice
+  cross sidebands at 10 MHz, digital is always USB, and a DX spot (which carries
+  no mode) takes FT8/FT4 or CW from the spotter's comment before falling back to
+  the band. Frequencies are Hz in every feed; the server converts the cluster's
+  kHz on the way in. Spots are keyed by feed, callsign, frequency and timestamp
+  so a replayed buffer does not duplicate rows already on screen.
+* **DX and CW spots also appear as markers; digital spots do not.** Green for DX
+  and cyan for CW, v1's colours, with a switch each in the Display panel beside
+  the other marker toggles — and each switch present only where that feed is.
+  Digital spots are left out on purpose: a decoder band puts every station on one
+  frequency, so a marker per spot would be a stack of pills on a single pixel
+  rather than somewhere to tune. The DX and CW streams are held open for the
+  whole session by `SpotStreams` in `App.jsx` rather than by whichever panel
+  happens to be showing — both are low-rate, and subscribing once means a marker
+  toggle decides only what is *drawn*, so turning one on shows the spots already
+  collected instead of an empty bar until the next spot arrives. Digital is the
+  exception and is subscribed only while its tab is on screen. Markers are laid
+  out last, seeded with where the bookmarks and voice detections landed, so a
+  spot never covers one; they use a fixed age window (v1's default filter values,
+  30 min DX / 10 min CW) rather than following the panel's live filter, since the
+  markers are on when the panel may well be closed. One marker per 100 Hz bucket,
+  newest wins — the skimmer re-spots the same station every few minutes and those
+  would otherwise pile up on one pixel.
+* **Chat is one stream on that socket.** Nothing chat-related is accepted until
+  `subscribe_chat` has been sent — the server answers "you must subscribe to
+  chat first" otherwise.
   That subscription is also what replays the recent-message buffer, and the
   server's `subscription_status` reply is what everything else waits on:
   sending immediately after `subscribe_chat` races the server registering it.

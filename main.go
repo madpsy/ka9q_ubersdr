@@ -4565,6 +4565,22 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// are reflected immediately without a server restart.
 	enabledAddons := adminHandler.GetEnabledPublicAddonNames()
 
+	// Whether DX spots can reach a client at all, for frontends that show a DX
+	// spot view only when there is something to show. Two ways in, and
+	// dxcluster.enabled covers only the first: it gates the upstream cluster
+	// connection, while POST /api/dxcluster/inject feeds the identical pipeline
+	// and is what the "dxcluster" addon uses. An instance running that addon
+	// with no upstream cluster still has a live spot feed.
+	dxClusterAvailable := config.DXCluster.Enabled
+	if !dxClusterAvailable && config.DXCluster.IsInjectEnabled() {
+		for _, name := range enabledAddons {
+			if name == "dxcluster" {
+				dxClusterAvailable = true
+				break
+			}
+		}
+	}
+
 	// Collect unique enabled digital mode types (e.g. ["FT8","WSPR"]) when decoder is enabled.
 	// Iterates enabled bands and deduplicates by DecoderMode integer value — no string parsing.
 	digitalModes := []string{}
@@ -4612,6 +4628,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"spectrogram":          config.Spectrogram.IsEnabled(),
 		"digital_decodes":      config.Decoder.Enabled,
 		"digital_modes":        digitalModes,
+		"dx_cluster":           dxClusterAvailable,
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"cw_skimmer_rbn_spots": cwskimmerConfig.Enabled && cwskimmerConfig.RBNSpots,
 		"cw_skimmer_callsign":  cwskimmerConfig.Callsign,

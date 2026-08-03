@@ -2,12 +2,11 @@
 // receiver. Only the chat panel subscribes to this.
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from '../react.js';
-import { ChatConnection } from '../radio/chat-connection.js';
+import { dxcluster, validateUsername } from '../radio/dxcluster-connection.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { throttle } from '../lib/throttle.js';
 import { isMention } from '../lib/mentions.js';
-import { validateUsername } from '../radio/chat-connection.js';
 
 const ChatContext = createContext(null);
 
@@ -48,9 +47,9 @@ export function ChatProvider({ children }) {
     // not looking at.
     const wanted = enabled && !(sections.chat && sections.chat.hidden);
 
-    const conn = useRef(null);
-    if (conn.current === null) conn.current = new ChatConnection();
-    const chat = conn.current;
+    // The shared `/ws/dxcluster` socket — chat is one stream on it, alongside
+    // the spot feeds. See radio/dxcluster-connection.js.
+    const chat = dxcluster;
 
     const [state, setState] = useState('idle');
     const [messages, setMessages] = useState([]);
@@ -126,9 +125,10 @@ export function ChatProvider({ children }) {
         }));
 
         // Auto-join with a remembered name, as v1 does. Driven by the
-        // subscription confirmation because nothing is accepted before it.
-        offs.push(chat.on('subscribed', (ok) => {
-            if (!ok) return;
+        // subscription confirmation because nothing is accepted before it —
+        // and the socket confirms several streams, so only chat's counts.
+        offs.push(chat.on('subscribed', ({ stream, enabled }) => {
+            if (stream !== 'chat' || !enabled) return;
             autoJoins.current = 0;
             const saved = nameRef.current;
             if (!saved || joinedRef.current || validateUsername(saved)) return;
@@ -138,11 +138,13 @@ export function ChatProvider({ children }) {
         return () => offs.forEach((off) => off());
     }, [chat]);
 
-    // The socket follows the receiver: no point holding a third connection open
-    // for someone who has not started listening.
+    // The socket follows the receiver: no point holding a second connection open
+    // for someone who has not started listening. Acquiring the stream is what
+    // opens it — the connection is shared, so it stays up for as long as chat
+    // *or* any other consumer (the spots panel) still wants it.
     useEffect(() => {
-        if (wanted && running) chat.connect();
-        else chat.disconnect();
+        if (!wanted || !running) return undefined;
+        return chat.acquire('chat');
     }, [wanted, running, chat]);
 
     // Publish what we are tuned to, so it shows beside our name in the user

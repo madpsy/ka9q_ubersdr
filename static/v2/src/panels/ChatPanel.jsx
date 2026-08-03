@@ -3,7 +3,7 @@ import { useChat } from '../chat/ChatContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
-import { USERNAME_MAX, validateUsername } from '../radio/chat-connection.js';
+import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { applyCompletion, matchUsernames, mentionQuery, splitMessage } from '../lib/mentions.js';
 import { clamp } from '../lib/format.js';

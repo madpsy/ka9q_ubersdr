@@ -40,6 +40,7 @@ import RecorderPanel from './RecorderPanel.jsx';
 import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
+import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -125,6 +126,18 @@ export const PANELS = [
         // The lookup provider is configured per instance; without it every
         // request would 503, so the panel is absent rather than broken.
         requires: (serverInfo) => !!(serverInfo && serverInfo.lookup_service),
+    },
+    // DX, digital and CW spots. One tab per feed the instance actually has, and
+    // the panel is absent entirely when it has none — no empty slot explaining
+    // that this receiver publishes no spots.
+    {
+        id: 'spots',
+        title: 'Spots',
+        icon: <Icon.Target />,
+        dock: 'bottom',
+        fill: true,
+        Component: SpotsPanel,
+        requires: (serverInfo) => spotTabs(serverInfo).length > 0,
     },
     { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
     // Off by default: a diagnostic, not something to occupy a slot in the dock

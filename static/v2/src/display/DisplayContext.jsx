@@ -27,6 +27,12 @@ export const DEFAULTS = {
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser
     markerVoice: true,           // detected voice activity (only where the receiver has it)
+    // Spot markers, per feed and only where the instance has it. Digital spots
+    // are deliberately absent: a decoder band puts every station on one
+    // frequency, so they would stack into a single illegible pile rather than
+    // showing you where to tune.
+    markerDxSpots: true,
+    markerCwSpots: true,
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)

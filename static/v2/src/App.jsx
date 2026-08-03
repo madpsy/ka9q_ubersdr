@@ -10,6 +10,7 @@ import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
+import { subscribeSpots } from './lib/spotStore.js';
 
 function DesktopShell() {
     return (
@@ -46,6 +47,37 @@ function PageTitle() {
     return null;
 }
 
+// Holds the DX and CW spot streams open for the whole session, rather than
+// leaving them to whichever panel or marker layer happens to be showing.
+//
+// Both are low-rate — a busy cluster is a few spots a minute — so the traffic
+// costs nothing, and subscribing once here means the marker toggles and the
+// Spots tabs only decide what is *drawn*. Without it, turning a marker on would
+// start from an empty list and stay blank until the next spot arrived, which on
+// a quiet band is minutes of looking at nothing.
+//
+// Digital spots are deliberately not held: that feed can run to thousands an
+// hour, so it is subscribed only while its tab is on screen.
+function SpotStreams() {
+    const { serverInfo, running } = useRadio();
+    const dx = !!(serverInfo && serverInfo.dx_cluster);
+    const cw = !!(serverInfo && serverInfo.cw_skimmer);
+
+    // The socket needs a registered session, which only exists once the
+    // receiver has been started.
+    useEffect(() => {
+        if (!running || !dx) return undefined;
+        return subscribeSpots('dx', () => {});
+    }, [running, dx]);
+
+    useEffect(() => {
+        if (!running || !cw) return undefined;
+        return subscribeSpots('cw', () => {});
+    }, [running, cw]);
+
+    return null;
+}
+
 export default function App() {
     const mobile = useMediaQuery(MOBILE_QUERY);
     return (
@@ -55,6 +87,7 @@ export default function App() {
                     <ChatProvider>
                         <PageTitle />
                         <LegacyBridge />
+                        <SpotStreams />
                         {mobile ? <MobileShell /> : <DesktopShell />}
                     </ChatProvider>
                 </RadioProvider>

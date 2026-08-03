@@ -2238,3 +2238,70 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-faint);
 }
 .rc-log__clear:hover { color: var(--accent); }
+
+/* =========================================================================
+   Spots
+   ========================================================================= */
+
+/* A `fill` panel: an unbounded stream, so the list scrolls itself rather than
+   growing the dock. Same exception as chat — see the README. */
+.spots { min-height: 0; height: 100%; }
+
+.spots__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spots__count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+/* Filters wrap onto as many rows as the panel's width needs: floated wide it is
+   one row, in the bottom dock at half width it is two or three. */
+.spots__filters { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; }
+.spots__filter { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.spots__filter .select, .spots__filter .input { min-width: 90px; }
+.spots__filter-label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.spots__filter--check { flex-direction: row; align-items: center; gap: 5px; padding-bottom: 5px; }
+.spots__filter--check span { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+
+.spots__list { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* One row is a grid rather than a table: the columns differ per tab, and a
+   grid lets a narrow panel drop the trailing ones off the end instead of
+   forcing a horizontal scroll on the whole dock. */
+.spot-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(58px, auto) minmax(0, 1.1fr) minmax(0, 1fr) auto auto minmax(0, 1.6fr);
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+}
+.spot-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.spot-row__time, .spot-row__age {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.spot-row__freq {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(11.5px * var(--ui-scale));
+}
+.spot-row__call { font-weight: 600; font-size: calc(11.5px * var(--ui-scale)); }
+.spot-row__mode, .spot-row__snr, .spot-row__dist {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.spot-row__country, .spot-row__note {
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.spot-row.is-active .spot-row__freq { color: var(--accent); }

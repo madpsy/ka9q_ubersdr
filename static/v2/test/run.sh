@@ -46,6 +46,8 @@ esbuild ../src/compat/legacyBridge.js --bundle --format=cjs --platform=node \
     --outfile=.build/compat.cjs --log-level=warning
 esbuild ../src/lib/callsign.js --bundle --format=cjs --platform=node \
     --outfile=.build/callsign.cjs --log-level=warning
+esbuild ../src/lib/spots.js --bundle --format=cjs --platform=node \
+    --outfile=.build/spots.cjs --log-level=warning
 esbuild ../src/controls/functions.js --bundle --format=cjs --platform=node \
     --outfile=.build/functions.cjs --log-level=warning
 esbuild ../src/controls/mappings.js --bundle --format=cjs --platform=node \
@@ -65,3 +67,4 @@ node callsign.test.js
 node compat.test.js
 node recorder.test.js
 node controls.test.js
+node spots.test.js

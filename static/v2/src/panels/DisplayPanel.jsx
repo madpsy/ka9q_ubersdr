@@ -73,6 +73,20 @@ export default function DisplayPanel() {
                     <Switch checked={d.markerVoice !== false} onChange={(v) => d.set({ markerVoice: v })} />
                 </Field>
             )}
+            {/* Spot markers, each present only where that feed is. Digital
+                spots have no switch on purpose — a decoder band puts every
+                station on one frequency, so a marker per spot would be a stack
+                of pills on a single pixel rather than somewhere to tune. */}
+            {serverInfo?.dx_cluster && (
+                <Field label="DX spots" inline>
+                    <Switch checked={d.markerDxSpots !== false} onChange={(v) => d.set({ markerDxSpots: v })} />
+                </Field>
+            )}
+            {serverInfo?.cw_skimmer && (
+                <Field label="CW spots" inline>
+                    <Switch checked={d.markerCwSpots !== false} onChange={(v) => d.set({ markerCwSpots: v })} />
+                </Field>
+            )}
 
             <div className="divider" />
 

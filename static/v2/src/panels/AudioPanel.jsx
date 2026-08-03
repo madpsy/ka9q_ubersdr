@@ -1,6 +1,6 @@
 import React from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Icon, Slider } from '../components/ui.jsx';
+import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
 
@@ -55,6 +55,33 @@ function SquelchControl() {
     );
 }
 
+const CHANNELS = [
+    { value: 'both', label: 'Both' },
+    { value: 'left', label: 'Left' },
+    { value: 'right', label: 'Right' },
+];
+
+// Which side of a stereo stream to listen to. Only the IQ modes and stereo
+// Opus carry two channels, so on a mono stream this says so rather than
+// offering a choice that would do nothing. Sampling the meters is how the
+// channel count is known — it comes from the frames actually being played.
+function ChannelPicker() {
+    const { audio, actions } = useRadio();
+    const m = useMeters(3);
+    const stereo = m.channels > 1;
+
+    return (
+        <Field label="Channel" hint={stereo ? undefined : 'mono stream'} inline>
+            <Segmented
+                options={CHANNELS}
+                value={audio.channel || 'both'}
+                onChange={actions.setChannel}
+                size="sm"
+            />
+        </Field>
+    );
+}
+
 export default function AudioPanel() {
     const { audio, actions } = useRadio();
 
@@ -76,6 +103,8 @@ export default function AudioPanel() {
                 />
                 <span className="volume-row__value">{Math.round(audio.volume * 100)}</span>
             </div>
+
+            <ChannelPicker />
 
             <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>
                 <Slider

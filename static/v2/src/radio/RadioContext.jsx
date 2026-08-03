@@ -96,6 +96,8 @@ export function RadioProvider({ children }) {
         volume: saved.volume != null ? saved.volume : 0.7,
         muted: !!saved.muted,
         bufferSec: saved.bufferSec != null ? saved.bufferSec : 0.2,
+        // Which side of a stereo stream to listen to: 'both' | 'left' | 'right'.
+        channel: saved.channel || 'both',
     });
     // One number: the slider position. Its floor doubles as "off", which is how
     // v1 behaves and avoids an enabled flag that can disagree with the value.
@@ -131,6 +133,7 @@ export function RadioProvider({ children }) {
         noiseDensity: null,
         snr: null,
         level: 0,
+        channels: 0,            // channels in the stream now playing
         queuedSec: 0,
         underruns: 0,
         frameAgeMs: 0,
@@ -201,6 +204,16 @@ export function RadioProvider({ children }) {
     }).current;
 
     // ---- wiring ---------------------------------------------------------
+
+    // Restored settings live in React state, but the player is a plain object
+    // that starts at its own defaults — so without this a saved volume, mute or
+    // channel choice only took effect the first time you touched the control.
+    useEffect(() => {
+        player.setVolume(audio.volume);
+        player.setMuted(audio.muted);
+        player.setBufferSec(audio.bufferSec);
+        player.setChannelMode(audio.channel);
+    }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         const offs = [];
@@ -333,6 +346,7 @@ export function RadioProvider({ children }) {
             m.level = player.level;
             m.queuedSec = player.queuedSec;
             m.underruns = player.underruns;
+            m.channels = player.channels;
             m.frameAgeMs = m.lastFrameAt ? performance.now() - m.lastFrameAt : 0;
         }, 100);
         return () => clearInterval(t);
@@ -393,6 +407,7 @@ export function RadioProvider({ children }) {
             volume: audio.volume,
             muted: audio.muted,
             bufferSec: audio.bufferSec,
+            channel: audio.channel,
             squelchValue,
             dspFilter: dsp.filter,
             dspParams: dsp.params,
@@ -521,6 +536,11 @@ export function RadioProvider({ children }) {
             setBufferSec(sec) {
                 player.setBufferSec(sec);
                 setAudio((a) => ({ ...a, bufferSec: sec }));
+            },
+
+            setChannel(mode) {
+                player.setChannelMode(mode);
+                setAudio((a) => ({ ...a, channel: mode }));
             },
 
             // `value` is the raw slider position; its floor means "off".

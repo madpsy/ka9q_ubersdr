@@ -26,6 +26,10 @@ export class AudioPlayer {
         this.gain = null;
         this.analyser = null;
         this.analyserFft = ANALYSER_IDLE_FFT;
+        // 'both' | 'left' | 'right'. Only meaningful on a stereo stream (IQ
+        // modes, and stereo Opus); a mono stream ignores it.
+        this.channelMode = 'both';
+        this.channels = 0;          // channels in the stream last scheduled
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -181,20 +185,32 @@ export class AudioPlayer {
         this.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.015);
     }
 
+    setChannelMode(mode) {
+        this.channelMode = mode === 'left' || mode === 'right' ? mode : 'both';
+    }
+
     _schedule(planes, frames, sampleRate) {
         const ctx = this.ctx;
         if (!ctx || ctx.state === 'closed') return;
 
+        // Picking one side copies it to both outputs rather than muting the
+        // other, so a single-sided listen is not also half the loudness and
+        // does not pan to one ear.
+        const pick = planes.length > 1 && this.channelMode !== 'both'
+            ? planes[this.channelMode === 'right' ? 1 : 0]
+            : null;
+
         const channels = planes.length;
+        this.channels = channels;
         const buffer = ctx.createBuffer(channels, frames, sampleRate);
         for (let c = 0; c < channels; c++) {
-            buffer.copyToChannel(planes[c].subarray(0, frames), c);
+            buffer.copyToChannel((pick || planes[c]).subarray(0, frames), c);
         }
 
-        // Level meter, from the first channel — cheaper than an AnalyserNode
-        // read on every animation frame and stays in sync with what is queued.
+        // Level meter, from what is actually being played — cheaper than an
+        // AnalyserNode read on every animation frame and in sync with the queue.
         let sum = 0;
-        const p = planes[0];
+        const p = pick || planes[0];
         for (let i = 0; i < frames; i++) sum += p[i] * p[i];
         const rms = Math.sqrt(sum / frames);
         this.level = this.level * 0.7 + rms * 0.3;

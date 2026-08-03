@@ -184,7 +184,7 @@ export default function LocalBookmarksPanel() {
                         });
                     }}
                 >
-                    Add current
+                    Current
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => fileRef.current && fileRef.current.click()}>
                     Import
@@ -235,7 +235,7 @@ export default function LocalBookmarksPanel() {
             )}
 
             {items.length === 0 && !editing && (
-                <Empty>Nothing saved yet — "Add current" stores where you are now.</Empty>
+                <Empty>Nothing saved yet — "Current" stores where you are now.</Empty>
             )}
 
             <div className="list">

@@ -82,6 +82,25 @@ cascade so a second float does not land on the first, and clicking one raises it
 Floating is desktop-only — `MobileShell` ignores it and shows every panel in its
 sheet list, since a draggable window on a phone is not useful.
 
+### Resizing
+
+Three levels, deliberately not four:
+
+* **Dock size** — drag a dock's edge (all three docks).
+* **Panel share within the bottom dock** — drag the splitter between two
+  neighbours. The bottom dock is the only one that lays panels out side by side,
+  so it is the only one where they compete for space. A drag converts a pixel
+  delta into a share of *that pair's* combined width, so the rest of the row
+  never shifts; double-clicking a splitter evens the pair out.
+* **Floating windows** — free position and size.
+
+Side docks are deliberately *not* per-panel resizable. Panels there size to
+their content and the dock scrolls; giving a panel a fixed height would
+reintroduce the inner scrollers that "one scroller per dock" exists to avoid.
+A general resizable grid was skipped for the same reason plus overlap: floating
+already covers freeform arrangement, at a fraction of a tiling manager's
+complexity.
+
 ### One scroller per dock
 
 Panels never scroll internally — no `overflow` and no `max-height` on a panel
@@ -142,6 +161,18 @@ panel never disturbs an existing user's arrangement.
   replays the first server-reported values rather than 1.1 / 20 / −15. There is
   no enable switch: the server accepts `agcEnable` but never reports it back, so
   a toggle would show a state nothing else agrees with.
+* **Chat rides on `/ws/dxcluster`, not its own endpoint.** That socket
+  multiplexes DX / digital / CW spot streams and chat, each opted into
+  separately, and nothing chat-related is accepted until `subscribe_chat` has
+  been sent — the server answers "you must subscribe to chat first" otherwise.
+  That subscription is also what replays the recent-message buffer, and the
+  server's `subscription_status` reply is what everything else waits on:
+  sending immediately after `subscribe_chat` races the server registering it.
+  A username (1–15 chars, alphanumeric plus `- _ /`, not at the ends) is needed
+  to send but not to read, and is re-sent on reconnect along with the published
+  frequency/mode — otherwise a dropped socket silently demotes the user to an
+  anonymous listener. The socket is opened only while the receiver is running
+  *and* the chat panel is visible.
 * **A new session UUID per session start.** Minted when the user starts
   listening, not persisted, and shared by both sockets — the server pairs audio
   and spectrum by UUID. It then stays fixed for that session, including across

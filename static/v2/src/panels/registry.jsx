@@ -12,6 +12,7 @@
 //   defaultOpen  false to ship collapsed
 //   defaultHidden true to ship hidden (still listed in the layout manager)
 //   fill         true if the body should stretch to the dock height
+//   Badge        optional component rendered in the header, for unread counts
 //   Component    the panel body
 
 import React from '../react.js';
@@ -27,6 +28,7 @@ import StatusPanel from './StatusPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
 import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
+import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -40,6 +42,7 @@ export const PANELS = [
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
     { id: 'quickbands', title: 'Quick bands', icon: <Icon.Grid />, dock: 'bottom', Component: QuickBandsPanel },
+    { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
     { id: 'log', title: 'Events', icon: <Icon.Sliders />, dock: 'bottom', defaultOpen: false, fill: true, Component: LogPanel },
 ];
 

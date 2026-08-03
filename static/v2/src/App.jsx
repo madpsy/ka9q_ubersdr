@@ -8,6 +8,7 @@ import TopBar from './components/TopBar.jsx';
 import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
+import { ChatProvider } from './chat/ChatContext.jsx';
 
 function DesktopShell() {
     return (
@@ -34,7 +35,9 @@ export default function App() {
         <DisplayProvider>
             <LayoutProvider>
                 <RadioProvider>
-                    {mobile ? <MobileShell /> : <DesktopShell />}
+                    <ChatProvider>
+                        {mobile ? <MobileShell /> : <DesktopShell />}
+                    </ChatProvider>
                 </RadioProvider>
             </LayoutProvider>
         </DisplayProvider>

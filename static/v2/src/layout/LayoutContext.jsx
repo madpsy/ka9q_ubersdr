@@ -36,7 +36,7 @@ function defaultLayout() {
         docks[p.dock].panels.push(p.id);
         sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden };
     }
-    return { version: VERSION, docks, sections, floats: {}, floatOrder: [] };
+    return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {} };
 }
 
 // Merges a stored layout with the current panel registry.
@@ -61,6 +61,12 @@ function reconcile(stored) {
     }
     base.floats = floats;
     base.floatOrder = floatOrder;
+    // Share of the bottom dock's width, per panel. Missing entries default to 1
+    // at render time, so a newly registered panel needs no migration.
+    base.weights = {};
+    for (const [id, w] of Object.entries(stored.weights || {})) {
+        if (PANEL_BY_ID[id] && Number.isFinite(Number(w)) && Number(w) > 0) base.weights[id] = Number(w);
+    }
 
     const seen = new Set(floatOrder);
     for (const dock of DOCKS) {
@@ -215,6 +221,19 @@ export function LayoutProvider({ children }) {
         return DOCKS.find((d) => layout.docks[d].panels.includes(id)) || 'left';
     }, [layout]);
 
+    // Adjusts two neighbours together so the row keeps its total width.
+    const setWeights = useCallback((pairs) => {
+        setLayout((l) => {
+            const weights = { ...l.weights };
+            let changed = false;
+            for (const [id, w] of pairs) {
+                const next = Math.max(0.2, Math.round(w * 1000) / 1000);
+                if (weights[id] !== next) { weights[id] = next; changed = true; }
+            }
+            return changed ? { ...l, weights } : l;
+        });
+    }, []);
+
     const resetLayout = useCallback(() => setLayout(defaultLayout()), []);
 
     const value = useMemo(() => ({
@@ -223,6 +242,8 @@ export function LayoutProvider({ children }) {
         sections: layout.sections,
         floats: layout.floats,
         floatOrder: layout.floatOrder,
+        weights: layout.weights,
+        setWeights,
         setFloat,
         raiseFloat,
         placementOf,
@@ -234,7 +255,7 @@ export function LayoutProvider({ children }) {
         movePanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel,
-        setFloat, raiseFloat, placementOf, resetLayout]);
+        setFloat, raiseFloat, placementOf, setWeights, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

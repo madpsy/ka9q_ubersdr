@@ -12,7 +12,7 @@ import { useDragEndReset } from '../lib/useDragEnd.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
-export default function Section({ panel, dock, index }) {
+export default function Section({ panel, dock, index, weight }) {
     const { sections, toggleSection, setSectionHidden, movePanel } = useLayout();
     const [dropEdge, setDropEdge] = useState(null);   // 'before' | 'after' | null
 
@@ -58,9 +58,16 @@ export default function Section({ panel, dock, index }) {
         dropEdge ? `is-drop-${dropEdge}` : '',
     ].filter(Boolean).join(' ');
 
+    // In the bottom dock the panels share one row, so their width is a weight
+    // the user can drag rather than a fixed basis.
+    const style = weight != null && state.open
+        ? { flexGrow: weight, flexShrink: 1, flexBasis: 0 }
+        : undefined;
+
     return (
         <section
             className={cls}
+            style={style}
             onDragOver={onDragOver}
             onDragLeave={() => setDropEdge(null)}
             onDrop={onDrop}
@@ -80,6 +87,7 @@ export default function Section({ panel, dock, index }) {
                     <span className="section__chevron"><Icon.Chevron size={14} /></span>
                     <span className="section__icon">{panel.icon}</span>
                     <span className="section__title">{panel.title}</span>
+                    {panel.Badge && <panel.Badge />}
                 </button>
 
                 <Menu trigger={<span className="section__grip" title="Move panel"><Icon.Drag size={14} /></span>}>

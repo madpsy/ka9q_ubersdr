@@ -10,6 +10,7 @@ const {
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
 const mk = require('./.build/markers.cjs');
+const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
 
@@ -317,6 +318,80 @@ t('setAudioGate with no thresholds is not sent', () => {
     // The server rejects a gate message carrying neither field.
     assert.strictEqual(a.setAudioGate({}), false);
     assert.strictEqual(sent.length, 0);
+});
+
+// --- chat mentions ---------------------------------------------------------
+//
+// Matches v1's chat-ui.js so both frontends agree on what counts as being
+// spoken to and how tab completion behaves.
+
+const CHAT_USERS = ['alice', 'alan', 'Bob', 'bobby', 'M0TEST-1', 'me'];
+
+t('a mention query only fires at the caret', () => {
+    assert.deepStrictEqual(mn.mentionQuery('hi @al'), { partial: 'al', at: 3 });
+    assert.deepStrictEqual(mn.mentionQuery('@'), { partial: '', at: 0 });
+    // Not a query: the @ is not adjacent to the caret.
+    assert.strictEqual(mn.mentionQuery('hi @alice there'), null);
+    assert.strictEqual(mn.mentionQuery('no at sign'), null);
+    // A second @ later in the line is the one being completed.
+    assert.deepStrictEqual(mn.mentionQuery('@bob hi @al'), { partial: 'al', at: 8 });
+});
+
+t('candidates are prefix matches, sorted, excluding yourself', () => {
+    assert.deepStrictEqual(mn.matchUsernames(CHAT_USERS, 'al', 'me'), ['alan', 'alice']);
+    assert.deepStrictEqual(mn.matchUsernames(CHAT_USERS, 'BO', 'me'), ['Bob', 'bobby']);
+    assert.ok(!mn.matchUsernames(CHAT_USERS, 'm', 'me').includes('me'), 'offered your own name');
+    // An empty partial offers everyone else.
+    assert.strictEqual(mn.matchUsernames(CHAT_USERS, '', 'me').length, CHAT_USERS.length - 1);
+});
+
+t('completion replaces the partial and leaves a trailing space', () => {
+    const r = mn.applyCompletion('hi @al', 6, 'alice');
+    assert.strictEqual(r.text, 'hi @alice ');
+    assert.strictEqual(r.cursor, r.text.length);
+    // Text after the caret is preserved.
+    const mid = mn.applyCompletion('hi @al world', 6, 'alice');
+    assert.strictEqual(mid.text, 'hi @alice  world');
+    assert.strictEqual(mid.cursor, 10);
+});
+
+t('completion is a no-op when there is nothing to complete', () => {
+    const r = mn.applyCompletion('plain text', 5, 'alice');
+    assert.strictEqual(r.text, 'plain text');
+});
+
+t('mention detection matches v1: case-insensitive substring', () => {
+    assert.strictEqual(mn.isMention('hey @Bob look', 'bob'), true);
+    assert.strictEqual(mn.isMention('hey @BOB', 'Bob'), true);
+    assert.strictEqual(mn.isMention('hey bob', 'bob'), false, 'no @ is not a mention');
+    assert.strictEqual(mn.isMention('hey @bob', ''), false, 'anonymous users are never mentioned');
+    assert.strictEqual(mn.isMention('hey @bob', null), false);
+    // v1 uses a plain substring, so a longer name also alerts the shorter one.
+    // Kept identical on purpose — diverging would make the two frontends
+    // disagree about whether you were spoken to.
+    assert.strictEqual(mn.isMention('hey @bobby', 'bob'), true);
+});
+
+t('highlighting splits out every mention', () => {
+    const parts = mn.splitMentions('hi @alice and @Bob!', CHAT_USERS);
+    assert.deepStrictEqual(parts.map((p) => p.text), ['hi ', '@alice', ' and ', '@Bob', '!']);
+    assert.deepStrictEqual(parts.filter((p) => p.mention).map((p) => p.mention), ['alice', 'Bob']);
+});
+
+t('the longest matching name wins, so @bobby is not split as @bob', () => {
+    const parts = mn.splitMentions('yo @bobby', CHAT_USERS);
+    assert.deepStrictEqual(parts.filter((p) => p.mention).map((p) => p.text), ['@bobby']);
+});
+
+t('a name with regex characters cannot break highlighting', () => {
+    const parts = mn.splitMentions('hi @a.b+c', ['a.b+c']);
+    assert.deepStrictEqual(parts.filter((p) => p.mention).map((p) => p.text), ['@a.b+c']);
+    // And a literal that only looks like the pattern is not matched.
+    assert.strictEqual(mn.splitMentions('hi @axbyc', ['a.b+c']).some((p) => p.mention), false);
+});
+
+t('no users means nothing to highlight', () => {
+    assert.deepStrictEqual(mn.splitMentions('hi @alice', []), [{ text: 'hi @alice' }]);
 });
 
 // --- marker bar ------------------------------------------------------------

@@ -85,7 +85,6 @@ export default function VoiceActivityPanel() {
     const [scope, setScope] = useState('band');
     const [groups, setGroups] = useState(null);   // null until the first reply
     const [error, setError] = useState('');
-    const [at, setAt] = useState(0);
 
     const band = bandForFrequency(tuning.frequency);
 
@@ -105,7 +104,6 @@ export default function VoiceActivityPanel() {
                     if (cancelled || !d) return;
                     setGroups(groupByBand(d.bands));
                     setError('');
-                    setAt(Date.now());
                 })
                 .catch((err) => { if (!cancelled) setError(err.message || String(err)); });
         };
@@ -176,12 +174,6 @@ export default function VoiceActivityPanel() {
                         ))}
                     </React.Fragment>
                 ))}
-            </div>
-
-            <div className="note note--tight">
-                Signals the receiver has detected as speech, with the callsign
-                from a nearby DX cluster spot where there is one. Click to tune.
-                {at ? ` Updated ${new Date(at).toLocaleTimeString()}.` : ''}
             </div>
         </div>
     );

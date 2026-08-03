@@ -54,6 +54,13 @@ export function parseFreqInput(text) {
     return n;
 }
 
+// ISO 3166-1 alpha-2 -> flag emoji, via the regional indicator letters.
+// 'GB' -> the two code points U+1F1EC U+1F1E7, which fonts render as a flag.
+export function countryFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+}
+
 export function clamp(v, lo, hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }

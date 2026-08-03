@@ -37,6 +37,7 @@ import AddonsPanel, { addonList } from './AddonsPanel.jsx';
 import RotatorPanel from './RotatorPanel.jsx';
 import AntennaPanel from './AntennaPanel.jsx';
 import RecorderPanel from './RecorderPanel.jsx';
+import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 
 export const PANELS = [
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
@@ -87,8 +88,32 @@ export const PANELS = [
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
     { id: 'quickbands', title: 'Quick bands', icon: <Icon.Grid />, dock: 'bottom', Component: QuickBandsPanel },
+    {
+        id: 'voice',
+        title: 'Voice activity',
+        icon: <Icon.Mic />,
+        dock: 'bottom',
+        fill: true,
+        Component: VoiceActivityPanel,
+        // The detector runs off the noise floor monitor, so an instance
+        // without it has nothing to show and the panel is absent rather than
+        // permanently empty — the same gate v1's service applies before it
+        // starts polling.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
+    },
     { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
-    { id: 'log', title: 'Events', icon: <Icon.Sliders />, dock: 'bottom', defaultOpen: false, fill: true, Component: LogPanel },
+    // Off by default: a diagnostic, not something to occupy a slot in the dock
+    // until someone goes looking for it in the layout manager.
+    {
+        id: 'log',
+        title: 'Events',
+        icon: <Icon.Sliders />,
+        dock: 'bottom',
+        defaultOpen: false,
+        defaultHidden: true,
+        fill: true,
+        Component: LogPanel,
+    },
 ];
 
 export const PANEL_BY_ID = Object.fromEntries(PANELS.map((p) => [p.id, p]));

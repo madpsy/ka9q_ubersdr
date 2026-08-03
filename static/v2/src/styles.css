@@ -1324,6 +1324,87 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* =========================================================================
+   Voice activity panel
+   ========================================================================= */
+
+.va { height: 100%; min-height: 0; }
+.va__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.va__count {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The list is the scroller, not the dock: this panel is `fill`, so in the
+   bottom dock it gets the dock's height and the rows scroll inside it — the
+   same arrangement chat uses. Without min-height:0 the flex item refuses to
+   shrink and the dock grows instead.
+
+   The cap is for everywhere else: a panel dragged to a side dock or floated has
+   no height to fill, and a busy evening across ten bands would otherwise run it
+   to arbitrary length. */
+.va__list { flex: 1; min-height: 0; max-height: 320px; overflow-y: auto; }
+.dock--bottom .section--fill .va__list { max-height: none; }
+
+.va__band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px 2px;
+    font-size: calc(10.5px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    position: sticky;
+    top: 0;
+    background: var(--surface-2);
+}
+.va__band-count { font-family: var(--mono); font-weight: 400; color: var(--text-faint); }
+
+.va-row__top { display: flex; align-items: baseline; gap: 7px; }
+.va-row__freq {
+    font-family: var(--mono);
+    font-size: calc(12.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+}
+.va-row__mode {
+    font-size: calc(9.5px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
+/* The callsign takes the slack so the confidence stays pinned right, where it
+   can be read down the column rather than hunted for on each row. */
+.va-row__call {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--accent);
+}
+.va-row__conf {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+/* v1's confidence colours (voice-activity.html). */
+.va-row__conf--high { color: var(--good); }
+.va-row__conf--medium { color: var(--warn); }
+.va-row__conf--low { color: var(--bad); }
+
+.va-row__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* =========================================================================
    Recorder panel
    ========================================================================= */
 

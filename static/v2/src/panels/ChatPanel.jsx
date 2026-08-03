@@ -4,7 +4,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/chat-connection.js';
-import { formatFreqShort } from '../lib/format.js';
+import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { applyCompletion, matchUsernames, mentionQuery, splitMessage } from '../lib/mentions.js';
 import { clamp } from '../lib/format.js';
 
@@ -32,12 +32,6 @@ const EMOJI = [
 // frontend reads the same in the room.
 function freqMessage(frequency, mode) {
     return `${(frequency / 1000).toFixed(3)} KHz (${String(mode).toUpperCase()})`;
-}
-
-function flag(code) {
-    if (!code || code.length !== 2) return '';
-    // Regional indicator letters: 'GB' -> 🇬🇧
-    return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 
 export default function ChatPanel() {
@@ -389,7 +383,7 @@ export default function ChatPanel() {
                         }}
                     >
                         <span className="chat__user-name">
-                            {flag(u.country_code)} {u.username}
+                            {countryFlag(u.country_code)} {u.username}
                             {u.tx && <span className="chip">TX</span>}
                         </span>
                         <span className="chat__user-meta">

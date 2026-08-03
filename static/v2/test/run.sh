@@ -38,8 +38,13 @@ esbuild ../src/lib/recorder.js --bundle --format=cjs --platform=node \
     --outfile=.build/recorder.cjs --log-level=warning
 esbuild ../src/lib/zoom.js --bundle --format=cjs --platform=node \
     --outfile=.build/zoom.cjs --log-level=warning
+esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bands.cjs --log-level=warning
+esbuild ../src/lib/voiceActivity.js --bundle --format=cjs --platform=node \
+    --outfile=.build/voice.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
 node zoom.test.js
+node voice.test.js
 node recorder.test.js

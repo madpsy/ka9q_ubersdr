@@ -16,22 +16,8 @@
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { BAND_NAMES, HAM_BANDS } from '../lib/bands.js';
 
-// [label, min, max] — v1's ranges verbatim, in v1's order.
-const HAM_BANDS = [
-    ['160m', 1810000, 2000000],
-    ['80m', 3500000, 4000000],
-    ['60m', 5250000, 5450000],
-    ['40m', 7000000, 7300000],
-    ['30m', 10100000, 10150000],
-    ['20m', 14000000, 14350000],
-    ['17m', 18068000, 18168000],
-    ['15m', 21000000, 21450000],
-    ['12m', 24890000, 24990000],
-    ['10m', 28000000, 29700000],
-];
-
-const BAND_NAMES = HAM_BANDS.map(([name]) => name);
 const POLL_MS = 60 * 1000;
 const WINDOW_MIN = 10;      // minutes of history averaged
 const MIN_SPAN = 10000;     // v1 never zooms tighter than 10 kHz

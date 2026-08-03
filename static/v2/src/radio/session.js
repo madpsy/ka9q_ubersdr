@@ -97,10 +97,14 @@ export async function checkConnection() {
             allowed: !!data.allowed,
             reason: data.reason || '',
             clientIp: data.client_ip || '',
+            // Seconds this session may run, 0 meaning unlimited. Only the
+            // /connection reply carries it — it depends on whether this client
+            // is bypassed, so it is not in /api/description.
+            maxSessionTime: typeof data.max_session_time === 'number' ? data.max_session_time : null,
             status: res.status,
         };
     } catch (err) {
-        return { allowed: true, reason: 'connection check failed', clientIp: '', status: 0 };
+        return { allowed: true, reason: 'connection check failed', clientIp: '', maxSessionTime: null, status: 0 };
     }
 }
 

@@ -14,7 +14,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
-import { newSessionId } from './session.js';
+import { connectionCheck, newSessionId } from './session.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -87,6 +87,9 @@ export function RadioProvider({ children }) {
     const [view, setView] = useState({ centerFreq: 0, binCount: 0, binBandwidth: 0, span: 0, defaultBinBandwidth: 0, defaultBinCount: 0 });
     const [running, setRunning] = useState(false);
     const [serverInfo, setServerInfo] = useState(null);
+    // How long this session may run, from /connection: { maxSec, startedAt }.
+    // maxSec 0 means unlimited; null until the first session starts.
+    const [session, setSession] = useState({ maxSec: null, startedAt: 0 });
     const [log, setLog] = useState([]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
@@ -424,6 +427,14 @@ export function RadioProvider({ children }) {
                 // A new session gets a new identity. Minted before either socket
                 // opens so audio and spectrum are paired under the same UUID.
                 newSessionId();
+                // Registers the UUID and tells us how long this session may run.
+                // The sockets share the cached result, so this costs no extra
+                // request; v1 reads max_session_time from the same reply.
+                connectionCheck().then((r) => {
+                    if (r && r.maxSessionTime != null) {
+                        setSession({ maxSec: r.maxSessionTime, startedAt: Date.now() });
+                    }
+                }, () => { /* the countdown just stays as it was */ });
                 const t = tuningRef.current;
                 await audioConn.connect(t);
                 await spectrumConn.connect({});
@@ -618,11 +629,11 @@ export function RadioProvider({ children }) {
     }), [squelchValue]);
 
     const value = useMemo(() => ({
-        tuning, audioState, spectrumState, view, running, serverInfo, log,
+        tuning, audioState, spectrumState, view, running, serverInfo, log, session,
         audio, squelch, agc, dsp, followTuning, catalog,
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, audio, squelch, agc, dsp, followTuning, catalog, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, catalog, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

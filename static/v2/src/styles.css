@@ -195,6 +195,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
     z-index: 80;
     animation: menu-in 120ms var(--ease);
 }
+/* Invisible bridge across the gap below the button: without it, crossing that
+   6px counts as leaving the menu and hover-close fires mid-travel. */
+.links__panel::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -8px;
+    height: 8px;
+}
 
 .links__row {
     position: relative;
@@ -348,6 +358,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__volume { display: flex; align-items: center; gap: 8px; width: 150px; }
 .topbar__docks { display: flex; gap: 2px; padding-left: 4px; border-left: 1px solid var(--border); }
 .topbar__status { display: grid; place-items: center; }
+.topbar__session {
+    font-family: var(--mono);
+    font-size: calc(11.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.topbar__session.is-low { color: var(--bad); }
 
 .topbar--compact { gap: 9px; padding: 7px 10px; }
 .topbar--compact .topbar__hz { font-size: calc(14px * var(--ui-scale)); }

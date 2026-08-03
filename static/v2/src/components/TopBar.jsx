@@ -95,6 +95,42 @@ function SpaceWeather({ clickable }) {
     );
 }
 
+// Session countdown, the line v1 keeps bottom-left. `max_session_time` comes
+// from the /connection reply: 0 means unlimited, anything else is the number of
+// seconds this session may run, counted from when it started. Under five
+// minutes it turns red, as v1 does.
+function SessionClock() {
+    const { session } = useRadio();
+    const [, tick] = useState(0);
+
+    useEffect(() => {
+        if (session.maxSec == null || session.maxSec === 0) return undefined;
+        const id = setInterval(() => tick((n) => n + 1), 1000);
+        return () => clearInterval(id);
+    }, [session.maxSec, session.startedAt]);
+
+    if (session.maxSec == null) return null;
+
+    if (session.maxSec === 0) {
+        return <span className="topbar__session" title="Session time">Unlimited</span>;
+    }
+
+    const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
+    const left = Math.max(0, session.maxSec - elapsed);
+    const hh = String(Math.floor(left / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
+    const ss = String(left % 60).padStart(2, '0');
+
+    return (
+        <span
+            className={`topbar__session${left < 300 ? ' is-low' : ''}`}
+            title="Time left in this session"
+        >
+            {hh}:{mm}:{ss}
+        </span>
+    );
+}
+
 export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo, audio } = useRadio();
     const display = useDisplay();
@@ -202,6 +238,8 @@ export default function TopBar({ compact }) {
             <div className="topbar__status" title={`audio: ${audioState} · spectrum: ${spectrumState}`}>
                 <span className={`dot dot--${linkTone}`} />
             </div>
+
+            <SessionClock />
 
             <Button
                 variant="ghost"

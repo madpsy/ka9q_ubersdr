@@ -148,7 +148,15 @@ export default function LinksMenu({ serverInfo, compact }) {
     const close = useCallback(() => setOpen(false), []);
 
     return (
-        <div className="links" ref={ref}>
+        <div
+            className="links"
+            ref={ref}
+            // Hover opens and leaving closes, as v1's does. The panel is a child
+            // of this wrapper, so moving down into it never counts as leaving —
+            // and its ::before bridges the gap under the button.
+            onMouseEnter={() => setOpen(true)}
+            onMouseLeave={() => setOpen(false)}
+        >
             <button
                 type="button"
                 className={`topbar__logo links__btn${open ? ' is-open' : ''}`}

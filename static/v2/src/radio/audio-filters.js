@@ -24,6 +24,12 @@ export const EQ_PRESETS = {
 export const EQ_GAIN_MIN = -12;
 export const EQ_GAIN_MAX = 12;
 export const MAX_NOTCHES = 5;
+
+// Bandpass width limits. v1 stops at 1 kHz, which is fine for CW and digimodes
+// but too narrow to use the filter for shaping a whole SSB passband — 3 kHz
+// covers that without letting the width exceed what any mode carries.
+export const BP_WIDTH_MIN = 20;
+export const BP_WIDTH_MAX = 3000;
 export const NOTCH_STAGES = 6;      // cascaded biquads per notch, as in v1
 
 export const FILTER_DEFAULTS = {

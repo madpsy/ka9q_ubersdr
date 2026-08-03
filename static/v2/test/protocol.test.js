@@ -12,6 +12,7 @@ const dspLib = require('./.build/dsp.cjs');
 const mk = require('./.build/markers.cjs');
 const ab = require('./.build/audioband.cjs');
 const af = require('./.build/audiofilters.cjs');
+const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
@@ -1072,6 +1073,65 @@ t('the bandpass range follows the mode passband', () => {
     assert.strictEqual(af.bandpassRange(ab.audioWindow(-5000, 5000)).min, 50);
     // CW sits around the 500 Hz tone.
     assert.deepStrictEqual(af.bandpassRange(ab.audioWindow(-200, 200)), { min: 300, max: 700 });
+});
+
+
+// ── EQ band meters ──────────────────────────────────────────────────────────
+// Each band's meter is weighted by that band's own filter response, so a wide
+// band reads what it actually controls rather than a fixed slice of bins.
+
+t('band weighting peaks at the centre and falls to -3 dB at f0/Q', () => {
+    const sr = 16000;
+    const bins = 512;
+    const [w] = eql.bandWeights([1000], 1.0, sr, bins);
+    const at = (hz) => w[Math.floor((hz / (sr / 2)) * bins)];
+
+    assert.ok(at(1000) > 0.99, `centre ${at(1000)}`);
+    // Q of 1 means a width of f0, so the -3 dB points sit either side of it.
+    // 0.707 is -3 dB in amplitude.
+    const lower = at(618);   // (sqrt(5)-1)/2 * f0, the analytic -3 dB point
+    const upper = at(1618);
+    assert.ok(Math.abs(lower - 0.707) < 0.02, `lower ${lower}`);
+    assert.ok(Math.abs(upper - 0.707) < 0.02, `upper ${upper}`);
+    // Far out, this band has almost no say. (7 kHz, not Nyquist itself —
+    // there is no bin at exactly sr/2.)
+    assert.ok(at(7000) < 0.15, `far ${at(7000)}`);
+});
+
+t('a higher Q makes a narrower band', () => {
+    const sr = 16000;
+    const bins = 512;
+    const [wide] = eql.bandWeights([1000], 0.5, sr, bins);
+    const [narrow] = eql.bandWeights([1000], 4.0, sr, bins);
+    const at = (w, hz) => w[Math.floor((hz / (sr / 2)) * bins)];
+    assert.ok(at(narrow, 1500) < at(wide, 1500));
+    assert.ok(at(narrow, 1000) > 0.99 && at(wide, 1000) > 0.99);
+});
+
+t('a tone lands in the band that controls it', () => {
+    const sr = 16000;
+    const bins = 512;
+    const freqs = [60, 1000, 8000];
+    const weights = eql.bandWeights(freqs, 1.0, sr, bins);
+
+    // A single tone at 1 kHz, everything else at the floor.
+    const data = new Float32Array(bins).fill(-120);
+    data[Math.floor((1000 / (sr / 2)) * bins)] = -20;
+
+    const levels = eql.bandLevels(data, weights);
+    assert.ok(levels[1] > levels[0], '1 kHz band should beat 60 Hz');
+    assert.ok(levels[1] > levels[2], '1 kHz band should beat 8 kHz');
+});
+
+t('meter fractions follow the loudest band and clamp', () => {
+    const state = { ceil: -40 };
+    // Feed a steady picture until the ceiling settles.
+    let frac;
+    for (let i = 0; i < 200; i++) frac = eql.meterFractions([-30, -60, -Infinity], state);
+    assert.ok(Math.abs(state.ceil - -30) < 0.5, `ceil ${state.ceil}`);
+    assert.ok(frac[0] > 0.98, `loudest ${frac[0]}`);
+    assert.ok(frac[1] > 0.2 && frac[1] < 0.5, `mid ${frac[1]}`);
+    assert.strictEqual(frac[2], 0, 'a silent band reads empty');
 });
 
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

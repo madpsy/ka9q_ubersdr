@@ -69,14 +69,18 @@ export function Field({ label, hint, children, inline }) {
 // `marker` overlays a live value on the track (e.g. current SNR against a
 // squelch threshold). It is in the same units as the slider and is positioned
 // inside the thumb's travel, so it lines up with where the thumb would sit.
-export function Slider({ value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle }) {
+export function Slider({
+    value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle, track,
+}) {
     // Percentage drives the filled-track gradient without a second element.
     const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+    // `track` replaces the accent fill with a gradient of its own, for scales
+    // where the position means something (the EQ's cut/boost).
     const input = (
         <input
             type="range"
-            className="slider"
-            style={{ '--fill': `${pct}%` }}
+            className={`slider${track ? ' slider--track' : ''}`}
+            style={{ '--fill': `${pct}%`, ...(track ? { '--track': track } : {}) }}
             value={value}
             min={min}
             max={max}

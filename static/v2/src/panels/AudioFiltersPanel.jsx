@@ -12,9 +12,11 @@ import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui
 import { audioBins, audioWindow } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audioWaterfall.js';
+import { bandLevels, bandWeights, meterFractions } from '../lib/eqLevels.js';
+import { getPalette } from '../lib/palettes.js';
 import {
-    EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN, FILTER_DEFAULTS, MAX_NOTCHES,
-    bandpassRange, detectPreset, presetGains,
+    BP_WIDTH_MAX, BP_WIDTH_MIN, EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN,
+    FILTER_DEFAULTS, MAX_NOTCHES, bandpassRange, detectPreset, presetGains,
 } from '../radio/audio-filters.js';
 
 const PRESETS = [
@@ -23,6 +25,37 @@ const PRESETS = [
     { value: 'cw', label: 'CW' },
     { value: 'music', label: 'Music' },
 ];
+
+// v1 paints its EQ faders with a cut-to-boost ramp — red at full cut through
+// amber at flat to green at full boost (style.css .eq-slider). Horizontal here,
+// so the same ramp runs left to right, and each band is additionally tinted
+// towards its own frequency: low bands warm, high bands cool, which makes a
+// column of twelve identical rows readable at a glance.
+const EQ_CUT = '#e74c3c';
+const EQ_FLAT = '#f39c12';
+const EQ_BOOST = '#2ecc71';
+
+// Meter colour comes from the waterfall palette, so a loud band reads the same
+// way here as it does on the preview above.
+function meterColor(palette, t) {
+    const lut = getPalette(palette);
+    const i = Math.max(0, Math.min(255, Math.round(t * 255))) * 3;
+    return `rgb(${lut[i]}, ${lut[i + 1]}, ${lut[i + 2]})`;
+}
+
+function bandTrack(i, total) {
+    // 0 at 60 Hz to 1 at 8 kHz, used only to shift how saturated the ramp is,
+    // so the cut/boost meaning still reads the same on every row.
+    const t = total > 1 ? i / (total - 1) : 0;
+    const alpha = (0.55 + 0.45 * (1 - t)).toFixed(2);
+    const mix = (hex) => `color-mix(in srgb, ${hex} ${Math.round(alpha * 100)}%, var(--surface-3))`;
+    return `linear-gradient(90deg, ${mix(EQ_CUT)} 0%, ${mix(EQ_FLAT)} 50%, ${mix(EQ_BOOST)} 100%)`;
+}
+
+// Meter refresh. Fast enough to feel live, slow enough that twelve bars are not
+// twelve React renders a frame.
+const METER_MS = 80;
+const EQ_Q = 1.0;               // the Q the EQ's peaking filters are built with
 
 const PREVIEW_H = 84;
 const PREVIEW_FFT = 4096;
@@ -120,7 +153,7 @@ function Preview({ notch, bandpass, onBandpass, range }) {
             // Either edge sets the width symmetrically about the centre, which
             // is what the filter actually is — there is one centre and one Q.
             const width = Math.round(Math.abs(hz - bandpass.center) * 2 / 10) * 10;
-            onBandpass({ width: Math.max(20, Math.min(1000, width)) });
+            onBandpass({ width: Math.max(BP_WIDTH_MIN, Math.min(BP_WIDTH_MAX, width)) });
         }
     };
 
@@ -166,6 +199,31 @@ function Preview({ notch, bandpass, onBandpass, range }) {
     );
 }
 
+// Live level per band, weighted by each band's own filter response — see
+// lib/eqLevels.js. Runs whenever the EQ tab is open, on the shared FFT, so it
+// costs nothing extra when the scope or the filter preview is already up.
+function useBandLevels(active) {
+    const { player } = useRadio();
+    const [levels, setLevels] = useState(null);
+    const state = useRef({ ceil: -40 });
+    const at = useRef(0);
+    const buf = useRef(null);
+
+    useEffect(() => {
+        if (!active) return undefined;
+        return subscribeAudioSpectrum(player, { fftSize: PREVIEW_FFT, bins: true }, (f) => {
+            const now = performance.now();
+            if (now - at.current < METER_MS) return;
+            at.current = now;
+            const weights = bandWeights(EQ_FREQUENCIES, EQ_Q, f.sampleRate, f.binCount);
+            buf.current = bandLevels(f.bins, weights, buf.current);
+            setLevels(meterFractions(buf.current, state.current));
+        });
+    }, [player, active]);
+
+    return levels;
+}
+
 const fmtGain = (g) => `${g > 0 ? '+' : ''}${g.toFixed(1)}`;
 const fmtBand = (f) => (f >= 1000 ? `${f / 1000}k` : String(f));
 
@@ -186,7 +244,9 @@ function Section({ title, enabled, onToggle, children, extra }) {
 
 export default function AudioFiltersPanel() {
     const { filters, actions, tuning } = useRadio();
+    const display = useDisplay();
     const [tab, setTab] = useState('eq');
+    const levels = useBandLevels(tab === 'eq');
 
     const eq = filters.eq;
     const notch = filters.notch;
@@ -264,13 +324,26 @@ export default function AudioFiltersPanel() {
                         {EQ_FREQUENCIES.map((freq, i) => (
                             <div className="eqband" key={freq}>
                                 <span className="eqband__hz">{fmtBand(freq)}</span>
-                                <Slider
-                                    value={eq.gains[i] || 0}
-                                    min={EQ_GAIN_MIN}
-                                    max={EQ_GAIN_MAX}
-                                    step={0.5}
-                                    onChange={(v) => setBand(i, v)}
-                                />
+                                <div className="eqband__slider">
+                                    <Slider
+                                        value={eq.gains[i] || 0}
+                                        min={EQ_GAIN_MIN}
+                                        max={EQ_GAIN_MAX}
+                                        step={0.5}
+                                        track={bandTrack(i, EQ_FREQUENCIES.length)}
+                                        onChange={(v) => setBand(i, v)}
+                                    />
+                                    {/* What this band is hearing right now. */}
+                                    <div className="eqband__meter">
+                                        <div
+                                            className="eqband__meter-fill"
+                                            style={{
+                                                width: `${((levels && levels[i]) || 0) * 100}%`,
+                                                background: meterColor(display.palette, (levels && levels[i]) || 0),
+                                            }}
+                                        />
+                                    </div>
+                                </div>
                                 <span className="eqband__db">{fmtGain(eq.gains[i] || 0)}</span>
                             </div>
                         ))}
@@ -368,7 +441,13 @@ export default function AudioFiltersPanel() {
                         />
                     </Field>
                     <Field label="Width" hint={`${bp.width} Hz`}>
-                        <Slider value={bp.width} min={20} max={1000} step={10} onChange={(v) => setBp({ width: v })} />
+                        <Slider
+                            value={bp.width}
+                            min={BP_WIDTH_MIN}
+                            max={BP_WIDTH_MAX}
+                            step={10}
+                            onChange={(v) => setBp({ width: v })}
+                        />
                     </Field>
                     <Field label="Stages" hint={`${bp.stages} (${bp.stages * 12} dB/oct)`}>
                         <Slider value={bp.stages} min={1} max={6} step={1} onChange={(v) => setBp({ stages: v })} />

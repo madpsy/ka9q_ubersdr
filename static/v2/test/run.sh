@@ -30,6 +30,8 @@ esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
     --outfile=.build/audioband.cjs --log-level=warning
 esbuild ../src/radio/audio-filters.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiofilters.cjs --log-level=warning
+esbuild ../src/lib/eqLevels.js --bundle --format=cjs --platform=node \
+    --outfile=.build/eqlevels.cjs --log-level=warning
 esbuild ../src/lib/mentions.js --bundle --format=cjs --platform=node \
     --outfile=.build/mentions.cjs --log-level=warning
 

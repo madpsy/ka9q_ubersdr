@@ -1185,15 +1185,20 @@ t('frame level is RMS in dBFS', () => {
     assert.ok(Math.abs(af.frameLevelDb(half) + 6) < 0.3, af.frameLevelDb(half));
 });
 
-t('auto makeup follows threshold and ratio, and stays bounded', () => {
-    // Harder compression gives back more, but never more than the slider could.
-    assert.ok(af.autoMakeup(-30, 4) > af.autoMakeup(-30, 2));
-    assert.ok(af.autoMakeup(-40, 4) > af.autoMakeup(-20, 4));
-    assert.strictEqual(af.autoMakeup(-30, 1), 0, 'a ratio of 1:1 compresses nothing');
-    for (const [th, r] of [[-60, 20], [0, 1], [-60, 1], [-5, 20]]) {
-        const m = af.autoMakeup(th, r);
-        assert.ok(m >= af.COMP_LIMITS.makeup.min && m <= af.COMP_LIMITS.makeup.max, `${th}/${r} -> ${m}`);
-    }
+t('auto makeup only gives back what the compressor took', () => {
+    // The bug this guards: estimating makeup from threshold and ratio assumes
+    // the audio peaks at 0 dBFS. On a signal peaking near -20 that handed back
+    // ~11 dB for ~5 dB of real reduction, and enabling the compressor
+    // distorted immediately. Driving it from the node's own reduction meter
+    // cannot over-boost.
+    assert.strictEqual(af.makeupFromReduction(0), 0, 'nothing compressed, nothing given back');
+    assert.ok(af.makeupFromReduction(-6) < 6, 'must stay under unity');
+    assert.ok(af.makeupFromReduction(-6) > af.makeupFromReduction(-3), 'more reduction, more makeup');
+    assert.strictEqual(af.makeupFromReduction(-6), 6 * af.MAKEUP_FACTOR);
+    // Bounded, and unbothered by a node that has not reported yet.
+    assert.strictEqual(af.makeupFromReduction(-100), af.MAKEUP_MAX_DB);
+    assert.strictEqual(af.makeupFromReduction(NaN), 0);
+    assert.strictEqual(af.makeupFromReduction(undefined), 0);
 });
 
 t('every filter section has defaults and ships disabled', () => {

@@ -5,7 +5,7 @@
 // arrival. When the schedule falls behind the cushion is re-primed, which is
 // audible as a single gap instead of continuous stuttering.
 
-import { buildChain, frameLevelDb, gateOpen } from './audio-filters.js';
+import { buildChain, frameLevelDb, gateOpen, makeupFromReduction } from './audio-filters.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
 // time, and a timer is the right tool: this must keep working with no panel
@@ -41,6 +41,8 @@ export class AudioPlayer {
         this.chain = null;          // active EQ/notch/bandpass nodes
         this.filterSpec = null;
         this.gateTimer = null;
+        this.makeupTimer = null;
+        this.makeupDb = 0;          // live compressor makeup, dB
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -227,6 +229,9 @@ export class AudioPlayer {
 
         clearInterval(this.gateTimer);
         this.gateTimer = null;
+        clearInterval(this.makeupTimer);
+        this.makeupTimer = null;
+        this.makeupDb = 0;
 
         try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
         if (this.chain) {
@@ -242,9 +247,26 @@ export class AudioPlayer {
             chain.output.connect(this.gain);
             this.chain = chain;
             if (chain.gate) this._runGate(chain.gate);
+            if (chain.compressor) this._runMakeup(chain.compressor);
         } else {
             this.head.connect(this.gain);
         }
+    }
+
+    // Auto makeup follows what the compressor is really doing, read from the
+    // node's own reduction meter. Smoothed hard: makeup that tracks every
+    // syllable is just a slower compressor fighting the fast one.
+    _runMakeup(comp) {
+        this.makeupTimer = setInterval(() => {
+            if (!this.ctx) return;
+            const db = makeupFromReduction(comp.node.reduction);
+            // Ease towards it rather than stepping, and keep the number for the
+            // panel to display.
+            this.makeupDb += (db - this.makeupDb) * 0.2;
+            comp.makeup.gain.setTargetAtTime(
+                Math.pow(10, this.makeupDb / 20), this.ctx.currentTime, 0.08,
+            );
+        }, 60);
     }
 
     // The gate is a gain node the player rides: Web Audio has no gate, and

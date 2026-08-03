@@ -6,7 +6,7 @@
 // this is the controls.
 
 import React, { useEffect, useRef, useState } from '../react.js';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { audioBins, audioWindow } from '../lib/audioBand.js';
@@ -15,7 +15,7 @@ import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audi
 import { bandLevels, bandWeights, meterFractions } from '../lib/eqLevels.js';
 import {
     BP_WIDTH_MAX, BP_WIDTH_MIN, COMP_LIMITS, EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN,
-    FILTER_DEFAULTS, MAX_NOTCHES, autoMakeup, bandpassRange, detectPreset, presetGains,
+    FILTER_DEFAULTS, MAX_NOTCHES, bandpassRange, detectPreset, presetGains,
 } from '../radio/audio-filters.js';
 
 const PRESETS = [
@@ -213,6 +213,14 @@ function useBandLevels(active) {
     }, [player, active]);
 
     return levels;
+}
+
+// The live makeup gain when it is automatic — it follows the audio, so it has
+// to be sampled rather than computed here.
+function CompMakeup({ comp }) {
+    const m = useMeters(6);
+    const db = comp.autoMakeup ? (m.makeupDb || 0) : comp.makeup;
+    return <span className="section-label__note">+{db.toFixed(1)} dB</span>;
 }
 
 const fmtGain = (g) => `${g > 0 ? '+' : ''}${g.toFixed(1)}`;
@@ -524,11 +532,7 @@ export default function AudioFiltersPanel() {
                     title="Compressor"
                     enabled={comp.enabled}
                     onToggle={(v) => setComp({ enabled: v })}
-                    extra={(
-                        <span className="section-label__note">
-                            +{(comp.autoMakeup ? autoMakeup(comp.threshold, comp.ratio) : comp.makeup).toFixed(1)} dB
-                        </span>
-                    )}
+                    extra={<CompMakeup comp={comp} />}
                 >
                     <Field label="Threshold" hint={`${comp.threshold} dB`}>
                         <Slider

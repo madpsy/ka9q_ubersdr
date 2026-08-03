@@ -86,15 +86,25 @@ export const FILTER_DEFAULTS = {
     },
 };
 
-// Roughly what the compressor took away, so switching it on does not also make
-// everything quieter. Deliberately conservative (60% of the theoretical
-// reduction) — over-compensating is how a compressor starts sounding pumped.
-export function autoMakeup(threshold, ratio) {
-    const reduction = -threshold * (1 - 1 / Math.max(1, ratio));
-    return Math.max(
-        COMP_LIMITS.makeup.min,
-        Math.min(COMP_LIMITS.makeup.max, Math.round(reduction * 0.6 * 2) / 2),
-    );
+// Auto makeup, from the reduction the compressor is *actually* applying.
+//
+// The obvious version — estimate it from threshold and ratio — assumes the
+// audio peaks at 0 dBFS. Real audio here peaks nearer -20, so the compressor
+// barely works while the estimate hands back double-digit gain, and enabling
+// the compressor distorted instantly. DynamicsCompressorNode reports its live
+// reduction, so use that: it cannot over-boost, because it only gives back what
+// was taken.
+//
+// A little under unity (90%) leaves headroom, and the cap is there for the
+// pathological case of a fully-limited signal.
+export const MAKEUP_FACTOR = 0.9;
+export const MAKEUP_MAX_DB = 12;
+
+export function makeupFromReduction(reductionDb) {
+    // `reduction` is negative dB (or 0 when nothing is being compressed).
+    if (!Number.isFinite(reductionDb)) return 0;
+    const give = Math.max(0, -reductionDb) * MAKEUP_FACTOR;
+    return Math.min(MAKEUP_MAX_DB, give);
 }
 
 // Whether the gate should be open, given the level now and whether it was open
@@ -219,6 +229,7 @@ export function buildChain(ctx, spec) {
         nodes.push(makeup);
     }
 
+    let compressor = null;
     if (spec.compressor && spec.compressor.enabled) {
         const c = spec.compressor;
         const comp = ctx.createDynamicsCompressor();
@@ -228,9 +239,11 @@ export function buildChain(ctx, spec) {
         comp.release.value = Math.max(1, c.release) / 1000;
         comp.knee.value = c.knee;
         const makeup = ctx.createGain();
-        const db = c.autoMakeup ? autoMakeup(c.threshold, c.ratio) : c.makeup;
-        makeup.gain.value = Math.pow(10, db / 20);
+        // Auto starts at unity and follows the measured reduction; manual is
+        // whatever the slider says.
+        makeup.gain.value = c.autoMakeup ? 1 : Math.pow(10, c.makeup / 20);
         nodes.push(comp, makeup);
+        if (c.autoMakeup) compressor = { node: comp, makeup, db: 0 };
     }
 
     // Stereo widener, last. Everything upstream is one signal; this is where it
@@ -274,5 +287,5 @@ export function buildChain(ctx, spec) {
         nodes.push(stereoTail.input, stereoTail.output, ...stereoTail.extra);
     }
 
-    return { input, output, nodes, gate };
+    return { input, output, nodes, gate, compressor };
 }

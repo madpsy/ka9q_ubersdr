@@ -145,6 +145,7 @@ export function RadioProvider({ children }) {
         snr: null,
         level: 0,
         channels: 0,            // channels in the stream now playing
+        makeupDb: 0,            // live compressor makeup gain
         queuedSec: 0,
         underruns: 0,
         frameAgeMs: 0,
@@ -359,6 +360,7 @@ export function RadioProvider({ children }) {
             m.queuedSec = player.queuedSec;
             m.underruns = player.underruns;
             m.channels = player.channels;
+            m.makeupDb = player.makeupDb;
             m.frameAgeMs = m.lastFrameAt ? performance.now() - m.lastFrameAt : 0;
         }, 100);
         return () => clearInterval(t);

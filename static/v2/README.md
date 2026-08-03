@@ -89,6 +89,14 @@ panel never disturbs an existing user's arrangement.
   click; browsers block it otherwise.
 * **Spectrum uses `binary8`.** ~75% less bandwidth than float32, and the 1 dB
   quantisation is finer than a waterfall can show.
+* **FFT bins must be unwrapped.** radiod emits raw FFT order,
+  `[DC..+Nyquist, -Nyquist..DC]`; the two halves are swapped in
+  `spectrum-connection.js` to get ascending frequency. Skipping this shifts the
+  whole display by half a span, so the spectrum silently disagrees with the
+  audio. Delta frames index the *raw* order, so the delta accumulators stay raw
+  and the swap happens on the way out. v1 does the same thing in
+  `spectrum-display.js`, in the shared `case 'spectrum'` both its JSON and
+  binary paths funnel into.
 * **The waterfall is a ring buffer.** Rows are written into an offscreen canvas
   at a decrementing index and the visible canvas is painted from two slices —
   O(row) per frame, and unlike blitting the canvas onto itself it never

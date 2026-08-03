@@ -11,6 +11,11 @@
 //
 // binary8 mode is requested because it cuts spectrum bandwidth by ~75% and the
 // 1 dB quantisation is well below what a waterfall can show.
+//
+// Bin ordering: radiod emits raw FFT order, [DC..+Nyquist, -Nyquist..DC], so
+// the two halves have to be swapped to get low-to-high frequency. Delta frames
+// index the *raw* order, so the accumulators are kept raw and the swap happens
+// on the way out, into a separate buffer.
 
 import { Emitter } from './emitter.js';
 import { checkConnection, getBypassPassword, getSessionId, wsBase } from './session.js';
@@ -35,9 +40,11 @@ export class SpectrumConnection extends Emitter {
         this.defaultBinCount = 0;
         this.defaultBinBandwidth = 0;
 
-        // Delta-decode accumulators.
+        // Delta-decode accumulators, in raw radiod bin order.
         this._float = null;   // Float32Array
         this._u8 = null;      // Uint8Array
+        // Reusable output buffer holding the frequency-ordered bins.
+        this._out = null;
     }
 
     get connected() {
@@ -247,7 +254,19 @@ export class SpectrumConnection extends Emitter {
             return;
         }
 
-        this.emit('frame', { bins, frequency, timestamp });
+        this.emit('frame', { bins: this._unwrap(bins), frequency, timestamp });
+    }
+
+    // Rotates raw FFT order into ascending frequency order: the second half
+    // (negative frequencies) moves to the front. A plain rotate-left by
+    // floor(n/2), so odd bin counts stay correct rather than dropping a bin.
+    _unwrap(raw) {
+        const n = raw.length;
+        if (!this._out || this._out.length !== n) this._out = new Float32Array(n);
+        const half = n >> 1;
+        this._out.set(raw.subarray(half), 0);
+        this._out.set(raw.subarray(0, half), n - half);
+        return this._out;
     }
 
     _onClose() {

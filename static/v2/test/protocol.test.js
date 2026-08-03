@@ -67,21 +67,51 @@ function capture(conn) {
     return frames;
 }
 
+// Emitted frames are in ascending frequency order, so the raw FFT halves
+// [DC..+Nyq | -Nyq..DC] arrive swapped. Verified against the live 25 MHz
+// reference on m9psy: without the swap the carrier reads half a span low.
+const unwrap = (a) => {
+    const half = a.length >> 1;
+    return [...a.slice(half), ...a.slice(0, half)];
+};
+
 t('float32 full frame decodes', () => {
     const c = new SpectrumConnection();
     const frames = capture(c);
-    c._onSpectrum(new DataView(fullFloat32([-100, -80.5, -60.25], 7100000)));
+    const raw = [-100, -80.5, -60.25, -40];
+    c._onSpectrum(new DataView(fullFloat32(raw, 7100000)));
     assert.strictEqual(frames.length, 1);
-    assert.deepStrictEqual([...frames[0].bins], [-100, -80.5, -60.25]);
+    assert.deepStrictEqual([...frames[0].bins], unwrap(raw));
     assert.strictEqual(frames[0].frequency, 7100000);
 });
 
-t('float32 delta applies onto previous frame', () => {
+t('FFT halves are swapped into ascending frequency order', () => {
     const c = new SpectrumConnection();
     const frames = capture(c);
-    c._onSpectrum(new DataView(fullFloat32([-100, -100, -100], 7100000)));
+    // A carrier at raw bin 0 is DC — the centre of the span — so it must come
+    // out at the middle bin, not the first one.
+    const raw = [0, -120, -120, -120, -120, -120, -120, -120];
+    c._onSpectrum(new DataView(fullFloat32(raw, 25000000)));
+    const bins = [...frames[0].bins];
+    assert.strictEqual(bins.indexOf(0), 4, `peak landed at ${bins.indexOf(0)}, want 4`);
+});
+
+t('odd bin counts rotate without dropping a bin', () => {
+    const c = new SpectrumConnection();
+    const frames = capture(c);
+    c._onSpectrum(new DataView(fullFloat32([-1, -2, -3, -4, -5], 7100000)));
+    // rotate left by floor(5/2) = 2
+    assert.deepStrictEqual([...frames[0].bins], [-3, -4, -5, -1, -2]);
+});
+
+t('float32 delta applies in raw bin order, then unwraps', () => {
+    const c = new SpectrumConnection();
+    const frames = capture(c);
+    c._onSpectrum(new DataView(fullFloat32([-100, -100, -100, -100], 7100000)));
+    // The server indexes deltas against raw order, so raw bin 1 must be the
+    // one that changes — it surfaces at output position 3.
     c._onSpectrum(new DataView(deltaFloat32([[1, -42.5]], 7100000)));
-    assert.deepStrictEqual([...frames[1].bins], [-100, -42.5, -100]);
+    assert.deepStrictEqual([...frames[1].bins], [-100, -100, -100, -42.5]);
 });
 
 t('delta before any full frame is ignored, not crashed', () => {
@@ -94,16 +124,28 @@ t('delta before any full frame is ignored, not crashed', () => {
 t('uint8 full frame maps 0->-256 and 255->-1', () => {
     const c = new SpectrumConnection();
     const frames = capture(c);
-    c._onSpectrum(new DataView(fullUint8([0, 128, 255], 7100000)));
-    assert.deepStrictEqual([...frames[0].bins], [-256, -128, -1]);
+    c._onSpectrum(new DataView(fullUint8([0, 128, 255, 64], 7100000)));
+    assert.deepStrictEqual([...frames[0].bins], unwrap([-256, -128, -1, -192]));
 });
 
 t('uint8 delta uses 3-byte entries', () => {
     const c = new SpectrumConnection();
     const frames = capture(c);
-    c._onSpectrum(new DataView(fullUint8([100, 100, 100], 7100000)));
+    c._onSpectrum(new DataView(fullUint8([100, 100, 100, 100], 7100000)));
     c._onSpectrum(new DataView(deltaUint8([[2, 200]], 7100000)));
-    assert.deepStrictEqual([...frames[1].bins], [-156, -156, -56]);
+    // raw bin 2 -> output position 0
+    assert.deepStrictEqual([...frames[1].bins], [-56, -156, -156, -156]);
+});
+
+t('accumulators stay in raw order across frames', () => {
+    const c = new SpectrumConnection();
+    const frames = capture(c);
+    c._onSpectrum(new DataView(fullFloat32([-10, -20, -30, -40], 7100000)));
+    c._onSpectrum(new DataView(deltaFloat32([[0, -99]], 7100000)));
+    c._onSpectrum(new DataView(deltaFloat32([[3, -88]], 7100000)));
+    // Unwrapping must not feed back into the accumulator: raw is now
+    // [-99,-20,-30,-88], which surfaces as [-30,-88,-99,-20].
+    assert.deepStrictEqual([...frames[2].bins], [-30, -88, -99, -20]);
 });
 
 t('unknown protocol version is dropped', () => {

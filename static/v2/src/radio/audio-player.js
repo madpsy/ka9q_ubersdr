@@ -166,15 +166,31 @@ export class AudioPlayer {
         }
         this.sampleRate = this.ctx.sampleRate;
         this.gain = this.ctx.createGain();
+        // Per-side output routing, as v1 does (app.js initializeStereoChannels):
+        // split the stereo pair, gate each side with its own gain, merge back.
+        // Because every buffer is scheduled with at least two channels, this
+        // works in mono modes too — which is the whole point of the control.
+        this.splitter = this.ctx.createChannelSplitter(2);
+        this.leftGain = this.ctx.createGain();
+        this.rightGain = this.ctx.createGain();
+        this.merger = this.ctx.createChannelMerger(2);
         this.analyser = this.ctx.createAnalyser();
         // Sized for whoever is looking: the node is always in the graph, but it
         // only does FFT work when something reads it, and the audio scope
         // raises this while it is on screen (see acquireAnalyser).
         this.analyser.fftSize = this.analyserFft || ANALYSER_IDLE_FFT;
         this.analyser.smoothingTimeConstant = 0.5;
-        this.gain.connect(this.analyser);
+        this.gain.connect(this.splitter);
+        this.splitter.connect(this.leftGain, 0);
+        this.splitter.connect(this.rightGain, 1);
+        this.leftGain.connect(this.merger, 0, 0);
+        this.rightGain.connect(this.merger, 0, 1);
+        // The analyser sits after the routing, so the audio scope shows what is
+        // actually being played.
+        this.merger.connect(this.analyser);
         this.analyser.connect(this.ctx.destination);
         this._applyGain();
+        this._applyChannelMode();
         this.nextPlayTime = this.ctx.currentTime + this.bufferSec;
     }
 
@@ -187,30 +203,35 @@ export class AudioPlayer {
 
     setChannelMode(mode) {
         this.channelMode = mode === 'left' || mode === 'right' ? mode : 'both';
+        this._applyChannelMode();
+    }
+
+    _applyChannelMode() {
+        if (!this.leftGain || !this.rightGain || !this.ctx) return;
+        const m = this.channelMode;
+        const t = this.ctx.currentTime;
+        this.leftGain.gain.setTargetAtTime(m === 'right' ? 0 : 1, t, 0.01);
+        this.rightGain.gain.setTargetAtTime(m === 'left' ? 0 : 1, t, 0.01);
     }
 
     _schedule(planes, frames, sampleRate) {
         const ctx = this.ctx;
         if (!ctx || ctx.state === 'closed') return;
 
-        // Picking one side copies it to both outputs rather than muting the
-        // other, so a single-sided listen is not also half the loudness and
-        // does not pan to one ear.
-        const pick = planes.length > 1 && this.channelMode !== 'both'
-            ? planes[this.channelMode === 'right' ? 1 : 0]
-            : null;
-
-        const channels = planes.length;
-        this.channels = channels;
+        // Always at least two channels, with a mono stream duplicated into both
+        // — v1 does the same. The output routing above can then select a side
+        // in any mode, rather than only on the stereo IQ modes.
+        this.channels = planes.length;
+        const channels = Math.max(2, planes.length);
         const buffer = ctx.createBuffer(channels, frames, sampleRate);
         for (let c = 0; c < channels; c++) {
-            buffer.copyToChannel((pick || planes[c]).subarray(0, frames), c);
+            buffer.copyToChannel((planes[c] || planes[0]).subarray(0, frames), c);
         }
 
         // Level meter, from what is actually being played — cheaper than an
         // AnalyserNode read on every animation frame and in sync with the queue.
         let sum = 0;
-        const p = pick || planes[0];
+        const p = planes[0];
         for (let i = 0; i < frames; i++) sum += p[i] * p[i];
         const rms = Math.sqrt(sum / frames);
         this.level = this.level * 0.7 + rms * 0.3;

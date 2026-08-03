@@ -61,17 +61,13 @@ const CHANNELS = [
     { value: 'right', label: 'Right' },
 ];
 
-// Which side of a stereo stream to listen to. Only the IQ modes and stereo
-// Opus carry two channels, so on a mono stream this says so rather than
-// offering a choice that would do nothing. Sampling the meters is how the
-// channel count is known — it comes from the frames actually being played.
+// Which output side to listen on, as in v1's Left/Right checkboxes. This is
+// output routing, not a stereo decode: every buffer is scheduled with two
+// channels (a mono stream duplicated), so it works in every mode.
 function ChannelPicker() {
     const { audio, actions } = useRadio();
-    const m = useMeters(3);
-    const stereo = m.channels > 1;
-
     return (
-        <Field label="Channel" hint={stereo ? undefined : 'mono stream'} inline>
+        <Field label="Channel" inline>
             <Segmented
                 options={CHANNELS}
                 value={audio.channel || 'both'}

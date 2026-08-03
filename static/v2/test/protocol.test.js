@@ -469,6 +469,31 @@ t('capped markers stay spread across the width', () => {
     assert.ok(Math.max(...xs) > 1400, `rightmost at ${Math.max(...xs)}`);
 });
 
+t('the density cap keeps local bookmarks and samples the server ones', () => {
+    // Five of yours scattered across the band, against a couple of thousand
+    // published ones — the cap must not be allowed to drop yours.
+    const local = [1.5e6, 7.05e6, 14.2e6, 21.3e6, 28.4e6].map((frequency, i) => ({
+        name: `Mine ${i}`, frequency, mode: 'usb', source: 'local',
+    }));
+    const sorted = MARKS.concat(local).sort((a, b) => a.frequency - b.frequency);
+
+    const placed = mk.layoutBookmarks({ sorted, startFreq: 0, endFreq: 30e6, width: 1600, measure });
+    const kept = placed.filter((p) => p.item.source === 'local').map((p) => p.item.name);
+
+    // Row assignment may still drop one that physically collides, but the
+    // sampling stage must have carried every one of them through.
+    const capped = mk.capDensity(
+        sorted.map((b, i) => ({ item: b, x: i, width: 10 })),
+        100,
+    );
+    assert.strictEqual(
+        capped.filter((it) => it.item.source === 'local').length, local.length,
+        'the density cap dropped a local bookmark',
+    );
+    assert.ok(capped.length <= 100, `${capped.length} survived a cap of 100`);
+    assert.ok(kept.length >= 4, `only ${kept.length} local markers survived layout: ${kept}`);
+});
+
 t('both rows are used before anything is dropped', () => {
     const placed = mk.layoutBookmarks({
         sorted: MARKS, startFreq: 7000000, endFreq: 7300000, width: 1200, measure,

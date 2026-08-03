@@ -23,6 +23,14 @@ function bandName(b) {
     return String(b.button_name || b.label || '').split('|')[0].replace(/\s+/g, ' ').trim();
 }
 
+// v1's two bookmark colours, kept identical so the distinction reads the same
+// in both frontends: gold for what the receiver publishes, blue for what you
+// saved in this browser (bookmark-manager.js drawBookmarks).
+const SERVER_PILL = 'rgba(255, 215, 0, 0.95)';
+const SERVER_INK = '#000000';
+const LOCAL_PILL = 'rgba(52, 152, 219, 0.95)';
+const LOCAL_INK = '#ffffff';
+
 export default function MarkerBar({ width }) {
     const { view, actions, catalog, tuning } = useRadio();
     const display = useDisplay();
@@ -37,6 +45,27 @@ export default function MarkerBar({ width }) {
         () => bandColors(display.server.config.band_color_intensity),
         [display.server.config.band_color_intensity],
     );
+
+    // Server and local bookmarks in one frequency-sorted list. Merged rather
+    // than concatenated-and-sorted: both inputs are already ordered, and the
+    // server side is a couple of thousand entries that would otherwise be
+    // re-sorted every time a local bookmark is added or deleted.
+    const marks = useMemo(() => {
+        const server = catalog.bookmarks || [];
+        const local = catalog.local || [];
+        if (!local.length) return server;
+        if (!server.length) return local;
+        const out = new Array(server.length + local.length);
+        let i = 0;
+        let j = 0;
+        let k = 0;
+        while (i < server.length && j < local.length) {
+            out[k++] = server[i].frequency <= local[j].frequency ? server[i++] : local[j++];
+        }
+        while (i < server.length) out[k++] = server[i++];
+        while (j < local.length) out[k++] = local[j++];
+        return out;
+    }, [catalog.bookmarks, catalog.local]);
 
     const centerFreq = view.centerFreq;
     const span = view.span;
@@ -100,7 +129,7 @@ export default function MarkerBar({ width }) {
         }
 
         // ---- bookmarks ---------------------------------------------------
-        if (showBookmarks && catalog.bookmarks) {
+        if (showBookmarks && marks.length) {
             c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
             c.textBaseline = 'middle';
             c.textAlign = 'center';
@@ -118,7 +147,7 @@ export default function MarkerBar({ width }) {
             };
 
             const placed = layoutBookmarks({
-                sorted: catalog.bookmarks, startFreq, endFreq, width, measure,
+                sorted: marks, startFreq, endFreq, width, measure,
             });
 
             for (const p of placed) {
@@ -136,15 +165,16 @@ export default function MarkerBar({ width }) {
                 c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
                 c.stroke();
 
-                c.fillStyle = isTuned ? accent : 'rgba(255,255,255,0.13)';
+                const isLocal = p.item.source === 'local';
+                c.fillStyle = isTuned ? accent : (isLocal ? LOCAL_PILL : SERVER_PILL);
                 roundRect(c, x - w / 2, y, w, PILL_H, 3);
                 c.fill();
                 if (!isTuned) {
-                    c.strokeStyle = 'rgba(255,255,255,0.18)';
+                    c.strokeStyle = 'rgba(255,255,255,0.55)';
                     c.stroke();
                 }
 
-                c.fillStyle = isTuned ? accentInk : 'rgba(233,238,246,0.95)';
+                c.fillStyle = isTuned ? accentInk : (isLocal ? LOCAL_INK : SERVER_INK);
                 clipText(c, p.item.name, x, y + PILL_H / 2, w - 6);
 
                 hitsRef.current.bookmarks.push({ x, y, w, h: PILL_H, item: p.item });
@@ -156,7 +186,7 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
-    }, [width, centerFreq, span, catalog, showBands, showBookmarks, colors, tuning.frequency]);
+    }, [width, centerFreq, span, catalog.bands, marks, showBands, showBookmarks, colors, tuning.frequency]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;

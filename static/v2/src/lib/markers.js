@@ -38,36 +38,78 @@ export function visibleBookmarks(sorted, startFreq, endFreq) {
 export const ROW_GAP_PX = 3;
 
 export function assignRows(items) {
-    const rows = [null, null];   // last placed marker in each row
+    // Two rows, each holding its placed markers in x order.
+    const rows = [[], []];
     const out = [];
-    const clashes = (a, b) => {
-        const aL = a.x - a.width / 2;
-        const bR = b.x + b.width / 2;
-        // Items arrive x-sorted, so only the previous marker in a row can
-        // collide — O(n) rather than v1's O(n²) scan of the whole row.
-        return aL - ROW_GAP_PX <= bR;
+
+    // Where `x` belongs in an x-ordered row.
+    const seek = (row, x) => {
+        let lo = 0;
+        let hi = row.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (row[mid].x < x) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     };
-    for (const item of items) {
-        const fits = (row) => !rows[row] || !clashes(item, rows[row]);
-        const row = fits(0) ? 0 : fits(1) ? 1 : -1;
-        if (row < 0) continue;
+
+    // Placed markers never overlap, so only the neighbours either side of the
+    // insertion point can collide — O(log n) per candidate, and unlike a
+    // "compare with the last one placed" check it holds when markers are not
+    // added strictly left to right.
+    const fits = (row, item) => {
+        const i = seek(row, item.x);
+        const left = row[i - 1];
+        const right = row[i];
+        if (left && item.x - item.width / 2 - ROW_GAP_PX <= left.x + left.width / 2) return false;
+        if (right && item.x + item.width / 2 + ROW_GAP_PX >= right.x - right.width / 2) return false;
+        return true;
+    };
+
+    const place = (item) => {
+        const row = fits(rows[0], item) ? 0 : fits(rows[1], item) ? 1 : -1;
+        if (row < 0) return;
         item.row = row;
-        rows[row] = item;
+        rows[row].splice(seek(rows[row], item.x), 0, item);
         out.push(item);
-    }
-    return out;
+    };
+
+    // Local bookmarks claim their space first. They are yours and there are a
+    // handful; a published bookmark 3 px away should be the one that gives way.
+    for (const item of items) if (item.item && item.item.source === 'local') place(item);
+    for (const item of items) if (!(item.item && item.item.source === 'local')) place(item);
+
+    // Restore x order — callers draw in list order and the tests read it.
+    return out.sort((a, b) => a.x - b.x);
 }
 
 // Density cap. Above `max`, sample evenly across the x-sorted list so the
 // survivors stay spread over the whole width instead of bunching at one end.
 export const MAX_MARKERS = 100;
 
+// Local bookmarks are always kept and the server's are sampled around them, as
+// v1 does: yours are a handful you chose deliberately, and losing one to a
+// density cap driven by a couple of thousand published ones would look like the
+// save had failed.
 export function capDensity(items, max = MAX_MARKERS) {
     if (items.length <= max) return items;
-    const out = [];
-    const step = items.length / max;
-    for (let i = 0; i < max; i++) out.push(items[Math.round(i * step)]);
-    return out;
+
+    const local = items.filter((it) => it.item && it.item.source === 'local');
+    const server = local.length ? items.filter((it) => !(it.item && it.item.source === 'local')) : items;
+    const slots = Math.max(0, max - local.length);
+
+    let sampled;
+    if (server.length <= slots) {
+        sampled = server;
+    } else {
+        sampled = [];
+        const step = server.length / slots;
+        for (let i = 0; i < slots; i++) sampled.push(server[Math.round(i * step)]);
+    }
+    // Back into x order, so the row assignment downstream stays a left-to-right
+    // sweep.
+    return local.length ? local.concat(sampled).sort((a, b) => a.x - b.x) : sampled;
 }
 
 // Full bookmark layout: window -> positions -> cap -> rows.

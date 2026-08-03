@@ -15,6 +15,7 @@ import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
 import { connectionCheck, newSessionId } from './session.js';
+import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -110,6 +111,9 @@ export function RadioProvider({ children }) {
     // payload to pull three times. Bookmarks are kept sorted by frequency so
     // the marker bar can binary-search the visible window.
     const [catalog, setCatalog] = useState({ bands: null, bookmarks: null });
+    // Bookmarks saved in this browser (see lib/localBookmarks.js). Separate from
+    // `catalog` because they change independently of the server fetch.
+    const [localMarks, setLocalMarks] = useState([]);
     const [agc, setAgc] = useState(null);
     // `schemas` is the server's filter list (null until it answers); `params`
     // is keyed by filter name so switching filters and back keeps your settings.
@@ -349,6 +353,27 @@ export function RadioProvider({ children }) {
             });
         });
         return () => { cancelled = true; };
+    }, []);
+
+    // The browser's own bookmarks, kept beside the server's so the marker bar
+    // can show both. Loaded here rather than in the panel: they belong on the
+    // spectrum whether or not the panel has ever been opened, and they must
+    // appear and disappear as they are added, imported and deleted — hence the
+    // subscription rather than a one-off read.
+    useEffect(() => {
+        let cancelled = false;
+        const load = () => {
+            const store = localBookmarkStore();
+            store.ready.then(() => {
+                if (cancelled) return;
+                setLocalMarks(store.getAll()
+                    .map((b) => ({ ...b, source: 'local' }))
+                    .sort((a, b) => a.frequency - b.frequency));
+            }, () => { /* IndexedDB unavailable — no local bookmarks, no error */ });
+        };
+        load();
+        const off = onLocalBookmarksChanged(load);
+        return () => { cancelled = true; off(); };
     }, []);
 
     useEffect(() => {
@@ -648,10 +673,11 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log, session,
-        audio, squelch, agc, dsp, followTuning, catalog,
+        audio, squelch, agc, dsp, followTuning,
+        catalog: { ...catalog, local: localMarks },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, catalog, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, catalog, localMarks, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

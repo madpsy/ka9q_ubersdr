@@ -8,9 +8,15 @@
 // until someone notices the notch is in the wrong place, so it is testable
 // without an AudioContext.
 //
-// Chain order follows v1 (app.js: bandpass, then notches, then EQ):
+// Chain order is the one that makes musical sense, and matches v1's intent:
 //
-//   in -> [bandpass x stages] -> [notch x 6 per notch] -> [EQ x 12] -> makeup -> out
+//   in -> gate -> [bandpass] -> [notch] -> [EQ] -> makeup -> compressor -> stereo -> out
+//
+// The gate goes first so nothing downstream has to work on noise it will only
+// throw away, and the compressor goes after the EQ so it levels what you have
+// actually shaped rather than fighting it. The stereo widener is last, because
+// it is the only stage that stops being mono and everything before it assumes
+// one signal.
 
 // EQ band centres, and the presets, exactly as v1 defines them.
 export const EQ_FREQUENCIES = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
@@ -32,13 +38,83 @@ export const BP_WIDTH_MIN = 20;
 export const BP_WIDTH_MAX = 3000;
 export const NOTCH_STAGES = 6;      // cascaded biquads per notch, as in v1
 
+// Gate. A soft gate — one that ducks by a set amount rather than slamming to
+// silence — is far kinder on SSB, where the noise between words is part of what
+// tells you the band is still there. Hysteresis and a hold time stop it
+// chattering on speech pauses.
+export const GATE_HYSTERESIS_DB = 3;
+
+// Compressor. The Web Audio node does the work; these are its parameters plus a
+// makeup gain, which the node does not provide.
+export const COMP_LIMITS = {
+    threshold: { min: -60, max: 0 },
+    ratio: { min: 1, max: 20 },
+    attack: { min: 0, max: 100 },      // ms
+    release: { min: 20, max: 1000 },   // ms
+    knee: { min: 0, max: 40 },
+    makeup: { min: 0, max: 24 },       // dB
+};
+
 export const FILTER_DEFAULTS = {
+    gate: {
+        enabled: false,
+        threshold: -45,     // dBFS of the audio arriving at the gate
+        depth: 25,          // dB it ducks by when closed (not silence)
+        attack: 5,          // ms to open
+        hold: 150,          // ms held open after the signal drops
+        release: 250,       // ms to close
+    },
     eq: { enabled: false, gains: EQ_FREQUENCIES.map(() => 0), makeup: 0 },
     notch: { enabled: false, items: [] },              // { center, width }
     bandpass: {
         enabled: false, center: 800, width: 200, stages: 4, autoQ: true, qMultiplier: 1,
     },
+    compressor: {
+        enabled: false,
+        threshold: -28,
+        ratio: 3,
+        attack: 10,         // ms
+        release: 250,       // ms
+        knee: 12,
+        makeup: 6,          // dB
+        autoMakeup: true,
+    },
+    stereo: {
+        enabled: false,
+        width: 50,          // % of the delayed copy mixed in, +/- per side
+        delay: 16,          // ms
+    },
 };
+
+// Roughly what the compressor took away, so switching it on does not also make
+// everything quieter. Deliberately conservative (60% of the theoretical
+// reduction) — over-compensating is how a compressor starts sounding pumped.
+export function autoMakeup(threshold, ratio) {
+    const reduction = -threshold * (1 - 1 / Math.max(1, ratio));
+    return Math.max(
+        COMP_LIMITS.makeup.min,
+        Math.min(COMP_LIMITS.makeup.max, Math.round(reduction * 0.6 * 2) / 2),
+    );
+}
+
+// Whether the gate should be open, given the level now and whether it was open
+// a moment ago. The hysteresis is what stops it chattering around the
+// threshold; `hold` is applied by the caller, which knows the clock.
+export function gateOpen(levelDb, threshold, wasOpen) {
+    if (!Number.isFinite(levelDb)) return wasOpen;
+    return wasOpen ? levelDb > threshold - GATE_HYSTERESIS_DB : levelDb > threshold;
+}
+
+// RMS of a byte time-domain frame, in dBFS. -Infinity for digital silence.
+export function frameLevelDb(wave) {
+    let sum = 0;
+    for (let i = 0; i < wave.length; i++) {
+        const v = (wave[i] - 128) / 128;
+        sum += v * v;
+    }
+    const rms = Math.sqrt(sum / wave.length);
+    return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+}
 
 // v1's Q for a bandpass stage: centre over width, scaled by half the stage
 // count so adding stages sharpens gradually rather than in jumps.
@@ -93,6 +169,17 @@ export function bandpassRange(window) {
 // rather than paying for a chain of no-ops.
 export function buildChain(ctx, spec) {
     const nodes = [];
+    let gate = null;
+
+    // Gate first: an analyser to watch the level, and a gain the player drives.
+    if (spec.gate && spec.gate.enabled) {
+        const watch = ctx.createAnalyser();
+        watch.fftSize = 1024;
+        const duck = ctx.createGain();
+        duck.gain.value = 1;
+        nodes.push(watch, duck);
+        gate = { watch, duck, spec: spec.gate, open: true, since: 0 };
+    }
 
     if (spec.bandpass.enabled) {
         const q = bandpassQ(spec.bandpass);
@@ -132,7 +219,60 @@ export function buildChain(ctx, spec) {
         nodes.push(makeup);
     }
 
-    if (!nodes.length) return null;
+    if (spec.compressor && spec.compressor.enabled) {
+        const c = spec.compressor;
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = c.threshold;
+        comp.ratio.value = c.ratio;
+        comp.attack.value = Math.max(0, c.attack) / 1000;
+        comp.release.value = Math.max(1, c.release) / 1000;
+        comp.knee.value = c.knee;
+        const makeup = ctx.createGain();
+        const db = c.autoMakeup ? autoMakeup(c.threshold, c.ratio) : c.makeup;
+        makeup.gain.value = Math.pow(10, db / 20);
+        nodes.push(comp, makeup);
+    }
+
+    // Stereo widener, last. Everything upstream is one signal; this is where it
+    // stops being one. A delayed copy is added to one side and subtracted from
+    // the other, which is the classic mono-to-stereo trick: at these delays the
+    // ear reads it as space rather than as an echo, and the two sides still sum
+    // back to the original if something downstream folds to mono.
+    let stereoTail = null;
+    if (spec.stereo && spec.stereo.enabled) {
+        const input = ctx.createGain();
+        const delay = ctx.createDelay(0.1);
+        delay.delayTime.value = Math.max(0.001, Math.min(0.1, spec.stereo.delay / 1000));
+        const w = Math.max(0, Math.min(1, spec.stereo.width / 100));
+        const wet = ctx.createGain();
+        wet.gain.value = w;
+        const wetInv = ctx.createGain();
+        wetInv.gain.value = -w;
+        const merger = ctx.createChannelMerger(2);
+
+        input.connect(merger, 0, 0);
+        input.connect(merger, 0, 1);
+        input.connect(delay);
+        delay.connect(wetInv);
+        delay.connect(wet);
+        wetInv.connect(merger, 0, 0);
+        wet.connect(merger, 0, 1);
+
+        stereoTail = { input, output: merger, extra: [delay, wet, wetInv] };
+    }
+
+    if (!nodes.length && !stereoTail) return null;
+
     for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
-    return { input: nodes[0], output: nodes[nodes.length - 1], nodes };
+
+    let input = nodes[0];
+    let output = nodes.length ? nodes[nodes.length - 1] : null;
+    if (stereoTail) {
+        if (output) output.connect(stereoTail.input);
+        else input = stereoTail.input;
+        output = stereoTail.output;
+        nodes.push(stereoTail.input, stereoTail.output, ...stereoTail.extra);
+    }
+
+    return { input, output, nodes, gate };
 }

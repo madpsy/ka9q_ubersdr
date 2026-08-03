@@ -61,9 +61,12 @@ function NoiseReductionTag() {
 function FilterTags() {
     const { filters } = useRadio();
     const on = [
+        filters.gate.enabled && 'GATE',
         filters.eq.enabled && 'EQ',
         filters.notch.enabled && filters.notch.items.length > 0 && 'NOTCH',
         filters.bandpass.enabled && 'BPF',
+        filters.compressor.enabled && 'COMP',
+        filters.stereo.enabled && 'WIDE',
     ].filter(Boolean);
     if (!on.length) return null;
     return (

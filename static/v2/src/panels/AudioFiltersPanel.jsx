@@ -14,8 +14,8 @@ import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audioWaterfall.js';
 import { bandLevels, bandWeights, meterFractions } from '../lib/eqLevels.js';
 import {
-    BP_WIDTH_MAX, BP_WIDTH_MIN, EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN,
-    FILTER_DEFAULTS, MAX_NOTCHES, bandpassRange, detectPreset, presetGains,
+    BP_WIDTH_MAX, BP_WIDTH_MIN, COMP_LIMITS, EQ_FREQUENCIES, EQ_GAIN_MAX, EQ_GAIN_MIN,
+    FILTER_DEFAULTS, MAX_NOTCHES, autoMakeup, bandpassRange, detectPreset, presetGains,
 } from '../radio/audio-filters.js';
 
 const PRESETS = [
@@ -241,6 +241,9 @@ export default function AudioFiltersPanel() {
     const eq = filters.eq;
     const notch = filters.notch;
     const bp = filters.bandpass;
+    const gate = filters.gate;
+    const comp = filters.compressor;
+    const stereo = filters.stereo;
     // Flat is a preset like any other; anything else that matches no preset is
     // the user's own curve, so no button is lit and the label says so.
     const flat = eq.gains.every((g) => !g) && !eq.makeup;
@@ -254,6 +257,9 @@ export default function AudioFiltersPanel() {
     const setEq = (patch) => actions.setFilters({ eq: { ...eq, ...patch } });
     const setNotch = (patch) => actions.setFilters({ notch: { ...notch, ...patch } });
     const setBp = (patch) => actions.setFilters({ bandpass: { ...bp, ...patch } });
+    const setGate = (patch) => actions.setFilters({ gate: { ...gate, ...patch } });
+    const setComp = (patch) => actions.setFilters({ compressor: { ...comp, ...patch } });
+    const setStereo = (patch) => actions.setFilters({ stereo: { ...stereo, ...patch } });
 
     const setBand = (i, value) => {
         const gains = eq.gains.slice();
@@ -296,11 +302,15 @@ export default function AudioFiltersPanel() {
                 options={[
                     { value: 'eq', label: 'EQ' },
                     { value: 'notch', label: `Notch${notch.items.length ? ` ${notch.items.length}` : ''}` },
-                    { value: 'bandpass', label: 'Bandpass' },
+                    { value: 'bandpass', label: 'BPF' },
+                    { value: 'gate', label: 'Gate' },
+                    { value: 'comp', label: 'Comp' },
+                    { value: 'stereo', label: 'Wide' },
                 ]}
                 value={tab}
                 onChange={setTab}
                 size="sm"
+                minItemWidth={64}
             />
 
             {tab === 'eq' && (
@@ -456,6 +466,172 @@ export default function AudioFiltersPanel() {
                             size="sm"
                             variant="ghost"
                             onClick={() => setBp({ ...FILTER_DEFAULTS.bandpass, enabled: bp.enabled })}
+                        >
+                            Reset
+                        </Button>
+                    </div>
+                </Section>
+            )}
+
+            {tab === 'gate' && (
+                <Section title="Noise gate" enabled={gate.enabled} onToggle={(v) => setGate({ enabled: v })}>
+                    <Field label="Threshold" hint={`${gate.threshold} dBFS`}>
+                        <Slider
+                            value={gate.threshold}
+                            min={-80}
+                            max={-10}
+                            step={1}
+                            onChange={(v) => setGate({ threshold: v })}
+                        />
+                    </Field>
+                    <Field label="Depth" hint={gate.depth >= 60 ? 'silent' : `−${gate.depth} dB`}>
+                        <Slider value={gate.depth} min={6} max={60} step={1} onChange={(v) => setGate({ depth: v })} />
+                    </Field>
+                    <Field label="Attack" hint={`${gate.attack} ms`}>
+                        <Slider value={gate.attack} min={1} max={50} step={1} onChange={(v) => setGate({ attack: v })} />
+                    </Field>
+                    <Field label="Hold" hint={`${gate.hold} ms`}>
+                        <Slider value={gate.hold} min={0} max={800} step={10} onChange={(v) => setGate({ hold: v })} />
+                    </Field>
+                    <Field label="Release" hint={`${gate.release} ms`}>
+                        <Slider
+                            value={gate.release}
+                            min={20}
+                            max={1500}
+                            step={10}
+                            onChange={(v) => setGate({ release: v })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Ducks by the set depth rather than muting, which keeps the band
+                        audible between words. The server squelch in the Audio panel is
+                        the harder cut.
+                    </div>
+                    <div className="row-end">
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setGate({ ...FILTER_DEFAULTS.gate, enabled: gate.enabled })}
+                        >
+                            Reset
+                        </Button>
+                    </div>
+                </Section>
+            )}
+
+            {tab === 'comp' && (
+                <Section
+                    title="Compressor"
+                    enabled={comp.enabled}
+                    onToggle={(v) => setComp({ enabled: v })}
+                    extra={(
+                        <span className="section-label__note">
+                            +{(comp.autoMakeup ? autoMakeup(comp.threshold, comp.ratio) : comp.makeup).toFixed(1)} dB
+                        </span>
+                    )}
+                >
+                    <Field label="Threshold" hint={`${comp.threshold} dB`}>
+                        <Slider
+                            value={comp.threshold}
+                            min={COMP_LIMITS.threshold.min}
+                            max={COMP_LIMITS.threshold.max}
+                            step={1}
+                            onChange={(v) => setComp({ threshold: v })}
+                        />
+                    </Field>
+                    <Field label="Ratio" hint={`${comp.ratio}:1`}>
+                        <Slider
+                            value={comp.ratio}
+                            min={COMP_LIMITS.ratio.min}
+                            max={COMP_LIMITS.ratio.max}
+                            step={0.5}
+                            onChange={(v) => setComp({ ratio: v })}
+                        />
+                    </Field>
+                    <Field label="Knee" hint={comp.knee === 0 ? 'hard' : `${comp.knee} dB soft`}>
+                        <Slider
+                            value={comp.knee}
+                            min={COMP_LIMITS.knee.min}
+                            max={COMP_LIMITS.knee.max}
+                            step={1}
+                            onChange={(v) => setComp({ knee: v })}
+                        />
+                    </Field>
+                    <Field label="Attack" hint={`${comp.attack} ms`}>
+                        <Slider
+                            value={comp.attack}
+                            min={COMP_LIMITS.attack.min}
+                            max={COMP_LIMITS.attack.max}
+                            step={1}
+                            onChange={(v) => setComp({ attack: v })}
+                        />
+                    </Field>
+                    <Field label="Release" hint={`${comp.release} ms`}>
+                        <Slider
+                            value={comp.release}
+                            min={COMP_LIMITS.release.min}
+                            max={COMP_LIMITS.release.max}
+                            step={10}
+                            onChange={(v) => setComp({ release: v })}
+                        />
+                    </Field>
+                    <Field label="Auto makeup" inline>
+                        <Switch checked={comp.autoMakeup} onChange={(v) => setComp({ autoMakeup: v })} />
+                    </Field>
+                    {!comp.autoMakeup && (
+                        <Field label="Makeup" hint={`+${comp.makeup} dB`}>
+                            <Slider
+                                value={comp.makeup}
+                                min={COMP_LIMITS.makeup.min}
+                                max={COMP_LIMITS.makeup.max}
+                                step={0.5}
+                                onChange={(v) => setComp({ makeup: v })}
+                            />
+                        </Field>
+                    )}
+                    <div className="row-end">
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setComp({ ...FILTER_DEFAULTS.compressor, enabled: comp.enabled })}
+                        >
+                            Reset
+                        </Button>
+                    </div>
+                </Section>
+            )}
+
+            {tab === 'stereo' && (
+                <Section title="Stereo widener" enabled={stereo.enabled} onToggle={(v) => setStereo({ enabled: v })}>
+                    <Field label="Width" hint={`${stereo.width} %`}>
+                        <Slider
+                            value={stereo.width}
+                            min={0}
+                            max={100}
+                            step={5}
+                            onChange={(v) => setStereo({ width: v })}
+                        />
+                    </Field>
+                    <Field label="Delay" hint={`${stereo.delay} ms`}>
+                        <Slider
+                            value={stereo.delay}
+                            min={2}
+                            max={40}
+                            step={1}
+                            onChange={(v) => setStereo({ delay: v })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Spreads a mono signal across both ears. Around 15–20 ms reads as
+                        space rather than echo; the two sides still sum back to the
+                        original if anything downstream folds to mono. Headphones only —
+                        on a single speaker it will thin the sound.
+                    </div>
+                    <div className="row-end">
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setStereo({ ...FILTER_DEFAULTS.stereo, enabled: stereo.enabled })}
                         >
                             Reset
                         </Button>

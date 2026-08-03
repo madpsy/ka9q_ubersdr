@@ -5,7 +5,12 @@
 // arrival. When the schedule falls behind the cushion is re-primed, which is
 // audible as a single gap instead of continuous stuttering.
 
-import { buildChain } from './audio-filters.js';
+import { buildChain, frameLevelDb, gateOpen } from './audio-filters.js';
+
+// How often the gate looks at the level. 20 ms is well inside its own attack
+// time, and a timer is the right tool: this must keep working with no panel
+// open, which rules out hanging it off a view's animation frame.
+const GATE_TICK_MS = 20;
 
 const DEFAULT_BUFFER_SEC = 0.2;
 const MIN_LEAD_SEC = 0.02;
@@ -35,6 +40,7 @@ export class AudioPlayer {
         this.head = null;           // filter chain input
         this.chain = null;          // active EQ/notch/bandpass nodes
         this.filterSpec = null;
+        this.gateTimer = null;
         this.decoder = null;
         this.decoderRate = 0;
         this.decoderChannels = 0;
@@ -219,6 +225,9 @@ export class AudioPlayer {
         this.filterSpec = spec;
         if (!this.ctx || !this.head) return;
 
+        clearInterval(this.gateTimer);
+        this.gateTimer = null;
+
         try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
         if (this.chain) {
             for (const n of this.chain.nodes) {
@@ -232,9 +241,44 @@ export class AudioPlayer {
             this.head.connect(chain.input);
             chain.output.connect(this.gain);
             this.chain = chain;
+            if (chain.gate) this._runGate(chain.gate);
         } else {
             this.head.connect(this.gain);
         }
+    }
+
+    // The gate is a gain node the player rides: Web Audio has no gate, and
+    // doing it per sample would mean a worklet for something a 50 Hz control
+    // signal handles perfectly well.
+    _runGate(gate) {
+        const wave = new Uint8Array(gate.watch.fftSize);
+        gate.since = performance.now();
+
+        this.gateTimer = setInterval(() => {
+            if (!this.ctx) return;
+            gate.watch.getByteTimeDomainData(wave);
+            const level = frameLevelDb(wave);
+            const now = performance.now();
+            const open = gateOpen(level, gate.spec.threshold, gate.open);
+
+            // Hold: once open, stay open for a while after the signal drops, so
+            // the gaps between words do not get chopped.
+            if (open !== gate.open) {
+                if (!open && now - gate.since < gate.spec.hold) return;
+                gate.open = open;
+                gate.since = now;
+
+                const target = open ? 1 : Math.pow(10, -Math.abs(gate.spec.depth) / 20);
+                const ms = open ? gate.spec.attack : gate.spec.release;
+                // setTargetAtTime reaches ~95% in three time constants, so the
+                // control reads as the time it actually takes.
+                gate.duck.gain.setTargetAtTime(
+                    target, this.ctx.currentTime, Math.max(0.001, ms / 1000) / 3,
+                );
+            } else if (open) {
+                gate.since = now;
+            }
+        }, GATE_TICK_MS);
     }
 
     setChannelMode(mode) {

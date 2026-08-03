@@ -129,11 +129,14 @@ export function RadioProvider({ children }) {
     const [followTuning, setFollowTuning] = useState(saved.followTuning !== false);
     // Client-side EQ / notch / bandpass. Merged per section so a spec saved
     // before a field existed still loads.
-    const [filters, setFilterState] = useState(() => ({
-        eq: { ...FILTER_DEFAULTS.eq, ...(saved.filters && saved.filters.eq) },
-        notch: { ...FILTER_DEFAULTS.notch, ...(saved.filters && saved.filters.notch) },
-        bandpass: { ...FILTER_DEFAULTS.bandpass, ...(saved.filters && saved.filters.bandpass) },
-    }));
+    const [filters, setFilterState] = useState(() => {
+        const from = saved.filters || {};
+        const merged = {};
+        for (const key of Object.keys(FILTER_DEFAULTS)) {
+            merged[key] = { ...FILTER_DEFAULTS[key], ...(from[key] || {}) };
+        }
+        return merged;
+    });
 
     // Mutable, high-rate values. Never a dependency of a render.
     const meters = useRef({
@@ -551,11 +554,8 @@ export function RadioProvider({ children }) {
             // A patch per section: { eq: {...} } leaves notch and bandpass alone.
             setFilters(patch) {
                 setFilterState((f) => {
-                    const next = {
-                        eq: { ...f.eq, ...(patch.eq || {}) },
-                        notch: { ...f.notch, ...(patch.notch || {}) },
-                        bandpass: { ...f.bandpass, ...(patch.bandpass || {}) },
-                    };
+                    const next = {};
+                    for (const key of Object.keys(f)) next[key] = { ...f[key], ...(patch[key] || {}) };
                     player.setFilters(next);
                     return next;
                 });

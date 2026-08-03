@@ -1156,4 +1156,54 @@ t('meter fractions follow the loudest band and clamp', () => {
     assert.strictEqual(frac[2], 0, 'a silent band reads empty');
 });
 
+
+// ── Gate, compressor and widener parameters ─────────────────────────────────
+
+t('the gate has hysteresis, so it cannot chatter on the threshold', () => {
+    // Closed: needs to cross the threshold proper. Open: hangs on until it
+    // drops a further GATE_HYSTERESIS_DB.
+    assert.strictEqual(af.gateOpen(-44, -45, false), true);
+    assert.strictEqual(af.gateOpen(-46, -45, false), false);
+    assert.strictEqual(af.gateOpen(-46, -45, true), true, 'must not close inside the hysteresis');
+    assert.strictEqual(af.gateOpen(-49, -45, true), false);
+    // No signal yet: hold whatever state we were in rather than flapping.
+    assert.strictEqual(af.gateOpen(-Infinity, -45, true), true);
+});
+
+t('frame level is RMS in dBFS', () => {
+    const flat = new Uint8Array(256).fill(128);
+    assert.strictEqual(af.frameLevelDb(flat), -Infinity, 'digital silence');
+
+    // Full-scale square wave: RMS 1.0 -> 0 dBFS.
+    const square = new Uint8Array(256);
+    for (let i = 0; i < square.length; i++) square[i] = i % 2 ? 255 : 1;
+    assert.ok(Math.abs(af.frameLevelDb(square)) < 0.2, af.frameLevelDb(square));
+
+    // Half amplitude is about -6 dB.
+    const half = new Uint8Array(256);
+    for (let i = 0; i < half.length; i++) half[i] = i % 2 ? 192 : 64;
+    assert.ok(Math.abs(af.frameLevelDb(half) + 6) < 0.3, af.frameLevelDb(half));
+});
+
+t('auto makeup follows threshold and ratio, and stays bounded', () => {
+    // Harder compression gives back more, but never more than the slider could.
+    assert.ok(af.autoMakeup(-30, 4) > af.autoMakeup(-30, 2));
+    assert.ok(af.autoMakeup(-40, 4) > af.autoMakeup(-20, 4));
+    assert.strictEqual(af.autoMakeup(-30, 1), 0, 'a ratio of 1:1 compresses nothing');
+    for (const [th, r] of [[-60, 20], [0, 1], [-60, 1], [-5, 20]]) {
+        const m = af.autoMakeup(th, r);
+        assert.ok(m >= af.COMP_LIMITS.makeup.min && m <= af.COMP_LIMITS.makeup.max, `${th}/${r} -> ${m}`);
+    }
+});
+
+t('every filter section has defaults and ships disabled', () => {
+    for (const [name, section] of Object.entries(af.FILTER_DEFAULTS)) {
+        assert.strictEqual(section.enabled, false, `${name} must ship off`);
+    }
+    assert.deepStrictEqual(
+        Object.keys(af.FILTER_DEFAULTS).sort(),
+        ['bandpass', 'compressor', 'eq', 'gate', 'notch', 'stereo'],
+    );
+});
+
 console.log(process.exitCode ? '\nPROTOCOL TESTS FAILED' : `\nall ${pass} protocol tests passed`);

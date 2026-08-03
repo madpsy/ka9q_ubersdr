@@ -7,6 +7,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { throttle } from '../lib/throttle.js';
 import { isMention } from '../lib/mentions.js';
+import { validateUsername } from '../radio/chat-connection.js';
 
 const ChatContext = createContext(null);
 
@@ -68,6 +69,12 @@ export function ChatProvider({ children }) {
     nameRef.current = username;
     const chimeRef = useRef(chimeOn);
     chimeRef.current = chimeOn;
+    const joinedRef = useRef(joined);
+    joinedRef.current = joined;
+    // Bounds the automatic re-join so a name the server will never accept
+    // (now restricted, or newly caught by the profanity filter) cannot turn
+    // into an error loop.
+    const autoJoins = useRef(0);
 
     useEffect(() => {
         const offs = [];
@@ -102,7 +109,32 @@ export function ChatProvider({ children }) {
         offs.push(chat.on('users', ({ users: list }) => setUsers(list)));
         offs.push(chat.on('userUpdate', () => chat.requestUsers()));
         offs.push(chat.on('idle', () => chat.requestUsers()));
-        offs.push(chat.on('error', (e) => setError(e.message || 'chat error')));
+        offs.push(chat.on('error', (e) => {
+            const message = e.message || 'chat error';
+            setError(message);
+            // The server forgets our identity when its session goes (a restart,
+            // or a socket it had already dropped). Re-join rather than making
+            // the user notice and retype.
+            if (message === 'username not set' && nameRef.current && autoJoins.current < 3) {
+                autoJoins.current += 1;
+                chat.setUsername(nameRef.current);
+                return;
+            }
+            // A name the server refuses outright drops us back to the join form
+            // with the reason showing.
+            if (/username/i.test(message)) setJoined(false);
+        }));
+
+        // Auto-join with a remembered name, as v1 does. Driven by the
+        // subscription confirmation because nothing is accepted before it.
+        offs.push(chat.on('subscribed', (ok) => {
+            if (!ok) return;
+            autoJoins.current = 0;
+            const saved = nameRef.current;
+            if (!saved || joinedRef.current || validateUsername(saved)) return;
+            chat.setUsername(saved);
+            setJoined(true);
+        }));
         return () => offs.forEach((off) => off());
     }, [chat]);
 
@@ -132,6 +164,10 @@ export function ChatProvider({ children }) {
         leave() {
             chat.leave();
             setJoined(false);
+            // Forget the name too, or the next connection silently re-joins the
+            // person who just chose to leave.
+            setUsername('');
+            try { localStorage.removeItem(NAME_KEY); } catch (e) { /* ignore */ }
         },
         send(text) {
             const body = String(text).trim();

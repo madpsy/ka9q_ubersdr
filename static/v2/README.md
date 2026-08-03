@@ -180,7 +180,10 @@ panel never disturbs an existing user's arrangement.
   A username (1–15 chars, alphanumeric plus `- _ /`, not at the ends) is needed
   to send but not to read, and is re-sent on reconnect along with the published
   frequency/mode — otherwise a dropped socket silently demotes the user to an
-  anonymous listener. The socket is opened only while the receiver is running
+  anonymous listener. A remembered name auto-joins once the subscription is
+  confirmed, and a `username not set` error triggers a re-join (bounded, so a
+  name the server will never accept cannot loop). Leaving forgets the name, or
+  the next connection would silently rejoin whoever just chose to leave. The socket is opened only while the receiver is running
   *and* the chat panel is visible.
 * **A new session UUID per session start.** Minted when the user starts
   listening, not persisted, and shared by both sockets — the server pairs audio

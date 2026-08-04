@@ -78,50 +78,60 @@ function ChannelPicker() {
     );
 }
 
-export default function AudioPanel() {
+// `minimal` keeps squelch and noise reduction — the two you ride while
+// listening — and drops volume, channel and buffer, which are set once. The
+// squelch explainer goes with them: it describes a control you already know how
+// to use by the time you are running minimal. See the registry's `minimal`.
+export default function AudioPanel({ minimal }) {
     const { audio, actions } = useRadio();
 
     return (
         <div className="stack">
-            <div className="volume-row">
-                <Button
-                    variant="ghost"
-                    icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
-                    title={audio.muted ? 'Unmute' : 'Mute'}
-                    active={audio.muted}
-                    onClick={actions.toggleMute}
-                />
-                <Slider
-                    value={Math.round(audio.volume * 100)}
-                    min={0}
-                    max={100}
-                    onChange={(v) => actions.setVolume(v / 100)}
-                />
-                <span className="volume-row__value">{Math.round(audio.volume * 100)}</span>
-            </div>
+            {!minimal && (
+                <>
+                    <div className="volume-row">
+                        <Button
+                            variant="ghost"
+                            icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
+                            title={audio.muted ? 'Unmute' : 'Mute'}
+                            active={audio.muted}
+                            onClick={actions.toggleMute}
+                        />
+                        <Slider
+                            value={Math.round(audio.volume * 100)}
+                            min={0}
+                            max={100}
+                            onChange={(v) => actions.setVolume(v / 100)}
+                        />
+                        <span className="volume-row__value">{Math.round(audio.volume * 100)}</span>
+                    </div>
 
-            <ChannelPicker />
+                    <ChannelPicker />
 
-            <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>
-                <Slider
-                    value={Math.round(audio.bufferSec * 1000)}
-                    min={60}
-                    max={800}
-                    step={20}
-                    onChange={(ms) => actions.setBufferSec(ms / 1000)}
-                />
-            </Field>
-            <div className="note note--tight">
-                A larger buffer rides out network jitter at the cost of latency.
-            </div>
+                    <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>
+                        <Slider
+                            value={Math.round(audio.bufferSec * 1000)}
+                            min={60}
+                            max={800}
+                            step={20}
+                            onChange={(ms) => actions.setBufferSec(ms / 1000)}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        A larger buffer rides out network jitter at the cost of latency.
+                    </div>
 
-            <div className="divider" />
+                    <div className="divider" />
+                </>
+            )}
 
             <SquelchControl />
-            <div className="note note--tight">
-                Gates audio below the threshold, server-side. The marker shows
-                live SNR — set the threshold just above the noise.
-            </div>
+            {!minimal && (
+                <div className="note note--tight">
+                    Gates audio below the threshold, server-side. The marker shows
+                    live SNR — set the threshold just above the noise.
+                </div>
+            )}
 
             <DspControl />
 

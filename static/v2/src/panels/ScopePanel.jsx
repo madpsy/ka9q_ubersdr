@@ -49,7 +49,10 @@ const RULER_H = 13;
 const SCOPE_MIN_PEAK = 0.05;   // fraction of full scale; below this, no extra gain
 const SCOPE_SILENT_LSB = 2;    // +/-2/128 or less is the gate closed, not a signal
 
-export default function ScopePanel() {
+// `minimal` keeps the view switch and the two canvases and drops the settings
+// under them — timebase, contrast, resolution — and the bandwidth line. The
+// settings still apply; they are just not on show. See the registry's `minimal`.
+export default function ScopePanel({ minimal }) {
     const { player, running, tuning } = useRadio();
     const display = useDisplay();
 
@@ -157,19 +160,19 @@ export default function ScopePanel() {
                 </div>
             )}
 
-            {showScope && (
+            {!minimal && showScope && (
                 <Field label="Timebase" hint={`${timebase} ms`}>
                     <Slider value={timebase} min={2} max={200} step={1} onChange={setTimebase} />
                 </Field>
             )}
 
-            {showWf && (
+            {!minimal && showWf && (
                 <Field label="Contrast" hint={contrast.toFixed(2)}>
                     <Slider value={contrast} min={0.4} max={2.5} step={0.05} onChange={setContrast} />
                 </Field>
             )}
 
-            {showWf && (
+            {!minimal && showWf && (
                 <Field label="Resolution" hint={rate ? `${Math.round(rate / fftSize)} Hz/bin` : ''}>
                     <Segmented
                         options={FFT_SIZES.map((f) => ({ value: String(f.value), label: f.label }))}
@@ -180,11 +183,16 @@ export default function ScopePanel() {
                 </Field>
             )}
 
-            <div className="note note--tight">
-                {!running
-                    ? 'Start the receiver to see audio.'
-                    : `${fmtHz(bins.startFreq)}–${fmtHz(bins.endFreq)} Hz of ${fmtHz((rate || 48000) / 2)} Hz available`}
-            </div>
+            {/* The bandwidth line goes with the settings, but "start the
+                receiver" stays either way: without it two blank canvases are
+                the only thing a stopped receiver shows here. */}
+            {(!minimal || !running) && (
+                <div className="note note--tight">
+                    {!running
+                        ? 'Start the receiver to see audio.'
+                        : `${fmtHz(bins.startFreq)}–${fmtHz(bins.endFreq)} Hz of ${fmtHz((rate || 48000) / 2)} Hz available`}
+                </div>
+            )}
         </div>
     );
 }

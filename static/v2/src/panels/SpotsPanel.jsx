@@ -247,7 +247,11 @@ function Head({ tab }) {
     );
 }
 
-export default function SpotsPanel() {
+// `minimal` hides the filter row and leaves the list. The filters themselves
+// stay in force — hiding a control does not undo it — and the count above the
+// list keeps reading "N of M" whenever they are narrowing anything, so a short
+// list is never a mystery. See the registry's `minimal`.
+export default function SpotsPanel({ minimal }) {
     const { serverInfo, tuning, actions, running } = useRadio();
     const { sections } = useLayout();
 
@@ -346,7 +350,7 @@ export default function SpotsPanel() {
             {!running && <div className="note note--tight">Start listening to receive spots.</div>}
             {running && state === 'reconnecting' && <div className="note note--warn">Reconnecting…</div>}
 
-            <Filters tab={active} filters={f} set={set} countries={countries} />
+            {!minimal && <Filters tab={active} filters={f} set={set} countries={countries} />}
 
             <div className={`list spots__list spots__list--${active}`}>
                 {page.length === 0 && (

@@ -45,7 +45,11 @@ const SOURCE_OPTIONS = [
     { value: 'radiosync', label: 'Radio Sync' },
 ];
 
-export default function RadioControlPanel() {
+// `minimal` only means something for Radio Sync, where there is a readout worth
+// keeping on its own: the rig's frequency, mode and TX state. The mapped
+// surfaces have no equivalent — a mapping table cut down is just a shorter
+// mapping table — so for them it changes nothing. See the registry's `minimal`.
+export default function RadioControlPanel({ minimal }) {
     const radio = useRadio();
     const [cfg, setCfg] = useState(loadState);
     const [messages, setMessages] = useState([]);
@@ -89,6 +93,18 @@ export default function RadioControlPanel() {
     // released: not on unmount, because a panel unmounts every time it is
     // dragged to another dock, and a dock drag must not close a serial port.
     useEffect(() => { releaseExcept(source); }, [source]);
+
+    // Just the rig readout: no source picker, no rig or baud selection, no
+    // direction, no log. The link itself is untouched — it lives on the sync
+    // singleton, so it stays connected and the readout keeps updating.
+    const syncOnly = minimal && source === 'radiosync';
+    if (syncOnly) {
+        return (
+            <div className="stack">
+                <RadioSyncControl cfg={cfg} update={update} ctx={ctx} onMessage={pushMessage} minimal />
+            </div>
+        );
+    }
 
     return (
         <div className="stack">
@@ -513,7 +529,7 @@ const DIRECTIONS = [
 // hold the top rate reliably.
 const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 
-function RadioSyncControl({ cfg, update, ctx, onMessage }) {
+function RadioSyncControl({ cfg, update, ctx, onMessage, minimal }) {
     // Also a singleton: an open CAT link and a loaded 14 MB module must both
     // survive this panel being dragged to another dock.
     const sync = getSync();
@@ -552,17 +568,32 @@ function RadioSyncControl({ cfg, update, ctx, onMessage }) {
         ? `${(rig.frequency / 1e6).toFixed(6)}`
         : '--.------';
 
+    const readout = (
+        <div className="rc-rig">
+            <div className="rc-rig__freq">{freqText}<span className="rc-rig__unit">MHz</span></div>
+            <div className="rc-rig__row">
+                <span className="rc-rig__mode">{rig.mode || '---'}</span>
+                <span className={`rc-rig__tx${rig.tx ? ' is-tx' : ''}`}>
+                    {status.connected ? (rig.tx ? 'TX' : 'RX') : '--'}
+                </span>
+            </div>
+        </div>
+    );
+
+    // The load note stays: 14 MB is long enough that a readout stuck on dashes
+    // needs to say it is still coming.
+    if (minimal) {
+        return (
+            <>
+                {readout}
+                {loading && <div className="note note--tight">Loading Hamlib…</div>}
+            </>
+        );
+    }
+
     return (
         <>
-            <div className="rc-rig">
-                <div className="rc-rig__freq">{freqText}<span className="rc-rig__unit">MHz</span></div>
-                <div className="rc-rig__row">
-                    <span className="rc-rig__mode">{rig.mode || '---'}</span>
-                    <span className={`rc-rig__tx${rig.tx ? ' is-tx' : ''}`}>
-                        {status.connected ? (rig.tx ? 'TX' : 'RX') : '--'}
-                    </span>
-                </div>
-            </div>
+            {readout}
 
             {loading && <div className="note note--tight">Loading Hamlib — 14 MB of WebAssembly, fetched once per session.</div>}
 

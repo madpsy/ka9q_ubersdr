@@ -80,7 +80,10 @@ function Row({ activity, onTune, current }) {
     );
 }
 
-export default function VoiceActivityPanel() {
+// `minimal` drops the header — scope switch, signal count, the button to the
+// full page — and leaves the detections. The scope keeps whatever it was set
+// to. See the registry's `minimal`.
+export default function VoiceActivityPanel({ minimal }) {
     const { tuning, actions, serverInfo } = useRadio();
     const [scope, setScope] = useState('band');
     const [groups, setGroups] = useState(null);   // null until the first reply
@@ -116,26 +119,32 @@ export default function VoiceActivityPanel() {
 
     return (
         <div className="stack va">
-            <div className="va__head">
-                <Segmented options={SCOPES} value={scope} onChange={setScope} size="sm" />
-                <span className="va__count">
-                    {groups === null ? 'Loading…' : `${count} signal${count === 1 ? '' : 's'}`}
-                    {scope === 'band' && total > count ? ` · ${total} all bands` : ''}
-                </span>
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Icon.External />}
-                    title="Open the full voice activity page"
-                    onClick={() => openVoiceActivityPage(band)}
-                >
-                    Open
-                </Button>
-            </div>
+            {!minimal && (
+                <div className="va__head">
+                    <Segmented options={SCOPES} value={scope} onChange={setScope} size="sm" />
+                    <span className="va__count">
+                        {groups === null ? 'Loading…' : `${count} signal${count === 1 ? '' : 's'}`}
+                        {scope === 'band' && total > count ? ` · ${total} all bands` : ''}
+                    </span>
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.External />}
+                        title="Open the full voice activity page"
+                        onClick={() => openVoiceActivityPage(band)}
+                    >
+                        Open
+                    </Button>
+                </div>
+            )}
 
             {error && <div className="note note--warn">Could not load voice activity: {error}</div>}
 
             <div className="list va__list">
+                {/* The header carries "Loading…" in the full view; without it
+                    the first poll would just be a blank panel. */}
+                {minimal && groups === null && <Empty>Loading…</Empty>}
+
                 {groups !== null && count === 0 && (
                     <Empty>
                         {scope === 'band' && !band

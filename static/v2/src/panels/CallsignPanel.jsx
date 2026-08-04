@@ -202,7 +202,11 @@ function Result({ call, data, serverInfo }) {
     );
 }
 
-export default function CallsignPanel() {
+// `minimal` hides the search form and leaves the result. The panel still fills:
+// clicking a callsign in the spots or voice-activity lists routes here through
+// onLookupRequest, so it becomes a read-out of whoever you last clicked on.
+// See the registry's `minimal`.
+export default function CallsignPanel({ minimal }) {
     const { serverInfo, running } = useRadio();
     const [entry, setEntry] = useState('');
     const [call, setCall] = useState('');
@@ -247,43 +251,45 @@ export default function CallsignPanel() {
 
     return (
         <div className="stack cs">
-            <form
-                className="cs-form"
-                onSubmit={(e) => { e.preventDefault(); run(entry); }}
-            >
-                <input
-                    ref={inputRef}
-                    className="input cs-form__input"
-                    type="search"
-                    placeholder="Callsign…"
-                    autoComplete="off"
-                    spellCheck="false"
-                    value={entry}
-                    onChange={(e) => setEntry(e.target.value.toUpperCase())}
-                />
-                <Button
-                    type="submit"
-                    size="sm"
-                    variant="primary"
-                    icon={<Icon.Search />}
-                    disabled={busy || !entry.trim()}
-                    title="Look up"
-                />
-                {/* The v1 page, which carries the bio, the map and the QSL
-                    details this panel does not. Whatever is in the box goes
-                    with it. Icon only — it sits next to the primary action and
-                    a second label would compete with it. */}
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Icon.External />}
-                    title="Open the full callsign lookup page"
-                    onClick={() => openCallsignLookup({
-                        uuid: getSessionId(),
-                        callsign: isValidCallsign(normaliseCallsign(entry)) ? entry : '',
-                    })}
-                />
-            </form>
+            {!minimal && (
+                <form
+                    className="cs-form"
+                    onSubmit={(e) => { e.preventDefault(); run(entry); }}
+                >
+                    <input
+                        ref={inputRef}
+                        className="input cs-form__input"
+                        type="search"
+                        placeholder="Callsign…"
+                        autoComplete="off"
+                        spellCheck="false"
+                        value={entry}
+                        onChange={(e) => setEntry(e.target.value.toUpperCase())}
+                    />
+                    <Button
+                        type="submit"
+                        size="sm"
+                        variant="primary"
+                        icon={<Icon.Search />}
+                        disabled={busy || !entry.trim()}
+                        title="Look up"
+                    />
+                    {/* The v1 page, which carries the bio, the map and the QSL
+                        details this panel does not. Whatever is in the box goes
+                        with it. Icon only — it sits next to the primary action
+                        and a second label would compete with it. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.External />}
+                        title="Open the full callsign lookup page"
+                        onClick={() => openCallsignLookup({
+                            uuid: getSessionId(),
+                            callsign: isValidCallsign(normaliseCallsign(entry)) ? entry : '',
+                        })}
+                    />
+                </form>
+            )}
 
             {!running && (
                 <div className="note note--tight">
@@ -295,8 +301,14 @@ export default function CallsignPanel() {
 
             {busy && !data && <Empty>Looking up {call}…</Empty>}
 
+            {/* Without the box there is nothing to type into, so the prompt has
+                to name the other way in. */}
             {!busy && !data && !error && running && (
-                <Empty>Enter a callsign to look it up.</Empty>
+                <Empty>
+                    {minimal
+                        ? 'Click a callsign in the spots or activity lists.'
+                        : 'Enter a callsign to look it up.'}
+                </Empty>
             )}
 
             {data && <Result call={call} data={data} serverInfo={serverInfo} />}

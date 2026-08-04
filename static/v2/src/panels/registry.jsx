@@ -69,6 +69,9 @@ export const PANELS = [
         // it stays declared for anyone who drags it there. The table is wide,
         // and a side dock is not, so this is a panel people will often float.
         fill: true,
+        // Minimal: the spots, without the filter row. Once the filters are set
+        // they are set, and in a side dock they cost more height than the list.
+        minimal: true,
         Component: SpotsPanel,
         requires: (serverInfo) => spotTabs(serverInfo).length > 0,
     },
@@ -81,6 +84,9 @@ export const PANELS = [
         // says what this panel should do if someone moves it there. In a side
         // dock the result pane's own max-height caps it instead.
         fill: true,
+        // Minimal: the result on its own. Most lookups start from a click on a
+        // spot or an activity row, not from typing, so the box is optional.
+        minimal: true,
         Component: CallsignPanel,
         // The lookup provider is configured per instance; without it every
         // request would 503, so the panel is absent rather than broken.
@@ -118,7 +124,16 @@ export const PANELS = [
         requires: (serverInfo) => !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled),
     },
 
-    { id: 'recorder', title: 'Recorder', icon: <Icon.Record />, dock: 'left', defaultOpen: false, Component: RecorderPanel },
+    // Minimal: status, clock and buttons. The format is chosen once.
+    {
+        id: 'recorder',
+        title: 'Recorder',
+        icon: <Icon.Record />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: RecorderPanel,
+    },
 
     // Hardware control surfaces and CAT sync. Collapsed by default: it does
     // nothing until someone attaches a device, and its Hamlib download only
@@ -129,6 +144,9 @@ export const PANELS = [
         icon: <Icon.Knob />,
         dock: 'left',
         defaultOpen: false,
+        // Minimal: the rig's frequency, mode and TX state, and only under Radio
+        // Sync — the mapped surfaces have no readout to keep.
+        minimal: true,
         Component: RadioControlPanel,
     },
 
@@ -140,9 +158,21 @@ export const PANELS = [
     // the same information at a resolution you only want when you are studying
     // a signal rather than glancing at it.
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', minimal: true, Component: SignalPanel },
-    { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', Component: AudioPanel },
+    // Minimal: squelch and noise reduction. Volume, channel and buffer are set
+    // once a session; these two are worked at while you listen.
+    { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
-    { id: 'scope', title: 'Audio scope', icon: <Icon.Waves />, dock: 'right', defaultOpen: false, Component: ScopePanel },
+    // Minimal: the traces alone. Timebase, contrast and resolution are set once
+    // and then watched, and in a side dock they cost more height than the views.
+    {
+        id: 'scope',
+        title: 'Audio scope',
+        icon: <Icon.Waves />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: ScopePanel,
+    },
     { id: 'display', title: 'Display', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
     { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
@@ -171,6 +201,9 @@ export const PANELS = [
         icon: <Icon.Mic />,
         dock: 'bottom',
         fill: true,
+        // Minimal: the detections alone, without the scope switch, the count
+        // and the button to the full page.
+        minimal: true,
         Component: VoiceActivityPanel,
         // The detector runs off the noise floor monitor, so an instance
         // without it has nothing to show and the panel is absent rather than
@@ -178,7 +211,17 @@ export const PANELS = [
         // starts polling.
         requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
     },
-    { id: 'chat', title: 'Chat', icon: <Icon.Chat />, dock: 'bottom', fill: true, Component: ChatPanel, Badge: ChatBadge },
+    // Minimal: the conversation, without the user list beside it.
+    {
+        id: 'chat',
+        title: 'Chat',
+        icon: <Icon.Chat />,
+        dock: 'bottom',
+        fill: true,
+        minimal: true,
+        Component: ChatPanel,
+        Badge: ChatBadge,
+    },
     // Off by default: a diagnostic, not something to occupy a slot in the dock
     // until someone goes looking for it in the layout manager.
     {

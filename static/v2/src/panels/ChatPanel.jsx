@@ -34,7 +34,10 @@ function freqMessage(frequency, mode) {
     return `${(frequency / 1000).toFixed(3)} KHz (${String(mode).toUpperCase()})`;
 }
 
-export default function ChatPanel() {
+// `minimal` drops the user list and its drag grip, giving the whole panel to
+// the conversation. The list is still loaded — @-completion matches against it,
+// and the "N here" count is one expand away. See the registry's `minimal`.
+export default function ChatPanel({ minimal }) {
     const chat = useChat();
     const { actions: radio, running, tuning } = useRadio();
     const [draft, setDraft] = useState('');
@@ -353,47 +356,54 @@ export default function ChatPanel() {
                 {nameError && <div className="chat__hint">{nameError}</div>}
             </div>
 
-            <div
-                className="chat__grip"
-                title="Drag to resize the user list"
-                onPointerDown={onGripDown}
-                onPointerMove={onGripMove}
-                onPointerUp={onGripUp}
-                onPointerCancel={onGripUp}
-                onDoubleClick={() => { setUsersWidth(170); display.set({ chatUsersWidth: 170 }); }}
-            />
+            {/* The grip goes with the list — a splitter with nothing on its far
+                side is a handle that resizes nothing. */}
+            {!minimal && (
+                <div
+                    className="chat__grip"
+                    title="Drag to resize the user list"
+                    onPointerDown={onGripDown}
+                    onPointerMove={onGripMove}
+                    onPointerUp={onGripUp}
+                    onPointerCancel={onGripUp}
+                    onDoubleClick={() => { setUsersWidth(170); display.set({ chatUsersWidth: 170 }); }}
+                />
+            )}
 
-            <div className="chat__users" style={{ flexBasis: usersWidth }}>
-                <div className="section-label"><span>{chat.users.length} here</span></div>
-                {chat.users.length === 0 && <Empty>Nobody yet.</Empty>}
-                {chat.users.map((u) => (
-                    <button
-                        key={u.username}
-                        type="button"
-                        className={`chat__user${u.is_idle ? ' is-idle' : ''}`}
-                        // Their frequency is published over chat, so it doubles
-                        // as a way to go and listen to what they are hearing.
-                        disabled={!u.frequency}
-                        title={u.frequency ? `Tune to ${formatFreqShort(u.frequency)}` : u.username}
-                        onClick={() => {
-                            if (!u.frequency) return;
-                            if (u.mode) radio.setMode(u.mode);
-                            radio.setFrequency(u.frequency);
-                            radio.setSpectrumCenter(u.frequency);
-                        }}
-                    >
-                        <span className="chat__user-name">
-                            {countryFlag(u.country_code)} {u.username}
-                            {u.tx && <span className="chip">TX</span>}
-                        </span>
-                        <span className="chat__user-meta">
-                            {u.frequency ? formatFreqShort(u.frequency) : '—'}
-                            {u.mode ? ` ${u.mode.toUpperCase()}` : ''}
-                            {u.is_idle && u.idle_minutes ? ` · idle ${u.idle_minutes}m` : ''}
-                        </span>
-                    </button>
-                ))}
-            </div>
+            {!minimal && (
+                <div className="chat__users" style={{ flexBasis: usersWidth }}>
+                    <div className="section-label"><span>{chat.users.length} here</span></div>
+                    {chat.users.length === 0 && <Empty>Nobody yet.</Empty>}
+                    {chat.users.map((u) => (
+                        <button
+                            key={u.username}
+                            type="button"
+                            className={`chat__user${u.is_idle ? ' is-idle' : ''}`}
+                            // Their frequency is published over chat, so it
+                            // doubles as a way to go and listen to what they
+                            // are hearing.
+                            disabled={!u.frequency}
+                            title={u.frequency ? `Tune to ${formatFreqShort(u.frequency)}` : u.username}
+                            onClick={() => {
+                                if (!u.frequency) return;
+                                if (u.mode) radio.setMode(u.mode);
+                                radio.setFrequency(u.frequency);
+                                radio.setSpectrumCenter(u.frequency);
+                            }}
+                        >
+                            <span className="chat__user-name">
+                                {countryFlag(u.country_code)} {u.username}
+                                {u.tx && <span className="chip">TX</span>}
+                            </span>
+                            <span className="chat__user-meta">
+                                {u.frequency ? formatFreqShort(u.frequency) : '—'}
+                                {u.mode ? ` ${u.mode.toUpperCase()}` : ''}
+                                {u.is_idle && u.idle_minutes ? ` · idle ${u.idle_minutes}m` : ''}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

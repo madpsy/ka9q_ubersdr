@@ -17,7 +17,10 @@ const FORMATS = [
     { value: 'wav', label: 'WAV', title: 'Uncompressed 16-bit PCM — larger, no second encode' },
 ];
 
-export default function RecorderPanel() {
+// `minimal` drops the format picker and the explainer, leaving the status, the
+// clock and the buttons. The format still applies — whatever was last chosen is
+// what the next recording uses. See the registry's `minimal`.
+export default function RecorderPanel({ minimal }) {
     const { player, running, tuning, serverInfo, meters } = useRadio();
     const rec = getRecorder(player);
 
@@ -116,23 +119,25 @@ export default function RecorderPanel() {
                 color={recording ? 'var(--bad)' : undefined}
             />
 
-            <Field label="Format" hint={rec.busy ? 'locked while a recording is held' : undefined}>
-                <Segmented
-                    options={options}
-                    value={rec.busy ? rec.format : format}
-                    onChange={(v) => {
-                        if (rec.busy) return;
-                        if (v === 'wav' && !wavOk) {
-                            setError('WAV recording needs a secure context (HTTPS).');
-                            return;
-                        }
-                        setError('');
-                        rec.preferredFormat = v;
-                        setFormat(v);
-                    }}
-                    size="sm"
-                />
-            </Field>
+            {!minimal && (
+                <Field label="Format" hint={rec.busy ? 'locked while a recording is held' : undefined}>
+                    <Segmented
+                        options={options}
+                        value={rec.busy ? rec.format : format}
+                        onChange={(v) => {
+                            if (rec.busy) return;
+                            if (v === 'wav' && !wavOk) {
+                                setError('WAV recording needs a secure context (HTTPS).');
+                                return;
+                            }
+                            setError('');
+                            rec.preferredFormat = v;
+                            setFormat(v);
+                        }}
+                        size="sm"
+                    />
+                </Field>
+            )}
 
             {recording ? (
                 <Button variant="danger" icon={<Icon.Stop />} onClick={() => rec.stop()}>
@@ -170,12 +175,14 @@ export default function RecorderPanel() {
                 <div className="note note--tight">Start the receiver to record.</div>
             )}
 
-            <div className="note note--tight">
-                Captures the processed audio as you hear it — filters, squelch
-                and the volume setting included. The download is a ZIP holding
-                the audio, the frequency and mode it was made on, and a CSV of
-                the signal readings taken once a second.
-            </div>
+            {!minimal && (
+                <div className="note note--tight">
+                    Captures the processed audio as you hear it — filters, squelch
+                    and the volume setting included. The download is a ZIP holding
+                    the audio, the frequency and mode it was made on, and a CSV of
+                    the signal readings taken once a second.
+                </div>
+            )}
         </div>
     );
 }

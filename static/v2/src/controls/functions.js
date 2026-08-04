@@ -23,6 +23,10 @@ import {
     MODES, MODE_BY_ID, bandwidthLimits,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, squelchEnabled,
 } from '../radio/constants.js';
+import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
+import {
+    antennaGround, antennaSelect, antennaStep, rotatorCommand, rotatorStep,
+} from './hardware.js';
 
 // Band entry points. These are the digital-mode watering holes rather than the
 // band edges, which is what v1 uses and what makes a band button useful: you
@@ -252,6 +256,146 @@ const SPECTRUM = group('Spectrum', [
     },
 ]);
 
+// The four VFOs, the same ones the Receiver panel's A B C D buttons switch.
+// Each holds a frequency, a mode, a passband and the spectrum zoom, and
+// switching stores what is live into the one being left — so a control mapped
+// here is a real VFO switch, not a memory recall.
+//
+// `radioOf` is the shape lib/vfos.js wants. The control facade keeps `view`
+// alongside the rest of the receiver state precisely for this.
+const radioOf = (ctx) => ({
+    tuning: ctx.state().tuning,
+    view: ctx.state().view,
+    actions: ctx.actions,
+});
+
+const VFO = group('VFO', [
+    ...VFO_IDS.map((id) => ({
+        id: `vfo_${id.toLowerCase()}`,
+        label: `VFO ${id}`,
+        accepts: PRESS,
+        run: (ev, ctx) => selectVfo(radioOf(ctx), id),
+    })),
+    {
+        id: 'vfo_next',
+        label: 'Next VFO',
+        accepts: PRESS,
+        run: (ev, ctx) => stepVfo(radioOf(ctx), +1),
+    },
+    {
+        id: 'vfo_prev',
+        label: 'Previous VFO',
+        accepts: PRESS,
+        run: (ev, ctx) => stepVfo(radioOf(ctx), -1),
+    },
+    {
+        // v1's one VFO function, and the reason `vfo_ab_toggle` is no longer
+        // retired: with four slots the A/B swap of a real radio is one press
+        // that ignores C and D, which is what the old mapping meant.
+        id: 'vfo_toggle_ab',
+        label: 'VFO A/B toggle',
+        accepts: PRESS,
+        // Read through the store rather than remembered here, so a switch made
+        // from the panel or the spectrum's right-click menu is the one this
+        // toggles away from.
+        run: (ev, ctx) => selectVfo(radioOf(ctx), getVfos().active === 'A' ? 'B' : 'A'),
+    },
+]);
+
+// --- station hardware -------------------------------------------------------
+//
+// The rotator and the antenna switch, for the receivers that have them. Both
+// are offered in the learn dropdown only where the server says they exist (see
+// `catalogue`), but both stay resolvable everywhere so a mapping file carried
+// between two receivers reads as itself rather than as an unknown id.
+
+// A handful of steps rather than a bearing box: from a knob you turn the beam,
+// you do not type 137 into it. 5° is a nudge onto a station, 15° walks it, and
+// 45° is the eighth of a circle a beam heading is usually given in.
+const ROT_STEPS = [5, 15, 45];
+
+const ROTATOR = group('Rotator', [
+    ...ROT_STEPS.flatMap((deg) => [
+        {
+            id: `rot_left_${deg}`,
+            label: `Rotate left ${deg}°`,
+            accepts: PRESS,
+            needs: 'rotator',
+            run: () => rotatorStep(-deg),
+        },
+        {
+            id: `rot_right_${deg}`,
+            label: `Rotate right ${deg}°`,
+            accepts: PRESS,
+            needs: 'rotator',
+            run: () => rotatorStep(deg),
+        },
+    ]),
+    {
+        // Deliberately not rate limited by the dispatcher: detents accumulate
+        // into one bearing a second inside controls/hardware.js, and a throttle
+        // here would drop the surplus, which is most of the turn.
+        id: 'rot_dial',
+        label: 'Rotate (dial)',
+        hint: '5° per detent',
+        accepts: [REL],
+        encoder: true,
+        needs: 'rotator',
+        run: (ev) => rotatorStep(5 * detents(ev)),
+    },
+    {
+        id: 'rot_stop',
+        label: 'Stop the rotator',
+        accepts: PRESS,
+        needs: 'rotator',
+        run: () => rotatorCommand('stop'),
+    },
+]);
+
+// The switch takes 1–10 antennas and the server names them. All ten ids exist
+// so a mapping made on one receiver still reads on another; `catalogue` offers
+// only the ones this switch has, under the operator's own labels.
+const ANT_MAX = 10;
+
+function antennaGroup(hw) {
+    const count = hw && hw.antenna ? hw.antenna.count : ANT_MAX;
+    const labels = (hw && hw.antenna && hw.antenna.labels) || [];
+    const items = [
+        {
+            id: 'ant_next',
+            label: 'Next antenna',
+            accepts: PRESS,
+            needs: 'antenna',
+            run: () => antennaStep(+1),
+        },
+        {
+            id: 'ant_prev',
+            label: 'Previous antenna',
+            accepts: PRESS,
+            needs: 'antenna',
+            run: () => antennaStep(-1),
+        },
+        {
+            id: 'ant_ground',
+            label: 'Ground all antennas',
+            accepts: PRESS,
+            needs: 'antenna',
+            run: () => antennaGround(),
+        },
+    ];
+    for (let n = 1; n <= count; n += 1) {
+        const named = labels[n - 1];
+        items.push({
+            id: `ant_select_${n}`,
+            label: named && named !== `Antenna ${n}` ? `${n} — ${named}` : `Antenna ${n}`,
+            accepts: PRESS,
+            needs: 'antenna',
+            run: () => antennaSelect(n),
+        });
+    }
+    return group('Antenna', items);
+}
+
 // Noise reduction is schema-driven — the server publishes which filters it has
 // and v2 hardcodes none of them (see the DSP note in the README). So this group
 // is generated from whatever `get_dsp_filters` returned, and a mapping made
@@ -309,6 +453,8 @@ function cycleDsp(ctx, names, dir) {
 // keep resolving or an imported mapping quietly stops working.
 const ALIAS = {
     mode_cw: 'mode_cwu',
+    // v1's A/B swap, which v2 could not honour until there were VFOs to swap.
+    vfo_ab_toggle: 'vfo_toggle_ab',
 };
 
 // Functions v1 could map that v2 has no equivalent for. Kept by name so an
@@ -316,27 +462,70 @@ const ALIAS = {
 // rather than being dropped on load, which would look like a corrupt import.
 export const RETIRED = {
     nb_toggle: 'Noise blanker — v2 has no client-side blanker',
-    vfo_ab_toggle: 'VFO A/B — v2 has no second VFO',
     nr2_toggle: 'Replaced by “Noise reduction on/off”',
 };
 
-// The full catalogue for the receiver we are connected to. `dspSchemas` comes
-// from the radio's `dsp.schemas`, so it changes as the server reports them.
-export function catalogue(dspSchemas) {
-    return [...FREQUENCY, ...MODE, ...BAND, ...AUDIO, ...SPECTRUM, ...dspGroup(dspSchemas)];
+// What the receiver has beyond the receiver itself, for the two groups that are
+// not always there: `{ rotator: bool, antenna: { count, labels } | null }`.
+// Comes from /api/description and, for the antenna names, from the switch
+// itself — see useHardware in controls/panel.jsx.
+function hasRotator(hw) { return !!(hw && hw.rotator); }
+function hasAntenna(hw) { return !!(hw && hw.antenna && hw.antenna.count); }
+
+/**
+ * What can be mapped on this receiver — the list the learn dropdown offers.
+ *
+ * `dspSchemas` comes from the radio's `dsp.schemas` and `hw` from the server
+ * description, so both move with the receiver you are connected to. Hardware
+ * this instance does not have is left out entirely: an antenna switch nobody
+ * has is not a thing to offer and then apologise for.
+ */
+export function catalogue(dspSchemas, hw) {
+    return [
+        ...FREQUENCY, ...MODE, ...BAND, ...VFO, ...AUDIO, ...SPECTRUM,
+        ...dspGroup(dspSchemas),
+        ...(hasRotator(hw) ? ROTATOR : []),
+        ...(hasAntenna(hw) ? antennaGroup(hw) : []),
+    ];
 }
 
-export function findFunction(id, dspSchemas) {
+// Everything that resolves, whether or not this receiver offers it.
+//
+// A mapping file is carried between receivers — that is what export is for —
+// and a rotator mapping arriving somewhere without a rotator has to read as
+// "Rotate left 15°" on a row that says nothing happened, not as a raw id. Same
+// for the antennas past this switch's count.
+// The receiver's own catalogue comes first so a match there wins: an antenna
+// this switch has resolves to its operator's label, and only the ones past the
+// end fall through to the numbered tail.
+function resolvable(dspSchemas, hw) {
+    return [...catalogue(dspSchemas, hw), ...ROTATOR, ...antennaGroup(null)];
+}
+
+export function findFunction(id, dspSchemas, hw) {
     const wanted = ALIAS[id] || id;
-    return catalogue(dspSchemas).find((f) => f.id === wanted) || null;
+    return resolvable(dspSchemas, hw).find((f) => f.id === wanted) || null;
 }
 
 // Human-readable name for a function id, including ones this build retired.
-export function functionLabel(id, dspSchemas) {
-    const f = findFunction(id, dspSchemas);
+export function functionLabel(id, dspSchemas, hw) {
+    const f = findFunction(id, dspSchemas, hw);
     if (f) return f.label;
     if (RETIRED[id]) return id;
     return id;
+}
+
+// True for a function this receiver has no hardware for. The mapping is kept
+// and the row explains itself rather than the control simply doing nothing.
+export function isUnavailable(id, dspSchemas, hw) {
+    const f = findFunction(id, dspSchemas, hw);
+    if (!f) return false;
+    if (f.needs === 'rotator') return !hasRotator(hw);
+    if (f.needs === 'antenna') {
+        return !hasAntenna(hw)
+            || catalogue(dspSchemas, hw).every((c) => c.id !== f.id);
+    }
+    return false;
 }
 
 // True for the functions that are a dial and nothing else — the frequency

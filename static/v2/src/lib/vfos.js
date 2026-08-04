@@ -132,3 +132,51 @@ export function switchTo(state, to, live) {
         recall: target,
     };
 }
+
+// --- switching as an action -------------------------------------------------
+//
+// Three things switch VFOs now: the buttons in the Receiver panel, the
+// spectrum's right-click menu, and a control mapped to one on a hardware
+// surface. Switching is more than storing a slot — the recalled zoom has to go
+// back through the same actions a manual zoom uses, or it lands off the
+// server's binBandwidth ladder — so the whole of it lives here rather than in a
+// panel that is unmounted whenever it is collapsed.
+//
+// `radio` is anything carrying `tuning`, `view` and `actions`: the RadioContext
+// value in a panel, and the control-surface facade from controls/panel.jsx.
+
+function applyZoom(radio, binBandwidth) {
+    const { view, actions } = radio;
+    if (!binBandwidth || !view || !view.binCount) return;
+    // At or beyond full span, `reset` is the way back — it also hands the
+    // private radiod channel back.
+    if (view.defaultBinBandwidth > 0 && binBandwidth >= view.defaultBinBandwidth) {
+        actions.resetSpectrum();
+        return;
+    }
+    actions.setSpan(binBandwidth * view.binCount);
+}
+
+/** Switch to VFO `to`. Returns false if it was already the active one. */
+export function selectVfo(radio, to) {
+    const before = getVfos();
+    const { state, recall } = switchTo(before, to, vfoSnapshot(radio.tuning, radio.view));
+    if (state === before) return false;
+    setVfos(state);
+    if (!recall) return true;   // an unused VFO starts as a copy of this one
+    radio.actions.tuneTo({
+        frequency: recall.frequency,
+        mode: recall.mode,
+        bandwidthLow: recall.bandwidthLow,
+        bandwidthHigh: recall.bandwidthHigh,
+    });
+    applyZoom(radio, recall.binBandwidth);
+    return true;
+}
+
+/** Step `dir` places along A B C D, wrapping. */
+export function stepVfo(radio, dir) {
+    const i = VFO_IDS.indexOf(getVfos().active);
+    const next = VFO_IDS[(i + dir + VFO_IDS.length) % VFO_IDS.length];
+    return selectVfo(radio, next);
+}

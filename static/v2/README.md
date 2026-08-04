@@ -512,11 +512,28 @@ band is part guesswork, and which part matters.
   and not news. A manual Disconnect outranks the switch until the operator
   connects again or turns it back on, so a hotplug elsewhere cannot undo it.
   Mapping records and the export envelope are v1's byte for byte,
-  and v1's `localStorage` mappings are adopted on first run. `nb_toggle` and
-  `vfo_ab_toggle` have no v2 equivalent and are listed in `RETIRED` so an
-  imported file shows them struck through rather than dropping them silently;
-  `mode_cw` aliases to `mode_cwu` since v2 splits the sidebands. Noise reduction
-  entries are generated from the server's DSP schema — nothing hardcodes nr2.
+  and v1's `localStorage` mappings are adopted on first run. `nb_toggle` has no
+  v2 equivalent and is listed in `RETIRED` so an imported file shows it struck
+  through rather than dropping it silently; `mode_cw` aliases to `mode_cwu`
+  since v2 splits the sidebands, and `vfo_ab_toggle` — retired while there was
+  only one VFO — now aliases to the A/B swap. Noise reduction entries are
+  generated from the server's DSP schema; nothing hardcodes nr2.
+  **The catalogue reaches past the receiver.** The four VFOs are mappable, and
+  a mapped switch is the same switch the Receiver panel's A B C D buttons make
+  — the logic moved to `lib/vfos.js` so both make it, storing what is live into
+  the VFO being left and recalling the zoom through the same actions a manual
+  zoom uses. The rotator and the antenna switch are mappable too, on the
+  receivers that have them: `catalogue(dspSchemas, hw)` offers them only where
+  `/api/description` says they exist, and the antennas come under the operator's
+  own labels, read from the switch itself since the description carries only
+  what is selected. Both are HTTP rather than `actions`, so they live in
+  `controls/hardware.js` with two constraints spelled out there — their POST
+  endpoints are rate limited to one request a second, so detents and presses
+  accumulate into one target and one request rather than being dropped by a
+  throttle; and the password can only be the one their panel already saved,
+  because a knob cannot type. A mapping for hardware this receiver lacks is
+  kept, named and marked "not here" rather than dropped, since a mapping file is
+  something you carry between receivers.
 * **Two panels: mapped surfaces, and CAT.** SDR control holds FlexControl and
   MIDI — a control moves, a mapped function runs — and Radio control holds Radio
   Sync, where nothing is mapped and the rig and the receiver simply follow each

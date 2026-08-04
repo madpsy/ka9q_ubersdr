@@ -2942,45 +2942,75 @@ a.btn { text-decoration: none; }
 }
 .rc-learn__msg { flex: 1; font-size: calc(11.5px * var(--ui-scale)); color: var(--accent); }
 
-/* One row per mapping. The key is monospaced and fixed-ish so a column of them
-   lines up; the function name takes the slack and ellipses rather than wrapping
-   the row onto two lines. */
-.rc-map { display: flex; flex-direction: column; gap: 3px; }
+/* One card per mapping, two lines: the function it runs, then the control that
+   runs it and the chips describing that control.
+
+   Two lines because this panel is usually narrow. On one line the address and
+   the function competed for the same 240px and the function — the thing being
+   scanned for — lost. Stacked, each gets the full width, the function wraps
+   instead of ellipsising, and the chips sit with the address they qualify.
+   Delete spans both rows so it stays put however tall the card grows. */
+.rc-map { display: flex; flex-direction: column; gap: 4px; }
 .rc-map__row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 7px;
-    padding: 4px 6px;
+    column-gap: 6px;
+    row-gap: 3px;
+    padding: 6px 7px;
     border-radius: var(--radius-sm);
     background: var(--surface-2);
 }
-.rc-map__key {
-    flex: none;
-    max-width: 42%;
-    font-family: var(--mono);
-    font-size: calc(10.5px * var(--ui-scale));
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
 .rc-map__fn {
-    flex: 1;
+    grid-column: 1;
     min-width: 0;
     font-size: calc(11.5px * var(--ui-scale));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.3;
+    /* A DSP parameter can be named anything a filter author likes, so a label
+       with no space in it still has to fit rather than widening the panel. */
+    overflow-wrap: anywhere;
 }
 /* A function this build no longer has — an imported v1 mapping for the noise
    blanker or VFO A/B. Shown struck through rather than dropped, so the row
    explains itself instead of silently disappearing on import. */
 .rc-map__fn.is-retired { color: var(--text-faint); text-decoration: line-through; }
+.rc-map__meta {
+    grid-column: 1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-width: 0;
+}
+.rc-map__key {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+/* Smaller than a stand-alone tag: these sit under the function as a footnote to
+   it, and at full size they read as the louder half of the card. */
+.rc-map__meta .tag { font-size: calc(10px * var(--ui-scale)); padding: 1px 6px; }
+/* The fader/encoder switch — the one chip on the card meant to be pressed, so
+   it answers the pointer rather than sitting there reading as a label. Its own
+   rule rather than .tag--ghost + .tag--button, which cancel each other's border
+   depending on which was declared last. */
+.rc-map__mode {
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    cursor: pointer;
+    font-family: var(--mono);
+}
+.rc-map__mode:hover { color: var(--text); border-color: var(--text-dim); }
+.rc-map__mode.is-encoder { color: var(--accent); border-color: var(--accent); }
+.rc-map__mode.is-encoder:hover { background: var(--accent-soft); }
 .rc-map__del {
-    flex: none;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
     display: grid;
     place-items: center;
-    padding: 2px;
+    padding: 3px;
     border: 0;
     background: transparent;
     color: var(--text-faint);

@@ -68,6 +68,8 @@ esbuild ../src/controls/flexcontrol.js --bundle --format=cjs --platform=node \
     --outfile=.build/flexcontrol.cjs --log-level=warning
 esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
     --outfile=.build/webmidi.cjs --log-level=warning
+esbuild ../src/controls/hardware.js --bundle --format=cjs --platform=node \
+    --outfile=.build/hardware.cjs --log-level=warning
 esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
 esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=node \

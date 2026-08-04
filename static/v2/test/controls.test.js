@@ -8,7 +8,12 @@
 const assert = require('assert');
 const { parseToken, flexKeyLabel, FlexControl } = require('./.build/flexcontrol.cjs');
 const { midiKey, midiKeyLabel, CC, NOTE_ON, NOTE_OFF } = require('./.build/webmidi.cjs');
-const { runFunction, catalogue, isEncoderFunction, RETIRED } = require('./.build/functions.cjs');
+const {
+    runFunction, catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
+} = require('./.build/functions.cjs');
+const {
+    antennaStep, nextAntenna, rotatorStep, hardwareMessages,
+} = require('./.build/hardware.cjs');
 const { Dispatcher, defaultThrottle, normaliseMidiMappings } = require('./.build/mappings.cjs');
 const { SDR_TO_HAMLIB } = require('./.build/radiosync.cjs');
 const { MODES, SQUELCH_MIN, SQUELCH_MAX, bandwidthLimits } = require('./.build/constants.cjs');
@@ -48,6 +53,8 @@ function fakeRadio(over = {}) {
             zoomOut: record('zoomOut'),
             centerOnTuned: record('centerOnTuned'),
             resetSpectrum: record('resetSpectrum'),
+            tuneTo: record('tuneTo'),
+            setSpan: record('setSpan'),
         },
     };
 }
@@ -346,6 +353,121 @@ t('a v1 mapping record runs unchanged', () => {
     assert.deepStrictEqual(r.calls, [['nudge', 2000], ['toggleMute'], ['setVolume', 1]]);
 });
 
+// --- VFOs --------------------------------------------------------------------
+//
+// One sequence rather than four tests: the VFO store is a module singleton, so
+// these share it in the order they run — which is also the only way to check
+// that switching away stored what was live.
+
+t('a VFO switch stores what is live and recalls what was there', () => {
+    const r = fakeRadio();   // 14.074 MHz USB
+
+    // B has never been used, so it starts as a copy of A: nothing to recall,
+    // and the receiver is already where the new VFO says it is.
+    assert.ok(runFunction('vfo_b', TRIG, r));
+    assert.strictEqual(r.calls.length, 0);
+
+    // Move the receiver, then step back to A. A must come back as it was left.
+    r.state().tuning.frequency = 7074000;
+    r.state().tuning.mode = 'lsb';
+    assert.ok(runFunction('vfo_a', TRIG, r));
+    assert.strictEqual(r.calls[0][0], 'tuneTo');
+    assert.strictEqual(r.calls[0][1].frequency, 14074000);
+    assert.strictEqual(r.calls[0][1].mode, 'usb');
+});
+
+t('the VFO cycle walks A B C D and wraps in both directions', () => {
+    const r = fakeRadio();
+    const freq = { A: 1000000, B: 2000000, C: 3000000, D: 4000000 };
+
+    // Leave each VFO on a frequency of its own, so a recall can be told apart
+    // from having gone nowhere.
+    runFunction('vfo_a', TRIG, r);
+    r.state().tuning.frequency = freq.A;
+    runFunction('vfo_next', TRIG, r);       // → B
+    r.state().tuning.frequency = freq.B;
+    runFunction('vfo_next', TRIG, r);       // → C
+    r.state().tuning.frequency = freq.C;
+    runFunction('vfo_next', TRIG, r);       // → D
+    r.state().tuning.frequency = freq.D;
+
+    // Forward from D wraps to A, which stepping away from stored.
+    r.calls.length = 0;
+    runFunction('vfo_next', TRIG, r);
+    assert.deepStrictEqual(r.calls[0][0], 'tuneTo');
+    assert.strictEqual(r.calls[0][1].frequency, freq.A);
+
+    // And back from A wraps to D.
+    r.calls.length = 0;
+    runFunction('vfo_prev', TRIG, r);
+    assert.strictEqual(r.calls[0][1].frequency, freq.D);
+});
+
+t('v1’s VFO A/B toggle swaps those two and ignores C and D', () => {
+    // It is no longer retired: with four slots the old id means what it always
+    // meant, which is a swap between the first two.
+    const r = fakeRadio();
+    runFunction('vfo_c', TRIG, r);          // park somewhere that is not A or B
+    r.calls.length = 0;
+    assert.ok(runFunction('vfo_ab_toggle', TRIG, r));
+    // Whichever of A/B it landed on, a second press must go to the other one
+    // rather than back to C.
+    r.calls.length = 0;
+    assert.ok(runFunction('vfo_ab_toggle', TRIG, r));
+    assert.strictEqual(r.calls[0][0], 'tuneTo');
+});
+
+// --- station hardware --------------------------------------------------------
+
+t('the rotator and the antenna switch are offered only where they exist', () => {
+    const bare = new Set(catalogue([]).map((f) => f.id));
+    assert.ok(!bare.has('rot_left_15'), 'no rotator, no rotator functions');
+    assert.ok(!bare.has('ant_next'), 'no switch, no antenna functions');
+
+    const both = new Set(catalogue([], {
+        rotator: true,
+        antenna: { count: 3, labels: ['Beverage', '', 'Vertical'] },
+    }).map((f) => f.id));
+    assert.ok(both.has('rot_left_15'));
+    assert.ok(both.has('rot_dial'));
+    assert.ok(both.has('ant_next'));
+    assert.ok(both.has('ant_select_3'));
+    // Three antennas means three, not the eight a default switch has.
+    assert.ok(!both.has('ant_select_4'));
+});
+
+t('an antenna keeps its operator’s name, and an unnamed one is still numbered', () => {
+    const hw = { rotator: false, antenna: { count: 2, labels: ['Beverage', ''] } };
+    assert.strictEqual(functionLabel('ant_select_1', [], hw), '1 — Beverage');
+    assert.strictEqual(functionLabel('ant_select_2', [], hw), 'Antenna 2');
+});
+
+t('a mapping for hardware this receiver lacks is named, not dropped', () => {
+    // Mapping files are carried between receivers. A rotator mapping arriving
+    // somewhere without a rotator has to read as itself on a row that says it
+    // will not run — an unresolved id would look like a corrupt import.
+    assert.strictEqual(functionLabel('rot_left_45', []), 'Rotate left 45°');
+    assert.ok(isUnavailable('rot_left_45', []));
+    assert.ok(isUnavailable('ant_select_9', [], { antenna: { count: 4, labels: [] } }));
+    assert.ok(!isUnavailable('ant_select_3', [], { antenna: { count: 4, labels: [] } }));
+    assert.ok(!isUnavailable('volume_set', []));
+});
+
+t('the rotator dial is an encoder, so learn records it as one', () => {
+    // A CC stored as a fader would send positions, which a dial cannot use.
+    assert.ok(isEncoderFunction('rot_dial', []));
+    assert.ok(!isEncoderFunction('rot_left_5', []));
+});
+
+t('stepping antennas wraps, and the ground counts as before the first', () => {
+    assert.strictEqual(nextAntenna(1, 4, +1), 2);
+    assert.strictEqual(nextAntenna(4, 4, +1), 1);
+    assert.strictEqual(nextAntenna(1, 4, -1), 4);
+    assert.strictEqual(nextAntenna(0, 4, +1), 1);   // grounded, forward
+    assert.strictEqual(nextAntenna(0, 4, -1), 4);   // grounded, back
+    assert.strictEqual(nextAntenna(1, 1, +1), 1);   // a single antenna stays put
+});
+
 t('every function id v1 could map is either still live or explicitly retired', () => {
     // The list v1's two extensions share. A name that is neither runnable nor
     // named in RETIRED would import as a row saying nothing.
@@ -452,6 +574,91 @@ t('the CW sidebands do not collapse onto one Hamlib mode', () => {
     // CW and CWR are different rig modes; mapping both to CW would flip the
     // rig's sideband every time the receiver changed.
     assert.notStrictEqual(SDR_TO_HAMLIB.cwu, SDR_TO_HAMLIB.cwl);
+});
+
+at('a spun rotator dial sends one bearing, not one per detent', async () => {
+    // /api/rotctl/position is rate limited to one request a second per address,
+    // and a dial sends far more than that. The detents have to accumulate into
+    // a bearing rather than being thrown away by a throttle — the surplus
+    // detents are the turn. This is the whole reason the sending lives outside
+    // the dispatcher.
+    const posts = [];
+    globalThis.localStorage = {
+        getItem: (k) => (k === 'rotctl_password' ? 'secret' : null),
+        setItem: () => {},
+        removeItem: () => {},
+    };
+    globalThis.fetch = async (url, opts) => {
+        if (url === '/api/rotctl/status') {
+            return { ok: true, json: async () => ({ position: { azimuth: 100 }, read_only: false }) };
+        }
+        posts.push(JSON.parse(opts.body));
+        return { ok: true, json: async () => ({ success: true }) };
+    };
+    const msgs = [];
+    const off = hardwareMessages.on('message', (m) => msgs.push(m));
+
+    for (let i = 0; i < 10; i += 1) rotatorStep(5);       // a fast spin: +50°
+    await new Promise((r) => setTimeout(r, 1400));
+    off();
+
+    assert.strictEqual(posts.length, 1, `sent ${posts.length} bearings, expected 1`);
+    assert.strictEqual(posts[0].azimuth, 150);
+    assert.strictEqual(posts[0].password, 'secret');
+    assert.ok(msgs.some((m) => m.text.includes('150')), 'the log says where it was sent');
+});
+
+at('a rotator step with no password saved says so and sends nothing', async () => {
+    const posts = [];
+    globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+    globalThis.fetch = async (url, opts) => {
+        if (url === '/api/rotctl/status') {
+            return { ok: true, json: async () => ({ position: { azimuth: 0 }, read_only: false }) };
+        }
+        posts.push(opts);
+        return { ok: true, json: async () => ({ success: true }) };
+    };
+    const msgs = [];
+    const off = hardwareMessages.on('message', (m) => msgs.push(m));
+
+    rotatorStep(15);
+    await new Promise((r) => setTimeout(r, 1400));
+    off();
+
+    assert.strictEqual(posts.length, 0);
+    assert.ok(msgs.some((m) => /password/i.test(m.text)), 'the log explains why nothing moved');
+});
+
+at('two quick antenna presses land two along, not one plus a refusal', async () => {
+    // /api/ant-switch/command is rate limited to one a second too, and unlike
+    // the rotator the steps are discrete: pressing "next" twice has to mean two
+    // antennas along, not one selected and one thrown away.
+    const posts = [];
+    globalThis.localStorage = {
+        getItem: (k) => (k === 'ant_switch_password' ? 'secret' : null),
+        setItem: () => {},
+        removeItem: () => {},
+    };
+    globalThis.fetch = async (url, opts) => {
+        if (url === '/api/ant-switch/status') {
+            return {
+                ok: true,
+                json: async () => ({
+                    enabled: true, num_antennas: 4, antenna_labels: ['A', 'B', 'C', 'D'],
+                    selected: [1], grounded: false,
+                }),
+            };
+        }
+        posts.push(JSON.parse(opts.body));
+        return { ok: true, json: async () => ({ success: true, selected: [3], grounded: false }) };
+    };
+
+    antennaStep(+1);
+    antennaStep(+1);
+    await new Promise((r) => setTimeout(r, 1400));
+
+    assert.strictEqual(posts.length, 1, `sent ${posts.length} commands, expected 1`);
+    assert.strictEqual(posts[0].antenna, 3);
 });
 
 // The asynchronous ones last, so the synchronous output above stays in order.

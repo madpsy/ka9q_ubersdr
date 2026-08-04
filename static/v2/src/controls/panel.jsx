@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { controlState, onControlState, updateControlState } from './mappings.js';
+import { antennaInfo, hardwareMessages, readAntenna } from './hardware.js';
 
 const MAX_MESSAGES = 60;
 
@@ -36,6 +37,10 @@ export function useControlContext(stepHz) {
             audio: radio.audio,
             squelch: radio.squelch,
             dsp: radio.dsp,
+            // For the VFO functions: a recalled VFO carries a zoom, and putting
+            // it back needs the spectrum's current bin count to turn it into a
+            // span. See lib/vfos.js.
+            view: radio.view,
         }),
     };
     return useMemo(() => ({
@@ -43,6 +48,33 @@ export function useControlContext(stepHz) {
         get stepHz() { return ref.current.stepHz; },
         state: () => ref.current.state(),
     }), []);
+}
+
+// What this receiver has beyond the receiver — the rotator and the antenna
+// switch — in the shape the function catalogue wants.
+//
+// Whether they exist at all comes from /api/description, which every panel
+// already has. The antenna *names* do not: the description carries only what is
+// selected right now, so the switch itself is read once for the count and the
+// operator's labels, and the learn dropdown then offers "3 — 80m dipole"
+// instead of eight anonymous slots. Nothing is read on a receiver with no
+// switch, and nothing is polled: this changes when the operator edits their
+// config, not while anyone is watching.
+export function useHardware() {
+    const { serverInfo } = useRadio();
+    const rotator = !!(serverInfo && serverInfo.rotator && serverInfo.rotator.enabled);
+    const antEnabled = !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled);
+    const [antenna, setAntenna] = useState(() => (antEnabled ? antennaInfo() : null));
+
+    useEffect(() => {
+        if (!antEnabled) { setAntenna(null); return undefined; }
+        let cancelled = false;
+        readAntenna().then((info) => { if (!cancelled) setAntenna(info); });
+        const off = hardwareMessages.on('antennas', (info) => { if (!cancelled) setAntenna(info); });
+        return () => { cancelled = true; off(); };
+    }, [antEnabled]);
+
+    return useMemo(() => ({ rotator, antenna }), [rotator, antenna]);
 }
 
 // Panel-local: each panel logs only what its own hardware said.

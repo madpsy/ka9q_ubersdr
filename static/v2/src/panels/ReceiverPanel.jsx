@@ -3,7 +3,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
-import { VFO_IDS, getVfos, onVfosChanged, setVfos, switchTo, vfoSnapshot } from '../lib/vfos.js';
+import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, hasAGCSettings,
     maxFilterWidth, stepLabel,
@@ -58,37 +58,14 @@ function AGCSettings() {
 // whenever it is collapsed or dragged to another dock, and the spectrum's
 // right-click menu writes them too.
 function VfoBar() {
-    const { tuning, view, actions } = useRadio();
+    const radio = useRadio();
     const [vfos, setLocal] = useState(getVfos);
 
     useEffect(() => onVfosChanged(setLocal), []);
 
-    // Zoom is restored through the same actions the buttons use, so a recalled
-    // view goes through the server's binBandwidth ladder exactly as a manual
-    // zoom does. At or beyond full span, `reset` is the way back — it also
-    // hands the private radiod channel back.
-    const applyZoom = (binBandwidth) => {
-        if (!binBandwidth || !view.binCount) return;
-        if (view.defaultBinBandwidth > 0 && binBandwidth >= view.defaultBinBandwidth) {
-            actions.resetSpectrum();
-            return;
-        }
-        actions.setSpan(binBandwidth * view.binCount);
-    };
-
-    const select = (id) => {
-        const { state, recall } = switchTo(getVfos(), id, vfoSnapshot(tuning, view));
-        if (state === vfos) return;   // already on it
-        setVfos(state);
-        if (!recall) return;          // an unused VFO starts as a copy of this one
-        actions.tuneTo({
-            frequency: recall.frequency,
-            mode: recall.mode,
-            bandwidthLow: recall.bandwidthLow,
-            bandwidthHigh: recall.bandwidthHigh,
-        });
-        applyZoom(recall.binBandwidth);
-    };
+    // The switch itself is in lib/vfos.js, because a control mapped to "VFO B"
+    // on a MIDI box or the FlexControl has to make exactly the same one.
+    const select = (id) => selectVfo(radio, id);
 
     return (
         <div className="vfo-bar">

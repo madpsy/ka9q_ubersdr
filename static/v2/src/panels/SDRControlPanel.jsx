@@ -26,14 +26,19 @@ import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Empty, Field, Icon, Segmented, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
-import { catalogue, functionLabel, isEncoderFunction, RETIRED } from '../controls/functions.js';
+import {
+    catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
+} from '../controls/functions.js';
+import { hardwareMessages } from '../controls/hardware.js';
 import {
     Dispatcher, defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
 } from '../controls/mappings.js';
 import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
 import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
 import { getSurface, releaseSurfaceExcept } from '../controls/sources.js';
-import { MessageLog, useControlContext, useControlState, useMessages } from '../controls/panel.jsx';
+import {
+    MessageLog, useControlContext, useControlState, useHardware, useMessages,
+} from '../controls/panel.jsx';
 
 const SURFACE_OPTIONS = [
     { value: 'off', label: 'Off' },
@@ -51,6 +56,7 @@ export default function SDRControlPanel({ minimal }) {
     const [cfg, update] = useControlState();
     const [messages, pushMessage, clearMessages] = useMessages();
     const ctx = useControlContext(cfg.stepHz);
+    const hw = useHardware();
 
     const surface = cfg.surface;
 
@@ -95,6 +101,7 @@ export default function SDRControlPanel({ minimal }) {
                     update={update}
                     ctx={ctx}
                     dspSchemas={radio.dsp.schemas}
+                    hw={hw}
                     onMessage={pushMessage}
                     minimal={minimal}
                 />
@@ -107,7 +114,7 @@ export default function SDRControlPanel({ minimal }) {
 
 // --- the two mapped control surfaces ---------------------------------------
 
-function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }) {
+function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minimal }) {
     const isMidi = id === 'midi';
     const conf = cfg[id];
     const mappings = conf.mappings;
@@ -141,7 +148,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
         const why = isMidi && isCCKey(key)
             ? 'if it is an endless encoder, press “fader” on its row to say so'
             : 'that function cannot be driven by this control';
-        onMessage(`${labelFor(isMidi)(key)} → ${functionLabel(fn, dspSchemas)} ignored — ${why}`, 'warn');
+        onMessage(`${labelFor(isMidi)(key)} → ${functionLabel(fn, dspSchemas, hw)} ignored — ${why}`, 'warn');
     };
 
     // Learn has to see the input before the dispatcher does, and both need the
@@ -186,7 +193,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
                 ]),
             },
         }));
-        onMessage(`Mapped ${keys.map(labelFor(isMidi)).join(' + ')} → ${functionLabel(fn, dspSchemas)}`, 'good');
+        onMessage(`Mapped ${keys.map(labelFor(isMidi)).join(' + ')} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
         setLearn(null);
     };
 
@@ -237,6 +244,13 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
         // the surface switch, not to this component going away.
         return () => offs.forEach((off) => off());
     }, [surface, isMidi, onMessage]);
+
+    // The rotator and the antenna switch answer over HTTP, long after the press
+    // that asked them to, and their failures are the ones an operator cannot
+    // guess at: a password the panel never saved, thunderstorm mode, a bearing
+    // the rotator would not take. They go in the same log as the surface's own
+    // messages, which is the only thing on screen when the knob is the UI.
+    useEffect(() => hardwareMessages.on('message', ({ text, tone }) => onMessage(text, tone)), [onMessage]);
 
     // Web Serial's own hotplug event, which is what `devices` is for MIDI. The
     // FlexControl surface is chosen far more often than it is plugged in, so
@@ -362,8 +376,8 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
         );
     }
 
-    const groups = groupCatalogue(dspSchemas);
-    const rows = Object.entries(mappings);
+    const groups = groupCatalogue(dspSchemas, hw);
+    const rows = sortRows(Object.entries(mappings), isMidi);
 
     return (
         <>
@@ -438,7 +452,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
                     <div className="rc-learn__msg">
                         {learn.mapBoth && learn.pressKey
                             ? 'Press captured — now release it'
-                            : `Move the control for “${functionLabel(learn.fn, dspSchemas)}”`}
+                            : `Move the control for “${functionLabel(learn.fn, dspSchemas, hw)}”`}
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => setLearn(null)}>Cancel</Button>
                 </div>
@@ -473,6 +487,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
                             mapping={m}
                             isMidi={isMidi}
                             dspSchemas={dspSchemas}
+                            hw={hw}
                             onRelative={(v) => update((prev) => ({
                                 ...prev,
                                 [id]: {
@@ -546,44 +561,91 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
     );
 }
 
-function MappingRow({ mapKey, mapping, isMidi, dspSchemas, onRelative, onDelete }) {
+// One mapping, on two lines: what it does, then which control does it.
+//
+// It was one line — control, function, chips, delete — and that only ever fit
+// the panel floated wide. Docked at its usual width the key took its 42% and
+// the function name, the thing you are actually scanning for, ellipsised to
+// "Passb…". So the function goes on top with the full width to itself and wraps
+// rather than truncates, and the address drops to a second line with the chips
+// it qualifies. Nothing is hidden at any width the panel can be dragged to.
+function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDelete }) {
     const retired = RETIRED[mapping.function];
-    const label = functionLabel(mapping.function, dspSchemas);
+    const label = functionLabel(mapping.function, dspSchemas, hw);
+    // A mapping that came from a receiver with a rotator, or an antenna past
+    // this switch's count. Kept, named, and marked — deleting it on arrival
+    // would quietly edit a file the operator carries between two receivers.
+    const missing = !retired && isUnavailable(mapping.function, dspSchemas, hw);
     // A CC could be either a fader or an endless encoder and one message cannot
     // tell them apart, so the row carries the switch rather than guessing.
     const isCC = isMidi && isCCKey(mapKey);
 
     return (
         <div className="rc-map__row">
-            <span className="rc-map__key">{labelFor(isMidi)(mapKey)}</span>
             <span className={`rc-map__fn${retired ? ' is-retired' : ''}`} title={retired || label}>
                 {label}
             </span>
-            {isCC && (
-                <button
-                    type="button"
-                    className={`tag tag--ghost${mapping.relative ? ' tag--accent' : ''}`}
-                    title="Endless encoder rather than a fader — sends increments, not a position"
-                    onClick={() => onRelative(!mapping.relative)}
-                >
-                    {mapping.relative ? 'encoder' : 'fader'}
-                </button>
-            )}
-            {mapping.mode === 'rate_limit' && mapping.throttleMs > 0 && (
-                <span className="tag tag--ghost" title="Rate limited">{mapping.throttleMs}ms</span>
-            )}
             <button type="button" className="rc-map__del" title="Remove" onClick={onDelete}>
                 <Icon.Close size={13} />
             </button>
+            <div className="rc-map__meta">
+                <span className="rc-map__key">{labelFor(isMidi)(mapKey)}</span>
+                {isCC && (
+                    <button
+                        type="button"
+                        className={`tag rc-map__mode${mapping.relative ? ' is-encoder' : ''}`}
+                        title="Endless encoder rather than a fader — sends increments, not a position"
+                        onClick={() => onRelative(!mapping.relative)}
+                    >
+                        {mapping.relative ? 'encoder' : 'fader'}
+                    </button>
+                )}
+                {mapping.mode === 'rate_limit' && mapping.throttleMs > 0 && (
+                    <span className="tag tag--ghost" title="Rate limited">{mapping.throttleMs}ms</span>
+                )}
+                {missing && (
+                    <span className="tag tag--bad" title="This receiver has no such hardware — the mapping is kept for one that does">
+                        not here
+                    </span>
+                )}
+            </div>
         </div>
     );
 }
 
 const labelFor = (isMidi) => (isMidi ? midiKeyLabel : flexKeyLabel);
 
-function groupCatalogue(dspSchemas) {
+// Rows in the order they were learned, which is the order they arrive in from
+// storage, are unordered by the time there are twenty of them — you learn the
+// dial, then a button, then the dial's other direction. So they are laid out by
+// address instead: the panel then matches the hardware, and the row you want is
+// where the control is under your hand.
+//
+// MIDI sorts by channel, then CCs before notes, then number — which is also
+// what keeps a "map both" pair adjacent, since a button's press and release
+// share a number and differ only in type. Anything unparseable sorts last
+// rather than throwing the order out.
+function sortRows(entries, isMidi) {
+    if (!isMidi) {
+        return entries.slice().sort((a, b) => flexKeyLabel(a[0]).localeCompare(flexKeyLabel(b[0])));
+    }
+    const rank = (key) => {
+        const [type, channel, number] = String(key).split(':').map(Number);
+        if (![type, channel, number].every(Number.isFinite)) return null;
+        return [channel, isCCKey(key) ? 0 : 1, number, type];
+    };
+    return entries.slice().sort((a, b) => {
+        const ra = rank(a[0]);
+        const rb = rank(b[0]);
+        if (!ra || !rb) return (ra ? 0 : 1) - (rb ? 0 : 1);
+        for (let i = 0; i < ra.length; i += 1) if (ra[i] !== rb[i]) return ra[i] - rb[i];
+        return 0;
+    });
+}
+
+function groupCatalogue(dspSchemas, hw) {
     const groups = new Map();
-    for (const f of catalogue(dspSchemas)) {
+    for (const f of catalogue(dspSchemas, hw)) {
         if (!groups.has(f.group)) groups.set(f.group, []);
         groups.get(f.group).push(f);
     }

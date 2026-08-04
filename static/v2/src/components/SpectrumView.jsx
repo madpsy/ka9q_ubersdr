@@ -43,6 +43,10 @@ const SPLIT_MAX = 0.85;
 // The type is 10 px, so this is the line plus a little air.
 const DB_LABEL_GAP = 13;
 
+// Weight of the spectrum trace in CSS px, as a bare line. Halved when the fill
+// is on — see where it is used.
+const TRACE_WIDTH = 1.25;
+
 // Width to assume for the cursor-frequency tag before it has ever been on
 // screen to measure — a little over what "14.074.00" needs at the default text
 // size. Only ever used once: from the first time it is shown, useRoomFor
@@ -1479,7 +1483,8 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
 
     // Solid area under the trace. Turning this off leaves a bare line, which
     // shows the whole backdrop and makes overlapping signals easier to separate.
-    if (d.fill !== false) {
+    const filled = d.fill !== false;
+    if (filled) {
         c.beginPath();
         c.moveTo(0, H);
         for (let x = 0; x < pxW; x++) c.lineTo(x, yOf(trace[x]));
@@ -1506,7 +1511,11 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
     }
     c.strokeStyle = g.traceGrad;
-    c.lineWidth = 1.25 * dpr;
+    // Half thickness when the fill is there. Filled, the shape is what you read
+    // and the line is only its edge — at full weight it thickens every peak and
+    // closes up the gap between two signals that are nearly touching. Unfilled
+    // the line *is* the trace, and has to carry it on its own.
+    c.lineWidth = (filled ? TRACE_WIDTH / 2 : TRACE_WIDTH) * dpr;
     c.stroke();
 
     drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colEdge);

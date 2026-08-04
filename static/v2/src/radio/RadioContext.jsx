@@ -107,6 +107,10 @@ export function RadioProvider({ children }) {
         bufferFromUser: saved.bufferSec != null,
         // Which side of a stereo stream to listen to: 'both' | 'left' | 'right'.
         channel: saved.channel || 'both',
+        // Output device ID, '' being the system default. Device IDs are
+        // per-origin and survive a reload, so this is worth restoring — and if
+        // the device has gone since, setAudioSink falls back to the default.
+        sinkId: saved.sinkId || '',
     });
     // One number: the slider position. Its floor doubles as "off", which is how
     // v1 behaves and avoids an enabled flag that can disagree with the value.
@@ -236,6 +240,9 @@ export function RadioProvider({ children }) {
         player.setBufferSec(audio.bufferSec);
         player.setChannelMode(audio.channel);
         player.setFilters(filters);
+        // Only remembered here — there is no context to route until audio
+        // starts, and _createContext applies it then.
+        player.setSinkId(audio.sinkId).catch(() => { /* reported when it plays */ });
     }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
@@ -468,6 +475,7 @@ export function RadioProvider({ children }) {
             muted: audio.muted,
             bufferSec: audio.bufferSec,
             channel: audio.channel,
+            sinkId: audio.sinkId,
             filters,
             squelchValue,
             dspFilter: dsp.filter,
@@ -643,6 +651,24 @@ export function RadioProvider({ children }) {
             setChannel(mode) {
                 player.setChannelMode(mode);
                 setAudio((a) => ({ ...a, channel: mode }));
+            },
+
+            // Which device the audio comes out of; '' is the system default.
+            // Rejects on a device the browser will not route to — a saved one
+            // that has since been unplugged, most often — having put playback
+            // back on the default first, so the panel never shows a selection
+            // that is not the one making sound.
+            async setAudioSink(id) {
+                const next = id || '';
+                try {
+                    await player.setSinkId(next);
+                } catch (err) {
+                    await player.setSinkId('').catch(() => {});
+                    setAudio((a) => ({ ...a, sinkId: '' }));
+                    pushLog('warn', 'Audio output device unavailable — using system default');
+                    throw err;
+                }
+                setAudio((a) => ({ ...a, sinkId: next }));
             },
 
             // `value` is the raw slider position; its floor means "off".

@@ -1,7 +1,8 @@
-import React from '../react.js';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
+import { listOutputDevices, sinkLabel, sinkSupport, unlockDeviceLabels } from '../lib/audioSinks.js';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
 
 // Split out so the 12 Hz meter sampling that drives the live SNR marker and the
@@ -78,6 +79,131 @@ function ChannelPicker() {
     );
 }
 
+// Which device the audio comes out of — v1's "Output Device" selector.
+//
+// The list is read on mount but the names are *not* unlocked on mount: browsers
+// only reveal them once microphone permission is granted, and a panel that
+// throws a mic prompt at you for opening it is not one you want to open. So the
+// prompt is a button, and until it is pressed the devices are still selectable,
+// just anonymously.
+function OutputDevicePicker() {
+    const { audio, actions } = useRadio();
+    const support = useMemo(sinkSupport, []);
+    const [devices, setDevices] = useState([]);
+    const [hidden, setHidden] = useState(false);
+    const [error, setError] = useState('');
+    const [busy, setBusy] = useState(false);
+    const alive = useRef(true);
+
+    const refresh = useCallback(async () => {
+        try {
+            const { devices: found, hidden: anon } = await listOutputDevices();
+            if (!alive.current) return;
+            setDevices(found);
+            setHidden(anon);
+            setError('');
+        } catch (err) {
+            if (alive.current) setError(err.message || 'could not list devices');
+        }
+    }, []);
+
+    useEffect(() => {
+        alive.current = true;
+        if (!support.supported) return undefined;
+        refresh();
+        // Plugging in a headset should not need the panel reopening.
+        const md = navigator.mediaDevices;
+        md.addEventListener('devicechange', refresh);
+        return () => {
+            alive.current = false;
+            md.removeEventListener('devicechange', refresh);
+        };
+    }, [support.supported, refresh]);
+
+    if (!support.supported) {
+        return (
+            <>
+                <Field label="Output">
+                    <select className="select" disabled value="">
+                        <option value="">System Default</option>
+                    </select>
+                </Field>
+                <div className="note note--tight">{support.reason}</div>
+            </>
+        );
+    }
+
+    const unlock = async () => {
+        setBusy(true);
+        try {
+            await unlockDeviceLabels();
+            await refresh();
+        } catch (err) {
+            if (alive.current) setError('Microphone permission denied — device names stay hidden.');
+        } finally {
+            if (alive.current) setBusy(false);
+        }
+    };
+
+    const choose = async (id) => {
+        setBusy(true);
+        setError('');
+        try {
+            await actions.setAudioSink(id);
+        } catch (err) {
+            if (alive.current) setError(`Could not use that device: ${err.message || err.name}`);
+        } finally {
+            if (alive.current) setBusy(false);
+        }
+    };
+
+    // A saved device that is not in the list — unplugged since, or its names
+    // are still hidden — would otherwise make the select fall back to showing
+    // "System Default" while the player is still pointed at it.
+    const known = devices.some((d) => d.deviceId === audio.sinkId);
+
+    return (
+        <>
+            <Field label="Output">
+                <select
+                    className="select"
+                    value={audio.sinkId}
+                    disabled={busy}
+                    onChange={(e) => choose(e.target.value)}
+                >
+                    <option value="">System Default</option>
+                    {devices
+                        .filter((d) => d.deviceId && d.deviceId !== 'default')
+                        .map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>{sinkLabel(d)}</option>
+                        ))}
+                    {audio.sinkId && !known && (
+                        <option value={audio.sinkId}>Saved device …{audio.sinkId.slice(-6)}</option>
+                    )}
+                </select>
+            </Field>
+            <div className="chip-row chip-row--wrap">
+                <button type="button" className="chip chip--button" onClick={refresh} disabled={busy}>
+                    Refresh
+                </button>
+                {hidden && (
+                    <button type="button" className="chip chip--button" onClick={unlock} disabled={busy}>
+                        Show device names
+                    </button>
+                )}
+            </div>
+            {error
+                ? <div className="note note--tight note--warn">{error}</div>
+                : hidden && (
+                    <div className="note note--tight">
+                        Device names are hidden until you grant microphone permission —
+                        the browser ties the two together. Nothing is recorded.
+                    </div>
+                )}
+        </>
+    );
+}
+
 // `minimal` keeps squelch and noise reduction — the two you ride while
 // listening — and drops volume, channel and buffer, which are set once. The
 // squelch explainer goes with them: it describes a control you already know how
@@ -111,6 +237,7 @@ export default function AudioPanel({ minimal }) {
                     </div>
 
                     <ChannelPicker />
+                    <OutputDevicePicker />
 
                     <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>
                         <Slider

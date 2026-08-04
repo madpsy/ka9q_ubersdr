@@ -118,6 +118,7 @@ export default function AudioPanel({ minimal }) {
                         />
                     </Field>
                     <div className="note note--tight">
+                        The most delay allowed before audio is dropped to catch up.
                         A larger buffer rides out network jitter at the cost of latency.
                     </div>
 

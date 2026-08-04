@@ -1,4 +1,4 @@
-import React, { useEffect } from './react.js';
+import React, { useEffect, useRef } from './react.js';
 import { RadioProvider, useRadio } from './radio/RadioContext.jsx';
 import { DisplayProvider } from './display/DisplayContext.jsx';
 import { LayoutProvider } from './layout/LayoutContext.jsx';
@@ -12,6 +12,7 @@ import IdleWatch from './components/IdleWatch.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
+import { useDisplay } from './display/DisplayContext.jsx';
 import { subscribeSpots } from './lib/spotStore.js';
 
 function DesktopShell() {
@@ -80,6 +81,28 @@ function SpotStreams() {
     return null;
 }
 
+// The operator's default audio buffer, for anyone who has never set their own.
+//
+// v1 does this in ui-config.js: it seeds localStorage with `default_buffer`
+// only when the key is absent, so the operator's value is a *default* and a
+// listener's own choice always wins. Applied here rather than in either
+// context, so the display settings and the signal path stay unaware of each
+// other — the same reason PageTitle and SpotStreams live at this level.
+function AudioDefaults() {
+    const { audio, actions } = useRadio();
+    const { server } = useDisplay();
+    const done = useRef(false);
+
+    useEffect(() => {
+        if (done.current || audio.bufferFromUser) return;
+        if (!server.loaded || server.bufferSec == null) return;
+        done.current = true;
+        actions.setBufferSec(server.bufferSec);
+    }, [server.loaded, server.bufferSec, audio.bufferFromUser, actions]);
+
+    return null;
+}
+
 export default function App() {
     const mobile = useMediaQuery(MOBILE_QUERY);
     return (
@@ -89,6 +112,7 @@ export default function App() {
                     <ChatProvider>
                         <ExtensionsProvider>
                             <PageTitle />
+                            <AudioDefaults />
                             <IdleWatch />
                             <LegacyBridge />
                             <SpotStreams />

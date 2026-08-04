@@ -28,6 +28,10 @@ export const UI_CONFIG_DEFAULTS = {
     stationIdColor: '#ffffff',
     autoMinSpan: 30,            // operator's default minimum dynamic range, dB
     bandwidthColor: 'rgba(0, 255, 0, 1)',   // passband edges, v1's default green
+    // The operator's default audio buffer ceiling, seconds. Sent as a string of
+    // milliseconds ("200"). null when the server did not say, which is not the
+    // same as 0 — see the AudioDefaults bridge in App.jsx.
+    bufferSec: null,
 };
 
 // v1's palette for the bandwidth indicator (spectrum-display.js
@@ -57,6 +61,10 @@ export function parseUiConfig(cfg) {
     const minSpan = parseFloat(
         cfg.min_span && typeof cfg.min_span === 'object' ? cfg.min_span.default : cfg.min_span,
     );
+    // v1's presets run 50–500 ms; the range is widened a little rather than
+    // enumerated, so an operator who sets something in between is honoured
+    // instead of silently ignored.
+    const bufferMs = parseFloat(cfg.default_buffer);
     return {
         loaded: true,
         config: cfg,
@@ -71,5 +79,8 @@ export function parseUiConfig(cfg) {
         autoMinSpan: Number.isFinite(minSpan)
             ? Math.max(0, Math.min(60, minSpan))
             : UI_CONFIG_DEFAULTS.autoMinSpan,
+        bufferSec: Number.isFinite(bufferMs) && bufferMs > 0
+            ? Math.max(0.05, Math.min(2, bufferMs / 1000))
+            : UI_CONFIG_DEFAULTS.bufferSec,
     };
 }

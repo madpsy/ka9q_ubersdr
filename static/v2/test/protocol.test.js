@@ -822,6 +822,21 @@ t('backdrop settings are parsed and validated onto the top level', () => {
     assert.strictEqual(parsed.bgOpacity, UI_SAMPLE.spectrum_bg_opacity);
 });
 
+t("the operator's default audio buffer is read from the same reply", () => {
+    // Sent as a string of milliseconds; the player works in seconds.
+    assert.strictEqual(parseUiConfig(UI_SAMPLE).bufferSec, 0.2);
+    assert.strictEqual(parseUiConfig({ default_buffer: '500' }).bufferSec, 0.5);
+    assert.strictEqual(parseUiConfig({ default_buffer: 50 }).bufferSec, 0.05);
+    // Absent or unusable is null, not zero: "the operator did not say" has to
+    // be distinguishable from "no buffer at all", or every listener on a server
+    // that never configured it would be forced to the minimum.
+    assert.strictEqual(parseUiConfig({}).bufferSec, null);
+    assert.strictEqual(parseUiConfig({ default_buffer: 'soon' }).bufferSec, null);
+    assert.strictEqual(parseUiConfig({ default_buffer: '0' }).bufferSec, null);
+    // Out of range is clamped rather than refused.
+    assert.strictEqual(parseUiConfig({ default_buffer: '9000' }).bufferSec, 2);
+});
+
 t('opacity is clamped and survives odd values', () => {
     assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: 5 }).bgOpacity, 1);
     assert.strictEqual(parseUiConfig({ spectrum_bg_opacity: -2 }).bgOpacity, 0);

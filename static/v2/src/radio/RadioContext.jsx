@@ -85,6 +85,10 @@ export function RadioProvider({ children }) {
         volume: saved.volume != null ? saved.volume : 0.7,
         muted: !!saved.muted,
         bufferSec: saved.bufferSec != null ? saved.bufferSec : 0.2,
+        // Whether that came from this browser or is just the built-in. The
+        // operator's own default only applies to someone who has never chosen,
+        // which is v1's rule (ui-config.js seeds localStorage once).
+        bufferFromUser: saved.bufferSec != null,
         // Which side of a stereo stream to listen to: 'both' | 'left' | 'right'.
         channel: saved.channel || 'both',
     });
@@ -573,7 +577,7 @@ export function RadioProvider({ children }) {
 
             setBufferSec(sec) {
                 player.setBufferSec(sec);
-                setAudio((a) => ({ ...a, bufferSec: sec }));
+                setAudio((a) => ({ ...a, bufferSec: sec, bufferFromUser: true }));
             },
 
             // A patch per section: { eq: {...} } leaves notch and bandpass alone.

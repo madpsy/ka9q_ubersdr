@@ -21,7 +21,19 @@ const CLIP_TICK_MS = 50;
 const CLIP_PEAK = 0.997;
 const CLIP_HOLD_MS = 1200;
 
+// The buffer setting is a *ceiling*, not a target — v1's `maxBufferMs`.
+//
+// v1 primes a fixed cushion and then discards anything that would push the
+// queue past the ceiling (app.js playAudioBuffer: the MAX_BUFFER_SEC branch).
+// That is what makes the control act at once: lowering it drops packets until
+// the queue is back inside the limit, where treating it as a prime target only
+// changes anything the next time playback is primed — which, while audio is
+// flowing, is never.
 const DEFAULT_BUFFER_SEC = 0.2;
+// v1's PRIME_BUFFER_MS / MIN_BUFFER_MS, and its rule: prime at 120 ms, never
+// below 40, and never more than three quarters of the ceiling.
+const PRIME_SEC = 0.12;
+const MIN_PRIME_SEC = 0.04;
 const MIN_LEAD_SEC = 0.02;
 
 function getOpusDecoderClass() {
@@ -68,6 +80,7 @@ export class AudioPlayer {
         this.requestedRate = 0;     // rate we asked for, which may differ
         this.nextPlayTime = 0;
         this.bufferSec = DEFAULT_BUFFER_SEC;
+        this.dropped = 0;
         this.volume = 0.7;
         this.muted = false;
         this.started = false;
@@ -111,6 +124,13 @@ export class AudioPlayer {
 
     setBufferSec(sec) {
         this.bufferSec = Math.max(0.05, Math.min(2, sec));
+    }
+
+    // The cushion to (re)start from, in seconds. Deliberately not the ceiling:
+    // starting at the limit leaves no room for the jitter the ceiling exists to
+    // absorb, so the first late packet would overflow it.
+    _primeSec() {
+        return Math.min(Math.max(PRIME_SEC, MIN_PRIME_SEC), this.bufferSec * 0.75);
     }
 
     // Feeds one Opus packet. Decoding is serialised so packets keep their order.
@@ -236,7 +256,7 @@ export class AudioPlayer {
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);
         this._runClipWatch();
-        this.nextPlayTime = this.ctx.currentTime + this.bufferSec;
+        this.nextPlayTime = this.ctx.currentTime + this._primeSec();
     }
 
     _applyGain() {
@@ -412,16 +432,24 @@ export class AudioPlayer {
         const rms = Math.sqrt(sum / frames);
         this.level = this.level * 0.7 + rms * 0.3;
 
+        if (this.nextPlayTime < ctx.currentTime + MIN_LEAD_SEC) {
+            // Fell behind: re-prime the cushion instead of chasing the clock,
+            // which would leave every later packet marginally late.
+            this.nextPlayTime = ctx.currentTime + this._primeSec();
+            this.underruns++;
+        } else if (this.nextPlayTime - ctx.currentTime > this.bufferSec) {
+            // Past the ceiling: drop this packet rather than let the delay
+            // accumulate. v1 does the same, and it is what turns the slider
+            // into a control you can feel — the queue is back inside a new,
+            // lower limit within a second of moving it, where a prime-time
+            // target would not change anything until the next restart.
+            this.dropped++;
+            return;
+        }
+
         const src = ctx.createBufferSource();
         src.buffer = buffer;
         src.connect(this.head);
-
-        if (this.nextPlayTime < ctx.currentTime + MIN_LEAD_SEC) {
-            // Fell behind: re-prime the full cushion instead of chasing the
-            // clock, which would leave every later packet marginally late.
-            this.nextPlayTime = ctx.currentTime + this.bufferSec;
-            this.underruns++;
-        }
         src.start(this.nextPlayTime);
         this.nextPlayTime += buffer.duration;
     }

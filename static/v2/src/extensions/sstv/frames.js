@@ -143,20 +143,32 @@ export function toRGBA(rgb, width, out) {
 
 // ── the decoder's settings ──────────────────────────────────────────────────
 
-// What the server takes at attach — see audio_extensions/sstv/extension.go.
-// `auto_save` is deliberately absent: it is what the *client* does with a
-// finished picture, and the server has no business knowing.
+// What the server takes at attach. Three booleans, and they are the ones
+// audio_extensions/sstv/extension.go actually reads — not the ones its
+// register.go advertises.
+//
+// The difference matters. register.go documents an `mmsstv_only` parameter and
+// v1's manifest declared it, but nothing in the package reads it: SSTVConfig
+// has AutoSync, DecodeFSKID and Adaptive and no more. v1 therefore shipped a
+// switch that did nothing, and left the one real setting — adaptive windowing —
+// with no control at all. This offers `adaptive` and drops the phantom.
+//
+// `auto_save` is absent for a different reason: it is what the *client* does
+// with a finished picture, and the server has no business knowing.
 export const SSTV_CONFIG = {
     auto_sync: true,
     decode_fsk_id: true,
-    mmsstv_only: false,
+    adaptive: true,
 };
 
 export function attachParams(config) {
+    // Booleans as booleans: the server reads each with a `.(bool)` type
+    // assertion and silently keeps its own default for anything else — and its
+    // defaults are all true, so a dropped value fails open rather than closed.
     return {
         auto_sync: !!config.auto_sync,
         decode_fsk_id: !!config.decode_fsk_id,
-        mmsstv_only: !!config.mmsstv_only,
+        adaptive: !!config.adaptive,
     };
 }
 

@@ -36,6 +36,7 @@ import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
 import SstvExtension from './sstv/SstvExtension.jsx';
+import SoundModemExtension from './soundmodem/SoundModemExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -111,6 +112,18 @@ export const EXTENSIONS = [
         float: { w: 780, h: 640 },
         minimal: true,
         Component: SstvExtension,
+    },
+    {
+        id: 'soundmodem',
+        title: 'Sound Modem',
+        icon: <Icon.Packet />,
+        summary: 'AX.25 packet — up to four modem channels, decoded frame by frame.',
+        requiresAudio: true,
+        // The widest of them: a frame is a path, a type and a payload on one
+        // line, and wrapping that reads far worse than scrolling for it.
+        float: { w: 940, h: 620 },
+        minimal: true,
+        Component: SoundModemExtension,
     },
 ];
 

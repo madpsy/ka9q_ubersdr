@@ -199,26 +199,29 @@ t('with correction off, the only completion is the one to file on', () => {
 
 // --- settings ---------------------------------------------------------------
 
-t('the attach carries the three settings the server reads', () => {
-    // audio_extensions/sstv/extension.go reads these and nothing else.
-    // auto_save is deliberately absent: it is what the client does with a
-    // finished picture, and the server has no business knowing.
+t('the attach carries the three settings the server actually reads', () => {
+    // SSTVConfig in audio_extensions/sstv/decoder.go has exactly these three
+    // fields, and extension.go reads exactly these three keys. register.go
+    // advertises an `mmsstv_only` that nothing implements — v1 shipped a switch
+    // for it that did nothing, and no control for `adaptive`, which is real.
     assert.deepStrictEqual(Object.keys(attachParams(SSTV_CONFIG)).sort(), [
-        'auto_sync', 'decode_fsk_id', 'mmsstv_only',
+        'adaptive', 'auto_sync', 'decode_fsk_id',
     ]);
-    // Booleans as booleans: Go's type assertion drops anything else and keeps
-    // its own default, which is the opposite of two of these.
-    const p = attachParams({ auto_sync: 'yes', decode_fsk_id: 0, mmsstv_only: 1 });
+    // Booleans as booleans: Go's `.(bool)` assertion drops anything else and
+    // keeps its own default — and every default here is true, so a value that
+    // fails to arrive fails open.
+    const p = attachParams({ auto_sync: 'yes', decode_fsk_id: 0, adaptive: 1 });
     assert.strictEqual(p.auto_sync, true);
     assert.strictEqual(p.decode_fsk_id, false);
-    assert.strictEqual(p.mmsstv_only, true);
+    assert.strictEqual(p.adaptive, true);
 });
 
-t('slant correction and the FSK ident are on by default', () => {
-    // Without auto-sync every picture leans, which reads as a broken decoder.
+t('the three settings default to the server’s own defaults', () => {
+    // DefaultSSTVConfig() is all true. Without auto-sync every picture leans,
+    // which reads as a broken decoder rather than a setting.
     assert.strictEqual(SSTV_CONFIG.auto_sync, true);
     assert.strictEqual(SSTV_CONFIG.decode_fsk_id, true);
-    assert.strictEqual(SSTV_CONFIG.mmsstv_only, false);
+    assert.strictEqual(SSTV_CONFIG.adaptive, true);
     assert.ok(KEEP_IMAGES > 0 && MIN_KEEPABLE_LINES > 0);
 });
 

@@ -94,6 +94,10 @@ esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=no
     --outfile=.build/freedv.cjs --log-level=warning
 esbuild ../src/extensions/sstv/frames.js --bundle --format=cjs --platform=node \
     --outfile=.build/sstv.cjs --log-level=warning
+esbuild ../src/extensions/soundmodem/frames.js --bundle --format=cjs --platform=node \
+    --outfile=.build/soundmodem.cjs --log-level=warning
+esbuild ../src/extensions/soundmodem/ax25.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ax25.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -117,3 +121,4 @@ node wefax.test.js
 node qrss.test.js
 node freedv.test.js
 node sstv.test.js
+node soundmodem.test.js

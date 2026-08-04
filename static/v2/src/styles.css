@@ -3443,3 +3443,137 @@ a.btn { text-decoration: none; }
 }
 .sstv__card-call { color: var(--accent); }
 .sstv__card-mode, .sstv__card-call { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Sound Modem ──────────────────────────────────────────────────────────── */
+
+.sm__count, .sm__last {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sm__last { color: var(--accent); }
+
+/* Four channel strips side by side, wrapping when there is not room. Each is a
+   card so an enabled one reads as a running modem rather than a row of inputs. */
+.sm__channels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px;
+    flex: none;
+}
+.sm__ch {
+    flex: 1 1 200px;
+    min-width: 180px;
+    padding: 5px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.sm__ch.is-on { border-color: var(--accent-line, var(--border-strong)); }
+.sm__ch-head { display: flex; align-items: center; gap: 6px; }
+.sm__ch-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 6px;
+    margin-top: 5px;
+}
+.sm__ch-body .select { max-width: 100%; }
+
+.sm__dcd {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.sm__dcd::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+}
+.sm__dcd.is-on { color: var(--good); }
+.sm__dcd.is-on::before { background: var(--good); border-color: var(--good); }
+
+.sm__filters { flex-wrap: wrap; }
+.sm__search { flex: 1; min-width: 140px; }
+
+.sm__list { padding: 0 2px; font-family: inherit; }
+
+/* One frame is a row that wraps its payload underneath. Link-control frames are
+   dimmed: they are the channel's housekeeping, not its traffic. */
+.sm__frame {
+    display: grid;
+    grid-template-columns: 58px 18px minmax(150px, auto) 1fr;
+    gap: 6px;
+    align-items: baseline;
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: calc(11px * var(--ui-scale));
+}
+.sm__frame--s, .sm__frame--u { color: var(--text-faint); }
+.sm__frame:hover { background: var(--surface-hover); }
+
+.sm__at {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sm__ch-tag {
+    display: grid;
+    place-items: center;
+    border-radius: 3px;
+    background: var(--surface-3);
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sm__path { font-family: var(--mono); white-space: nowrap; }
+.sm__call {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+}
+.sm__call:hover { text-decoration: underline; }
+.sm__arrow { color: var(--text-faint); margin: 0 2px; }
+.sm__to { color: var(--text-dim); }
+.sm__digis { color: var(--text-faint); }
+.sm__info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.sm__info--aprs { color: var(--good); }
+
+/* The payload spans the row, because a packet's text is the thing you read. */
+.sm__payload {
+    grid-column: 3 / -1;
+    margin: 1px 0 2px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+}
+
+.sm__line {
+    display: grid;
+    grid-template-columns: 58px 18px 1fr;
+    gap: 6px;
+    align-items: baseline;
+    padding: 1px 4px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.sm__line--tx { color: var(--warn); }
+/* The process log has no channel of its own, so its rows are two columns. */
+.sm__line--log { grid-template-columns: 58px 1fr; }
+.sm__line-text { white-space: pre-wrap; word-break: break-word; }

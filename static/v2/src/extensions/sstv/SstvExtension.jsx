@@ -367,10 +367,10 @@ export default function SstvExtension({ minimal }) {
                     onChange={(v) => setCfg({ decode_fsk_id: v })}
                 />
                 <Switch
-                    label="MMSSTV only"
-                    title="Only decode the MMSSTV modes (MR, MP and ML). Narrows what the VIS detector will accept, which helps on a noisy band"
-                    checked={!!config.mmsstv_only}
-                    onChange={(v) => setCfg({ mmsstv_only: v })}
+                    label="Adaptive"
+                    title="Size the demodulator's window from the signal-to-noise ratio — wider when the signal is weak, sharper when it is strong. Almost always wanted"
+                    checked={!!config.adaptive}
+                    onChange={(v) => setCfg({ adaptive: v })}
                 />
                 <Switch
                     label="Auto-save"

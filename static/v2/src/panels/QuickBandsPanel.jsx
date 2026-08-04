@@ -46,7 +46,9 @@ function summarise(primary) {
     return out;
 }
 
-export default function QuickBandsPanel() {
+// `minimal` drops the operator's own quick-tune row and leaves the amateur
+// bands. See the registry's `minimal`.
+export default function QuickBandsPanel({ minimal }) {
     const { tuning, actions, serverInfo, catalog } = useRadio();
     const [states, setStates] = useState({});
 
@@ -117,7 +119,7 @@ export default function QuickBandsPanel() {
                 })}
             </div>
 
-            {custom.length > 0 && (
+            {!minimal && custom.length > 0 && (
                 <>
                     <div className="divider" />
                     <div className="chip-row chip-row--wrap chip-row--center">

@@ -177,7 +177,15 @@ export const PANELS = [
     { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
-    { id: 'quickbands', title: 'Quick bands', icon: <Icon.Grid />, dock: 'bottom', Component: QuickBandsPanel },
+    // Minimal: the amateur bands only, without the operator's quick-tune row.
+    {
+        id: 'quickbands',
+        title: 'Quick bands',
+        icon: <Icon.Grid />,
+        dock: 'bottom',
+        minimal: true,
+        Component: QuickBandsPanel,
+    },
     // The launcher for the extensions, not the extensions themselves: an open
     // extension is a window of its own (extensions/ExtensionWindow.jsx) and
     // never joins the dock layout.

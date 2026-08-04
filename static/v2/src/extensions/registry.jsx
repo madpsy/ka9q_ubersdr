@@ -34,6 +34,7 @@ import FSKExtension from './fsk/FSKExtension.jsx';
 import NavtexExtension from './navtex/NavtexExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
+import FreeDVExtension from './freedv/FreeDVExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -89,6 +90,16 @@ export const EXTENSIONS = [
         float: { w: 880, h: 620 },
         minimal: true,
         Component: QrssExtension,
+    },
+    {
+        id: 'freedv',
+        title: 'FreeDV Decoder',
+        icon: <Icon.Mic />,
+        summary: 'Digital voice — decodes RADE and plays it over the receiver.',
+        requiresAudio: true,
+        float: { w: 820, h: 520 },
+        minimal: true,
+        Component: FreeDVExtension,
     },
 ];
 

@@ -90,6 +90,8 @@ esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefax.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
+esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
+    --outfile=.build/freedv.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -111,3 +113,4 @@ node fsk.test.js
 node navtex.test.js
 node wefax.test.js
 node qrss.test.js
+node freedv.test.js

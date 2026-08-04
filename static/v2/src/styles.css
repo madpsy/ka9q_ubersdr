@@ -3284,3 +3284,79 @@ a.btn { text-decoration: none; }
     line-height: 1.35;
     white-space: nowrap;
 }
+
+/* ── FreeDV ───────────────────────────────────────────────────────────────── */
+
+.fdv__signal {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--surface-3);
+    color: var(--text-faint);
+}
+.fdv__signal.is-on { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.fdv__stat {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.fdv__list { padding: 0; font-family: inherit; }
+.fdv__status { display: grid; place-items: center; }
+
+/* A row is a button: every one of them tunes. */
+.fdv__row {
+    display: grid;
+    grid-template-columns: 92px minmax(80px, 1fr) 46px 56px 96px minmax(80px, 1.4fr);
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    padding: 3px 6px;
+    text-align: left;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.fdv__row:disabled { cursor: default; opacity: 0.55; }
+.fdv__row:not(.fdv__row--head):not(:disabled):hover { background: var(--surface-hover); }
+.fdv__row--head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-strong);
+    cursor: default;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* Transmitting now is the only row you can do anything about. */
+.fdv__row--tx { color: var(--text); }
+/* The station the dial is already on. */
+.fdv__row--here { box-shadow: inset 2px 0 0 var(--accent); }
+
+.fdv__c-call, .fdv__c-grid {
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.fdv__c-num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.fdv__c-country, .fdv__c-msg {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fdv__c-msg { color: var(--text-faint); }
+.fdv__tx { color: var(--bad); font-size: 8px; line-height: 1; }

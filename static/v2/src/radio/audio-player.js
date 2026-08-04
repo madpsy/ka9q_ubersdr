@@ -36,7 +36,10 @@ const PRIME_SEC = 0.12;
 const MIN_PRIME_SEC = 0.04;
 const MIN_LEAD_SEC = 0.02;
 
-function getOpusDecoderClass() {
+// Exported because FreeDV decodes its own stream: the server sends it Opus
+// frames of *decoded voice* on a different socket, which must not go through
+// this player's scheduling or it would fight the SDR audio for the cursor.
+export function getOpusDecoderClass() {
     if (typeof window.OpusDecoder !== 'undefined') return window.OpusDecoder;
     const lib = window['opus-decoder'];
     if (lib && lib.OpusDecoder) return lib.OpusDecoder;
@@ -69,6 +72,8 @@ export class AudioPlayer {
         this.peakDb = -Infinity;    // output peak, dBFS
         this._clipUntil = 0;
         this.recordTap = null;      // unity node the recorder hangs off
+        this.duck = null;           // output gate, for decoders that play their own audio
+        this.ducked = false;
         // Bumped every time the context is rebuilt. A recording holds nodes
         // belonging to one context, so anything capturing audio has to notice
         // when that context has been thrown away (see lib/recorder.js).
@@ -120,6 +125,14 @@ export class AudioPlayer {
     setMuted(muted) {
         this.muted = !!muted;
         this._applyGain();
+    }
+
+    // Silences the receiver's own audio without touching the user's mute. See
+    // the duck node in _createContext.
+    setDucked(ducked) {
+        this.ducked = !!ducked;
+        if (!this.duck || !this.ctx) return;
+        this.duck.gain.setTargetAtTime(this.ducked ? 0 : 1, this.ctx.currentTime, 0.015);
     }
 
     setBufferSec(sec) {
@@ -244,7 +257,16 @@ export class AudioPlayer {
         // The analyser sits after the routing, so the audio scope shows what is
         // actually being played.
         this.merger.connect(this.analyser);
-        this.analyser.connect(this.ctx.destination);
+        // The duck sits between the analyser and the speakers, and nowhere
+        // else. A decoder that produces its own audio — FreeDV — has to silence
+        // the receiver while it plays, and doing that with the user's mute
+        // would both lie about the mute button and silence the decoder too.
+        // Here it stops only what is being played: the recorder tap, the audio
+        // scope and QRSS all still see the receiver.
+        this.duck = this.ctx.createGain();
+        this.duck.gain.value = this.ducked ? 0 : 1;
+        this.analyser.connect(this.duck);
+        this.duck.connect(this.ctx.destination);
         // Recorder tap, at the point v1 takes it (app.js "Step 10"): after the
         // filter chain and the volume/mute fader, but before the L/R output
         // routing — so a recording holds the processed audio as heard, in both

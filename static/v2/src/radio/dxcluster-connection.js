@@ -22,7 +22,7 @@
 //
 // Client -> server
 //   subscribe_dx_spots / subscribe_digital_spots / subscribe_cw_spots
-//   subscribe_chat  (+ the unsubscribe_* of each)
+//   subscribe_chat / subscribe_freedv_activity  (+ the unsubscribe_* of each)
 //   chat_set_username {username}      1-15 chars, alphanumeric plus - _ /
 //   chat_message {message}
 //   chat_set_frequency_mode {frequency, mode, bw_low, bw_high}
@@ -30,6 +30,7 @@
 //
 // Server -> client
 //   dx_spot / digital_spot / cw_spot   {data:{…}}   — see lib/spots.js
+//   freedv_activity_snapshot {users[]} / freedv_activity_update {event,user|sid}
 //   chat_message        {data:{username, message, timestamp}}
 //   chat_user_joined    {data:{username, timestamp, country, country_code}}
 //   chat_user_left      {data:{username, ...}}
@@ -51,7 +52,7 @@ export const USERNAME_MAX = 15;
 
 // Stream names as the server spells them in `subscribe_*` and in the
 // `subscription_status` replies.
-export const STREAMS = ['dx_spots', 'digital_spots', 'cw_spots', 'chat'];
+export const STREAMS = ['dx_spots', 'digital_spots', 'cw_spots', 'chat', 'freedv_activity'];
 
 // Mirrors isAlphanumeric() server-side: letters, digits, and - _ / but never
 // leading or trailing. Checked here so a bad name is caught before a round trip.
@@ -346,6 +347,20 @@ export class DXClusterConnection extends Emitter {
             case 'chat_idle_updates':
                 this.emit('idle', d.users || []);
                 break;
+
+            // FreeDV Reporter: who the server can see on the air. A snapshot on
+            // subscribe, then one update per change — see freedv_reporter_store.go.
+            case 'freedv_activity_snapshot':
+                this.emit('freedv', { kind: 'snapshot', users: msg.users || [] });
+                break;
+            case 'freedv_activity_update':
+                this.emit('freedv', {
+                    kind: 'update',
+                    event: msg.event,
+                    user: msg.user || null,
+                    sid: msg.sid || null,
+                });
+                break;
             case 'chat_error':
                 this.emit('error', { message: msg.error });
                 break;
@@ -360,7 +375,10 @@ export class DXClusterConnection extends Emitter {
                     if (this.lastStatus) this.send({ type: 'chat_set_frequency_mode', ...this.lastStatus });
                     this.send({ type: 'chat_request_users' });
                 }
-                this.emit('subscribed', { stream, enabled: !!msg.enabled });
+                // `error` distinguishes a refusal from the confirmation the
+                // server also sends for an unsubscribe: both carry
+                // enabled:false, and only one of them is news.
+                this.emit('subscribed', { stream, enabled: !!msg.enabled, error: msg.error || '' });
                 break;
             }
             default:

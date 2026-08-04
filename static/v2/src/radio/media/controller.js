@@ -231,6 +231,10 @@ export class MediaSessionController {
         // throws — harmlessly caught, but it was never going to work.
         this._startPositionUpdates();
         this._report('activated');
+        // The panel learns everything through _emit, so reaching the state it
+        // exists to report has to say so — without this the badge sits on
+        // WAITING while the OS is already showing the card.
+        this._emit();
     }
 
     _watchAudio() {

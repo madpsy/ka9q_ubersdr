@@ -104,8 +104,9 @@ export default function MediaSessionPanel({ minimal }) {
                 <StateBadge state={status.state} />
                 <span className="ms-head__note">
                     {status.state !== 'waiting' ? ''
-                        : !status.running ? 'waiting for audio'
-                        : 'connecting\u2026'}
+                        : !status.running ? 'start the receiver'
+                        : status.anchor === 'stream' ? 'connecting\u2026'
+                        : 'waiting for audio'}
                 </span>
                 <Switch checked={enabled} onChange={setEnabled} label={enabled ? 'On' : 'Off'} />
             </div>

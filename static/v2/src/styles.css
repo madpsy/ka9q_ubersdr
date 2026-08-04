@@ -2510,13 +2510,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ft8__status--on { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .ft8__status--wait { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
 .ft8__status--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
-.ft8__readout {
-    font-family: var(--mono);
-    font-size: calc(10.5px * var(--ui-scale));
-    color: var(--text-faint);
-    white-space: nowrap;
-}
-.ft8__readout--ok { color: var(--good); }
 .ft8__freq { max-width: 220px; }
 
 .ft8__controls {
@@ -2564,7 +2557,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ft8__row {
     display: grid;
     grid-template-columns:
-        58px 46px 42px 52px 52px 44px minmax(90px, 1fr) 38px 78px minmax(150px, 2fr) 46px;
+        58px 46px 42px 52px 52px 44px minmax(90px, 1fr) 38px 78px minmax(150px, 2fr);
     gap: 6px;
     align-items: center;
     padding: 2px 4px;
@@ -2573,6 +2566,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-bottom: 1px solid var(--border);
 }
 .ft8__row:not(.ft8__row--head):hover { background: var(--surface-hover); }
+/* First row of a cycle: the rule stands in for the slot column that used to be
+   the only way to see where one cycle ended. Heavier than the row separator so
+   it reads as a break rather than another row. */
+.ft8__row--slot { border-top: 2px solid var(--border-strong); }
 .ft8__row--head {
     position: sticky;
     top: 0;

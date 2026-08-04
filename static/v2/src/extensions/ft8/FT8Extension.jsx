@@ -43,13 +43,17 @@ const PAGE = 60;
 // raising it costs CPU on a machine shared with every other listener.
 const PARAMS = { protocol: 'FT8', min_score: 10, max_candidates: 100 };
 
-// How long after the last decode the receiver still counts as synchronised.
-// Two empty cycles on a live band means something is wrong — usually the clock.
-const SYNC_TIMEOUT_MS = 32000;
-
 const SPECTRUM_H = 120;
 
 const EMPTY_STATS = { total: 0, slotCount: 0, candidates: null, ldpc: null, crc: null, currentSlot: 0, lastAt: 0 };
+
+// Whether a rule goes above row `i`, marking where one cycle's decodes end and
+// the next begin. Only in arrival order: under a sort the rows are interleaved
+// by whatever was sorted on, so a slot boundary is not a place on the table and
+// a rule there would be drawing a line through nothing.
+function slotBreakBefore(rows, i, sortColumn) {
+    return !sortColumn && i > 0 && rows[i - 1].slot !== rows[i].slot;
+}
 
 function snrClass(snr) {
     if (snr >= 0) return 'ft8__snr ft8__snr--high';
@@ -129,8 +133,6 @@ export default function FT8Extension() {
     const [filterText, setFilterText] = useState('');
     const [sort, setSort] = useState({ column: null, dir: 'asc' });
     const [shown, setShown] = useState(PAGE);
-    // Ticks only while decoding, and only to age the sync indicator out.
-    const [now, setNow] = useState(() => Date.now());
 
     // The server sends no id with a decode, so the row key is a counter.
     const seq = useRef(0);
@@ -172,12 +174,6 @@ export default function FT8Extension() {
     // stops nothing. An audio *reconnect* is not that: it drops `live` for a
     // few seconds and the hook re-attaches on its own, so decoding stays on.
     useEffect(() => { if (!running && decoding) setDecoding(false); }, [running, decoding]);
-
-    useEffect(() => {
-        if (!decoding) return undefined;
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(id);
-    }, [decoding]);
 
     // A filter or sort change should show the top of the new list.
     useEffect(() => { setShown(PAGE); }, [opts.cqOnly, opts.latestOnly, filterText, sort]);
@@ -259,13 +255,11 @@ export default function FT8Extension() {
             : { column: id, dir: 'asc' }
     ));
 
-    const synced = decoding && stats.lastAt > 0 && now - stats.lastAt < SYNC_TIMEOUT_MS;
     const statusLabel = !decoding
         ? 'Stopped'
         : (state === 'running' ? 'Running' : (state === 'error' ? 'Error' : 'Starting…'));
     const statusTone = !decoding ? 'off' : (state === 'running' ? 'on' : (state === 'error' ? 'bad' : 'wait'));
 
-    const bandwidth = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     const page = rows.slice(0, shown);
 
     return (
@@ -277,28 +271,6 @@ export default function FT8Extension() {
                 >
                     {statusLabel}
                 </span>
-                <span className="ft8__readout" title="What the receiver is tuned to — the decoder hears exactly this">
-                    FT8 · {(tuning.frequency / 1e6).toFixed(3)} MHz {tuning.mode.toUpperCase()} · BW {bandwidth} Hz
-                </span>
-                <span className="ft8__readout" title="The 15-second transmission cycle being decoded, counted from when the decoder started">
-                    Slot {stats.currentSlot || '--'}
-                </span>
-                <span
-                    className={`ft8__readout${synced ? ' ft8__readout--ok' : ''}`}
-                    title={`Whether anything decoded in the last ${Math.round(SYNC_TIMEOUT_MS / 1000)} seconds. Persistently waiting on a busy band usually means the receiver's clock is off`}
-                >
-                    {synced ? 'Sync OK' : 'Sync waiting'}
-                </span>
-                <span
-                    className="ft8__readout"
-                    title="Decodes held, decodes in this cycle, then the decoder's own counters for the last cycle: candidate signals examined, and those thrown out by the error-correction and checksum tests"
-                >
-                    {messages.length} held · {stats.slotCount} this slot
-                    {stats.candidates != null ? ` · ${stats.candidates} cand` : ''}
-                    {stats.ldpc != null ? ` · ${stats.ldpc} LDPC` : ''}
-                    {stats.crc != null ? ` · ${stats.crc} CRC` : ''}
-                </span>
-
                 <span className="ft8__bar-gap" />
 
                 <select
@@ -427,8 +399,12 @@ export default function FT8Extension() {
                     </Empty>
                 )}
 
-                {page.map((m) => (
-                    <div key={m.key} className="ft8__row" title={m.locator ? `${m.callsign} · ${m.locator}` : m.callsign}>
+                {page.map((m, i) => (
+                    <div
+                        key={m.key}
+                        className={`ft8__row${slotBreakBefore(page, i, sort.column) ? ' ft8__row--slot' : ''}`}
+                        title={m.locator ? `${m.callsign} · ${m.locator}` : m.callsign}
+                    >
                         <span className="ft8__c-time">{m.utc}</span>
                         <span className={`ft8__c-num ${snrClass(m.snr)}`}>{m.snr.toFixed(1)}</span>
                         <span className="ft8__c-num">{m.deltaT.toFixed(1)}</span>
@@ -449,7 +425,6 @@ export default function FT8Extension() {
                                 : ''}
                         </span>
                         <span className={`ft8__c-msg${m.isCQ ? ' ft8__c-msg--cq' : ''}`}>{m.message}</span>
-                        <span className="ft8__c-num">{m.slot}</span>
                     </div>
                 ))}
 

@@ -131,8 +131,11 @@ export const COLUMNS = [
     { id: 'continent', label: 'Cont', sort: 'text', cls: 'ft8__c-cont' },
     { id: 'txCallsign', label: 'TX call', sort: 'text', cls: 'ft8__c-call' },
     { id: 'message', label: 'Message', sort: 'text', cls: 'ft8__c-msg' },
-    { id: 'slot', label: 'Slot', sort: 'num', cls: 'ft8__c-num' },
 ];
+// The slot is deliberately not a column: in arrival order the table draws a
+// rule where it changes, which says the same thing without a column of numbers
+// that repeats itself thirty times. It is still in `normaliseMessage`, still
+// filtered on by "latest cycle only", and still in the CSV.
 
 const COLUMN_BY_ID = Object.fromEntries(COLUMNS.map((c) => [c.id, c]));
 

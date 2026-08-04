@@ -126,19 +126,26 @@ function FilterTags() {
 // station_id_overlay from /api/ui-config — the same values v1 reads.
 const WIND_DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
 
+// No emoji here, unlike v1's thermometer and wind glyphs.
+//
+// This line is painted into the canvas, and a colour emoji is the one thing in
+// the whole block that comes out of a fallback font. Safari lays such a run out
+// differently from the rest, which is what put the weather line — and only the
+// weather line, the other three being plain text — off the right-hand edge.
+// A middle dot separates the parts instead, and reads the same everywhere.
 function weatherLine(wd) {
     if (!wd || !wd.weather || !wd.weather.length) return null;
     const desc = String(wd.weather[0].description || '')
         .split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const temp = wd.main && wd.main.temp !== undefined
-        ? `\u{1F321}️${Math.round(wd.main.temp)}°C` : '';
+        ? `${Math.round(wd.main.temp)}°C` : '';
     let wind = '';
     if (wd.wind && wd.wind.speed !== undefined) {
         const kmh = Math.round(wd.wind.speed * 3.6);
         const dir = wd.wind.deg !== undefined ? WIND_DIRS[Math.round(wd.wind.deg / 45) % 8] : '';
-        wind = `\u{1F4A8}${kmh} km/h${dir ? ' ' + dir : ''}`;
+        wind = `${kmh} km/h${dir ? ' ' + dir : ''}`;
     }
-    return [desc, temp, wind].filter(Boolean).join('  ') || null;
+    return [desc, temp, wind].filter(Boolean).join(' · ') || null;
 }
 
 function antennaLine(ant) {
@@ -1069,6 +1076,9 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     }
 }
 
+// Measured line widths, keyed by font and text — see drawStationId.
+const STATION_W = new Map();
+
 // Top-right station block. Geometry is v1's: 6 px inset, 16 px line pitch, and
 // a 1 px black drop shadow under every line so the text stays legible over a
 // bright backdrop image or a strong signal.
@@ -1081,16 +1091,33 @@ function drawStationId(g, c, pxW, dpr) {
     const col = g.stationColor || '#ffffff';
 
     c.save();
-    c.textAlign = 'right';
+    // Placed by measurement rather than by textAlign: an operator's name or
+    // location can carry anything, and a run the browser aligns by its own
+    // rules is how the weather line ended up off the edge in Safari. Measuring
+    // and drawing from the left uses one number we can see.
+    c.textAlign = 'left';
     c.textBaseline = 'top';
     for (const line of lines) {
-        c.font = `${line.bold ? 'bold ' : ''}${line.size * dpr}px ui-sans-serif, system-ui, sans-serif`;
+        const font = `${line.bold ? 'bold ' : ''}${line.size * dpr}px ui-sans-serif, system-ui, sans-serif`;
+        c.font = font;
+        // Cached: this runs on every frame, the text changes every 15 minutes,
+        // and shaping a string is the expensive half of drawing it.
+        const key = `${font}|${line.text}`;
+        let w = STATION_W.get(key);
+        if (w === undefined) {
+            if (STATION_W.size > 32) STATION_W.clear();   // dpr and text both vary
+            w = c.measureText(line.text).width;
+            STATION_W.set(key, w);
+        }
+        // A width the browser could not work out must not push the line off
+        // screen — anchor it at the edge instead.
+        const x = Number.isFinite(w) && w > 0 ? rightX - w : rightX;
         c.globalAlpha = 1;
         c.fillStyle = 'rgba(0,0,0,0.55)';
-        c.fillText(line.text, rightX + dpr, y + dpr);
+        c.fillText(line.text, x + dpr, y + dpr);
         c.globalAlpha = line.alpha;
         c.fillStyle = col;
-        c.fillText(line.text, rightX, y);
+        c.fillText(line.text, x, y);
         y += 16 * dpr;
     }
     c.restore();

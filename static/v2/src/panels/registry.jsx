@@ -159,6 +159,18 @@ export const PANELS = [
     // the same information at a resolution you only want when you are studying
     // a signal rather than glancing at it.
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', minimal: true, Component: SignalPanel },
+    // Directly under Signal: the band you are on and how it is doing are read
+    // together, and the chips are a row of buttons rather than a wide table —
+    // they fit a dock column better than they fit the bottom rail.
+    // Minimal: the amateur bands only, without the operator's quick-tune row.
+    {
+        id: 'quickbands',
+        title: 'Quick bands',
+        icon: <Icon.Grid />,
+        dock: 'right',
+        minimal: true,
+        Component: QuickBandsPanel,
+    },
     // Minimal: squelch and noise reduction. Volume, channel and buffer are set
     // once a session; these two are worked at while you listen.
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
@@ -199,15 +211,6 @@ export const PANELS = [
     },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
-    // Minimal: the amateur bands only, without the operator's quick-tune row.
-    {
-        id: 'quickbands',
-        title: 'Quick bands',
-        icon: <Icon.Grid />,
-        dock: 'bottom',
-        minimal: true,
-        Component: QuickBandsPanel,
-    },
     // The launcher for the extensions, not the extensions themselves: an open
     // extension is a window of its own (extensions/ExtensionWindow.jsx) and
     // never joins the dock layout.

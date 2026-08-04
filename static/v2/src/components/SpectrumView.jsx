@@ -1266,6 +1266,10 @@ function binsToPixels(bins, width, out) {
 // least `minSpan` dB are shown, expanding 75% upward (headroom for signals) and
 // 25% downward, and only re-commits when the new edges move more than 3 dB —
 // without that dead-band the grid ticks jitter as the smoothed values drift.
+//
+// It reads g.autoFloor/g.autoCeil and writes only g.clampedFloor/g.clampedCeil.
+// Keeping those two pairs apart is what stops the dead band from latching the
+// auto-range; see the note at the end of this function.
 const CLAMP_HYSTERESIS = 3;
 
 function applyMinSpan(g, minSpan) {
@@ -1287,8 +1291,20 @@ function applyMinSpan(g, minSpan) {
         g.clampedFloor = floor;
         g.clampedCeil = ceil;
     }
-    g.autoFloor = g.clampedFloor;
-    g.autoCeil = g.clampedCeil;
+    // The clamped pair is what gets drawn, and deliberately nothing more. It
+    // used to be written back into autoFloor/autoCeil, which is where the whole
+    // thing came unstuck: those two are the values autoRange eases towards the
+    // signal, and feeding the clamp back into them closed a loop with the dead
+    // band above.
+    //
+    // Each frame eases 8% of the way to the target and the dead band ignores a
+    // move under 3 dB, so once the remaining error fell below 3/0.08 — about 37
+    // dB — a frame's easing could no longer clear the band, the write-back put
+    // the levels back where they were, and the auto-range stopped dead that far
+    // from the truth. Come to a quiet band from a loud one and the noise floor
+    // sat tens of dB below the bottom of the display, invisible, for as long as
+    // you cared to wait. Zooming out only fixed it because the jump in the data
+    // was large enough to clear the band again — and it would re-latch.
 }
 
 // How far the auto-levels move towards their target in one 20 Hz frame. Slow,
@@ -1350,8 +1366,11 @@ function drawFrame(g, d, ctx) {
         // null means "follow the operator's default"; 0 means no minimum.
         applyMinSpan(g, d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan);
     }
-    const floor = d.autoRange ? g.autoFloor : d.floorDb;
-    const ceil = d.autoRange ? g.autoCeil : d.ceilDb;
+    // The clamped pair when a minimum span is in force, the eased pair
+    // otherwise — applyMinSpan sets clampedFloor to null when it has nothing to
+    // add, which is also what it does when the minimum is switched off.
+    const floor = d.autoRange ? (g.clampedFloor != null ? g.clampedFloor : g.autoFloor) : d.floorDb;
+    const ceil = d.autoRange ? (g.clampedCeil != null ? g.clampedCeil : g.autoCeil) : d.ceilDb;
     const range = Math.max(1, ceil - floor);
 
     // Soft enough to read as context beside the dial line; v1's colour name.

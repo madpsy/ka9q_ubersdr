@@ -4,7 +4,7 @@
 // you are panned away from the dial, so both are pinned here.
 
 const assert = require('assert');
-const { clampCenter, zoomCenter } = require('./.build/zoom.cjs');
+const { clampCenter, needsRecenter, zoomCenter } = require('./.build/zoom.cjs');
 const { MAX_FREQ, MIN_FREQ } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -99,6 +99,71 @@ t('a zero-width current span falls back to holding the view centre', () => {
     // Before the first frame arrives `span` is 0, and the ratio would be
     // Infinity — the anchored branch must not be taken.
     assert.strictEqual(zoomCenter(view(10e6, 0), binBW(1e6), 10.25e6, 7.1e6), 10e6);
+});
+
+// --- following the dial: the passband is what must stay on screen -----------
+//
+// A symmetric threshold cannot express this, and the old one (35% of the span,
+// whichever way you were going) made the outer 15% of the spectrum unclickable
+// on the side the filter does not occupy.
+
+// A 100 kHz view centred on 14.100 MHz: edges at 14.050 and 14.150.
+const FOLLOW = { center: 14.1e6, span: 100e3 };
+const LO = FOLLOW.center - FOLLOW.span / 2;   // 14.050 MHz
+const HI = FOLLOW.center + FOLLOW.span / 2;   // 14.150 MHz
+const at = (frequency, mode) => ({ frequency, ...mode });
+const USB = { bandwidthLow: 50, bandwidthHigh: 2700 };
+const LSB = { bandwidthLow: -2700, bandwidthHigh: -50 };
+const AM = { bandwidthLow: -5000, bandwidthHigh: 5000 };
+
+t('USB can be tuned hard against the left edge, because the filter opens right', () => {
+    // The passband runs from +50 to +2700 of the dial, so at the left edge it
+    // is entirely on screen and there is nothing to move for.
+    assert.strictEqual(needsRecenter(at(LO, USB), FOLLOW.center, FOLLOW.span), false);
+    assert.strictEqual(needsRecenter(at(LO + 1, USB), FOLLOW.center, FOLLOW.span), false);
+});
+
+t('USB stops 2.7 kHz short of the right edge, where the filter would run off', () => {
+    // The last frequency whose passband still ends on the edge.
+    assert.strictEqual(needsRecenter(at(HI - 2700, USB), FOLLOW.center, FOLLOW.span), false);
+    // One hertz further out and 1 Hz of it is off screen.
+    assert.strictEqual(needsRecenter(at(HI - 2699, USB), FOLLOW.center, FOLLOW.span), true);
+});
+
+t('LSB is the mirror image of USB', () => {
+    // Hard against the right edge is fine; it is the left that needs the room.
+    assert.strictEqual(needsRecenter(at(HI, LSB), FOLLOW.center, FOLLOW.span), false);
+    assert.strictEqual(needsRecenter(at(LO + 2700, LSB), FOLLOW.center, FOLLOW.span), false);
+    assert.strictEqual(needsRecenter(at(LO + 2699, LSB), FOLLOW.center, FOLLOW.span), true);
+});
+
+t('AM needs the same room at both edges, because its filter is symmetric', () => {
+    assert.strictEqual(needsRecenter(at(LO + 5000, AM), FOLLOW.center, FOLLOW.span), false);
+    assert.strictEqual(needsRecenter(at(HI - 5000, AM), FOLLOW.center, FOLLOW.span), false);
+    assert.strictEqual(needsRecenter(at(LO + 4999, AM), FOLLOW.center, FOLLOW.span), true);
+    assert.strictEqual(needsRecenter(at(HI - 4999, AM), FOLLOW.center, FOLLOW.span), true);
+});
+
+t('the middle of the view never moves it, whatever the mode', () => {
+    for (const mode of [USB, LSB, AM]) {
+        assert.strictEqual(needsRecenter(at(FOLLOW.center, mode), FOLLOW.center, FOLLOW.span), false);
+    }
+});
+
+t('a filter wider than the span falls back to keeping the dial visible', () => {
+    // FM at 16 kHz on a 10 kHz view can never fit, and demanding it would move
+    // the view on every single tune.
+    const FM = { bandwidthLow: -8000, bandwidthHigh: 8000 };
+    const span = 10e3;
+    const centre = 14.1e6;
+    assert.strictEqual(needsRecenter(at(centre, FM), centre, span), false);
+    assert.strictEqual(needsRecenter(at(centre + 4999, FM), centre, span), false, 'dial still on screen');
+    assert.strictEqual(needsRecenter(at(centre + 5001, FM), centre, span), true, 'dial off screen');
+});
+
+t('no span yet means nothing to be outside of', () => {
+    // Before the spectrum has connected there is no view to move.
+    assert.strictEqual(needsRecenter(at(14.1e6, USB), 0, 0), false);
 });
 
 if (process.exitCode) console.log('\nzoom tests FAILED');

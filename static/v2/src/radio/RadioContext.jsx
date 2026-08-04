@@ -25,7 +25,7 @@ import {
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
-import { zoomCenter } from '../lib/zoom.js';
+import { needsRecenter, zoomCenter } from '../lib/zoom.js';
 
 const RadioContext = createContext(null);
 
@@ -504,13 +504,12 @@ export function RadioProvider({ children }) {
     const sendDspParams = useMemo(() => throttle((params) => audioConn.setDSPParams(params), 120), []);
 
     const actions = useMemo(() => {
-        const recenterIfNeeded = (freq) => {
+        // Move the view only when the passband would leave the screen — the
+        // rule itself is in lib/zoom.js, with the rest of the view geometry.
+        const recenterIfNeeded = (t) => {
             if (!followRef.current || !spectrumConn.connected) return;
-            const span = spectrumConn.span;
-            if (!span) return;
-            const edge = span * 0.35;
-            if (Math.abs(freq - spectrumConn.centerFreq) > edge) {
-                spectrumConn.setView(clamp(freq, MIN_FREQ, MAX_FREQ), null);
+            if (needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span)) {
+                spectrumConn.setView(clamp(t.frequency, MIN_FREQ, MAX_FREQ), null);
             }
         };
 
@@ -523,7 +522,10 @@ export function RadioProvider({ children }) {
             lastLocalTune.current = Date.now();
             setTuning(next);
             sendTune(next);
-            recenterIfNeeded(next.frequency);
+            // The whole tuning, not just the frequency: a mode change or a
+            // widened filter can put the passband off the edge without the dial
+            // having moved at all.
+            recenterIfNeeded(next);
         };
 
         const applySquelch = (value) => {

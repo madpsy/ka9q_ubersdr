@@ -19,6 +19,7 @@
 
 import { Emitter } from './emitter.js';
 import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
+import { clampCenter } from '../lib/zoom.js';
 
 const HEADER_BYTES = 22;
 
@@ -171,9 +172,34 @@ export class SpectrumConnection extends Emitter {
     // next open, rather than being dropped: clicking a bookmark during a
     // reconnect used to tune the receiver and leave the view where it was, so
     // the signal you asked for was off screen with no sign of why.
+    // The view is kept inside the band here rather than at each call site.
+    //
+    // There are eight callers and only the three zoom ones remembered to do it:
+    // panning, ensureVisible, centerOnTuned and the auto-recentre all clamp the
+    // centre to MIN_FREQ..MAX_FREQ, which says nothing about where the *edges*
+    // land — a centre of 10 kHz with a 1 MHz span puts the left edge at
+    // -490 kHz. Worse, setSpan passes no centre at all: a wider span can put an
+    // untouched centre out of bounds on its own, so there is a case here that
+    // no call site could have fixed. The result was a spectrum running past
+    // 0 Hz into frequencies that do not exist, most easily on a low frequency
+    // with the zoom anchored to the dial.
+    //
+    // clampCenter is the same rule the zoom actions already use: the left edge
+    // stops at 0 and the right at MAX_FREQ, and a span too small to reach
+    // either simply keeps the centre inside the band.
     setView(centerFreq, binBandwidth) {
+        const bw = binBandwidth != null ? binBandwidth : this.binBandwidth;
+        const span = bw > 0 && this.binCount > 0 ? bw * this.binCount : 0;
+        const wanted = centerFreq != null ? centerFreq : this.centerFreq;
+        const centre = span > 0 && wanted > 0 ? clampCenter(wanted, span) : wanted;
+
         const msg = { type: 'zoom' };
-        if (centerFreq != null) msg.frequency = Math.round(centerFreq);
+        // The centre goes out when the caller asked for one, and also when the
+        // clamp has moved a centre nobody touched — which is the span-change
+        // case above.
+        if (centerFreq != null || (centre > 0 && Math.round(centre) !== Math.round(this.centerFreq))) {
+            msg.frequency = Math.round(centre);
+        }
         if (binBandwidth != null) msg.binBandwidth = binBandwidth;
         if (this.send(msg)) return true;
         this.pendingView = {

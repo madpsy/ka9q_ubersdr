@@ -34,6 +34,19 @@ const MIN_WATERFALL_H = 40;
 // remembers the real width.
 const CURSOR_TAG_W = 96;
 
+// The first two live pointers, in the order they went down — a pinch, if there
+// are two of them. A third finger joins the map but is ignored.
+function pinchPair(pts) {
+    const [a, b] = pts.values();
+    return a && b ? [a, b] : null;
+}
+function pinchDist([a, b]) { return Math.hypot(b.x - a.x, b.y - a.y); }
+
+// Shortest gap between zoom steps taken from a pinch. Long enough for the
+// server to answer the previous one over a slow link, short enough that a brisk
+// gesture still gets through several.
+const PINCH_MS = 140;
+
 // Squelch state in the spectrum toolbar. Split into its own component so the
 // 10 Hz meter sampling re-renders this tag alone — SpectrumView owns the draw
 // loop and must not re-render at meter rate.
@@ -264,6 +277,8 @@ export default function SpectrumView() {
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px
         drag: null,
+        pts: new Map(),      // live pointers, id -> {x, y}; two of them is a pinch
+        pinch: null,         // {dist, bw, last} the view the fingers went down on
         bgImage: null,       // operator backdrop, split view only
         bgOpacity: 0,
         bgUrl: '',
@@ -486,7 +501,26 @@ export default function SpectrumView() {
         const el = wrapRef.current;
         if (!el) return;
         el.setPointerCapture(e.pointerId);
-        gfx.current.drag = {
+        const g = gfx.current;
+        g.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // Second finger down: this is a pinch, not a drag. The first finger has
+        // a drag open — drop it, or the release at the end of the pinch reads as
+        // a tap and tunes the receiver to wherever the fingers happened to be.
+        if (g.pts.size === 2) {
+            g.drag = null;
+            g.hover = null;
+            setHoverInfo(null);
+            g.pinch = {
+                dist: pinchDist(pinchPair(g.pts)),
+                bw: cfgRef.current.binBandwidth,
+                last: 0,
+            };
+            return;
+        }
+        if (g.pts.size > 2) return;   // a third finger changes nothing
+
+        g.drag = {
             startX: e.clientX,
             startCenter: cfgRef.current.centerFreq,
             moved: false,
@@ -499,6 +533,45 @@ export default function SpectrumView() {
         if (!el) return;
         const r = el.getBoundingClientRect();
         const g = gfx.current;
+
+        if (g.pts.has(e.pointerId)) g.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // ---- pinch ------------------------------------------------------
+        //
+        // Zoom is a ladder the server snaps to, so a continuous gesture has to
+        // be quantised onto it. How far the fingers have opened since they went
+        // down gives the span the gesture is asking for; the difference between
+        // that and the span actually on screen, in rungs, says whether to take a
+        // step. Rounding puts the threshold at the geometric mean between rungs
+        // — spreading to √2 of the starting separation zooms one step.
+        //
+        // Measuring against the live view rather than a running total is what
+        // keeps this honest: a step only counts once the server has confirmed
+        // it, so a request that is refused at the zoom floor, or one still in
+        // flight, cannot leave the gesture believing it got somewhere it did
+        // not. The throttle is there because pointermove fires far faster than
+        // any of that settles.
+        if (g.pinch) {
+            const pair = pinchPair(g.pts);
+            const dist = pair ? pinchDist(pair) : 0;
+            const now = performance.now();
+            const bwNow = cfgRef.current.binBandwidth;
+            if (dist > 0 && g.pinch.bw > 0 && bwNow > 0 && now - g.pinch.last >= PINCH_MS) {
+                const want = g.pinch.bw * (g.pinch.dist / dist);
+                const steps = Math.round(Math.log2(bwNow / want));
+                if (steps !== 0) {
+                    // About the point between the fingers, so whatever they
+                    // opened around stays under them.
+                    const about = freqAtX((pair[0].x + pair[1].x) / 2);
+                    if (steps > 0) actions.zoomIn(about); else actions.zoomOut(about);
+                    g.pinch.last = now;
+                }
+            }
+            // No hover readout and no pan for the rest of the gesture, up to and
+            // including the finger still down after the first one lifts.
+            return;
+        }
+
         g.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
         g.dirty = true;
 
@@ -542,10 +615,20 @@ export default function SpectrumView() {
 
     const onPointerUp = useCallback((e) => {
         const g = gfx.current;
+        g.pts.delete(e.pointerId);
+        try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+        // Lifting one finger of a pinch leaves the other one resting on the
+        // spectrum. Stay out of the way until the hand is off entirely, or that
+        // finger picks up a pan from wherever it happens to be.
+        if (g.pinch) {
+            if (g.pts.size === 0) g.pinch = null;
+            return;
+        }
+
         const drag = g.drag;
         g.drag = null;
         if (!drag) return;
-        try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         if (drag.moved) return;
         const f = freqAtX(e.clientX);
         if (f == null) return;

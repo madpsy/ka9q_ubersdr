@@ -798,6 +798,10 @@ export function RadioProvider({ children }) {
                 // session back to the shared radiod channel instead of leaving a
                 // private one allocated at default parameters.
                 if (next >= c.fullSpanBinBandwidth()) {
+                    // Already there: nothing to hand back, and a held pinch
+                    // against the stop would otherwise re-send this several
+                    // times a second.
+                    if (c.binBandwidth >= c.fullSpanBinBandwidth()) return;
                     c.reset();
                     return;
                 }

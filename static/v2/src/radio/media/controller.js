@@ -76,6 +76,9 @@ export class MediaSessionController {
         // — switching has to tear down what was built, not what was asked for.
         this.activeAnchor = null;
         this.offFlowing = null;
+        // Whether audio has actually been heard since this was enabled. Until
+        // it has, nothing may be handed to MediaSession at all — see _activate.
+        this.activated = false;
     }
 
     get anchor() {
@@ -127,9 +130,11 @@ export class MediaSessionController {
         if (this.host.onStatus) this.host.onStatus(this.status);
     }
 
+    // ON AIR means the OS has actually been handed the card, not merely that
+    // the switch is on — which for most of this feature's life was the same
+    // claim and the wrong one.
     _anchorReady() {
-        if (this.anchor === 'stream') return !!(this.stream && this.stream.playing);
-        return this.running;
+        return this.activated;
     }
 
     // ---- lifecycle ---------------------------------------------------------
@@ -150,8 +155,14 @@ export class MediaSessionController {
         if (running === this.running) return;
         this.running = running;
         if (!this.enabled) return;
-        if (running) this._start().catch(() => {});
-        else this._stopAnchor();
+        if (running) {
+            this._start().catch(() => {});
+        } else {
+            // Audio has stopped, so the browser's session goes with it. Saying
+            // so keeps a later tuning change from pushing into nothing.
+            this.activated = false;
+            this._stopAnchor();
+        }
         this._emit();
     }
 
@@ -175,7 +186,6 @@ export class MediaSessionController {
             }
         }
         this._installHandlers();
-        this._startPositionUpdates();
 
         // The one that actually makes the controls appear.
         //
@@ -192,13 +202,18 @@ export class MediaSessionController {
         // re-arms it whenever the AudioContext is rebuilt (app.js:4529, 5389),
         // which is what the player's `flowing` event covers here.
         //
-        // The push below is still worth doing: on the browsers that do not need
-        // this, it puts the card up immediately rather than one buffer later.
+        // Nothing is pushed from here, deliberately. Setting metadata while no
+        // audio is playing makes Chrome create a session for something that is
+        // not there: the toolbar icon appears and is dropped a second later,
+        // and the operator sees the feature flicker and fail. v1 refuses the
+        // same case outright — "Media Session enabled — will activate on next
+        // audio start" (app.js:13539) — and waits for the playback loop.
+        //
+        // Arming covers both orders. Enable while audio is already flowing and
+        // the next buffer activates within about 20 ms; enable beforehand, or
+        // with the receiver stopped, and it activates the moment audio starts.
         this._watchAudio();
         if (this.host.player) this.host.player.armFlowing();
-
-        this._pushMetadata();
-        this._applyPlaybackState();
         this._report('enabled');
     }
 
@@ -207,9 +222,14 @@ export class MediaSessionController {
     // text would be recognised as already set — which is precisely the state
     // that made this invisible.
     _activate() {
+        this.activated = true;
         this.lastMetadata = null;
         this._pushMetadata();
         this._applyPlaybackState();
+        // Position state belongs here rather than at enable: it describes a
+        // session that has to exist first, and setting it against nothing
+        // throws — harmlessly caught, but it was never going to work.
+        this._startPositionUpdates();
         this._report('activated');
     }
 
@@ -221,6 +241,7 @@ export class MediaSessionController {
     }
 
     _stop() {
+        this.activated = false;
         if (this.offFlowing) {
             this.offFlowing();
             this.offFlowing = null;
@@ -261,8 +282,10 @@ export class MediaSessionController {
             // only now should the context stop playing the same audio itself.
             this.host.player.setExternalPlayback(true);
             this._syncStreamOutput();
-            this._pushMetadata();
-            this._applyPlaybackState();
+            // Same milestone as the player's `flowing` event, reached the other
+            // way: audio is now genuinely playing, from the element rather than
+            // from the graph.
+            this._activate();
             this._emit();
         });
 
@@ -365,6 +388,10 @@ export class MediaSessionController {
 
     _pushMetadata() {
         if (!this.enabled || !this.support.available) return;
+        // The gate that keeps a tuning change from doing what the enable click
+        // used to: creating a session with no audio behind it, which Chrome
+        // shows for a second and then drops.
+        if (!this.activated) return;
         // Rule 2: on the stream anchor, silence until it is stably playing.
         if (this.anchor === 'stream' && !(this.stream && this.stream.playing)) return;
 

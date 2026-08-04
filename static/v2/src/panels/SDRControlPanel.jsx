@@ -23,7 +23,7 @@
 // exactly the path a click takes.
 
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
-import { Button, Empty, Field, Icon, Segmented, Switch } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
 import {
@@ -45,6 +45,13 @@ const SURFACE_OPTIONS = [
     { value: 'flexcontrol', label: 'FlexControl' },
     { value: 'midi', label: 'MIDI' },
 ];
+
+// Mapping rows shown before "show more". A dock panel never scrolls itself —
+// the dock is the only scroller — so a fader bank with forty controls learned
+// would otherwise make this panel a couple of thousand pixels tall and push
+// everything below it out of the dock. Same answer as the band and bookmark
+// lists, which page for the same reason.
+const PAGE = 12;
 
 // `minimal` leaves the connection line alone — the indicator, the surface's
 // name and the button that connects or drops it. Everything else here is setup:
@@ -130,6 +137,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
     // Learn: null when idle, otherwise { fn, mapBoth, pressKey }.
     const [learn, setLearn] = useState(null);
     const [pick, setPick] = useState('');
+    const [limit, setLimit] = useState(PAGE);
     const fileRef = useRef(null);
 
     const dispatcher = useMemo(() => new Dispatcher(), []);
@@ -183,7 +191,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
         // a position, and the wheel does nothing.
         const encoder = isMidi && isEncoderFunction(fn, dspSchemas);
         const recordFor = (k) => (encoder && isCCKey(k) ? { ...record, relative: true } : record);
-        update((prev) => ({
+        const next = update((prev) => ({
             ...prev,
             [id]: {
                 ...prev[id],
@@ -193,6 +201,13 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
                 ]),
             },
         }));
+        // Reveal what was just learned. The rows are in address order and the
+        // list pages, so a new mapping can sort past the end of the page — and
+        // learning a control only to watch nothing appear is exactly the
+        // failure the message log exists to prevent.
+        const sorted = sortRows(Object.entries(next[id].mappings), isMidi);
+        const last = Math.max(...keys.map((k) => sorted.findIndex(([rk]) => rk === k)));
+        setLimit((n) => Math.max(n, last + 1));
         onMessage(`Mapped ${keys.map(labelFor(isMidi)).join(' + ')} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
         setLearn(null);
     };
@@ -480,7 +495,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
                 <Empty>Nothing mapped yet.</Empty>
             ) : (
                 <div className="rc-map">
-                    {rows.map(([key, m]) => (
+                    {rows.slice(0, limit).map(([key, m]) => (
                         <MappingRow
                             key={key}
                             mapKey={key}
@@ -503,6 +518,17 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
                         />
                     ))}
                 </div>
+            )}
+
+            {/* Only when there is more to see: ShowMore's other branch is a
+                "34 shown" line, and the section label above already says 34. */}
+            {rows.length > limit && (
+                <ShowMore
+                    shown={limit}
+                    total={rows.length}
+                    onMore={() => setLimit((n) => n + PAGE)}
+                    label="Show more mappings"
+                />
             )}
 
             <div className="chip-row">
@@ -530,6 +556,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
                     disabled={!rows.length}
                     onClick={() => {
                         update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: {} } }));
+                        setLimit(PAGE);
                         onMessage('Cleared all mappings', 'info');
                     }}
                 >
@@ -550,6 +577,10 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
                                 // normaliseMidiMappings.
                                 const next = isMidi ? normaliseMidiMappings(m) : m;
                                 update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
+                                // A fresh list, so back to the first page —
+                                // importing forty mappings must not leave the
+                                // panel forty rows tall.
+                                setLimit(PAGE);
                                 onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
                             },
                             (err) => onMessage(`Import failed: ${err.message}`, 'error'),

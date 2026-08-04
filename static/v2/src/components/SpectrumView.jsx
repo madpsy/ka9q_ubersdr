@@ -22,6 +22,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
+import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
@@ -455,6 +456,11 @@ export default function SpectrumView() {
     const metaRef = useRef(null);
     const cursorTagFits = useRoomFor(metaRef, CURSOR_TAG_W);
 
+    // The centre frequency goes on a phone: the ruler under the spectrum already
+    // has it, and the tags left of the zoom buttons are the scarcest row in the
+    // layout there.
+    const mobile = useMediaQuery(MOBILE_QUERY);
+
     // ---- pointer interaction --------------------------------------------
 
     const freqAtX = useCallback((clientX) => {
@@ -624,7 +630,7 @@ export default function SpectrumView() {
             <div className="spectrum__toolbar">
                 <div className="spectrum__meta" ref={metaRef}>
                     <span className="tag tag--accent">{formatSpan(span)}</span>
-                    <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>
+                    {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
                     {hoverInfo && cursorTagFits && (
                         <span className="tag tag--ghost" data-optional="">{formatFreqShort(hoverInfo.freq, span)}</span>
                     )}

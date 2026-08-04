@@ -24,8 +24,12 @@ import { Button, Empty, Icon, Segmented } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
+import { getSessionId } from '../radio/session.js';
 import { dxcluster } from '../radio/dxcluster-connection.js';
 import { clearSpots, subscribeSpots } from '../lib/spotStore.js';
+import {
+    cwGraphBand, cwGraphCleared, cwGraphFrequency, openCwGraph, setCwGraphContext,
+} from '../compat/cwGraph.js';
 import {
     AGE_OPTIONS, BANDS, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
     DISTANCE_OPTIONS, SNR_OPTIONS, WPM_OPTIONS,
@@ -299,6 +303,25 @@ export default function SpotsPanel({ minimal }) {
     // A filter change should show the top of the new list, not page 4 of it.
     useEffect(() => { setShown(PAGE); }, [active, filters]);
 
+    // What the CW graph reads back off us — everything except the spots, which
+    // it subscribes to itself. Refreshed on every render rather than captured
+    // once: the panel is unmounted whenever its section is collapsed, and the
+    // graph has to keep working through that.
+    setCwGraphContext({
+        band: () => filters.cw.band,
+        frequency: () => tuning.frequency,
+        lookups: () => !!(serverInfo && serverInfo.lookup_service),
+        uuid: () => getSessionId(),
+        tune: (t) => actions.tuneTo(t),
+        lookup: (call) => { if (!requestLookup(call)) lookupCallsign(call); },
+        clear: () => clearSpots('cw'),
+    });
+
+    // The graph mirrors our band filter and follows the dial for its
+    // auto-lookup. Both are no-ops when it is not open.
+    useEffect(() => { cwGraphBand(filters.cw.band); }, [filters.cw.band]);
+    useEffect(() => { cwGraphFrequency(tuning.frequency); }, [tuning.frequency]);
+
     if (!tabs.length) return <Empty>This receiver publishes no spots.</Empty>;
 
     const list = spots;
@@ -337,13 +360,32 @@ export default function SpotsPanel({ minimal }) {
                         ? `${list.length} spot${list.length === 1 ? '' : 's'}`
                         : `${matched.length} of ${list.length}`}
                 </span>
+                {/* v1 ships this as the CW skimmer extension's "View Spots"
+                    button. The page is a chart of the same spots over time,
+                    with its own filters, map and morse decoder — see
+                    compat/cwGraph.js for what it expects from us. */}
+                {active === 'cw' && (
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.External size={13} />}
+                        title="Open the CW spot graph"
+                        onClick={() => openCwGraph((fn) => subscribeSpots('cw', fn))}
+                    >
+                        Graph
+                    </Button>
+                )}
                 <Button
                     size="sm"
                     variant="ghost"
                     icon={<Icon.Trash size={13} />}
                     title="Clear the list"
                     disabled={!list.length}
-                    onClick={() => clearSpots(active)}
+                    onClick={() => {
+                        clearSpots(active);
+                        // The graph holds its own copy, so it has to be told.
+                        if (active === 'cw') cwGraphCleared();
+                    }}
                 />
             </div>
 

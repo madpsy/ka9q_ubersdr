@@ -76,6 +76,10 @@ esbuild ../src/extensions/ft8/messages.js --bundle --format=cjs --platform=node 
     --outfile=.build/ft8messages.cjs --log-level=warning
 esbuild ../src/extensions/ft8/spectrum.js --bundle --format=cjs --platform=node \
     --outfile=.build/ft8spectrum.cjs --log-level=warning
+esbuild ../src/extensions/fsk/frames.js --bundle --format=cjs --platform=node \
+    --outfile=.build/fskframes.cjs --log-level=warning
+esbuild ../src/extensions/fsk/spectrum.js --bundle --format=cjs --platform=node \
+    --outfile=.build/fskspectrum.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -93,3 +97,4 @@ node recorder.test.js
 node controls.test.js
 node spots.test.js
 node extensions.test.js
+node fsk.test.js

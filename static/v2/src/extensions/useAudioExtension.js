@@ -19,7 +19,15 @@
 // every render without re-attaching. `params` is compared by value for the same
 // reason: an extension whose settings changed must be re-attached (the server
 // takes them at creation), but one whose object identity merely changed must
-// not be.
+// not be. That second rule is what makes a decoder with live settings work at
+// all: FSK's shift and baud are attach-time parameters server-side, so editing
+// one has to tear the extension down and build it again, and doing that is
+// simply passing different `params`.
+//
+// Result frames are JSON by default, because that is what the decoders written
+// since have used. The older ones speak a packed binary format of their own
+// (FSK's is a type byte and a payload), so `parse` takes the raw frame and
+// returns whatever the panel wants to handle — or null to drop it.
 //
 // Attaching needs a live *audio* session — the server looks it up by the UUID
 // the socket was opened with — so `active` should include the audio connection
@@ -37,7 +45,7 @@ import {
 const RETRY_MS = 1500;
 const MAX_RETRIES = 6;
 
-export function useAudioExtension({ name, params, active, onResult, onEvent }) {
+export function useAudioExtension({ name, params, active, onResult, onEvent, parse }) {
     // 'idle' before anything is asked for, 'attaching' between the attach and
     // the server's confirmation, 'running' once it has confirmed, 'error' when
     // it refused. The panel shows this; nothing else depends on it.
@@ -48,6 +56,10 @@ export function useAudioExtension({ name, params, active, onResult, onEvent }) {
     resultRef.current = onResult;
     const eventRef = useRef(onEvent);
     eventRef.current = onEvent;
+    // Through a ref for the same reason as the callbacks: a panel that names
+    // its frame decoder inline must not re-attach on every render.
+    const parseRef = useRef(parse);
+    parseRef.current = parse || decodeResult;
 
     // Value comparison, not identity — see the note above.
     const paramsKey = JSON.stringify(params || {});
@@ -79,7 +91,7 @@ export function useAudioExtension({ name, params, active, onResult, onEvent }) {
         };
 
         const offBinary = dxcluster.on('binary', (data) => {
-            const msg = decodeResult(data);
+            const msg = parseRef.current(data);
             if (msg && resultRef.current) resultRef.current(msg);
         });
 

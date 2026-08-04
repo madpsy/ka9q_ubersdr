@@ -25,6 +25,7 @@
 import React from '../react.js';
 import Icon from '../components/icons.jsx';
 import FT8Extension from './ft8/FT8Extension.jsx';
+import FSKExtension from './fsk/FSKExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -35,6 +36,15 @@ export const EXTENSIONS = [
         requiresAudio: true,
         float: { w: 880, h: 560 },
         Component: FT8Extension,
+    },
+    {
+        id: 'fsk',
+        title: 'FSK / RTTY Decoder',
+        icon: <Icon.Teleprinter />,
+        summary: 'Live teleprinter copy — RTTY, weather, SITOR-B and NAVTEX.',
+        requiresAudio: true,
+        float: { w: 760, h: 560 },
+        Component: FSKExtension,
     },
 ];
 

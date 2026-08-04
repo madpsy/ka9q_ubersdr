@@ -1273,15 +1273,19 @@ function binsToPixels(bins, width, out) {
 const CLAMP_HYSTERESIS = 3;
 
 function applyMinSpan(g, minSpan) {
-    if (!(minSpan > 0)) {
+    // Both, always, whenever the clamp is not in force. Nulling only the floor
+    // was survivable while the caller read autoFloor/autoCeil — the write-back
+    // kept those in step — but the draw site reads the clamped pair directly
+    // now, and a clampedCeil left behind became the displayed ceiling for good.
+    // Committed on a quiet band at, say, -90, it stayed there while the eased
+    // ceiling rose to meet a -70 signal, and the signal was drawn clipped flat
+    // against a scale that had stopped moving hours ago.
+    if (!(minSpan > 0) || g.autoCeil - g.autoFloor >= minSpan) {
         g.clampedFloor = null;
+        g.clampedCeil = null;
         return;
     }
     const range = g.autoCeil - g.autoFloor;
-    if (range >= minSpan) {
-        g.clampedFloor = null;
-        return;
-    }
     const deficit = minSpan - range;
     const ceil = Math.round(g.autoCeil + deficit * 0.75);
     const floor = Math.round(g.autoFloor - deficit * 0.25);
@@ -1312,7 +1316,18 @@ function applyMinSpan(g, minSpan) {
 // that chased each frame would make the noise shimmer.
 const AUTO_RANGE_K = 0.08;
 
-function autoRange(px, g, k) {
+// `px` is the live pixel row, which the waterfall draws and which the
+// percentiles below are taken from. `trace` is what the *spectrum* draws — the
+// same array when smoothing is off, and the smoothed one when it is not.
+//
+// Both have to be covered, and passing only `px` was the whole of the bug this
+// signature exists to prevent. Smoothing is an exponential average, so it lags
+// in both directions: while a signal decays the smoothed trace sits *above* the
+// live pixels. Measuring the ceiling from `px` alone therefore let it fall away
+// under a trace that was still up there, and the spectrum drew clipped flat
+// against the top for as long as the tail lasted — every syllable, with the
+// default smoothing of 0.5.
+function autoRange(px, trace, g, k) {
     // Robust floor: a low percentile is immune to the strong carriers that
     // would drag a plain minimum or mean around.
     const n = px.length;
@@ -1321,11 +1336,15 @@ function autoRange(px, g, k) {
     const stride = Math.max(1, Math.floor(n / 512));
     for (let i = 0; i < n; i += stride) sample.push(px[i]);
     sample.sort((a, b) => a - b);
-    // The tallest pixel, over every one of them rather than the strided sample.
+    // The tallest pixel anything will draw, over every one of them rather than
+    // the strided sample, and over both rows rather than just the live one.
     // This is the only thing that guarantees a signal is drawn inside the scale
     // rather than flat against the top of it.
     let peak = -Infinity;
     for (let i = 0; i < n; i++) if (px[i] > peak) peak = px[i];
+    if (trace !== px && trace && trace.length === n) {
+        for (let i = 0; i < n; i++) if (trace[i] > peak) peak = trace[i];
+    }
     const floor = sample[Math.floor(sample.length * 0.25)];
     const ceil = sample[Math.floor(sample.length * 0.995)];
     const targetFloor = floor - 4;
@@ -1403,7 +1422,9 @@ function drawFrame(g, d, ctx) {
     if (d.autoRange) {
         // Same reasoning: the levels have to settle in the same number of
         // seconds however often the frames arrive.
-        autoRange(g.px, g, approachFor(AUTO_RANGE_K, dt));
+        // After the smoothing above, so `trace` is the row that will actually
+        // be drawn — see autoRange.
+        autoRange(g.px, trace, g, approachFor(AUTO_RANGE_K, dt));
         // null means "follow the operator's default"; 0 means no minimum.
         applyMinSpan(g, d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan);
     }

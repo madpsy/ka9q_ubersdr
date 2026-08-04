@@ -310,7 +310,7 @@ export default function SignalPanel({ minimal }) {
                         </MeterTrack>
                     </>
                 )}
-                {/* Live reading, then the peak hold — "S4 / S6" — in the one
+                {/* Live reading, then the peak hold — "S4   S6" — in the one
                     size: they are the same measurement a moment apart, and
                     shrinking the second one makes it read as a footnote. */}
                 <div className="meter__value">
@@ -318,8 +318,8 @@ export default function SignalPanel({ minimal }) {
                     {/* Kept in the layout even with no hold to show, so the
                         live value does not shift sideways the moment one
                         appears — see .meter__num in the stylesheet. */}
-                    <span className={`meter__num meter__num--hold${held == null ? ' is-blank' : ''}`}>
-                        {held == null ? '' : `/ ${sUnitLabelAt(held)}`}
+                    <span className={`meter__num${held == null ? ' is-blank' : ''}`}>
+                        {held == null ? '' : sUnitLabelAt(held)}
                     </span>
                 </div>
             </button>

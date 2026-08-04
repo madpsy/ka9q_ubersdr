@@ -3446,15 +3446,12 @@ a.btn { text-decoration: none; }
 
 /* ── Sound Modem ──────────────────────────────────────────────────────────── */
 
-/* Threshold on its own row: it belongs to the modem as a whole, and dropping it
-   in among the channel cards left a stray labelled number of a different shape
-   sitting where a fifth card would be. */
-.sm__global { display: flex; align-items: flex-end; gap: 8px; flex: none; }
-.sm__hint {
-    font-size: calc(10px * var(--ui-scale));
-    color: var(--text-faint);
-    padding-bottom: 3px;
-}
+/* The DCD threshold, in the bar beside the lamps it governs. Laid out inline
+   rather than as the usual label-over-control, so it sits on the bar's line
+   instead of making the whole bar as tall as a stacked field. */
+.sm__thresh { display: inline-flex; align-items: center; flex: none; }
+.sm__thresh .tp__field { flex-direction: row; align-items: center; gap: 5px; }
+.sm__thresh .tp__num { width: 54px; }
 
 /* The DCD lamps: one per channel, always all four. An enabled channel's lamp
    carries its waterfall marker colour, which is what ties the two together. */
@@ -3531,6 +3528,16 @@ a.btn { text-decoration: none; }
     margin-top: 5px;
 }
 .sm__ch-body .select { max-width: 100%; }
+
+/* Minimal: the cards hold a switch and nothing else, so they stop claiming a
+   200px share each and shrink to their label — four on one line, and the rows
+   that were the modem settings go to the frame list. */
+.sm__channels--compact { gap: 4px; }
+.sm__channels--compact .sm__ch {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 3px 7px;
+}
 
 .sm__dcd {
     display: inline-flex;

@@ -12,7 +12,10 @@
 //     channel enabled decodes nothing, and the modem type has to match the
 //     transmission exactly — 1200 baud AFSK will not hear a 300 baud HF link.
 //     So the channel strip is always visible and Start is refused until at
-//     least one channel is on.
+//     least one channel is on. The minimal view keeps the strip for that
+//     reason, collapsed to the four switches: which channels are running stays
+//     answerable and changeable, while their settings — chosen once to match
+//     the transmission — give their height to the frame list.
 //   * There is a real "it will never work" failure. The server sends an error
 //     frame when QtSoundModem is not installed or its subprocess dies, and that
 //     is not a bad decode to shrug off — nothing will ever arrive. It is shown
@@ -166,8 +169,16 @@ function Waterfall({ channels }) {
     );
 }
 
-/** One modem channel's settings. */
-function ChannelStrip({ index, channel, onChange, dcd }) {
+/**
+ * One modem channel's settings.
+ *
+ * `compact` leaves the on/off switch and nothing else — see the minimal view
+ * below. The card's own DCD indicator goes with the rest: the lamps in the bar
+ * at the top say the same thing, per channel and in the same colours, so
+ * keeping a second copy would cost the width that lets all four switches sit on
+ * one line.
+ */
+function ChannelStrip({ index, channel, onChange, dcd, compact }) {
     const set = (patch) => onChange({ ...channel, ...patch });
     return (
         <div className={`sm__ch sm__ch--${index}${channel.enabled ? ' is-on' : ''}`}>
@@ -178,16 +189,20 @@ function ChannelStrip({ index, channel, onChange, dcd }) {
                     checked={!!channel.enabled}
                     onChange={(v) => set({ enabled: v })}
                 />
-                <span className="tp__bar-gap" />
-                <span
-                    className={`sm__dcd${dcd ? ' is-on' : ''}`}
-                    title="Data carrier detect — this channel is hearing something it thinks is a signal"
-                >
-                    DCD
-                </span>
+                {!compact && (
+                    <>
+                        <span className="tp__bar-gap" />
+                        <span
+                            className={`sm__dcd${dcd ? ' is-on' : ''}`}
+                            title="Data carrier detect — this channel is hearing something it thinks is a signal"
+                        >
+                            DCD
+                        </span>
+                    </>
+                )}
             </div>
 
-            {channel.enabled && (
+            {!compact && channel.enabled && (
                 <div className="sm__ch-body">
                     <label className="tp__field" title="The modulation and rate to listen for. It has to match the transmission — 1200 baud AFSK will not hear a 300 baud HF link">
                         <span className="tp__field-label">Modem</span>
@@ -421,6 +436,18 @@ export default function SoundModemExtension({ minimal }) {
                         </span>
                     ))}
                 </span>
+                {/* Beside the lamps, because it is the setting they answer to:
+                    the threshold decides when a channel calls something a
+                    carrier. One number never justified a row of its own. */}
+                <span className="sm__thresh">
+                    <NumberField
+                        label="Threshold"
+                        title="Carrier-detect threshold, 1–100. Lower is more sensitive and triggers on more noise"
+                        value={config.dcd_threshold}
+                        limits={LIMITS.dcd_threshold}
+                        onCommit={(v) => setConfig((prev) => ({ ...prev, dcd_threshold: v }))}
+                    />
+                </span>
                 <span className="tp__bar-gap" />
 
                 <select
@@ -463,29 +490,19 @@ export default function SoundModemExtension({ minimal }) {
                 <Button size="sm" variant="ghost" onClick={clear} disabled={!frames.length && !monitor.length && !log.length} icon={<Icon.Trash size={13} />} title="Clear everything decoded" />
             </div>
 
-            {/* Always visible, unlike the other decoders' settings: the modem
-                type has to match the transmission, so this is the control you
-                use rather than one you set once. */}
             {/* The waterfall runs whenever the receiver does, not only while
                 the modem is started: choosing a modem frequency is what it is
                 for, and you do that before pressing Start. */}
             {!minimal && running && <Waterfall channels={config.channels} />}
 
-            {/* The threshold is a property of the modem as a whole, so it sits
-                on its own row above the per-channel cards rather than being
-                dropped in among them as a fifth item of a different shape. */}
-            <div className="sm__global">
-                <NumberField
-                    label="DCD threshold"
-                    title="Carrier-detect threshold, 1–100. Lower is more sensitive and triggers on more noise"
-                    value={config.dcd_threshold}
-                    limits={LIMITS.dcd_threshold}
-                    onCommit={(v) => setConfig((prev) => ({ ...prev, dcd_threshold: v }))}
-                />
-                <span className="sm__hint">1–100 · lower is more sensitive</span>
-            </div>
-
-            <div className="sm__channels">
+            {/* The channel strip stays even in the minimal view, unlike the
+                other decoders' settings: a modem with no channel enabled
+                decodes nothing, and switching a channel off is how you stop one
+                that is only producing noise. It collapses to the four switches
+                — modem type, frequency, pairs and the FEC modes are set to
+                match the transmission and then left, and the height they take
+                is height the frame list wants. */}
+            <div className={`sm__channels${minimal ? ' sm__channels--compact' : ''}`}>
                 {config.channels.slice(0, MAX_CHANNELS).map((c, i) => (
                     <ChannelStrip
                         // eslint-disable-next-line react/no-array-index-key
@@ -493,6 +510,7 @@ export default function SoundModemExtension({ minimal }) {
                         index={i}
                         channel={c}
                         dcd={dcd[i]}
+                        compact={minimal}
                         onChange={(next) => setChannel(i, next)}
                     />
                 ))}

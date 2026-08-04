@@ -32,6 +32,7 @@ import Icon from '../components/icons.jsx';
 import FT8Extension from './ft8/FT8Extension.jsx';
 import FSKExtension from './fsk/FSKExtension.jsx';
 import NavtexExtension from './navtex/NavtexExtension.jsx';
+import WefaxExtension from './wefax/WefaxExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -63,6 +64,17 @@ export const EXTENSIONS = [
         float: { w: 760, h: 580 },
         minimal: true,
         Component: NavtexExtension,
+    },
+    {
+        id: 'wefax',
+        title: 'WEFAX Decoder',
+        icon: <Icon.Fax />,
+        summary: 'Weather charts drawn line by line from HF radiofax.',
+        requiresAudio: true,
+        // Wider and taller than the others: the output is a page, not a list.
+        float: { w: 820, h: 640 },
+        minimal: true,
+        Component: WefaxExtension,
     },
 ];
 

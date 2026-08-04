@@ -86,6 +86,8 @@ esbuild ../src/extensions/fsk/presets.js --bundle --format=cjs --platform=node \
     --outfile=.build/fskpresets.cjs --log-level=warning
 esbuild ../src/extensions/navtex/messages.js --bundle --format=cjs --platform=node \
     --outfile=.build/navtex.cjs --log-level=warning
+esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
+    --outfile=.build/wefax.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -105,3 +107,4 @@ node spots.test.js
 node extensions.test.js
 node fsk.test.js
 node navtex.test.js
+node wefax.test.js

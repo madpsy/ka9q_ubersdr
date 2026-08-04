@@ -69,6 +69,8 @@ export const Icon = {
     Trash: (p) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><path d="M10 11v6M14 11v6" /></Svg>,
     Upload: (p) => <Svg {...p}><path d="M12 14V3" /><path d="m7.5 7 4.5-4 4.5 4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Copy: (p) => <Svg {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></Svg>,
+    // A fax page: a sheet with a chart drawn on it.
+    Fax: (p) => <Svg {...p}><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M7 8h10" /><path d="M7 16c2-4 3.5 2 5-1s2.5-2 5 1" /></Svg>,
     // An anchor: maritime traffic, which is what NAVTEX carries.
     Anchor: (p) => <Svg {...p}><circle cx="12" cy="5" r="2.2" /><path d="M12 7.2V21" /><path d="M8 11h8" /><path d="M4 15a8 8 0 0 0 16 0" /><path d="M4 15h2.5M20 15h-2.5" /></Svg>,
     // A teleprinter: paper coming out of a machine with lines of text on it.

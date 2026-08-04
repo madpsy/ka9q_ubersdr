@@ -3162,3 +3162,67 @@ a.btn { text-decoration: none; }
     word-break: break-word;
     color: var(--text);
 }
+
+/* ── WEFAX ────────────────────────────────────────────────────────────────── */
+
+.wfx__freq { max-width: 260px; }
+.wfx__count {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.wfx__lamp {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--surface-3);
+    color: var(--text-dim);
+}
+.wfx__lamp--receiving { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.wfx__lamp--ended { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+
+/* Fax paper is white in every light, so this pane does not follow the theme:
+   a chart inverted to suit a dark UI is a chart with the isobars painted over
+   the land, and nobody reads it that way. */
+.wfx__paper { background: #f4f4f4; padding: 0; }
+/* The canvas is at the transmission's own width — 1809 px by default — and
+   scaled to the pane. Full resolution is kept for the saved file. */
+.wfx__canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    image-rendering: auto;
+}
+
+.wfx__strip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    overflow-x: auto;
+    padding: 2px 0;
+}
+.wfx__strip-label {
+    flex: none;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.wfx__thumb {
+    flex: none;
+    display: block;
+    width: 54px;
+    height: 42px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #f4f4f4;
+}
+.wfx__thumb:hover { border-color: var(--accent); }
+/* Top-anchored: a chart's title block is at the head of the page, which is the
+   part that tells you which one it is. */
+.wfx__thumb img { display: block; width: 100%; height: auto; }

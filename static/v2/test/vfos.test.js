@@ -5,7 +5,7 @@
 // the spectrum zoom, which is the part with no visible clue that it was lost.
 
 const assert = require('assert');
-const { VFO_IDS, cleanSlot, switchTo, vfoSnapshot } = require('./.build/vfos.cjs');
+const { VFO_IDS, cleanSlot, storeInto, switchTo, vfoSnapshot } = require('./.build/vfos.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -62,6 +62,31 @@ t('coming back to a VFO hands back everything it held', () => {
     // ...and B kept where it was left, rather than being overwritten by A.
     assert.strictEqual(back.state.slots.B.frequency, 3.7e6);
     assert.strictEqual(back.state.slots.B.binBandwidth, 200);
+});
+
+t('storing into a VFO fills it without going there', () => {
+    const before = empty();
+    const after = storeInto(before, 'C', vfoSnapshot(tuning(21.2e6), view(50)));
+    assert.strictEqual(after.active, 'A', 'storing must not switch');
+    assert.strictEqual(after.slots.C.frequency, 21.2e6);
+    assert.strictEqual(after.slots.C.binBandwidth, 50);
+    // ...and nothing else is touched.
+    assert.strictEqual(after.slots.A, null);
+    assert.strictEqual(after.slots.B, null);
+});
+
+t('storing over an occupied VFO replaces what was there', () => {
+    let s = storeInto(empty(), 'B', vfoSnapshot(tuning(7.1e6), view(20)));
+    s = storeInto(s, 'B', vfoSnapshot(tuning(3.7e6), view(100)));
+    assert.strictEqual(s.slots.B.frequency, 3.7e6);
+});
+
+t('storing into the VFO in use is refused, not written', () => {
+    // That slot is the live receiver by definition; writing it would imply the
+    // two could differ.
+    const before = empty();
+    assert.strictEqual(storeInto(before, 'A', vfoSnapshot(tuning(7e6), view(20))), before);
+    assert.strictEqual(storeInto(before, 'Z', vfoSnapshot(tuning(7e6), view(20))), before);
 });
 
 t('pressing the VFO you are already on changes nothing', () => {

@@ -20,6 +20,7 @@ import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
+import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
@@ -433,9 +434,10 @@ export default function SpectrumView() {
 
     // ---- right-click menu -------------------------------------------------
     //
-    // { x, y, freq } while open. The frequency is taken at the moment of the
-    // click, not read from the dial when an entry is chosen: the menu is about
-    // the place you clicked, and the receiver may be tuned somewhere else.
+    // { x, y, freq } while open. `freq` is where the pointer was, captured at
+    // the click rather than read back later — the view can pan or zoom under an
+    // open menu. Each entry decides whether it is about that spot or about the
+    // dial; adding a bookmark is about the dial.
     const [menu, setMenu] = useState(null);
     const [adding, setAdding] = useState(null);
 
@@ -660,17 +662,41 @@ export default function SpectrumView() {
                     items={[
                         {
                             key: 'bookmark',
-                            label: `Add local bookmark at ${formatFreqShort(menu.freq, span)}`,
-                            title: 'Save this frequency in this browser',
+                            // The dial, not the click: a bookmark is somewhere
+                            // you are listening, with the mode and passband you
+                            // settled on. `menu.freq` is kept for entries that
+                            // are about the spot under the pointer.
+                            label: `Add local bookmark — ${formatFreqShort(tuning.frequency, span)}`,
+                            title: 'Save what the receiver is tuned to, in this browser',
                             onSelect: () => setAdding({
-                                frequency: menu.freq,
-                                // The mode and passband are the receiver's:
-                                // the click says where, not how to listen.
+                                frequency: tuning.frequency,
                                 mode: tuning.mode,
                                 bandwidthLow: tuning.bandwidthLow,
                                 bandwidthHigh: tuning.bandwidthHigh,
                             }),
                         },
+                        { key: 'sep-vfo', separator: true },
+                        // Copy the receiver as it stands into a VFO without
+                        // going there — the Receiver panel's buttons only ever
+                        // write the one you are leaving.
+                        ...VFO_IDS.map((id) => {
+                            const vfos = getVfos();
+                            const held = vfos.slots[id];
+                            const inUse = vfos.active === id;
+                            return {
+                                key: `vfo-${id}`,
+                                label: `Store to VFO ${id}`,
+                                disabled: inUse,
+                                title: inUse
+                                    ? `VFO ${id} is in use — it already holds these settings`
+                                    : held
+                                        ? `Replaces ${formatFreqShort(held.frequency)} ${held.mode.toUpperCase()}`
+                                        : `VFO ${id} is unused`,
+                                onSelect: () => setVfos(
+                                    storeInto(getVfos(), id, vfoSnapshot(tuning, view)),
+                                ),
+                            };
+                        }),
                     ]}
                 />
             )}

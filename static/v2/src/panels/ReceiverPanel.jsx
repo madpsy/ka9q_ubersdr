@@ -1,9 +1,9 @@
-import React, { useState } from '../react.js';
+import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
-import { VFO_IDS, loadVfos, saveVfos, switchTo, vfoSnapshot } from '../lib/vfos.js';
+import { VFO_IDS, getVfos, onVfosChanged, setVfos, switchTo, vfoSnapshot } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, hasAGCSettings,
     maxFilterWidth, stepLabel,
@@ -54,12 +54,14 @@ function AGCSettings() {
 // Four VFOs under the dial. Each holds frequency, mode, passband and the
 // spectrum zoom; the logic is in lib/vfos.js, this is the row of buttons.
 //
-// The state is loaded from storage on mount rather than held in a context: the
-// panel unmounts whenever it is collapsed or dragged to another dock, and
-// storage is the thing that survives that anyway.
+// The VFOs themselves live in lib/vfos.js, not here: this panel is unmounted
+// whenever it is collapsed or dragged to another dock, and the spectrum's
+// right-click menu writes them too.
 function VfoBar() {
     const { tuning, view, actions } = useRadio();
-    const [vfos, setVfos] = useState(loadVfos);
+    const [vfos, setLocal] = useState(getVfos);
+
+    useEffect(() => onVfosChanged(setLocal), []);
 
     // Zoom is restored through the same actions the buttons use, so a recalled
     // view goes through the server's binBandwidth ladder exactly as a manual
@@ -75,10 +77,9 @@ function VfoBar() {
     };
 
     const select = (id) => {
-        const { state, recall } = switchTo(vfos, id, vfoSnapshot(tuning, view));
+        const { state, recall } = switchTo(getVfos(), id, vfoSnapshot(tuning, view));
         if (state === vfos) return;   // already on it
         setVfos(state);
-        saveVfos(state);
         if (!recall) return;          // an unused VFO starts as a copy of this one
         actions.tuneTo({
             frequency: recall.frequency,

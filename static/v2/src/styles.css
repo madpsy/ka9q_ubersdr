@@ -710,8 +710,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .specmenu__item:disabled { color: var(--text-faint); cursor: default; }
 .specmenu__sep { height: 1px; margin: 3px 2px; background: var(--border); }
 
-/* The add-bookmark prompt the menu opens. */
-.addmark { min-width: min(320px, 70vw); }
+/* The add-bookmark prompt the menu opens. The close button is pinned to the
+   top-right corner of the modal, so the title needs room to clear it. */
+.addmark { min-width: min(400px, 80vw); padding-right: 30px; }
 .addmark__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
 .addmark__at { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 

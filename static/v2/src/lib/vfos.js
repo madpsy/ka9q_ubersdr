@@ -70,6 +70,36 @@ export function saveVfos(state) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* private mode */ }
 }
 
+// --- the shared copy --------------------------------------------------------
+//
+// Two places write VFOs now: the buttons in the Receiver panel, and the
+// spectrum's right-click menu. The panel is unmounted whenever its section is
+// collapsed, so its own state cannot be the record — a store written from the
+// menu would be overwritten by the next switch made from a stale panel. One
+// copy here, and everyone re-reads it when it changes.
+
+let current = null;
+const listeners = new Set();
+
+export function getVfos() {
+    if (!current) current = loadVfos();
+    return current;
+}
+
+export function setVfos(next) {
+    current = next;
+    saveVfos(next);
+    for (const fn of listeners) {
+        try { fn(next); } catch (e) { console.error('vfo listener threw', e); }
+    }
+    return next;
+}
+
+export function onVfosChanged(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+}
+
 /**
  * Switch to `to`, given what is live.
  *
@@ -78,6 +108,19 @@ export function saveVfos(state) {
  * can take somewhere else, which is what pressing an empty B on a radio does.
  * There is nothing to apply in that case: the receiver is already there.
  */
+/**
+ * Copies `live` into `to` without going there.
+ *
+ * For storing the receiver as it stands into a VFO you are not on — the other
+ * half of `switchTo`, which only ever writes the one you are leaving. Storing
+ * into the VFO already in use is refused rather than written: that slot is the
+ * live receiver by definition, and writing it would imply otherwise.
+ */
+export function storeInto(state, to, live) {
+    if (!VFO_IDS.includes(to) || to === state.active) return state;
+    return { ...state, slots: { ...state.slots, [to]: live } };
+}
+
 export function switchTo(state, to, live) {
     if (!VFO_IDS.includes(to) || to === state.active) return { state, recall: null };
     const target = cleanSlot(state.slots[to]);

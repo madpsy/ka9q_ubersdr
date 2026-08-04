@@ -106,11 +106,11 @@ function SquelchTag() {
     return (
         <button
             type="button"
-            className={`tag tag--button tag--${open ? 'good' : 'bad'}`}
+            className={`tag tag--button tag--sq tag--${open ? 'good' : 'bad'}`}
             title={`Squelch ≥ ${squelch.value.toFixed(1)} dB SNR — ${open ? 'passing audio' : 'muted'}. Click to switch it off`}
             onClick={() => actions.setSquelch(SQUELCH_MIN)}
         >
-            SQ {open ? 'open' : 'closed'}
+            {open ? 'open' : 'closed'}
         </button>
     );
 }

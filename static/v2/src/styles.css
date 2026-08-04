@@ -1206,6 +1206,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tag--good { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .tag--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
 
+/* The squelch gate tag, which is the one tag here whose text changes while you
+   are looking at it — and it changes width, from "open" to "closed" and back,
+   every time the gate moves. Sized to the longer word and centred, so the tags
+   to its right hold still instead of shuffling sideways on every burst of
+   speech. `ch` is exact rather than approximate because .tag is monospace; the
+   14px is that rule's own 7px of padding either side, which box-sizing:
+   border-box counts inside the width. */
+.tag--sq { min-width: calc(6ch + 14px); text-align: center; }
+
 /* =========================================================================
    Controls
    ========================================================================= */

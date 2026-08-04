@@ -5,7 +5,9 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
-import { MODE_BY_ID } from '../radio/constants.js';
+import { MODES, MODE_BY_ID } from '../radio/constants.js';
+import FreqEntry from './FreqEntry.jsx';
+import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
@@ -156,6 +158,12 @@ export default function TopBar({ compact }) {
     const barRef = useRef(null);
     const roomForSession = useRoomFor(barRef, SESSION_W);
 
+    // Tuning straight from the readout: the frequency swaps for an input, the
+    // mode drops a menu at the point it was clicked.
+    const [editingFreq, setEditingFreq] = useState(false);
+    const [modeAt, setModeAt] = useState(null);
+    const modeClosedAt = useRef(0);
+
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
             : audioState === 'rejected' ? 'bad' : 'idle';
@@ -172,9 +180,62 @@ export default function TopBar({ compact }) {
 
             {!compact && <Clock tzOffset={serverInfo?.receiver?.timezone_offset} />}
 
+            {/* The readout is also the shortest way to tune: the frequency
+                opens the same type-in box as the Receiver panel's dial, the
+                mode a picker. Both are here so the top bar alone is enough to
+                retune with every panel closed. */}
             <div className="topbar__freq">
-                <span className="topbar__hz">{formatHz(tuning.frequency)}</span>
-                <span className="topbar__mode">{(MODE_BY_ID[tuning.mode] || {}).label || tuning.mode}</span>
+                {editingFreq ? (
+                    <FreqEntry
+                        frequency={tuning.frequency}
+                        className="topbar__hz-input"
+                        onDone={(hz) => { setEditingFreq(false); if (hz != null) actions.setFrequency(hz); }}
+                    />
+                ) : (
+                    <button
+                        type="button"
+                        className="topbar__hz"
+                        title="Type a frequency"
+                        onClick={() => setEditingFreq(true)}
+                    >
+                        {formatHz(tuning.frequency)}
+                    </button>
+                )}
+                <button
+                    type="button"
+                    className="topbar__mode"
+                    title="Change mode"
+                    aria-haspopup="menu"
+                    onClick={(e) => {
+                        // A click on the button while the menu is open has
+                        // already closed it on the way down — the menu dismisses
+                        // itself on any pointerdown outside. Without this the
+                        // second click would blink it shut and straight back
+                        // open instead of toggling.
+                        if (performance.now() - modeClosedAt.current < 250) return;
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setModeAt({ x: r.left, y: r.bottom + 4 });
+                    }}
+                >
+                    {(MODE_BY_ID[tuning.mode] || {}).label || tuning.mode}
+                </button>
+
+                {/* Inside the readout rather than a child of the bar itself:
+                    it is position:fixed either way, but useRoomFor counts the
+                    bar's own children and would take it for content. */}
+                {modeAt && (
+                    <SpectrumMenu
+                        at={modeAt}
+                        onClose={() => { modeClosedAt.current = performance.now(); setModeAt(null); }}
+                        items={MODES.map((m) => ({
+                            key: m.id,
+                            label: m.label,
+                            disabled: m.id === tuning.mode,
+                            title: m.id === tuning.mode ? 'Current mode' : undefined,
+                            onSelect: () => actions.setMode(m.id),
+                        }))}
+                    />
+                )}
             </div>
 
             {!compact && (

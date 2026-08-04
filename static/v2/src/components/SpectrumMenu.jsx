@@ -1,13 +1,13 @@
-// The spectrum's right-click menu.
+// A small popup menu, placed at a point.
 //
-// One entry for now — save the frequency under the pointer as a local bookmark
-// — but the shape is the point: the menu is a list of items the caller passes
-// in, so adding the next one is an entry in SpectrumView's array rather than
-// anything here. Nothing about a bookmark is known in this file.
+// Written for the spectrum's right-click menu — hence the name and the class —
+// but it knows nothing about the spectrum: the menu is a list of items the
+// caller passes in, so the top bar's mode picker is the same component opened
+// under a button instead of at a pointer.
 //
-// Positioned at the click and nudged back on screen where that would put it
-// over an edge, which is the one thing a context menu must always get right:
-// the whole menu has to be reachable from where the pointer already is.
+// Positioned at the point given and nudged back on screen where that would put
+// it over an edge, which is the one thing such a menu must always get right:
+// all of it has to be reachable from where the pointer already is.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 

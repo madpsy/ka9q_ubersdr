@@ -293,18 +293,45 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px solid var(--border);
     border-radius: var(--radius);
 }
+/* Both halves of the readout are buttons — one opens the type-in box, one the
+   mode menu — but they have to go on reading as a readout: the top bar has
+   enough chrome without two more framed controls in the middle of it. */
+.topbar__hz, .topbar__mode {
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+}
 .topbar__hz {
     font-family: var(--mono);
     font-size: calc(16px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
 }
+.topbar__hz:hover { color: var(--accent); }
 .topbar__mode {
     font-size: calc(10.5px * var(--ui-scale));
     font-weight: 650;
     letter-spacing: 0.08em;
     color: var(--accent);
 }
+.topbar__mode:hover { filter: brightness(1.25); }
+
+/* Sized in ch so the box is the width of the number it replaces, and the bar
+   does not jump as the readout turns into an input. */
+.topbar__hz-input {
+    width: 11ch;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--accent);
+    background: none;
+    font-family: var(--mono);
+    font-size: calc(16px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    outline: none;
+}
+.topbar--compact .topbar__hz-input { font-size: calc(14px * var(--ui-scale)); }
 
 .topbar__meter { display: flex; align-items: center; gap: 9px; min-width: 180px; }
 .topbar__s { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 46px; }

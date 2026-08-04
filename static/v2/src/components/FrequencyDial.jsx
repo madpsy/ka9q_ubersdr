@@ -5,30 +5,16 @@
 // step size first. Typing is still available — click the readout to edit.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { formatHz, parseFreqInput, clamp } from '../lib/format.js';
+import { formatHz, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
+import FreqEntry from './FreqEntry.jsx';
 
 const DIGITS = 8;   // 30 MHz upper limit needs eight decimal digits
 
 export default function FrequencyDial({ frequency, onChange, disabled }) {
     const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState('');
-    const inputRef = useRef(null);
     const dragRef = useRef(null);
     const rootRef = useRef(null);
-
-    useEffect(() => {
-        if (editing && inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.select();
-        }
-    }, [editing]);
-
-    const commit = useCallback(() => {
-        const hz = parseFreqInput(draft);
-        setEditing(false);
-        if (hz != null) onChange(clamp(Math.round(hz), MIN_FREQ, MAX_FREQ));
-    }, [draft, onChange]);
 
     // Pointer moves can outrun React's re-render, so the step is applied to a
     // ref rather than to the `frequency` prop captured at render time.
@@ -60,17 +46,10 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
     if (editing) {
         return (
             <div className="dial dial--editing">
-                <input
-                    ref={inputRef}
+                <FreqEntry
+                    frequency={frequency}
                     className="dial__input"
-                    value={draft}
-                    inputMode="decimal"
-                    onChange={(e) => setDraft(e.target.value)}
-                    onBlur={commit}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') commit();
-                        if (e.key === 'Escape') setEditing(false);
-                    }}
+                    onDone={(hz) => { setEditing(false); if (hz != null) onChange(hz); }}
                 />
                 <span className="dial__unit">Hz / MHz</span>
             </div>
@@ -111,10 +90,7 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
                     dragRef.current = null;
                     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
                     // A press that moved nothing is a click: open the editor.
-                    if (d && d.acc === 0) {
-                        setDraft(String(Math.round(frequency)));
-                        setEditing(true);
-                    }
+                    if (d && d.acc === 0) setEditing(true);
                 }}
             >
                 {text[i]}

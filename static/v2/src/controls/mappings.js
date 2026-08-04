@@ -12,7 +12,8 @@
 // someone who spent an evening learning twenty buttons should not have to do it
 // again to try v2.
 
-import { runFunction } from './functions.js';
+import { isEncoderFunction, runFunction } from './functions.js';
+import { isCCKey } from './webmidi.js';
 
 const STORE_KEY = 'ubersdr.v2.radioControl';
 
@@ -65,6 +66,28 @@ function adoptV1(state) {
     return state;
 }
 
+// Fills in the encoder flag for CCs that could only ever be encoders.
+//
+// v1 has no such flag: its `freq_enc_*` cases treat every value as a detent, so
+// a mapping written by v1 — or by v2 before this — says nothing about the
+// control being endless. Read as a fader those messages arrive as positions,
+// the function refuses them, and the wheel does nothing at all. An explicit
+// `false` is the operator having pressed the switch and is left alone; only an
+// absent flag is filled in.
+export function normaliseMidiMappings(mappings) {
+    let changed = false;
+    const out = {};
+    for (const [key, m] of Object.entries(mappings || {})) {
+        if (m && m.relative === undefined && isCCKey(key) && isEncoderFunction(m.function)) {
+            out[key] = { ...m, relative: true };
+            changed = true;
+        } else {
+            out[key] = m;
+        }
+    }
+    return changed ? out : mappings;
+}
+
 export function loadState() {
     const saved = readJSON(STORE_KEY);
     const state = {
@@ -82,7 +105,9 @@ export function loadState() {
     }
     delete state.source;
     if (!SURFACES.includes(state.surface)) state.surface = 'off';
-    return saved ? state : adoptV1(state);
+    const out = saved ? state : adoptV1(state);
+    out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
+    return out;
 }
 
 export function saveState(state) {

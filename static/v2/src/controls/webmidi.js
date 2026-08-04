@@ -31,6 +31,10 @@ export function midiKey(type, channel, number) {
     return `${type}:${channel}:${number}`;
 }
 
+export function isCCKey(key) {
+    return String(key).startsWith(`${CC}:`);
+}
+
 export function midiKeyLabel(key) {
     const [type, channel, number] = String(key).split(':').map(Number);
     const ch = Number.isFinite(channel) ? channel + 1 : '?';

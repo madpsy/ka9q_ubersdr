@@ -485,7 +485,15 @@ tests exercise, and it is where a silent mistake actually lives.
   declares which it accepts, because a fader read as an encoder slews the
   receiver across the band rather than setting a level. A MIDI CC cannot be told
   apart from one message, so the mapping carries an encoder/fader switch instead
-  of guessing. Mapping records and the export envelope are v1's byte for byte,
+  of guessing — but the switch starts on *encoder* for the frequency dials and
+  the zoom dial (`encoder: true` in the catalogue), because nothing else could
+  drive them and a CC left as a fader there is a wheel that does nothing at all;
+  v1 wrote no such flag, so adopted and imported mappings are filled in the same
+  way (`normaliseMidiMappings`). A CC pad sending 127 down and 0 up drives the
+  button functions, with the zero ignored so a press does not fire twice —
+  v1 spells that `if (value > 0)`. Anything the function still refuses is said
+  once in the message log rather than being swallowed.
+  Mapping records and the export envelope are v1's byte for byte,
   and v1's `localStorage` mappings are adopted on first run. `nb_toggle` and
   `vfo_ab_toggle` have no v2 equivalent and are listed in `RETIRED` so an
   imported file shows them struck through rather than dropping them silently;

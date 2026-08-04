@@ -80,6 +80,7 @@ const FREQUENCY = group('Frequency', [
         id: `freq_enc_${hz === 1000 ? '1k' : hz === 10000 ? '10k' : hz}`,
         label: `Encoder (${hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`} steps)`,
         accepts: [REL, TRIG],
+        encoder: true,
         run: (ev, ctx) => ctx.actions.nudge(hz * detents(ev)),
     })),
     {
@@ -227,6 +228,7 @@ const SPECTRUM = group('Spectrum', [
         id: 'zoom_dial',
         label: 'Zoom (dial)',
         accepts: [REL],
+        encoder: true,
         run: (ev, ctx) => {
             const hz = ctx.state().tuning.frequency;
             const n = Math.min(4, Math.abs(detents(ev)));
@@ -337,13 +339,37 @@ export function functionLabel(id, dspSchemas) {
     return id;
 }
 
+// True for the functions that are a dial and nothing else — the frequency
+// encoders and the zoom dial, which read the sign of a detent. A CC mapped to
+// one of these is an endless encoder by construction: a fader's position means
+// nothing to them, so learn and the v1 import set the encoder flag themselves
+// rather than storing a fader that refuses every message.
+export function isEncoderFunction(id, dspSchemas) {
+    const fn = findFunction(id, dspSchemas);
+    return !!fn && !!fn.encoder;
+}
+
 // Runs a mapping. Returns false when the function is unknown to this build or
 // cannot use this kind of event, so the caller can say so rather than leaving
 // the operator wiggling a control that will never do anything.
 export function runFunction(id, ev, ctx) {
     const fn = findFunction(id, ctx.state().dsp.schemas);
     if (!fn) return false;
-    if (!fn.accepts.includes(ev.kind)) return false;
-    fn.run(ev, ctx);
+    // Plenty of pads and switches send a CC rather than a note — 127 down, 0 up
+    // — which arrives here as a position. For a function that wants a button
+    // and has no use for a position, that is a press, and the zero is the
+    // release that must not fire it a second time. v1 spells the same rule
+    // `if (value > 0)`.
+    // Not for the dials: a position landing on one of those means the control
+    // is an encoder recorded as a fader, and turning that into a press would
+    // tune one way whichever way the wheel went — better to refuse it and let
+    // the panel say so.
+    let event = ev;
+    if (ev.kind === ABS && !fn.encoder && !fn.accepts.includes(ABS) && fn.accepts.includes(TRIG)) {
+        if (!(ev.value > 0)) return true;
+        event = { kind: TRIG };
+    }
+    if (!fn.accepts.includes(event.kind)) return false;
+    fn.run(event, ctx);
     return true;
 }

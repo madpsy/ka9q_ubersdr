@@ -26,10 +26,12 @@ import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Empty, Field, Icon, Segmented, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
-import { catalogue, functionLabel, RETIRED } from '../controls/functions.js';
-import { Dispatcher, defaultThrottle, exportMappings, importMappings } from '../controls/mappings.js';
+import { catalogue, functionLabel, isEncoderFunction, RETIRED } from '../controls/functions.js';
+import {
+    Dispatcher, defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
+} from '../controls/mappings.js';
 import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
-import { CC, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
+import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
 import { getSurface, releaseSurfaceExcept } from '../controls/sources.js';
 import { MessageLog, useControlContext, useControlState, useMessages } from '../controls/panel.jsx';
 
@@ -126,6 +128,22 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
     const dispatcher = useMemo(() => new Dispatcher(), []);
     dispatcher.setMappings(mappings);
 
+    // A function that refuses the event it was handed is the one failure with
+    // nothing to see — the control is mapped, the row looks right, and the
+    // receiver ignores it. Said once per control: a fader on an encoder-only
+    // function sends a message per degree of travel and would bury the log.
+    const warned = useRef(null);
+    if (!warned.current) warned.current = new Set();
+    dispatcher.onResult = (key, fn, ok) => {
+        if (ok) { warned.current.delete(key); return; }
+        if (warned.current.has(key)) return;
+        warned.current.add(key);
+        const why = isMidi && isCCKey(key)
+            ? 'if it is an endless encoder, press “fader” on its row to say so'
+            : 'that function cannot be driven by this control';
+        onMessage(`${labelFor(isMidi)(key)} → ${functionLabel(fn, dspSchemas)} ignored — ${why}`, 'warn');
+    };
+
     // Learn has to see the input before the dispatcher does, and both need the
     // values from this render — so the handler is kept in a ref and the
     // subscription is made once.
@@ -151,13 +169,20 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
 
     const commit = (keys, fn) => {
         const record = { function: fn, ...defaultThrottle(fn) };
+        // Learn cannot tell an encoder from a fader by watching one message, but
+        // the function can: the frequency encoders and the zoom dial take
+        // nothing else, so a CC landing on one is an encoder and is recorded as
+        // such. Without this the mapping stores a fader, every detent arrives as
+        // a position, and the wheel does nothing.
+        const encoder = isMidi && isEncoderFunction(fn, dspSchemas);
+        const recordFor = (k) => (encoder && isCCKey(k) ? { ...record, relative: true } : record);
         update((prev) => ({
             ...prev,
             [id]: {
                 ...prev[id],
                 mappings: Object.fromEntries([
                     ...Object.entries(prev[id].mappings),
-                    ...keys.map((k) => [k, record]),
+                    ...keys.map((k) => [k, recordFor(k)]),
                 ]),
             },
         }));
@@ -424,8 +449,11 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
                         if (!file) return;
                         importMappings(file).then(
                             (m) => {
-                                update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: m } }));
-                                onMessage(`Imported ${Object.keys(m).length} mapping(s)`, 'good');
+                                // A v1 file carries no encoder flag — see
+                                // normaliseMidiMappings.
+                                const next = isMidi ? normaliseMidiMappings(m) : m;
+                                update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
+                                onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
                             },
                             (err) => onMessage(`Import failed: ${err.message}`, 'error'),
                         );
@@ -441,7 +469,7 @@ function MappingRow({ mapKey, mapping, isMidi, dspSchemas, onRelative, onDelete 
     const label = functionLabel(mapping.function, dspSchemas);
     // A CC could be either a fader or an endless encoder and one message cannot
     // tell them apart, so the row carries the switch rather than guessing.
-    const isCC = isMidi && String(mapKey).startsWith(`${CC}:`);
+    const isCC = isMidi && isCCKey(mapKey);
 
     return (
         <div className="rc-map__row">

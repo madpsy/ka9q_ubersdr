@@ -8,8 +8,8 @@
 const assert = require('assert');
 const { parseToken, flexKeyLabel } = require('./.build/flexcontrol.cjs');
 const { midiKey, midiKeyLabel, CC, NOTE_ON, NOTE_OFF } = require('./.build/webmidi.cjs');
-const { runFunction, catalogue, RETIRED } = require('./.build/functions.cjs');
-const { Dispatcher, defaultThrottle } = require('./.build/mappings.cjs');
+const { runFunction, catalogue, isEncoderFunction, RETIRED } = require('./.build/functions.cjs');
+const { Dispatcher, defaultThrottle, normaliseMidiMappings } = require('./.build/mappings.cjs');
 const { SDR_TO_HAMLIB } = require('./.build/radiosync.cjs');
 const { MODES, SQUELCH_MIN, SQUELCH_MAX, bandwidthLimits } = require('./.build/constants.cjs');
 
@@ -257,11 +257,13 @@ t('encoders are rate limited by default and buttons are not', () => {
 
 t('a function that refuses the event is reported, not silently swallowed', () => {
     const d = new Dispatcher();
-    d.setMappings({ fader: { function: 'mode_next', throttleMs: 0, mode: 'none' } });
+    // A fader on a dial function — the panel turns this into the one message
+    // that tells the operator to press the encoder switch on the row.
+    d.setMappings({ fader: { function: 'freq_enc_1k', throttleMs: 0, mode: 'none' } });
     const seen = [];
     d.onResult = (key, fn, ok) => seen.push([key, fn, ok]);
     d.handle('fader', ABS(0.5), fakeRadio());
-    assert.deepStrictEqual(seen, [['fader', 'mode_next', false]]);
+    assert.deepStrictEqual(seen, [['fader', 'freq_enc_1k', false]]);
 });
 
 // --- v1 compatibility --------------------------------------------------------
@@ -307,6 +309,73 @@ t('v1’s single “CW” still resolves, to CW-upper as it did there', () => {
     const r = fakeRadio();
     assert.ok(runFunction('mode_cw', TRIG, r));
     assert.deepStrictEqual(r.calls[0], ['setMode', 'cwu']);
+});
+
+// --- encoder / fader ---------------------------------------------------------
+
+t('a CC on an encoder-only function is marked as an encoder', () => {
+    // v1 wrote no such flag — its freq_enc_* cases read every value as a detent
+    // — so an adopted or imported mapping arrives without one. Read as a fader
+    // the wheel sends positions, the function refuses them, and nothing moves.
+    const out = normaliseMidiMappings({
+        '176:0:14': { function: 'freq_enc_100', throttleMs: 100, mode: 'rate_limit' },
+    });
+    assert.strictEqual(out['176:0:14'].relative, true);
+});
+
+t('a fader mapping and an explicit choice are both left alone', () => {
+    const before = {
+        '176:0:7': { function: 'volume_set', throttleMs: 0, mode: 'none' },
+        '176:0:14': { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit', relative: false },
+        '144:0:36': { function: 'freq_enc_10', throttleMs: 100, mode: 'rate_limit' },
+    };
+    const out = normaliseMidiMappings(before);
+    assert.strictEqual(out['176:0:7'].relative, undefined);
+    assert.strictEqual(out['176:0:14'].relative, false);
+    assert.strictEqual(out['144:0:36'].relative, undefined);
+});
+
+t('the dials are the encoder functions, and nothing else is', () => {
+    for (const id of ['freq_enc_10', 'freq_enc_100', 'freq_enc_1k', 'zoom_dial']) {
+        assert.ok(isEncoderFunction(id), `${id} should be an encoder function`);
+    }
+    // mode_next takes a detent as a press, but it is a button's function: a CC
+    // pad on it must not be recorded as an endless encoder.
+    for (const id of ['volume_set', 'bw_low', 'squelch_set', 'mode_next', 'band_20m']) {
+        assert.ok(!isEncoderFunction(id), `${id} should not be an encoder function`);
+    }
+});
+
+t('a pad that sends a CC works the buttons, and its release does not repeat', () => {
+    // Plenty of surfaces send 127/0 on a CC rather than a note. v1 ran those
+    // through `if (value > 0)`; without the same rule the pad is mapped, looks
+    // right and does nothing.
+    const r = fakeRadio();
+    assert.ok(runFunction('band_20m', ABS(1), r));
+    assert.ok(runFunction('band_20m', ABS(0), r));
+    assert.deepStrictEqual(r.calls, [['setFrequency', 14074000]]);
+});
+
+t('a position on a dial function is refused rather than read as a press', () => {
+    // It means an encoder recorded as a fader. Treating it as a press would
+    // tune upward whichever way the wheel turned, which is worse than nothing
+    // because it hides the mistake.
+    const r = fakeRadio();
+    assert.strictEqual(runFunction('freq_enc_100', ABS(1), r), false);
+    assert.strictEqual(r.calls.length, 0);
+});
+
+t('an encoder’s detents reach the radio once it is marked as one', () => {
+    // The whole point of the flag: 127 means one detent down, not full scale.
+    const rel = normaliseMidiMappings({
+        '176:0:14': { function: 'freq_enc_100', throttleMs: 0, mode: 'none' },
+    })['176:0:14'].relative;
+    const d = new Dispatcher();
+    d.setMappings({ '176:0:14': { function: 'freq_enc_100', throttleMs: 0, mode: 'none' } });
+    const r = fakeRadio();
+    d.handle('176:0:14', rel ? REL(1) : ABS(1 / 127), r);
+    d.handle('176:0:14', rel ? REL(-1) : ABS(127 / 127), r);
+    assert.deepStrictEqual(r.calls, [['nudge', 100], ['nudge', -100]]);
 });
 
 // --- Hamlib mode table -------------------------------------------------------

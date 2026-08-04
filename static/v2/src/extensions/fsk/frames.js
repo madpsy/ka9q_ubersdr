@@ -254,6 +254,35 @@ export function presetOf(config) {
     return hit ? hit.id : 'custom';
 }
 
+// Frequencies worth a menu entry. These are the frequencies of the *signal*, so
+// tuning one sets the dial low enough to put it at the configured audio centre,
+// and matching one back means adding that centre to the dial again.
+export const FSK_FREQUENCIES = [
+    {
+        group: 'Amateur RTTY',
+        options: [
+            { hz: 3590000, label: '3.590 MHz (80m)' },
+            { hz: 7040000, label: '7.040 MHz (40m)' },
+            { hz: 10140000, label: '10.140 MHz (30m)' },
+            { hz: 14080000, label: '14.080 MHz (20m)' },
+            { hz: 18100000, label: '18.100 MHz (17m)' },
+            { hz: 21080000, label: '21.080 MHz (15m)' },
+            { hz: 24920000, label: '24.920 MHz (12m)' },
+            { hz: 28080000, label: '28.080 MHz (10m)' },
+        ],
+    },
+    {
+        // 50 baud, 450 Hz shift — the Weather RTTY preset.
+        group: 'Weather RTTY — DWD Pinneberg',
+        options: [
+            { hz: 147300, label: '147.3 kHz' },
+            { hz: 4583000, label: '4.583 MHz' },
+            { hz: 7646000, label: '7.646 MHz' },
+            { hz: 10100800, label: '10.1008 MHz' },
+        ],
+    },
+];
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /**

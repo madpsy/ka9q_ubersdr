@@ -72,6 +72,8 @@ esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=no
     --outfile=.build/dxcluster.cjs --log-level=warning
 esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
     --outfile=.build/extprotocol.cjs --log-level=warning
+esbuild ../src/extensions/frequencies.js --bundle --format=cjs --platform=node \
+    --outfile=.build/extfreq.cjs --log-level=warning
 esbuild ../src/extensions/ft8/messages.js --bundle --format=cjs --platform=node \
     --outfile=.build/ft8messages.cjs --log-level=warning
 esbuild ../src/extensions/ft8/spectrum.js --bundle --format=cjs --platform=node \

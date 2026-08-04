@@ -27,6 +27,7 @@ import { openCallsignLookup } from '../../compat/legacyBridge.js';
 import { normaliseCallsign, requestLookup } from '../../lib/callsign.js';
 import { getSessionId } from '../../radio/session.js';
 import { useAudioExtension } from '../useAudioExtension.js';
+import { tunedOption } from '../frequencies.js';
 import {
     AUTO_CLEAR_KEEP, COLUMNS, CYCLE_SEC, FT8_BANDWIDTH, FT8_FREQUENCIES, FT8_MODE,
     addMessage, cycleProgress, filterMessages, normaliseMessage, sortMessages, statsFrom, toCSV,
@@ -216,6 +217,9 @@ export default function FT8Extension({ minimal }) {
 
     const set = (patch) => setOpts((prev) => ({ ...prev, ...patch }));
 
+    // The list entry the dial is on, if any — see ../frequencies.js.
+    const tuned = tunedOption(FT8_FREQUENCIES, tuning.frequency);
+
     const tuneTo = (hz) => {
         actions.tuneTo({
             frequency: hz,
@@ -286,11 +290,15 @@ export default function FT8Extension({ minimal }) {
                 </span>
                 <span className="ft8__bar-gap" />
 
+                {/* Bound to where the receiver actually is, so this doubles as
+                    a readout of which FT8 band you are on. Re-picking the entry
+                    already shown is therefore a no-op, which is right: it would
+                    tune to the frequency the dial is on. */}
                 <select
                     className="select ft8__freq"
-                    value=""
+                    value={tuned ? String(tuned.hz) : ''}
                     onChange={(e) => { if (e.target.value) tuneTo(Number(e.target.value)); }}
-                    title="Tune to an FT8 frequency in USB with a 0-3200 Hz passband"
+                    title="Tune to an FT8 frequency in USB with a 0-3200 Hz passband, and show which one the receiver is on"
                 >
                     <option value="">Tune to…</option>
                     {FT8_FREQUENCIES.map((g) => (

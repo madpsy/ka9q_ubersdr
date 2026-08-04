@@ -36,6 +36,7 @@ const {
     normaliseMessage, statsFrom, addMessage, filterMessages, sortMessages, toCSV, cycleProgress,
 } = require('./.build/ft8messages.cjs');
 const { labelsFor, layoutLabels } = require('./.build/ft8spectrum.cjs');
+const { tunedOption } = require('./.build/extfreq.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -279,6 +280,18 @@ t('the FT8 passband and frequency list are the decoder’s, not the mode’s', (
     const all = FT8_FREQUENCIES.flatMap((g) => g.options.map((o) => o.hz));
     assert.ok(all.includes(14074000));
     assert.strictEqual(all.length, 9);
+    // Unique, or two entries would fight over being the selected one.
+    assert.strictEqual(new Set(all).size, all.length);
+});
+
+t('the frequency menu says which of its entries the dial is on', () => {
+    // FT8 tunes the dial to the entry directly, so the lookup is the dial.
+    assert.strictEqual(tunedOption(FT8_FREQUENCIES, 14074000).hz, 14074000);
+    assert.ok(tunedOption(FT8_FREQUENCIES, 14074000).label.includes('20m'));
+    // A band with no FT8 entry falls back to the placeholder rather than
+    // claiming the nearest one.
+    assert.strictEqual(tunedOption(FT8_FREQUENCIES, 14200000), null);
+    assert.strictEqual(tunedOption(FT8_FREQUENCIES, NaN), null);
 });
 
 // --- spectrum labels -------------------------------------------------------

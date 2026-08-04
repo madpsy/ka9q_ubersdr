@@ -33,8 +33,9 @@ import { useRadio } from '../../radio/RadioContext.jsx';
 import { Button, Empty, Icon, Switch } from '../../components/ui.jsx';
 import { subscribeAudioSpectrum } from '../../lib/audioSpectrum.js';
 import { useAudioExtension } from '../useAudioExtension.js';
+import { tunedOption } from '../frequencies.js';
 import {
-    BAUD_ERROR_MAX, DEFAULT_PRESET, ENCODINGS, FRAMINGS, LIMITS, PRESETS,
+    BAUD_ERROR_MAX, DEFAULT_PRESET, ENCODINGS, FRAMINGS, FSK_FREQUENCIES, LIMITS, PRESETS,
     appendText, attachParams, decodeFrame, formatTime, markSpace, presetConfig, presetOf,
     stateFlags, toText,
 } from './frames.js';
@@ -48,35 +49,6 @@ const FSK_MODE = 'usb';
 const FSK_BANDWIDTH = { low: 0, high: MAX_AUDIO_HZ };
 
 const SPECTRUM_H = 120;
-
-// Frequencies worth a menu entry. These are the frequencies of the *signal*, so
-// tuning one sets the dial low enough to put it at the configured audio centre
-// — the same arithmetic click-to-tune does, done in advance.
-const FSK_FREQUENCIES = [
-    {
-        group: 'Amateur RTTY',
-        options: [
-            { hz: 3590000, label: '3.590 MHz (80m)' },
-            { hz: 7040000, label: '7.040 MHz (40m)' },
-            { hz: 10140000, label: '10.140 MHz (30m)' },
-            { hz: 14080000, label: '14.080 MHz (20m)' },
-            { hz: 18100000, label: '18.100 MHz (17m)' },
-            { hz: 21080000, label: '21.080 MHz (15m)' },
-            { hz: 24920000, label: '24.920 MHz (12m)' },
-            { hz: 28080000, label: '28.080 MHz (10m)' },
-        ],
-    },
-    {
-        // 50 baud, 450 Hz shift — the Weather RTTY preset.
-        group: 'Weather RTTY — DWD Pinneberg',
-        options: [
-            { hz: 147300, label: '147.3 kHz' },
-            { hz: 4583000, label: '4.583 MHz' },
-            { hz: 7646000, label: '7.646 MHz' },
-            { hz: 10100800, label: '10.1008 MHz' },
-        ],
-    },
-];
 
 // LSB and CW-L put the audio spectrum the other way up, so a tone higher in the
 // passband is a *lower* radio frequency: click-to-tune has to move the dial the
@@ -314,6 +286,12 @@ export default function FSKExtension({ minimal }) {
     const lamps = stateFlags(state);
     const text = useMemo(() => toText(lines, opts.timestamps), [lines, opts.timestamps]);
 
+    // The list entry the receiver is on. The menu holds signal frequencies and
+    // the dial sits an audio centre below one, so the comparison has to add
+    // that back — which also means the match follows the centre frequency: move
+    // it and the decoder is listening somewhere else, so the menu says so.
+    const tuned = tunedOption(FSK_FREQUENCIES, tuning.frequency + params.center_frequency);
+
     const tuneTo = (signalHz) => {
         // In USB the audio frequency is the offset above the dial, so putting
         // the signal at the configured centre means tuning that much below it.
@@ -375,11 +353,15 @@ export default function FSKExtension({ minimal }) {
                 </span>
                 <span className="fsk__bar-gap" />
 
+                {/* Bound to where the receiver actually is, so this doubles as
+                    a readout of which frequency you are on. Re-picking the
+                    entry already shown is therefore a no-op, which is right:
+                    it would tune to where the receiver already is. */}
                 <select
                     className="select fsk__freq"
-                    value=""
+                    value={tuned ? String(tuned.hz) : ''}
                     onChange={(e) => { if (e.target.value) tuneTo(Number(e.target.value)); }}
-                    title={`Tune so the signal at this frequency lands on ${params.center_frequency} Hz of audio, in USB`}
+                    title={`Tune so the signal at this frequency lands on ${params.center_frequency} Hz of audio, in USB, and show which one the receiver is on`}
                 >
                     <option value="">Tune to…</option>
                     {FSK_FREQUENCIES.map((g) => (

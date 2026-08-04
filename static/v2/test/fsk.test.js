@@ -11,11 +11,12 @@ const assert = require('assert');
 
 const {
     FRAME_TEXT, FRAME_BAUD, FRAME_STATE, MAX_LINES, BAUD_ERROR_MAX,
-    FRAMINGS, ENCODINGS, LIMITS, PRESETS, DEFAULT_PRESET,
+    FRAMINGS, ENCODINGS, LIMITS, PRESETS, DEFAULT_PRESET, FSK_FREQUENCIES,
     decodeFrame, stateFlags, appendText, formatTime, toText,
     presetConfig, presetOf, attachParams, markSpace,
 } = require('./.build/fskframes.cjs');
 const { waveLevelDb } = require('./.build/fskspectrum.cjs');
+const { tunedOption } = require('./.build/extfreq.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -236,6 +237,50 @@ t('inverted swaps the two markers, as it swaps the two tones', () => {
 
 t('the baud meter’s range is the one the panel draws against', () => {
     assert.strictEqual(BAUD_ERROR_MAX, 8);
+});
+
+// --- the frequency menu ----------------------------------------------------
+
+t('the menu says which of its entries the receiver is on', () => {
+    // The list holds signal frequencies and the dial sits an audio centre
+    // below one, so the lookup has to add the centre back — and the answer
+    // follows the centre, because moving it moves where the decoder listens.
+    const centre = 1000;
+    const dial = 14080000 - centre;
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, dial + centre).hz, 14080000);
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, dial + 2000), null);
+    // Off the list entirely: the menu falls back to its placeholder rather
+    // than claiming the nearest band.
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, 14200000), null);
+});
+
+t('a hertz of rounding does not lose the match', () => {
+    // Tuning is `signal − centre` rounded, so recovering the signal frequency
+    // can land either side of where it started. A hertz on an HF dial is not a
+    // different frequency.
+    assert.ok(tunedOption(FSK_FREQUENCIES, 7646001));
+    assert.ok(tunedOption(FSK_FREQUENCIES, 7645999));
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, 7646002), null);
+});
+
+t('an unknown dial position is not a match', () => {
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, NaN), null);
+    assert.strictEqual(tunedOption(FSK_FREQUENCIES, undefined), null);
+    assert.strictEqual(tunedOption([], 14080000), null);
+    assert.strictEqual(tunedOption(undefined, 14080000), null);
+});
+
+t('every menu entry is a frequency the receiver can reach', () => {
+    // MIN_FREQ is 10 kHz: an entry below it would tune to the clamp instead,
+    // and then never match itself.
+    const all = FSK_FREQUENCIES.flatMap((g) => g.options);
+    assert.strictEqual(all.length, 12);
+    for (const o of all) {
+        assert.ok(o.hz >= 10000 && o.hz <= 30000000, o.label);
+        assert.ok(o.label, `${o.hz} has no label`);
+    }
+    // Unique, or two entries would fight over being the selected one.
+    assert.strictEqual(new Set(all.map((o) => o.hz)).size, all.length);
 });
 
 // --- audio level -----------------------------------------------------------

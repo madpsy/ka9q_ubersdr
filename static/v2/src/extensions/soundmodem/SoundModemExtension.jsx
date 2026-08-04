@@ -57,6 +57,13 @@ const DCD_HOLD_MS = 500;
 
 const WATERFALL_H = 120;
 
+// The channel band is a tint over the waterfall rather than a fill: it has to
+// read as a region at a glance without hiding the trace inside it, which is the
+// signal you are trying to line up. The centre line stays much stronger — it is
+// the thing you actually tune onto.
+const BAND_ALPHA = 0.32;
+const CENTRE_ALPHA = 0.85;
+
 function timeOf(at) {
     return new Date(at).toISOString().substring(11, 19);
 }
@@ -115,9 +122,9 @@ function Waterfall({ channels }) {
             const half = (modemBandwidth((MODEM_TYPES[m.modem] || {}).label) / 2 / MAX_AUDIO_HZ) * w;
 
             ctx.fillStyle = colour;
-            ctx.globalAlpha = 0.16;
+            ctx.globalAlpha = BAND_ALPHA;
             ctx.fillRect(x - half, 0, half * 2, WATERFALL_H - 12);
-            ctx.globalAlpha = 0.85;
+            ctx.globalAlpha = CENTRE_ALPHA;
             ctx.fillRect(x - 0.5, 0, 1, WATERFALL_H - 12);
             ctx.globalAlpha = 1;
 

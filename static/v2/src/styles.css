@@ -1970,7 +1970,25 @@ a.btn { text-decoration: none; }
 
 /* Same arrangement as the voice panel: `fill` gives it the dock height and the
    result scrolls inside, with a cap for when it is dragged to a side dock. */
-.cs-result { flex: 1; min-height: 0; max-height: 340px; overflow-y: auto; }
+/* `scrollbar-gutter` is load-bearing, not polish.
+ *
+ * This box has a max height and a photo inside it sized `width: 100%`, so the
+ * photo's height follows the box's width. Where a scrollbar takes real layout
+ * width — Windows, so Edge and Chrome there, rather than the overlay scrollbars
+ * macOS and Linux use — those two facts make a loop: content passes 340 px, the
+ * scrollbar appears, the photo is 15 px narrower and therefore shorter, the
+ * content drops back under 340 px, the scrollbar goes, the photo widens again.
+ * The local-time readout re-renders every second, which retriggers layout and
+ * turns that into a scrollbar flickering once a second rather than settling.
+ * Reserving the gutter means toggling the scrollbar no longer changes the
+ * content width, so the loop cannot start. */
+.cs-result {
+    flex: 1;
+    min-height: 0;
+    max-height: 340px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
 .dock--bottom .section--fill .cs-result { max-height: none; }
 
 .cs-result__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; }

@@ -22,6 +22,23 @@ const BASE = '/hamlib';
 const MAX_POLL_FAILURES = 20;
 const POLL_MS = 100;
 
+// How long hamlib_open gets to talk to the rig once the serial port is open.
+// A working rig answers in well under a second; this is only here so a rig that
+// never answers ends the attempt rather than hanging it.
+const CONNECT_TIMEOUT_MS = 20000;
+
+// Why the port could not be opened, in the operator's terms. The DOMException
+// names are what Web Serial throws — the messages themselves are unhelpful
+// ("Failed to execute 'requestPort'…"), so they are not passed through.
+function portErrorText(err) {
+    if (!err) return 'hamlib_open failed — see the browser console for its debug trace';
+    if (err.name === 'NotFoundError') return 'no serial port was chosen';
+    if (err.name === 'InvalidStateError') return 'that serial port is already open — close the other tab or program using it';
+    if (err.name === 'NetworkError') return 'the serial port could not be opened — it may be in use or unplugged';
+    if (err.name === 'SecurityError') return 'the browser refused access to the serial port';
+    return err.message || String(err);
+}
+
 // The SDR's mode names against Hamlib's canonical rig_strrmode() names. One
 // table for both directions.
 export const SDR_TO_HAMLIB = {
@@ -43,6 +60,10 @@ export class RadioSync extends Emitter {
         this.handle = 0;
         this.connected = false;
         this.busy = false;          // a connect or disconnect is in flight
+        // Why the last port operation failed, kept by the bridge guard so the
+        // failure message can say something better than "hamlib_open failed".
+        this.portError = null;
+        this._onPortOpen = null;    // armed only while a connect is in flight
         this.direction = 'sdr-to-radio';
         this.muteOnTx = true;
 
@@ -63,6 +84,42 @@ export class RadioSync extends Emitter {
         this.ctx = ctx;
     }
 
+    // Every async bridge method, wrapped so it can only ever *resolve*.
+    //
+    // Emscripten's Asyncify glue is `wakeUp(await startAsync())` with no catch —
+    // its own source says "TODO: add error handling" — so a bridge method that
+    // rejects never wakes the wasm up. The call it was serving stays suspended
+    // for good and the cwrap promise never settles, which is exactly how
+    // "Connecting…" used to sit there for ever: cancelling the browser's port
+    // picker rejects requestPort(), and that was the end of it.
+    //
+    // So each one resolves with the failure code Hamlib already understands,
+    // and the reason is kept for the message the operator actually sees.
+    //
+    // `drain` and `flush` are not here: they are synchronous, so a throw from
+    // them unwinds the wasm call rather than stranding it.
+    _guardBridge(bridge) {
+        const codes = { open: -1, close: -1, write: -1, poll: -2, setSignals: -1, getSignals: null };
+        for (const [name, code] of Object.entries(codes)) {
+            if (typeof bridge[name] !== 'function') continue;
+            const fn = bridge[name].bind(bridge);
+            bridge[name] = async (...args) => {
+                try {
+                    const out = await fn(...args);
+                    // A port that really opened: the connect watchdog can start
+                    // counting now, and not before — the picker waits for a
+                    // human and must not be on the clock.
+                    if (name === 'open' && this._onPortOpen) this._onPortOpen();
+                    return out;
+                } catch (err) {
+                    this.portError = err;
+                    return code;
+                }
+            };
+        }
+        return bridge;
+    }
+
     // Fetches and instantiates the wasm module, once. Resolves to the rig list.
     ensureLoaded() {
         if (this.loadPromise) return this.loadPromise;
@@ -77,7 +134,7 @@ export class RadioSync extends Emitter {
             const mod = await import(url);
             const createHamlibModule = mod.default;
 
-            const bridge = new window.HamlibSerialBridge();
+            const bridge = this._guardBridge(new window.HamlibSerialBridge());
             const Module = await createHamlibModule({ hamlibSerial: bridge });
             this.module = Module;
 
@@ -155,16 +212,17 @@ export class RadioSync extends Emitter {
         }
 
         this.busy = true;
+        this.portError = null;
         this.emit('state', this.snapshot());
         try {
             this.emit('message', { text: `Connecting to ${rig.mfg} ${rig.name}…`, tone: 'info' });
             // This is what raises the browser's serial port picker, so it has to
             // stay on the stack of the click that called connect().
-            this.handle = await this.open(
+            this.handle = await this._watched(this.open(
                 Number(model), baud || Number(rig.baudMax),
                 Number(rig.dataBits), Number(rig.stopBits), Number(rig.parity), Number(rig.handshake),
-            );
-            if (this.handle <= 0) throw new Error('hamlib_open failed — see the browser console for its debug trace');
+            ));
+            if (this.handle <= 0) throw new Error(portErrorText(this.portError));
 
             this.connected = true;
             this.failures = 0;
@@ -182,11 +240,57 @@ export class RadioSync extends Emitter {
             this.emit('message', { text: `Connection failed: ${err.message}`, tone: 'error' });
             this.handle = 0;
             this.connected = false;
+            if (err.timedOut) this._dropModule();
         } finally {
             this.busy = false;
             this.emit('state', this.snapshot());
         }
         return this.connected;
+    }
+
+    // Fails the open out if the rig never answers, so the button comes back
+    // instead of reading "Connecting…" for the rest of the session.
+    //
+    // The clock only starts once the port is genuinely open — see _guardBridge.
+    // Timing the picker instead would fail anyone who takes their time choosing
+    // a port, which is the one part of this that waits for a person.
+    _watched(call) {
+        return new Promise((resolve, reject) => {
+            let timer = null;
+            let done = false;
+            const settle = (fn) => (v) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                fn(v);
+            };
+            const fail = settle(reject);
+            this._onPortOpen = () => {
+                if (done) return;
+                timer = setTimeout(() => {
+                    const err = new Error(
+                        `the radio did not answer within ${Math.round(CONNECT_TIMEOUT_MS / 1000)} s — `
+                        + 'check the model, the baud rate and the cable',
+                    );
+                    err.timedOut = true;
+                    fail(err);
+                }, CONNECT_TIMEOUT_MS);
+            };
+            call.then(settle(resolve), fail);
+        }).finally(() => { this._onPortOpen = null; });
+    }
+
+    // A timed-out call is still suspended inside Asyncify and every later call
+    // is queued behind it, so this module can never be used again — reusing it
+    // would corrupt the one in-flight call it allows. Drop it; the next attempt
+    // builds a fresh instance from the already-cached 14 MB download. The
+    // abandoned one is unreachable except from the call that never returned.
+    _dropModule() {
+        this.module = null;
+        this.loadPromise = null;
+        this.open = null;
+        this.closeRig = null;
+        this.emit('message', { text: 'Radio link reset — press Connect to try again', tone: 'warn' });
     }
 
     async disconnect() {

@@ -17,10 +17,16 @@
     --text-dim: #8d99ad;
     --text-faint: #5c6779;
 
-    --accent: #3ddbe8;
-    --accent-ink: #04141a;
-    --accent-soft: rgba(61, 219, 232, 0.13);
-    --accent-line: rgba(61, 219, 232, 0.4);
+    /* The blue off the receiver's own mark (static/images/apple-touch-icon.png),
+       so the accent and the logo in the corner are the same colour rather than
+       two brand ideas sitting next to each other. 7.1:1 on --bg, which still
+       clears AAA for body text — it is a good deal less bright than the
+       turquoise it replaces, so anything relying on the accent to shout will
+       read more quietly. */
+    --accent: #08a2fb;
+    --accent-ink: #031a2b;
+    --accent-soft: rgba(8, 162, 251, 0.13);
+    --accent-line: rgba(8, 162, 251, 0.4);
     --violet: #8b7cf8;
 
     --good: #45d69a;
@@ -70,10 +76,13 @@
     --text-dim: #5d6a7d;
     --text-faint: #8996a8;
 
-    --accent: #0d8fa4;
+    /* The logo blue itself is only 2.8:1 on white — fine as a badge, unreadable
+       as text — so the light theme takes a darkened one of the same hue. 4.7:1
+       on a panel, which is better than the teal it replaces managed (3.8:1). */
+    --accent: #0b78c4;
     --accent-ink: #ffffff;
-    --accent-soft: rgba(13, 143, 164, 0.12);
-    --accent-line: rgba(13, 143, 164, 0.35);
+    --accent-soft: rgba(11, 120, 196, 0.12);
+    --accent-line: rgba(11, 120, 196, 0.35);
     --violet: #6d5ce0;
 
     --spec-bg: #0d1219;         /* the canvas stays dark in both themes — */

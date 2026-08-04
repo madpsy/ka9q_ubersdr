@@ -97,7 +97,7 @@ export function drawSpectrum(canvas, { bins, binCount, sampleRate, mark, space, 
 
         // Three bands rather than a gradient, as both v1 extensions draw it:
         // what matters is seeing which tones are strong at a glance.
-        const accent = cssVar('--accent', '#3ddbe8');
+        const accent = cssVar('--accent', '#08a2fb');
         const warn = cssVar('--warn', '#f2b544');
         const bad = cssVar('--bad', '#f2646a');
 

@@ -155,7 +155,7 @@ export default function MarkerBar({ width }) {
         const startFreq = centerFreq - span / 2;
         const endFreq = centerFreq + span / 2;
         const css = getComputedStyle(document.documentElement);
-        const accent = css.getPropertyValue('--accent').trim() || '#3ddbe8';
+        const accent = css.getPropertyValue('--accent').trim() || '#08a2fb';
         const accentInk = css.getPropertyValue('--accent-ink').trim() || '#04141a';
         const dim = css.getPropertyValue('--text-faint').trim() || '#5c6779';
 

@@ -307,7 +307,7 @@ function drawScope(canvas, wave, sampleRate, timebaseMs, state) {
         const y = h / 2 - (wave[start + i] - 128) * gain;
         if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
     }
-    c.strokeStyle = cssVar('--accent', '#3ddbe8');
+    c.strokeStyle = cssVar('--accent', '#08a2fb');
     c.lineWidth = 1.4 * dpr;
     c.stroke();
 }

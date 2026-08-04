@@ -3559,8 +3559,15 @@ a.btn { text-decoration: none; }
 .sm__dcd.is-on { color: var(--good); }
 .sm__dcd.is-on::before { background: var(--good); border-color: var(--good); }
 
-.sm__filters { flex-wrap: wrap; }
-.sm__search { flex: 1; min-width: 140px; }
+/* The filter row on one line: three menus, the search box and the switches.
+   `.select` is width:100% by design — a panel stacks one control per row — and
+   in a flex row that makes every menu ask for the full width, so each landed on
+   a line of its own. Here they size to their own contents ("All", "All
+   channels", "25" are short), and the search box takes whatever is left. It
+   still wraps when the window is genuinely too narrow. */
+.sm__filters { flex-wrap: wrap; gap: 6px 8px; }
+.sm__filters .select { width: auto; flex: 0 1 auto; min-width: 0; }
+.sm__search { flex: 1 1 110px; min-width: 90px; }
 
 .sm__list { padding: 0 2px; font-family: inherit; }
 

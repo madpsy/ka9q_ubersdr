@@ -28,6 +28,9 @@ const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefo
 const CHROME_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 const SAFARI_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15';
 const CHROME_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126 Mobile/15E148 Safari/604.1';
+const CHROME_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
+const EDGE_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Edg/126';
+const FIREFOX_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
 t('desktop Chrome needs no element at all — the context is enough', () => {
     // Pinned: v1 uses this path on desktop Chrome and the controls do appear,
@@ -61,6 +64,34 @@ t('Chrome on a Mac is Chrome, not Apple — no bridge', () => {
     // Still an Apple platform for the default-on decision, which is about where
     // lock-screen control matters and not about which element to play.
     assert.strictEqual(s.apple, true);
+});
+
+t('Blink on Windows needs the URL stream, as it does on Android', () => {
+    // An audible AudioContext alone raises the controls on Linux and macOS but
+    // not the Windows SMTC widget, which wants a real media resource behind the
+    // session. Measured, not reasoned: 'none' shows nothing there.
+    for (const [name, ua] of [['Chrome', CHROME_WIN], ['Edge', EDGE_WIN]]) {
+        const s = detectSupport(ua, { hasMediaSession: true, hasContextSink: true });
+        assert.strictEqual(s.anchor, 'stream', `${name} on Windows`);
+        assert.strictEqual(s.windows, true);
+    }
+});
+
+t('Blink elsewhere is unchanged — Windows is the exception, not the rule', () => {
+    // The stream anchor costs the scope, the recorder and the audio filters, so
+    // it is only taken where nothing else works.
+    for (const ua of [CHROME_DESKTOP, CHROME_MAC]) {
+        assert.strictEqual(detectSupport(ua, { hasMediaSession: true, hasContextSink: true }).anchor, 'none');
+    }
+});
+
+t('Firefox on Windows is left on the bridge', () => {
+    // Not Blink, so none of the above applies to it — and nothing has been
+    // measured there to justify moving it.
+    const s = detectSupport(FIREFOX_WIN, { hasMediaSession: true, hasContextSink: false });
+    assert.strictEqual(s.anchor, 'bridge');
+    assert.strictEqual(s.blink, false);
+    assert.strictEqual(s.windows, true);
 });
 
 t('Safari on the same Mac still takes the bridge', () => {

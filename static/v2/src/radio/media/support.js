@@ -55,6 +55,7 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
     const ios = /iPhone|iPad|iPod/i.test(ua);
     const blink = !ios && /Chrome\/|Chromium\/|Edg\//i.test(ua);
     const androidChrome = /Android/i.test(ua) && blink;
+    const windows = /Windows/i.test(ua);
 
     // Feature detection rather than a Firefox sniff: the browsers that cannot
     // point an AudioContext at a device are the same ones that will not show
@@ -73,8 +74,20 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
     // agent says Macintosh, so it was read as Apple and handed the one anchor
     // that cannot work there, while the same browser on Linux took the 'none'
     // path and was fine. Nothing throws — the controls simply never appear.
+    //
+    // Within Blink, Windows then wants what Android wants. An audible
+    // AudioContext and nothing else is enough to raise the controls on Linux
+    // and macOS, but not the Windows SMTC widget, which — like Android's
+    // notification — wants a real media resource behind the session. Measured
+    // rather than reasoned: 'none' shows nothing there and 'stream' works.
+    //
+    // It costs something, which is why it is not the answer everywhere: the
+    // stream anchor moves the audio off the WebSocket, so the scope, the
+    // recorder and the audio filters go quiet while it runs. The panel says so
+    // wherever this anchor is the live one, and anyone who would rather keep
+    // those can force 'none' from the same control.
     let anchor = 'none';
-    if (blink) anchor = androidChrome ? 'stream' : 'none';
+    if (blink) anchor = androidChrome || windows ? 'stream' : 'none';
     else if (apple || !contextSink) anchor = 'bridge';
 
     return {
@@ -82,6 +95,7 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         anchor,
         apple,
         blink,
+        windows,
         androidChrome,
         // v1's defaults, kept: Apple has had this working for years and it is
         // where lock-screen control matters most, so it is opt-out there and

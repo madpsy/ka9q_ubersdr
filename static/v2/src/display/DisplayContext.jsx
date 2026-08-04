@@ -40,7 +40,7 @@ export const DEFAULTS = {
     markerDxSpots: true,
     markerCwSpots: true,
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
-    split: 0.42,            // fraction of the centre area used by the spectrum
+    split: 0.25,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
     // Resting opacity of floating panel windows, 0.5..1 from the Layout panel.
     // 1 is solid, i.e. the effect off.

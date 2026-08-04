@@ -7,7 +7,7 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
 import {
     audioLevelPercent, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
-    snrFraction, sUnitFraction, sUnitLabel,
+    snrFraction, sUnitFraction, sUnitLabel, sUnitLabelAt,
     SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
 } from '../lib/format.js';
 // The theme's own tokens rather than v1's hardcoded slate palette, so a meter
@@ -76,9 +76,9 @@ const NEEDLE_H = 74;
 // Drawn on every render, which is the meter sample rate (useMeters), not a frame
 // loop: the needle eases toward the reading and the peak decays in wall-clock
 // time, so the movement is the same however often the panel is sampled.
-function NeedleMeter({ ticks, fraction, colourAt, showPeak, title }) {
+function NeedleMeter({ ticks, fraction, peak, colourAt, title }) {
     const ref = useRef(null);
-    const anim = useRef({ at: null, peak: null, last: 0 });
+    const anim = useRef({ at: null });
 
     useEffect(() => {
         const canvas = ref.current;
@@ -93,16 +93,11 @@ function NeedleMeter({ ticks, fraction, colourAt, showPeak, title }) {
             canvas.height = pxH;
         }
 
-        const now = performance.now();
-        const a = anim.current;
-        const dt = a.last ? Math.min(0.5, (now - a.last) / 1000) : 0;
-        a.last = now;
-
         // v1 eases the needle toward the reading rather than snapping to it —
         // an analogue movement has mass, and without it the needle jitters.
+        const a = anim.current;
         const target = Number.isFinite(fraction) ? fraction : 0;
         a.at = a.at == null ? target : a.at + (target - a.at) * 0.35;
-        if (showPeak) a.peak = stepPeak(a.peak, a.at, dt);
 
         const g = geometry(w, h);
         const c = canvas.getContext('2d');
@@ -167,11 +162,11 @@ function NeedleMeter({ ticks, fraction, colourAt, showPeak, title }) {
         // The peak-hold needle, under the live one and thinner: v1's second
         // needle at v1's opacity, narrowed so that when the two meet the live
         // reading still reads as the live reading.
-        if (showPeak && a.peak) {
+        if (peak != null) {
             c.save();
             c.globalAlpha = 0.6;
-            needle(a.peak.value, 1.5);
-            c.fillStyle = colourAt(a.peak.value);
+            needle(peak, 1.5);
+            c.fillStyle = colourAt(peak);
             c.fill();
             c.restore();
         }
@@ -259,6 +254,26 @@ export default function SignalPanel({ minimal }) {
 
     const power = m.basebandPower;
     const snr = m.snr;
+    const sFraction = sUnitFraction(power);
+
+    // Peak hold lives here rather than inside the meter, so one number drives
+    // the hold needle, the bar's peak marker and the S value printed beside the
+    // live one — three readings that must never disagree. Carried as a position
+    // on the scale, like everything else the meters take.
+    const peak = useRef(null);
+    const peakAt = useRef(0);
+    useEffect(() => {
+        const now = performance.now();
+        const dt = peakAt.current ? Math.min(0.5, (now - peakAt.current) / 1000) : 0;
+        peakAt.current = now;
+        peak.current = stepPeak(peak.current, sFraction, dt);
+    });
+    // Nothing heard yet, or a peak still on the stop: no hold worth showing.
+    // The bottom of the scale is S1, so a hold of 0 cannot say whether it means
+    // S1 or the silence below it — and silence is what it almost always is.
+    const held = power != null && power > -998 && peak.current && peak.current.value > 0
+        ? peak.current.value
+        : null;
 
     // One style for both meters, and it is a display setting like any other, so
     // it survives a reload. Clicking either one switches both: they are a pair,
@@ -276,20 +291,29 @@ export default function SignalPanel({ minimal }) {
                 {needle ? (
                     <NeedleMeter
                         ticks={S_TICKS}
-                        fraction={sUnitFraction(power)}
+                        fraction={sFraction}
+                        peak={held}
                         colourAt={sMeterColourAt}
-                        showPeak
                         title={hint}
                     />
                 ) : (
                     <>
                         <MeterScale ticks={S_TICKS} />
                         <MeterTrack ticks={S_TICKS}>
-                            <Bar value={sUnitFraction(power)} min={0} max={1} color={sMeterColour(power)} />
+                            <Bar
+                                value={sFraction}
+                                min={0}
+                                max={1}
+                                peak={held}
+                                color={sMeterColour(power)}
+                            />
                         </MeterTrack>
                     </>
                 )}
-                <div className="meter__value">{sUnitLabel(power)}</div>
+                <div className="meter__value">
+                    {sUnitLabel(power)}
+                    {held != null && <span className="meter__held">pk {sUnitLabelAt(held)}</span>}
+                </div>
             </button>
 
             {/* SNR on v1's meter scale: 30 dB at the left, 60 at the right

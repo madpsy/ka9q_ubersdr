@@ -124,6 +124,23 @@ export function sUnitLabel(dbfs) {
     return 'S9+' + Math.round(dbfs + 73);
 }
 
+// The same label from a position on the meter rather than a reading — for the
+// peak hold, which is carried as a position so that one number drives both the
+// hold needle and the text beside the live value.
+export function sUnitLabelAt(fraction) {
+    const f = Number.isFinite(fraction) ? clamp(fraction, 0, 1) : 0;
+    // The trip out to a fraction and back is not exact: S9+3.5 comes back as
+    // 3.4999999996 and rounds *down*, so a hold could print one dB below the
+    // live reading that set it. EPS restores the half-up rounding sUnitLabel
+    // does on the raw value — and it goes inside the rounding, not on `s`
+    // itself, or an exact S9 would fall through to the "S9+0" branch.
+    const EPS = 1e-9;
+    const s = S_UNITS_MIN + f * (S_UNITS_MAX - S_UNITS_MIN);
+    if (s < 1) return 'S0';
+    if (s <= 9 + EPS) return 'S' + Math.round(s + EPS);
+    return 'S9+' + Math.round((s - 9) * 10 + EPS);
+}
+
 // SNR meter, matching v1's scales so a signal reads the same in both UIs.
 //
 // v1 puts SNR on a 30–60 dB meter (s-meter-needle.js `snrMin`/`snrMax`, mirrored

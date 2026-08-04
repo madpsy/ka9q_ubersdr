@@ -16,7 +16,8 @@ const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const {
-    dbfsToSUnits, sMeterColour, sMeterColourAt, snrColour, snrColourAt, sUnitFraction, sUnitLabel,
+    dbfsToSUnits, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    sUnitFraction, sUnitLabel, sUnitLabelAt,
     S_UNITS_MIN, S_UNITS_MAX,
 } = require('./.build/format.cjs');
 
@@ -702,6 +703,21 @@ t('a colour from a meter position matches the colour from the reading', () => {
     for (const snr of [30, 35, 40, 45, 50, 60]) {
         assert.strictEqual(snrColourAt((snr - 30) / 30), snrColour(snr), `${snr} dB`);
     }
+});
+
+t('the held S value reads the same as a live one at the same place', () => {
+    // The peak is carried as a position on the scale, so its label has to come
+    // out the same as the live label for the reading that put it there — a hold
+    // of S9+20 printed as S9+19 would be its own bug report.
+    for (let dbfs = -121; dbfs <= -13; dbfs += 0.5) {
+        assert.strictEqual(sUnitLabelAt(sUnitFraction(dbfs)), sUnitLabel(dbfs), `${dbfs} dBFS`);
+    }
+    assert.strictEqual(sUnitLabelAt(1), 'S9+60');
+    // Below S1 there is no position to hold: the scale starts at S1, so
+    // everything quieter sits at 0 alongside it. The panel prints no hold at
+    // all down there rather than choosing between S0 and S1.
+    assert.strictEqual(sUnitFraction(-130), sUnitFraction(-121));
+    assert.strictEqual(sUnitLabelAt(0), 'S1');
 });
 
 t('the bar and the S label never disagree', () => {

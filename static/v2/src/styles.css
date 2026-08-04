@@ -1129,6 +1129,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent);
     font-variant-numeric: tabular-nums;
 }
+/* The peak hold, beside the live reading. Smaller and dimmer: it is where the
+   signal has been, and must not compete with where it is. */
+.meter__held {
+    margin-left: 9px;
+    font-size: 0.62em;
+    font-weight: 500;
+    color: var(--text-dim);
+}
 
 .bar {
     position: relative;

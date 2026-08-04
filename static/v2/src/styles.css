@@ -882,7 +882,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: rgba(255, 255, 255, 0.02);
     border-bottom: 1px solid var(--border);
 }
-.spectrum__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+/* Grows into the space the tools leave, so its clientWidth *is* the room the
+   tags have — which is what SpectrumView measures against to decide whether the
+   cursor-frequency tag fits. Sized to content it would always read as full. */
+.spectrum__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
 .spectrum__tools { display: flex; gap: 2px; }
 
 .spectrum__canvas {

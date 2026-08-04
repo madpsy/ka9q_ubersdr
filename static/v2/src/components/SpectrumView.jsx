@@ -21,10 +21,17 @@ import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
+import { useRoomFor } from '../lib/useRoomFor.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
 const MIN_WATERFALL_H = 40;
+
+// Width to assume for the cursor-frequency tag before it has ever been on
+// screen to measure — a little over what "14.074.00" needs at the default text
+// size. Only ever used once: from the first time it is shown, useRoomFor
+// remembers the real width.
+const CURSOR_TAG_W = 96;
 
 // Squelch state in the spectrum toolbar. Split into its own component so the
 // 10 Hz meter sampling re-renders this tag alone — SpectrumView owns the draw
@@ -441,6 +448,13 @@ export default function SpectrumView() {
     const [menu, setMenu] = useState(null);
     const [adding, setAdding] = useState(null);
 
+    // The cursor frequency is the one tag in the toolbar we can do without: it
+    // is transient, and the same number is in the tooltip already following the
+    // pointer. On a narrow spectrum it is what tips the tag row into wrapping,
+    // so it is dropped whenever the row has no width left for it.
+    const metaRef = useRef(null);
+    const cursorTagFits = useRoomFor(metaRef, CURSOR_TAG_W);
+
     // ---- pointer interaction --------------------------------------------
 
     const freqAtX = useCallback((clientX) => {
@@ -608,10 +622,12 @@ export default function SpectrumView() {
     return (
         <div className="spectrum">
             <div className="spectrum__toolbar">
-                <div className="spectrum__meta">
+                <div className="spectrum__meta" ref={metaRef}>
                     <span className="tag tag--accent">{formatSpan(span)}</span>
                     <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>
-                    {hoverInfo && <span className="tag tag--ghost">{formatFreqShort(hoverInfo.freq, span)}</span>}
+                    {hoverInfo && cursorTagFits && (
+                        <span className="tag tag--ghost" data-optional="">{formatFreqShort(hoverInfo.freq, span)}</span>
+                    )}
                     <SquelchTag />
                     <NoiseReductionTag />
                     <FilterTags />

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio, useMeters } from '../radio/RadioContext.jsx';
 import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
@@ -8,6 +8,11 @@ import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
+import { useRoomFor } from '../lib/useRoomFor.js';
+
+// Width to assume for the session countdown until it has been on screen once —
+// "Unlimited" is the widest it gets. See useRoomFor.
+const SESSION_W = 68;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -114,7 +119,7 @@ function SessionClock() {
     if (session.maxSec == null) return null;
 
     if (session.maxSec === 0) {
-        return <span className="topbar__session" title="Session time">Unlimited</span>;
+        return <span className="topbar__session" data-optional="" title="Session time">Unlimited</span>;
     }
 
     const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
@@ -126,6 +131,7 @@ function SessionClock() {
     return (
         <span
             className={`topbar__session${left < 300 ? ' is-low' : ''}`}
+            data-optional=""
             title="Time left in this session"
         >
             {hh}:{mm}:{ss}
@@ -146,12 +152,16 @@ export default function TopBar({ compact }) {
         uiScale: Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v)) * 100) / 100,
     });
 
+    // The countdown only goes up while the bar has width to spare for it.
+    const barRef = useRef(null);
+    const roomForSession = useRoomFor(barRef, SESSION_W);
+
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
             : audioState === 'rejected' ? 'bad' : 'idle';
 
     return (
-        <header className={`topbar${compact ? ' topbar--compact' : ''}`}>
+        <header className={`topbar${compact ? ' topbar--compact' : ''}`} ref={barRef}>
             <div className="topbar__brand">
                 <LinksMenu serverInfo={serverInfo} compact={compact} />
                 <div className="topbar__id">
@@ -180,7 +190,7 @@ export default function TopBar({ compact }) {
                 </div>
             )}
 
-            <div className="topbar__spacer" />
+            <div className="topbar__spacer" data-slack="" />
 
             {!compact && serverInfo?.space_weather && (
                 <SpaceWeather clickable={!!serverInfo?.noise_floor} />
@@ -250,7 +260,10 @@ export default function TopBar({ compact }) {
                 <span className={`dot dot--${linkTone}`} />
             </div>
 
-            <SessionClock />
+            {/* First thing to go when the bar runs out of width: it is the one
+                readout among controls here, and a countdown that disappears
+                costs less than a squeezed frequency or Listen button. */}
+            {roomForSession && <SessionClock />}
 
             {/* v1 pins this next to the voice activity button on the band
                 bar, on the same condition. The page it opens is a v1 one and

@@ -25,7 +25,7 @@
 //   4. Replacing MediaMetadata re-fetches every artwork URL, identical content
 //      or not. Hence the dedup, and hence blob: artwork (see artwork.js).
 
-import { logoArtwork, photoArtwork, photoPlaceholder, trimPhotoCache } from './artwork.js';
+import { logoArtwork, logoNow, photoArtwork, photoPlaceholder, trimPhotoCache } from './artwork.js';
 import { buildMetadata, sameMetadata } from './metadata.js';
 import { HttpAudioStream } from './httpStream.js';
 import { mediaSupport, resolveAnchor } from './support.js';
@@ -138,7 +138,7 @@ export class MediaSessionController {
         this.enabled = on;
         this.error = '';
         if (on) await this._start();
-        else this._stop();
+        else { this._stop(); this._report('disabled'); }
         this._emit();
     }
 
@@ -159,11 +159,12 @@ export class MediaSessionController {
             this.error = 'This browser has no Media Session support.';
             return;
         }
-        // Cached before any metadata is set, so the very first assignment
-        // already carries blob artwork and Chrome never fetches the paths.
-        await logoArtwork();
-        // Toggled off again while that was in flight.
-        if (!this.enabled) return;
+        // Warmed, not awaited. The artwork only has to be ready before the
+        // metadata is *set*, and _pushMetadata re-pushes when it resolves — but
+        // awaiting here would put three image fetches between the operator's
+        // click and the anchor's play() call, and a play() that has lost its
+        // user activation is refused by the autoplay policy.
+        logoArtwork().catch(() => { /* falls back to plain paths */ });
 
         if (this.running) {
             try {
@@ -172,10 +173,17 @@ export class MediaSessionController {
                 this.error = err.message || String(err);
             }
         }
-        this._installHandlers();
-        this._startPositionUpdates();
+        // This order is v1's, and deliberately so: metadata, then playback
+        // state, then handlers, then position. Chrome builds its session from
+        // the first metadata assignment, and setPositionState before there is a
+        // session to position throws — harmlessly caught, but it leaves the
+        // session half-built for no reason. Matching the implementation known
+        // to work on this browser costs nothing.
         this._pushMetadata();
         this._applyPlaybackState();
+        this._installHandlers();
+        this._startPositionUpdates();
+        this._report('enabled');
     }
 
     _stop() {
@@ -340,7 +348,7 @@ export class MediaSessionController {
             });
             return;
         }
-        this._setMetadata(text, null);
+        this._setMetadata(text, logoNow());
         logoArtwork().then((art) => {
             if (this.lastMetadata !== next) return;
             this._setMetadata(text, art);
@@ -358,6 +366,33 @@ export class MediaSessionController {
         } catch (err) {
             console.warn('[media] metadata:', err.message);
         }
+    }
+
+    // One line saying exactly what the browser was handed and what it kept.
+    //
+    // Worth having permanently. Every failure this feature has is silent: the
+    // API never reports that the OS declined to show anything, so without a
+    // read-back there is no way to tell "we set nothing" from "we set it and it
+    // was ignored" — and those have completely different fixes.
+    _report(what) {
+        const ms = navigator.mediaSession;
+        const held = ms && ms.metadata;
+        console.log('[media] %s', what, {
+            anchor: this.anchor,
+            override: this.override,
+            enabled: this.enabled,
+            running: this.running,
+            playbackState: ms && ms.playbackState,
+            // Read back rather than trusting the assignment: this is the line
+            // that says whether the browser took it.
+            metadata: held ? `${held.title} | ${held.artist} | ${held.album}` : null,
+            artwork: held && held.artwork ? held.artwork.length : 0,
+            streamMode: this.stream ? this.stream.mode : null,
+            streamPlaying: !!(this.stream && this.stream.playing),
+            audioContext: this.host.player && this.host.player.ctx
+                ? this.host.player.ctx.state : 'none',
+            error: this.error || null,
+        });
     }
 
     _applyPlaybackState() {

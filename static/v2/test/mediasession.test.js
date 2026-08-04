@@ -26,10 +26,9 @@ const CHROME_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTM
 const SAFARI_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
-t('desktop Chrome is detected as needing no anchor — v1\u2019s unverified claim', () => {
-    // Pinned so that changing it is a deliberate act with a failing test, not a
-    // silent edit: if Blink turns out to need a media element after all, this is
-    // the line that changes and this is the test that says so.
+t('desktop Chrome needs no element at all — the context is enough', () => {
+    // Pinned: v1 uses this path on desktop Chrome and the controls do appear,
+    // so a change here would be a regression rather than a fix.
     const s = detectSupport(CHROME_DESKTOP, { hasMediaSession: true, hasContextSink: true });
     assert.strictEqual(s.anchor, 'none');
     // Opt-in off Apple, so nobody gets a media widget they did not ask for.

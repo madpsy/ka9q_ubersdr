@@ -5,16 +5,10 @@
 // three cases at every call site. There is really only one question, and it is
 // not "which browser is this" but "what has to be playing".
 //
-//   'none'   — metadata and action handlers only, on the assumption that an
-//              audible AudioContext is itself enough for the browser to raise
-//              controls. This is v1's belief about desktop Chrome and it is
-//              *unverified* — v1 ships that path defaulting to off, with a
-//              comment saying the user must enable it manually to test. Blink
-//              appears to register a media session for a media element rather
-//              than for Web Audio output, in which case this anchor does
-//              nothing anywhere and the honest fix is to change the line below
-//              to give Chrome 'stream'. The panel's Anchor control exists to
-//              settle that on a real browser.
+//   'none'   — metadata and action handlers only. An audible AudioContext is
+//              enough for desktop Chrome and Edge to raise controls in the
+//              toolbar; v1 does exactly this and it works there, so no element
+//              of any kind is needed.
 //
 //   'bridge' — an <audio> playing a MediaStream. Safari and Firefox show
 //              nothing at all without a media element. The bridge gives them

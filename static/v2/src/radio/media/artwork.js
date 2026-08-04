@@ -22,14 +22,30 @@ const LOGO = [
 // that fits, and a photo declared smaller than the logo would never win.
 const PHOTO_SIZE = '800x800';
 
+let logoPromise = null;
+let logoResolved = null;
+
+// The plain paths, usable synchronously. The blobs are an optimisation, not a
+// requirement, and metadata should never go out with an empty artwork array
+// just because the fetches have not finished — v1 waits for the blobs before it
+// sets anything, and matching what a working implementation hands the browser
+// is worth more than saving one assignment.
+export function logoFallback() {
+    return LOGO.map(({ path, sizes, type }) => ({
+        src: new URL(path, location.origin).href, sizes, type,
+    }));
+}
+
+// What is cached right now, or the plain paths.
+export function logoNow() {
+    return logoResolved || logoFallback();
+}
+
 async function toBlobUrl(url) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return URL.createObjectURL(await resp.blob());
 }
-
-let logoPromise = null;
-let logoResolved = null;
 
 // The receiver's own artwork. Resolves to a MediaImage[] — falling back to the
 // plain paths for any image that would not load, so there is always something.

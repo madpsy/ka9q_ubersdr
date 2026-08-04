@@ -122,15 +122,21 @@ export function MediaSessionProvider({ children }) {
     // which is why this provider sits below it in the tree.
     ctl.host.player = player;
 
-    useEffect(() => {
-        if (!enabled) return undefined;
-        return subscribeSpots('dx', setDxSpots);
-    }, [enabled]);
+    // Gated exactly as App.jsx gates its own spot streams: the socket needs a
+    // registered session, and a feed the instance does not run has nothing to
+    // subscribe to.
+    const hasDx = !!(serverInfo && serverInfo.dx_cluster);
+    const hasCw = !!(serverInfo && serverInfo.cw_skimmer);
 
     useEffect(() => {
-        if (!enabled) return undefined;
+        if (!enabled || !running || !hasDx) return undefined;
+        return subscribeSpots('dx', setDxSpots);
+    }, [enabled, running, hasDx]);
+
+    useEffect(() => {
+        if (!enabled || !running || !hasCw) return undefined;
         return subscribeSpots('cw', setCwSpots);
-    }, [enabled]);
+    }, [enabled, running, hasCw]);
 
     // The detector runs off the noise floor monitor, so on an instance without
     // it the poll would be a request every five seconds for a 404 — the same

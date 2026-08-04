@@ -18,7 +18,7 @@ import { useExtensions } from './ExtensionsContext.jsx';
 const MIN = { w: 380, h: 240 };
 
 export default function ExtensionWindow({ bounds }) {
-    const { active, close, geometryOf, setFloat } = useExtensions();
+    const { active, close, minimised, setMinimised, geometryOf, setFloat } = useExtensions();
     const geom = geometryOf(active ? active.id : '');
 
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
@@ -48,10 +48,14 @@ export default function ExtensionWindow({ bounds }) {
     if (!active) return null;
 
     return (
+        // Minimised keeps the window in the tree at its full size and only stops
+        // it being painted, so the decoder runs on and every canvas keeps the
+        // dimensions it was measured at — restoring is instant and lossless.
         <section
-            className="floatwin floatwin--ext"
+            className={`floatwin floatwin--ext${minimised ? ' floatwin--min' : ''}`}
             style={{ left: geom.x, top: geom.y, width: geom.w, height: geom.h }}
             aria-label={active.title}
+            aria-hidden={minimised || undefined}
         >
             <header
                 className="floatwin__head"
@@ -62,6 +66,14 @@ export default function ExtensionWindow({ bounds }) {
             >
                 <span className="floatwin__icon">{active.icon}</span>
                 <span className="floatwin__title">{active.title}</span>
+                <button
+                    type="button"
+                    className="floatwin__btn floatwin__ctl"
+                    title="Minimise — the decoder keeps running"
+                    onClick={() => setMinimised(true)}
+                >
+                    <Icon.Minus size={14} />
+                </button>
                 <button
                     type="button"
                     className="floatwin__btn floatwin__ctl"

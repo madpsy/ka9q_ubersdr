@@ -1935,6 +1935,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     left: 10px;
     right: 10px;
     bottom: 10px;
+    /* Above every window (panels at 10+, the extension at 60) — a chip that a
+       window can cover is a chip you cannot click to get that window back. */
+    z-index: 70;
     display: flex;
     flex-wrap: wrap-reverse;
     align-items: flex-end;
@@ -2464,6 +2467,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
    above them and its body does not scroll — the extension lays itself out and
    scrolls whichever part of itself is the list. */
 .floatwin--ext { z-index: 60; }
+
+/* Minimised: still mounted and still sized, just not drawn. visibility rather
+   than display, so the decoder's canvases keep their measured dimensions and
+   restoring costs no re-layout. */
+.floatwin--min {
+    visibility: hidden;
+    pointer-events: none;
+}
 .floatwin__body--ext {
     display: flex;
     flex-direction: column;

@@ -50,6 +50,10 @@ export function ExtensionsProvider({ children }) {
     // enabled" must not read the same.
     const [enabled, setEnabled] = useState(null);
     const [activeId, setActiveId] = useState(null);
+    // Minimised only hides the window. Unlike a panel, an extension is a live
+    // decoder — unmounting it would drop the stream and the decodes with it —
+    // so the window stays mounted and merely stops being drawn.
+    const [minimised, setMinimised] = useState(false);
     const [floats, setFloats] = useState(loadGeometry);
 
     useEffect(() => {
@@ -76,16 +80,28 @@ export function ExtensionsProvider({ children }) {
         enabled: enabled == null ? false : enabled.includes(e.id),
     })), [enabled]);
 
+    // Opening always shows the window: asking for an extension that is already
+    // open but minimised is asking to see it again, not to do nothing.
     const open = useCallback((id) => {
         if (!EXTENSION_BY_ID[id]) return;
         setActiveId(id);
+        setMinimised(false);
     }, []);
 
-    const close = useCallback(() => setActiveId(null), []);
+    const close = useCallback(() => {
+        setActiveId(null);
+        setMinimised(false);
+    }, []);
 
+    // Toggling the one that is already open closes it — unless it is minimised,
+    // in which case the launcher is the obvious way to get it back on screen.
     const toggle = useCallback((id) => {
-        setActiveId((cur) => (cur === id ? null : (EXTENSION_BY_ID[id] ? id : cur)));
-    }, []);
+        setActiveId((cur) => {
+            if (cur !== id) return EXTENSION_BY_ID[id] ? id : cur;
+            return minimised ? cur : null;
+        });
+        setMinimised(false);
+    }, [minimised]);
 
     const setFloat = useCallback((id, geom) => {
         setFloats((prev) => {
@@ -111,12 +127,14 @@ export function ExtensionsProvider({ children }) {
         list,
         activeId,
         active: activeId ? EXTENSION_BY_ID[activeId] : null,
+        minimised: !!activeId && minimised,
+        setMinimised,
         open,
         close,
         toggle,
         geometryOf,
         setFloat,
-    }), [list, activeId, open, close, toggle, geometryOf, setFloat]);
+    }), [list, activeId, minimised, open, close, toggle, geometryOf, setFloat]);
 
     return <ExtensionsContext.Provider value={value}>{children}</ExtensionsContext.Provider>;
 }

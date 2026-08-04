@@ -10,49 +10,50 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { PANEL_BY_ID } from '../panels/registry.jsx';
 import ExtensionWindow from '../extensions/ExtensionWindow.jsx';
+import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import FloatingPanel from './FloatingPanel.jsx';
 import { Icon } from './ui.jsx';
 
 // Minimised windows gather here, along the bottom of the centre area and so
-// directly above the bottom dock. The panel body is dropped while minimised,
-// exactly as a collapsed dock section drops its own — but the panel's badge is
-// kept, so a chip can still say there is something to look at.
-function MinimisedBar({ ids }) {
-    const { setFloatMin, movePanel } = useLayout();
-    if (!ids.length) return null;
+// directly above the bottom dock. Panels and the extension share the strip:
+// both are floating windows, so both minimise to the same place.
+//
+// A minimised panel drops its body, exactly as a collapsed dock section drops
+// its own, but keeps its badge — so a chip can still say there is something to
+// look at. The extension is different and stays mounted; see ExtensionWindow.
+function MinimisedBar({ chips }) {
+    if (!chips.length) return null;
     return (
         <div className="floatbar">
-            {ids.map((id) => {
-                const panel = PANEL_BY_ID[id];
-                return (
-                    <div key={id} className="floatchip">
-                        <button
-                            type="button"
-                            className="floatchip__main"
-                            title={`Restore ${panel.title}`}
-                            onClick={() => setFloatMin(id, false)}
-                        >
-                            <span className="floatchip__icon">{panel.icon}</span>
-                            <span className="floatchip__title">{panel.title}</span>
-                            {panel.Badge && <panel.Badge />}
-                        </button>
-                        <button
-                            type="button"
-                            className="floatchip__btn"
-                            title="Return to its dock"
-                            onClick={() => movePanel(id, panel.dock, null)}
-                        >
-                            <Icon.Close size={12} />
-                        </button>
-                    </div>
-                );
-            })}
+            {chips.map((c) => (
+                <div key={c.key} className="floatchip">
+                    <button
+                        type="button"
+                        className="floatchip__main"
+                        title={`Restore ${c.title}`}
+                        onClick={c.onRestore}
+                    >
+                        <span className="floatchip__icon">{c.icon}</span>
+                        <span className="floatchip__title">{c.title}</span>
+                        {c.Badge && <c.Badge />}
+                    </button>
+                    <button
+                        type="button"
+                        className="floatchip__btn"
+                        title={c.dismissTitle}
+                        onClick={c.onDismiss}
+                    >
+                        <Icon.Close size={12} />
+                    </button>
+                </div>
+            ))}
         </div>
     );
 }
 
 export default function FloatingLayer() {
-    const { floats, floatOrder, sections, setFloat } = useLayout();
+    const { floats, floatOrder, sections, setFloat, setFloatMin, movePanel } = useLayout();
+    const ext = useExtensions();
     const ref = useRef(null);
     const bounds = useRef(null);
     const [, force] = useState(0);
@@ -86,8 +87,30 @@ export default function FloatingLayer() {
 
     const visible = floatOrder.filter((id) => PANEL_BY_ID[id] && !sections[id]?.hidden);
     // The chip strip keeps floatOrder, so minimising a window does not shuffle
-    // the row; z-order among the remaining windows is unaffected either.
-    const minimised = visible.filter((id) => floats[id]?.min);
+    // the row; z-order among the remaining windows is unaffected either. The
+    // extension chip goes last, matching where its window paints.
+    const chips = visible.filter((id) => floats[id]?.min).map((id) => {
+        const panel = PANEL_BY_ID[id];
+        return {
+            key: id,
+            title: panel.title,
+            icon: panel.icon,
+            Badge: panel.Badge,
+            onRestore: () => setFloatMin(id, false),
+            onDismiss: () => movePanel(id, panel.dock, null),
+            dismissTitle: 'Return to its dock',
+        };
+    });
+    if (ext.active && ext.minimised) {
+        chips.push({
+            key: `ext:${ext.active.id}`,
+            title: ext.active.title,
+            icon: ext.active.icon,
+            onRestore: () => ext.setMinimised(false),
+            onDismiss: ext.close,
+            dismissTitle: 'Close this extension',
+        });
+    }
 
     return (
         <div className="floatlayer" ref={ref}>
@@ -100,7 +123,7 @@ export default function FloatingLayer() {
                     bounds={bounds}
                 />
             ))}
-            <MinimisedBar ids={minimised} />
+            <MinimisedBar chips={chips} />
             {/* Last, so an extension always paints above the panels: it is the
                 thing the user just opened, and it has no raise-to-front of its
                 own because there is only ever one. */}

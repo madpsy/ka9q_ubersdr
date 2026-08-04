@@ -22,7 +22,7 @@ import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 
 export default function ExtensionsPanel() {
-    const { list, activeId, toggle } = useExtensions();
+    const { list, activeId, minimised, toggle } = useExtensions();
     const { running } = useRadio();
 
     return (
@@ -47,7 +47,12 @@ export default function ExtensionsPanel() {
                                 <span className="ext-row__title">{e.title}</span>
                                 <span className="ext-row__summary">{reason || e.summary}</span>
                             </span>
-                            <span className="ext-row__state">{open ? 'Open' : ''}</span>
+                            {/* A minimised extension is still running, so it
+                                must not read as closed — and clicking the row
+                                brings it back rather than shutting it down. */}
+                            <span className="ext-row__state">
+                                {open ? (minimised ? 'Minimised' : 'Open') : ''}
+                            </span>
                         </button>
                     );
                 })}

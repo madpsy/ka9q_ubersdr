@@ -28,7 +28,7 @@
 import { logoArtwork, photoArtwork, photoPlaceholder, trimPhotoCache } from './artwork.js';
 import { buildMetadata, sameMetadata } from './metadata.js';
 import { HttpAudioStream } from './httpStream.js';
-import { mediaSupport } from './support.js';
+import { mediaSupport, resolveAnchor } from './support.js';
 import { noteExternalActivity } from '../idle.js';
 
 // How often the lock-screen scrubber is refreshed. It shows session time
@@ -68,10 +68,40 @@ export class MediaSessionController {
         // setOutput before anything is ever anchored.
         this.volume = 1;
         this.sinkId = '';
+        // 'auto', or an anchor forced from the panel. Which anchor a browser
+        // actually needs is not specified anywhere and moves between releases,
+        // so detection is a default rather than a verdict.
+        this.override = 'auto';
+        // The anchor that is *running*, which is not the same as the one wanted
+        // — switching has to tear down what was built, not what was asked for.
+        this.activeAnchor = null;
     }
 
     get anchor() {
-        return this.support.anchor;
+        return resolveAnchor(this.support, this.override);
+    }
+
+    async setAnchorOverride(override) {
+        if (override === this.override) return;
+        this.override = override;
+        if (!this.enabled) {
+            this._emit();
+            return;
+        }
+        this._stopAnchor();
+        if (this.running) {
+            try {
+                await this._startAnchor();
+            } catch (err) {
+                this.error = err.message || String(err);
+            }
+        }
+        // The card has to be pushed again: switching anchors can take it away,
+        // and the dedup would otherwise recognise identical text and skip it.
+        this.lastMetadata = null;
+        this._pushMetadata();
+        this._applyPlaybackState();
+        this._emit();
     }
 
     // What the panel renders. One object so a single subscription covers it.
@@ -85,6 +115,9 @@ export class MediaSessionController {
             // the HTTP anchor is still buffering, or before the receiver starts.
             state: !this.enabled ? 'off' : this._anchorReady() ? 'active' : 'waiting',
             streamMode: this.stream ? this.stream.mode : null,
+            // What the OS was actually handed, so "nothing happened" can be
+            // told apart from "we never set anything".
+            card: this.lastMetadata ? this.lastMetadata.artist : '',
             error: this.error,
         };
     }
@@ -157,6 +190,7 @@ export class MediaSessionController {
     }
 
     async _startAnchor() {
+        this.activeAnchor = this.anchor;
         if (this.anchor === 'bridge') {
             // The same hidden element the output-device picker uses. Asking for
             // it here rather than building a second one is what lets the two
@@ -226,9 +260,10 @@ export class MediaSessionController {
             // otherwise be recognised as "already set" and skipped.
             this.lastMetadata = null;
         }
-        if (this.anchor === 'bridge') {
+        if (this.activeAnchor === 'bridge') {
             this.host.player.setAnchorWanted(false).catch(() => {});
         }
+        this.activeAnchor = null;
     }
 
     // The stream can drop for reasons that fix themselves — a backgrounded tab

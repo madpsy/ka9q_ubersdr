@@ -5,9 +5,16 @@
 // three cases at every call site. There is really only one question, and it is
 // not "which browser is this" but "what has to be playing".
 //
-//   'none'   — an audible AudioContext is enough. Desktop Chrome and Edge put
-//              media controls in the toolbar on their own, so the whole feature
-//              is metadata and action handlers.
+//   'none'   — metadata and action handlers only, on the assumption that an
+//              audible AudioContext is itself enough for the browser to raise
+//              controls. This is v1's belief about desktop Chrome and it is
+//              *unverified* — v1 ships that path defaulting to off, with a
+//              comment saying the user must enable it manually to test. Blink
+//              appears to register a media session for a media element rather
+//              than for Web Audio output, in which case this anchor does
+//              nothing anywhere and the honest fix is to change the line below
+//              to give Chrome 'stream'. The panel's Anchor control exists to
+//              settle that on a real browser.
 //
 //   'bridge' — an <audio> playing a MediaStream. Safari and Firefox show
 //              nothing at all without a media element. The bridge gives them
@@ -23,6 +30,20 @@
 //              instead of* over the WebSocket, so it costs no extra bandwidth —
 //              but it does mean the client-side DSP, the audio scope and the
 //              recorder see nothing while it runs. See media/httpStream.js.
+
+// The anchors, as a vocabulary the panel can offer directly. 'auto' means take
+// the detected one.
+export const ANCHORS = ['auto', 'none', 'bridge', 'stream'];
+
+// Detection is a best guess about browser behaviour that is not specified
+// anywhere and changes between releases, so it can be overridden — see
+// resolveAnchor and the Media controls panel. Worth having permanently: the
+// alternative to a setting is editing this file every time a browser moves.
+export function resolveAnchor(support, override) {
+    return override && override !== 'auto' && ANCHORS.includes(override)
+        ? override
+        : support.anchor;
+}
 
 // Split out so a test can drive it with any user agent.
 export function detectSupport(ua = navigator.userAgent, env = {}) {

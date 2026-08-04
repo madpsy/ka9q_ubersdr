@@ -11,7 +11,7 @@ const {
     MARKER_TOLERANCE_HZ, collectMarkers, findMarkers, modeFamily,
 } = require('./.build/markernav.cjs');
 const { buildMetadata, formatFrequency, markerLabel, sameMetadata } = require('./.build/mediametadata.cjs');
-const { detectSupport } = require('./.build/mediasupport.cjs');
+const { detectSupport, resolveAnchor } = require('./.build/mediasupport.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -26,7 +26,10 @@ const CHROME_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTM
 const SAFARI_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
-t('desktop Chrome needs no element at all — the context is enough', () => {
+t('desktop Chrome is detected as needing no anchor — v1\u2019s unverified claim', () => {
+    // Pinned so that changing it is a deliberate act with a failing test, not a
+    // silent edit: if Blink turns out to need a media element after all, this is
+    // the line that changes and this is the test that says so.
     const s = detectSupport(CHROME_DESKTOP, { hasMediaSession: true, hasContextSink: true });
     assert.strictEqual(s.anchor, 'none');
     // Opt-in off Apple, so nobody gets a media widget they did not ask for.
@@ -56,6 +59,16 @@ t('no Media Session API means never on by default', () => {
     const s = detectSupport(SAFARI_IOS, { hasMediaSession: false, hasContextSink: false });
     assert.strictEqual(s.available, false);
     assert.strictEqual(s.defaultEnabled, false);
+});
+
+t('a forced anchor wins over detection, and junk falls back to it', () => {
+    const chrome = detectSupport(CHROME_DESKTOP, { hasMediaSession: true, hasContextSink: true });
+    assert.strictEqual(resolveAnchor(chrome, 'auto'), 'none');
+    assert.strictEqual(resolveAnchor(chrome, 'stream'), 'stream', 'the override is the point');
+    assert.strictEqual(resolveAnchor(chrome, ''), 'none');
+    // A stored value from a future version that no longer exists must not
+    // silently disable the feature.
+    assert.strictEqual(resolveAnchor(chrome, 'nonsense'), 'none');
 });
 
 // --- frequency formatting ---------------------------------------------------

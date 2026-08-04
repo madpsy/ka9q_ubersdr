@@ -14,7 +14,7 @@ import { subscribeSpots } from '../../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../../lib/voiceActivity.js';
 import { CALLSIGN_TYPES, NAV_TYPES, collectMarkers, findMarkers } from '../../lib/markerNav.js';
 import { MediaSessionController } from './controller.js';
-import { mediaSupport } from './support.js';
+import { ANCHORS, mediaSupport } from './support.js';
 import { onLookupResolved, peekLookup, startLookup } from './lookup.js';
 
 const SETTINGS_KEY = 'ubersdr.v2.media';
@@ -58,6 +58,9 @@ export function MediaSessionProvider({ children }) {
     // Which marker types ⏮/⏭ will stop on. Everything, unless narrowed.
     const [navTypes, setNavTypesState] = useState(
         Array.isArray(saved.navTypes) && saved.navTypes.length ? saved.navTypes : null,
+    );
+    const [anchor, setAnchorState] = useState(
+        ANCHORS.includes(saved.anchor) ? saved.anchor : 'auto',
     );
     const [status, setStatus] = useState({
         available: support.available, enabled: false, anchor: support.anchor, state: 'off', streamMode: null, error: '',
@@ -189,6 +192,10 @@ export function MediaSessionProvider({ children }) {
     }, [ctl, running]);
 
     useEffect(() => {
+        ctl.setAnchorOverride(anchor).catch(() => { /* reported through status */ });
+    }, [ctl, anchor]);
+
+    useEffect(() => {
         ctl.update({
             frequency: tuning.frequency,
             mode: tuning.mode,
@@ -207,8 +214,8 @@ export function MediaSessionProvider({ children }) {
     }, [ctl, audio.volume, audio.muted, audio.sinkId]);
 
     useEffect(() => {
-        saveSettings({ enabled, skipMode, navTypes });
-    }, [enabled, skipMode, navTypes]);
+        saveSettings({ enabled, skipMode, navTypes, anchor });
+    }, [enabled, skipMode, navTypes, anchor]);
 
     useEffect(() => () => ctl.destroy(), [ctl]);
 
@@ -222,12 +229,14 @@ export function MediaSessionProvider({ children }) {
         navTypes,
         setNavTypes: setNavTypesState,
         navTypeOptions: NAV_TYPES,
+        anchor,
+        setAnchor: setAnchorState,
         // What the panel shows as "now playing", so the operator can see what
         // the lock screen says without picking up the phone.
         marker,
         lookup,
         neighbours: { prev: markers.prev, next: markers.next },
-    }), [support, status, enabled, skipMode, navTypes, marker, lookup, markers.prev, markers.next]);
+    }), [support, status, enabled, skipMode, navTypes, anchor, marker, lookup, markers.prev, markers.next]);
 
     return (
         <MediaSessionContext.Provider value={value}>

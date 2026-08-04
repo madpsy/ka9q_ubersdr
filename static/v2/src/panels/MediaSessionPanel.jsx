@@ -8,11 +8,24 @@ import { useRadio } from '../radio/RadioContext.jsx';
 // needs to know what a MediaStreamDestination is; they need to know whether
 // turning this on changes anything else about how the receiver behaves.
 const ANCHOR_NOTE = {
-    none: 'Controls appear in the browser toolbar and on your keyboard’s media keys.',
-    bridge: 'Controls appear on the lock screen and in Control Centre.',
-    stream: 'Controls appear on the lock screen and in the notification shade. '
-        + 'Audio switches to a direct stream from the receiver while this is on.',
+    none: 'Metadata only — nothing is playing that the OS can attach controls to. '
+        + 'If no controls appear, this browser needs one of the other two.',
+    bridge: 'Anchored to a hidden audio element fed from the existing stream. '
+        + 'No extra bandwidth and no change to how audio is decoded.',
+    stream: 'Anchored to a direct audio stream from the receiver. Same bandwidth — '
+        + 'the server sends it instead of over the WebSocket, not as well as — '
+        + 'but the audio scope, recorder and audio filters see nothing while it runs.',
 };
+
+// Which anchor a browser needs is not written down anywhere and moves between
+// releases, so the detected one is a default rather than a verdict. Exposed
+// because the failure mode is silent: nothing appears, and no error says why.
+const ANCHOR_OPTIONS = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'none', label: 'Metadata' },
+    { value: 'bridge', label: 'Element' },
+    { value: 'stream', label: 'Stream' },
+];
 
 const TYPE_LABELS = {
     cw: 'CW spots',
@@ -62,7 +75,7 @@ function NowPlaying() {
 export default function MediaSessionPanel({ minimal }) {
     const ms = useMediaSession();
     const { support, status, enabled, setEnabled, skipMode, setSkipMode,
-        navTypes, setNavTypes, navTypeOptions, neighbours } = ms;
+        navTypes, setNavTypes, navTypeOptions, neighbours, anchor, setAnchor } = ms;
 
     if (!support.available) {
         return (
@@ -99,12 +112,26 @@ export default function MediaSessionPanel({ minimal }) {
 
             {status.error && <div className="note note--tight note--warn">{status.error}</div>}
 
-            {!minimal && <div className="note note--tight">{ANCHOR_NOTE[status.anchor]}</div>}
-
             {enabled && <NowPlaying />}
 
             {!minimal && (
                 <>
+                    <Field
+                        label="Anchor"
+                        hint={anchor === 'auto' ? `auto → ${status.anchor}` : 'forced'}
+                    >
+                        <Segmented options={ANCHOR_OPTIONS} value={anchor} onChange={setAnchor} size="sm" />
+                    </Field>
+                    <div className="note note--tight">{ANCHOR_NOTE[status.anchor]}</div>
+
+                    {/* The one thing that tells "the browser ignored us" apart
+                        from "we never set anything". */}
+                    {enabled && (
+                        <div className="ms-head__note">
+                            {status.card ? `OS card set: ${status.card}` : 'No OS card set yet.'}
+                        </div>
+                    )}
+
                     <div className="divider" />
 
                     <Field label="Skip buttons" hint={skipMode === 'marker' ? 'to spots' : 'by step'}>

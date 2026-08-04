@@ -676,6 +676,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .tag--accent { background: var(--accent-soft); color: var(--accent); }
 .tag--ghost { background: transparent; border: 1px solid var(--border-strong); }
+/* A tag that switches its own feature off. Same pill, but it has to answer the
+   pointer — otherwise it reads as a label and nobody tries it. */
+.tag--button {
+    border: 0;
+    cursor: pointer;
+}
+.tag--button:hover { filter: brightness(1.25); }
+.tag--button:active { filter: brightness(0.9); }
 .tag--good { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .tag--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
 

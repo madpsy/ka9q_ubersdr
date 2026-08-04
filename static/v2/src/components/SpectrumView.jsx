@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
-import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN } from '../radio/constants.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
@@ -27,17 +27,19 @@ const MIN_WATERFALL_H = 40;
 // 10 Hz meter sampling re-renders this tag alone — SpectrumView owns the draw
 // loop and must not re-render at meter rate.
 function SquelchTag() {
-    const { squelch } = useRadio();
+    const { squelch, actions } = useRadio();
     const m = useMeters(10);
     if (!squelch.enabled) return null;
     const open = m.squelchOpen;
     return (
-        <span
-            className={`tag tag--${open ? 'good' : 'bad'}`}
-            title={`Squelch ≥ ${squelch.value.toFixed(1)} dB SNR — ${open ? 'passing audio' : 'muted'}`}
+        <button
+            type="button"
+            className={`tag tag--button tag--${open ? 'good' : 'bad'}`}
+            title={`Squelch ≥ ${squelch.value.toFixed(1)} dB SNR — ${open ? 'passing audio' : 'muted'}. Click to switch it off`}
+            onClick={() => actions.setSquelch(SQUELCH_MIN)}
         >
             SQ {open ? 'open' : 'closed'}
-        </span>
+        </button>
     );
 }
 
@@ -45,13 +47,21 @@ function SquelchTag() {
 // server's dsp_status echo, so this reflects what the server is actually doing
 // rather than what was requested.
 function NoiseReductionTag() {
-    const { dsp } = useRadio();
+    const { dsp, actions } = useRadio();
     if (!dsp.enabled || !dsp.filter) return null;
     const schema = (dsp.schemas || []).find((f) => f.name === dsp.filter);
+    // Switches the insert off but keeps the filter selected, so turning it back
+    // on from the Audio panel starts where it left off rather than at the
+    // first filter in the list.
     return (
-        <span className="tag tag--accent" title={schema ? schema.description : 'Noise reduction'}>
+        <button
+            type="button"
+            className="tag tag--button tag--accent"
+            title={`${schema ? schema.description : 'Noise reduction'} — click to switch it off`}
+            onClick={() => actions.setDsp(dsp.filter, false)}
+        >
             NR {dsp.filter.toUpperCase()}
-        </span>
+        </button>
     );
 }
 
@@ -72,20 +82,30 @@ function ClipTag() {
 }
 
 function FilterTags() {
-    const { filters } = useRadio();
+    const { filters, actions } = useRadio();
+    // [label, the key in the filter state]. The key is what the click turns
+    // off, so a tag can never name one filter and disable another.
     const on = [
-        filters.gate.enabled && 'GATE',
-        filters.eq.enabled && 'EQ',
-        filters.notch.enabled && filters.notch.items.length > 0 && 'NOTCH',
-        filters.bandpass.enabled && 'BPF',
-        filters.compressor.enabled && 'COMP',
-        filters.stereo.enabled && 'WIDE',
+        filters.gate.enabled && ['GATE', 'gate'],
+        filters.eq.enabled && ['EQ', 'eq'],
+        filters.notch.enabled && filters.notch.items.length > 0 && ['NOTCH', 'notch'],
+        filters.bandpass.enabled && ['BPF', 'bandpass'],
+        filters.compressor.enabled && ['COMP', 'compressor'],
+        filters.stereo.enabled && ['WIDE', 'stereo'],
     ].filter(Boolean);
     if (!on.length) return null;
     return (
         <>
-            {on.map((name) => (
-                <span key={name} className="tag tag--accent" title={`${name} filter active`}>{name}</span>
+            {on.map(([name, key]) => (
+                <button
+                    key={name}
+                    type="button"
+                    className="tag tag--button tag--accent"
+                    title={`${name} filter active — click to switch it off`}
+                    onClick={() => actions.setFilters({ [key]: { enabled: false } })}
+                >
+                    {name}
+                </button>
             ))}
         </>
     );

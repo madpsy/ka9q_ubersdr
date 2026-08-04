@@ -1176,6 +1176,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 [data-theme="light"] .meter__notches i { background: rgba(0, 0, 0, 0.18); }
 .meter__value {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 6px;
     font-family: var(--mono);
     font-size: calc(19px * var(--ui-scale));
     font-weight: 600;
@@ -1183,6 +1187,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent);
     font-variant-numeric: tabular-nums;
 }
+/* Each reading gets the width of the widest thing it can say, so the numbers
+   sit still: "S3" becoming "S9+20" would otherwise shove the whole line
+   sideways twice a second, and a meter you cannot read at a glance is not a
+   meter. The units are `ch` in a monospace face, so they are exact.
+   S9+60 is the longest S label; the live and held halves are anchored to the
+   middle so the pair grows outwards rather than sliding. */
+.meter__num { min-width: 5ch; text-align: right; }
+/* The held half carries its own separator, so it is two characters wider. */
+.meter__num--hold { min-width: 7ch; text-align: left; }
+.meter__num--hold.is-blank { visibility: hidden; }
+/* "60.0 dB" is the longest the SNR readout gets. */
+.meter__num--snr { min-width: 7ch; text-align: center; }
 
 .bar {
     position: relative;

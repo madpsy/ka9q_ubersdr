@@ -314,8 +314,13 @@ export default function SignalPanel({ minimal }) {
                     size: they are the same measurement a moment apart, and
                     shrinking the second one makes it read as a footnote. */}
                 <div className="meter__value">
-                    {sUnitLabel(power)}
-                    {held != null && ` / ${sUnitLabelAt(held)}`}
+                    <span className="meter__num">{sUnitLabel(power)}</span>
+                    {/* Kept in the layout even with no hold to show, so the
+                        live value does not shift sideways the moment one
+                        appears — see .meter__num in the stylesheet. */}
+                    <span className={`meter__num meter__num--hold${held == null ? ' is-blank' : ''}`}>
+                        {held == null ? '' : `/ ${sUnitLabelAt(held)}`}
+                    </span>
                 </div>
             </button>
 
@@ -338,7 +343,11 @@ export default function SignalPanel({ minimal }) {
                         </MeterTrack>
                     </>
                 )}
-                <div className="meter__value">{snr == null ? '--' : `${snr.toFixed(1)} dB`}</div>
+                <div className="meter__value">
+                    <span className="meter__num meter__num--snr">
+                        {snr == null ? '--' : `${snr.toFixed(1)} dB`}
+                    </span>
+                </div>
             </button>
 
             {!minimal && (

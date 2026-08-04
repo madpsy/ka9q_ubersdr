@@ -3674,6 +3674,141 @@ a.btn { text-decoration: none; }
 .sm__line--log { grid-template-columns: 58px 1fr; }
 .sm__line-text { white-space: pre-wrap; word-break: break-word; }
 
+/* ── Speech-to-text ───────────────────────────────────────────────────────── */
+
+.stt__lang { max-width: 190px; }
+.stt__limit { max-width: 130px; }
+.stt__voice { max-width: 260px; }
+.stt__rate { min-width: 130px; }
+
+.stt__detected,
+.stt__since,
+.stt__count {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* The one readout that is a live measurement rather than a label, so it is
+   tabular — it changes every second and must not jitter sideways. */
+.stt__since { font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+.stt__detected { color: var(--accent); }
+
+.stt__tts { align-items: flex-end; gap: 8px 12px; }
+/* The view filter sits in a wrapping bar; without this it is the one item that
+   would be squeezed instead of the row wrapping. */
+.stt .segmented { flex: none; }
+
+/* A transcript is prose, not a column of fixed-width fields: the console's
+   monospace makes a paragraph of speech markedly harder to read, and the text
+   size is under the user's control precisely so it can be read from a distance.
+   Line height rather than a gap, so a wrapped sentence stays one block. */
+.stt__lines { font-family: inherit; line-height: 1.5; padding: 6px 8px; }
+.stt__line { align-items: baseline; padding: 1px 0; }
+/* The line still being decoded. Dimmed and italic because its words change
+   under you — it is the transcriber's current guess, not a record of what was
+   said, and it should not read like the settled lines above it. */
+.stt__line--live { color: var(--text-dim); font-style: italic; }
+.stt__line--live .tp__line-text { color: inherit; }
+
+/* ── the floating caption box ── */
+
+/* Above the floating windows (50) and the mobile sheet (80), below the modals
+   (200). Over everything the shell draws is the whole point — it exists to be
+   read while the extension's own window is minimised — but not over a dialog
+   that is waiting for an answer. */
+.stt-cap {
+    position: fixed;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 30px 12px 16px;
+    border-radius: var(--radius);
+    /* Its own dark plate whatever the theme, and not a surface token: it is
+       drawn over the waterfall, which is dark in both themes, and a caption
+       that inverts with the page would be unreadable half the time. */
+    background: rgba(6, 10, 16, 0.72);
+    border: 1px solid var(--accent-line);
+    box-shadow: var(--shadow);
+    color: var(--accent);
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: center;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+    /* The whole box is the drag handle, so it must not look like text to
+       select — and dragging must not start a selection, or scroll the page
+       under it on a touch screen. */
+    cursor: move;
+    user-select: none;
+    touch-action: none;
+    overflow: hidden;
+}
+/* Scrolls rather than clips: a long over resized small still has an end. */
+.stt-cap__text { max-height: 100%; overflow-y: auto; overflow-x: hidden; word-break: break-word; }
+.stt-cap__hint { color: var(--text-dim); font-weight: 400; font-style: italic; }
+.stt-cap__close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.stt-cap__close:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.stt-cap__grip {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    touch-action: none;
+    background: linear-gradient(135deg, transparent 50%, var(--accent-line) 50%, var(--accent-line) 68%, transparent 68%);
+}
+
+/* ── the summary dialog ── */
+
+.stt-sum {
+    min-width: min(560px, 82vw);
+    max-height: 80vh;
+    overflow: auto;
+    padding-right: 30px;
+}
+.stt-sum__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
+.stt-sum__meta {
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.stt-sum__text { margin: 0; line-height: 1.55; white-space: pre-wrap; }
+.stt-sum__wait { display: flex; align-items: center; gap: 10px; color: var(--text-dim); }
+.stt-sum__spinner {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    animation: stt-spin 0.8s linear infinite;
+}
+@keyframes stt-spin { to { transform: rotate(360deg); } }
+/* Nothing to watch is better than something moving for people who have asked
+   for that; the sentence beside it still says what is happening. */
+@media (prefers-reduced-motion: reduce) {
+    .stt-sum__spinner { animation: none; }
+}
+
 /* ── Media controls panel ──────────────────────────────────────────────────
    A small copy of the card the OS is showing. Laid out like a lock screen
    rather than like the rest of the panel — art on the left, three lines of

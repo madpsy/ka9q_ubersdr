@@ -82,6 +82,10 @@ export const Icon = {
     Fax: (p) => <Svg {...p}><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M7 8h10" /><path d="M7 16c2-4 3.5 2 5-1s2.5-2 5 1" /></Svg>,
     // An anchor: maritime traffic, which is what NAVTEX carries.
     Anchor: (p) => <Svg {...p}><circle cx="12" cy="5" r="2.2" /><path d="M12 7.2V21" /><path d="M8 11h8" /><path d="M4 15a8 8 0 0 0 16 0" /><path d="M4 15h2.5M20 15h-2.5" /></Svg>,
+    // Captions: a screen with lines of subtitle across it — speech turned into
+    // text. Not the microphone, which FreeDV has: that one means "voice", and
+    // this extension's output is the words.
+    Captions: (p) => <Svg {...p}><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="M6 11h5M14 11h4M6 15h3M12 15h6" /></Svg>,
     // A teleprinter: paper coming out of a machine with lines of text on it.
     Teleprinter: (p) => <Svg {...p}><path d="M7 8V3h10v5" /><rect x="3" y="8" width="18" height="7" rx="1.5" /><path d="M7 15h10v6H7z" /><path d="M9.5 18h5" /></Svg>,
     // A control-surface knob: a dial with an index mark and detent ticks.

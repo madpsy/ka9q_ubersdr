@@ -37,6 +37,7 @@ import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
 import SstvExtension from './sstv/SstvExtension.jsx';
 import SoundModemExtension from './soundmodem/SoundModemExtension.jsx';
+import WhisperExtension from './whisper/WhisperExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -124,6 +125,22 @@ export const EXTENSIONS = [
         float: { w: 940, h: 620 },
         minimal: true,
         Component: SoundModemExtension,
+    },
+    {
+        // The slug is `whisper` — the directory name the server enables in
+        // extensions.yaml and the name the attach carries — but nothing in the
+        // UI says so: v1's manifest called it Speech-to-Text, which is what it
+        // does, and "Whisper" names the model rather than the feature.
+        id: 'whisper',
+        title: 'Speech-to-Text',
+        icon: <Icon.Captions />,
+        summary: 'Live transcription of speech, read aloud and summarised on request.',
+        requiresAudio: true,
+        // Text, but wide: a transcript line is a sentence, and wrapping every
+        // one of them across a narrow window is much harder to read than a page.
+        float: { w: 860, h: 600 },
+        minimal: true,
+        Component: WhisperExtension,
     },
 ];
 

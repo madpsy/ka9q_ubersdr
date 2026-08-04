@@ -3494,6 +3494,49 @@ a.btn { text-decoration: none; }
 .tp__lamp.is-on { color: var(--good); }
 .tp__lamp.is-on::before { background: var(--good); border-color: var(--good); }
 
+/* ── CW ───────────────────────────────────────────────────────────────────── */
+
+/* The decoder's own confidence in each run of characters, which on a noisy band
+   is most of what tells you whether a callsign is a callsign. v1's four
+   colours, moved onto the theme's: they have to work on the console's dark
+   background in both themes, and #00ff88 on white does not. Poor copy is also
+   dimmed — it is there to be read past, not read. */
+.mo__q--high { color: var(--good); }
+.mo__q--medium { color: var(--text); }
+.mo__q--low { color: var(--warn); }
+.mo__q--poor { color: var(--bad); opacity: 0.75; }
+.mo__q--none { color: var(--text-faint); }
+
+/* Bigger than the teleprinter console it borrows, as v1's was: RTTY prints
+   pages you scan, CW arrives a character at a time and is read live off the
+   screen while you listen to it. v1 set 18px against a 13px UI; this is the
+   same step up from v2's smaller base. */
+.mo .tp__console { font-size: calc(14px * var(--ui-scale)); line-height: 1.6; }
+
+/* A warning that carries its own fix: the text takes the room, the button
+   stays whole beside it. */
+.mo__fix { display: flex; align-items: center; gap: 8px; }
+.mo__fix > span { flex: 1; min-width: 0; }
+
+.mo__stat { display: inline-flex; align-items: baseline; gap: 5px; flex: none; }
+.mo__stat-label {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.mo__stat-value {
+    font-family: var(--mono);
+    font-size: calc(11.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+/* The quality filter sits in the transport bar rather than the settings row —
+   it is a view control, used while reading — so its label goes beside it
+   instead of above, where a two-line field would make the bar taller. */
+.tp__field--inline { flex-direction: row; align-items: center; gap: 6px; }
+
 /* ── NAVTEX ───────────────────────────────────────────────────────────────── */
 
 /* The message list is the same scroller as the raw console, so switching

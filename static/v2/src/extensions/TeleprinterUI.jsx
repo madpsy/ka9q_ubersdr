@@ -128,11 +128,11 @@ export function AudioLevel() {
 
 // The 0-3 kHz audio spectrum with the two tones marked. Subscribes to the
 // analyser directly and paints the canvas, so no frame of it reaches React.
-export function SpectrumStrip({ mark, space, onTune }) {
+export function SpectrumStrip({ mark, space, onTune, markLabel, spaceLabel, title }) {
     const { player } = useRadio();
     const canvas = useRef(null);
-    const tones = useRef({ mark, space });
-    tones.current = { mark, space };
+    const tones = useRef(null);
+    tones.current = { mark, space, markLabel, spaceLabel };
 
     useEffect(() => subscribeAudioSpectrum(player, { fftSize: 2048, bins: true }, (f) => {
         drawSpectrum(canvas.current, {
@@ -141,6 +141,8 @@ export function SpectrumStrip({ mark, space, onTune }) {
             sampleRate: f.sampleRate,
             mark: tones.current.mark,
             space: tones.current.space,
+            markLabel: tones.current.markLabel,
+            spaceLabel: tones.current.spaceLabel,
             cssHeight: SPECTRUM_H,
         });
     }), [player]);
@@ -149,7 +151,7 @@ export function SpectrumStrip({ mark, space, onTune }) {
         <div
             className="tp__spectrum"
             style={{ height: SPECTRUM_H }}
-            title="Audio spectrum, 0–3 kHz. Click a signal to move the dial so it lands on the centre frequency"
+            title={title || 'Audio spectrum, 0–3 kHz. Click a signal to move the dial so it lands on the centre frequency'}
             onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 if (rect.width <= 0) return;

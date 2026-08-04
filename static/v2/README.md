@@ -248,6 +248,15 @@ Keep the pure parts (payload normalisation, filtering, sorting, export) in their
 own module beside the component, as `ft8/messages.js` does — that is what the
 tests exercise, and it is where a silent mistake actually lives.
 
+One decoder does not fail like the others: **CW** (`morse`) is a `cw-decoder`
+subprocess built round ggmorse, which the receiver's operator installs
+separately. When it is missing, or when it dies, the attach still succeeds and
+the server says so in a `0x12` frame on the result channel instead — so the
+panel reads those and stops itself, rather than sitting there attached and
+silent for ever. Its frames are also the only ones carrying a per-decode
+confidence, which the console keeps per run of characters: CW copy off a noisy
+band is part guesswork, and which part matters.
+
 ## Behaviour notes
 
 * **Audio requires a gesture.** The AudioContext is created inside the *Listen*

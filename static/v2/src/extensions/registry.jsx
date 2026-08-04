@@ -32,6 +32,7 @@ import Icon from '../components/icons.jsx';
 import FT8Extension from './ft8/FT8Extension.jsx';
 import FSKExtension from './fsk/FSKExtension.jsx';
 import NavtexExtension from './navtex/NavtexExtension.jsx';
+import MorseExtension from './morse/MorseExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
@@ -69,6 +70,21 @@ export const EXTENSIONS = [
         float: { w: 760, h: 580 },
         minimal: true,
         Component: NavtexExtension,
+    },
+    {
+        // v1 calls the slug `morse` and the extension "CW Decoder". Both are
+        // kept: the slug is what the server enables and the attach carries, and
+        // CW is what anyone tuning one calls it.
+        id: 'morse',
+        title: 'CW Decoder',
+        icon: <Icon.Morse />,
+        summary: 'Morse copy, with the tone and the sending speed found for you.',
+        requiresAudio: true,
+        // Narrower than the teleprinter decoders: the output is one column of
+        // text with no wide lines in it, and no settings grid to lay out.
+        float: { w: 700, h: 520 },
+        minimal: true,
+        Component: MorseExtension,
     },
     {
         id: 'wefax',

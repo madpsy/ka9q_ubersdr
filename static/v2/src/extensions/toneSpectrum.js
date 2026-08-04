@@ -75,8 +75,16 @@ function drawTone(ctx, { x, width, height, colour, label, hz }) {
  *
  * `bins` are the analyser's dB values; only the part below MAX_AUDIO_HZ is
  * drawn. `mark` and `space` are the two tones the decoder is listening for.
+ *
+ * The labels are settable because not every decoder that wants this display has
+ * two tones: CW has one note and a pitch to put it on, which is the same picture
+ * with different words on it. A marker whose frequency is null is not drawn, so
+ * a decoder with one tone passes one.
  */
-export function drawSpectrum(canvas, { bins, binCount, sampleRate, mark, space, cssHeight }) {
+export function drawSpectrum(canvas, {
+    bins, binCount, sampleRate, mark, space, cssHeight,
+    markLabel = 'Mark', spaceLabel = 'Space',
+}) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -120,10 +128,10 @@ export function drawSpectrum(canvas, { bins, binCount, sampleRate, mark, space, 
 
     const markX = toneX(mark, width);
     if (markX != null) {
-        drawTone(ctx, { x: markX, width, height, colour: cssVar('--good', '#45d69a'), label: 'Mark', hz: mark });
+        drawTone(ctx, { x: markX, width, height, colour: cssVar('--good', '#45d69a'), label: markLabel, hz: mark });
     }
     const spaceX = toneX(space, width);
     if (spaceX != null) {
-        drawTone(ctx, { x: spaceX, width, height, colour: cssVar('--warn', '#f2b544'), label: 'Space', hz: space });
+        drawTone(ctx, { x: spaceX, width, height, colour: cssVar('--warn', '#f2b544'), label: spaceLabel, hz: space });
     }
 }

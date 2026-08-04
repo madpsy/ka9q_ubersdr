@@ -75,6 +75,7 @@ export class MediaSessionController {
         // The anchor that is *running*, which is not the same as the one wanted
         // — switching has to tear down what was built, not what was asked for.
         this.activeAnchor = null;
+        this.offFlowing = null;
     }
 
     get anchor() {
@@ -173,20 +174,57 @@ export class MediaSessionController {
                 this.error = err.message || String(err);
             }
         }
-        // This order is v1's, and deliberately so: metadata, then playback
-        // state, then handlers, then position. Chrome builds its session from
-        // the first metadata assignment, and setPositionState before there is a
-        // session to position throws — harmlessly caught, but it leaves the
-        // session half-built for no reason. Matching the implementation known
-        // to work on this browser costs nothing.
-        this._pushMetadata();
-        this._applyPlaybackState();
         this._installHandlers();
         this._startPositionUpdates();
+
+        // The one that actually makes the controls appear.
+        //
+        // Chrome does not build a media session from a metadata assignment; it
+        // builds one from Web Audio that is genuinely playing, and only then
+        // does an assignment attach to anything. Setting metadata at the moment
+        // the operator flicks the switch therefore lands on nothing — and the
+        // dedup below then guarantees it is never set again while the dial sits
+        // on one frequency, so the controls never appear at all.
+        //
+        // So the metadata is (re)pushed on the first buffer that is really
+        // played after this point. v1 does exactly this from inside its
+        // playback loop (app.js:5612, "Activated with real audio flowing") and
+        // re-arms it whenever the AudioContext is rebuilt (app.js:4529, 5389),
+        // which is what the player's `flowing` event covers here.
+        //
+        // The push below is still worth doing: on the browsers that do not need
+        // this, it puts the card up immediately rather than one buffer later.
+        this._watchAudio();
+        if (this.host.player) this.host.player.armFlowing();
+
+        this._pushMetadata();
+        this._applyPlaybackState();
         this._report('enabled');
     }
 
+    // Re-pushes everything the OS needs, from a point where the browser has a
+    // session to attach it to. The dedup has to be cleared or the identical
+    // text would be recognised as already set — which is precisely the state
+    // that made this invisible.
+    _activate() {
+        this.lastMetadata = null;
+        this._pushMetadata();
+        this._applyPlaybackState();
+        this._report('activated');
+    }
+
+    _watchAudio() {
+        if (this.offFlowing || !this.host.player) return;
+        this.offFlowing = this.host.player.on('flowing', () => {
+            if (this.enabled) this._activate();
+        });
+    }
+
     _stop() {
+        if (this.offFlowing) {
+            this.offFlowing();
+            this.offFlowing = null;
+        }
         this._stopAnchor();
         this._clearHandlers();
         this._stopPositionUpdates();

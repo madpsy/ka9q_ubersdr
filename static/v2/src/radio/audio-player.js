@@ -6,6 +6,7 @@
 // audible as a single gap instead of continuous stuttering.
 
 import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey } from './audio-filters.js';
+import { Emitter } from './emitter.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
 // time, and a timer is the right tool: this must keep working with no panel
@@ -51,8 +52,9 @@ export function getOpusDecoderClass() {
 // asked for.
 const ANALYSER_IDLE_FFT = 1024;
 
-export class AudioPlayer {
+export class AudioPlayer extends Emitter {
     constructor() {
+        super();
         this.ctx = null;
         this.gain = null;
         this.analyser = null;
@@ -96,6 +98,9 @@ export class AudioPlayer {
         this.started = false;
         this.underruns = 0;
         this.level = 0;                 // smoothed RMS, 0..1, for the VU meter
+        // Whether a buffer has actually been scheduled since this was last
+        // armed. Drives the 'flowing' event — see _schedule.
+        this._flowed = true;
         this._decodeChain = Promise.resolve();
     }
 
@@ -127,6 +132,12 @@ export class AudioPlayer {
         this._applyGain();
     }
 
+    // Gain only, and deliberately: the schedule is never flushed. Chrome keeps
+    // a media session alive only while the context is genuinely producing
+    // audio, so a mute that stopped scheduling would take the OS media controls
+    // down with it. v1 had to special-case this because its mute *did* flush
+    // the queue for instant response (app.js:7603, keepPipelineRunning); here
+    // there is nothing to special-case, and nothing to reintroduce.
     setMuted(muted) {
         this.muted = !!muted;
         this._applyGain();
@@ -297,6 +308,9 @@ export class AudioPlayer {
             this._applyOutput().catch((err) => console.warn('audio output lost on rebuild', err));
         }
         this._runClipWatch();
+        // A new context has produced nothing yet, so anyone waiting to hear
+        // that audio is really playing has to be told again.
+        this._flowed = false;
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
     }
 
@@ -614,6 +628,30 @@ export class AudioPlayer {
         src.connect(this.head);
         src.start(this.nextPlayTime);
         this.nextPlayTime += buffer.duration;
+
+        // Emitted from here rather than from start() or the socket, because
+        // this is the first moment the browser has actually been handed audio
+        // to play. Once per arming, so it costs nothing per buffer.
+        if (!this._flowed) {
+            this._flowed = true;
+            this.emit('flowing', this.contextEpoch);
+        }
+    }
+
+    // Ask to be told, once, when audio is next genuinely playing.
+    //
+    // This exists for Media Session. Chrome builds its media session from real
+    // Web Audio output, not from the metadata assignment — so metadata set at
+    // the moment the operator flicks the switch attaches to nothing and the OS
+    // shows nothing, forever. v1 hit the same wall and answered it the same
+    // way, activating from inside its playback loop on the first buffer after
+    // enabling (app.js:5612, "Activated with real audio flowing").
+    //
+    // Armed rather than latched, because "the context was rebuilt" and "the
+    // feature was just switched on" both need the same notice, and only the
+    // first of those is something the player can see for itself.
+    armFlowing() {
+        this._flowed = false;
     }
 
     // Seconds of audio currently queued ahead of the playback clock.

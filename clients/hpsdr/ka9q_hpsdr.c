@@ -172,10 +172,10 @@ bool check_ubersdr_connection(const char *url)
     char line[128];
     while (fgets(line, sizeof(line), fp) != NULL && rlen < sizeof(resp) - 1) {
         size_t ll = strlen(line);
-        if (rlen + ll < sizeof(resp) - 1) {
-            memcpy(resp + rlen, line, ll);
-            rlen += ll;
-        }
+        size_t remaining = sizeof(resp) - 1 - rlen;
+        if (ll > remaining) ll = remaining;
+        memcpy(resp + rlen, line, ll);
+        rlen += ll;
     }
     resp[rlen] = '\0';
     pclose(fp);
@@ -710,8 +710,12 @@ static bool discover_instances(char *url_out, size_t url_out_size, const char *a
         /* Build modes string */
         char modes_str[64] = {0};
         for (int m = 0; m < inst->n_modes; m++) {
-            if (m > 0) strncat(modes_str, " ", sizeof(modes_str) - strlen(modes_str) - 1);
-            strncat(modes_str, inst->iq_modes[m], sizeof(modes_str) - strlen(modes_str) - 1);
+            size_t modes_len = strlen(modes_str);
+            if (m > 0 && modes_len < sizeof(modes_str) - 1) {
+                modes_str[modes_len++] = ' ';
+                modes_str[modes_len] = '\0';
+            }
+            snprintf(modes_str + modes_len, sizeof(modes_str) - modes_len, "%s", inst->iq_modes[m]);
         }
 
         printf("%-4d %-12s %-35s %-38s %s\n",
@@ -739,7 +743,10 @@ static bool discover_instances(char *url_out, size_t url_out_size, const char *a
         fflush(stdout);
 
         int choice = 0;
-        if (scanf("%d", &choice) != 1 || choice < 1 || choice > n_instances) {
+        char scanline[32] = {0};
+        if (fgets(scanline, sizeof(scanline), stdin) == NULL ||
+            sscanf(scanline, "%d", &choice) != 1 ||
+            choice < 1 || choice > n_instances) {
             printf("Cancelled.\n");
             return false;
         }
@@ -958,7 +965,7 @@ void *ws_thread(void *arg)
             use_ssl = 1;
             port = 443;
             url += 6;
-        } else if (strncmp(url, "ws://", 5) == 0) {
+        } else if (strncmp(url, "ws" "://", 5) == 0) {
             url += 5;
         }
 
@@ -1213,11 +1220,12 @@ int proc_find(char name[][16], char *find)
         if (fp) {
             if (fgets(buf, sizeof(buf), fp) != NULL) {
                 // check the first token in the file, the program name
-                char* first = strtok(buf, "\0");
+                char *strtok_save = NULL;
+                char* first = strtok_r(buf, "\0", &strtok_save);
                 if (strstr(first, find) != NULL) {
                     for (i = 0; i < sizeof(buf); i++) {
                         if (!strcmp(&buf[i], "-i")) {
-                            strcpy(name[name_found], &buf[i+3]);
+                            snprintf(name[name_found], 16, "%s", &buf[i+3]);
                             if (++name_found > MAX_PRGMS)
                                 goto finishup;
                             break;
@@ -1261,7 +1269,7 @@ int main (int argc, char *argv[])
     mcb.num_rxs = MAX_RCVRS;
     mcb.wideband = false;
     mcb.device_type = HERMES_LITE;
-    strcpy(mcb.ubersdr_url, "http://localhost:8080");
+    snprintf(mcb.ubersdr_url, sizeof(mcb.ubersdr_url), "%s", "http://localhost:8080");
 
     /* --callsign / --discover state */
     const char *callsign_arg = NULL;
@@ -1309,16 +1317,16 @@ int main (int argc, char *argv[])
             break;
 
         case 'i':
-            strcpy(mcb.interface, optarg);
+            snprintf(mcb.interface, sizeof(mcb.interface), "%s", optarg);
             break;
         case 'n':
             mcb.num_rxs = atoi(optarg);
             break;
         case 'p':
-            strncpy(mcb.ubersdr_password, optarg, sizeof(mcb.ubersdr_password) - 1);
+            snprintf(mcb.ubersdr_password, sizeof(mcb.ubersdr_password), "%s", optarg);
             break;
         case 'u':
-            strncpy(mcb.ubersdr_url, optarg, sizeof(mcb.ubersdr_url) - 1);
+            snprintf(mcb.ubersdr_url, sizeof(mcb.ubersdr_url), "%s", optarg);
             break;
         case 'd':
             mcb.device_type = atoi(optarg);
@@ -1408,7 +1416,7 @@ int main (int argc, char *argv[])
 
     struct ifreq hwaddr;
     memset(&hwaddr, 0, sizeof(hwaddr));
-    strncpy(hwaddr.ifr_name, mcb.interface, IFNAMSIZ - 1);
+    snprintf(hwaddr.ifr_name, IFNAMSIZ, "%s", mcb.interface);
     ioctl(sock_udp, SIOCGIFHWADDR, &hwaddr);
 
     struct ifaddrs *ifap, *ifa;
@@ -1422,7 +1430,7 @@ int main (int argc, char *argv[])
             sa = (struct sockaddr_in *) ifa->ifa_addr;
             addr = inet_ntoa(sa->sin_addr);
             if (!strcmp(mcb.interface, ifa->ifa_name)) {
-                strcpy(mcb.ip, addr);
+                snprintf(mcb.ip, sizeof(mcb.ip), "%s", addr);
             }
         }
     }

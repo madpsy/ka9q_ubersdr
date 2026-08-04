@@ -166,21 +166,31 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .topbar__brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
 
+/* The receiver's mark, and the links menu's trigger.
+   Only slightly rounded — a smaller radius than the surrounding controls on
+   purpose. The artwork is already a square badge, and rounding it to match a
+   button would read as a second badge drawn around the first. */
 .topbar__logo {
     display: grid;
     place-items: center;
     width: 32px;
     height: 32px;
-    border-radius: var(--radius-sm);
-    background: var(--accent-soft);
-    color: var(--accent);
+    border-radius: 5px;
+    /* Clips the image to the radius above, so the corners belong here rather
+       than to whatever artwork is dropped in. */
+    overflow: hidden;
     flex: none;
+    transition: box-shadow var(--dur) var(--ease);
 }
+.topbar--compact .topbar__logo { width: 26px; height: 26px; border-radius: 4px; }
+.topbar__logo-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
 /* Links menu — the logo doubles as its trigger. */
 .links { position: relative; display: inline-flex; }
-.links__btn { border: 0; cursor: pointer; padding: 0; }
-.links__btn:hover, .links__btn.is-open { background: var(--accent); color: var(--accent-ink); }
+.links__btn { border: 0; cursor: pointer; padding: 0; background: none; }
+/* A ring, not a tint: the artwork fills the button, so a background change
+   would be behind an opaque image and show nothing at all. */
+.links__btn:hover, .links__btn.is-open { box-shadow: 0 0 0 2px var(--accent); }
 
 .links__panel {
     position: absolute;

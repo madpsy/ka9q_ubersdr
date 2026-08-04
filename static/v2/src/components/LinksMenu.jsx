@@ -9,7 +9,6 @@
 // downloads in a plain tab. The dynamic add-ons group is appended last.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Icon } from './ui.jsx';
 
 const POPUP_W = 1200;
 const POPUP_H = 800;
@@ -197,7 +196,19 @@ export default function LinksMenu({ serverInfo, compact }) {
                 aria-expanded={open}
                 onClick={() => setOpen((o) => !o)}
             >
-                <Icon.Radio size={compact ? 16 : 18} />
+                {/* The receiver's own mark rather than a generic glyph. The
+                    artwork is a full-bleed square — Apple rounds its own — so
+                    the corners are the stylesheet's to choose; see
+                    .topbar__logo. Decorative: the button is already labelled,
+                    and a second name here would be read out twice. */}
+                <img
+                    className="topbar__logo-img"
+                    src="/images/apple-touch-icon.png"
+                    alt=""
+                    width={compact ? 26 : 32}
+                    height={compact ? 26 : 32}
+                    draggable="false"
+                />
             </button>
 
             {open && (

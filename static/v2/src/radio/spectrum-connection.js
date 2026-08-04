@@ -48,6 +48,11 @@ export class SpectrumConnection extends Emitter {
         this.defaultBinBandwidth = 0;
         this.initialBinBandwidth = 0;   // first value seen, i.e. the full-span view
 
+        // The poll divisor last asked for — see setRate. Tracked rather than
+        // read back, because the server echoes no such field: the status reply
+        // carries the view geometry and nothing about the rate.
+        this.rateDivisor = 1;
+
         // Delta-decode accumulators, in raw radiod bin order.
         this._float = null;   // Float32Array
         this._u8 = null;      // Uint8Array
@@ -184,11 +189,41 @@ export class SpectrumConnection extends Emitter {
     }
 
     // divisor 1..8 — reduces how often the server polls, for slow links.
+    //
+    // The value is kept and published with the view geometry so the Status panel
+    // can show what rate the spectrum is running at: it is the one setting here
+    // that nothing on screen would otherwise reveal, and it changes on its own
+    // (IdleWatch halves it after a few minutes of nothing).
+    //
+    // Kept even when the send fails. A socket that is down has no rate at all,
+    // and what the panel should say once it comes back is what was last asked
+    // for, not "full" — the server clamps to 1..8 and so does this, so the two
+    // cannot drift.
     setRate(divisor) {
-        return this.send({ type: 'set_rate', divisor });
+        const d = Math.min(8, Math.max(1, Math.round(Number(divisor) || 1)));
+        const changed = d !== this.rateDivisor;
+        this.rateDivisor = d;
+        const ok = this.send({ type: 'set_rate', divisor: d });
+        if (changed) this.emit('config', this._config());
+        return ok;
     }
 
     // ---- internals ------------------------------------------------------
+
+    // What the view looks like from outside: the server's geometry, plus the
+    // rate this client asked for. One shape, built in one place, so a field
+    // added for the panel cannot go missing from whichever emitter forgot it.
+    _config() {
+        return {
+            centerFreq: this.centerFreq,
+            binCount: this.binCount,
+            binBandwidth: this.binBandwidth,
+            span: this.span,
+            defaultBinCount: this.defaultBinCount,
+            defaultBinBandwidth: this.defaultBinBandwidth,
+            rateDivisor: this.rateDivisor,
+        };
+    }
 
     _setState(state) {
         if (this.state === state) return;
@@ -234,14 +269,7 @@ export class SpectrumConnection extends Emitter {
             // Bin count changes invalidate the delta accumulators.
             if (this._float && this._float.length !== this.binCount) this._float = null;
             if (this._u8 && this._u8.length !== this.binCount) this._u8 = null;
-            this.emit('config', {
-                centerFreq: this.centerFreq,
-                binCount: this.binCount,
-                binBandwidth: this.binBandwidth,
-                span: this.span,
-                defaultBinCount: this.defaultBinCount,
-                defaultBinBandwidth: this.defaultBinBandwidth,
-            });
+            this.emit('config', this._config());
             return;
         }
         if (msg.type === 'error') {

@@ -57,6 +57,12 @@ export const DEFAULTS = {
     // 'zoom'. Cursor is the default because it is what makes the wheel feel
     // like it is zooming into the signal you are pointing at.
     zoomAnchor: 'cursor',
+    // Halve the spectrum poll rate after a few minutes with no input, and put
+    // it back on the first sign of life (IdleWatch). On by default, as it is in
+    // v1, because the data it saves is data nobody was looking at — but it is a
+    // switch because "nobody is looking" is a guess, and someone watching a
+    // band for a signal to appear is not idle in the sense that matters.
+    idleThrottle: true,
     chatUsersWidth: 170,    // px given to the chat user list, drag to change
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open

@@ -7,10 +7,10 @@ import { formatRate, formatSpan } from '../lib/format.js';
 // over — they are the same thing: each tick reports the bytes since the last.
 const RATE_MS = 1000;
 
-function Row({ label, value }) {
+function Row({ label, value, title }) {
     if (value == null || value === '') return null;
     return (
-        <div className="kv">
+        <div className="kv" title={title}>
             <span className="kv__k">{label}</span>
             <span className="kv__v">{value}</span>
         </div>
@@ -41,6 +41,30 @@ function useThroughput(conn) {
     }, [conn]);
 
     return rate;
+}
+
+// The spectrum poll rate, as the divisor this client has asked the server for.
+//
+// "Full" rather than "÷1", because a divisor of one is the absence of a
+// throttle and reads better as such.
+function rateLabel(divisor) {
+    const d = Number(divisor) || 1;
+    return d > 1 ? `÷${d}` : 'full';
+}
+
+// The one caveat worth carrying: the divisor is applied to a private channel —
+// the one a session gets once it zooms — while the shared default channel is
+// polled at a fixed rate server-side and ignores set_rate entirely. So a
+// throttled session sitting at the default view is still receiving at the
+// shared rate, and this line would otherwise be quietly wrong about that.
+function rateTitle(divisor) {
+    const d = Number(divisor) || 1;
+    const what = d > 1
+        ? `The server is polling the receiver at 1/${d} of the normal rate for this session.`
+        : 'The server is polling the receiver at the full rate for this session.';
+    return `${what} Halved automatically after a few minutes of inactivity and restored on the`
+        + ' first activity. Only applies to a zoomed (private) spectrum channel — the shared'
+        + ' default channel is polled at a fixed rate for everyone on it.';
 }
 
 // The link state, with what it is actually carrying beside it. The rate is only
@@ -104,6 +128,17 @@ export default function StatusPanel({ minimal }) {
                 <Row label="Span" value={view.span ? formatSpan(view.span) : '—'} />
                 <Row label="Bins" value={view.binCount || '—'} />
                 <Row label="Resolution" value={view.binBandwidth ? `${view.binBandwidth.toFixed(1)} Hz/bin` : '—'} />
+                {/* The poll divisor: how often the server asks the receiver for
+                    a frame, as a fraction of the full rate. Worth a line here
+                    because nothing else on screen shows it and it changes on
+                    its own — the idle watch halves it after a few minutes of
+                    nothing and restores it on the first sign of life, which
+                    otherwise reads as a waterfall that has quietly slowed down. */}
+                <Row
+                    label="Poll rate"
+                    title={rateTitle(view.rateDivisor)}
+                    value={rateLabel(view.rateDivisor)}
+                />
             </div>
 
             {!minimal && serverInfo && serverInfo.description && (

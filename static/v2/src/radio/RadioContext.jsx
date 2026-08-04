@@ -87,7 +87,14 @@ export function RadioProvider({ children }) {
     });
     const [audioState, setAudioState] = useState('idle');
     const [spectrumState, setSpectrumState] = useState('idle');
-    const [view, setView] = useState({ centerFreq: 0, binCount: 0, binBandwidth: 0, span: 0, defaultBinBandwidth: 0, defaultBinCount: 0 });
+    const [view, setView] = useState({
+        centerFreq: 0, binCount: 0, binBandwidth: 0, span: 0,
+        defaultBinBandwidth: 0, defaultBinCount: 0,
+        // How often the server is polling for us, as a divisor of the full
+        // rate. Set by the idle throttle rather than by anything on screen,
+        // which is why the Status panel shows it.
+        rateDivisor: 1,
+    });
     const [running, setRunning] = useState(false);
     const [serverInfo, setServerInfo] = useState(null);
     // How long this session may run, from /connection: { maxSec, startedAt }.

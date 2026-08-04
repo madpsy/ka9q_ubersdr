@@ -17,6 +17,7 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Modal } from './ui.jsx';
 import {
     CONFIRM_MS, FULL_DIVISOR, THROTTLE_DIVISOR,
@@ -34,6 +35,10 @@ const BURST_MS = 500;
 export default function IdleWatch() {
     const { running, session, actions, audioConn, spectrumConn } = useRadio();
     const mobile = useMediaQuery(MOBILE_QUERY);
+    // The operator can turn the rate throttle off — see the Display panel. The
+    // keepalive and the warning are not optional: those are about not losing the
+    // session, and are the receiver's rules rather than a preference.
+    const throttleOn = useDisplay().idleThrottle !== false;
 
     // 'watching' — nothing to see. 'asking' — the dialog is up. 'out' — the
     // receiver has been stopped and the operator has to say so to come back.
@@ -122,7 +127,9 @@ export default function IdleWatch() {
             // session is only immortal while somebody is actually here.
             if (warnMs != null) t.warn = setTimeout(ask, warnMs);
             clearTimeout(t.throttle);
-            t.throttle = setTimeout(throttle, throttleAfterMs(api.current.mobile));
+            // Switched off: nothing is armed, and the effect's cleanup has
+            // already restored the full rate on the way in here.
+            if (throttleOn) t.throttle = setTimeout(throttle, throttleAfterMs(api.current.mobile));
         };
 
         // --- activity --------------------------------------------------------
@@ -180,7 +187,12 @@ export default function IdleWatch() {
             // would be invisible and permanent.
             unthrottle();
         };
-    }, [running, warnMs]);
+        // `throttleOn` is in the list so turning the switch off tears this down
+        // and rebuilds it: the cleanup restores the full rate on the way out,
+        // which is what makes the change take effect at once rather than at the
+        // next activity. Re-binding the listeners is the cost, and it happens
+        // only when the switch is touched.
+    }, [running, warnMs, throttleOn]);
 
     // The one place the phase is answered by a click rather than by movement:
     // the button. Any activity at all already dismisses it.

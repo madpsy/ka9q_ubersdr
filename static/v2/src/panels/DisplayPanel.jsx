@@ -3,11 +3,16 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
+    // Only to say when the idle throttle will fire: it waits half as long on a
+    // small screen, and a hint that named the wrong figure would be worse than
+    // none. Same query IdleWatch uses to decide.
+    const mobile = useMediaQuery(MOBILE_QUERY);
     const viewMode = d.viewMode || 'split';
     // null means the operator's default is in force; the slider shows that
     // value so moving it starts from what you are actually looking at.
@@ -219,6 +224,32 @@ export default function DisplayPanel() {
                     </Field>
                 </>
             )}
+
+            <div className="divider" />
+
+            {/* Not a look but a cost: how much spectrum data this session asks
+                for while nobody is using it. It lives here because this is the
+                panel that owns everything about the spectrum you can see, and
+                because the effect of it — a waterfall that slows down on its
+                own — is something you notice here first. The Status panel's
+                "Poll rate" says what it is doing at any moment. */}
+            <div className="section-label"><span>Data</span></div>
+            <Field
+                label="Slow down when idle"
+                hint={`after ${mobile ? '2.5' : '5'} min`}
+                inline
+            >
+                <Switch
+                    checked={d.idleThrottle !== false}
+                    onChange={(v) => d.set({ idleThrottle: v })}
+                    title="Asks the server to poll the receiver half as often once nothing has happened for a few minutes, and restores the full rate on your first click, keypress or scroll"
+                />
+            </Field>
+            <div className="note note--tight">
+                Halves the spectrum data after a few minutes of no input and restores it the
+                moment you touch anything — saves bandwidth and battery while nobody is
+                watching. Turn it off if you leave the waterfall running to watch a band.
+            </div>
 
             <div className="row-end">
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>

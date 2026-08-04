@@ -1812,6 +1812,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }
+/* Dimmed with its slider while muted, so the number does not read as live. */
+.volume-row__value.is-muted { opacity: 0.4; }
 
 /* =========================================================================
    Mobile

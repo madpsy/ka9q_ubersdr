@@ -97,13 +97,17 @@ export default function AudioPanel({ minimal }) {
                             active={audio.muted}
                             onClick={actions.toggleMute}
                         />
+                        {/* Disabled, not hidden — see the top bar. */}
                         <Slider
                             value={Math.round(audio.volume * 100)}
                             min={0}
                             max={100}
+                            disabled={audio.muted}
                             onChange={(v) => actions.setVolume(v / 100)}
                         />
-                        <span className="volume-row__value">{Math.round(audio.volume * 100)}</span>
+                        <span className={`volume-row__value${audio.muted ? ' is-muted' : ''}`}>
+                            {Math.round(audio.volume * 100)}
+                        </span>
                     </div>
 
                     <ChannelPicker />

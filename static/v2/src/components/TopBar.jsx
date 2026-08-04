@@ -225,7 +225,16 @@ export default function TopBar({ compact }) {
                         active={audio.muted}
                         title={audio.muted ? 'Unmute' : 'Mute'}
                     />
-                    <Slider value={Math.round(audio.volume * 100)} min={0} max={100} onChange={(v) => actions.setVolume(v / 100)} />
+                    {/* Disabled rather than hidden while muted: the level is
+                        still what you will hear when you unmute, and a control
+                        that vanishes takes the reading with it. */}
+                    <Slider
+                        value={Math.round(audio.volume * 100)}
+                        min={0}
+                        max={100}
+                        disabled={audio.muted}
+                        onChange={(v) => actions.setVolume(v / 100)}
+                    />
                 </div>
             )}
 

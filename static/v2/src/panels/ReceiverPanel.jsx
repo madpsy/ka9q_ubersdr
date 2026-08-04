@@ -50,7 +50,9 @@ function AGCSettings() {
     );
 }
 
-export default function ReceiverPanel() {
+// `minimal` keeps what you tune with — the dial, its step, and the mode — and
+// drops the filter, the passband readout and AGC. See the registry's `minimal`.
+export default function ReceiverPanel({ minimal }) {
     const { tuning, actions, running } = useRadio();
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
     const display = useDisplay();
@@ -113,29 +115,33 @@ export default function ReceiverPanel() {
                 />
             </Field>
 
-            <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
-                <Slider
-                    value={Math.min(width, maxFilterWidth(tuning.mode))}
-                    min={100}
-                    max={maxFilterWidth(tuning.mode)}
-                    step={50}
-                    onChange={setWidth}
-                />
-            </Field>
+            {!minimal && (
+                <>
+                    <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
+                        <Slider
+                            value={Math.min(width, maxFilterWidth(tuning.mode))}
+                            min={100}
+                            max={maxFilterWidth(tuning.mode)}
+                            step={50}
+                            onChange={setWidth}
+                        />
+                    </Field>
 
-            <Field label="Filter shift" hint={`${Math.round(shift)} Hz`}>
-                <Slider value={Math.round(shift)} min={-1500} max={1500} step={10} onChange={setShift} />
-            </Field>
+                    <Field label="Filter shift" hint={`${Math.round(shift)} Hz`}>
+                        <Slider value={Math.round(shift)} min={-1500} max={1500} step={10} onChange={setShift} />
+                    </Field>
 
-            <div className="passband">
-                <span>{tuning.bandwidthLow} Hz</span>
-                <span className="passband__mode">{mode.label}</span>
-                <span>{tuning.bandwidthHigh} Hz</span>
-            </div>
+                    <div className="passband">
+                        <span>{tuning.bandwidthLow} Hz</span>
+                        <span className="passband__mode">{mode.label}</span>
+                        <span>{tuning.bandwidthHigh} Hz</span>
+                    </div>
 
-            {hasAGCSettings(tuning.mode) && <AGCSettings />}
+                    {hasAGCSettings(tuning.mode) && <AGCSettings />}
 
-            {!running && <div className="note">Press <strong>Listen</strong> to start the receiver.</div>}
+                    {!running && <div className="note">Press <strong>Listen</strong> to start the receiver.</div>}
+                </>
+            )}
         </div>
     );
 }

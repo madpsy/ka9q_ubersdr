@@ -12,7 +12,11 @@ import { Icon, Menu, MenuItem } from './ui.jsx';
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
 export default function FloatingPanel({ panel, geom, z, bounds }) {
-    const { setFloat, setFloatMin, raiseFloat, movePanel, setSectionHidden } = useLayout();
+    const {
+        sections, setFloat, setFloatMin, raiseFloat, movePanel, setSectionHidden, toggleSectionMinimal,
+    } = useLayout();
+    // Same flag the docked section uses: a panel looks the same wherever it is.
+    const minimal = !!panel.minimal && !!sections[panel.id]?.minimal;
 
     // The size floor lives in LayoutContext (setFloat clamps), so none is
     // passed here — this only has to stop the gesture running away.
@@ -47,6 +51,17 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
                     ))}
                     <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
                 </Menu>
+                {panel.minimal && (
+                    <button
+                        type="button"
+                        className="floatwin__btn floatwin__ctl"
+                        title={minimal ? 'Show the full panel' : 'Show the minimal view'}
+                        aria-pressed={minimal}
+                        onClick={() => toggleSectionMinimal(panel.id)}
+                    >
+                        {minimal ? <Icon.Expand size={13} /> : <Icon.Collapse size={13} />}
+                    </button>
+                )}
                 <button
                     type="button"
                     className="floatwin__btn floatwin__ctl"
@@ -68,7 +83,7 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
             {/* The window has a fixed height, so its body is a scroller — the
                 same rule as the mobile sheet: containers scroll, panels do not. */}
             <div className="floatwin__body">
-                <panel.Component />
+                <panel.Component minimal={minimal} />
             </div>
 
             <span

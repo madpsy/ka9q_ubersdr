@@ -34,7 +34,7 @@ function defaultLayout() {
     const sections = {};
     for (const p of PANELS) {
         docks[p.dock].panels.push(p.id);
-        sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden };
+        sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden, minimal: false };
     }
     return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {}, heights: {} };
 }
@@ -126,6 +126,10 @@ function reconcile(stored) {
         base.sections[p.id] = {
             open: s?.open ?? (p.defaultOpen !== false),
             hidden: s?.hidden ?? !!p.defaultHidden,
+            // Only panels that declare a minimal view can be in one, so a
+            // stored flag on a panel that has since dropped it is discarded
+            // rather than leaving the panel stuck showing nothing extra.
+            minimal: !!p.minimal && !!s?.minimal,
         };
     }
     return base;
@@ -175,6 +179,16 @@ export function LayoutProvider({ children }) {
         setLayout((l) => ({
             ...l,
             sections: { ...l.sections, [id]: { ...l.sections[id], open: !l.sections[id].open } },
+        }));
+    }, []);
+
+    // Minimal view: the panel renders its cut-down form. It is per panel and
+    // not per placement, so a panel reads the same whether it is docked or
+    // floating — the point is what you want to see from it, not where it is.
+    const toggleSectionMinimal = useCallback((id) => {
+        setLayout((l) => ({
+            ...l,
+            sections: { ...l.sections, [id]: { ...l.sections[id], minimal: !l.sections[id]?.minimal } },
         }));
     }, []);
 
@@ -319,10 +333,11 @@ export function LayoutProvider({ children }) {
         setDockCollapsed,
         setDockSize,
         toggleSection,
+        toggleSectionMinimal,
         setSectionHidden,
         movePanel,
         resetLayout,
-    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel,
+    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
         setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;

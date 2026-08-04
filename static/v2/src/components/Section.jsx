@@ -18,7 +18,10 @@ const SNAP = 8;
 const snap = (v) => Math.round(v / SNAP) * SNAP;
 
 export default function Section({ panel, dock, index, weight, height }) {
-    const { sections, toggleSection, setSectionHidden, movePanel, weights, setWeights, setPanelHeight } = useLayout();
+    const {
+        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
+        weights, setWeights, setPanelHeight,
+    } = useLayout();
     const grip = useRef(null);
     const [dropEdge, setDropEdge] = useState(null);   // 'before' | 'after' | null
 
@@ -27,6 +30,7 @@ export default function Section({ panel, dock, index, weight, height }) {
     const clearEdge = useCallback(() => setDropEdge(null), []);
     useDragEndReset(dropEdge !== null, clearEdge);
     const state = sections[panel.id] || { open: true };
+    const minimal = !!panel.minimal && !!state.minimal;
 
     const onDragStart = (e) => {
         e.dataTransfer.setData('text/ubersdr-panel', panel.id);
@@ -139,6 +143,20 @@ export default function Section({ panel, dock, index, weight, height }) {
                     {panel.Badge && <panel.Badge />}
                 </button>
 
+                {/* Only for panels that declare one, and only while open —
+                    there is nothing to cut down in a collapsed section. */}
+                {panel.minimal && state.open && (
+                    <button
+                        type="button"
+                        className="section__grip"
+                        title={minimal ? 'Show the full panel' : 'Show the minimal view'}
+                        aria-pressed={minimal}
+                        onClick={() => toggleSectionMinimal(panel.id)}
+                    >
+                        {minimal ? <Icon.Expand size={13} /> : <Icon.Collapse size={13} />}
+                    </button>
+                )}
+
                 <Menu trigger={<span className="section__grip" title="Move panel"><Icon.Drag size={14} /></span>}>
                     {DOCKS.filter((d) => d !== dock).map((d) => (
                         <MenuItem key={d} onClick={() => movePanel(panel.id, d, null)}>
@@ -152,7 +170,7 @@ export default function Section({ panel, dock, index, weight, height }) {
 
             {state.open && (
                 <div className="section__body">
-                    <panel.Component />
+                    <panel.Component minimal={minimal} />
                 </div>
             )}
 

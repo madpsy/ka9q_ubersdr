@@ -56,7 +56,9 @@ function MeterTrack({ ticks, children }) {
     );
 }
 
-export default function SignalPanel() {
+// `minimal` keeps the two bar meters and drops the numeric readouts, the SNR
+// trace and the buffer counters. See the registry's `minimal`.
+export default function SignalPanel({ minimal }) {
     const { running } = useRadio();
     const m = useMeters(15);
     const canvasRef = useRef(null);
@@ -138,40 +140,45 @@ export default function SignalPanel() {
                 <div className="meter__value">{snr == null ? '--' : `${snr.toFixed(1)} dB`}</div>
             </div>
 
-            <div className="readout-grid">
-                <Readout label="Signal" value={power == null ? '—' : power.toFixed(1)} unit="dBFS" />
-                <Readout label="Noise" value={m.noiseDensity == null ? '—' : m.noiseDensity.toFixed(1)} unit="dBFS" />
-                {/* Coloured on v1's ramp — red at 30 dB, green at 50 — rather
-                    than on thresholds of 3 and 10 dB, which every normal
-                    reading cleared, so the card was permanently green. */}
-                <Readout
-                    label="SNR"
-                    value={snr == null ? '—' : snr.toFixed(1)}
-                    unit="dB"
-                    color={snr == null ? undefined : snrColour(snr)}
-                />
-                {/* Red the moment the output hits full scale — the number
-                    itself keeps reading, since RMS barely moves when peaks
-                    clip and would otherwise hide it. */}
-                <Readout
-                    label={m.clipping ? 'Audio · clip' : 'Audio'}
-                    value={audioLevelPercent(m.level).toFixed(0)}
-                    unit="%"
-                    color={m.clipping ? 'var(--bad)' : undefined}
-                />
-            </div>
+            {!minimal && (
+                <>
+                    <div className="readout-grid">
+                        <Readout label="Signal" value={power == null ? '—' : power.toFixed(1)} unit="dBFS" />
+                        <Readout label="Noise" value={m.noiseDensity == null ? '—' : m.noiseDensity.toFixed(1)} unit="dBFS" />
+                        {/* Coloured on v1's ramp — red at 30 dB, green at 50 —
+                            rather than on thresholds of 3 and 10 dB, which every
+                            normal reading cleared, so the card was permanently
+                            green. */}
+                        <Readout
+                            label="SNR"
+                            value={snr == null ? '—' : snr.toFixed(1)}
+                            unit="dB"
+                            color={snr == null ? undefined : snrColour(snr)}
+                        />
+                        {/* Red the moment the output hits full scale — the
+                            number itself keeps reading, since RMS barely moves
+                            when peaks clip and would otherwise hide it. */}
+                        <Readout
+                            label={m.clipping ? 'Audio · clip' : 'Audio'}
+                            value={audioLevelPercent(m.level).toFixed(0)}
+                            unit="%"
+                            color={m.clipping ? 'var(--bad)' : undefined}
+                        />
+                    </div>
 
-            <div className="sparkline">
-                <canvas ref={canvasRef} />
-                <span className="sparkline__label">SNR, last 10 s</span>
-            </div>
+                    <div className="sparkline">
+                        <canvas ref={canvasRef} />
+                        <span className="sparkline__label">SNR, last 10 s</span>
+                    </div>
 
-            <div className="readout-grid">
-                <Readout label="Buffer" value={(m.queuedSec * 1000).toFixed(0)} unit="ms" tone={m.queuedSec < 0.05 ? 'weak' : 'ok'} />
-                <Readout label="Underruns" value={m.underruns} />
-            </div>
+                    <div className="readout-grid">
+                        <Readout label="Buffer" value={(m.queuedSec * 1000).toFixed(0)} unit="ms" tone={m.queuedSec < 0.05 ? 'weak' : 'ok'} />
+                        <Readout label="Underruns" value={m.underruns} />
+                    </div>
 
-            {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}
+                    {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}
+                </>
+            )}
         </div>
     );
 }

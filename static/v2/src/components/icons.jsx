@@ -53,6 +53,9 @@ export const Icon = {
     Eye: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></Svg>,
     Plus: (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>,
     Minus: (p) => <Svg {...p}><path d="M5 12h14" /></Svg>,
+    // Arrows into the corners / out of them: the minimal-view toggle.
+    Collapse: (p) => <Svg {...p}><path d="M9 4v5H4" /><path d="M15 20v-5h5" /><path d="m3 21 6-6" /><path d="m21 3-6 6" /></Svg>,
+    Expand: (p) => <Svg {...p}><path d="M4 9V4h5" /><path d="M20 15v5h-5" /><path d="m4 4 6 6" /><path d="m20 20-6-6" /></Svg>,
     Compass: (p) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5z" /></Svg>,
     Antenna: (p) => <Svg {...p}><path d="M12 4v16" /><path d="m5 20 7-9 7 9" /><path d="M8.4 6.4a5 5 0 0 1 7.2 0" /><path d="M6 3.6a9 9 0 0 1 12 0" /></Svg>,
     // Filled, unlike its neighbours: a record button is a solid dot everywhere

@@ -13,6 +13,13 @@
 //   defaultHidden true to ship hidden (still listed in the layout manager)
 //   fill         true if the body should stretch to the dock height
 //   Badge        optional component rendered in the header, for unread counts
+//   minimal      true when the panel has a minimal view. The header then shows
+//                a toggle, and Component is called with `minimal` — the panel
+//                itself decides what survives. That is all it takes to give any
+//                panel one: set the flag, then honour the prop.
+//                    export default function FooPanel({ minimal }) { … }
+//                The choice is remembered per panel and applies wherever the
+//                panel is drawn, docked or floating.
 //   requires     optional (serverInfo, env) => bool; false hides the panel
 //                entirely — see usePanelApplies() at the foot of this file
 //   Component    the panel body
@@ -47,7 +54,9 @@ import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 
 export const PANELS = [
-    { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', Component: ReceiverPanel },
+    // Minimal: the dial and the mode buttons — what you tune with. The filter,
+    // the passband readout and AGC are settings you reach for occasionally.
+    { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
     // DX, digital and CW spots. One tab per feed the instance actually has, and
     // the panel is absent entirely when it has none — no empty slot explaining
     // that this receiver publishes no spots.
@@ -127,7 +136,10 @@ export const PANELS = [
     { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 
-    { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', Component: SignalPanel },
+    // Minimal: the two bar meters. The numeric readouts and the SNR trace are
+    // the same information at a resolution you only want when you are studying
+    // a signal rather than glancing at it.
+    { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', minimal: true, Component: SignalPanel },
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', Component: AudioPanel },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
     { id: 'scope', title: 'Audio scope', icon: <Icon.Waves />, dock: 'right', defaultOpen: false, Component: ScopePanel },

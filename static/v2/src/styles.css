@@ -597,16 +597,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
     text-overflow: ellipsis;
 }
 
+/* Used on a span (the move menu's trigger) and on a button (the minimal-view
+   toggle), so it carries its own button reset. */
 .section__grip {
     display: grid;
     place-items: center;
     width: 22px;
     height: 22px;
+    padding: 0;
+    border: 0;
     border-radius: 6px;
+    background: transparent;
     color: var(--text-faint);
     cursor: pointer;
 }
 .section__grip:hover { background: var(--surface-hover); color: var(--text); }
+/* The minimal view is a state, not a momentary action — the toggle stays lit
+   so a cut-down panel never reads as a panel that has lost half its controls. */
+.section__grip[aria-pressed="true"],
+.floatwin__btn[aria-pressed="true"] { color: var(--accent); }
 
 .section__body {
     padding: 2px 10px 9px;

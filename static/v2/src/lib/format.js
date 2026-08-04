@@ -89,6 +89,33 @@ export function sUnitFraction(dbfs) {
     return clamp((s - S_UNITS_MIN) / (S_UNITS_MAX - S_UNITS_MIN), 0, 1);
 }
 
+// v1's S-meter ramp (s-meter-needle.js `sMeterColour`): red at S1 through
+// yellow around S5 to green at S9, and green all the way up from there. Same
+// idea as the SNR ramp — the colour runs out before the scale does, because a
+// signal at S9 is already as strong as the colour has anything to say about.
+export const S_COLOUR_MIN = 1;    // S-units,  -121 dBFS
+export const S_COLOUR_MAX = 9;    //           -73 dBFS
+
+export function sUnitColour(sUnits) {
+    if (sUnits == null || !Number.isFinite(sUnits)) return 'hsl(0, 0%, 55%)';
+    const c = clamp(sUnits, S_COLOUR_MIN, S_COLOUR_MAX);
+    const hue = Math.round(((c - S_COLOUR_MIN) / (S_COLOUR_MAX - S_COLOUR_MIN)) * 120);
+    return `hsl(${hue}, 90%, 55%)`;
+}
+
+export function sMeterColour(dbfs) {
+    if (dbfs == null || dbfs <= -998) return 'hsl(0, 0%, 55%)';
+    return sUnitColour(dbfsToSUnits(dbfs));
+}
+
+// The same colour from a position on the meter rather than a reading, for the
+// needle and its peak hold — those know where they are pointing, not what dBFS
+// put them there.
+export function sMeterColourAt(fraction) {
+    const f = Number.isFinite(fraction) ? clamp(fraction, 0, 1) : 0;
+    return sUnitColour(S_UNITS_MIN + f * (S_UNITS_MAX - S_UNITS_MIN));
+}
+
 export function sUnitLabel(dbfs) {
     if (dbfs == null || dbfs <= -998) return '--';
     const s = dbfsToSUnits(dbfs);
@@ -122,6 +149,12 @@ export function snrColour(snr) {
     const c = clamp(snr, SNR_COLOUR_MIN, SNR_COLOUR_MAX);
     const hue = Math.round(((c - SNR_COLOUR_MIN) / (SNR_COLOUR_MAX - SNR_COLOUR_MIN)) * 120);
     return `hsl(${hue}, 90%, 55%)`;
+}
+
+// From a position on the meter rather than a reading — see sMeterColourAt.
+export function snrColourAt(fraction) {
+    const f = Number.isFinite(fraction) ? clamp(fraction, 0, 1) : 0;
+    return snrColour(SNR_MIN + f * (SNR_MAX - SNR_MIN));
 }
 
 // Audio level, on v1's VU scale (app.js updateVUMeter).

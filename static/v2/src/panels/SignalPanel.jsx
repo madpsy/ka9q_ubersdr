@@ -6,7 +6,8 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
 import {
-    audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel,
+    audioLevelPercent, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    snrFraction, sUnitFraction, sUnitLabel,
     SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
 } from '../lib/format.js';
 // The theme's own tokens rather than v1's hardcoded slate palette, so a meter
@@ -75,7 +76,7 @@ const NEEDLE_H = 74;
 // Drawn on every render, which is the meter sample rate (useMeters), not a frame
 // loop: the needle eases toward the reading and the peak decays in wall-clock
 // time, so the movement is the same however often the panel is sampled.
-function NeedleMeter({ ticks, fraction, colour, showPeak, title }) {
+function NeedleMeter({ ticks, fraction, colourAt, showPeak, title }) {
     const ref = useRef(null);
     const anim = useRef({ at: null, peak: null, last: 0 });
 
@@ -110,7 +111,10 @@ function NeedleMeter({ ticks, fraction, colour, showPeak, title }) {
 
         const faint = cssVar('--text-faint', '#5c6779');
         const strong = cssVar('--border-strong', '#2f3b4e');
-        const text = cssVar('--text', '#e6ecf5');
+        // Both needles take their colour from where they are pointing, as v1's
+        // do: the peak needle is the colour that reading *was*, not the colour
+        // of the one that has since replaced it.
+        const colour = colourAt(a.at);
 
         // Track, then the travelled part of it in the meter's own colour: the
         // same "how far along" the bar gives, on an arc.
@@ -145,38 +149,38 @@ function NeedleMeter({ ticks, fraction, colour, showPeak, title }) {
             c.fillText(label, lp.x, lp.y);
         }
 
-        // Peak hold: a thin marker rather than v1's second needle, which at this
-        // size lands on top of the first one and reads as a smear.
-        if (showPeak && a.peak) {
-            const p1 = pointAt(g, a.peak.value, g.radius + 1);
-            const p2 = pointAt(g, a.peak.value, g.radius - TICK_IN);
-            c.strokeStyle = text;
-            c.globalAlpha = 0.55;
-            c.lineWidth = 2;
+        // A tapered triangle from the pivot to the scale, as v1 draws it.
+        const needle = (at, halfW) => {
+            const tip = pointAt(g, at, g.radius - NEEDLE_GAP);
+            const ang = angleAt(at);
+            const bx = g.cx + Math.cos(ang - Math.PI / 2) * halfW;
+            const by = g.cy - Math.sin(ang - Math.PI / 2) * halfW;
+            const cx2 = g.cx + Math.cos(ang + Math.PI / 2) * halfW;
+            const cy2 = g.cy - Math.sin(ang + Math.PI / 2) * halfW;
             c.beginPath();
-            c.moveTo(p1.x, p1.y);
-            c.lineTo(p2.x, p2.y);
-            c.stroke();
-            c.globalAlpha = 1;
+            c.moveTo(tip.x, tip.y);
+            c.lineTo(bx, by);
+            c.lineTo(cx2, cy2);
+            c.closePath();
+        };
+
+        // The peak-hold needle, under the live one and thinner: v1's second
+        // needle at v1's opacity, narrowed so that when the two meet the live
+        // reading still reads as the live reading.
+        if (showPeak && a.peak) {
+            c.save();
+            c.globalAlpha = 0.6;
+            needle(a.peak.value, 1.5);
+            c.fillStyle = colourAt(a.peak.value);
+            c.fill();
+            c.restore();
         }
 
-        // The needle: a tapered triangle from the pivot, as v1 draws it.
-        const tip = pointAt(g, a.at, g.radius - NEEDLE_GAP);
-        const ang = angleAt(a.at);
-        const halfW = 2.6;
-        const bx = g.cx + Math.cos(ang - Math.PI / 2) * halfW;
-        const by = g.cy - Math.sin(ang - Math.PI / 2) * halfW;
-        const cx2 = g.cx + Math.cos(ang + Math.PI / 2) * halfW;
-        const cy2 = g.cy - Math.sin(ang + Math.PI / 2) * halfW;
         c.save();
         c.shadowColor = 'rgba(0,0,0,0.45)';
         c.shadowBlur = 3;
         c.shadowOffsetY = 1;
-        c.beginPath();
-        c.moveTo(tip.x, tip.y);
-        c.lineTo(bx, by);
-        c.lineTo(cx2, cy2);
-        c.closePath();
+        needle(a.at, 2.6);
         c.fillStyle = colour;
         c.fill();
         c.restore();
@@ -273,7 +277,7 @@ export default function SignalPanel({ minimal }) {
                     <NeedleMeter
                         ticks={S_TICKS}
                         fraction={sUnitFraction(power)}
-                        colour={cssVar('--accent', '#3ddbe8')}
+                        colourAt={sMeterColourAt}
                         showPeak
                         title={hint}
                     />
@@ -281,7 +285,7 @@ export default function SignalPanel({ minimal }) {
                     <>
                         <MeterScale ticks={S_TICKS} />
                         <MeterTrack ticks={S_TICKS}>
-                            <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
+                            <Bar value={sUnitFraction(power)} min={0} max={1} color={sMeterColour(power)} />
                         </MeterTrack>
                     </>
                 )}
@@ -296,7 +300,7 @@ export default function SignalPanel({ minimal }) {
                     <NeedleMeter
                         ticks={SNR_TICKS}
                         fraction={snrFraction(snr)}
-                        colour={snr == null ? cssVar('--text-faint', '#5c6779') : snrColour(snr)}
+                        colourAt={snrColourAt}
                         title={hint}
                     />
                 ) : (

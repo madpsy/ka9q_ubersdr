@@ -15,7 +15,10 @@ const af = require('./.build/audiofilters.cjs');
 const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
-const { dbfsToSUnits, sUnitFraction, sUnitLabel, S_UNITS_MIN, S_UNITS_MAX } = require('./.build/format.cjs');
+const {
+    dbfsToSUnits, sMeterColour, sMeterColourAt, snrColour, snrColourAt, sUnitFraction, sUnitLabel,
+    S_UNITS_MIN, S_UNITS_MAX,
+} = require('./.build/format.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -677,6 +680,28 @@ t('the bar lines up with the printed scale', () => {
         assert.ok(Math.abs(got - want) < 1e-9,
             `${name} at ${(got * 100).toFixed(1)}%, printed scale puts it at ${(want * 100).toFixed(1)}%`);
     });
+});
+
+t('the S-meter colours are v1s ramp: red at S1, yellow at S5, green from S9', () => {
+    assert.strictEqual(sMeterColour(-121), 'hsl(0, 90%, 55%)');    // S1
+    assert.strictEqual(sMeterColour(-97), 'hsl(60, 90%, 55%)');    // S5
+    assert.strictEqual(sMeterColour(-73), 'hsl(120, 90%, 55%)');   // S9
+    // The colour runs out at S9; everything above it is as green as it gets.
+    assert.strictEqual(sMeterColour(-33), sMeterColour(-73));
+    // No reading is grey, not red — red is a real, weak signal.
+    assert.strictEqual(sMeterColour(null), 'hsl(0, 0%, 55%)');
+    assert.strictEqual(sMeterColour(-999), 'hsl(0, 0%, 55%)');
+});
+
+t('a colour from a meter position matches the colour from the reading', () => {
+    // The needle knows where it points, not what dBFS put it there, so the two
+    // ways in must agree or the needle and its own scale differ.
+    for (const dbfs of [-121, -109, -97, -85, -73, -53, -13]) {
+        assert.strictEqual(sMeterColourAt(sUnitFraction(dbfs)), sMeterColour(dbfs), `${dbfs} dBFS`);
+    }
+    for (const snr of [30, 35, 40, 45, 50, 60]) {
+        assert.strictEqual(snrColourAt((snr - 30) / 30), snrColour(snr), `${snr} dB`);
+    }
 });
 
 t('the bar and the S label never disagree', () => {

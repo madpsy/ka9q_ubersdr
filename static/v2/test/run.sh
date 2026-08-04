@@ -88,6 +88,8 @@ esbuild ../src/extensions/navtex/messages.js --bundle --format=cjs --platform=no
     --outfile=.build/navtex.cjs --log-level=warning
 esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefax.cjs --log-level=warning
+esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
+    --outfile=.build/qrssdsp.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -108,3 +110,4 @@ node extensions.test.js
 node fsk.test.js
 node navtex.test.js
 node wefax.test.js
+node qrss.test.js

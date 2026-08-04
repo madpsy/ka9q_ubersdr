@@ -33,6 +33,7 @@ import FT8Extension from './ft8/FT8Extension.jsx';
 import FSKExtension from './fsk/FSKExtension.jsx';
 import NavtexExtension from './navtex/NavtexExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
+import QrssExtension from './qrss/QrssExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -75,6 +76,19 @@ export const EXTENSIONS = [
         float: { w: 820, h: 640 },
         minimal: true,
         Component: WefaxExtension,
+    },
+    {
+        id: 'qrss',
+        title: 'QRSS Grabber',
+        icon: <Icon.Snail />,
+        // The one extension with no server side: it reads the audio this
+        // browser is already playing. `requiresAudio` still holds — it needs
+        // the receiver running — it just does not need an attach.
+        summary: 'Very-slow-CW waterfall for reading beacons under the noise.',
+        requiresAudio: true,
+        float: { w: 880, h: 620 },
+        minimal: true,
+        Component: QrssExtension,
     },
 ];
 

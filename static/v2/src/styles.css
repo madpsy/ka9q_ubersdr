@@ -3226,3 +3226,61 @@ a.btn { text-decoration: none; }
 /* Top-anchored: a chart's title block is at the head of the page, which is the
    part that tells you which one it is. */
 .wfx__thumb img { display: block; width: 100%; height: auto; }
+
+/* ── QRSS ─────────────────────────────────────────────────────────────────── */
+
+.qrss__band { max-width: 300px; }
+.qrss__fill {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--warn);
+}
+
+.qrss__stats { gap: 14px; }
+.qrss__stat { display: inline-flex; align-items: baseline; gap: 5px; }
+.qrss__stat-label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.qrss__stat-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+/* The plot is the part that grows: the controls above it are a fixed height and
+   the waterfall should take everything else, because time on screen is pixels. */
+.qrss__plot {
+    position: relative;
+    flex: 1;
+    min-height: 160px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--spec-bg);
+}
+.qrss__canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    /* The wheel zooms the waterfall rather than scrolling the window. */
+    touch-action: none;
+}
+
+.qrss__hover {
+    position: absolute;
+    pointer-events: none;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.82);
+    border: 1px solid var(--border-strong);
+    color: #e6edf3;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    line-height: 1.35;
+    white-space: nowrap;
+}

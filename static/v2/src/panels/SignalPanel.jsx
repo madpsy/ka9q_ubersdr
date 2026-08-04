@@ -310,9 +310,12 @@ export default function SignalPanel({ minimal }) {
                         </MeterTrack>
                     </>
                 )}
+                {/* Live reading, then the peak hold — "S4 / S6" — in the one
+                    size: they are the same measurement a moment apart, and
+                    shrinking the second one makes it read as a footnote. */}
                 <div className="meter__value">
                     {sUnitLabel(power)}
-                    {held != null && <span className="meter__held">pk {sUnitLabelAt(held)}</span>}
+                    {held != null && ` / ${sUnitLabelAt(held)}`}
                 </div>
             </button>
 

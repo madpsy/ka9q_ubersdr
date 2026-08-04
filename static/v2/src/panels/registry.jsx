@@ -12,6 +12,9 @@
 //   defaultOpen  false to ship collapsed
 //   defaultHidden true to ship hidden (still listed in the layout manager)
 //   fill         true if the body should stretch to the dock height
+//   weight       share of the bottom dock's width, 1 being an equal share. Only
+//                the starting point: dragging a splitter stores a weight of the
+//                operator's own, which then wins.
 //   Badge        optional component rendered in the header, for unread counts
 //   minimal      true when the panel has a minimal view. The header then shows
 //                a toggle, and Component is called with `minimal` — the panel
@@ -219,6 +222,9 @@ export const PANELS = [
         title: 'Extensions',
         icon: <Icon.Plug />,
         dock: 'bottom',
+        // A launcher: a list of a few names needs half the width its neighbours
+        // do, and the room is better spent on chat or the spot tables.
+        weight: 0.5,
         Component: ExtensionsPanel,
         // Present only when this receiver enables at least one extension v2 can
         // actually render. A receiver with none — or one whose extensions are
@@ -234,6 +240,8 @@ export const PANELS = [
         icon: <Icon.Mic />,
         dock: 'bottom',
         fill: true,
+        // Two short lines per detection, so it reads fine at half width.
+        weight: 0.5,
         // Minimal: the detections alone, without the scope switch, the count
         // and the button to the full page.
         minimal: true,

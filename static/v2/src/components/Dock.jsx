@@ -8,6 +8,18 @@ import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
 
+// A panel's share of the bottom dock's width: what the operator dragged it to,
+// otherwise what the panel asks for, otherwise an equal share. Reading the
+// registry here rather than seeding the stored layout means a declared width
+// reaches everyone, not only whoever installs v2 next — a stored layout is
+// never rewritten by a release.
+function shareOf(weights, id) {
+    const stored = weights && weights[id];
+    if (stored) return stored;
+    const panel = PANEL_BY_ID[id];
+    return (panel && panel.weight) || 1;
+}
+
 // Drag handle between two bottom-dock panels. Converts a pixel delta into a
 // share of the pair's combined width, so the rest of the row is undisturbed.
 function SectionSplitter({ before, after, weights, setWeights }) {
@@ -26,8 +38,8 @@ function SectionSplitter({ before, after, weights, setWeights }) {
             x: e.clientX,
             aw: a.getBoundingClientRect().width,
             bw: b.getBoundingClientRect().width,
-            wa: weights[before] || 1,
-            wb: weights[after] || 1,
+            wa: shareOf(weights, before),
+            wb: shareOf(weights, after),
         };
     };
 
@@ -186,7 +198,7 @@ export default function Dock({ side }) {
                             panel={PANEL_BY_ID[id]}
                             dock={side}
                             index={i}
-                            weight={side === 'bottom' ? (weights[id] || 1) : undefined}
+                            weight={side === 'bottom' ? shareOf(weights, id) : undefined}
                             height={side === 'bottom' ? heights[id] : undefined}
                         />
                     </React.Fragment>

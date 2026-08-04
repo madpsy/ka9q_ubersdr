@@ -68,9 +68,12 @@ function pinchPair(pts) {
 }
 function pinchDist([a, b]) { return Math.hypot(b.x - a.x, b.y - a.y); }
 
-// Shortest gap between zoom steps taken from a pinch. Long enough for the
-// server to answer the previous one over a slow link, short enough that a brisk
-// gesture still gets through several.
+// Shortest gap between zoom messages sent from a pinch — a message rate limit,
+// not a zoom rate limit. One message now carries however many rungs the fingers
+// have asked for (see zoomSteps), so this no longer paces how fast the view can
+// move; it only stops a gesture emitting a request per pointermove while the
+// server is still answering the last one. The first move of a gesture goes out
+// immediately.
 const PINCH_MS = 140;
 
 // Squelch state in the spectrum toolbar. Split into its own component so the
@@ -780,9 +783,28 @@ export default function SpectrumView() {
             g.drag = null;
             g.hover = null;
             setHoverInfo(null);
+            const pair = pinchPair(g.pts);
             g.pinch = {
-                dist: pinchDist(pinchPair(g.pts)),
+                dist: pinchDist(pair),
                 bw: cfgRef.current.binBandwidth,
+                // What the gesture zooms about, decided once, here.
+                //
+                // Two reasons it is not recomputed per step. The setting is the
+                // first: 'tuned' means the dial stays centred, which zoomCenter
+                // takes as a null point, and pinch used to ignore that and
+                // always anchor on the fingers — so on a phone, where pinch is
+                // the only way to zoom, the one control for this did nothing.
+                //
+                // The second is the walk. A pinch is quantised onto the server's
+                // ladder and takes a step at most every PINCH_MS, and fingers do
+                // not spread symmetrically — one travels further than the other,
+                // so the midpoint slides. Re-reading it per step anchored each
+                // one on a different frequency and marched the view along the
+                // band. Fixed at the start, the whole gesture turns about a
+                // single point, which is what the fingers are asking for.
+                about: dispRef.current.zoomAnchor === 'tuned'
+                    ? null
+                    : freqAtX((pair[0].x + pair[1].x) / 2),
                 last: 0,
             };
             return;
@@ -795,7 +817,7 @@ export default function SpectrumView() {
             moved: false,
             pointerId: e.pointerId,
         };
-    }, []);
+    }, [freqAtX]);
 
     const onPointerMove = useCallback((e) => {
         const el = wrapRef.current;
@@ -829,10 +851,14 @@ export default function SpectrumView() {
                 const want = g.pinch.bw * (g.pinch.dist / dist);
                 const steps = Math.round(Math.log2(bwNow / want));
                 if (steps !== 0) {
-                    // About the point between the fingers, so whatever they
-                    // opened around stays under them.
-                    const about = freqAtX((pair[0].x + pair[1].x) / 2);
-                    if (steps > 0) actions.zoomIn(about); else actions.zoomOut(about);
+                    // All of them at once, not one per tick. `steps` is how far
+                    // behind the fingers the view is, and taking a single rung
+                    // from it meant a wide pinch needed a server round trip per
+                    // rung to catch up — which is what made zooming feel stuck
+                    // on a phone while the same code felt instant on a wheel.
+                    // The anchor is fixed when the fingers go down; see
+                    // onPointerDown.
+                    actions.zoomSteps(steps, g.pinch.about);
                     g.pinch.last = now;
                 }
             }

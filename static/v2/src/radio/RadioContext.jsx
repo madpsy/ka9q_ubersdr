@@ -819,6 +819,41 @@ export function RadioProvider({ children }) {
                 c.setView(zoomCenter(c, next, aboutHz, tuningRef.current.frequency), next);
             },
 
+            // Several rungs in one message, which is what a pinch needs.
+            //
+            // zoomIn and zoomOut move exactly one rung, and the view they read
+            // is the last one the *server* confirmed — binBandwidth does not
+            // change locally when a zoom is sent. So a gesture that has opened
+            // to four times its starting spread cannot ask for the two rungs it
+            // means: it can only ask for one and wait for the confirmation
+            // before asking for the next. On a desktop wheel that is invisible,
+            // because a notch is one rung and a round trip on a LAN is shorter
+            // than the gap between notches. Under a thumb on a phone it is the
+            // whole experience — every rung costs a round trip over cellular,
+            // and a wide pinch spends several of them catching up with fingers
+            // that stopped moving long ago.
+            //
+            // The ladder is unaffected. 2^n is a factor of two taken n times, so
+            // it crosses at least n rungs, and the server snaps to the nearest
+            // as it does for a single step. Positive n zooms in, matching the
+            // sign the pinch already works in.
+            zoomSteps(n, aboutHz) {
+                const c = spectrumConn;
+                if (!c.binCount || !c.binBandwidth || !n) return;
+                const full = c.fullSpanBinBandwidth();
+                const next = clamp(c.binBandwidth / (2 ** n), c.minBinBandwidthForUI(), full);
+                // Full span goes through reset, which hands the private radiod
+                // channel back — the same reason zoomOut does it.
+                if (next >= full) {
+                    if (c.binBandwidth >= full) return;
+                    c.reset();
+                    return;
+                }
+                // Against the zoom-in stop, with nothing left to give.
+                if (next === c.binBandwidth) return;
+                c.setView(zoomCenter(c, next, aboutHz, tuningRef.current.frequency), next);
+            },
+
             resetSpectrum() { spectrumConn.reset(); },
 
             centerOnTuned() { spectrumConn.setView(tuningRef.current.frequency, null); },

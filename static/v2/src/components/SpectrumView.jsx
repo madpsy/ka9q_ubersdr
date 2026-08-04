@@ -29,6 +29,11 @@ import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
+// Tick lengths down from the top of that ruler, CSS px. The major stops just
+// short of the cap height of the label under it, which is what makes the two
+// read as one mark rather than as a line and a number that happen to line up.
+const TICK_MAJOR = 9;
+const TICK_MINOR = 5;
 const MIN_SPECTRUM_H = 60;
 const MIN_WATERFALL_H = 40;
 
@@ -1649,26 +1654,39 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW) {
     const step = pow * mult;
 
     const textCol = col['--scale-text'] || '#8a95a8';
-    const tickCol = col['--scale-tick'] || 'rgba(255,255,255,0.18)';
+    const tickCol = col['--scale-tick'] || 'rgba(255,255,255,0.3)';
 
     c.font = `${11 * dpr}px ui-monospace, SFMono-Regular, monospace`;
     c.textBaseline = 'middle';
     c.textAlign = 'center';
 
+    // Ticks are filled rectangles rather than stroked lines. A stroke of an
+    // even number of device pixels wants an integer centre and an odd one wants
+    // a half-pixel centre, so a single `+ 0.5` is right at one scale factor and
+    // blurs at the other; a rect snapped to the device grid is crisp at every
+    // one. It also makes the width honest: this used to stroke at lineWidth 1 in
+    // an unscaled context, which is one *device* pixel — a half-CSS-pixel
+    // hairline on any 2× display, at 16% white, which is why the ruler read as
+    // smudges rather than as notches.
+    const w = Math.max(1, Math.round(dpr));
+
+    // Stepped by index, so "is this a major" is `i % 5` rather than a
+    // floating-point comparison against an epsilon. The epsilon version was not
+    // wrong — swept across the whole dial at every span and width it never once
+    // disagreed with this — but it left the label positions resting on a
+    // tolerance that nothing states a bound for, and an index does not.
     const minor = step / 5;
-    for (let f = Math.ceil(lo / minor) * minor; f <= hi; f += minor) {
-        const x = Math.round(((f - lo) / cfg.span) * pxW) + 0.5;
-        const isMajor = Math.abs(f / step - Math.round(f / step)) < 1e-6;
-        c.strokeStyle = tickCol;
-        c.lineWidth = 1;
-        c.beginPath();
-        c.moveTo(x, 0);
-        c.lineTo(x, isMajor ? 8 * dpr : 4 * dpr);
-        c.stroke();
-        if (isMajor) {
-            c.fillStyle = textCol;
-            c.fillText(formatFreqShort(f, cfg.span), x, H * 0.65);
-        }
+    const first = Math.ceil(lo / minor);
+    const last = Math.floor(hi / minor);
+    for (let i = first; i <= last; i++) {
+        const f = i * minor;
+        const isMajor = i % 5 === 0;
+        const cx = ((f - lo) / cfg.span) * pxW;
+        // Majors take the label's own colour: a tick and the number under it
+        // are one mark, and the minors between them are the subdivision.
+        c.fillStyle = isMajor ? textCol : tickCol;
+        c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((isMajor ? TICK_MAJOR : TICK_MINOR) * dpr));
+        if (isMajor) c.fillText(formatFreqShort(f, cfg.span), Math.round(cx), H * 0.65);
     }
 
     // Tuned-frequency pip: a downward triangle hanging from the top edge.

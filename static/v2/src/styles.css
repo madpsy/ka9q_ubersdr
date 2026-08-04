@@ -113,7 +113,9 @@
     --spec-vfo: #ffd166;
     --scale-bg: #0d121b;
     --scale-text: #8b96a9;
-    --scale-tick: rgba(255, 255, 255, 0.16);
+    /* The ruler's minor ticks. Majors take --scale-text, so this only has to be
+       legible as a subdivision — but 0.16 was not even that against --scale-bg. */
+    --scale-tick: rgba(255, 255, 255, 0.34);
 
     --radius: 10px;
     --radius-sm: 7px;

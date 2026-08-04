@@ -678,6 +678,43 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--warn);
 }
 
+/* ── Spectrum context menu ────────────────────────────────────────────────── */
+
+/* Fixed, not absolute: the click is reported in viewport coordinates and the
+   menu has to be able to sit outside the spectrum's own box near an edge. */
+.specmenu {
+    position: fixed;
+    z-index: 90;
+    min-width: 180px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.specmenu__item {
+    padding: 6px 9px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: calc(12px * var(--ui-scale));
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.specmenu__item:hover:not(:disabled) { background: var(--surface-hover); }
+.specmenu__item:disabled { color: var(--text-faint); cursor: default; }
+.specmenu__sep { height: 1px; margin: 3px 2px; background: var(--border); }
+
+/* The add-bookmark prompt the menu opens. */
+.addmark { min-width: min(320px, 70vw); }
+.addmark__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
+.addmark__at { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+
 /* =========================================================================
    Spectrum
    ========================================================================= */

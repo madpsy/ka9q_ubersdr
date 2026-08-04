@@ -18,6 +18,8 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
+import SpectrumMenu from './SpectrumMenu.jsx';
+import AddBookmark from './AddBookmark.jsx';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
@@ -429,6 +431,14 @@ export default function SpectrumView() {
         return () => { img.onload = null; img.onerror = null; };
     }, [bgUrl, bgOpacity, viewMode]);
 
+    // ---- right-click menu -------------------------------------------------
+    //
+    // { x, y, freq } while open. The frequency is taken at the moment of the
+    // click, not read from the dial when an entry is chosen: the menu is about
+    // the place you clicked, and the receiver may be tuned somewhere else.
+    const [menu, setMenu] = useState(null);
+    const [adding, setAdding] = useState(null);
+
     // ---- pointer interaction --------------------------------------------
 
     const freqAtX = useCallback((clientX) => {
@@ -440,7 +450,17 @@ export default function SpectrumView() {
         return cfg.centerFreq - cfg.span / 2 + frac * cfg.span;
     }, []);
 
+    const onContextMenu = useCallback((e) => {
+        const f = freqAtX(e.clientX);
+        if (f == null) return;   // no view yet; leave the browser menu alone
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, freq: Math.round(f) });
+    }, [freqAtX]);
+
     const onPointerDown = useCallback((e) => {
+        // Right button: the context menu handler deals with it, and starting a
+        // pan here would drag the view out from under the menu.
+        if (e.button === 2) return;
         const el = wrapRef.current;
         if (!el) return;
         el.setPointerCapture(e.pointerId);
@@ -604,6 +624,7 @@ export default function SpectrumView() {
             <div
                 className="spectrum__canvas"
                 ref={wrapRef}
+                onContextMenu={onContextMenu}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -631,6 +652,38 @@ export default function SpectrumView() {
                 <canvas ref={scaleRef} className="spectrum__pane spectrum__pane--scale" />
                 {wfH > 0 && <canvas ref={wfRef} className="spectrum__pane" />}
             </div>
+
+            {menu && (
+                <SpectrumMenu
+                    at={menu}
+                    onClose={() => setMenu(null)}
+                    items={[
+                        {
+                            key: 'bookmark',
+                            label: `Add local bookmark at ${formatFreqShort(menu.freq, span)}`,
+                            title: 'Save this frequency in this browser',
+                            onSelect: () => setAdding({
+                                frequency: menu.freq,
+                                // The mode and passband are the receiver's:
+                                // the click says where, not how to listen.
+                                mode: tuning.mode,
+                                bandwidthLow: tuning.bandwidthLow,
+                                bandwidthHigh: tuning.bandwidthHigh,
+                            }),
+                        },
+                    ]}
+                />
+            )}
+
+            {adding && (
+                <AddBookmark
+                    frequency={adding.frequency}
+                    mode={adding.mode}
+                    bandwidthLow={adding.bandwidthLow}
+                    bandwidthHigh={adding.bandwidthHigh}
+                    onClose={() => setAdding(null)}
+                />
+            )}
         </div>
     );
 }

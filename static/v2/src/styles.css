@@ -924,25 +924,50 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* Above everything, including the floating windows and the extension: nothing
    behind it is usable until the receiver is running. */
+/* The card is centred by `margin: auto` on the card itself, not by centring it
+   from here.
+ *
+ * A centred item in a scroll container that is *taller* than the container
+ * overflows equally at both ends, and the half that goes off the top cannot be
+ * scrolled back to — the callsign, the name and the blurb are simply gone above
+ * the edge. `margin: auto` centres while there is room and gives way to the
+ * padding edge when there is not, which is the whole of the fix. This bites on
+ * a laptop as readily as a phone: the card carries a 200 px map, the operator's
+ * blurb and the button. */
 .start {
     position: fixed;
     inset: 0;
     z-index: 200;
-    display: grid;
-    place-items: center;
+    display: flex;
+    justify-content: center;
+    /* index.html asks for viewport-fit=cover, so a fixed overlay covers the
+       notch and the home indicator too and has to keep clear of both itself. */
     padding: 20px;
+    padding-top: calc(20px + env(safe-area-inset-top));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-left: calc(20px + env(safe-area-inset-left));
+    padding-right: calc(20px + env(safe-area-inset-right));
     background: rgba(4, 8, 14, 0.88);
     backdrop-filter: blur(3px);
+    /* Safari needs the prefix below 18, as .modal already says. Without it the
+       overlay is flat rather than blurred — and on the versions that support
+       neither, the background colour is doing the work anyway. */
+    -webkit-backdrop-filter: blur(3px);
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
 }
 [data-theme="light"] .start { background: rgba(226, 233, 242, 0.9); }
 
 .start__card {
+    margin: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 14px;
     width: min(520px, 100%);
+    /* A flex item will not shrink below its content by default, and this one is
+       the thing that has to be allowed to stay tall and let the overlay scroll. */
+    flex: none;
     padding: 26px 24px 20px;
     text-align: center;
     background: var(--surface-2);
@@ -963,8 +988,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start__where { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 
 /* The operator's blurb can be any length; give it a bound and let it scroll
-   rather than pushing the button off a short window. */
-.start__blurb { max-height: 30vh; overflow: auto; text-align: left; }
+   rather than pushing the button off a short window.
+ *
+ * dvh over vh, with vh left underneath for anything that does not know the unit:
+ * on iOS `vh` is the viewport with the toolbars *hidden*, so 30vh is a good deal
+ * more than 30% of what you can actually see, and the button it was meant to
+ * protect gets pushed off the bottom anyway. Every other bounded thing in this
+ * file — the shell, the sheets — is already in dvh. */
+.start__blurb {
+    max-height: 30vh;
+    max-height: 30dvh;
+    overflow: auto;
+    text-align: left;
+    /* Operator-supplied markup: a long URL or a wide <pre> must not stretch the
+       card past the window. */
+    overflow-wrap: anywhere;
+}
 
 /* The one thing on screen worth pressing, so it looks like it. */
 .start__go {

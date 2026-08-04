@@ -9,36 +9,40 @@ import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui
 
 const PLACEMENT_LABEL = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Float' };
 
+// Lowest resting opacity offered for floating windows — below this an idle
+// window is hard to read and hard to aim at.
+const FLOAT_MIN_PCT = 50;
+
 export default function LayoutPanel() {
     const { sections, movePanel, setSectionHidden, resetLayout, placementOf } = useLayout();
     const d = useDisplay();
     const applies = usePanelApplies();
 
-    // 0 is off — floating windows stay solid. Anything above is their resting
-    // opacity, so the slider is one control rather than a switch plus a level.
-    // A stored 1 (the old "fully opaque" default) reads as off, same effect.
+    // Resting opacity of floating windows. 100 % is solid, i.e. the effect off;
+    // the floor keeps an idle window legible rather than a ghost. Values from
+    // outside that range (an older stored setting) clamp in.
     const floatRaw = Number(d.floatOpacity);
-    const floatPct = Number.isFinite(floatRaw) && floatRaw > 0 && floatRaw < 1
-        ? Math.round(floatRaw * 100)
-        : 0;
+    const floatPct = Number.isFinite(floatRaw) && floatRaw > 0
+        ? Math.min(100, Math.max(FLOAT_MIN_PCT, Math.round(floatRaw * 100)))
+        : 100;
 
     return (
         <div className="stack">
             <Field
-                label="Float transparency"
-                hint={floatPct > 0 ? `${floatPct} % opacity` : 'off'}
+                label="Float opacity"
+                hint={floatPct < 100 ? `${floatPct} %` : 'solid'}
             >
                 <Slider
                     value={floatPct}
-                    min={0}
-                    max={95}
+                    min={FLOAT_MIN_PCT}
+                    max={100}
                     step={5}
                     onChange={(v) => d.set({ floatOpacity: v / 100 })}
                 />
             </Field>
             <div className="note note--tight">
-                At 0 floating windows are solid. Above it they rest at that
-                opacity and go solid when you point at them.
+                Floating windows rest at this opacity and go solid when you
+                point at them. At 100 % they are always solid.
             </div>
 
             <div className="divider" />

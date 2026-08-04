@@ -788,11 +788,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start__error { font-size: calc(12px * var(--ui-scale)); color: var(--bad); }
 
 .start__links { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
-.start__link { font-size: calc(12px * var(--ui-scale)); color: var(--accent); }
-/* The two that act rather than navigate. Same appearance: from here they are
-   all just ways out of this screen. */
+.start__link {
+    font-size: calc(12px * var(--ui-scale));
+    color: var(--accent);
+    /* Anchors underline by default and buttons do not, so half this row came
+       out underlined and half did not. They are one set of choices: none of
+       them underlined until pointed at. */
+    text-decoration: none;
+}
+.start__link:hover { text-decoration: underline; }
+/* The ones that act rather than navigate, made to match the anchors. */
 .start__link--btn { border: 0; padding: 0; background: transparent; font-family: inherit; cursor: pointer; }
-.start__link--btn:hover { text-decoration: underline; }
 .start__status { font-size: calc(12px * var(--ui-scale)); color: var(--bad); }
 .start__status.is-ok { color: var(--good); }
 .start__badge {

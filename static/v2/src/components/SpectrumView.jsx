@@ -1351,6 +1351,24 @@ function autoRange(px, g, k) {
     // Ease towards the target so the display does not flicker frame to frame.
     g.autoFloor += (targetFloor - g.autoFloor) * k;
     g.autoCeil += (targetCeil - g.autoCeil) * k;
+
+    // The ceiling rises at once and only falls slowly.
+    //
+    // Easing both ways cannot work at the top, because the easing is a 0.6 s
+    // time constant and signals are not continuous. Speech, CW, a beacon: the
+    // peak appears for a couple of hundred milliseconds — a fraction of the way
+    // into the climb — and is gone before the ceiling arrives, whereupon the
+    // ceiling starts back down. It settles somewhere between the noise and the
+    // signal and every burst is drawn clipped flat against the top of the
+    // scale. Making the target track the peak is not enough on its own; the
+    // approach has to be instant.
+    //
+    // So the peak is a hard floor under the ceiling rather than something to
+    // ease towards, which is the attack-and-decay a level meter uses and for
+    // the same reason. A spurious pixel now moves it at once, but only by as
+    // much as that pixel, and the eased decay takes it back.
+    const hardCeil = peak + 3;
+    if (g.autoCeil < hardCeil) g.autoCeil = hardCeil;
 }
 
 function drawFrame(g, d, ctx) {

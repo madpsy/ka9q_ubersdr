@@ -1321,10 +1321,33 @@ function autoRange(px, g, k) {
     const stride = Math.max(1, Math.floor(n / 512));
     for (let i = 0; i < n; i += stride) sample.push(px[i]);
     sample.sort((a, b) => a - b);
+    // The tallest pixel, over every one of them rather than the strided sample.
+    // This is the only thing that guarantees a signal is drawn inside the scale
+    // rather than flat against the top of it.
+    let peak = -Infinity;
+    for (let i = 0; i < n; i++) if (px[i] > peak) peak = px[i];
     const floor = sample[Math.floor(sample.length * 0.25)];
     const ceil = sample[Math.floor(sample.length * 0.995)];
     const targetFloor = floor - 4;
-    const targetCeil = Math.max(targetFloor + 25, ceil + 12);
+    // Three terms, each covering a case the others get wrong:
+    //
+    //   floor + 25   a dead band has no signal to scale to, and without a
+    //                minimum the noise wobble fills the height.
+    //   p995 + 12    generous headroom over the general signal level on a busy
+    //                band, and immune to one hot pixel.
+    //   peak + 3     the guarantee. The percentile is taken from ~512 strided
+    //                samples of a canvas two thousand pixels wide, so a carrier
+    //                two or three pixels across contributes at most one sample
+    //                and cannot move a 99.5th percentile that needs about three
+    //                — it reads the noise instead, the ceiling drops to
+    //                floor + 25, and a signal 20 dB above it is drawn clipped
+    //                to the top of the scale with its peak cut off. One extra
+    //                linear pass is what that costs.
+    //
+    // A single spurious pixel setting the ceiling is damped by the easing
+    // below: one frame moves it 8% of the way, and it decays back when the
+    // spike is gone.
+    const targetCeil = Math.max(targetFloor + 25, ceil + 12, peak + 3);
     // Ease towards the target so the display does not flicker frame to frame.
     g.autoFloor += (targetFloor - g.autoFloor) * k;
     g.autoCeil += (targetCeil - g.autoCeil) * k;

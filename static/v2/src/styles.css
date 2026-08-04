@@ -70,6 +70,45 @@
         U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Flag emoji, because Windows has none.
+ *
+ * `countryFlag()` builds a flag from a pair of regional indicators, which is
+ * what every other platform renders as a flag and what Windows renders as two
+ * letters in boxes: Segoe UI Emoji ships no national flags, so Chrome and Edge
+ * there have nothing to draw. This is the same flags-only Twemoji subset v1
+ * uses, from the same path — one file, one cache entry for both frontends.
+ *
+ * Four things this face depends on, all load-bearing:
+ *
+ *  - `unicode-range` limits it to the regional indicator block, so the 500 KB
+ *    is fetched only when a flag is actually on screen and the font is never
+ *    consulted for ordinary text. A session that shows no flags pays nothing.
+ *  - The metric overrides are not cosmetic. The font's own ascent is 13.6 em
+ *    (27829 at 2048 upem), and Safari applies that to `line-height: normal` on
+ *    any element whose stack merely names the family — flags present or not,
+ *    which is every element here. v1 measured ~280 px-tall rows before adding
+ *    these; 100% / 20% / 0% is an ordinary Latin face's proportions.
+ *  - It goes first in both stacks so every platform draws the same flags,
+ *    rather than Twemoji on Windows and Apple's on macOS. Costs nothing for
+ *    text: a face whose unicode-range excludes the character is skipped
+ *    without being fetched.
+ *  - Only this one family is declared. v1 additionally redeclares Arial,
+ *    Helvetica, Segoe UI and the generic `sans-serif` and `monospace` under
+ *    the same src, which it needs because its stacks are spread across many
+ *    files and inline styles. Everything here inherits --font or --mono.
+ */
+@font-face {
+    font-family: 'Twemoji Flags';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+
 /* =========================================================================
    UberSDR v2 — design tokens
    Everything visual resolves to a variable here, so themes and future
@@ -126,8 +165,8 @@
     /* The downloaded faces first, the OS stack behind them — see the @font-face
        block at the top of this file. The fallbacks are not decoration: until the
        woff2 arrives, and for ever if it 404s, this is what the UI renders in. */
-    --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --font: 'Twemoji Flags', Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: 'Twemoji Flags', "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
     --dur: 160ms;
     --ease: cubic-bezier(0.2, 0.7, 0.3, 1);

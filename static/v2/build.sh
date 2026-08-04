@@ -52,6 +52,9 @@ COMMON=(
     # bundle: the woff2 sit in v2/fonts/ and are served from there. Without this
     # esbuild tries to resolve them against the filesystem and fails the build.
     --external:/v2/fonts/*
+    # Same for the flag font, which lives with v1's under static/fonts/ rather
+    # than being copied here — both frontends then share one cached file.
+    --external:/fonts/*
     --log-level=warning
     --outfile="$OUT"
 )

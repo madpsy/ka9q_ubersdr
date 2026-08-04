@@ -13,8 +13,9 @@ import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
-// Width to assume for the session countdown until it has been on screen once —
-// "Unlimited" is the widest it gets. See useRoomFor.
+// Width to assume for the session countdown until it has been on screen once.
+// "00:00:00" in tabular figures is now the widest it gets — it used to be the
+// word "Unlimited", which is no longer shown. See useRoomFor.
 const SESSION_W = 68;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
@@ -148,21 +149,23 @@ function VuBar({ muted }) {
 // from the /connection reply: 0 means unlimited, anything else is the number of
 // seconds this session may run, counted from when it started. Under five
 // minutes it turns red, as v1 does.
+//
+// Nothing is shown when there is no limit. A clock is worth the space it takes
+// in the bar only while it is counting towards something — "Unlimited" is a
+// permanent label for the absence of a deadline, and the receivers that set no
+// limit are the ones where it would sit there for ever saying nothing.
 function SessionClock() {
     const { session } = useRadio();
     const [, tick] = useState(0);
 
     useEffect(() => {
-        if (session.maxSec == null || session.maxSec === 0) return undefined;
+        if (!session.maxSec) return undefined;
         const id = setInterval(() => tick((n) => n + 1), 1000);
         return () => clearInterval(id);
     }, [session.maxSec, session.startedAt]);
 
-    if (session.maxSec == null) return null;
-
-    if (session.maxSec === 0) {
-        return <span className="topbar__session" data-optional="" title="Session time">Unlimited</span>;
-    }
+    // Null before /connection answers, 0 when the receiver sets no limit.
+    if (!session.maxSec) return null;
 
     const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
     const left = Math.max(0, session.maxSec - elapsed);
@@ -362,10 +365,13 @@ export default function TopBar({ compact }) {
                 <span className={`dot dot--${linkTone}`} />
             </div>
 
-            {/* First thing to go when the bar runs out of width: it is the one
-                readout among controls here, and a countdown that disappears
-                costs less than a squeezed frequency or Listen button. */}
-            {roomForSession && <SessionClock />}
+            {/* Never on mobile, where the bar is down to the frequency, the
+                mode and Listen — and where the space this would take is the
+                space those need. On the desktop bar it is still the first thing
+                to go when the width runs out: it is the one readout among
+                controls here, and a countdown that disappears costs less than a
+                squeezed frequency or Listen button. */}
+            {!compact && roomForSession && <SessionClock />}
 
             {/* v1 pins this next to the voice activity button on the band
                 bar, on the same condition. The page it opens is a v1 one and

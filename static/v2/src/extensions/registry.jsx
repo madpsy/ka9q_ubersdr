@@ -31,6 +31,7 @@ import React from '../react.js';
 import Icon from '../components/icons.jsx';
 import FT8Extension from './ft8/FT8Extension.jsx';
 import FSKExtension from './fsk/FSKExtension.jsx';
+import NavtexExtension from './navtex/NavtexExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -52,6 +53,16 @@ export const EXTENSIONS = [
         float: { w: 760, h: 560 },
         minimal: true,
         Component: FSKExtension,
+    },
+    {
+        id: 'navtex',
+        title: 'NAVTEX Decoder',
+        icon: <Icon.Anchor />,
+        summary: 'Maritime safety broadcasts, framed into numbered messages.',
+        requiresAudio: true,
+        float: { w: 760, h: 580 },
+        minimal: true,
+        Component: NavtexExtension,
     },
 ];
 

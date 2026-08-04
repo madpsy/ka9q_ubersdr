@@ -2947,21 +2947,21 @@ a.btn { text-decoration: none; }
 
 /* ── FSK / RTTY ───────────────────────────────────────────────────────────── */
 
-.fsk { display: flex; flex-direction: column; gap: 7px; min-height: 0; flex: 1; }
+.tp { display: flex; flex-direction: column; gap: 7px; min-height: 0; flex: 1; }
 
-.fsk__bar,
-.fsk__controls,
-.fsk__config,
-.fsk__foot {
+.tp__bar,
+.tp__controls,
+.tp__config,
+.tp__foot {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
 }
-.fsk__controls { gap: 10px; }
-.fsk__bar-gap { flex: 1; }
+.tp__controls { gap: 10px; }
+.tp__bar-gap { flex: 1; }
 
-.fsk__status {
+.tp__status {
     padding: 2px 8px;
     border-radius: 999px;
     font-size: calc(10.5px * var(--ui-scale));
@@ -2970,14 +2970,14 @@ a.btn { text-decoration: none; }
     background: var(--surface-3);
     color: var(--text-dim);
 }
-.fsk__status--on { background: rgba(69, 214, 154, 0.16); color: var(--good); }
-.fsk__status--wait { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
-.fsk__status--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
-.fsk__freq { max-width: 200px; }
+.tp__status--on { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.tp__status--wait { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+.tp__status--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
+.tp__freq { max-width: 200px; }
 
-/* The six decoder settings. Each is a label stacked over its control so the row
+/* The decoder settings. Each is a label stacked over its control so the row
    wraps into a grid of the same-shaped cells at any window width. */
-.fsk__config {
+.tp__config {
     /* Bottoms, not centres: the fields are a label stacked over a control and
        the Inverted switch is not, so centring would leave it floating. */
     align-items: flex-end;
@@ -2987,27 +2987,27 @@ a.btn { text-decoration: none; }
     background: var(--surface-2);
     border: 1px solid var(--border);
 }
-.fsk__field { display: flex; flex-direction: column; gap: 2px; }
-.fsk__field-label {
+.tp__field { display: flex; flex-direction: column; gap: 2px; }
+.tp__field-label {
     font-size: calc(9.5px * var(--ui-scale));
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
-.fsk__num { width: 76px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tp__num { width: 76px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* Baud error: a bar either side of centre, because the sign says which way the
    configured rate is wrong. */
-.fsk__baud { display: flex; align-items: center; gap: 6px; flex: none; }
-.fsk__baud-label,
-.fsk__level-label {
+.tp__baud { display: flex; align-items: center; gap: 6px; flex: none; }
+.tp__baud-label,
+.tp__level-label {
     font-size: calc(9.5px * var(--ui-scale));
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
-.fsk__baud-track,
-.fsk__level-track {
+.tp__baud-track,
+.tp__level-track {
     position: relative;
     width: 96px;
     height: 8px;
@@ -3015,7 +3015,7 @@ a.btn { text-decoration: none; }
     background: var(--surface-3);
     overflow: hidden;
 }
-.fsk__baud-zero {
+.tp__baud-zero {
     position: absolute;
     left: 50%;
     top: 0;
@@ -3023,10 +3023,10 @@ a.btn { text-decoration: none; }
     width: 1px;
     background: var(--border-strong);
 }
-.fsk__baud-fill { position: absolute; top: 0; bottom: 0; background: var(--good); }
-.fsk__baud-fill--neg { background: var(--bad); }
-.fsk__baud-value,
-.fsk__level-value {
+.tp__baud-fill { position: absolute; top: 0; bottom: 0; background: var(--good); }
+.tp__baud-fill--neg { background: var(--bad); }
+.tp__baud-value,
+.tp__level-value {
     min-width: 44px;
     text-align: right;
     font-family: var(--mono);
@@ -3034,22 +3034,22 @@ a.btn { text-decoration: none; }
     font-size: calc(10px * var(--ui-scale));
     color: var(--text-dim);
 }
-.fsk__level { display: flex; align-items: center; gap: 6px; flex: none; }
-.fsk__level-track { width: 70px; }
-.fsk__level-fill { display: block; height: 100%; background: var(--accent); }
+.tp__level { display: flex; align-items: center; gap: 6px; flex: none; }
+.tp__level-track { width: 70px; }
+.tp__level-fill { display: block; height: 100%; background: var(--accent); }
 
-.fsk__spectrum {
+.tp__spectrum {
     flex: none;
     border-radius: var(--radius-sm);
     overflow: hidden;
     background: var(--spec-bg);
     cursor: crosshair;
 }
-.fsk__spectrum-canvas { display: block; width: 100%; height: 100%; }
+.tp__spectrum-canvas { display: block; width: 100%; height: 100%; }
 
 /* The console is the scroller: it is the part with unbounded content, and
    auto-scroll only means something if the text scrolls rather than the window. */
-.fsk__console {
+.tp__console {
     flex: 1;
     min-height: 0;
     overflow: auto;
@@ -3060,8 +3060,8 @@ a.btn { text-decoration: none; }
     font-size: calc(11.5px * var(--ui-scale));
     line-height: 1.45;
 }
-.fsk__line { display: flex; gap: 8px; }
-.fsk__line-at {
+.tp__line { display: flex; gap: 8px; }
+.tp__line-at {
     flex: none;
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
@@ -3069,10 +3069,10 @@ a.btn { text-decoration: none; }
 }
 /* Teleprinter lines run to whatever length the sender chose, and a line of
    weather data is long — wrap it rather than hide it behind a sideways scroll. */
-.fsk__line-text { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.tp__line-text { white-space: pre-wrap; word-break: break-word; color: var(--text); }
 
-.fsk__foot { gap: 10px; padding-top: 1px; }
-.fsk__lamp {
+.tp__foot { gap: 10px; padding-top: 1px; }
+.tp__lamp {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -3081,7 +3081,7 @@ a.btn { text-decoration: none; }
     text-transform: uppercase;
     color: var(--text-faint);
 }
-.fsk__lamp::before {
+.tp__lamp::before {
     content: '';
     width: 7px;
     height: 7px;
@@ -3089,5 +3089,76 @@ a.btn { text-decoration: none; }
     background: var(--surface-3);
     border: 1px solid var(--border-strong);
 }
-.fsk__lamp.is-on { color: var(--good); }
-.fsk__lamp.is-on::before { background: var(--good); border-color: var(--good); }
+.tp__lamp.is-on { color: var(--good); }
+.tp__lamp.is-on::before { background: var(--good); border-color: var(--good); }
+
+/* ── NAVTEX ───────────────────────────────────────────────────────────────── */
+
+/* The message list is the same scroller as the raw console, so switching
+   between the two views does not resize the panel under you. */
+.ntx__msgs { padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.ntx__freq { max-width: 230px; }
+.ntx__bar-gap { flex: 1; }
+.ntx__count {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.ntx__msg {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+/* A message with no NNNN may be cut short, so it is drawn as unfinished rather
+   than sitting among the complete ones looking like the whole of it. */
+.ntx__msg--part { border-left-color: var(--warn); border-left-style: dashed; }
+
+.ntx__msg-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.ntx__msg-id {
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    color: var(--accent);
+}
+.ntx__msg-subject { color: var(--text-dim); }
+/* A, B, D and L are the subjects a NAVTEX receiver may not reject. */
+.ntx__msg-subject.is-vital { color: var(--warn); font-weight: 600; }
+.ntx__msg-at {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+}
+.ntx__msg-flag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(242, 100, 106, 0.16);
+    color: var(--bad);
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.ntx__msg-flag--part { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+
+/* Wrapped, not scrolled sideways: a NAVTEX body is fixed-width text meant for a
+   printer, and a horizontal scrollbar per message would be unreadable. */
+.ntx__msg-body {
+    margin: 0;
+    padding: 6px 8px;
+    font-family: var(--mono);
+    font-size: calc(11.5px * var(--ui-scale));
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+}

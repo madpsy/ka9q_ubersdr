@@ -1,4 +1,4 @@
-// FSK/RTTY: the decoder's binary frames, and the console they fill.
+// The teleprinter decoders' shared machinery, and FSK/RTTY's own settings.
 //
 // This is the extension where a mistake is quietest. The frames are packed
 // bytes rather than JSON, so a wrong offset does not throw — it yields a
@@ -11,11 +11,13 @@ const assert = require('assert');
 
 const {
     FRAME_TEXT, FRAME_BAUD, FRAME_STATE, MAX_LINES, BAUD_ERROR_MAX,
-    FRAMINGS, ENCODINGS, LIMITS, PRESETS, DEFAULT_PRESET, FSK_FREQUENCIES,
-    decodeFrame, stateFlags, appendText, formatTime, toText,
-    presetConfig, presetOf, attachParams, markSpace,
-} = require('./.build/fskframes.cjs');
-const { waveLevelDb } = require('./.build/fskspectrum.cjs');
+    FRAMINGS, ENCODINGS, LIMITS,
+    decodeFrame, stateFlags, appendText, formatTime, toText, attachParams, markSpace,
+} = require('./.build/teleprinter.cjs');
+const {
+    PRESETS, DEFAULT_PRESET, FSK_FREQUENCIES, presetConfig, presetOf,
+} = require('./.build/fskpresets.cjs');
+const { waveLevelDb } = require('./.build/tonespectrum.cjs');
 const { tunedOption } = require('./.build/extfreq.cjs');
 
 let pass = 0;

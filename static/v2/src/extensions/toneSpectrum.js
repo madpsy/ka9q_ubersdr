@@ -9,7 +9,7 @@
 // coming out; once it is, the text is what you are reading and this is 120 px
 // and an FFT read per frame that nothing is paying for.
 
-import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
+import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
 
 // The span drawn, matching v1. The decoder will accept a centre frequency well
 // above this, but nothing transmits a teleprinter tone up there and a wider

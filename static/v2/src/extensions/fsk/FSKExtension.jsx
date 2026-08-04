@@ -2,9 +2,11 @@
 //
 // The decoding happens on the server: this attaches the `fsk` audio extension
 // to the session's audio (see ../useAudioExtension.js) and reads the binary
-// frames that come back (see ./frames.js). There is no DSP here — the work is
+// frames that come back (see ../teleprinter.js). There is no DSP here — the
+// work is
 // a console you can read while characters are still arriving, and enough of a
-// tuning aid to get the two tones onto the two markers in the first place.
+// tuning aid to get the two tones onto the two markers in the first place. The
+// pieces NAVTEX draws the same way live in ../TeleprinterUI.jsx.
 //
 // Behaviour is v1's where v1 had a reason: the same presets and parameters, the
 // same ±8 baud-error meter, the same three lamps off the decoder's state
@@ -28,18 +30,20 @@
 //     the time it is 120 px of window and an FFT read per frame spent on
 //     something nobody is looking at.
 
-import React, { memo, useEffect, useMemo, useRef, useState } from '../../react.js';
+import React, { useEffect, useMemo, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
-import { Button, Empty, Icon, Switch } from '../../components/ui.jsx';
-import { subscribeAudioSpectrum } from '../../lib/audioSpectrum.js';
+import { Button, Icon, Switch } from '../../components/ui.jsx';
 import { useAudioExtension } from '../useAudioExtension.js';
 import { tunedOption } from '../frequencies.js';
 import {
-    BAUD_ERROR_MAX, DEFAULT_PRESET, ENCODINGS, FRAMINGS, FSK_FREQUENCIES, LIMITS, PRESETS,
-    appendText, attachParams, decodeFrame, formatTime, markSpace, presetConfig, presetOf,
-    stateFlags, toText,
-} from './frames.js';
-import { MAX_AUDIO_HZ, drawSpectrum, waveLevelDb } from './spectrum.js';
+    AudioLevel, BaudMeter, Console, NumberField, SpectrumStrip,
+} from '../TeleprinterUI.jsx';
+import {
+    ENCODINGS, FRAMINGS, LIMITS,
+    appendText, attachParams, decodeFrame, markSpace, sidebandSign, stateFlags, toText,
+} from '../teleprinter.js';
+import { MAX_AUDIO_HZ } from '../toneSpectrum.js';
+import { DEFAULT_PRESET, FSK_FREQUENCIES, PRESETS, presetConfig, presetOf } from './presets.js';
 
 // The mode the decoder wants. FSK is demodulated as an audio pair, so the
 // receiver has to be in a sideband mode for the tones to exist at all; the
@@ -47,186 +51,6 @@ import { MAX_AUDIO_HZ, drawSpectrum, waveLevelDb } from './spectrum.js';
 // anything it shows.
 const FSK_MODE = 'usb';
 const FSK_BANDWIDTH = { low: 0, high: MAX_AUDIO_HZ };
-
-const SPECTRUM_H = 120;
-
-// LSB and CW-L put the audio spectrum the other way up, so a tone higher in the
-// passband is a *lower* radio frequency: click-to-tune has to move the dial the
-// other way. v1 assumed USB and got this backwards on the lower sideband.
-const sidebandSign = (mode) => (mode === 'lsb' || mode === 'cwl' ? -1 : 1);
-
-/**
- * A number input that commits when you are finished with it.
- *
- * A controlled numeric field fires on every keystroke, and here every commit
- * re-attaches the decoder — so "45.45" would restart it at 4, 45, 45.4 and
- * 45.45 in turn, the first two of which the server refuses outright. Editing
- * happens against a draft string; blur and Enter commit, Escape abandons.
- */
-function NumberField({ label, title, value, limits, disabled, onCommit }) {
-    const [draft, setDraft] = useState(String(value));
-    const [editing, setEditing] = useState(false);
-
-    // Follow the value while the field is not being edited, so choosing a
-    // preset updates it — but never overwrite what is being typed.
-    useEffect(() => { if (!editing) setDraft(String(value)); }, [value, editing]);
-
-    const commit = () => {
-        setEditing(false);
-        const n = parseFloat(draft);
-        if (Number.isFinite(n)) onCommit(Math.min(limits.max, Math.max(limits.min, n)));
-        else setDraft(String(value));
-    };
-
-    return (
-        <label className="fsk__field" title={title}>
-            <span className="fsk__field-label">{label}</span>
-            <input
-                className="input fsk__num"
-                type="number"
-                inputMode="decimal"
-                min={limits.min}
-                max={limits.max}
-                step={limits.step}
-                disabled={disabled}
-                value={draft}
-                onChange={(e) => { setEditing(true); setDraft(e.target.value); }}
-                onBlur={commit}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.currentTarget.blur(); }
-                    if (e.key === 'Escape') { setEditing(false); setDraft(String(value)); }
-                }}
-            />
-        </label>
-    );
-}
-
-/**
- * The baud-error meter: how far the decoder's bit clock is from the rate asked
- * for.
- *
- * It runs either side of centre because the sign says which way to correct —
- * a bar to the right means the signal is faster than the configured baud rate.
- * Near zero and the rate is right; pinned to one end and it is not.
- */
-function BaudMeter({ error }) {
-    const e = Number.isFinite(error) ? error : 0;
-    const clamped = Math.max(-BAUD_ERROR_MAX, Math.min(BAUD_ERROR_MAX, e));
-    const half = (Math.abs(clamped) / BAUD_ERROR_MAX) * 50;
-    return (
-        <div
-            className="fsk__baud"
-            title="Difference between the configured baud rate and the one the decoder is tracking. Centred means the rate is right"
-        >
-            <span className="fsk__baud-label">Baud err</span>
-            <div className="fsk__baud-track">
-                <span className="fsk__baud-zero" />
-                <span
-                    className={`fsk__baud-fill${clamped < 0 ? ' fsk__baud-fill--neg' : ''}`}
-                    style={clamped < 0
-                        ? { right: '50%', width: `${half}%` }
-                        : { left: '50%', width: `${half}%` }}
-                />
-            </div>
-            <span className="fsk__baud-value">{e.toFixed(1)}</span>
-        </div>
-    );
-}
-
-/**
- * The audio level, in its own component so its 10 Hz tick cannot re-render the
- * console.
- *
- * Same reasoning as FT8's cycle bar: this reads the analyser on every animation
- * frame, and nothing above it needs to know.
- */
-function AudioLevel() {
-    const { player } = useRadio();
-    const [db, setDb] = useState(-Infinity);
-    const last = useRef(0);
-
-    useEffect(() => subscribeAudioSpectrum(player, { fftSize: 2048, bins: false, wave: true }, (f) => {
-        const now = performance.now();
-        if (now - last.current < 100) return;
-        last.current = now;
-        setDb(waveLevelDb(f.wave));
-    }), [player]);
-
-    const pct = Number.isFinite(db) ? Math.max(0, Math.min(100, ((db + 60) / 60) * 100)) : 0;
-    return (
-        <div className="fsk__level" title="Level of the demodulated audio the decoder is being fed">
-            <span className="fsk__level-label">Audio</span>
-            <div className="fsk__level-track"><span className="fsk__level-fill" style={{ width: `${pct}%` }} /></div>
-            <span className="fsk__level-value">{Number.isFinite(db) ? `${db.toFixed(0)} dB` : '−∞ dB'}</span>
-        </div>
-    );
-}
-
-// The 0-3 kHz audio spectrum with the two tones marked. Subscribes to the
-// analyser directly and paints the canvas, so no frame of it reaches React.
-function SpectrumStrip({ mark, space, onTune }) {
-    const { player } = useRadio();
-    const canvas = useRef(null);
-    const tones = useRef({ mark, space });
-    tones.current = { mark, space };
-
-    useEffect(() => subscribeAudioSpectrum(player, { fftSize: 2048, bins: true }, (f) => {
-        drawSpectrum(canvas.current, {
-            bins: f.bins,
-            binCount: f.binCount,
-            sampleRate: f.sampleRate,
-            mark: tones.current.mark,
-            space: tones.current.space,
-            cssHeight: SPECTRUM_H,
-        });
-    }), [player]);
-
-    return (
-        <div
-            className="fsk__spectrum"
-            style={{ height: SPECTRUM_H }}
-            title="Audio spectrum, 0–3 kHz. Click a signal to move the dial so it lands on the centre frequency"
-            onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                if (rect.width <= 0) return;
-                onTune(((e.clientX - rect.left) / rect.width) * MAX_AUDIO_HZ);
-            }}
-        >
-            <canvas ref={canvas} className="fsk__spectrum-canvas" />
-        </div>
-    );
-}
-
-/**
- * The decoded text.
- *
- * Memoised, and deliberately: the baud error arrives five times a second and
- * the state whenever it changes, both of which re-render the panel. Without
- * this the console's thousand lines would be reconciled every time one of them
- * moved a meter by a pixel.
- */
-const Console = memo(function Console({ lines, timestamps, autoScroll }) {
-    const box = useRef(null);
-
-    // Newest is at the bottom here — a console reads downwards — so following
-    // it means keeping the bottom in view.
-    useEffect(() => {
-        if (!autoScroll || !box.current) return;
-        box.current.scrollTop = box.current.scrollHeight;
-    }, [lines, autoScroll]);
-
-    return (
-        <div className="fsk__console" ref={box}>
-            {lines.length === 0 && <Empty>Nothing decoded yet.</Empty>}
-            {lines.map((l) => (
-                <div key={l.id} className="fsk__line">
-                    {timestamps && <span className="fsk__line-at">{formatTime(l.at)}</span>}
-                    <span className="fsk__line-text">{l.text}</span>
-                </div>
-            ))}
-        </div>
-    );
-});
 
 // `minimal` keeps what you set the decoder up with and what it produces — the
 // preset and its six parameters, the transport, and the console — and drops
@@ -343,22 +167,22 @@ export default function FSKExtension({ minimal }) {
         : (attachState === 'running' ? 'on' : (attachState === 'error' ? 'bad' : 'wait'));
 
     return (
-        <div className="fsk">
-            <div className="fsk__bar">
+        <div className="tp fsk">
+            <div className="tp__bar">
                 <span
-                    className={`fsk__status fsk__status--${statusTone}`}
+                    className={`tp__status tp__status--${statusTone}`}
                     title="Whether the decoder is attached to your audio session on the server"
                 >
                     {statusLabel}
                 </span>
-                <span className="fsk__bar-gap" />
+                <span className="tp__bar-gap" />
 
                 {/* Bound to where the receiver actually is, so this doubles as
                     a readout of which frequency you are on. Re-picking the
                     entry already shown is therefore a no-op, which is right:
                     it would tune to where the receiver already is. */}
                 <select
-                    className="select fsk__freq"
+                    className="select tp__freq"
                     value={tuned ? String(tuned.hz) : ''}
                     onChange={(e) => { if (e.target.value) tuneTo(Number(e.target.value)); }}
                     title={`Tune so the signal at this frequency lands on ${params.center_frequency} Hz of audio, in USB, and show which one the receiver is on`}
@@ -412,9 +236,9 @@ export default function FSKExtension({ minimal }) {
             {/* Settings stay editable while running: the hook re-attaches when
                 they change, and hunting for the shift a signal is using is
                 exactly the thing you do with the decoder already on. */}
-            <div className="fsk__config">
-                <label className="fsk__field" title="A named set of all six settings. Changing any of them by hand makes it Custom">
-                    <span className="fsk__field-label">Preset</span>
+            <div className="tp__config">
+                <label className="tp__field" title="A named set of all six settings. Changing any of them by hand makes it Custom">
+                    <span className="tp__field-label">Preset</span>
                     <select
                         className="select"
                         value={preset}
@@ -449,15 +273,15 @@ export default function FSKExtension({ minimal }) {
                     onCommit={(v) => setCfg({ baud_rate: v })}
                 />
 
-                <label className="fsk__field" title="Start, data and stop bits. 5N1.5 is the teleprinter standard; 4/7 is the seven-bit code SITOR-B and NAVTEX use">
-                    <span className="fsk__field-label">Framing</span>
+                <label className="tp__field" title="Start, data and stop bits. 5N1.5 is the teleprinter standard; 4/7 is the seven-bit code SITOR-B and NAVTEX use">
+                    <span className="tp__field-label">Framing</span>
                     <select className="select" value={config.framing} onChange={(e) => setCfg({ framing: e.target.value })}>
                         {FRAMINGS.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
                 </label>
 
-                <label className="fsk__field" title="Character set. ITA2 is Baudot, CCIR476 is the error-detecting code SITOR-B and NAVTEX use">
-                    <span className="fsk__field-label">Encoding</span>
+                <label className="tp__field" title="Character set. ITA2 is Baudot, CCIR476 is the error-detecting code SITOR-B and NAVTEX use">
+                    <span className="tp__field-label">Encoding</span>
                     <select className="select" value={config.encoding} onChange={(e) => setCfg({ encoding: e.target.value })}>
                         {ENCODINGS.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
@@ -487,7 +311,7 @@ export default function FSKExtension({ minimal }) {
             {attachState === 'error' && <div className="note note--warn">{error}</div>}
 
             {!minimal && (
-            <div className="fsk__controls">
+            <div className="tp__controls">
                 <Switch
                     label="Timestamp"
                     title="Show the UTC time each line started. Applies to what is already on screen, and to what you copy or save"
@@ -506,7 +330,7 @@ export default function FSKExtension({ minimal }) {
                     checked={opts.spectrum}
                     onChange={(v) => set({ spectrum: v })}
                 />
-                <span className="fsk__bar-gap" />
+                <span className="tp__bar-gap" />
                 <BaudMeter error={baudError} />
             </div>
             )}
@@ -523,11 +347,11 @@ export default function FSKExtension({ minimal }) {
             {/* The lamps are cumulative — decoding implies sync implies signal —
                 so how far along they are lit says where the decoder gave up. */}
             {!minimal && (
-            <div className="fsk__foot">
-                <span className={`fsk__lamp${lamps.signal ? ' is-on' : ''}`} title="The demodulator is hearing something above its noise threshold">Signal</span>
-                <span className={`fsk__lamp${lamps.sync ? ' is-on' : ''}`} title="The bit clock has locked to the signal">Sync</span>
-                <span className={`fsk__lamp${lamps.decode ? ' is-on' : ''}`} title="Characters are being decoded">Decode</span>
-                <span className="fsk__bar-gap" />
+            <div className="tp__foot">
+                <span className={`tp__lamp${lamps.signal ? ' is-on' : ''}`} title="The demodulator is hearing something above its noise threshold">Signal</span>
+                <span className={`tp__lamp${lamps.sync ? ' is-on' : ''}`} title="The bit clock has locked to the signal">Sync</span>
+                <span className={`tp__lamp${lamps.decode ? ' is-on' : ''}`} title="Characters are being decoded">Decode</span>
+                <span className="tp__bar-gap" />
                 {running && <AudioLevel />}
             </div>
             )}

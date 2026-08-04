@@ -8,6 +8,7 @@ import TopBar from './components/TopBar.jsx';
 import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
+import IdleWatch from './components/IdleWatch.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
@@ -88,6 +89,7 @@ export default function App() {
                     <ChatProvider>
                         <ExtensionsProvider>
                             <PageTitle />
+                            <IdleWatch />
                             <LegacyBridge />
                             <SpotStreams />
                             {mobile ? <MobileShell /> : <DesktopShell />}

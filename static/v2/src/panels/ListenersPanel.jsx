@@ -13,7 +13,7 @@
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Empty, Icon } from '../components/ui.jsx';
+import { Button, Empty, Icon, ShowMore } from '../components/ui.jsx';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { openChannelsMap } from '../compat/legacyBridge.js';
 import { activeLabel, subscribeListeners, tunable } from '../lib/listeners.js';
@@ -22,6 +22,11 @@ import { activeLabel, subscribeListeners, tunable } from '../lib/listeners.js';
 // seconds reads as frozen, and "12s ago" that stays at 12 for ten seconds is
 // worse than no number.
 const TICK_MS = 1000;
+
+// Rows before "show more", and how many each press adds. Smaller than the spot
+// list's page because this panel sits in a side dock among several others, and
+// because your own row is always one of the five.
+const PAGE = 5;
 
 function Row({ channel, now, current, onTune }) {
     const flag = countryFlag(channel.countryCode);
@@ -79,6 +84,7 @@ export default function ListenersPanel({ minimal }) {
     const { tuning, actions } = useRadio();
     const [state, setState] = useState(null);      // null until the first reply
     const [now, setNow] = useState(() => Date.now());
+    const [shown, setShown] = useState(PAGE);
 
     useEffect(() => subscribeListeners(setState), []);
 
@@ -89,6 +95,7 @@ export default function ListenersPanel({ minimal }) {
 
     const channels = (state && state.channels) || [];
     const others = channels.filter((c) => !c.you).length;
+    const page = channels.slice(0, shown);
 
     // One tune, so the receiver never passes through an intermediate
     // mode/passband on the way — the same call the spot rows make.
@@ -129,7 +136,7 @@ export default function ListenersPanel({ minimal }) {
             <div className="list lsn-list">
                 {state === null && <Empty>Loading…</Empty>}
                 {state !== null && channels.length === 0 && <Empty>Nobody is listening.</Empty>}
-                {channels.map((c) => (
+                {page.map((c) => (
                     <Row
                         key={`${c.index}-${c.frequency}-${c.chatUsername}`}
                         channel={c}
@@ -139,6 +146,8 @@ export default function ListenersPanel({ minimal }) {
                     />
                 ))}
             </div>
+
+            <ShowMore shown={page.length} total={channels.length} onMore={() => setShown((n) => n + PAGE)} />
         </div>
     );
 }

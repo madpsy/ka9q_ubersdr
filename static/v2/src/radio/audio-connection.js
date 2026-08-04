@@ -27,7 +27,6 @@ export class AudioConnection extends Emitter {
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
-        this.pingTimer = null;
         // Bytes taken off this socket, ever. Cumulative and never reset, so a
         // reader only has to take deltas — see the Receiver info panel, which
         // is the only thing that looks at it.
@@ -85,8 +84,10 @@ export class AudioConnection extends Emitter {
             // so ask for one — the UI should reflect what the server actually
             // tuned, not only what we requested.
             this.send({ type: 'get_status' });
-            clearInterval(this.pingTimer);
-            this.pingTimer = setInterval(() => this.send({ type: 'ping' }), 15000);
+            // No keepalive timer. Every message touches the session server
+            // side, ping included, so a timer here would make the session
+            // immortal and the operator's slot unreclaimable. The idle watch
+            // pings on activity instead — see radio/idle.js.
         };
         ws.onmessage = (ev) => this._onMessage(ev);
         ws.onerror = () => this.emit('error', { kind: 'socket', message: 'audio socket error' });
@@ -97,13 +98,18 @@ export class AudioConnection extends Emitter {
     disconnect() {
         this.closedByUser = true;
         clearTimeout(this.reconnectTimer);
-        clearInterval(this.pingTimer);
         this.reconnectTimer = null;
         if (this.ws) {
             try { this.ws.close(1000, 'client'); } catch (e) { /* ignore */ }
         }
         this.ws = null;
         this._setState('idle');
+    }
+
+    // Keepalive, sent when the operator does something rather than on a timer —
+    // see radio/idle.js for why that distinction is the whole point.
+    ping() {
+        return this.send({ type: 'ping' });
     }
 
     send(msg) {
@@ -238,7 +244,6 @@ export class AudioConnection extends Emitter {
     }
 
     _onClose(ev) {
-        clearInterval(this.pingTimer);
         this.ws = null;
         // The session it belonged to is gone; a reconnect is given a new one.
         setServerSessionId(null);

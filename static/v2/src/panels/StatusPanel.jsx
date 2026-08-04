@@ -57,36 +57,46 @@ function Link({ state, rate }) {
     );
 }
 
-export default function StatusPanel() {
+// `minimal` keeps the link block — what the two sockets are doing and what the
+// spectrum view is set to — and drops the receiver's identity and the
+// operator's blurb, which are read once and then known. See the registry's
+// `minimal`.
+export default function StatusPanel({ minimal }) {
     const { serverInfo, audioState, spectrumState, view, audioConn, spectrumConn } = useRadio();
     // Before the early return: hooks cannot be called conditionally.
     const audioRate = useThroughput(audioConn);
     const spectrumRate = useThroughput(spectrumConn);
 
-    if (!serverInfo) return <Empty>Loading receiver info…</Empty>;
+    // The link block needs no /api/description, so the minimal view has
+    // nothing to wait for.
+    if (!serverInfo && !minimal) return <Empty>Loading receiver info…</Empty>;
 
-    const rx = serverInfo.receiver || {};
+    const rx = (serverInfo && serverInfo.receiver) || {};
     const gps = rx.gps || {};
 
     return (
         <div className="stack">
-            <div className="kv-list">
-                <Row label="Name" value={rx.name} />
-                <Row label="Callsign" value={rx.callsign} />
-                <Row label="Location" value={rx.location} />
-                <Row label="Grid" value={gps.maidenhead} />
-                <Row
-                    label="Coordinates"
-                    // 0,0 is the config default, not a real position.
-                    value={gps.lat || gps.lon ? `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}` : null}
-                />
-                <Row label="Altitude" value={rx.asl != null ? `${rx.asl} m ASL` : null} />
-                <Row label="Antenna" value={rx.antenna} />
-                <Row label="Timezone" value={rx.timezone} />
-                <Row label="Version" value={serverInfo.version} />
-            </div>
+            {!minimal && serverInfo && (
+                <>
+                    <div className="kv-list">
+                        <Row label="Name" value={rx.name} />
+                        <Row label="Callsign" value={rx.callsign} />
+                        <Row label="Location" value={rx.location} />
+                        <Row label="Grid" value={gps.maidenhead} />
+                        <Row
+                            label="Coordinates"
+                            // 0,0 is the config default, not a real position.
+                            value={gps.lat || gps.lon ? `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}` : null}
+                        />
+                        <Row label="Altitude" value={rx.asl != null ? `${rx.asl} m ASL` : null} />
+                        <Row label="Antenna" value={rx.antenna} />
+                        <Row label="Timezone" value={rx.timezone} />
+                        <Row label="Version" value={serverInfo.version} />
+                    </div>
 
-            <div className="divider" />
+                    <div className="divider" />
+                </>
+            )}
 
             <div className="kv-list">
                 <Row label="Audio link" value={<Link state={audioState} rate={audioRate} />} />
@@ -96,7 +106,7 @@ export default function StatusPanel() {
                 <Row label="Resolution" value={view.binBandwidth ? `${view.binBandwidth.toFixed(1)} Hz/bin` : '—'} />
             </div>
 
-            {serverInfo.description && (
+            {!minimal && serverInfo && serverInfo.description && (
                 <>
                     <div className="divider" />
                     <div

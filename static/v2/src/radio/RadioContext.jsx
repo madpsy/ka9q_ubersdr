@@ -76,7 +76,10 @@ export function RadioProvider({ children }) {
     const [serverInfo, setServerInfo] = useState(null);
     // How long this session may run, from /connection: { maxSec, startedAt }.
     // maxSec 0 means unlimited; null until the first session starts.
-    const [session, setSession] = useState({ maxSec: null, startedAt: 0 });
+    // maxSec: how long this session may run at all. idleSec: how long it may
+    // sit inactive before the server reclaims it — what the idle watch counts
+    // against. Both come from the one /connection reply, and 0 means neither.
+    const [session, setSession] = useState({ maxSec: null, idleSec: null, startedAt: 0 });
     const [log, setLog] = useState([]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
@@ -476,7 +479,11 @@ export function RadioProvider({ children }) {
                 // request; v1 reads max_session_time from the same reply.
                 connectionCheck().then((r) => {
                     if (r && r.maxSessionTime != null) {
-                        setSession({ maxSec: r.maxSessionTime, startedAt: Date.now() });
+                        setSession({
+                            maxSec: r.maxSessionTime,
+                            idleSec: r.sessionTimeout,
+                            startedAt: Date.now(),
+                        });
                     }
                 }, () => { /* the countdown just stays as it was */ });
                 const t = tuningRef.current;

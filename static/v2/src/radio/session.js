@@ -125,10 +125,22 @@ export async function checkConnection() {
             // /connection reply carries it — it depends on whether this client
             // is bypassed, so it is not in /api/description.
             maxSessionTime: typeof data.max_session_time === 'number' ? data.max_session_time : null,
+            // Seconds of *inactivity* before the server reclaims the session,
+            // 0 meaning it never does. The idle watch counts against this, and
+            // it comes from the same reply for the same reason max_session_time
+            // does: it depends on whether this client is bypassed.
+            sessionTimeout: typeof data.session_timeout === 'number' ? data.session_timeout : null,
             status: res.status,
         };
     } catch (err) {
-        return { allowed: true, reason: 'connection check failed', clientIp: '', maxSessionTime: null, status: 0 };
+        return {
+            allowed: true,
+            reason: 'connection check failed',
+            clientIp: '',
+            maxSessionTime: null,
+            sessionTimeout: null,
+            status: 0,
+        };
     }
 }
 

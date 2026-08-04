@@ -128,3 +128,76 @@ export function splitMessage(message, usernames) {
     if (last < text.length) out.push({ text: text.slice(last) });
     return out.length ? out : [{ text }];
 }
+
+// ---------------------------------------------------------------------------
+// :shortcode: emoji
+//
+// v1's map (chat-ui.js EMOJI_SHORTCODES), name for name and character for
+// character. It has to stay identical: a shortcode is expanded before the
+// message goes out, so both frontends have to agree on what :fire: means or the
+// same typing produces different text in the room.
+//
+// Note `grin` is in the map but not in the picker — v1 is the same, and it
+// costs nothing to keep a shortcode with no button.
+export const EMOJI_SHORTCODES = {
+    grin: '\u{1F601}', smile: '\u{1F60A}', laugh: '\u{1F602}',
+    rofl: '\u{1F923}', heart_eyes: '\u{1F60D}', sunglasses: '\u{1F60E}',
+    thinking: '\u{1F914}', thumbsup: '\u{1F44D}', thumbsdown: '\u{1F44E}',
+    heart: '\u2764\uFE0F', tada: '\u{1F389}', fire: '\u{1F525}',
+    star: '\u2B50', sparkles: '\u2728', hundred: '\u{1F4AF}',
+    rocket: '\u{1F680}', target: '\u{1F3AF}', wave: '\u{1F44B}',
+    pray: '\u{1F64F}', muscle: '\u{1F4AA}', handshake: '\u{1F91D}',
+    clap: '\u{1F44F}', music: '\u{1F3B5}', radio: '\u{1F4FB}',
+    satellite: '\u{1F4E1}', glowing_star: '\u{1F31F}', bulb: '\u{1F4A1}',
+    zap: '\u26A1', rainbow: '\u{1F308}', sun: '\u2600\uFE0F',
+    moon: '\u{1F319}', gear: '\u2699\uFE0F', wrench: '\u{1F527}',
+};
+
+// The shortcode for an emoji, for the picker's tooltips. The first name wins
+// where two map to the same character, which is v1's rule and keeps the order
+// of the map meaningful.
+const BY_EMOJI = (() => {
+    const out = {};
+    for (const [code, emoji] of Object.entries(EMOJI_SHORTCODES)) {
+        if (!out[emoji]) out[emoji] = code;
+    }
+    return out;
+})();
+
+export function shortcodeFor(emoji) {
+    return BY_EMOJI[emoji] || null;
+}
+
+// The partial shortcode being typed, or null. Needs at least one character
+// after the colon: a bare ":" is far more often punctuation than the start of
+// an emoji, and offering the whole list on every colon is noise.
+export function emojiQuery(textBeforeCursor) {
+    const m = String(textBeforeCursor || '').match(/:(\w+)$/);
+    return m ? { partial: m[1], at: m.index } : null;
+}
+
+export function matchShortcodes(partial) {
+    const p = String(partial || '').toLowerCase();
+    return Object.keys(EMOJI_SHORTCODES).filter((code) => code.startsWith(p)).sort();
+}
+
+// Replaces ":partial" with the emoji itself — not with ":code:", which would
+// only have to be expanded again on send.
+export function applyEmojiCompletion(text, cursor, code) {
+    const before = text.slice(0, cursor);
+    const q = emojiQuery(before);
+    const emoji = EMOJI_SHORTCODES[code];
+    if (!q || !emoji) return { text, cursor };
+    const next = text.slice(0, q.at) + emoji + text.slice(cursor);
+    return { text: next, cursor: q.at + emoji.length };
+}
+
+// Expands any :shortcode: left in a message on the way out, so typing them in
+// full works without ever touching the suggestion list. Unknown codes are left
+// exactly as they were — ":-)" and "10:30:00" are not emoji.
+export function expandShortcodes(message) {
+    return String(message == null ? '' : message)
+        .replace(/:(\w+):/g, (m, code) => (
+            EMOJI_SHORTCODES[code] !== undefined ? EMOJI_SHORTCODES[code] : m
+        ));
+}

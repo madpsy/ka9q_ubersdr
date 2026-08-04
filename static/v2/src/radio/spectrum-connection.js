@@ -37,7 +37,6 @@ export class SpectrumConnection extends Emitter {
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
-        this.pingTimer = null;
         // Bytes taken off this socket, ever — see AudioConnection.bytesIn.
         this.bytesIn = 0;
 
@@ -119,8 +118,10 @@ export class SpectrumConnection extends Emitter {
             this.attempts = 0;
             this._setState('open');
             this.emit('open');
-            clearInterval(this.pingTimer);
-            this.pingTimer = setInterval(() => this.send({ type: 'ping' }), 20000);
+            // No keepalive timer. Every message touches the session server
+            // side, ping included, so a timer here would make the session
+            // immortal and the operator's slot unreclaimable. The idle watch
+            // pings on activity instead — see radio/idle.js.
             if (this.pendingView) {
                 const p = this.pendingView;
                 this.pendingView = null;
@@ -136,13 +137,18 @@ export class SpectrumConnection extends Emitter {
     disconnect() {
         this.closedByUser = true;
         clearTimeout(this.reconnectTimer);
-        clearInterval(this.pingTimer);
         this.reconnectTimer = null;
         if (this.ws) {
             try { this.ws.close(1000, 'client'); } catch (e) { /* ignore */ }
         }
         this.ws = null;
         this._setState('idle');
+    }
+
+    // Keepalive, sent when the operator does something rather than on a timer —
+    // see radio/idle.js for why that distinction is the whole point.
+    ping() {
+        return this.send({ type: 'ping' });
     }
 
     send(msg) {
@@ -314,7 +320,6 @@ export class SpectrumConnection extends Emitter {
     }
 
     _onClose() {
-        clearInterval(this.pingTimer);
         this.ws = null;
         this.emit('close');
         if (this.closedByUser) {

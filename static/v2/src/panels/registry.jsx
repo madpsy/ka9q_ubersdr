@@ -186,7 +186,17 @@ export const PANELS = [
         minimal: true,
         Component: ListenersPanel,
     },
-    { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },
+    // Minimal: the link block — sockets, throughput and the spectrum view.
+    // The receiver's identity is read once and then known.
+    {
+        id: 'status',
+        title: 'Receiver info',
+        icon: <Icon.Info />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: StatusPanel,
+    },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 
     // Minimal: the amateur bands only, without the operator's quick-tune row.

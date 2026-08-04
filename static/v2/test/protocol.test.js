@@ -5,6 +5,7 @@ const assert = require('assert');
 const { SpectrumConnection } = require('./.build/spectrum.cjs');
 const { AudioConnection } = require('./.build/audio.cjs');
 const {
+    MAX_FREQ, MIN_FREQ,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, SQUELCH_STEP,
     autoSquelchValue, bandwidthLimits, maxFilterWidth, snapStep, squelchEnabled, squelchThreshold,
 } = require('./.build/constants.cjs');
@@ -16,7 +17,8 @@ const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const {
-    dbfsToSUnits, formatRate, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    dbfsToSUnits, formatRate, freqInRange, freqToKHz, parseFreqInput,
+    sMeterColour, sMeterColourAt, snrColour, snrColourAt,
     sUnitFraction, sUnitLabel, sUnitLabelAt,
     S_UNITS_MIN, S_UNITS_MAX,
 } = require('./.build/format.cjs');
@@ -764,6 +766,88 @@ t('the held S value reads the same as a live one at the same place', () => {
     // all down there rather than choosing between S0 and S1.
     assert.strictEqual(sUnitFraction(-130), sUnitFraction(-121));
     assert.strictEqual(sUnitLabelAt(0), 'S1');
+});
+
+// --- the type-in frequency box ----------------------------------------------
+//
+// Both places you can type a frequency — the top bar's readout and the Receiver
+// panel's dial — are the same FreqEntry over parseFreqInput, so this is the
+// whole contract for what either of them accepts.
+
+t('a bare number is kHz, with or without a decimal point', () => {
+    assert.strictEqual(parseFreqInput('14175'), 14175000);
+    assert.strictEqual(parseFreqInput('7100'), 7100000);
+    assert.strictEqual(parseFreqInput('198'), 198000);
+    // Sub-kHz precision is still reachable, which is what the decimal is for.
+    assert.strictEqual(parseFreqInput('14175.5'), 14175500);
+    assert.strictEqual(parseFreqInput('7100.001'), 7100001);
+});
+
+t('a written unit is taken at its word, whatever the number looks like', () => {
+    assert.strictEqual(parseFreqInput('7.1M'), 7100000);
+    assert.strictEqual(parseFreqInput('7.1mhz'), 7100000);
+    assert.strictEqual(parseFreqInput('7100k'), 7100000);
+    assert.strictEqual(parseFreqInput('7100khz'), 7100000);
+    assert.strictEqual(parseFreqInput('7100000hz'), 7100000);
+    // Spacing and case are noise.
+    assert.strictEqual(parseFreqInput('  7100 KHz '), 7100000);
+});
+
+t('the readout\'s own grouped form pastes straight back in', () => {
+    // What the dial displays for 14.175 MHz — two separators, so it can only be
+    // the grouped Hz form and never a decimal.
+    assert.strictEqual(parseFreqInput('14.175.000'), 14175000);
+    assert.strictEqual(parseFreqInput('0.198.000'), 198000);
+});
+
+t('nothing usable reads as nothing, never as zero', () => {
+    assert.strictEqual(parseFreqInput(''), null);
+    assert.strictEqual(parseFreqInput('   '), null);
+    assert.strictEqual(parseFreqInput(null), null);
+    assert.strictEqual(parseFreqInput('abc'), null);
+    // A suffix with no number left to scale — Number('') is 0, which would
+    // otherwise tune to DC instead of being refused.
+    assert.strictEqual(parseFreqInput('k'), null);
+    assert.strictEqual(parseFreqInput('mhz'), null);
+    assert.strictEqual(parseFreqInput('.'), null);
+});
+
+t('the range is the receiver\'s, and both ends are inclusive', () => {
+    assert.ok(freqInRange(MIN_FREQ));
+    assert.ok(freqInRange(MAX_FREQ));
+    assert.ok(freqInRange(14175000));
+    assert.ok(!freqInRange(MIN_FREQ - 1));
+    assert.ok(!freqInRange(MAX_FREQ + 1));
+    assert.ok(!freqInRange(0));
+    assert.ok(!freqInRange(-7100000));
+    assert.ok(!freqInRange(null));
+    assert.ok(!freqInRange(NaN));
+});
+
+t('typing the range\'s own bounds in kHz lands exactly on them', () => {
+    assert.strictEqual(parseFreqInput('10'), MIN_FREQ);
+    assert.strictEqual(parseFreqInput('30000'), MAX_FREQ);
+    // And a step outside either is refused rather than clamped.
+    assert.ok(!freqInRange(parseFreqInput('9.999')));
+    assert.ok(!freqInRange(parseFreqInput('30000.001')));
+});
+
+t('the box opens on the current frequency, in kHz, without trailing zeros', () => {
+    assert.strictEqual(freqToKHz(14175000), '14175');
+    assert.strictEqual(freqToKHz(7100000), '7100');
+    assert.strictEqual(freqToKHz(10000), '10');
+    assert.strictEqual(freqToKHz(14175500), '14175.5');
+    assert.strictEqual(freqToKHz(null), '');
+});
+
+t('what the box opens with is what it would commit unchanged', () => {
+    // Open, touch nothing, press Enter: the frequency must not move. This is
+    // the round trip that a unit change is most likely to break.
+    for (const hz of [10000, 198000, 7100000, 14175500, 27500123, 30000000]) {
+        const back = parseFreqInput(freqToKHz(hz));
+        assert.strictEqual(Math.round(back), hz, `${hz} Hz did not survive the round trip`);
+        assert.ok(freqInRange(back), `${hz} Hz came back out of range`);
+    }
 });
 
 t('a link rate reads in bits, and scales', () => {

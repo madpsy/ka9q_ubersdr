@@ -2,7 +2,8 @@
 //
 // Each digit is its own hit target: scrolling or dragging over one steps the
 // frequency by that digit's place value, which is far quicker than picking a
-// step size first. Typing is still available — click the readout to edit.
+// step size first. Typing is still available — click the readout to edit, which
+// swaps in the shared kHz box (FreqEntry); the readout itself stays in Hz.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { formatHz, clamp } from '../lib/format.js';
@@ -51,7 +52,7 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
                     className="dial__input"
                     onDone={(hz) => { setEditing(false); if (hz != null) onChange(hz); }}
                 />
-                <span className="dial__unit">Hz / MHz</span>
+                <span className="dial__unit">kHz</span>
             </div>
         );
     }

@@ -426,6 +426,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     outline: none;
 }
 .topbar--compact .topbar__hz-input { font-size: calc(14px * var(--ui-scale)); }
+/* A frequency outside 10 kHz–30 MHz. The box stays open and keeps the text —
+   see FreqEntry — so this has to say "not yet" rather than "rejected". */
+.topbar__hz-input.is-invalid { border-bottom-color: var(--bad); color: var(--bad); }
 
 .topbar__meter { display: flex; align-items: center; gap: 9px; min-width: 180px; }
 .topbar__s { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 46px; }
@@ -1470,6 +1473,7 @@ a.btn { text-decoration: none; }
     font-size: calc(20px * var(--ui-scale));
     text-align: center;
 }
+.dial__input.is-invalid { border-color: var(--bad); color: var(--bad); }
 .dial.is-disabled { opacity: 0.6; pointer-events: none; }
 
 /* VFO A-D. Round, because they are the one control here that is a position

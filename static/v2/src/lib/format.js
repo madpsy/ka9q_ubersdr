@@ -1,5 +1,7 @@
 // Frequency / number formatting shared across panels and the spectrum canvas.
 
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
+
 // 14175000 -> "14.175.000"  (grouped in the ham-radio convention: MHz.kHz.Hz)
 export function formatHz(hz) {
     const n = Math.max(0, Math.round(hz || 0));
@@ -35,7 +37,19 @@ export function formatSpan(hz) {
     return Math.round(hz) + ' Hz';
 }
 
-// Accepts "14.175", "14175000", "14175 k", "7.1M" — returns Hz or null.
+// Reads a typed frequency and returns Hz, or null for anything unusable.
+//
+// The unit is kHz. A bare number is kHz whether or not it has a decimal point —
+// "14175", "14175.5" and "475" all mean what an operator would say out loud —
+// and that is the whole rule, so there is nothing to work out before typing.
+//
+// It used to guess from the shape of the number: a decimal point meant MHz and
+// a plain integer meant Hz, so "7100" was 7.1 kHz and "7.1" was 7.1 MHz — a
+// thousandfold difference resting on a keystroke. One fixed unit is worth more
+// than the convenience that cost.
+//
+// A unit written out is still taken at its word, since those cannot be
+// misread: "7.1M", "7100k" and "7100000hz" are all the same frequency.
 export function parseFreqInput(text) {
     if (text == null) return null;
     let s = String(text).trim().toLowerCase().replace(/\s+/g, '');
@@ -48,21 +62,38 @@ export function parseFreqInput(text) {
     else if (s.endsWith('m')) { mult = 1e6; s = s.slice(0, -1); }
     else if (s.endsWith('k')) { mult = 1e3; s = s.slice(0, -1); }
 
-    // Grouped form "14.175.000" is unambiguous — treat separators as thousands.
+    // Grouped form "14.175.000" — the readout's own format, and unambiguous
+    // because nothing else carries two separators. Read back as Hz, so what the
+    // dial displays can be pasted straight back into it.
     if (mult === null && (s.match(/\./g) || []).length > 1) {
         const digits = s.replace(/\./g, '');
-        const n = Number(digits);
+        const n = digits === '' ? NaN : Number(digits);
         return Number.isFinite(n) ? n : null;
     }
 
     s = s.replace(/,/g, '');
+    // A suffix on its own ("k") leaves nothing to scale, and Number('') is 0 —
+    // which would tune to DC rather than being rejected.
+    if (s === '') return null;
     const n = Number(s);
     if (!Number.isFinite(n)) return null;
 
-    if (mult !== null) return n * mult;
-    // Bare number: a decimal point means MHz, otherwise assume Hz.
-    if (s.includes('.')) return n * 1e6;
-    return n;
+    return n * (mult === null ? 1e3 : mult);
+}
+
+// Is a frequency one this receiver can be tuned to? The bounds are the same
+// ones every other path clamps against, so the type-in box accepts exactly what
+// the dial, the spectrum drag and a bookmark can reach.
+export function freqInRange(hz) {
+    return hz != null && Number.isFinite(hz) && hz >= MIN_FREQ && hz <= MAX_FREQ;
+}
+
+// A frequency as the number the type-in box works in. Trailing zeros are gone —
+// 14175000 Hz is "14175", not "14175.000" — because it is a value to be edited,
+// not a readout to be lined up with others.
+export function freqToKHz(hz) {
+    if (hz == null || !Number.isFinite(hz)) return '';
+    return String(Math.round(hz) / 1000);
 }
 
 // ISO 3166-1 alpha-2 -> flag emoji, via the regional indicator letters.

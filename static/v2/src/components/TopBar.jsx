@@ -235,7 +235,7 @@ export default function TopBar({ compact }) {
                     <button
                         type="button"
                         className="topbar__hz"
-                        title="Type a frequency"
+                        title="Type a frequency in kHz"
                         onClick={() => setEditingFreq(true)}
                     >
                         {formatHz(tuning.frequency)}

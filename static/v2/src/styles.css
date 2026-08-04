@@ -1088,6 +1088,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
    ========================================================================= */
 
 .meter { display: flex; flex-direction: column; gap: 5px; }
+/* The meters are buttons: clicking one swaps every meter between the bar and
+   the analogue needle. Nothing else about them changes. */
+.meter--swap {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+.needle { display: block; width: 100%; }
 /* Labels are placed at their true position on the scale, not spread evenly —
    see S_TICKS in SignalPanel.jsx. */
 .meter__scale {

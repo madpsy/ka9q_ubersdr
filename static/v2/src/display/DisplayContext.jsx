@@ -50,6 +50,9 @@ export const DEFAULTS = {
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
     scopeContrast: 1.0,     // gamma on the audio waterfall's colour mapping
+    // Signal panel meters: 'bar' or the analogue 'needle'. Clicking a meter
+    // switches both — see SignalPanel.
+    meterStyle: 'bar',
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };

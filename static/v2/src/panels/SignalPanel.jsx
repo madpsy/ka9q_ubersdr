@@ -3,11 +3,19 @@
 
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { Bar, Readout } from '../components/ui.jsx';
 import {
     audioLevelPercent, snrColour, snrFraction, sUnitFraction, sUnitLabel,
     SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
 } from '../lib/format.js';
+// The theme's own tokens rather than v1's hardcoded slate palette, so a meter
+// belongs to whichever theme is on. Cached per theme — this is a draw loop.
+import { cssVar } from '../lib/audioWaterfall.js';
+import {
+    angleAt, arcAngle, geometry, pointAt, stepPeak,
+    LABEL_INSET, NEEDLE_GAP, TICK_IN, TICK_OUT,
+} from '../lib/needle.js';
 
 const HISTORY = 120;   // ~10 s at 12 Hz
 
@@ -56,10 +64,142 @@ function MeterTrack({ ticks, children }) {
     );
 }
 
-// `minimal` keeps the two bar meters and drops the numeric readouts, the SNR
-// trace and the buffer counters. See the registry's `minimal`.
+// Height of a needle meter, CSS px. Together with the panel width this is what
+// sets the radius — a meter too wide for it draws a narrower arc rather than
+// one with its scale hanging out of the box. See lib/needle.js.
+const NEEDLE_H = 74;
+
+// The analogue meter. Takes the same 0..1 position and the same tick list as the
+// bar it replaces, so the two are the same instrument drawn two ways.
+//
+// Drawn on every render, which is the meter sample rate (useMeters), not a frame
+// loop: the needle eases toward the reading and the peak decays in wall-clock
+// time, so the movement is the same however often the panel is sampled.
+function NeedleMeter({ ticks, fraction, colour, showPeak, title }) {
+    const ref = useRef(null);
+    const anim = useRef({ at: null, peak: null, last: 0 });
+
+    useEffect(() => {
+        const canvas = ref.current;
+        if (!canvas) return;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = canvas.clientWidth;
+        const h = NEEDLE_H;
+        const pxW = Math.round(w * dpr);
+        const pxH = Math.round(h * dpr);
+        if (canvas.width !== pxW || canvas.height !== pxH) {
+            canvas.width = pxW;
+            canvas.height = pxH;
+        }
+
+        const now = performance.now();
+        const a = anim.current;
+        const dt = a.last ? Math.min(0.5, (now - a.last) / 1000) : 0;
+        a.last = now;
+
+        // v1 eases the needle toward the reading rather than snapping to it —
+        // an analogue movement has mass, and without it the needle jitters.
+        const target = Number.isFinite(fraction) ? fraction : 0;
+        a.at = a.at == null ? target : a.at + (target - a.at) * 0.35;
+        if (showPeak) a.peak = stepPeak(a.peak, a.at, dt);
+
+        const g = geometry(w, h);
+        const c = canvas.getContext('2d');
+        c.setTransform(dpr, 0, 0, dpr, 0, 0);
+        c.clearRect(0, 0, w, h);
+
+        const faint = cssVar('--text-faint', '#5c6779');
+        const strong = cssVar('--border-strong', '#2f3b4e');
+        const text = cssVar('--text', '#e6ecf5');
+
+        // Track, then the travelled part of it in the meter's own colour: the
+        // same "how far along" the bar gives, on an arc.
+        c.lineWidth = 2;
+        c.strokeStyle = strong;
+        c.beginPath();
+        c.arc(g.cx, g.cy, g.radius, arcAngle(0), arcAngle(1));
+        c.stroke();
+
+        c.strokeStyle = colour;
+        c.lineWidth = 2.5;
+        c.beginPath();
+        c.arc(g.cx, g.cy, g.radius, arcAngle(0), arcAngle(a.at));
+        c.stroke();
+
+        // Ticks inside the arc, each labelled where the bar prints it.
+        c.font = `600 ${9.5}px ui-sans-serif, system-ui, sans-serif`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        for (const [label, f] of ticks) {
+            const p1 = pointAt(g, f, g.radius - TICK_OUT);
+            const p2 = pointAt(g, f, g.radius - TICK_IN);
+            c.strokeStyle = faint;
+            c.lineWidth = 1.5;
+            c.beginPath();
+            c.moveTo(p1.x, p1.y);
+            c.lineTo(p2.x, p2.y);
+            c.stroke();
+
+            const lp = pointAt(g, f, g.radius - LABEL_INSET);
+            c.fillStyle = faint;
+            c.fillText(label, lp.x, lp.y);
+        }
+
+        // Peak hold: a thin marker rather than v1's second needle, which at this
+        // size lands on top of the first one and reads as a smear.
+        if (showPeak && a.peak) {
+            const p1 = pointAt(g, a.peak.value, g.radius + 1);
+            const p2 = pointAt(g, a.peak.value, g.radius - TICK_IN);
+            c.strokeStyle = text;
+            c.globalAlpha = 0.55;
+            c.lineWidth = 2;
+            c.beginPath();
+            c.moveTo(p1.x, p1.y);
+            c.lineTo(p2.x, p2.y);
+            c.stroke();
+            c.globalAlpha = 1;
+        }
+
+        // The needle: a tapered triangle from the pivot, as v1 draws it.
+        const tip = pointAt(g, a.at, g.radius - NEEDLE_GAP);
+        const ang = angleAt(a.at);
+        const halfW = 2.6;
+        const bx = g.cx + Math.cos(ang - Math.PI / 2) * halfW;
+        const by = g.cy - Math.sin(ang - Math.PI / 2) * halfW;
+        const cx2 = g.cx + Math.cos(ang + Math.PI / 2) * halfW;
+        const cy2 = g.cy - Math.sin(ang + Math.PI / 2) * halfW;
+        c.save();
+        c.shadowColor = 'rgba(0,0,0,0.45)';
+        c.shadowBlur = 3;
+        c.shadowOffsetY = 1;
+        c.beginPath();
+        c.moveTo(tip.x, tip.y);
+        c.lineTo(bx, by);
+        c.lineTo(cx2, cy2);
+        c.closePath();
+        c.fillStyle = colour;
+        c.fill();
+        c.restore();
+
+        // Pivot cap. Mostly off the bottom of the box, which is what sells the
+        // idea that the movement continues below the panel.
+        c.beginPath();
+        c.arc(g.cx, g.cy, 6, 0, Math.PI * 2);
+        c.fillStyle = strong;
+        c.fill();
+        c.strokeStyle = faint;
+        c.lineWidth = 1;
+        c.stroke();
+    });
+
+    return <canvas ref={ref} className="needle" style={{ height: NEEDLE_H }} title={title} />;
+}
+
+// `minimal` keeps the two meters and drops the numeric readouts, the SNR trace
+// and the buffer counters. See the registry's `minimal`.
 export default function SignalPanel({ minimal }) {
     const { running } = useRadio();
+    const display = useDisplay();
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
@@ -116,29 +256,59 @@ export default function SignalPanel({ minimal }) {
     const power = m.basebandPower;
     const snr = m.snr;
 
+    // One style for both meters, and it is a display setting like any other, so
+    // it survives a reload. Clicking either one switches both: they are a pair,
+    // and a needle above a bar reads as a fault rather than a choice.
+    const needle = display.meterStyle === 'needle';
+    const swap = () => display.set({ meterStyle: needle ? 'bar' : 'needle' });
+    const hint = needle ? 'Click for the bar meters' : 'Click for the needle meters';
+
     return (
         <div className="stack">
-            <div className="meter">
-                <MeterScale ticks={S_TICKS} />
-                {/* Plotted in S-units, not dBFS: the printed scale above is
-                    6 dB per step to S9 then 10 dB per step, so a linear dBFS
-                    bar would not line up with it or with the S value below. */}
-                <MeterTrack ticks={S_TICKS}>
-                    <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
-                </MeterTrack>
+            {/* Plotted in S-units, not dBFS: the printed scale is 6 dB per step
+                to S9 then 10 dB per step, so a linear dBFS bar — or needle —
+                would not line up with it or with the S value below. */}
+            <button type="button" className="meter meter--swap" onClick={swap} title={hint}>
+                {needle ? (
+                    <NeedleMeter
+                        ticks={S_TICKS}
+                        fraction={sUnitFraction(power)}
+                        colour={cssVar('--accent', '#3ddbe8')}
+                        showPeak
+                        title={hint}
+                    />
+                ) : (
+                    <>
+                        <MeterScale ticks={S_TICKS} />
+                        <MeterTrack ticks={S_TICKS}>
+                            <Bar value={sUnitFraction(power)} min={0} max={1} tone="signal" />
+                        </MeterTrack>
+                    </>
+                )}
                 <div className="meter__value">{sUnitLabel(power)}</div>
-            </div>
+            </button>
 
             {/* SNR on v1's meter scale: 30 dB at the left, 60 at the right
-                (s-meter-needle.js snrMin/snrMax), filled in the same red→green
-                ramp its needle uses. */}
-            <div className="meter">
-                <MeterScale ticks={SNR_TICKS} />
-                <MeterTrack ticks={SNR_TICKS}>
-                    <Bar value={snrFraction(snr)} min={0} max={1} color={snr == null ? undefined : snrColour(snr)} />
-                </MeterTrack>
+                (s-meter-needle.js snrMin/snrMax), in the same red→green ramp its
+                needle uses. No peak hold here, as in v1. */}
+            <button type="button" className="meter meter--swap" onClick={swap} title={hint}>
+                {needle ? (
+                    <NeedleMeter
+                        ticks={SNR_TICKS}
+                        fraction={snrFraction(snr)}
+                        colour={snr == null ? cssVar('--text-faint', '#5c6779') : snrColour(snr)}
+                        title={hint}
+                    />
+                ) : (
+                    <>
+                        <MeterScale ticks={SNR_TICKS} />
+                        <MeterTrack ticks={SNR_TICKS}>
+                            <Bar value={snrFraction(snr)} min={0} max={1} color={snr == null ? undefined : snrColour(snr)} />
+                        </MeterTrack>
+                    </>
+                )}
                 <div className="meter__value">{snr == null ? '--' : `${snr.toFixed(1)} dB`}</div>
-            </div>
+            </button>
 
             {!minimal && (
                 <>

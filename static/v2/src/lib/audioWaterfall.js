@@ -27,8 +27,24 @@ export function sizedCanvas(canvas, cssH) {
     return { w, h, dpr };
 }
 
+// Cached per theme: these are read from inside draw loops — the audio
+// waterfall's is per frame and the needle meters' is per meter sample — and
+// getComputedStyle forces a style resolution every time. The tokens only ever
+// change with the theme, which is stamped on the root element, so that is the
+// key. An unknown theme (none set yet) caches under its own empty-string key
+// and is dropped as soon as one is.
+const VARS = { theme: null, seen: new Map() };
+
 export function cssVar(name, fallback) {
+    const theme = document.documentElement.dataset.theme || '';
+    if (VARS.theme !== theme) {
+        VARS.theme = theme;
+        VARS.seen.clear();
+    }
+    const hit = VARS.seen.get(name);
+    if (hit !== undefined) return hit || fallback;
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    VARS.seen.set(name, v);
     return v || fallback;
 }
 

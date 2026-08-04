@@ -42,6 +42,8 @@ esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bands.cjs --log-level=warning
 esbuild ../src/lib/vfos.js --bundle --format=cjs --platform=node \
     --outfile=.build/vfos.cjs --log-level=warning
+esbuild ../src/lib/needle.js --bundle --format=cjs --platform=node \
+    --outfile=.build/needle.cjs --log-level=warning
 esbuild ../src/lib/voiceActivity.js --bundle --format=cjs --platform=node \
     --outfile=.build/voice.cjs --log-level=warning
 esbuild ../src/compat/legacyBridge.js --bundle --format=cjs --platform=node \
@@ -74,6 +76,7 @@ node protocol.test.js
 node modes.test.js
 node zoom.test.js
 node vfos.test.js
+node needle.test.js
 node voice.test.js
 node callsign.test.js
 node compat.test.js

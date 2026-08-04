@@ -5,7 +5,10 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
-import { applyCompletion, matchUsernames, mentionQuery, splitMessage } from '../lib/mentions.js';
+import {
+    EMOJI_SHORTCODES, applyCompletion, applyEmojiCompletion, emojiQuery, expandShortcodes,
+    matchShortcodes, matchUsernames, mentionQuery, shortcodeFor, splitMessage,
+} from '../lib/mentions.js';
 import { clamp } from '../lib/format.js';
 
 // The user list can be dragged narrower or wider. Bounds keep both halves
@@ -85,11 +88,25 @@ export default function ChatPanel({ minimal }) {
         () => [...new Set([...chat.users.map((u) => u.username), chat.username].filter(Boolean))],
         [chat.users, chat.username],
     );
-    const query = mentionQuery(draft.slice(0, cursor));
-    const suggestions = useMemo(
-        () => (query ? matchUsernames(names, query.partial, chat.username).slice(0, 8) : []),
-        [query && query.partial, names, chat.username],
-    );
+    // Two completions share one list, as v1's does: @name, and :shortcode for
+    // an emoji. A mention wins where both could match — "@" cannot appear
+    // inside a shortcode, so in practice they never both fire.
+    const before = draft.slice(0, cursor);
+    const query = mentionQuery(before);
+    const emoji = query ? null : emojiQuery(before);
+    const suggestions = useMemo(() => {
+        if (query) {
+            return matchUsernames(names, query.partial, chat.username)
+                .slice(0, 8)
+                .map((name) => ({ kind: 'mention', value: name, label: `@${name}` }));
+        }
+        if (emoji) {
+            return matchShortcodes(emoji.partial)
+                .slice(0, 8)
+                .map((code) => ({ kind: 'emoji', value: code, label: `:${code}:`, emoji: EMOJI_SHORTCODES[code] }));
+        }
+        return [];
+    }, [query && query.partial, emoji && emoji.partial, names, chat.username]);
 
     // Reading the panel is what clears the alert.
     useEffect(() => {
@@ -127,8 +144,10 @@ export default function ChatPanel({ minimal }) {
         return () => cancelAnimationFrame(raf);
     }, [chat.messages.length]);
 
-    const complete = (username) => {
-        const next = applyCompletion(draft, cursor, username);
+    const complete = (item) => {
+        const next = item.kind === 'emoji'
+            ? applyEmojiCompletion(draft, cursor, item.value)
+            : applyCompletion(draft, cursor, item.value);
         setDraft(next.text);
         setSel(0);
         // The cursor has to be placed after React writes the new value.
@@ -141,7 +160,7 @@ export default function ChatPanel({ minimal }) {
 
     const onKeyDown = (e) => {
         if (suggestions.length === 0) return;
-        if (e.key === 'Tab' || (e.key === 'Enter' && suggestions.length > 0 && query)) {
+        if (e.key === 'Tab' || (e.key === 'Enter' && suggestions.length > 0)) {
             e.preventDefault();
             complete(suggestions[Math.min(sel, suggestions.length - 1)]);
         } else if (e.key === 'ArrowDown') {
@@ -190,7 +209,10 @@ export default function ChatPanel({ minimal }) {
 
     const submitMessage = (e) => {
         e.preventDefault();
-        if (chat.actions.send(draft)) setDraft('');
+        // Anything typed in full and never completed is expanded here, so
+        // ":fire:" works whether or not the suggestion list was used — v1 does
+        // the same on the way out.
+        if (chat.actions.send(expandShortcodes(draft))) setDraft('');
     };
 
     // Clicking a frequency someone shared tunes there, as v1 does. setMode
@@ -286,14 +308,15 @@ export default function ChatPanel({ minimal }) {
                     <form className="chat__compose" onSubmit={submitMessage}>
                         {suggestions.length > 0 && (
                             <div className="chat__suggest">
-                                {suggestions.map((name, i) => (
+                                {suggestions.map((item, i) => (
                                     <button
                                         type="button"
-                                        key={name}
+                                        key={item.label}
                                         className={`chat__suggest-item${i === sel ? ' is-active' : ''}`}
-                                        onMouseDown={(e) => { e.preventDefault(); complete(name); }}
+                                        onMouseDown={(e) => { e.preventDefault(); complete(item); }}
                                     >
-                                        @{name}
+                                        {item.emoji && <span className="chat__suggest-emoji">{item.emoji}</span>}
+                                        {item.label}
                                     </button>
                                 ))}
                             </div>
@@ -301,7 +324,7 @@ export default function ChatPanel({ minimal }) {
                         <input
                             ref={inputRef}
                             className="input"
-                            placeholder={chat.connected ? `Message as ${chat.username}… (@ to mention)` : 'Reconnecting…'}
+                            placeholder={chat.connected ? `Message as ${chat.username}… (@name, :emoji)` : 'Reconnecting…'}
                             disabled={!chat.connected}
                             value={draft}
                             onChange={(e) => { setDraft(e.target.value); setCursor(e.target.selectionStart); }}
@@ -330,16 +353,23 @@ export default function ChatPanel({ minimal }) {
                             </button>
                             {emojiOpen && (
                                 <div className="chat__emoji">
-                                    {EMOJI.map((e2) => (
-                                        <button
-                                            type="button"
-                                            key={e2}
-                                            className="chat__emoji-item"
-                                            onMouseDown={(ev) => { ev.preventDefault(); insert(e2); }}
-                                        >
-                                            {e2}
-                                        </button>
-                                    ))}
+                                    {EMOJI.map((e2) => {
+                                        // v1 titles each one with its shortcode,
+                                        // which is how anyone finds out the
+                                        // shortcodes exist at all.
+                                        const code = shortcodeFor(e2);
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={e2}
+                                                className="chat__emoji-item"
+                                                title={code ? `:${code}:` : undefined}
+                                                onMouseDown={(ev) => { ev.preventDefault(); insert(e2); }}
+                                            >
+                                                {e2}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>

@@ -344,6 +344,52 @@ t('a mention query only fires at the caret', () => {
     assert.deepStrictEqual(mn.mentionQuery('@bob hi @al'), { partial: 'al', at: 8 });
 });
 
+t('an emoji query needs a colon and at least one letter', () => {
+    assert.deepStrictEqual(mn.emojiQuery('nice :fi'), { partial: 'fi', at: 5 });
+    // A bare colon is punctuation far more often than the start of an emoji,
+    // so it offers nothing — v1 waits for a character too.
+    assert.strictEqual(mn.emojiQuery('nice :'), null);
+    assert.strictEqual(mn.emojiQuery('hi :fire: there'), null, 'not at the caret');
+    // Typing a time does fire a query — v1's pattern is the same — but nothing
+    // matches "30", so no list appears. That is the safeguard, not the regex.
+    assert.deepStrictEqual(mn.emojiQuery('10:30'), { partial: '30', at: 2 });
+    assert.deepStrictEqual(mn.matchShortcodes('30'), []);
+});
+
+t('shortcodes complete to the emoji itself, not to :code:', () => {
+    assert.deepStrictEqual(mn.matchShortcodes('thumb'), ['thumbsdown', 'thumbsup']);
+    const r = mn.applyEmojiCompletion('nice :fi', 8, 'fire');
+    assert.strictEqual(r.text, `nice ${mn.EMOJI_SHORTCODES.fire}`);
+    assert.strictEqual(r.cursor, r.text.length);
+    // Text after the caret survives.
+    const mid = mn.applyEmojiCompletion('nice :fi day', 8, 'fire');
+    assert.strictEqual(mid.text, `nice ${mn.EMOJI_SHORTCODES.fire} day`);
+});
+
+t('a shortcode typed in full is expanded on the way out', () => {
+    assert.strictEqual(mn.expandShortcodes('nice :fire:'), `nice ${mn.EMOJI_SHORTCODES.fire}`);
+    assert.strictEqual(mn.expandShortcodes(':wave: :wave:'), `${mn.EMOJI_SHORTCODES.wave} ${mn.EMOJI_SHORTCODES.wave}`);
+    // Anything that is not a shortcode is left exactly as typed.
+    assert.strictEqual(mn.expandShortcodes('at 10:30:00'), 'at 10:30:00');
+    assert.strictEqual(mn.expandShortcodes(':nope:'), ':nope:');
+    assert.strictEqual(mn.expandShortcodes(''), '');
+    assert.strictEqual(mn.expandShortcodes(null), '');
+});
+
+t('every picker emoji has a shortcode to type instead', () => {
+    // The picker teaches the shortcodes through its tooltips, so an emoji with
+    // no name behind it is a dead end.
+    const picker = [
+        '\u{1F60A}', '\u{1F602}', '\u{1F923}', '\u{1F60D}', '\u{1F60E}', '\u{1F914}', '\u{1F44D}', '\u{1F44E}',
+        '\u2764\uFE0F', '\u{1F389}', '\u{1F525}', '\u2B50', '\u2728', '\u{1F4AF}', '\u{1F680}', '\u{1F3AF}',
+        '\u{1F44B}', '\u{1F64F}', '\u{1F4AA}', '\u{1F91D}', '\u{1F44F}', '\u{1F3B5}', '\u{1F4FB}', '\u{1F4E1}',
+        '\u{1F31F}', '\u{1F4A1}', '\u26A1', '\u{1F308}', '\u2600\uFE0F', '\u{1F319}', '\u2699\uFE0F', '\u{1F527}',
+    ];
+    for (const e of picker) {
+        assert.ok(mn.shortcodeFor(e), `no shortcode for ${e}`);
+    }
+});
+
 t('candidates are prefix matches, sorted, excluding yourself', () => {
     assert.deepStrictEqual(mn.matchUsernames(CHAT_USERS, 'al', 'me'), ['alan', 'alice']);
     assert.deepStrictEqual(mn.matchUsernames(CHAT_USERS, 'BO', 'me'), ['Bob', 'bobby']);

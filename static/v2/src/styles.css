@@ -2276,6 +2276,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     cursor: pointer;
 }
 .chat__suggest-item.is-active, .chat__suggest-item:hover { background: var(--accent); color: var(--accent-ink); }
+/* The emoji itself, ahead of its :shortcode: — the row has to show what you
+   are about to insert, not only what it is called. */
+.chat__suggest-emoji { margin-right: 7px; }
 
 .dock__split {
     flex: 0 0 7px;

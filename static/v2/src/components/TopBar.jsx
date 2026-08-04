@@ -13,9 +13,8 @@ import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
-// Width to assume for the session countdown until it has been on screen once.
-// "00:00:00" in tabular figures is now the widest it gets — it used to be the
-// word "Unlimited", which is no longer shown. See useRoomFor.
+// Width to assume for the session countdown until it has been on screen once —
+// "Unlimited" is the widest it gets. See useRoomFor.
 const SESSION_W = 68;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
@@ -149,23 +148,21 @@ function VuBar({ muted }) {
 // from the /connection reply: 0 means unlimited, anything else is the number of
 // seconds this session may run, counted from when it started. Under five
 // minutes it turns red, as v1 does.
-//
-// Nothing is shown when there is no limit. A clock is worth the space it takes
-// in the bar only while it is counting towards something — "Unlimited" is a
-// permanent label for the absence of a deadline, and the receivers that set no
-// limit are the ones where it would sit there for ever saying nothing.
 function SessionClock() {
     const { session } = useRadio();
     const [, tick] = useState(0);
 
     useEffect(() => {
-        if (!session.maxSec) return undefined;
+        if (session.maxSec == null || session.maxSec === 0) return undefined;
         const id = setInterval(() => tick((n) => n + 1), 1000);
         return () => clearInterval(id);
     }, [session.maxSec, session.startedAt]);
 
-    // Null before /connection answers, 0 when the receiver sets no limit.
-    if (!session.maxSec) return null;
+    if (session.maxSec == null) return null;
+
+    if (session.maxSec === 0) {
+        return <span className="topbar__session" data-optional="" title="Session time">Unlimited</span>;
+    }
 
     const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
     const left = Math.max(0, session.maxSec - elapsed);

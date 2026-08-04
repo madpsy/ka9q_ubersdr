@@ -16,11 +16,10 @@
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { BAND_NAMES, HAM_BANDS } from '../lib/bands.js';
+import { BAND_NAMES, HAM_BANDS, tuneToBand } from '../lib/bands.js';
 
 const POLL_MS = 60 * 1000;
 const WINDOW_MIN = 10;      // minutes of history averaged
-const MIN_SPAN = 10000;     // v1 never zooms tighter than 10 kHz
 
 // v1's thresholds (static/bands_state.js).
 function classify(snr) {
@@ -81,14 +80,9 @@ export default function QuickBandsPanel({ minimal }) {
         return () => { cancelled = true; clearInterval(id); };
     }, [conditions]);
 
-    // One tune action for both rows.
-    const go = (min, max, mode) => {
-        const centre = Math.round((min + max) / 2);
-        actions.setMode(mode || (centre < 10000000 ? 'lsb' : 'usb'));
-        actions.setFrequency(centre);
-        actions.setSpectrumCenter(centre);
-        actions.setSpan(Math.max(max - min, MIN_SPAN));
-    };
+    // One tune action for both rows — and the same one the band conditions
+    // table uses, see lib/bands.js.
+    const go = (min, max, mode) => tuneToBand(actions, min, max, mode);
 
     const custom = (catalog.bands || []).filter((b) => b.button_name && b.button_name.trim());
 

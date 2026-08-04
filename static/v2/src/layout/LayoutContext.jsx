@@ -242,6 +242,32 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // "Show me that panel", from somewhere outside the docks — the top bar's
+    // space weather summary is the first caller. Whatever is in the way is
+    // undone: the panel is un-hidden, its section opened, and the dock it lives
+    // in expanded. A floating panel is un-minimised and raised instead, since
+    // for it those are the same three obstacles.
+    //
+    // Deliberately not a move: revealing must not take a panel away from
+    // wherever the operator has put it.
+    const revealPanel = useCallback((id) => {
+        setLayout((l) => {
+            if (!PANEL_BY_ID[id]) return l;
+            const sections = { ...l.sections, [id]: { ...l.sections[id], hidden: false, open: true } };
+            if (l.floats[id]) {
+                return {
+                    ...l,
+                    sections,
+                    floats: { ...l.floats, [id]: { ...l.floats[id], min: false } },
+                    floatOrder: [...l.floatOrder.filter((f) => f !== id), id],
+                };
+            }
+            const dock = DOCKS.find((d) => l.docks[d].panels.includes(id));
+            if (!dock) return { ...l, sections };
+            return { ...l, sections, docks: { ...l.docks, [dock]: { ...l.docks[dock], collapsed: false } } };
+        });
+    }, []);
+
     const setFloat = useCallback((id, geom) => {
         setLayout((l) => {
             const cur = l.floats[id];
@@ -336,9 +362,10 @@ export function LayoutProvider({ children }) {
         toggleSectionMinimal,
         setSectionHidden,
         movePanel,
+        revealPanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
-        setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
+        revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

@@ -1972,6 +1972,171 @@ a.btn { text-decoration: none; }
 .va-row__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* =========================================================================
+   Space weather panel
+   ========================================================================= */
+
+/* The headline grade. Tinted rather than filled: it sits at the top of a side
+   dock, and a solid block of colour there pulls the eye off the spectrum for
+   something that changes twice a day. */
+.sw-hero {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+}
+.sw-hero__label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.sw-hero__value {
+    font-size: calc(19px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.15;
+}
+.sw-hero__age {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sw-hero--good { border-left-color: var(--good); }
+.sw-hero--good .sw-hero__value { color: var(--good); }
+.sw-hero--warn { border-left-color: var(--warn); }
+.sw-hero--warn .sw-hero__value { color: var(--warn); }
+.sw-hero--bad { border-left-color: var(--bad); }
+.sw-hero--bad .sw-hero__value { color: var(--bad); }
+
+/* A plain-language line under each index, at the size of a caption — it
+   explains the figure above it and must not compete with it. */
+.sw-cell__note {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The NOAA scales: four small tiles, four across in a dock at its default
+   width and fewer per row as it is dragged narrower — at 220px, four columns
+   would clip every label. */
+.sw-scales { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 5px; }
+.sw-scale {
+    padding: 4px 5px;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    min-width: 0;
+}
+.sw-scale__v {
+    display: block;
+    font-family: var(--mono);
+    font-size: calc(12.5px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.2;
+}
+.sw-scale__k {
+    display: block;
+    font-size: calc(8.5px * var(--ui-scale));
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Quiet conditions read as text, not as a green alarm: level zero is the
+   normal state and should be the least eye-catching thing on the row. */
+.sw-scale--good .sw-scale__v { color: var(--text-dim); }
+.sw-scale--warn { border-color: var(--warn); }
+.sw-scale--warn .sw-scale__v { color: var(--warn); }
+.sw-scale--bad { border-color: var(--bad); }
+.sw-scale--bad .sw-scale__v { color: var(--bad); }
+.sw-scale--idle .sw-scale__v { color: var(--text-faint); }
+
+/* Band | Day | Night. The band column is sized to its content so the two grade
+   columns stay equal, which is what makes a column readable as a column. */
+.sw-bands { display: flex; flex-direction: column; gap: 2px; }
+.sw-bands__head,
+.sw-bands__row {
+    display: grid;
+    grid-template-columns: 3.4em minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px;
+    align-items: center;
+}
+.sw-bands__head {
+    padding: 0 2px 2px;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    text-align: center;
+}
+.sw-bands__head span:first-child { text-align: left; }
+/* Which half of the day it is at the receiver right now. */
+.sw-bands__head .is-now { color: var(--text); font-weight: 650; }
+
+.sw-bands__row {
+    padding: 1px 2px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+.sw-bands__row:hover:not(:disabled) { background: var(--surface-hover); }
+.sw-bands__row:disabled { cursor: default; }
+/* The band the dial is in, ringed the way the band buttons ring theirs. */
+.sw-bands__row.is-current { border-color: var(--border-strong); background: var(--surface-hover); }
+.sw-bands__band {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.sw-bands__row.is-current .sw-bands__band { color: var(--text); font-weight: 650; }
+
+/* Condition colours are the band buttons' (see .band-chip above), so a "Good"
+   here is the same amber a Good band button is. */
+.sw-grade {
+    padding: 2px 4px;
+    border-radius: 4px;
+    text-align: center;
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sw-grade--excellent { background: #22c55e; color: #fff; }
+.sw-grade--good { background: #fbbf24; color: #14202e; }
+.sw-grade--fair { background: #ff9800; color: #14202e; }
+.sw-grade--poor { background: #ef4444; color: #fff; }
+.sw-grade--none { background: var(--surface-3); color: var(--text-faint); }
+/* The half of the day that is not the current one. Dimmed rather than hidden:
+   it is where the band is heading in a few hours, which is half the reason to
+   read the table at all. */
+.sw-grade.is-off { opacity: 0.4; }
+
+.sw-forecast__head {
+    margin-bottom: 3px;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* NOAA's sentences, not readings: set in the interface face and aligned left
+   so a wrapped one reads as a sentence, rather than in the monospaced,
+   right-aligned column .kv__v is built for. */
+.sw-forecast .kv__v { font-family: var(--font); text-align: left; }
+/* And the label must not be squeezed to nothing by a long one. */
+.sw-forecast .kv__k { flex: none; }
+
+/* =========================================================================
    Recorder panel
    ========================================================================= */
 

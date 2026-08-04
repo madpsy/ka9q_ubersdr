@@ -36,3 +36,28 @@ export function bandOrder(name) {
     const i = BAND_NAMES.indexOf(name);
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
 }
+
+// Frequency range of a named band, or null for a name that is not one of ours.
+export function bandRange(name) {
+    const b = HAM_BANDS.find(([n]) => n === name);
+    return b ? { min: b[1], max: b[2] } : null;
+}
+
+// v1 never zooms the spectrum tighter than this when a band is selected, even
+// for a band narrower than it (60m, 30m, 12m).
+export const MIN_BAND_SPAN = 10000;
+
+// "Take me to that band", as v1's setBand() does it: tune the middle, take the
+// band's mode — LSB below 10 MHz, USB above, unless the band declares one — and
+// zoom the spectrum to the band's width.
+//
+// Shared because more than one panel offers the move: the band buttons, and the
+// band conditions table, which would otherwise arrive at a different frequency
+// for the same band.
+export function tuneToBand(actions, min, max, mode) {
+    const centre = Math.round((min + max) / 2);
+    actions.setMode(mode || (centre < 10000000 ? 'lsb' : 'usb'));
+    actions.setFrequency(centre);
+    actions.setSpectrumCenter(centre);
+    actions.setSpan(Math.max(max - min, MIN_BAND_SPAN));
+}

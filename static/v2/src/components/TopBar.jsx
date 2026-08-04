@@ -11,6 +11,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
+import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
 // Width to assume for the session countdown until it has been on screen once —
 // "Unlimited" is the widest it gets. See useRoomFor.
@@ -54,21 +55,16 @@ function Clock({ tzOffset }) {
 // solar wind Bz and the derived propagation quality, refreshed every minute.
 // /api/spaceweather is only meaningful when the operator enabled the monitor,
 // so the caller mounts this on serverInfo.space_weather.
-const SW_TONE = { Poor: 'bad', Fair: 'warn', Good: 'good', Excellent: 'good' };
-
-function SpaceWeather({ clickable }) {
+//
+// Clicking it opens the Space weather panel, which is the same reply in full.
+// The poll behind both lives in lib/spaceWeather.js — one request serves the
+// summary and the panel, and the grade is coloured by the shared rule so the
+// two can never call the same reading different things.
+function SpaceWeather() {
+    const { revealPanel } = useLayout();
     const [sw, setSw] = useState(null);
 
-    useEffect(() => {
-        let cancelled = false;
-        const load = () => fetch('/api/spaceweather')
-            .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
-            .then((d) => { if (!cancelled) setSw(d); })
-            .catch(() => { /* non-fatal — the summary just stays as it was */ });
-        load();
-        const id = setInterval(load, 60000);
-        return () => { cancelled = true; clearInterval(id); };
-    }, []);
+    useEffect(() => subscribeSpaceWeather((state) => setSw(state.data)), []);
 
     if (!sw) return null;
 
@@ -84,22 +80,34 @@ function SpaceWeather({ clickable }) {
         `A-Index: ${a}`,
         `Solar Wind Bz: ${bz} nT`,
         `Propagation Quality: ${quality}`,
-        clickable ? '\nClick for band conditions' : '',
-    ].filter(Boolean).join('\n');
+        '\nClick for the full space weather panel',
+    ].join('\n');
+
+    // Reveal, then bring it into view: the panel is collapsed by default and
+    // its dock scrolls, so opening it is no use if it opened below the fold.
+    // The scroll waits a frame for the section to have been laid out.
+    const open = () => {
+        revealPanel('spaceweather');
+        requestAnimationFrame(() => {
+            const el = document.querySelector('[data-panel="spaceweather"]');
+            if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+    };
 
     return (
         <div
-            className={`topbar__sw${clickable ? ' is-clickable' : ''}`}
+            className="topbar__sw is-clickable"
             title={tip}
-            role={clickable ? 'button' : undefined}
-            tabIndex={clickable ? 0 : undefined}
-            onClick={clickable ? () => window.open('/bandconditions.html', '_blank') : undefined}
+            role="button"
+            tabIndex={0}
+            onClick={open}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
         >
             <span>S:{flux}</span>
             <span>K:{k}</span>
             <span>A:{a}</span>
             <span>W:{bz}</span>
-            <span className={`topbar__sw-p is-${SW_TONE[quality] || 'idle'}`}>P:{quality}</span>
+            <span className={`topbar__sw-p is-${gradeTone(quality)}`}>P:{quality}</span>
         </div>
     );
 }
@@ -253,9 +261,7 @@ export default function TopBar({ compact }) {
 
             <div className="topbar__spacer" data-slack="" />
 
-            {!compact && serverInfo?.space_weather && (
-                <SpaceWeather clickable={!!serverInfo?.noise_floor} />
-            )}
+            {!compact && serverInfo?.space_weather && <SpaceWeather />}
 
             {!compact && (
                 <div className="topbar__zoom" role="group" aria-label="Text size">

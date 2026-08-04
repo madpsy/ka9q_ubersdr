@@ -57,6 +57,7 @@ import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
 import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
+import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 
 export const PANELS = [
@@ -192,6 +193,26 @@ export const PANELS = [
         dock: 'right',
         minimal: true,
         Component: QuickBandsPanel,
+    },
+    // Under Quick bands, for the same reason Quick bands sits under Signal:
+    // the band buttons say how each band is doing right now and this says why,
+    // and both are read as one answer to "where should I be listening".
+    // Collapsed by default — the top bar already carries the summary, and its
+    // click opens this — but the header is right there under the bands.
+    // Minimal: the grade, the four indices and the storm scales, without the
+    // band table and the forecast.
+    {
+        id: 'spaceweather',
+        title: 'Space weather',
+        icon: <Icon.Sun />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: SpaceWeatherPanel,
+        // The monitor is optional and off by default; without it every request
+        // to /api/spaceweather fails, so the panel is absent rather than
+        // permanently empty. Same gate the top bar's summary uses.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.space_weather),
     },
     // Minimal: squelch and noise reduction. Volume, channel and buffer are set
     // once a session; these two are worked at while you listen.

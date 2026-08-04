@@ -56,6 +56,10 @@ function reconcile(stored) {
             y: Number(g.y) || 0,
             w: Math.max(FLOAT_MIN.w, Number(g.w) || FLOAT_DEFAULT.w),
             h: Math.max(FLOAT_MIN.h, Number(g.h) || FLOAT_DEFAULT.h),
+            // Minimised: still floating, but shown as a chip in the strip along
+            // the bottom of the centre area rather than as a window. The
+            // geometry is kept so restoring puts it back where it was.
+            min: !!g.min,
         };
         floatOrder.push(id);
     }
@@ -201,7 +205,11 @@ export function LayoutProvider({ children }) {
                         x: 48 + n * FLOAT_CASCADE,
                         y: 40 + n * FLOAT_CASCADE,
                         ...FLOAT_DEFAULT,
+                        min: false,
                     };
+                } else if (floats[id].min) {
+                    // Asking for it to float again means asking to see it.
+                    floats[id] = { ...floats[id], min: false };
                 }
                 floatOrder = [...floatOrder, id];
                 // A floating panel is always expanded; a collapsed window with
@@ -225,6 +233,7 @@ export function LayoutProvider({ children }) {
             const cur = l.floats[id];
             if (!cur) return l;
             const next = {
+                ...cur,
                 x: Math.round(geom.x ?? cur.x),
                 y: Math.round(geom.y ?? cur.y),
                 w: Math.round(Math.max(FLOAT_MIN.w, geom.w ?? cur.w)),
@@ -232,6 +241,19 @@ export function LayoutProvider({ children }) {
             };
             if (next.x === cur.x && next.y === cur.y && next.w === cur.w && next.h === cur.h) return l;
             return { ...l, floats: { ...l.floats, [id]: next } };
+        });
+    }, []);
+
+    // Minimise / restore a floating window. A minimised panel stays mounted —
+    // it is only rendered as a chip — so a running panel keeps running.
+    const setFloatMin = useCallback((id, min) => {
+        setLayout((l) => {
+            const cur = l.floats[id];
+            if (!cur || !!cur.min === !!min) return l;
+            const floats = { ...l.floats, [id]: { ...cur, min: !!min } };
+            // Restoring also raises: you expect what you just clicked on top.
+            const floatOrder = min ? l.floatOrder : [...l.floatOrder.filter((f) => f !== id), id];
+            return { ...l, floats, floatOrder };
         });
     }, []);
 
@@ -290,6 +312,7 @@ export function LayoutProvider({ children }) {
         heights: layout.heights,
         setPanelHeight,
         setFloat,
+        setFloatMin,
         raiseFloat,
         placementOf,
         toggleDock,
@@ -300,7 +323,7 @@ export function LayoutProvider({ children }) {
         movePanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, setSectionHidden, movePanel,
-        setFloat, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
+        setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

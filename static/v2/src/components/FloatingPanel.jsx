@@ -12,7 +12,7 @@ import { Icon, Menu, MenuItem } from './ui.jsx';
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
 export default function FloatingPanel({ panel, geom, z, bounds }) {
-    const { setFloat, raiseFloat, movePanel, setSectionHidden } = useLayout();
+    const { setFloat, setFloatMin, raiseFloat, movePanel, setSectionHidden } = useLayout();
 
     // The size floor lives in LayoutContext (setFloat clamps), so none is
     // passed here — this only has to stop the gesture running away.
@@ -47,6 +47,14 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
                     ))}
                     <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
                 </Menu>
+                <button
+                    type="button"
+                    className="floatwin__btn floatwin__ctl"
+                    title="Minimise to the strip along the bottom"
+                    onClick={() => setFloatMin(panel.id, true)}
+                >
+                    <Icon.Minus size={14} />
+                </button>
                 <button
                     type="button"
                     className="floatwin__btn floatwin__ctl"

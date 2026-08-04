@@ -1926,6 +1926,71 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .floatwin__grip:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
 
+/* Minimised floating windows. The strip is pinned to the bottom of the float
+   layer, which ends where the bottom dock begins, so the chips sit just above
+   it. Inset to the centre area's padding so they line up with the spectrum.
+   wrap-reverse: a second row grows upwards rather than off the bottom. */
+.floatbar {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    flex-wrap: wrap-reverse;
+    align-items: flex-end;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.floatchip {
+    display: flex;
+    align-items: center;
+    max-width: 220px;
+    pointer-events: auto;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    /* Same resting fade as the windows these came from. */
+    opacity: var(--float-opacity, 1);
+    transition: opacity var(--dur) var(--ease);
+    overflow: hidden;
+}
+.floatchip:hover,
+.floatchip:focus-within { opacity: 1; }
+
+.floatchip__main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 4px 4px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: calc(12.5px * var(--ui-scale));
+    font-weight: 600;
+    line-height: 1.15;
+    cursor: pointer;
+}
+.floatchip__main:hover { background: var(--surface-hover); }
+.floatchip__icon { display: grid; place-items: center; flex: none; color: var(--accent); }
+.floatchip__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.floatchip__btn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 20px;
+    align-self: stretch;
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.floatchip__btn:hover { background: var(--surface-hover); color: var(--text); }
+
 /* ── Chat ─────────────────────────────────────────────────────────────────── */
 
 .chat {

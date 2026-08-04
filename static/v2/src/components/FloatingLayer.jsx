@@ -11,6 +11,45 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { PANEL_BY_ID } from '../panels/registry.jsx';
 import ExtensionWindow from '../extensions/ExtensionWindow.jsx';
 import FloatingPanel from './FloatingPanel.jsx';
+import { Icon } from './ui.jsx';
+
+// Minimised windows gather here, along the bottom of the centre area and so
+// directly above the bottom dock. The panel body is dropped while minimised,
+// exactly as a collapsed dock section drops its own — but the panel's badge is
+// kept, so a chip can still say there is something to look at.
+function MinimisedBar({ ids }) {
+    const { setFloatMin, movePanel } = useLayout();
+    if (!ids.length) return null;
+    return (
+        <div className="floatbar">
+            {ids.map((id) => {
+                const panel = PANEL_BY_ID[id];
+                return (
+                    <div key={id} className="floatchip">
+                        <button
+                            type="button"
+                            className="floatchip__main"
+                            title={`Restore ${panel.title}`}
+                            onClick={() => setFloatMin(id, false)}
+                        >
+                            <span className="floatchip__icon">{panel.icon}</span>
+                            <span className="floatchip__title">{panel.title}</span>
+                            {panel.Badge && <panel.Badge />}
+                        </button>
+                        <button
+                            type="button"
+                            className="floatchip__btn"
+                            title="Return to its dock"
+                            onClick={() => movePanel(id, panel.dock, null)}
+                        >
+                            <Icon.Close size={12} />
+                        </button>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
 export default function FloatingLayer() {
     const { floats, floatOrder, sections, setFloat } = useLayout();
@@ -46,10 +85,13 @@ export default function FloatingLayer() {
     }, [floats, setFloat, bounds.current && bounds.current.width, bounds.current && bounds.current.height]);
 
     const visible = floatOrder.filter((id) => PANEL_BY_ID[id] && !sections[id]?.hidden);
+    // The chip strip keeps floatOrder, so minimising a window does not shuffle
+    // the row; z-order among the remaining windows is unaffected either.
+    const minimised = visible.filter((id) => floats[id]?.min);
 
     return (
         <div className="floatlayer" ref={ref}>
-            {visible.map((id, i) => (
+            {visible.filter((id) => !floats[id]?.min).map((id, i) => (
                 <FloatingPanel
                     key={id}
                     panel={PANEL_BY_ID[id]}
@@ -58,6 +100,7 @@ export default function FloatingLayer() {
                     bounds={bounds}
                 />
             ))}
+            <MinimisedBar ids={minimised} />
             {/* Last, so an extension always paints above the panels: it is the
                 thing the user just opened, and it has no raise-to-front of its
                 own because there is only ever one. */}

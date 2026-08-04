@@ -50,8 +50,9 @@ export default function LayoutPanel() {
             <div className="note note--tight">
                 Drag a panel by its header to move it between docks, or set its
                 place here. Drag a dock edge to resize. <strong>Float</strong>
-                detaches a panel into a window you can move and resize; drop it
-                back with the × on its title bar.
+                detaches a panel into a window you can move and resize; − parks
+                it in the strip along the bottom, and × drops it back into its
+                dock.
             </div>
 
             <div className="layout-list">

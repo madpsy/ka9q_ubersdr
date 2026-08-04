@@ -34,7 +34,7 @@ function SquelchControl() {
                     {!squelch.enabled ? 'DISABLED' : open ? 'OPEN' : 'CLOSED'}
                 </span>
                 <span className="squelch-status__snr">
-                    SNR {snr == null ? '--' : snr.toFixed(1)} dB
+                    SNR {snr == null ? '--' : snr.toFixed(1)}
                 </span>
                 <button
                     type="button"

@@ -34,3 +34,27 @@ export function loadScript(src) {
 export async function loadScripts(list) {
     for (const src of list) await loadScript(src);
 }
+
+// The same, for a stylesheet a lazily-loaded library needs (Leaflet ships one).
+// Resolves as soon as the sheet has applied, so a map is never laid out with
+// its own CSS missing — which puts the tiles in a stack down the page.
+export function loadStyle(href) {
+    const key = `css:${href}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+
+    const p = new Promise((resolve, reject) => {
+        const el = document.createElement('link');
+        el.rel = 'stylesheet';
+        el.href = href;
+        el.onload = () => resolve();
+        el.onerror = () => {
+            cache.delete(key);
+            reject(new Error(`failed to load ${href}`));
+        };
+        document.head.appendChild(el);
+    });
+
+    cache.set(key, p);
+    return p;
+}

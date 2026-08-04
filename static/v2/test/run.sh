@@ -48,6 +48,8 @@ esbuild ../src/lib/listeners.js --bundle --format=cjs --platform=node \
     --outfile=.build/listeners.cjs --log-level=warning
 esbuild ../src/radio/idle.js --bundle --format=cjs --platform=node \
     --outfile=.build/idle.cjs --log-level=warning
+esbuild ../src/lib/myip.js --bundle --format=cjs --platform=node \
+    --outfile=.build/myip.cjs --log-level=warning
 esbuild ../src/lib/voiceActivity.js --bundle --format=cjs --platform=node \
     --outfile=.build/voice.cjs --log-level=warning
 esbuild ../src/compat/legacyBridge.js --bundle --format=cjs --platform=node \
@@ -83,6 +85,7 @@ node vfos.test.js
 node needle.test.js
 node listeners.test.js
 node idle.test.js
+node myip.test.js
 node voice.test.js
 node callsign.test.js
 node compat.test.js

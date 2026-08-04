@@ -805,6 +805,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .start__version { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
 
+/* The receiver/listener map on the start overlay. */
+.startmap { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.startmap__canvas {
+    width: 100%;
+    height: 200px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    /* Leaflet measures its container, so it needs a background of its own
+       before the tiles arrive rather than showing the card through. */
+    background: var(--surface-3);
+}
+.startmap__hello { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+/* Leaflet's own tooltip styling is white-on-white against a dark card. */
+.startmap__tip {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-sm);
+    font-size: calc(11px * var(--ui-scale));
+}
+.startmap__tip::before { display: none; }
+
 /* The VibeSDR / password dialogs the overlay opens. */
 .vibe { align-items: center; text-align: center; min-width: min(360px, 80vw); padding-right: 30px; }
 .vibe__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }

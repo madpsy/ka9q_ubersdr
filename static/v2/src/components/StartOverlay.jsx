@@ -22,6 +22,7 @@ import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, VibeSdrModal, vibesdrUri } from './StartExtras.jsx';
 import { openChannelsMap } from '../compat/legacyBridge.js';
 import { subscribeListeners } from '../lib/listeners.js';
+import StartMap from './StartMap.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
 //
@@ -120,6 +121,11 @@ export default function StartOverlay() {
                         dangerouslySetInnerHTML={{ __html: serverInfo.description }}
                     />
                 )}
+
+                {/* Where it is, where you are, and how far apart — v1 puts the
+                    same map here, and it is the question everybody has before
+                    they press anything. */}
+                <StartMap receiver={rx} mobile={mobile} />
 
                 {allowed ? (
                     <button

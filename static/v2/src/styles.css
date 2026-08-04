@@ -789,6 +789,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .start__links { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
 .start__link { font-size: calc(12px * var(--ui-scale)); color: var(--accent); }
+/* The two that act rather than navigate. Same appearance: from here they are
+   all just ways out of this screen. */
+.start__link--btn { border: 0; padding: 0; background: transparent; font-family: inherit; cursor: pointer; }
+.start__link--btn:hover { text-decoration: underline; }
+.start__status { font-size: calc(12px * var(--ui-scale)); color: var(--bad); }
+.start__status.is-ok { color: var(--good); }
 .start__badge {
     font-family: var(--mono);
     font-size: calc(10px * var(--ui-scale));
@@ -798,6 +804,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent);
 }
 .start__version { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
+
+/* The VibeSDR / password dialogs the overlay opens. */
+.vibe { align-items: center; text-align: center; min-width: min(360px, 80vw); padding-right: 30px; }
+.vibe__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
+.vibe__text { margin: 0; font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+/* White plate whatever the theme: a camera reads the contrast, and an inverted
+   code does not scan. */
+.vibe__qr { display: inline-grid; place-items: center; padding: 10px; background: #fff; border-radius: var(--radius-sm); }
+.vibe__uri {
+    display: block;
+    width: 100%;
+    padding: 6px 8px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--accent);
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+    word-break: break-all;
+    text-align: left;
+}
+.vibe__row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.vibe__note { margin: 0; font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
 
 /* =========================================================================
    Spectrum
@@ -907,6 +935,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn--ghost.is-active { color: var(--accent); background: var(--accent-soft); }
 
 .btn--sm { padding: 5px 9px; font-size: calc(11.5px * var(--ui-scale)); }
+/* A link wearing the button's clothes — the VibeSDR deep link is an anchor so
+   the browser hands the custom scheme to the OS. */
+a.btn { text-decoration: none; }
 .btn--icon { padding: 7px; }
 .btn--sm.btn--icon { padding: 5px; }
 

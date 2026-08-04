@@ -18,6 +18,8 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
+import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { PasswordModal, VibeSdrModal, vibesdrUri } from './StartExtras.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
 const LISTENER_MAP = '/session_stats.html';
@@ -30,7 +32,9 @@ export default function StartOverlay() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [started, setStarted] = useState(false);
+    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'password' | null
     const buttonRef = useRef(null);
+    const mobile = useMediaQuery(MOBILE_QUERY);
 
     // Asked once on load, and again only when a password is submitted. The
     // endpoint is rate limited per IP, and the answer does not change on its
@@ -55,6 +59,16 @@ export default function StartOverlay() {
     const rx = (serverInfo && serverInfo.receiver) || {};
     const allowed = !check || check.allowed;
     const bypassed = !!getBypassPassword();
+    // Only instances registered with the directory have one, and without it
+    // there is nothing for the app to connect to — so no button, as in v1.
+    const publicUuid = (serverInfo && serverInfo.public_uuid) || '';
+
+    // On a phone the deep link goes straight to the app: the QR dialog exists
+    // to get the URI onto a *different* device, and this is that device.
+    const vibesdr = () => {
+        if (mobile) { window.location.href = vibesdrUri(publicUuid); return; }
+        setDialog('vibesdr');
+    };
 
     const start = () => {
         setStarted(true);
@@ -138,6 +152,19 @@ export default function StartOverlay() {
                     <a className="start__link" href={DIRECTORY} target="_blank" rel="noopener noreferrer">
                         Instance directory
                     </a>
+                    {publicUuid && (
+                        <button type="button" className="start__link start__link--btn" onClick={vibesdr}>
+                            VibeSDR
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        className="start__link start__link--btn"
+                        title="Enter a bypass password"
+                        onClick={() => setDialog('password')}
+                    >
+                        Password
+                    </button>
                     {bypassed && <span className="start__badge" title="A bypass password is in use">Bypass</span>}
                 </div>
 
@@ -145,6 +172,19 @@ export default function StartOverlay() {
                     <div className="start__version">v{serverInfo.version}</div>
                 )}
             </div>
+
+            {dialog === 'vibesdr' && (
+                <VibeSdrModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
+            )}
+            {dialog === 'password' && (
+                <PasswordModal
+                    onClose={() => setDialog(null)}
+                    // A password accepted here can change the answer we already
+                    // have, so the overlay takes the fresh one rather than
+                    // asking again.
+                    onChanged={(r) => setCheck(r || null)}
+                />
+            )}
         </div>
     );
 }

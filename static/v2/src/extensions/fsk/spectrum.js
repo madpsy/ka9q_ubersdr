@@ -1,11 +1,13 @@
 // The FSK audio spectrum, with the mark and space tones marked on it.
 //
-// Unlike FT8's, this display is not a diagnostic — it is how you tune. The
-// decoder is looking for two tones at fixed audio frequencies, so the job is to
-// get the signal's two peaks onto the two markers, and that is a thing you do
-// by eye. Hence it is on by default here and off there, and hence the click
-// handler in the panel: clicking a peak moves the dial so that peak lands on
-// the centre frequency.
+// The decoder is looking for two tones at fixed audio frequencies, so the job
+// this display does is getting the signal's two peaks onto the two markers —
+// which is why the markers are here at all, and why the panel makes a click on
+// it move the dial so the peak clicked lands on the centre frequency.
+//
+// Like FT8's it starts switched off. It is what you open when the copy is not
+// coming out; once it is, the text is what you are reading and this is 120 px
+// and an FFT read per frame that nothing is paying for.
 
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 

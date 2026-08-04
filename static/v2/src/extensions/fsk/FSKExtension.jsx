@@ -8,7 +8,7 @@
 //
 // Behaviour is v1's where v1 had a reason: the same presets and parameters, the
 // same ±8 baud-error meter, the same three lamps off the decoder's state
-// machine, click-to-tune on the spectrum, and copy/save/clear. Three things
+// machine, click-to-tune on the spectrum, and copy/save/clear. Four things
 // changed:
 //
 //   * Settings apply while running. Server-side they are fixed when the
@@ -23,6 +23,10 @@
 //   * The console fills the window instead of being sized in lines. A v1
 //     extension lived in a fixed panel; this one is resizable, so a control for
 //     how tall the text area is would be a second, worse way to do that.
+//   * The spectrum can be switched off, and starts that way. v1 drew it always;
+//     it is the thing you open when the copy is not coming out, and the rest of
+//     the time it is 120 px of window and an FFT read per frame spent on
+//     something nobody is looking at.
 
 import React, { memo, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -263,7 +267,10 @@ export default function FSKExtension() {
     const [lines, setLines] = useState([]);
     const [baudError, setBaudError] = useState(0);
     const [state, setState] = useState(0);
-    const [opts, setOpts] = useState({ timestamps: true, autoScroll: true, spectrum: true });
+    // The spectrum starts off, as FT8's does: it is a tuning aid you reach for
+    // when the copy is not coming out, not something you read while it is, and
+    // it costs the window 120 px and an FFT read per frame until switched on.
+    const [opts, setOpts] = useState({ timestamps: true, autoScroll: true, spectrum: false });
     const [copied, setCopied] = useState(false);
 
     const params = useMemo(() => attachParams(config), [config]);

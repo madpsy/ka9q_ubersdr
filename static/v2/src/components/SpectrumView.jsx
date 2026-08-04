@@ -586,7 +586,10 @@ export default function SpectrumView() {
             actions.stepBy(dispRef.current.tuneStep || 500, dir < 0 ? 1 : -1);
             return;
         }
-        const f = freqAtX(e.clientX);
+        // Anchor per the Display panel: 'cursor' holds the frequency under the
+        // pointer still, 'tuned' re-centres on the dial the way the toolbar's
+        // +/- buttons do — which zoomCenter() takes as a null point.
+        const f = dispRef.current.zoomAnchor === 'tuned' ? null : freqAtX(e.clientX);
         if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
     }, [actions, freqAtX]);
 
@@ -600,6 +603,7 @@ export default function SpectrumView() {
     }, [onWheel]);
 
     const span = view.span || 0;
+    const anchorTuned = display.zoomAnchor === 'tuned';
 
     return (
         <div className="spectrum">
@@ -614,6 +618,22 @@ export default function SpectrumView() {
                     <ClipTag />
                 </div>
                 <div className="spectrum__tools">
+                    {/* Only while the wheel zooms — with the wheel set to tune
+                        there is nothing for an anchor to apply to. Shows the
+                        anchor in force rather than the one it would switch to,
+                        so the toolbar reads as state. */}
+                    {(display.wheelAction || 'zoom') === 'zoom' && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={anchorTuned ? <Icon.Knob /> : <Icon.Pointer />}
+                            title={anchorTuned
+                                ? 'Wheel zoom keeps the tuned frequency centred — click to zoom about the pointer'
+                                : 'Wheel zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
+                            aria-label="Wheel zoom anchor"
+                            onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
+                        />
+                    )}
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
                     <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
                     <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />

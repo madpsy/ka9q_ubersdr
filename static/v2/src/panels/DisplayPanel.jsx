@@ -51,6 +51,22 @@ export default function DisplayPanel() {
                 />
             </Field>
 
+            {/* Only means something while the wheel zooms. Mirrored by the
+                toggle in the spectrum toolbar, which writes the same setting. */}
+            {(d.wheelAction || 'zoom') === 'zoom' && (
+                <Field label="Zoom about">
+                    <Segmented
+                        size="sm"
+                        value={d.zoomAnchor === 'tuned' ? 'tuned' : 'cursor'}
+                        onChange={(v) => d.set({ zoomAnchor: v })}
+                        options={[
+                            { value: 'cursor', label: 'Cursor', title: 'Holds the frequency under the pointer still' },
+                            { value: 'tuned', label: 'Tuned', title: 'Re-centres on the tuned frequency, as the toolbar buttons do' },
+                        ]}
+                    />
+                </Field>
+            )}
+
             <div className="divider" />
 
             <div className="section-label"><span>Markers</span></div>

@@ -45,6 +45,12 @@ export const DEFAULTS = {
     tuneStep: 500,
     // What the wheel does over the spectrum: 'zoom' or 'tune' by tuneStep.
     wheelAction: 'zoom',
+    // What wheel zoom holds still: 'cursor' keeps the frequency under the
+    // pointer where it is, 'tuned' re-centres on the dial each step (which is
+    // what the toolbar's +/- buttons do). Only consulted when wheelAction is
+    // 'zoom'. Cursor is the default because it is what makes the wheel feel
+    // like it is zooming into the signal you are pointing at.
+    zoomAnchor: 'cursor',
     chatUsersWidth: 170,    // px given to the chat user list, drag to change
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open

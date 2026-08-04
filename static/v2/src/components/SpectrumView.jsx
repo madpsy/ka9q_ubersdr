@@ -76,6 +76,25 @@ function pinchDist([a, b]) { return Math.hypot(b.x - a.x, b.y - a.y); }
 // immediately.
 const PINCH_MS = 140;
 
+// Rungs of zoom per doubling of the finger separation.
+//
+// At 1 — the natural reading, where the span follows the fingers exactly — a
+// rung costs a √2 spread, two rungs cost 2× and three cost 2.83×. That is fine
+// on a trackpad and useless on a phone: the gesture is bounded by the hand and
+// the glass, so a pinch that starts at a comfortable separation opens perhaps
+// two or three times before it runs out, and is therefore worth one rung, or
+// two if you are careful. The band is thirteen rungs deep. Everything past the
+// second rung became lift-and-pinch-again, which is what made zooming on a
+// phone feel like work.
+//
+// At 2 the same gesture is worth twice as much: a doubling of separation is
+// four times the span, and the first rung comes at a 19% spread — far enough
+// apart from a two-finger tap to be deliberate, near enough to be one
+// unhurried movement. The loop is unchanged and still self-correcting: this
+// only changes what span the gesture is asking for, not how the answer is
+// measured.
+const PINCH_GAIN = 2;
+
 // Squelch state in the spectrum toolbar. Split into its own component so the
 // 10 Hz meter sampling re-renders this tag alone — SpectrumView owns the draw
 // loop and must not re-render at meter rate.
@@ -848,7 +867,7 @@ export default function SpectrumView() {
             const now = performance.now();
             const bwNow = cfgRef.current.binBandwidth;
             if (dist > 0 && g.pinch.bw > 0 && bwNow > 0 && now - g.pinch.last >= PINCH_MS) {
-                const want = g.pinch.bw * (g.pinch.dist / dist);
+                const want = g.pinch.bw / ((dist / g.pinch.dist) ** PINCH_GAIN);
                 const steps = Math.round(Math.log2(bwNow / want));
                 if (steps !== 0) {
                     // All of them at once, not one per tick. `steps` is how far

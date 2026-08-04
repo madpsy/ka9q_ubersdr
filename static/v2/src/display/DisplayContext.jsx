@@ -23,6 +23,12 @@ export const DEFAULTS = {
     grid: false,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 1,           // device px per row
+    // Slide each new row into view over the gap until the next one, instead of
+    // letting it appear in a single frame. It costs nothing per frame — the
+    // slide is a composited transform, and the canvas is still painted once per
+    // row — but it is a switch because the browser resamples the picture while
+    // it is in flight, which is very slightly soft on a non-HiDPI screen.
+    smoothScroll: true,
     markerBands: true,      // band allocations in the marker bar
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser

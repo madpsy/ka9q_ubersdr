@@ -169,6 +169,14 @@ export default function DisplayPanel() {
                     <Field label="Row height" hint={`${d.rowHeight} px`}>
                         <Slider value={d.rowHeight} min={1} max={4} onChange={(v) => d.set({ rowHeight: v })} />
                     </Field>
+
+                    <Field label="Smooth scrolling" inline>
+                        <Switch
+                            checked={d.smoothScroll !== false}
+                            onChange={(v) => d.set({ smoothScroll: v })}
+                            title="Slide each row into view instead of letting it step in. Most noticeable on a wide span, where the receiver sends fewer frames a second. Costs no extra work per frame, but the picture is very slightly softer while it is moving"
+                        />
+                    </Field>
                 </>
             )}
 

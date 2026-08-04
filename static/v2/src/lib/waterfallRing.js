@@ -18,6 +18,41 @@
 /** The background the ring is cleared to — nothing received yet. */
 export const RING_BG = '#05070c';
 
+// Device pixels the waterfall canvas overhangs its container by, so the smooth
+// scroll always has a row in hand to slide into view while its container clips
+// the rest. The tallest a row can be is the Display panel's 4 CSS px at a
+// device ratio of 2, so eight covers every case and costs eight rows of canvas.
+export const RING_PAD = 8;
+
+// Bounds on the estimated gap between rows, in ms. Below the floor there is
+// nothing worth animating — the step is already at the display's own rate — and
+// above the ceiling a feed that has stalled would otherwise leave the next row
+// crawling into place for as long as the stall lasted.
+export const SCROLL_MIN_MS = 25;
+export const SCROLL_MAX_MS = 600;
+
+/**
+ * The running estimate of how long the next row will take to arrive.
+ *
+ * Smooth scrolling means sliding a row into view over the gap until the next
+ * one, and that gap is not known until it has passed — so the last few are
+ * averaged and used as the prediction. An average rather than the last value
+ * because the arrival times jitter by a frame either way (the commit is gated
+ * on an animation frame), and a duration that jumped about with the jitter
+ * would itself be visible.
+ *
+ * Being *under* is much cheaper than being over: the slide finishes early and
+ * the picture rests for a moment, where overshooting cuts the slide off partway
+ * and shows a fraction of a row as a jump. Hence clamping the sample before it
+ * is averaged in — one late frame nudges the estimate instead of doubling it.
+ */
+export function smoothInterval(prev, dt) {
+    if (!(dt > 0)) return prev > 0 ? prev : 0;
+    const sample = Math.min(SCROLL_MAX_MS, Math.max(SCROLL_MIN_MS, dt));
+    if (!(prev > 0)) return sample;
+    return prev * 0.7 + sample * 0.3;
+}
+
 /**
  * The runs to copy, in destination order, as `[{ sy, sh, dy }]`.
  *

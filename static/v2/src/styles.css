@@ -927,6 +927,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .spectrum__pane { display: block; flex: none; }
 .spectrum__pane--scale { border-block: 1px solid rgba(255, 255, 255, 0.06); }
 
+/* The waterfall is two stacked canvases in a clipping box. The lower one is
+   taller than the box and is translated between rows so the history scrolls
+   continuously rather than a row at a time; the box hides the overhang. The
+   upper one carries the tuning marks and must not move with it. */
+.spectrum__wf { position: relative; flex: none; overflow: hidden; }
+.spectrum__wf-pane {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Promotes it to a layer of its own, so the scroll is the compositor moving
+       a texture rather than the page being painted again. */
+    will-change: transform;
+}
+.spectrum__wf-marks {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
 .tag {
     font-family: var(--mono);
     font-size: calc(11px * var(--ui-scale));

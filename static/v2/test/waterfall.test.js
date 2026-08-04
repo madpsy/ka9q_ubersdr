@@ -17,7 +17,10 @@
 
 const assert = require('assert');
 
-const { RING_BG, ringKeepsHistory, ringSlices } = require('./.build/waterfallring.cjs');
+const {
+    RING_BG, RING_PAD, SCROLL_MAX_MS, SCROLL_MIN_MS,
+    ringKeepsHistory, ringSlices, smoothInterval,
+} = require('./.build/waterfallring.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -209,6 +212,69 @@ t('there is nothing to keep before the first ring exists', () => {
     assert.strictEqual(ringKeepsHistory(null, 640), false);
     assert.strictEqual(ringKeepsHistory({ ring: null, width: 640, height: 300 }, 640), false);
     assert.strictEqual(ringKeepsHistory({ ring: true, width: 640, height: 0 }, 640), false);
+});
+
+// --- the smooth scroll -----------------------------------------------------
+
+t('a steady feed settles on its own interval', () => {
+    // The duration of the slide is this estimate, so on a steady feed it has to
+    // converge on the truth or every row is cut short or finishes early.
+    for (const dt of [50, 100, 200]) {
+        let e = 0;
+        for (let i = 0; i < 40; i++) e = smoothInterval(e, dt);
+        assert.ok(Math.abs(e - dt) < 0.5, `${dt} ms feed settled at ${e}`);
+    }
+});
+
+t('the first interval is taken whole, with nothing to average against', () => {
+    assert.strictEqual(smoothInterval(0, 200), 200);
+    assert.strictEqual(smoothInterval(undefined, 200), 200);
+});
+
+t('no measurement leaves the estimate alone', () => {
+    // The first row has no previous one to time against, and must not reset an
+    // estimate that had already settled.
+    assert.strictEqual(smoothInterval(120, 0), 120);
+    assert.strictEqual(smoothInterval(120, -5), 120);
+    assert.strictEqual(smoothInterval(0, 0), 0);
+});
+
+t('one late frame nudges the estimate instead of doubling it', () => {
+    // A dropped frame doubles the gap. Following it exactly would make the next
+    // row crawl at half speed and then jump when it was cut off.
+    let e = 0;
+    for (let i = 0; i < 20; i++) e = smoothInterval(e, 100);
+    const after = smoothInterval(e, 200);
+    assert.ok(after > 100 && after < 135, `${after} ms after one dropped frame`);
+    // …and it is back within about a second of rows, not carrying the glitch.
+    let back = after;
+    for (let i = 0; i < 8; i++) back = smoothInterval(back, 100);
+    assert.ok(Math.abs(back - 100) < 3, `${back} ms after recovering`);
+});
+
+t('a stall cannot leave the next row crawling for seconds', () => {
+    let e = smoothInterval(0, 30000);
+    assert.strictEqual(e, SCROLL_MAX_MS);
+    e = smoothInterval(100, 30000);
+    assert.ok(e <= SCROLL_MAX_MS, e);
+});
+
+t('the estimate always stays within the animatable range', () => {
+    let e = 0;
+    // A deliberately horrible feed: alternating fast, slow and stalled.
+    for (const dt of [5, 1000, 40, 9000, 16, 250, 1, 600, 33]) {
+        e = smoothInterval(e, dt);
+        assert.ok(e >= SCROLL_MIN_MS && e <= SCROLL_MAX_MS, `${dt} -> ${e}`);
+    }
+});
+
+t('the overhang covers the tallest row the display panel can ask for', () => {
+    // The scroll lifts the canvas by one row; if a row could be taller than the
+    // overhang, the lift would expose background along the bottom edge.
+    const maxRowHeight = 4;   // Display panel's slider maximum, CSS px
+    const maxDpr = 2;         // SpectrumView clamps devicePixelRatio to this
+    assert.ok(RING_PAD >= maxRowHeight * maxDpr,
+        `RING_PAD ${RING_PAD} must cover ${maxRowHeight * maxDpr} device px`);
 });
 
 console.log(`\n${pass} passed`);

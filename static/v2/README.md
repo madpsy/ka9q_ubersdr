@@ -253,6 +253,23 @@ tests exercise, and it is where a silent mistake actually lives.
   click; browsers block it otherwise.
 * **Spectrum uses `binary8`.** ~75% less bandwidth than float32, and the 1 dB
   quantisation is finer than a waterfall can show.
+* **The waterfall scrolls on the compositor, not in JavaScript.** How often the
+  receiver sends a frame depends on the span — a wide one arrives at half the
+  rate of a narrow one — and a row that lands in a single frame at 5 Hz reads as
+  a series of jerks. So the canvas is `RING_PAD` device px taller than the box
+  that clips it: a committed row is painted above the top edge and a `translateY`
+  animation slides it down over the gap until the next one is due
+  (`smoothInterval` predicts that from the last few). Nothing about this costs
+  per-frame work — the canvas is still painted exactly once per row, and the
+  slide is a composited transform, so the browser moves a texture it already has
+  without calling back into the app. Two consequences: the tuning marks live on
+  a second, *un*translated canvas (a marker that slid would stop pointing at its
+  frequency — and it now redraws only when it moves, which it did not before),
+  and the picture is resampled while in flight, which is very slightly soft on a
+  non-HiDPI screen. That last one is why *Smooth scrolling* is a switch in the
+  Display panel rather than unconditional. Resizing the pane vertically keeps
+  the history; only a width change discards it, since every ring column is a
+  frequency. See `lib/waterfallRing.js`.
 * **Noise reduction is entirely schema-driven.** `get_dsp_filters` returns each
   enabled filter and its parameters (`name, type, default, min, max,
   description, runtime_safe`), and `lib/dsp.js` turns a descriptor into a

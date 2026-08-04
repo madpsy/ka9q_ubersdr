@@ -24,7 +24,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
-import { RING_BG, ringKeepsHistory, ringSlices } from '../lib/waterfallRing.js';
+import { RING_BG, RING_PAD, ringKeepsHistory, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
@@ -260,6 +260,12 @@ export default function SpectrumView() {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
+    // The tuning marks and the hover line, on a canvas of their own over the
+    // waterfall. They have to be off the scrolling canvas: it is translated
+    // between rows, and a marker that slid with it would not be pointing at the
+    // frequency it names. Keeping them apart also stops them being repainted
+    // for a scroll that does not move them.
+    const wfMarksRef = useRef(null);
     const scaleRef = useRef(null);
 
     // Everything the draw loop needs, kept out of React state.
@@ -347,17 +353,36 @@ export default function SpectrumView() {
         const g = gfx.current;
         g.dpr = dpr;
 
-        for (const [ref, h] of [[specRef, specH], [wfRef, wfH], [scaleRef, SCALE_H]]) {
+        const w = Math.max(1, Math.round(sizes.w * dpr));
+
+        // Setting a canvas's width or height clears it, and the marks are drawn
+        // only when they change — so the record of what is on them has to go
+        // with the pixels, or a resize would leave them blank until the dial
+        // next moved.
+        g.marksKey = '';
+
+        // Everything except the waterfall is sized to exactly what it shows.
+        for (const [ref, h] of [[specRef, specH], [scaleRef, SCALE_H], [wfMarksRef, wfH]]) {
             const c = ref.current;
             if (!c) continue;
-            c.width = Math.max(1, Math.round(sizes.w * dpr));
+            c.width = w;
             c.height = Math.max(1, Math.round(h * dpr));
             c.style.width = sizes.w + 'px';
             c.style.height = h + 'px';
         }
 
-        const w = Math.max(1, Math.round(sizes.w * dpr));
-        const h = Math.max(1, Math.round(wfH * dpr));
+        // The waterfall is RING_PAD taller than its container, which clips it.
+        // That overhang is what the smooth scroll slides: the newest row is
+        // painted above the top edge and travels down into view, so the picture
+        // moves continuously between rows instead of jumping when one arrives.
+        const h = Math.max(1, Math.round(wfH * dpr)) + RING_PAD;
+        const wfc = wfRef.current;
+        if (wfc) {
+            wfc.width = w;
+            wfc.height = h;
+            wfc.style.width = sizes.w + 'px';
+            wfc.style.height = (h / dpr) + 'px';
+        }
         if (g.ringWidth !== w || g.ringHeight !== h) {
             // A resize needs a new ring, but the history only has to be thrown
             // away for a width change — see ringKeepsHistory for why the two
@@ -425,6 +450,10 @@ export default function SpectrumView() {
             const rowInterval = 1000 / d.waterfallRate;
             const commitRow = g.rowsPending > 0 && now - lastRow >= rowInterval;
             if (commitRow) {
+                // How long the last row took to arrive, which is the best guess
+                // at how long the next one will — and so how long this one has
+                // to slide into view. See smoothInterval.
+                if (lastRow) g.rowDt = smoothInterval(g.rowDt, now - lastRow);
                 lastRow = now;
                 g.rowsPending = 0;
             }
@@ -432,6 +461,7 @@ export default function SpectrumView() {
             drawFrame(g, d, {
                 spec: specRef.current,
                 wf: wfRef.current,
+                wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 cfg: cfgRef.current,
                 tuning: tuneRef.current,
@@ -444,11 +474,32 @@ export default function SpectrumView() {
         };
 
         raf = requestAnimationFrame(loop);
-        return () => cancelAnimationFrame(raf);
+        return () => {
+            cancelAnimationFrame(raf);
+            // A held `fill: forwards` animation outlives the loop that started
+            // it, and would leave the canvas parked a row out of place for
+            // whatever draws next.
+            const g = gfx.current;
+            if (g.scroll) {
+                g.scroll.cancel();
+                g.scroll = null;
+            }
+        };
     }, [sizes.w, specH, wfH]);
 
     // Redraw when a display setting changes even if no new frame arrived.
-    useEffect(() => { gfx.current.dirty = true; }, [display]);
+    useEffect(() => {
+        const g = gfx.current;
+        g.dirty = true;
+        // Turning the scroll off has to put the canvas back straight away. The
+        // next committed row would do it, but on a feed that has gone quiet
+        // there may not be one, and the picture would sit a row out of place.
+        if (display.smoothScroll === false && g.scroll) {
+            g.scroll.cancel();
+            g.scroll = null;
+            if (wfRef.current) wfRef.current.style.transform = '';
+        }
+    }, [display]);
 
     // Operator-supplied backdrop for the spectrum, behind the trace.
     //
@@ -801,7 +852,15 @@ export default function SpectrumView() {
                 )}
                 {specH > 0 && <canvas ref={specRef} className="spectrum__pane" />}
                 <canvas ref={scaleRef} className="spectrum__pane spectrum__pane--scale" />
-                {wfH > 0 && <canvas ref={wfRef} className="spectrum__pane" />}
+                {/* The waterfall canvas overhangs this box and the box clips it,
+                    which is what gives the scroll a row to slide in. The marks
+                    sit above, still, on a canvas that is not translated. */}
+                {wfH > 0 && (
+                    <div className="spectrum__wf" style={{ height: wfH }}>
+                        <canvas ref={wfRef} className="spectrum__wf-pane" />
+                        <canvas ref={wfMarksRef} className="spectrum__wf-marks" />
+                    </div>
+                )}
             </div>
 
             {menu && (
@@ -991,7 +1050,7 @@ function autoRange(px, g) {
 }
 
 function drawFrame(g, d, ctx) {
-    const { spec, wf, scale, cfg, tuning, width, specH, wfH, commitRow } = ctx;
+    const { spec, wf, wfMarks, scale, cfg, tuning, width, specH, wfH, commitRow } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
 
@@ -1027,7 +1086,7 @@ function drawFrame(g, d, ctx) {
     const colEdge = bandwidthColor(d.server.bandwidthColorName, 0.38);
     const colVfoLine = colors()['--spec-vfo'] || '#ffd166';
 
-    drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
+    drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width);
 }
@@ -1058,7 +1117,7 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, edgeColor) {
     }
 }
 
-function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {
+function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {
     if (!wf || wfH <= 0 || !g.ring) return;
     const ring = g.ring;
     const rctx = g.ringCtx;
@@ -1099,29 +1158,93 @@ function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning,
         octx.drawImage(ring, 0, s.sy, pxW, s.sh, 0, s.dy, pxW, s.sh);
     }
 
-    // Markers go on the visible canvas, never into the ring — otherwise they
-    // would scroll away with the history instead of standing still.
+    // The picture has just moved down a row within the canvas, so putting the
+    // canvas back up by the same amount leaves the screen exactly as it was —
+    // and sliding it from there to nothing is the row arriving, spread over the
+    // time until the next one instead of landing in a single frame.
+    //
+    // The slide is a transform animation and nothing else, which is the whole
+    // reason this is affordable: transforms are composited, so the browser
+    // moves a texture it already has rather than calling back into this file.
+    // The painting above still happens once per row, exactly as it did when the
+    // waterfall jumped.
+    if (commitRow) scrollRow(g, wf, d.smoothScroll === false ? 0 : rowH / g.dpr, g.rowDt);
+
+    drawWaterfallMarks(g, wfMarks, wfH, pxW, cfg, tuning, colVfo, colEdge);
+}
+
+/**
+ * Slide the waterfall canvas up by one row and let it fall back.
+ *
+ * `rowCss` of 0 means no animation — smooth scrolling turned off, or a first
+ * row with nothing to time against — and leaves the canvas at rest, where it
+ * shows the same thing the animation ends on.
+ */
+function scrollRow(g, wf, rowCss, duration) {
+    if (g.scroll) {
+        g.scroll.cancel();
+        g.scroll = null;
+    }
+    if (!(rowCss > 0) || !(duration > 0) || typeof wf.animate !== 'function') {
+        wf.style.transform = '';
+        return;
+    }
+    g.scroll = wf.animate(
+        [{ transform: `translateY(${-rowCss}px)` }, { transform: 'translateY(0px)' }],
+        // Linear, because the row is a constant slice of time and any easing
+        // would show it arriving faster at one end than the other. Held at the
+        // end so a feed that pauses rests in the right place rather than
+        // snapping back to where the slide began.
+        { duration, easing: 'linear', fill: 'forwards' },
+    );
+}
+
+/**
+ * The tuning marks and the hover line, on the fixed canvas above the waterfall.
+ *
+ * Never in the ring — they would scroll away with the history — and no longer
+ * on the waterfall canvas either, which now moves between rows.
+ *
+ * Redrawn only when one of them has actually moved. On its old canvas that came
+ * free, because the ring blit overwrote everything underneath anyway; on a
+ * canvas of its own it would be a clear and three strokes per frame for a
+ * picture that changes when the dial does, which is orders of magnitude less
+ * often than the feed arrives.
+ */
+function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
+    if (!marks) return;
+    const H = Math.max(1, Math.round(wfH * g.dpr));
+
+    const key = `${pxW}|${H}|${cfg.centerFreq}|${cfg.span}|${tuning.frequency}|`
+        + `${tuning.bandwidthLow}|${tuning.bandwidthHigh}|${g.hover ? g.hover.x : ''}|`
+        + `${colVfo}|${colEdge}`;
+    if (g.marksKey === key) return;
+    g.marksKey = key;
+
+    const c = marks.getContext('2d');
+    c.clearRect(0, 0, pxW, H);
+
     if (g.hover) {
         const hx = Math.round(g.hover.x * g.dpr) + 0.5;
-        octx.strokeStyle = 'rgba(255,255,255,0.25)';
-        octx.lineWidth = 1;
-        octx.beginPath();
-        octx.moveTo(hx, 0);
-        octx.lineTo(hx, H);
-        octx.stroke();
+        c.strokeStyle = 'rgba(255,255,255,0.25)';
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(hx, 0);
+        c.lineTo(hx, H);
+        c.stroke();
     }
-    drawTuningMarks(octx, pxW, H, cfg, tuning, g.dpr, colEdge);
+    drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colEdge);
     if (cfg.span) {
         const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
         if (x >= 0 && x <= pxW) {
-            octx.strokeStyle = colVfo;
-            octx.lineWidth = g.dpr;
-            octx.setLineDash([4 * g.dpr, 3 * g.dpr]);
-            octx.beginPath();
-            octx.moveTo(x, 0);
-            octx.lineTo(x, H);
-            octx.stroke();
-            octx.setLineDash([]);
+            c.strokeStyle = colVfo;
+            c.lineWidth = g.dpr;
+            c.setLineDash([4 * g.dpr, 3 * g.dpr]);
+            c.beginPath();
+            c.moveTo(x, 0);
+            c.lineTo(x, H);
+            c.stroke();
+            c.setLineDash([]);
         }
     }
 }

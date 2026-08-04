@@ -270,6 +270,19 @@ tests exercise, and it is where a silent mistake actually lives.
   Display panel rather than unconditional. Resizing the pane vertically keeps
   the history; only a width change discards it, since every ring column is a
   frequency. See `lib/waterfallRing.js`.
+* **Smoothing is per second, not per frame.** The spectrum's own rate depends on
+  the span — a wide one arrives about half as often — so a factor applied once
+  per redraw would silently change meaning as you zoom: the same trace-smoothing
+  setting lagged several times longer, and the auto-levels took several times as
+  long to settle. `lib/timeConstant.js` raises the factor to the power of
+  elapsed-time-over-reference, which makes applying it twice over half an
+  interval identical to applying it once over the whole. The reference is 20 Hz,
+  so existing settings keep the behaviour they had on a narrow span and only the
+  slower ones change. Peak hold was already time-based (dB per *second*) and is
+  the model the other two now follow. Note that this cannot make the trace
+  *move* more smoothly — a shape can only be smoothed by drawing it more often,
+  unlike the waterfall's scroll, which is rigid motion and so composites for
+  free.
 * **Noise reduction is entirely schema-driven.** `get_dsp_filters` returns each
   enabled filter and its parameters (`name, type, default, min, max,
   description, runtime_safe`), and `lib/dsp.js` turns a descriptor into a

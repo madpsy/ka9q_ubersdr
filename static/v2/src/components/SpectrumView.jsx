@@ -25,6 +25,7 @@ import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { RING_BG, RING_PAD, ringKeepsHistory, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
+import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
@@ -469,7 +470,12 @@ export default function SpectrumView() {
                 specH,
                 wfH,
                 commitRow,
+                // Seconds since the last draw, which is what makes the trace
+                // smoothing and the auto-levels settle in the same time however
+                // often frames arrive.
+                dt: g.drawAt ? (now - g.drawAt) / 1000 : 0,
             });
+            g.drawAt = now;
             g.dirty = false;
         };
 
@@ -1031,7 +1037,12 @@ function applyMinSpan(g, minSpan) {
     g.autoCeil = g.clampedCeil;
 }
 
-function autoRange(px, g) {
+// How far the auto-levels move towards their target in one 20 Hz frame. Slow,
+// because the floor and ceiling set the whole picture's contrast and a level
+// that chased each frame would make the noise shimmer.
+const AUTO_RANGE_K = 0.08;
+
+function autoRange(px, g, k) {
     // Robust floor: a low percentile is immune to the strong carriers that
     // would drag a plain minimum or mean around.
     const n = px.length;
@@ -1045,12 +1056,12 @@ function autoRange(px, g) {
     const targetFloor = floor - 4;
     const targetCeil = Math.max(targetFloor + 25, ceil + 12);
     // Ease towards the target so the display does not flicker frame to frame.
-    g.autoFloor += (targetFloor - g.autoFloor) * 0.08;
-    g.autoCeil += (targetCeil - g.autoCeil) * 0.08;
+    g.autoFloor += (targetFloor - g.autoFloor) * k;
+    g.autoCeil += (targetCeil - g.autoCeil) * k;
 }
 
 function drawFrame(g, d, ctx) {
-    const { spec, wf, wfMarks, scale, cfg, tuning, width, specH, wfH, commitRow } = ctx;
+    const { spec, wf, wfMarks, scale, cfg, tuning, width, specH, wfH, commitRow, dt } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
 
@@ -1065,16 +1076,23 @@ function drawFrame(g, d, ctx) {
     binsToPixels(g.bins, pxW, g.px);
 
     // Optional temporal smoothing of the trace.
+    //
+    // The retention is per unit *time*, not per frame: the receiver sends about
+    // half as many frames a second on a wide span as on a narrow one, and a
+    // per-frame factor would make the same slider setting lag several times
+    // longer purely because you had zoomed out. See lib/timeConstant.js.
     let trace = g.px;
     if (d.smoothing > 0) {
         if (!g.smoothed || g.smoothed.length !== pxW) g.smoothed = Float32Array.from(g.px);
-        const a = d.smoothing;
+        const a = retentionFor(d.smoothing, dt);
         for (let i = 0; i < pxW; i++) g.smoothed[i] = g.smoothed[i] * a + g.px[i] * (1 - a);
         trace = g.smoothed;
     }
 
     if (d.autoRange) {
-        autoRange(g.px, g);
+        // Same reasoning: the levels have to settle in the same number of
+        // seconds however often the frames arrive.
+        autoRange(g.px, g, approachFor(AUTO_RANGE_K, dt));
         // null means "follow the operator's default"; 0 means no minimum.
         applyMinSpan(g, d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan);
     }

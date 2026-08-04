@@ -66,6 +66,12 @@ export class RadioSync extends Emitter {
         this._onPortOpen = null;    // armed only while a connect is in flight
         this.direction = 'sdr-to-radio';
         this.muteOnTx = true;
+        // Which of the two things are actually kept together. Either can be
+        // turned off: a rig used as a transmitter for a fixed digital mode wants
+        // its frequency followed and its mode left alone, and someone working
+        // split wants the reverse. Both off is allowed — the readout still runs.
+        this.syncFrequency = true;
+        this.syncMode = true;
 
         this.timer = null;
         this.polling = false;       // a poll cycle is still in the air
@@ -232,8 +238,8 @@ export class RadioSync extends Emitter {
             // rather than waiting for the operator to touch something.
             if (this.direction === 'sdr-to-radio' && this.ctx) {
                 const t = this.ctx.state().tuning;
-                await this._pushFrequency(t.frequency);
-                await this._pushMode(t.mode);
+                if (this.syncFrequency) await this._pushFrequency(t.frequency);
+                if (this.syncMode) await this._pushMode(t.mode);
             }
             this._startPolling();
         } catch (err) {
@@ -332,12 +338,26 @@ export class RadioSync extends Emitter {
         this.emit('state', this.snapshot());
     }
 
+    // Turning a field back on has to re-assert it, not wait for the next time it
+    // happens to change: the two ends have been free to drift apart while it was
+    // off, and they may well have drifted to a value that still matches what was
+    // last pushed. Clearing the record of that push forces one on the next tick.
+    setSyncFields({ frequency, mode }) {
+        if (frequency && !this.syncFrequency) this.lastSent.frequency = 0;
+        if (mode && !this.syncMode) this.lastSent.mode = '';
+        this.syncFrequency = frequency;
+        this.syncMode = mode;
+        this.emit('state', this.snapshot());
+    }
+
     snapshot() {
         return {
             connected: this.connected,
             busy: this.busy,
             direction: this.direction,
             muteOnTx: this.muteOnTx,
+            syncFrequency: this.syncFrequency,
+            syncMode: this.syncMode,
             rig: { ...this.rig },
         };
     }
@@ -393,7 +413,7 @@ export class RadioSync extends Emitter {
             this.rig = { ...this.rig, frequency: freq };
             this.emit('state', this.snapshot());
         }
-        if (this.direction !== 'radio-to-sdr' || !this.ctx) return;
+        if (this.direction !== 'radio-to-sdr' || !this.ctx || !this.syncFrequency) return;
         if (freq === this.ctx.state().tuning.frequency) return;
         this.lastSent.frequency = freq;
         this.ctx.actions.setFrequency(freq);
@@ -416,7 +436,7 @@ export class RadioSync extends Emitter {
             this.lastSent.mode = this.ctx.state().tuning.mode;
             return;
         }
-        if (this.direction !== 'radio-to-sdr') return;
+        if (this.direction !== 'radio-to-sdr' || !this.syncMode) return;
         if (sdrMode === this.ctx.state().tuning.mode) return;
         this.lastSent.mode = sdrMode;
         this.ctx.actions.setMode(sdrMode);
@@ -449,11 +469,11 @@ export class RadioSync extends Emitter {
     async _pushFromSdr() {
         if (!this.ctx) return;
         const t = this.ctx.state().tuning;
-        if (t.frequency !== this.lastSent.frequency) {
+        if (this.syncFrequency && t.frequency !== this.lastSent.frequency) {
             this.lastSent.frequency = t.frequency;
             await this._pushFrequency(t.frequency);
         }
-        if (t.mode !== this.lastSent.mode) {
+        if (this.syncMode && t.mode !== this.lastSent.mode) {
             this.lastSent.mode = t.mode;
             await this._pushMode(t.mode);
         }

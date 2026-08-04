@@ -66,6 +66,8 @@ export const Icon = {
     Download: (p) => <Svg {...p}><path d="M12 3v11" /><path d="m7.5 10 4.5 4 4.5-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Search: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></Svg>,
     Mic: (p) => <Svg {...p}><rect x="9" y="3" width="6" height="10" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></Svg>,
+    // A handset showing a play button: the lock-screen media card.
+    LockScreen: (p) => <Svg {...p}><rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="m10.6 9.3 4.4 2.7-4.4 2.7z" /></Svg>,
     Trash: (p) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><path d="M10 11v6M14 11v6" /></Svg>,
     Upload: (p) => <Svg {...p}><path d="M12 14V3" /><path d="m7.5 7 4.5-4 4.5 4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Copy: (p) => <Svg {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></Svg>,

@@ -75,3 +75,30 @@ export function idlePhrase(ms) {
     if (mins > 0) return `${plural(mins, 'minute')} and ${plural(rem, 'second')}`;
     return plural(secs, 'second');
 }
+
+// --- activity the DOM never sees --------------------------------------------
+//
+// The whole point of the media controls is operating the receiver without
+// touching the page, and none of the events IdleWatch listens for fire when the
+// ⏭ button on a lock screen is pressed. Left alone, a listener working entirely
+// from their phone would be asked whether they were still there — on a screen
+// they cannot see — and then disconnected for not answering.
+//
+// So the media session reports its button presses here and IdleWatch treats
+// them exactly like a click. Deliberately only *presses*: a session that stayed
+// alive merely because audio was flowing would hold a slot on a shared receiver
+// for as long as the tab was open, which is the thing this whole module exists
+// to prevent.
+
+const externalActivity = new Set();
+
+export function onExternalActivity(fn) {
+    externalActivity.add(fn);
+    return () => externalActivity.delete(fn);
+}
+
+export function noteExternalActivity() {
+    for (const fn of externalActivity) {
+        try { fn(); } catch (err) { console.error('activity listener threw', err); }
+    }
+}

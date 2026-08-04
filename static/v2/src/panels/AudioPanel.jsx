@@ -81,11 +81,12 @@ function ChannelPicker() {
 
 // Which device the audio comes out of — v1's "Output Device" selector.
 //
-// The list is read on mount but the names are *not* unlocked on mount: browsers
-// only reveal them once microphone permission is granted, and a panel that
-// throws a mic prompt at you for opening it is not one you want to open. So the
-// prompt is a button, and until it is pressed the devices are still selectable,
-// just anonymously.
+// Reading the list and revealing the names are two different things: browsers
+// treat device labels as fingerprinting surface and only hand them over once
+// microphone permission is granted. So the list is read on mount, quietly, and
+// the permission is asked for only when the operator presses Refresh — a panel
+// that can sit open all session should not throw a mic prompt at you for being
+// opened, which is what v1's settings modal effectively does.
 function OutputDevicePicker() {
     const { audio, actions } = useRadio();
     const support = useMemo(sinkSupport, []);
@@ -95,10 +96,33 @@ function OutputDevicePicker() {
     const [busy, setBusy] = useState(false);
     const alive = useRef(true);
 
-    const refresh = useCallback(async () => {
+    // `unlock` is what separates the button from the mount and the devicechange
+    // event: those re-read silently, the button may also ask for the mic. It
+    // asks only when there is something to gain — names that are still hidden
+    // after the list has been re-read.
+    const refresh = useCallback(async (unlock) => {
         try {
-            const { devices: found, hidden: anon } = await listOutputDevices();
+            let { devices: found, hidden: anon } = await listOutputDevices();
             if (!alive.current) return;
+            if (anon && unlock) {
+                setBusy(true);
+                try {
+                    await unlockDeviceLabels();
+                    if (!alive.current) return;
+                    ({ devices: found, hidden: anon } = await listOutputDevices());
+                } catch (permErr) {
+                    // Denied, or dismissed. The re-read above still stands, so
+                    // keep it and say why the names are missing.
+                    if (!alive.current) return;
+                    setDevices(found);
+                    setHidden(anon);
+                    setError('Microphone permission denied — device names stay hidden.');
+                    return;
+                } finally {
+                    if (alive.current) setBusy(false);
+                }
+                if (!alive.current) return;
+            }
             setDevices(found);
             setHidden(anon);
             setError('');
@@ -110,13 +134,14 @@ function OutputDevicePicker() {
     useEffect(() => {
         alive.current = true;
         if (!support.supported) return undefined;
-        refresh();
+        const reread = () => refresh(false);
+        reread();
         // Plugging in a headset should not need the panel reopening.
         const md = navigator.mediaDevices;
-        md.addEventListener('devicechange', refresh);
+        md.addEventListener('devicechange', reread);
         return () => {
             alive.current = false;
-            md.removeEventListener('devicechange', refresh);
+            md.removeEventListener('devicechange', reread);
         };
     }, [support.supported, refresh]);
 
@@ -132,18 +157,6 @@ function OutputDevicePicker() {
             </>
         );
     }
-
-    const unlock = async () => {
-        setBusy(true);
-        try {
-            await unlockDeviceLabels();
-            await refresh();
-        } catch (err) {
-            if (alive.current) setError('Microphone permission denied — device names stay hidden.');
-        } finally {
-            if (alive.current) setBusy(false);
-        }
-    };
 
     const choose = async (id) => {
         setBusy(true);
@@ -183,21 +196,24 @@ function OutputDevicePicker() {
                 </select>
             </Field>
             <div className="chip-row chip-row--wrap">
-                <button type="button" className="chip chip--button" onClick={refresh} disabled={busy}>
+                <button
+                    type="button"
+                    className="chip chip--button"
+                    title={hidden
+                        ? 'Re-scan for devices, and ask for microphone permission to show their names'
+                        : 'Re-scan for devices'}
+                    onClick={() => refresh(true)}
+                    disabled={busy}
+                >
                     Refresh
                 </button>
-                {hidden && (
-                    <button type="button" className="chip chip--button" onClick={unlock} disabled={busy}>
-                        Show device names
-                    </button>
-                )}
             </div>
             {error
                 ? <div className="note note--tight note--warn">{error}</div>
                 : hidden && (
                     <div className="note note--tight">
-                        Device names are hidden until you grant microphone permission —
-                        the browser ties the two together. Nothing is recorded.
+                        The browser hides device names until microphone permission is
+                        granted — Refresh asks for it. Nothing is recorded.
                     </div>
                 )}
         </>

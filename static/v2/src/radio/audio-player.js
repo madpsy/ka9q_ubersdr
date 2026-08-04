@@ -75,7 +75,10 @@ export class AudioPlayer {
         this.duck = null;           // output gate, for decoders that play their own audio
         this.ducked = false;
         this.sinkId = '';           // chosen output device; '' is the system default
-        this.sinkElement = null;    // hidden <audio> bridge, on browsers that need one
+        this.anchorWanted = false;  // Media Session needs a media element playing
+        this.element = null;        // the hidden <audio> those two share
+        this.local = null;          // gate on the context's own output
+        this.external = false;      // something outside the graph is playing this
         // Bumped every time the context is rebuilt. A recording holds nodes
         // belonging to one context, so anything capturing audio has to notice
         // when that context has been thrown away (see lib/recorder.js).
@@ -268,7 +271,15 @@ export class AudioPlayer {
         this.duck = this.ctx.createGain();
         this.duck.gain.value = this.ducked ? 0 : 1;
         this.analyser.connect(this.duck);
-        this.duck.connect(this.ctx.destination);
+        // The last node before whatever is playing the audio, and the only one
+        // the output routing touches — see _applyOutput. It is also the gate
+        // that goes to zero when something outside this graph has taken over
+        // playback (the Media Session HTTP stream), which must silence the
+        // speakers without disturbing the meters, the scope or the recorder.
+        this.local = this.ctx.createGain();
+        this.local.gain.value = this.external ? 0 : 1;
+        this.duck.connect(this.local);
+        this.local.connect(this.ctx.destination);
         // Recorder tap, at the point v1 takes it (app.js "Step 10"): after the
         // filter chain and the volume/mute fader, but before the L/R output
         // routing — so a recording holds the processed audio as heard, in both
@@ -279,63 +290,97 @@ export class AudioPlayer {
         this._applyGain();
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);
-        // A new context always comes up on the system device, and any bridge
+        // A new context always comes up on the system device, and any element
         // built for the old one belongs to a context that is being thrown away
-        // — so the chosen sink has to be re-applied, not just remembered.
-        if (this.sinkId) {
-            this._applySink().catch((err) => console.warn('audio sink lost on rebuild', err));
+        // — so the routing has to be re-applied, not just remembered.
+        if (this.sinkId || this.anchorWanted) {
+            this._applyOutput().catch((err) => console.warn('audio output lost on rebuild', err));
         }
         this._runClipWatch();
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
     }
 
+    // ---- output routing ----------------------------------------------------
+    //
+    // Two features want the tail of this graph, and they compose rather than
+    // fight because there is one element between them:
+    //
+    //   the output-device picker — a browser without AudioContext.setSinkId can
+    //       still point an <audio> element at a device, so the audio goes out
+    //       through one.
+    //   Media Session — Safari and Firefox show no OS controls unless a media
+    //       element is playing, so they need one to exist whatever device it is
+    //       pointed at.
+    //
+    // v1 builds a separate hidden element for each and therefore has to switch
+    // Media Session off the moment a device is chosen (app.js setOutputDevice).
+    // Here `_applyOutput` is the single place that decides, and both can be on.
+
     // Chooses the output device. '' is the system default. Rejects if the
     // browser refuses the device, having left audio on whatever was playing it.
     async setSinkId(id) {
         this.sinkId = id || '';
-        await this._applySink();
+        await this._applyOutput();
     }
 
-    async _applySink() {
+    // Media Session asking for a media element to anchor the OS controls to.
+    async setAnchorWanted(wanted) {
+        this.anchorWanted = !!wanted;
+        await this._applyOutput();
+    }
+
+    // The element the anchor ended up being, or null. Media Session only needs
+    // to know that one exists and is playing.
+    get outputElement() {
+        return this.element;
+    }
+
+    // Something outside this graph has taken over playback — the Media Session
+    // HTTP stream, which the server feeds *instead of* the WebSocket. Silence
+    // the speakers, but leave the graph running: the analyser, the recorder tap
+    // and the meters all sit upstream of this gate.
+    setExternalPlayback(external) {
+        this.external = !!external;
+        if (!this.local || !this.ctx) return;
+        this.local.gain.setTargetAtTime(this.external ? 0 : 1, this.ctx.currentTime, 0.02);
+        // Removing the element that was driving playback can leave the context
+        // suspended, and a suspended context schedules nothing.
+        if (!this.external) this.ctx.resume().catch(() => {});
+    }
+
+    async _applyOutput() {
         const ctx = this.ctx;
         // Nothing to route yet — _createContext applies it when audio starts.
         if (!ctx) return;
-        const id = this.sinkId;
 
-        // Chrome, Edge: the context itself takes a device, so the graph and its
-        // latency are exactly what they were before.
-        if (typeof ctx.setSinkId === 'function') {
-            this._teardownSinkBridge();
-            await ctx.setSinkId(id || '');
+        const contextSink = typeof ctx.setSinkId === 'function';
+        // The element is needed when Media Session asks for one, or when a
+        // device has been chosen on a browser that can only do it per element.
+        const needElement = this.anchorWanted || (!!this.sinkId && !contextSink);
+
+        if (!needElement) {
+            this._releaseOutputElement();
+            if (contextSink) await ctx.setSinkId(this.sinkId || '');
             return;
         }
 
-        if (!id) {
-            this._teardownSinkBridge();
-            return;
-        }
-
-        // Firefox: no AudioContext.setSinkId, so the tail of the graph is
-        // bridged through a hidden <audio>, which does have one. That costs an
-        // extra buffer of latency, which is why it is not the path everywhere.
-        if (typeof HTMLAudioElement === 'undefined' ||
-            typeof HTMLAudioElement.prototype.setSinkId !== 'function') {
-            throw new Error('this browser cannot choose an audio output device');
-        }
-        // Firefox only accepts an ID it has handed out in this session, so the
-        // device list has to have been read at least once.
-        if (navigator.mediaDevices) {
+        // Firefox only accepts a device ID it has handed out in this session,
+        // so the device list has to have been read at least once first.
+        if (this.sinkId && navigator.mediaDevices) {
             await navigator.mediaDevices.enumerateDevices().catch(() => {});
+            if (this.ctx !== ctx) return;
         }
-        if (this.ctx !== ctx) return;
 
-        if (!this.sinkElement) {
+        if (!this.element) {
             const el = document.createElement('audio');
+            // iOS refuses to play inline without this and takes the audio
+            // fullscreen instead, which is not a thing a hidden element can do.
+            el.setAttribute('playsinline', '');
             el.style.display = 'none';
             document.body.appendChild(el);
-            this.sinkElement = el;
+            this.element = el;
         }
-        const el = this.sinkElement;
+        const el = this.element;
         if (!el._dest || el._dest.context !== ctx) {
             el._dest = ctx.createMediaStreamDestination();
             el.srcObject = el._dest.stream;
@@ -344,32 +389,35 @@ export class AudioPlayer {
         // Point the element at the device *before* diverting the audio into it:
         // a rejected device then leaves playback on the speakers rather than
         // dumping it into a stream nobody is listening to.
-        await el.setSinkId(id);
+        if (this.sinkId && typeof el.setSinkId === 'function') {
+            await el.setSinkId(this.sinkId);
+        }
         // A mode change during that await rebuilds the context, and its nodes
         // cannot be wired to a destination belonging to the old one. The new
-        // context re-applies the sink itself, so dropping out here loses nothing.
+        // context re-applies the routing itself, so dropping out loses nothing.
         if (this.ctx !== ctx) return;
-        try { this.duck.disconnect(); } catch (e) { /* not connected */ }
-        this.duck.connect(el._dest);
+
+        try { this.local.disconnect(); } catch (e) { /* not connected */ }
+        this.local.connect(el._dest);
         // Autoplay policy can block this; audio starts from a user gesture, so
-        // in practice it does not, and a failure here is silence we cannot fix
-        // by retrying anyway.
-        await el.play().catch((err) => console.warn('audio sink element blocked', err));
+        // in practice it does not, and a failure here is silence that retrying
+        // would not fix.
+        await el.play().catch((err) => console.warn('output element blocked', err));
     }
 
-    // Drops the <audio> bridge and puts the output back on the context's own
-    // destination. A no-op when no bridge was ever built.
-    _teardownSinkBridge() {
-        const el = this.sinkElement;
+    // Drops the element and puts the output back on the context's own
+    // destination. A no-op when no element was ever built.
+    _releaseOutputElement() {
+        const el = this.element;
         if (!el) return;
         try { el.pause(); } catch (e) { /* ignore */ }
         el.srcObject = null;
         el._dest = null;
         if (el.parentNode) el.parentNode.removeChild(el);
-        this.sinkElement = null;
-        if (this.ctx && this.duck) {
-            try { this.duck.disconnect(); } catch (e) { /* ignore */ }
-            this.duck.connect(this.ctx.destination);
+        this.element = null;
+        if (this.ctx && this.local) {
+            try { this.local.disconnect(); } catch (e) { /* ignore */ }
+            this.local.connect(this.ctx.destination);
         }
     }
 
@@ -579,7 +627,7 @@ export class AudioPlayer {
             try { this.decoder.free(); } catch (e) { /* ignore */ }
             this.decoder = null;
         }
-        this._teardownSinkBridge();
+        this._releaseOutputElement();
         if (this.ctx) {
             this.ctx.close().catch(() => {});
             this.ctx = null;

@@ -3643,3 +3643,55 @@ a.btn { text-decoration: none; }
 /* The process log has no channel of its own, so its rows are two columns. */
 .sm__line--log { grid-template-columns: 58px 1fr; }
 .sm__line-text { white-space: pre-wrap; word-break: break-word; }
+
+/* ── Media controls panel ──────────────────────────────────────────────────
+   A small copy of the card the OS is showing. Laid out like a lock screen
+   rather than like the rest of the panel — art on the left, three lines of
+   text beside it — because recognising it as the same thing is the point. */
+.ms-card {
+    display: flex;
+    gap: 9px;
+    align-items: center;
+    padding: 7px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-width: 0;
+}
+.ms-card__art {
+    width: 46px;
+    height: 46px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: var(--surface-2);
+}
+.ms-card__art--placeholder {
+    background:
+        radial-gradient(circle at 50% 50%, var(--accent-soft) 0 40%, transparent 41%),
+        var(--surface-2);
+}
+/* Every line is one line: a lock screen truncates, and a preview that wraps
+   would show text the operator will never actually see. */
+.ms-card__text { min-width: 0; flex: 1; }
+.ms-card__title, .ms-card__artist, .ms-card__album {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ms-card__title { font-size: calc(12px * var(--ui-scale)); font-weight: 650; }
+.ms-card__artist {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.ms-card__album { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+
+.ms-head { display: flex; align-items: center; gap: 6px; }
+.ms-head__note {
+    flex: 1;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.ms-neighbours { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }

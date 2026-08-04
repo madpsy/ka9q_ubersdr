@@ -38,6 +38,7 @@ import BookmarksPanel from './BookmarksPanel.jsx';
 import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
 import AudioPanel from './AudioPanel.jsx';
 import AudioFiltersPanel from './AudioFiltersPanel.jsx';
+import MediaSessionPanel from './MediaSessionPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
@@ -196,6 +197,21 @@ export const PANELS = [
     // once a session; these two are worked at while you listen.
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
+    // OS media controls — lock screen, Control Centre, notification shade, media
+    // keys. Ships collapsed because it is a per-device preference rather than
+    // part of operating the receiver, and absent entirely on a browser with no
+    // Media Session API, where the panel could only say so.
+    // Minimal: the switch and the card the OS is showing, without the ⏮/⏭ setup.
+    {
+        id: 'mediasession',
+        title: 'Media controls',
+        icon: <Icon.LockScreen />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: MediaSessionPanel,
+        requires: () => typeof navigator !== 'undefined' && 'mediaSession' in navigator,
+    },
     // Minimal: the traces alone. Timebase, contrast and resolution are set once
     // and then watched, and in a side dock they cost more height than the views.
     {

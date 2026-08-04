@@ -1,0 +1,131 @@
+// Which marker the dial is sitting on, and which ones sit either side of it.
+//
+// v1 keeps this inside the dial-wheel overlay and lets Media Session borrow it
+// through a window global (app.js findMarkers). Here it is its own module,
+// because more than one thing wants it: the lock-screen album line names the
+// marker you are tuned to, and the ⏮/⏭ buttons step to the neighbours.
+//
+// Pure by construction — callers pass the lists in. Nothing here fetches,
+// subscribes or reads the DOM, which is what makes it testable.
+
+import { modeForSpot } from './spots.js';
+import { activityLabel, dialFreq } from './voiceActivity.js';
+
+// How close the dial has to sit before a marker counts as the one you are on.
+// v1's MARKER_FREQ_TOLERANCE_HZ.
+export const MARKER_TOLERANCE_HZ = 100;
+
+const SIDEBAND_CROSSOVER_HZ = 10000000;
+
+// Modes that are the same thing as far as "am I tuned to this marker" goes.
+// A CW spot should match whether you are in CWL or CWU, and a bookmark saved
+// in AM should match SAM.
+export function modeFamily(mode) {
+    const m = String(mode || '').toLowerCase();
+    if (m === 'cw' || m === 'cwu' || m === 'cwl') return 'cw';
+    if (m === 'am' || m === 'sam') return 'am';
+    if (m === 'fm' || m === 'nfm') return 'fm';
+    return m;
+}
+
+function voiceMode(hz) {
+    return hz >= SIDEBAND_CROSSOVER_HZ ? 'usb' : 'lsb';
+}
+
+// The marker types, as an allow-list vocabulary for prev/next filtering.
+export const NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark-server', 'bookmark-local'];
+
+// Types whose `name` is a callsign, and so worth a lookup — the album line
+// enriches these, and only these, with the operator's name and photo.
+export const CALLSIGN_TYPES = new Set(['cw', 'dx', 'voice']);
+
+// Flattens every marker source into one list of
+// { freq, mode, family, name, type, priority }.
+//
+// `priority` is what makes a live spot beat a bookmark sitting on the same
+// frequency, which is v1's rule and the right one: the bookmark is what the
+// frequency always is, the spot is who is on it right now.
+export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], local = [] } = {}) {
+    const out = [];
+
+    // Spots arrive already normalised (lib/spots.js), so they carry `kind` and
+    // `callsign` — modeForSpot reads the first, the album line reads the second.
+    for (const s of cw) {
+        if (!(s.frequency > 0)) continue;
+        out.push({ freq: s.frequency, mode: modeForSpot(s), family: 'cw', name: s.callsign || '', type: 'cw', priority: 1 });
+    }
+    for (const s of dx) {
+        if (!(s.frequency > 0)) continue;
+        const mode = modeForSpot(s);
+        out.push({ freq: s.frequency, mode, family: modeFamily(mode), name: s.callsign || '', type: 'dx', priority: 1 });
+    }
+    for (const a of voice) {
+        const freq = dialFreq(a);
+        if (!(freq > 0)) continue;
+        const mode = a.mode ? String(a.mode).toLowerCase() : voiceMode(freq);
+        out.push({ freq, mode, family: modeFamily(mode), name: activityLabel(a), type: 'voice', priority: 1 });
+    }
+    // A bookmark with no mode is a wildcard: `family: null` matches whatever
+    // you happen to be listening in, which is what "7.100 — net" means.
+    for (const [list, type] of [[bookmarks, 'bookmark-server'], [local, 'bookmark-local']]) {
+        for (const b of list) {
+            if (!(b.frequency > 0)) continue;
+            out.push({
+                freq: b.frequency,
+                mode: b.mode || null,
+                family: b.mode ? modeFamily(b.mode) : null,
+                name: b.name || '',
+                type,
+                priority: 0,
+            });
+        }
+    }
+    return out;
+}
+
+// Locates the dial among the markers.
+//
+//   current — the closest marker inside the tolerance window whose mode family
+//             matches. Never filtered by `navTypes`: the frequency you are on
+//             is labelled with whatever is on it.
+//   prev/next — the nearest marker below/above, outside that window, in any
+//             mode, carrying its own mode so a caller can tune to it. These
+//             *are* filtered, so "step through CW spots only" is possible.
+export function findMarkers(markers, dialHz, mode, navTypes) {
+    const result = { current: null, prev: null, next: null };
+    if (!(dialHz > 0)) return result;
+
+    const fam = modeFamily(mode);
+    const allow = Array.isArray(navTypes) ? new Set(navTypes) : null;
+    const navOk = (m) => !allow || allow.has(m.type);
+
+    let current = null;
+    let currentDist = Infinity;
+    let prev = null;
+    let next = null;
+
+    for (const m of markers) {
+        const d = Math.abs(m.freq - dialHz);
+        if (d <= MARKER_TOLERANCE_HZ) {
+            if (m.family !== null && m.family !== fam) continue;
+            if (!current || m.priority > current.priority ||
+                (m.priority === current.priority && d < currentDist)) {
+                current = m;
+                currentDist = d;
+            }
+        } else if (m.freq < dialHz) {
+            if (navOk(m) && (!prev || m.freq > prev.freq ||
+                (m.freq === prev.freq && m.priority > prev.priority))) {
+                prev = m;
+            }
+        } else if (navOk(m) && (!next || m.freq < next.freq ||
+            (m.freq === next.freq && m.priority > next.priority))) {
+            next = m;
+        }
+    }
+
+    result.current = current;
+    result.prev = prev;
+    result.next = next;
+    return result;
+}

@@ -88,6 +88,12 @@ esbuild ../src/extensions/navtex/messages.js --bundle --format=cjs --platform=no
     --outfile=.build/navtex.cjs --log-level=warning
 esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefax.cjs --log-level=warning
+esbuild ../src/lib/markerNav.js --bundle --format=cjs --platform=node \
+    --outfile=.build/markernav.cjs --log-level=warning
+esbuild ../src/radio/media/metadata.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mediametadata.cjs --log-level=warning
+esbuild ../src/radio/media/support.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mediasupport.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
 esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
@@ -124,3 +130,4 @@ node qrss.test.js
 node freedv.test.js
 node sstv.test.js
 node soundmodem.test.js
+node mediasession.test.js

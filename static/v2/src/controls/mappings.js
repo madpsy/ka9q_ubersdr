@@ -31,7 +31,10 @@ export const DEFAULT_STATE = {
     stepHz: 1000,
     flexcontrol: { mappings: {} },
     midi: { mappings: {}, device: '' },
-    radiosync: { rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true },
+    radiosync: {
+        rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
+        syncFrequency: true, syncMode: true,
+    },
 };
 
 function readJSON(key) {

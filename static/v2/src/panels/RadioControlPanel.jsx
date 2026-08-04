@@ -64,6 +64,10 @@ export default function RadioControlPanel({ minimal }) {
         sync.setMuteOnTx(cfg.radiosync.muteOnTx);
     }, [sync, cfg.radiosync.direction, cfg.radiosync.muteOnTx]);
 
+    useEffect(() => {
+        sync.setSyncFields({ frequency: cfg.radiosync.syncFrequency, mode: cfg.radiosync.syncMode });
+    }, [sync, cfg.radiosync.syncFrequency, cfg.radiosync.syncMode]);
+
     if (!serialAvailable()) {
         return (
             <div className="stack">
@@ -164,6 +168,26 @@ export default function RadioControlPanel({ minimal }) {
                     size="sm"
                 />
             </Field>
+
+            <Switch
+                checked={cfg.radiosync.syncFrequency}
+                onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, syncFrequency: v } }))}
+                label="Sync frequency"
+                title="Keep the rig and the receiver on the same frequency"
+            />
+
+            <Switch
+                checked={cfg.radiosync.syncMode}
+                onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, syncMode: v } }))}
+                label="Sync mode"
+                title="Keep the rig and the receiver in the same mode"
+            />
+
+            {!cfg.radiosync.syncFrequency && !cfg.radiosync.syncMode && (
+                <div className="note note--tight">
+                    Nothing is being synced — the readout above still follows the radio.
+                </div>
+            )}
 
             <Switch
                 checked={cfg.radiosync.muteOnTx}

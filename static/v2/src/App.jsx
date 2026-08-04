@@ -12,6 +12,7 @@ import IdleWatch from './components/IdleWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
+import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import { useDisplay } from './display/DisplayContext.jsx';
 import { subscribeSpots } from './lib/spotStore.js';
@@ -112,13 +113,15 @@ export default function App() {
                 <RadioProvider>
                     <ChatProvider>
                         <ExtensionsProvider>
-                            <PageTitle />
-                            <AudioDefaults />
-                            <IdleWatch />
-                            <StartOverlay />
-                            <LegacyBridge />
-                            <SpotStreams />
-                            {mobile ? <MobileShell /> : <DesktopShell />}
+                            <MediaSessionProvider>
+                                <PageTitle />
+                                <AudioDefaults />
+                                <IdleWatch />
+                                <StartOverlay />
+                                <LegacyBridge />
+                                <SpotStreams />
+                                {mobile ? <MobileShell /> : <DesktopShell />}
+                            </MediaSessionProvider>
                         </ExtensionsProvider>
                     </ChatProvider>
                 </RadioProvider>

@@ -20,7 +20,7 @@ import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { Button, Modal } from './ui.jsx';
 import {
     CONFIRM_MS, FULL_DIVISOR, THROTTLE_DIVISOR,
-    idlePhrase, shouldPing, throttleAfterMs, warnAfterMs,
+    idlePhrase, onExternalActivity, shouldPing, throttleAfterMs, warnAfterMs,
 } from '../radio/idle.js';
 
 // What counts as being there. v1's list, and capture-phase like v1's, so a
@@ -166,12 +166,15 @@ export default function IdleWatch() {
 
         for (const ev of ACTIVITY) document.addEventListener(ev, onActivity, true);
         document.addEventListener('visibilitychange', onVisible);
+        // Lock-screen and media-key presses, which reach no DOM element.
+        const offExternal = onExternalActivity(onActivity);
         at.current.activity = Date.now();
         arm();
 
         return () => {
             for (const ev of ACTIVITY) document.removeEventListener(ev, onActivity, true);
             document.removeEventListener('visibilitychange', onVisible);
+            offExternal();
             clearAll();
             // Leaving the spectrum at half rate because the panel unmounted
             // would be invisible and permanent.

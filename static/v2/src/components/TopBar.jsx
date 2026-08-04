@@ -4,7 +4,7 @@ import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../displa
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
-import { formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
+import { audioLevelPercent, formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
 import { MODES, MODE_BY_ID } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
@@ -108,6 +108,38 @@ function SpaceWeather() {
             <span>A:{a}</span>
             <span>W:{bz}</span>
             <span className={`topbar__sw-p is-${gradeTone(quality)}`}>P:{quality}</span>
+        </div>
+    );
+}
+
+// The output VU, tucked under the volume slider it belongs to.
+//
+// Measured after the volume control (meters.outLevel), so it answers the
+// question the slider raises — is anything actually coming out, and how hard —
+// rather than reporting the stream regardless of where the slider is. Muting
+// takes it to nothing, which is the point: a silent receiver and a silent band
+// look the same until something says which.
+//
+// Sampled at its own rate rather than the S-meter's: this is a 3px bar, and
+// re-rendering it faster than the eye resolves buys nothing. The zone colours
+// are v1's VU (app.js updateVUMeter) — green to −20 dBFS, yellow, orange, then
+// red over the last 5 dB — and they live in the stylesheet, so the fill is one
+// number and no per-frame colour arithmetic.
+function VuBar({ muted }) {
+    const m = useMeters(10);
+    const pct = audioLevelPercent(m.outLevel);
+
+    return (
+        <div
+            className={`topbar__vu${m.clipping ? ' is-clip' : ''}${muted ? ' is-muted' : ''}`}
+            title={m.clipping
+                ? 'Output is hitting full scale — turn the volume, makeup or EQ boost down'
+                : muted ? 'Output level — muted' : 'Output level'}
+        >
+            {/* The colours are painted across the whole track and this covers
+                what the level has not reached, so a zone boundary stays at the
+                same place on the bar instead of sliding with the reading. */}
+            <span className="topbar__vu-mask" style={{ left: `${pct}%` }} />
         </div>
     );
 }
@@ -302,16 +334,19 @@ export default function TopBar({ compact }) {
                         active={audio.muted}
                         title={audio.muted ? 'Unmute' : 'Mute'}
                     />
-                    {/* Disabled rather than hidden while muted: the level is
-                        still what you will hear when you unmute, and a control
-                        that vanishes takes the reading with it. */}
-                    <Slider
-                        value={Math.round(audio.volume * 100)}
-                        min={0}
-                        max={100}
-                        disabled={audio.muted}
-                        onChange={(v) => actions.setVolume(v / 100)}
-                    />
+                    <div className="topbar__vol-stack">
+                        {/* Disabled rather than hidden while muted: the level is
+                            still what you will hear when you unmute, and a
+                            control that vanishes takes the reading with it. */}
+                        <Slider
+                            value={Math.round(audio.volume * 100)}
+                            min={0}
+                            max={100}
+                            disabled={audio.muted}
+                            onChange={(v) => actions.setVolume(v / 100)}
+                        />
+                        <VuBar muted={audio.muted} />
+                    </div>
                 </div>
             )}
 

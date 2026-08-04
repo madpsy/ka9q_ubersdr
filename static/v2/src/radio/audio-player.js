@@ -72,6 +72,7 @@ export class AudioPlayer extends Emitter {
         this.clipTimer = null;
         this.clipping = false;      // output hit full scale recently
         this.peakDb = -Infinity;    // output peak, dBFS
+        this.outLevel = 0;          // smoothed RMS of the output, 0..1
         this._clipUntil = 0;
         this.recordTap = null;      // unity node the recorder hangs off
         this.duck = null;           // output gate, for decoders that play their own audio
@@ -491,16 +492,35 @@ export class AudioPlayer extends Emitter {
 
         this.clipTimer = setInterval(() => {
             const a = this.analyser;
-            if (!this.ctx || this.ctx.state !== 'running' || !a) return;
+            // A suspended or closed context produces nothing, so the meter
+            // reads nothing rather than freezing on whatever was playing when
+            // it stopped — a bar left half lit with the receiver off is a
+            // reading, and a wrong one.
+            if (!this.ctx || this.ctx.state !== 'running' || !a) {
+                this.outLevel = 0;
+                return;
+            }
             if (buf.length !== a.fftSize) buf = new Float32Array(a.fftSize);
             a.getFloatTimeDomainData(buf);
 
             let peak = 0;
+            let sum = 0;
             for (let i = 0; i < buf.length; i++) {
-                const v = buf[i] < 0 ? -buf[i] : buf[i];
+                const s = buf[i];
+                const v = s < 0 ? -s : s;
                 if (v > peak) peak = v;
+                sum += s * s;
             }
             this.peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+
+            // The output VU, from the buffer already in hand — the sum costs
+            // one multiply per sample on a loop that is walking the array
+            // anyway. Distinct from `level`, which is the RMS of the decoded
+            // packet before the volume control: this one is what is coming out
+            // of the speakers, so it follows the volume slider and falls to
+            // nothing on mute, which is what a meter beside that slider has to
+            // do. Smoothed at the rate `level` is, so the two meters move alike.
+            this.outLevel = this.outLevel * 0.7 + Math.sqrt(sum / buf.length) * 0.3;
 
             const now = performance.now();
             if (peak >= CLIP_PEAK) this._clipUntil = now + CLIP_HOLD_MS;

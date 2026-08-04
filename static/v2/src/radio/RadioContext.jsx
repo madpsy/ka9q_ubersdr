@@ -160,6 +160,7 @@ export function RadioProvider({ children }) {
         makeupDb: 0,            // live compressor makeup gain
         clipping: false,        // output hit full scale in the last moment
         peakDb: -Infinity,      // output peak, dBFS
+        outLevel: 0,            // smoothed RMS after the volume control, 0..1
         queuedSec: 0,
         underruns: 0,
         frameAgeMs: 0,
@@ -380,6 +381,7 @@ export function RadioProvider({ children }) {
             m.makeupDb = player.makeupDb;
             m.clipping = player.clipping;
             m.peakDb = player.peakDb;
+            m.outLevel = player.outLevel;
             m.frameAgeMs = m.lastFrameAt ? performance.now() - m.lastFrameAt : 0;
         }, 100);
         return () => clearInterval(t);

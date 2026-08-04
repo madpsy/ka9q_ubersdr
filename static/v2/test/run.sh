@@ -106,6 +106,8 @@ esbuild ../src/extensions/soundmodem/ax25.js --bundle --format=cjs --platform=no
     --outfile=.build/ax25.cjs --log-level=warning
 esbuild ../src/extensions/soundmodem/waterfall.js --bundle --format=cjs --platform=node \
     --outfile=.build/smwaterfall.cjs --log-level=warning
+esbuild ../src/lib/waterfallRing.js --bundle --format=cjs --platform=node \
+    --outfile=.build/waterfallring.cjs --log-level=warning
 esbuild ../src/extensions/whisper/frames.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisper.cjs --log-level=warning
 esbuild ../src/extensions/whisper/speech.js --bundle --format=cjs --platform=node \
@@ -137,4 +139,5 @@ node freedv.test.js
 node sstv.test.js
 node soundmodem.test.js
 node whisper.test.js
+node waterfall.test.js
 node mediasession.test.js

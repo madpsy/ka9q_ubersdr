@@ -7,7 +7,9 @@
 // The waterfall uses a ring-buffered offscreen canvas: each new row is written
 // at a decrementing index and the visible canvas is painted from two slices of
 // the ring. That is O(row) per frame and, unlike scrolling by blitting the
-// canvas onto itself, never accumulates resampling artefacts.
+// canvas onto itself, never accumulates resampling artefacts. Resizing the pane
+// vertically keeps that history and only a width change throws it away — see
+// the ring allocation below for why the two differ.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
@@ -22,6 +24,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
+import { RING_BG, ringKeepsHistory, ringSlices } from '../lib/waterfallRing.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
@@ -356,12 +359,33 @@ export default function SpectrumView() {
         const w = Math.max(1, Math.round(sizes.w * dpr));
         const h = Math.max(1, Math.round(wfH * dpr));
         if (g.ringWidth !== w || g.ringHeight !== h) {
+            // A resize needs a new ring, but the history only has to be thrown
+            // away for a width change — see ringKeepsHistory for why the two
+            // dimensions differ. A height change is what dragging the splitter,
+            // the window edge or the dock beside it produces, and wiping the
+            // last few minutes of the band for one of those is pure loss.
+            const keep = ringKeepsHistory(
+                { ring: g.ring, width: g.ringWidth, height: g.ringHeight }, w,
+            );
+
             const ring = document.createElement('canvas');
             ring.width = w;
             ring.height = h;
             const ctx = ring.getContext('2d', { alpha: false });
-            ctx.fillStyle = '#05070c';
+            ctx.fillStyle = RING_BG;
             ctx.fillRect(0, 0, w, h);
+
+            if (keep) {
+                // Copied out unrolled, newest first — the same read the paint
+                // does, which is why the head can then be 0. Growing leaves the
+                // background showing below the oldest row we have, since that
+                // history does not exist yet; shrinking drops the oldest rows,
+                // which are the ones about to scroll off anyway.
+                for (const s of ringSlices(g.ringHead, g.ringHeight, Math.min(g.ringHeight, h))) {
+                    ctx.drawImage(g.ring, 0, s.sy, w, s.sh, 0, s.dy, w, s.sh);
+                }
+            }
+
             g.ring = ring;
             g.ringCtx = ctx;
             g.ringWidth = w;
@@ -1068,12 +1092,11 @@ function drawWaterfall(g, d, wf, wfH, pxW, floor, range, commitRow, cfg, tuning,
 
     const octx = wf.getContext('2d', { alpha: false });
     octx.imageSmoothingEnabled = false;
-    const head = g.ringHead;
-    const firstH = Math.min(H - head, H);
-    // Newest row sits at `head`; time runs downward through increasing indices.
-    octx.drawImage(ring, 0, head, pxW, firstH, 0, 0, pxW, firstH);
-    if (firstH < H) {
-        octx.drawImage(ring, 0, 0, pxW, H - firstH, 0, firstH, pxW, H - firstH);
+    // Newest row sits at `head`; time runs downward through increasing indices,
+    // wrapping once — so the whole ring is one or two contiguous runs. The
+    // resize reads it back the same way; see lib/waterfallRing.js.
+    for (const s of ringSlices(g.ringHead, H, H)) {
+        octx.drawImage(ring, 0, s.sy, pxW, s.sh, 0, s.dy, pxW, s.sh);
     }
 
     // Markers go on the visible canvas, never into the ring — otherwise they

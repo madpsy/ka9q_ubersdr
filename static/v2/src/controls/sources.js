@@ -8,9 +8,13 @@
 //
 // So they are module singletons with a lifetime tied to the *choice of source*,
 // not to the panel's mount state. Hardware is released when the operator picks
-// a different source or presses Disconnect, and at no other time. A collapsed
+// a different surface or presses Disconnect, and at no other time. A collapsed
 // or hidden panel keeps its connection, which is the behaviour you want from a
 // rig that is tracking your receiver.
+//
+// FlexControl and MIDI are the two mapped surfaces and exclude each other —
+// both mapped to frequency would fight. Radio Sync excludes neither: it is a
+// panel of its own and can run alongside whichever surface is chosen.
 
 import { FlexControl } from './flexcontrol.js';
 import { MIDIControl } from './webmidi.js';
@@ -41,11 +45,11 @@ export function getSurface(id) {
     return id === 'midi' ? getMidi() : getFlex();
 }
 
-// Releases every source except `keep`. Called when the selected source changes,
-// so exactly one device is ever claimed. Safe to call for a source that was
-// never created — nothing is instantiated here.
-export function releaseExcept(keep) {
+// Releases the mapped surface that is not `keep`. Called when the chosen
+// surface changes, so at most one of the two is ever claimed. Radio Sync is
+// untouched — it is nobody's alternative now. Safe to call for a surface that
+// was never created: nothing is instantiated here.
+export function releaseSurfaceExcept(keep) {
     if (keep !== 'flexcontrol' && flex) flex.disconnect();
     if (keep !== 'midi' && midi) midi.close();
-    if (keep !== 'radiosync' && sync) sync.disconnect();
 }

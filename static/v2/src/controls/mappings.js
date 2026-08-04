@@ -1,4 +1,4 @@
-// Mapping storage and dispatch for the Radio Control panel.
+// Mapping storage and dispatch for the control panels.
 //
 // A mapping is keyed by whatever the source calls its control — a FlexControl
 // key like `dial_up`, a MIDI address like `176:0:14` — and holds the function
@@ -22,10 +22,12 @@ const V1_KEYS = {
     midi: { mappings: 'ubersdr_midi_mappings', step: 'ubersdr_midi_step_hz', device: 'ubersdr_midi_device' },
 };
 
-export const SOURCES = ['off', 'flexcontrol', 'midi', 'radiosync'];
+// The mapped surfaces, which are mutually exclusive. Radio Sync is not among
+// them: it is a panel of its own now, and may run alongside either of these.
+export const SURFACES = ['off', 'flexcontrol', 'midi'];
 
 export const DEFAULT_STATE = {
-    source: 'off',
+    surface: 'off',
     stepHz: 1000,
     flexcontrol: { mappings: {} },
     midi: { mappings: {}, device: '' },
@@ -69,7 +71,14 @@ export function loadState() {
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
     };
-    if (!SOURCES.includes(state.source)) state.source = 'off';
+    // Until the split there was one `source` covering all three, Radio Sync
+    // included. A saved 'radiosync' therefore names no surface at all: the sync
+    // panel now stands on its own and needs no flag, so it simply drops.
+    if (saved && saved.surface === undefined && typeof saved.source === 'string') {
+        state.surface = saved.source === 'radiosync' ? 'off' : saved.source;
+    }
+    delete state.source;
+    if (!SURFACES.includes(state.surface)) state.surface = 'off';
     return saved ? state : adoptV1(state);
 }
 
@@ -79,6 +88,36 @@ export function saveState(state) {
     } catch (e) {
         /* private browsing, quota — the panel still works for this session */
     }
+}
+
+// --- the shared store -------------------------------------------------------
+//
+// One saved blob, two panels: SDR Control owns `surface`, `stepHz` and the
+// mapping tables, Radio Control owns `radiosync`. If each held its own copy in
+// component state, whichever saved last would write back a stale version of the
+// other's half — picking a rig would silently undo a mapping learned a moment
+// earlier. So the state lives here and both panels subscribe.
+
+let current = null;
+const listeners = new Set();
+
+export function controlState() {
+    if (!current) current = loadState();
+    return current;
+}
+
+export function onControlState(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+}
+
+// Takes a patch or a reducer, same shape as a React setState.
+export function updateControlState(patch) {
+    const prev = controlState();
+    current = typeof patch === 'function' ? patch(prev) : { ...prev, ...patch };
+    saveState(current);
+    for (const fn of Array.from(listeners)) fn(current);
+    return current;
 }
 
 // Encoders repeat as fast as the hardware can send, so they get a rate limit by

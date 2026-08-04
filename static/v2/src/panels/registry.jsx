@@ -54,6 +54,7 @@ import RecorderPanel from './RecorderPanel.jsx';
 import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
+import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 
@@ -139,19 +140,36 @@ export const PANELS = [
         Component: RecorderPanel,
     },
 
-    // Hardware control surfaces and CAT sync. Collapsed by default: it does
-    // nothing until someone attaches a device, and its Hamlib download only
-    // starts when Radio Sync is chosen inside it.
+    // CAT sync with a transceiver. Collapsed by default, and deliberately so:
+    // opening it is what starts the 14 MB Hamlib download, since that is the
+    // point at which someone has asked for CAT.
     {
         id: 'radiocontrol',
         title: 'Radio control',
+        icon: <Icon.Radio />,
+        dock: 'left',
+        defaultOpen: false,
+        // Minimal: the rig's frequency, mode and TX state — the readout is the
+        // part worth keeping in view once the link is set up.
+        minimal: true,
+        Component: RadioControlPanel,
+    },
+
+    // The mapped hardware surfaces — a FlexControl dial or a MIDI surface.
+    // Independent of Radio control above: either may drive the receiver while a
+    // rig is synced. Collapsed by default; it does nothing until someone
+    // attaches a device.
+    {
+        id: 'sdrcontrol',
+        title: 'SDR control',
         icon: <Icon.Knob />,
         dock: 'left',
         defaultOpen: false,
-        // Minimal: the rig's frequency, mode and TX state, and only under Radio
-        // Sync — the mapped surfaces have no readout to keep.
+        // Minimal: the connection line — is the dial still attached, and the
+        // button to attach or drop it. The mapping table and the learn flow are
+        // setup, done once.
         minimal: true,
-        Component: RadioControlPanel,
+        Component: SDRControlPanel,
     },
 
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },

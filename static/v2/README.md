@@ -441,12 +441,13 @@ tests exercise, and it is where a silent mistake actually lives.
 * **State persists in `localStorage`** under `ubersdr.v2.*` (tuning, display,
   layout). The session UUID is in `sessionStorage`, so each tab is its own
   receiver session.
-* **Radio control is native, not a hosted extension.** v1 ships FlexControl,
+* **Hardware control is native, not a hosted extension.** v1 ships FlexControl,
   MIDI Control and Radio Sync as three separate extensions; the first two are
   near-identical 900-line files that each carry their own copy of the mapping
   engine and discover control ranges by reading v1's sliders out of the DOM
-  (`document.getElementById('bandwidth-low').min`). Here they are one panel with
-  one function catalogue in `controls/functions.js`, and everything goes through
+  (`document.getElementById('bandwidth-low').min`). Here they are the SDR
+  control panel, with one function catalogue in `controls/functions.js`, and
+  everything goes through
   `actions`, so a mapped control takes the same path as a click. Hardware is
   normalised to three event kinds — `relative` (encoder detents), `absolute`
   (a fader's position, 0..1) and `trigger` (a button) — and each function
@@ -459,15 +460,22 @@ tests exercise, and it is where a silent mistake actually lives.
   imported file shows them struck through rather than dropping them silently;
   `mode_cw` aliases to `mode_cwu` since v2 splits the sidebands. Noise reduction
   entries are generated from the server's DSP schema — nothing hardcodes nr2.
-* **One control source at a time, and it outlives the panel.** Two surfaces
-  mapped to frequency would fight, and Radio Sync driving the receiver would
-  fight both, so choosing a source releases the others (`controls/sources.js`).
-  The sources are module singletons rather than component state for a reason
-  specific to this UI: a panel unmounts every time it is dragged to another dock,
-  floated or opened on mobile, and that must not close a serial port, drop a CAT
-  link, or throw away Hamlib. Hardware is released on a source change or an
-  explicit Disconnect, never on unmount.
-* **Hamlib is fetched only when Radio Sync is chosen.** `hamlib.wasm` is 14 MB,
+* **Two panels: mapped surfaces, and CAT.** SDR control holds FlexControl and
+  MIDI — a control moves, a mapped function runs — and Radio control holds Radio
+  Sync, where nothing is mapped and the rig and the receiver simply follow each
+  other. They are independent: a knob box and a synced rig are two ways of
+  moving the same dial, not a conflict. Only the two mapped surfaces exclude
+  each other, since both mapped to frequency would fight, so choosing one
+  releases the other (`controls/sources.js`). Both panels read and write one
+  settings blob through the small store in `controls/mappings.js` — with a copy
+  each, whichever saved last would write back a stale version of the other's
+  half — and share the radio facade and the message log via `controls/panel.jsx`.
+* **A source outlives its panel.** The sources are module singletons rather than
+  component state for a reason specific to this UI: a panel unmounts every time
+  it is dragged to another dock, floated or opened on mobile, and that must not
+  close a serial port, drop a CAT link, or throw away Hamlib. Hardware is
+  released on a surface change or an explicit Disconnect, never on unmount.
+* **Hamlib is fetched only when the Radio control panel is opened.** `hamlib.wasm` is 14 MB,
   so `ensureLoaded()` is the one place it is pulled, it caches its promise on the
   singleton, and it deliberately does *not* cache a rejection — a transient
   failure on a 14 MB download must not leave the panel dead until a reload. The

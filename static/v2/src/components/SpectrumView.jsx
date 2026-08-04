@@ -16,7 +16,7 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN } from '../radio/constants.js';
-import { DEFAULTS as DISPLAY_DEFAULTS, useDisplay } from '../display/DisplayContext.jsx';
+import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
@@ -690,6 +690,12 @@ export default function SpectrumView() {
     // layout there.
     const mobile = useMediaQuery(MOBILE_QUERY);
 
+    // The pointer handlers below are registered once and must not close over a
+    // stale answer, so this goes in a ref like `display` does.
+    const mobileRef = useRef(mobile);
+    mobileRef.current = mobile;
+    const anchorNow = () => resolveZoomAnchor(dispRef.current.zoomAnchor, mobileRef.current);
+
     // ---- pointer interaction --------------------------------------------
 
     const freqAtX = useCallback((clientX) => {
@@ -821,7 +827,7 @@ export default function SpectrumView() {
                 // one on a different frequency and marched the view along the
                 // band. Fixed at the start, the whole gesture turns about a
                 // single point, which is what the fingers are asking for.
-                about: dispRef.current.zoomAnchor === 'tuned'
+                about: anchorNow() === 'tuned'
                     ? null
                     : freqAtX((pair[0].x + pair[1].x) / 2),
                 last: 0,
@@ -1006,7 +1012,7 @@ export default function SpectrumView() {
         // Anchor per the Display panel: 'cursor' holds the frequency under the
         // pointer still, 'tuned' re-centres on the dial the way the toolbar's
         // +/- buttons do — which zoomCenter() takes as a null point.
-        const f = dispRef.current.zoomAnchor === 'tuned' ? null : freqAtX(e.clientX);
+        const f = anchorNow() === 'tuned' ? null : freqAtX(e.clientX);
         if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
     }, [actions, freqAtX]);
 
@@ -1020,7 +1026,7 @@ export default function SpectrumView() {
     }, [onWheel]);
 
     const span = view.span || 0;
-    const anchorTuned = display.zoomAnchor === 'tuned';
+    const anchorTuned = resolveZoomAnchor(display.zoomAnchor, mobile) === 'tuned';
 
     return (
         <div className="spectrum">

@@ -1,5 +1,5 @@
 import React from '../react.js';
-import { useDisplay } from '../display/DisplayContext.jsx';
+import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
@@ -56,16 +56,24 @@ export default function DisplayPanel() {
                 />
             </Field>
 
-            {/* Only means something while the wheel zooms. Mirrored by the
-                toggle in the spectrum toolbar, which writes the same setting. */}
+            {/* Read by wheel zoom and by the spectrum's pinch. Mirrored by the
+                toggle in the spectrum toolbar, which writes the same setting —
+                that one only ever writes an explicit choice, so pressing it is
+                how you leave Auto. */}
             {(d.wheelAction || 'zoom') === 'zoom' && (
-                <Field label="Zoom about">
+                <Field
+                    label="Zoom about"
+                    hint={d.zoomAnchor === 'cursor' || d.zoomAnchor === 'tuned'
+                        ? undefined
+                        : `auto \u2192 ${resolveZoomAnchor(d.zoomAnchor, mobile)}`}
+                >
                     <Segmented
                         size="sm"
-                        value={d.zoomAnchor === 'tuned' ? 'tuned' : 'cursor'}
+                        value={d.zoomAnchor === 'tuned' || d.zoomAnchor === 'cursor' ? d.zoomAnchor : 'auto'}
                         onChange={(v) => d.set({ zoomAnchor: v })}
                         options={[
-                            { value: 'cursor', label: 'Cursor', title: 'Holds the frequency under the pointer still' },
+                            { value: 'auto', label: 'Auto', title: 'Cursor where there is a pointer, tuned on a phone — where a pinch has no cursor to hold still and the dial is what you are watching' },
+                            { value: 'cursor', label: 'Cursor', title: 'Holds the frequency under the pointer or the fingers still' },
                             { value: 'tuned', label: 'Tuned', title: 'Re-centres on the tuned frequency, as the toolbar buttons do' },
                         ]}
                     />

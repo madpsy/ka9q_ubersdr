@@ -51,12 +51,19 @@ export const DEFAULTS = {
     tuneStep: 500,
     // What the wheel does over the spectrum: 'zoom' or 'tune' by tuneStep.
     wheelAction: 'zoom',
-    // What wheel zoom holds still: 'cursor' keeps the frequency under the
-    // pointer where it is, 'tuned' re-centres on the dial each step (which is
-    // what the toolbar's +/- buttons do). Only consulted when wheelAction is
-    // 'zoom'. Cursor is the default because it is what makes the wheel feel
-    // like it is zooming into the signal you are pointing at.
-    zoomAnchor: 'cursor',
+    // What a zoom holds still: 'cursor' keeps the frequency under the pointer
+    // or the fingers where it is, 'tuned' re-centres on the dial each step
+    // (which is what the toolbar's +/- buttons do). Read by the wheel and by
+    // the spectrum's pinch; only consulted when wheelAction is 'zoom'.
+    //
+    // 'auto' is the default and means cursor on a pointer, tuned on a phone —
+    // see resolveZoomAnchor. The two devices genuinely want opposite things.
+    // A wheel is precise and sits over the signal you are already pointing at,
+    // so holding that still is exactly right. A pinch is two fat fingers whose
+    // midpoint is wherever they happened to land, on a screen where the dial is
+    // the only thing you are actually interested in — anchoring on the fingers
+    // there walks the view off the signal you were listening to.
+    zoomAnchor: 'auto',
     // Halve the spectrum poll rate after a few minutes with no input, and put
     // it back on the first sign of life (IdleWatch). On by default, as it is in
     // v1, because the data it saves is data nobody was looking at — but it is a
@@ -80,12 +87,38 @@ export const UI_SCALE_MIN = 0.75;
 export const UI_SCALE_MAX = 1.6;
 export const UI_SCALE_STEP = 0.05;
 
+// Bumped when a stored value has to be reinterpreted rather than merely added
+// to. Everything in this file is persisted, defaults included — the save effect
+// writes the whole object on mount — so a stored value cannot be assumed to be
+// a choice somebody made, and a new default reaches nobody without this.
+const SETTINGS_VERSION = 2;
+
+function migrate(saved) {
+    // v2: zoomAnchor gained 'auto', which is tuned on a phone.
+    //
+    // A stored 'cursor' from before this is the old default written out on
+    // first load, not a preference — and on a phone it cannot have been one at
+    // all, because the pinch ignored this setting entirely until now, so there
+    // was nothing to choose between. Dropping it lets 'auto' apply. An explicit
+    // 'tuned' is left alone: that one could only have been set on purpose.
+    if (!(saved.v >= 2) && saved.zoomAnchor === 'cursor') delete saved.zoomAnchor;
+    return saved;
+}
+
 function load() {
     try {
-        return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}) };
+        const saved = migrate(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {});
+        return { ...DEFAULTS, ...saved, v: SETTINGS_VERSION };
     } catch (e) {
-        return { ...DEFAULTS };
+        return { ...DEFAULTS, v: SETTINGS_VERSION };
     }
+}
+
+// Which anchor is in force. 'auto' is the default and splits by device: a phone
+// gets the tuned frequency held still, anything with a pointer gets the cursor.
+export function resolveZoomAnchor(value, mobile) {
+    if (value === 'tuned' || value === 'cursor') return value;
+    return mobile ? 'tuned' : 'cursor';
 }
 
 const DisplayContext = createContext(null);
@@ -131,7 +164,7 @@ export function DisplayProvider({ children }) {
     }, [state.uiScale]);
 
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
-    const reset = useCallback(() => setState({ ...DEFAULTS }), []);
+    const reset = useCallback(() => setState({ ...DEFAULTS, v: SETTINGS_VERSION }), []);
 
     const value = useMemo(() => ({ ...state, server, set, reset }), [state, server, set, reset]);
     return <DisplayContext.Provider value={value}>{children}</DisplayContext.Provider>;

@@ -103,6 +103,20 @@ export function getBypassPassword() {
     try { return sessionStorage.getItem('ubersdr.v2.password') || ''; } catch (e) { return ''; }
 }
 
+// Typed into the start overlay rather than given in the URL. Session storage,
+// not local: a bypass is for this tab and this sitting, and a password left in
+// a browser for the next person is a password the operator did not share.
+// An empty value clears it, which is what a refusal does.
+export function setBypassPassword(password) {
+    try {
+        if (password) sessionStorage.setItem('ubersdr.v2.password', password);
+        else sessionStorage.removeItem('ubersdr.v2.password');
+    } catch (e) { /* private mode */ }
+    // The registration is per password: one cached under a rejected one would
+    // be replayed by the next connect.
+    registration = null;
+}
+
 // Returns { allowed, reason, clientIp }. A network failure is reported as
 // allowed so a flaky check never blocks an otherwise-working connection.
 export async function checkConnection() {

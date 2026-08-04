@@ -9,6 +9,7 @@ import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
+import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
@@ -114,6 +115,7 @@ export default function App() {
                             <PageTitle />
                             <AudioDefaults />
                             <IdleWatch />
+                            <StartOverlay />
                             <LegacyBridge />
                             <SpotStreams />
                             {mobile ? <MobileShell /> : <DesktopShell />}

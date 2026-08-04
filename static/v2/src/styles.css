@@ -716,6 +716,89 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .addmark__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
 .addmark__at { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 
+/* ── Start overlay ────────────────────────────────────────────────────────── */
+
+/* Above everything, including the floating windows and the extension: nothing
+   behind it is usable until the receiver is running. */
+.start {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(4, 8, 14, 0.88);
+    backdrop-filter: blur(3px);
+    overflow: auto;
+}
+[data-theme="light"] .start { background: rgba(226, 233, 242, 0.9); }
+
+.start__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    width: min(520px, 100%);
+    padding: 26px 24px 20px;
+    text-align: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.start__who { display: flex; flex-direction: column; gap: 2px; }
+.start__call {
+    font-family: var(--mono);
+    font-size: calc(26px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+.start__name { font-size: calc(15px * var(--ui-scale)); }
+.start__where { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+
+/* The operator's blurb can be any length; give it a bound and let it scroll
+   rather than pushing the button off a short window. */
+.start__blurb { max-height: 30vh; overflow: auto; text-align: left; }
+
+/* The one thing on screen worth pressing, so it looks like it. */
+.start__go {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 15px 20px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: calc(16px * var(--ui-scale));
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter var(--dur) var(--ease);
+}
+.start__go:hover { filter: brightness(1.08); }
+.start__go:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+
+.start__refused { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.start__pw { display: flex; gap: 6px; }
+.start__pw .input { flex: 1; min-width: 0; }
+.start__error { font-size: calc(12px * var(--ui-scale)); color: var(--bad); }
+
+.start__links { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+.start__link { font-size: calc(12px * var(--ui-scale)); color: var(--accent); }
+.start__badge {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+.start__version { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
+
 /* =========================================================================
    Spectrum
    ========================================================================= */

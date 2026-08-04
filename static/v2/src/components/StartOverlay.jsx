@@ -1,0 +1,150 @@
+// The front door — v1's audio-start overlay, in v2's clothes.
+//
+// It exists for a reason the browser imposes: an AudioContext started without a
+// user gesture is suspended, so *something* has to be pressed before there is
+// any audio. v1 makes that unavoidable moment useful, and this keeps the same
+// contents: whose receiver this is, the operator's own description of it, and
+// the way in — plus the links that only matter before you are listening.
+//
+// It also asks `/connection` on load rather than at the first press, so a full
+// or barred receiver says so up front instead of after a click that fails. That
+// is v1's checkConnectionOnLoad, including the bypass password: a rejection
+// offers the box, and a password that works is remembered for the session.
+//
+// Dismissed for the session once you start. It is not a tour and not a notice:
+// there is nothing to acknowledge, so it never reappears while the tab is open.
+
+import React, { useEffect, useRef, useState } from '../react.js';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { Button, Icon } from './ui.jsx';
+import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
+
+// The pages v1 links from this overlay. Both open in a new tab, as v1's do.
+const LISTENER_MAP = '/session_stats.html';
+const DIRECTORY = 'https://instances.ubersdr.org/';
+
+export default function StartOverlay() {
+    const { running, serverInfo, actions } = useRadio();
+    const [check, setCheck] = useState(null);      // null until /connection answers
+    const [password, setPassword] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const [started, setStarted] = useState(false);
+    const buttonRef = useRef(null);
+
+    // Asked once on load, and again only when a password is submitted. The
+    // endpoint is rate limited per IP, and the answer does not change on its
+    // own — a receiver that was full stays full until somebody leaves, which
+    // pressing Start will discover anyway.
+    useEffect(() => {
+        let cancelled = false;
+        checkConnection().then((r) => { if (!cancelled) setCheck(r); });
+        return () => { cancelled = true; };
+    }, []);
+
+    // Focused, so Return starts — v1's button title promises exactly that, and
+    // a focused button gets it from the browser without a key handler that
+    // could fire from somewhere else later.
+    useEffect(() => {
+        const el = buttonRef.current;
+        if (el) el.focus();
+    }, [check]);
+
+    if (running || started) return null;
+
+    const rx = (serverInfo && serverInfo.receiver) || {};
+    const allowed = !check || check.allowed;
+    const bypassed = !!getBypassPassword();
+
+    const start = () => {
+        setStarted(true);
+        actions.powerOn();
+    };
+
+    const submitPassword = async (e) => {
+        e.preventDefault();
+        const pw = password.trim();
+        if (!pw) { setError('Enter the password.'); return; }
+        setBusy(true);
+        setError('');
+        // Stored before the check, because that is where checkConnection reads
+        // it from — and cleared again if it is refused, so a wrong one is not
+        // left to fail every later request.
+        setBypassPassword(pw);
+        const r = await checkConnection();
+        setBusy(false);
+        if (r.allowed) {
+            setCheck(r);
+            return;
+        }
+        setBypassPassword('');
+        setError('That password was not accepted.');
+    };
+
+    return (
+        <div className="start" role="dialog" aria-label="Start listening">
+            <div className="start__card">
+                <div className="start__who">
+                    {rx.callsign && <div className="start__call">{rx.callsign}</div>}
+                    {rx.name && <div className="start__name">{rx.name}</div>}
+                    {rx.location && <div className="start__where">{rx.location}</div>}
+                </div>
+
+                {/* The operator's own blurb, as markup — the same field v1
+                    renders here and the Receiver info panel shows. */}
+                {serverInfo && serverInfo.description && (
+                    <div
+                        className="prose start__blurb"
+                        dangerouslySetInnerHTML={{ __html: serverInfo.description }}
+                    />
+                )}
+
+                {allowed ? (
+                    <button
+                        ref={buttonRef}
+                        type="button"
+                        className="start__go"
+                        title="Press Return to start"
+                        onClick={start}
+                    >
+                        <Icon.Power size={34} />
+                        <span>Click to start</span>
+                    </button>
+                ) : (
+                    <div className="start__refused">
+                        <div className="note note--warn">{check.reason || 'This receiver is not accepting connections.'}</div>
+                        {/* v1 offers the box on any refusal, not only a full
+                            receiver: a bypass password overrides the lot. */}
+                        <form className="start__pw" onSubmit={submitPassword}>
+                            <input
+                                className="input"
+                                type="password"
+                                placeholder="Bypass password"
+                                value={password}
+                                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                            />
+                            <Button size="sm" variant="primary" type="submit" disabled={busy}>
+                                {busy ? 'Checking…' : 'Unlock'}
+                            </Button>
+                        </form>
+                        {error && <div className="start__error">{error}</div>}
+                    </div>
+                )}
+
+                <div className="start__links">
+                    <a className="start__link" href={LISTENER_MAP} target="_blank" rel="noopener noreferrer">
+                        Listener map
+                    </a>
+                    <a className="start__link" href={DIRECTORY} target="_blank" rel="noopener noreferrer">
+                        Instance directory
+                    </a>
+                    {bypassed && <span className="start__badge" title="A bypass password is in use">Bypass</span>}
+                </div>
+
+                {serverInfo && serverInfo.version && (
+                    <div className="start__version">v{serverInfo.version}</div>
+                )}
+            </div>
+        </div>
+    );
+}

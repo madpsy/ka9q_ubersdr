@@ -3446,6 +3446,51 @@ a.btn { text-decoration: none; }
 
 /* ── Sound Modem ──────────────────────────────────────────────────────────── */
 
+/* Threshold on its own row: it belongs to the modem as a whole, and dropping it
+   in among the channel cards left a stray labelled number of a different shape
+   sitting where a fifth card would be. */
+.sm__global { display: flex; align-items: flex-end; gap: 8px; flex: none; }
+.sm__hint {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    padding-bottom: 3px;
+}
+
+/* The DCD lamps: one per channel, always all four. An enabled channel's lamp
+   carries its waterfall marker colour, which is what ties the two together. */
+.sm__dcds { display: inline-flex; gap: 3px; }
+.sm__lamp {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-3);
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sm__lamp.is-enabled { border-color: var(--ch); color: var(--ch); }
+.sm__lamp.is-on { background: var(--ch); border-color: var(--ch); color: #06090f; }
+
+/* The waterfall, and the axis/marker overlay drawn on top of it. */
+.sm__wf {
+    position: relative;
+    flex: none;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #000;
+}
+.sm__wf-canvas, .sm__wf-overlay {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.sm__wf-overlay { pointer-events: none; }
+
 .sm__count, .sm__last {
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
@@ -3471,7 +3516,12 @@ a.btn { text-decoration: none; }
     border-radius: var(--radius-sm);
     background: var(--surface-2);
 }
-.sm__ch.is-on { border-color: var(--accent-line, var(--border-strong)); }
+.sm__ch--0 { --ch: #ff4d4d; }
+.sm__ch--1 { --ch: #4dff88; }
+.sm__ch--2 { --ch: #4db4ff; }
+.sm__ch--3 { --ch: #ffd24d; }
+.sm__ch.is-on { border-color: var(--ch); }
+.sm__ch.is-on .switch__label { color: var(--ch); }
 .sm__ch-head { display: flex; align-items: center; gap: 6px; }
 .sm__ch-body {
     display: flex;
@@ -3534,7 +3584,9 @@ a.btn { text-decoration: none; }
     background: var(--surface-3);
     font-family: var(--mono);
     font-size: calc(9px * var(--ui-scale));
-    color: var(--text-faint);
+    /* The channel's marker colour, so a row is matched to a line on the
+       waterfall without reading the letter. */
+    color: var(--ch, var(--text-faint));
 }
 .sm__path { font-family: var(--mono); white-space: nowrap; }
 .sm__call {

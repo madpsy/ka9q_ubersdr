@@ -98,6 +98,8 @@ esbuild ../src/extensions/soundmodem/frames.js --bundle --format=cjs --platform=
     --outfile=.build/soundmodem.cjs --log-level=warning
 esbuild ../src/extensions/soundmodem/ax25.js --bundle --format=cjs --platform=node \
     --outfile=.build/ax25.cjs --log-level=warning
+esbuild ../src/extensions/soundmodem/waterfall.js --bundle --format=cjs --platform=node \
+    --outfile=.build/smwaterfall.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js

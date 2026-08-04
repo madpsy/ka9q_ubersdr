@@ -26,40 +26,154 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
 import { Button, Empty, Icon, Switch } from '../../components/ui.jsx';
+import { subscribeAudioSpectrum } from '../../lib/audioSpectrum.js';
 import { useAudioExtension } from '../useAudioExtension.js';
 import { tunedOption } from '../frequencies.js';
 import { NumberField } from '../TeleprinterUI.jsx';
 import { parseAX25 } from './ax25.js';
 import {
-    FRAME_FILTERS, FX25_MODES, IL2P_MODES, LIMITS, MAX_CHANNELS, MAX_FRAMES, MAX_LINES,
-    MODEM_TYPES, SOUNDMODEM_CONFIG, SOUNDMODEM_FREQUENCIES,
-    anyChannelEnabled, attachParams, decodeFrame, matchesFilter, matchesSearch,
+    CHANNEL_NAMES, DEFAULT_FRAME_LIMIT, FRAME_FILTERS, FRAME_LIMITS, FX25_MODES, IL2P_MODES,
+    LIMITS, MAX_CHANNELS, MAX_LINES, MODEM_TYPES, RCVR_PAIRS,
+    SOUNDMODEM_CONFIG, SOUNDMODEM_FREQUENCIES,
+    anyChannelEnabled, attachParams, decodeFrame, looksLikeRealFrame, matchesFilter,
+    matchesSearch, trimFrames,
 } from './frames.js';
+import {
+    CHANNEL_COLOURS, LINE_MS, MAX_AUDIO_HZ, buildBinMap, drawLine, modemBandwidth, xOf,
+} from './waterfall.js';
 
 // Packet is received in USB on HF; on VHF a receiver is in NFM, which this
 // receiver can also do — so the mode is not forced and only the tune-to menu
 // picks one.
 const HF_MODE = 'usb';
 
-// How long a DCD lamp stays lit after the last "on". The server sends a pulse
-// per state change and a channel that is decoding toggles constantly, so
-// without this the lamps flicker rather than reading as activity.
-const DCD_HOLD_MS = 400;
+// How long a lamp stays lit when no "off" follows the "on". v1's number. The
+// server sends a pulse per state change, and a burst that ends without one
+// would otherwise leave the lamp lit for ever.
+const DCD_HOLD_MS = 500;
 
-const RCVR_PAIRS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const WATERFALL_H = 120;
 
 function timeOf(at) {
     return new Date(at).toISOString().substring(11, 19);
+}
+
+/**
+ * The audio waterfall, with a marker per enabled channel.
+ *
+ * Runs whenever the receiver does, not only while the modem is started: the
+ * point of it is choosing a modem frequency, which you do before pressing
+ * Start. Nothing about it goes through React — the bins are read and painted
+ * inside one animation callback.
+ */
+function Waterfall({ channels }) {
+    const { player } = useRadio();
+    const wrap = useRef(null);
+    const wf = useRef(null);
+    const overlay = useRef(null);
+    // Everything the paint path needs across frames without causing a render.
+    const g = useRef({ binMap: null, rgba: null, bins: 0, rate: 0, at: 0, width: 0 });
+
+    // Redrawn on every change, so moving a channel's frequency moves its marker
+    // as you type rather than when the modem next starts.
+    const marks = useMemo(() => channels
+        .map((c, i) => ({ ...c, index: i }))
+        .filter((c) => c.enabled && xOf(c.freq) != null), [channels]);
+
+    useEffect(() => {
+        const canvas = overlay.current;
+        if (!canvas) return;
+        const box = wrap.current;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        canvas.width = Math.max(1, Math.round(box.clientWidth * dpr));
+        canvas.height = Math.max(1, Math.round(WATERFALL_H * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const w = box.clientWidth;
+        ctx.clearRect(0, 0, w, WATERFALL_H);
+
+        // Frequency scale along the bottom.
+        ctx.font = '9px ui-monospace, monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        for (let hz = 0; hz <= MAX_AUDIO_HZ; hz += 500) {
+            const x = (hz / MAX_AUDIO_HZ) * w;
+            ctx.fillRect(x, WATERFALL_H - 4, 1, 4);
+            ctx.fillText(String(hz), x + 2, WATERFALL_H - 5);
+        }
+
+        // One marker per enabled channel: a centre line, a bandwidth bar and
+        // the channel's letter, so two channels a hundred hertz apart are still
+        // told apart at a glance.
+        for (const m of marks) {
+            const colour = CHANNEL_COLOURS[m.index % CHANNEL_COLOURS.length];
+            const x = xOf(m.freq) * w;
+            const half = (modemBandwidth((MODEM_TYPES[m.modem] || {}).label) / 2 / MAX_AUDIO_HZ) * w;
+
+            ctx.fillStyle = colour;
+            ctx.globalAlpha = 0.16;
+            ctx.fillRect(x - half, 0, half * 2, WATERFALL_H - 12);
+            ctx.globalAlpha = 0.85;
+            ctx.fillRect(x - 0.5, 0, 1, WATERFALL_H - 12);
+            ctx.globalAlpha = 1;
+
+            ctx.font = '600 10px ui-monospace, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.fillRect(x - 7, 1, 14, 12);
+            ctx.fillStyle = colour;
+            ctx.fillText(CHANNEL_NAMES[m.index], x, 2);
+        }
+    }, [marks]);
+
+    useEffect(() => {
+        const canvas = wf.current;
+        const box = wrap.current;
+        if (!canvas || !box) return undefined;
+        const width = Math.max(1, Math.round(box.clientWidth));
+        canvas.width = width;
+        canvas.height = WATERFALL_H;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, WATERFALL_H);
+        g.current.width = width;
+        g.current.binMap = null;
+
+        return subscribeAudioSpectrum(player, { fftSize: 2048, bins: false, byteBins: true }, (f) => {
+            const s = g.current;
+            if (!f.byteBins) return;
+            // One line every LINE_MS, so the scroll speed is constant whatever
+            // rate the animation loop runs at.
+            const now = performance.now();
+            if (now - s.at < LINE_MS) return;
+            s.at = now;
+            if (!s.binMap || s.bins !== f.binCount || s.rate !== f.sampleRate) {
+                s.binMap = buildBinMap(canvas.width, f.binCount, f.sampleRate);
+                s.bins = f.binCount;
+                s.rate = f.sampleRate;
+            }
+            s.rgba = drawLine(ctx, f.byteBins, s.binMap, s.rgba);
+        });
+    }, [player]);
+
+    return (
+        <div className="sm__wf" style={{ height: WATERFALL_H }} ref={wrap} title="Audio spectrum over the last few seconds, with each enabled channel's listening frequency marked. Put the signal on a marker">
+            <canvas ref={wf} className="sm__wf-canvas" />
+            <canvas ref={overlay} className="sm__wf-overlay" />
+        </div>
+    );
 }
 
 /** One modem channel's settings. */
 function ChannelStrip({ index, channel, onChange, dcd }) {
     const set = (patch) => onChange({ ...channel, ...patch });
     return (
-        <div className={`sm__ch${channel.enabled ? ' is-on' : ''}`}>
+        <div className={`sm__ch sm__ch--${index}${channel.enabled ? ' is-on' : ''}`}>
             <div className="sm__ch-head">
                 <Switch
-                    label={`Ch ${index + 1}`}
+                    label={`Ch ${CHANNEL_NAMES[index]}`}
                     title="Run a modem on this channel. Each one listens to the same audio with its own settings, so you can watch two baud rates at once"
                     checked={!!channel.enabled}
                     onChange={(v) => set({ enabled: v })}
@@ -93,7 +207,7 @@ function ChannelStrip({ index, channel, onChange, dcd }) {
                     <label className="tp__field" title="Receiver diversity pairs. More decodes marginal signals better and costs CPU on a machine shared with every other listener">
                         <span className="tp__field-label">Pairs</span>
                         <select className="select" value={channel.rcvr_pairs} onChange={(e) => set({ rcvr_pairs: Number(e.target.value) })}>
-                            {RCVR_PAIRS.map((n) => <option key={n} value={n}>{n}</option>)}
+                            {RCVR_PAIRS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
                     </label>
 
@@ -132,9 +246,14 @@ export default function SoundModemExtension({ minimal }) {
     const [search, setSearch] = useState('');
     const [view, setView] = useState('frames');
     const [autoScroll, setAutoScroll] = useState(true);
+    const [limit, setLimit] = useState(DEFAULT_FRAME_LIMIT);
     const [copied, setCopied] = useState(false);
 
     const seq = useRef(0);
+    // Read from the socket callback, which is not re-created when the limit
+    // changes, so it has to come from a ref rather than the closure.
+    const limitRef = useRef(DEFAULT_FRAME_LIMIT);
+    limitRef.current = limit;
     const dcdTimers = useRef([null, null, null, null]);
     const listRef = useRef(null);
 
@@ -145,9 +264,10 @@ export default function SoundModemExtension({ minimal }) {
         switch (msg.kind) {
             case 'packet': {
                 const parsed = parseAX25(msg.bytes);
-                // A channel delivers plenty of frames too damaged to read. They
-                // are not worth a row, and not worth an error either.
-                if (!parsed) break;
+                // A channel delivers plenty of frames too damaged to read, and
+                // plenty of noise bursts that decode into AX.25-shaped rubbish.
+                // Neither is worth a row, and neither is worth an error.
+                if (!parsed || !looksLikeRealFrame(parsed)) break;
                 const row = {
                     ...parsed,
                     key: seq.current++,
@@ -155,7 +275,7 @@ export default function SoundModemExtension({ minimal }) {
                     // The KISS port is the modem channel it came from.
                     channel: msg.port,
                 };
-                setFrames((prev) => [row, ...prev].slice(0, MAX_FRAMES));
+                setFrames((prev) => trimFrames([row, ...prev], limitRef.current));
                 break;
             }
 
@@ -163,14 +283,18 @@ export default function SoundModemExtension({ minimal }) {
                 const ch = msg.channel;
                 if (ch >= MAX_CHANNELS) break;
                 clearTimeout(dcdTimers.current[ch]);
-                if (msg.on) setDcd((prev) => (prev[ch] ? prev : prev.map((v, i) => (i === ch ? true : v))));
-                // The lamp always goes out on a timer, never on the "off"
-                // pulse: a channel that is decoding toggles carrier detect
-                // constantly, and following it exactly makes the lamp flicker
-                // rather than read as activity.
-                dcdTimers.current[ch] = setTimeout(() => {
+                dcdTimers.current[ch] = null;
+                if (msg.on) {
+                    setDcd((prev) => (prev[ch] ? prev : prev.map((v, i) => (i === ch ? true : v))));
+                    // A safety net, not the normal path: an explicit "off"
+                    // clears the lamp at once, and this only catches a burst
+                    // whose "off" never arrives.
+                    dcdTimers.current[ch] = setTimeout(() => {
+                        setDcd((prev) => (prev[ch] ? prev.map((v, i) => (i === ch ? false : v)) : prev));
+                    }, DCD_HOLD_MS);
+                } else {
                     setDcd((prev) => (prev[ch] ? prev.map((v, i) => (i === ch ? false : v)) : prev));
-                }, DCD_HOLD_MS);
+                }
                 break;
             }
 
@@ -202,6 +326,8 @@ export default function SoundModemExtension({ minimal }) {
         parse: decodeFrame,
         onResult,
     });
+
+    useEffect(() => { setFrames((prev) => trimFrames(prev, limit)); }, [limit]);
 
     useEffect(() => { if (!running && decoding) setDecoding(false); }, [running, decoding]);
 
@@ -275,10 +401,26 @@ export default function SoundModemExtension({ minimal }) {
                 <span className={`tp__status tp__status--${statusTone}`} title="Whether the modem is attached to your audio session on the server">
                     {statusLabel}
                 </span>
-                <span className="sm__count" title="Frames decoded this session">{frames.length} frames</span>
+                <span className="sm__count" title="Frames held">{frames.length} frames</span>
                 {lastHeard && (
                     <span className="sm__last" title={`Last frame at ${timeOf(lastHeard.at)}`}>{lastHeard.from}</span>
                 )}
+                {/* One lamp per channel, always all four, so a dark lamp reads
+                    as "that channel is quiet" and a missing one is impossible.
+                    An enabled channel's lamp carries its marker colour, which
+                    is how a lamp is matched to a line on the waterfall. */}
+                <span className="sm__dcds" title="Data carrier detect, per modem channel">
+                    {CHANNEL_NAMES.map((name, i) => (
+                        <span
+                            key={name}
+                            className={`sm__lamp${dcd[i] ? ' is-on' : ''}${config.channels[i] && config.channels[i].enabled ? ' is-enabled' : ''}`}
+                            style={{ '--ch': CHANNEL_COLOURS[i] }}
+                            title={`Channel ${name}: ${config.channels[i] && config.channels[i].enabled ? (dcd[i] ? 'carrier detected' : 'enabled, idle') : 'disabled'}`}
+                        >
+                            {name}
+                        </span>
+                    ))}
+                </span>
                 <span className="tp__bar-gap" />
 
                 <select
@@ -324,6 +466,25 @@ export default function SoundModemExtension({ minimal }) {
             {/* Always visible, unlike the other decoders' settings: the modem
                 type has to match the transmission, so this is the control you
                 use rather than one you set once. */}
+            {/* The waterfall runs whenever the receiver does, not only while
+                the modem is started: choosing a modem frequency is what it is
+                for, and you do that before pressing Start. */}
+            {!minimal && running && <Waterfall channels={config.channels} />}
+
+            {/* The threshold is a property of the modem as a whole, so it sits
+                on its own row above the per-channel cards rather than being
+                dropped in among them as a fifth item of a different shape. */}
+            <div className="sm__global">
+                <NumberField
+                    label="DCD threshold"
+                    title="Carrier-detect threshold, 1–100. Lower is more sensitive and triggers on more noise"
+                    value={config.dcd_threshold}
+                    limits={LIMITS.dcd_threshold}
+                    onCommit={(v) => setConfig((prev) => ({ ...prev, dcd_threshold: v }))}
+                />
+                <span className="sm__hint">1–100 · lower is more sensitive</span>
+            </div>
+
             <div className="sm__channels">
                 {config.channels.slice(0, MAX_CHANNELS).map((c, i) => (
                     <ChannelStrip
@@ -335,13 +496,6 @@ export default function SoundModemExtension({ minimal }) {
                         onChange={(next) => setChannel(i, next)}
                     />
                 ))}
-                <NumberField
-                    label="DCD"
-                    title="Carrier-detect threshold, 1–100. Lower is more sensitive and triggers on more noise"
-                    value={config.dcd_threshold}
-                    limits={LIMITS.dcd_threshold}
-                    onCommit={(v) => setConfig((prev) => ({ ...prev, dcd_threshold: v }))}
-                />
             </div>
 
             {!minimal && !running && <div className="note note--tight">Start the receiver to decode.</div>}
@@ -362,10 +516,15 @@ export default function SoundModemExtension({ minimal }) {
                     </select>
                     <select className="select" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} title="Which modem channel's frames to show">
                         <option value="all">All channels</option>
-                        {config.channels.map((c, i) => (
-                            // eslint-disable-next-line react/no-array-index-key
-                            <option key={i} value={i}>Ch {i + 1}</option>
-                        ))}
+                        {CHANNEL_NAMES.map((name, i) => <option key={name} value={i}>Ch {name}</option>)}
+                    </select>
+                    <select
+                        className="select"
+                        value={limit}
+                        onChange={(e) => setLimit(Number(e.target.value))}
+                        title="How many frames to keep. Unlimited still stops at a couple of thousand — a tab left open overnight is not a reason to run out of memory"
+                    >
+                        {FRAME_LIMITS.map((n) => <option key={n} value={n}>{n === 0 ? '∞' : n}</option>)}
                     </select>
                     <input
                         className="input sm__search"
@@ -406,7 +565,13 @@ export default function SoundModemExtension({ minimal }) {
                 {view === 'frames' && rows.map((f) => (
                     <div key={f.key} className={`sm__frame sm__frame--${f.frameClass.toLowerCase()}`}>
                         <span className="sm__at">{timeOf(f.at)}</span>
-                        <span className="sm__ch-tag" title={`Modem channel ${f.channel + 1}`}>{f.channel + 1}</span>
+                        <span
+                            className="sm__ch-tag"
+                            style={{ '--ch': CHANNEL_COLOURS[f.channel % CHANNEL_COLOURS.length] }}
+                            title={`Modem channel ${CHANNEL_NAMES[f.channel] || f.channel}`}
+                        >
+                            {CHANNEL_NAMES[f.channel] || f.channel}
+                        </span>
                         <span className="sm__path">
                             <button
                                 type="button"
@@ -433,7 +598,9 @@ export default function SoundModemExtension({ minimal }) {
                 {view === 'monitor' && monitor.map((m) => (
                     <div key={m.key} className={`sm__line${m.isTx ? ' sm__line--tx' : ''}`}>
                         <span className="sm__at">{timeOf(m.at)}</span>
-                        <span className="sm__ch-tag">{m.channel + 1}</span>
+                        <span className="sm__ch-tag" style={{ '--ch': CHANNEL_COLOURS[m.channel % CHANNEL_COLOURS.length] }}>
+                            {CHANNEL_NAMES[m.channel] || m.channel}
+                        </span>
                         <span className="sm__line-text">{m.text}</span>
                     </div>
                 ))}

@@ -118,10 +118,11 @@ export const MODEM_TYPES = [
     { value: 15, label: 'ARDOP Packet' },
 ];
 
+// v1 offers two, not the three the server documents: this is a receive-only
+// site, so "RX+TX" is a mode it can never be in.
 export const FX25_MODES = [
     { value: 0, label: 'Off' },
-    { value: 1, label: 'RX' },
-    { value: 2, label: 'RX+TX' },
+    { value: 1, label: 'On' },
 ];
 
 export const IL2P_MODES = [
@@ -133,23 +134,51 @@ export const IL2P_MODES = [
 
 export const MAX_CHANNELS = 4;
 
+// QtSoundModem names its channels by letter, and so do the server's logs. They
+// are not numbered anywhere in the system, so numbering them here would invent
+// a second way of referring to the same four things.
+export const CHANNEL_NAMES = ['A', 'B', 'C', 'D'];
+
+// Receiver diversity pairs, as v1 offers them — powers of two rather than every
+// integer, because the cost roughly doubles with each step.
+export const RCVR_PAIRS = [
+    { value: 0, label: '0 (off)' },
+    { value: 1, label: '1' },
+    { value: 2, label: '2' },
+    { value: 4, label: '4' },
+    { value: 8, label: '8' },
+];
+
 export const LIMITS = {
     freq: { min: 100, max: 4000, step: 10 },
     dcd_threshold: { min: 1, max: 100, step: 1 },
 };
 
-// One channel, at the defaults the server documents. 1700 Hz is the Bell 202
-// centre — the tone pair sits at 1200 and 2200 — and is what a VHF packet
-// channel expects.
+// A spare channel: 1700 Hz is the Bell 202 centre — the tone pair sits at 1200
+// and 2200 — which is what a VHF packet channel expects.
 export function defaultChannel(enabled = false) {
     return { enabled, modem: 1, freq: 1700, rcvr_pairs: 0, fx25: 1, il2p: 0 };
 }
 
+// v1's starting configuration, verbatim, and it is not the obvious one.
+//
+// A and B are both on and both 300 baud, at 850 Hz AFSK and 2150 Hz BPSK. That
+// is an HF packet setup — the one that matches the 7.049 MHz entry in the
+// frequency menu — and running the two side by side is the point: you do not
+// know which of them the station you are hearing is using, so you listen for
+// both at once. C and D are spare Bell 202 channels for when you retune to VHF.
+//
+// FX.25 on and IL2P+CRC on the two HF channels are v1's as well: both are
+// error-corrected framings that a sender who is not using them cannot be hurt
+// by, so there is no cost to listening for them.
 export const SOUNDMODEM_CONFIG = {
     dcd_threshold: 20,
-    // The first channel on, the rest off: a modem with nothing enabled decodes
-    // nothing, and a panel that starts in that state looks broken.
-    channels: [defaultChannel(true), defaultChannel(), defaultChannel(), defaultChannel()],
+    channels: [
+        { enabled: true, modem: 0, freq: 850, rcvr_pairs: 0, fx25: 1, il2p: 2 },
+        { enabled: true, modem: 6, freq: 2150, rcvr_pairs: 0, fx25: 1, il2p: 2 },
+        defaultChannel(),
+        defaultChannel(),
+    ],
 };
 
 const clampInt = (v, lo, hi, fallback) => {
@@ -174,7 +203,7 @@ export function attachParams(config) {
             enabled: !!c.enabled,
             modem: oneOf(c.modem, MODEM_TYPES, 1),
             freq: clampInt(c.freq, LIMITS.freq.min, LIMITS.freq.max, 1700),
-            rcvr_pairs: clampInt(c.rcvr_pairs, 0, 8, 0),
+            rcvr_pairs: RCVR_PAIRS.some((r) => r.value === Number(c.rcvr_pairs)) ? Number(c.rcvr_pairs) : 0,
             fx25: oneOf(c.fx25, FX25_MODES, 1),
             il2p: oneOf(c.il2p, IL2P_MODES, 0),
         })),
@@ -186,36 +215,66 @@ export function anyChannelEnabled(config) {
     return (config.channels || []).some((c) => c.enabled);
 }
 
-// Frames kept. A busy VHF channel is a few a minute; an HF one, a few an hour.
-export const MAX_FRAMES = 500;
+// How many frames the list may hold, as v1 offers it. Zero means no limit —
+// which is a real choice on a channel that carries a few frames an hour.
+export const FRAME_LIMITS = [10, 25, 50, 100, 250, 500, 0];
+export const DEFAULT_FRAME_LIMIT = 25;
+
+// The ceiling even on "unlimited": a browser tab left on a busy VHF channel
+// overnight is not a reason to run out of memory.
+export const MAX_FRAMES = 2000;
+
+export function trimFrames(list, limit) {
+    const cap = limit > 0 ? Math.min(limit, MAX_FRAMES) : MAX_FRAMES;
+    return list.length > cap ? list.slice(0, cap) : list;
+}
 
 // Monitor and log lines kept. Both are diagnostics rather than results, so they
 // are held shallowly — the log in particular is QtSoundModem's stderr.
 export const MAX_LINES = 200;
 
-/**
- * The frame types the filter offers, grouped the way an operator thinks of them.
- *
- * 'all' and the two groups rather than sixteen individual types: what you
- * actually want is "just the APRS" or "hide the link-layer chatter", and a
- * menu of every U-frame variant is a menu nobody reads.
- */
+// The filter categories, and the type sets behind them — v1's, unchanged.
 export const FRAME_FILTERS = [
-    { id: 'all', label: 'All frames' },
-    { id: 'aprs', label: 'APRS only' },
-    { id: 'data', label: 'Data (UI and I)' },
-    { id: 'link', label: 'Link control' },
+    { id: 'all', label: 'All' },
+    { id: 'aprs', label: 'APRS' },
+    { id: 'ui', label: 'UI' },
+    { id: 'connected', label: 'Connected' },
+    { id: 'netrom', label: 'NET/ROM' },
+    { id: 'control', label: 'S-frames' },
+    { id: 'ip', label: 'IP/ARP' },
 ];
 
-const DATA_TYPES = new Set(['ui', 'i', 'aprs', 'netrom', 'nodes', 'ip', 'arp']);
+const CONNECTED_TYPES = new Set([
+    'i', 'rr', 'rnr', 'rej', 'srej', 'sabm', 'sabme', 'ua', 'disc', 'dm', 'frmr', 'xid', 'test',
+]);
+const CONTROL_TYPES = new Set(['rr', 'rnr', 'rej', 'srej']);
+const NETROM_TYPES = new Set([
+    'netrom', 'nodes', 'nodes-poll', 'l4-connect', 'l4-connect-ack', 'l4-disc',
+    'l4-disc-ack', 'l4-info', 'l4-info-ack', 'l4-reset', 'l4-unknown',
+]);
 
 export function matchesFilter(frame, filter) {
+    const ft = frame.frameType;
     switch (filter) {
         case 'aprs': return !!frame.isAPRS;
-        case 'data': return DATA_TYPES.has(frame.frameType);
-        case 'link': return !DATA_TYPES.has(frame.frameType);
+        // APRS is a UI frame too — filtering UI must not hide it.
+        case 'ui': return ft === 'ui' || !!frame.isAPRS;
+        case 'connected': return CONNECTED_TYPES.has(ft);
+        case 'netrom': return NETROM_TYPES.has(ft);
+        case 'control': return CONTROL_TYPES.has(ft);
+        case 'ip': return ft === 'ip' || ft === 'arp';
         default: return true;
     }
+}
+
+// A real callsign is one to six alphanumerics and an optional SSID. A noise
+// burst decoded as AX.25 produces addresses that are not, and a packet channel
+// produces a steady trickle of them — v1 drops those frames rather than filling
+// the list with rows of punctuation, and so does this.
+const VALID_CALL = /^[A-Z0-9]{1,6}(-\d{1,2})?$/i;
+
+export function looksLikeRealFrame(frame) {
+    return !!frame && VALID_CALL.test(frame.from) && VALID_CALL.test(frame.to);
 }
 
 /**

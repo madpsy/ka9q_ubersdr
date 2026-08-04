@@ -13,7 +13,7 @@
 
 const subs = new Set();
 
-let running = null;      // { player, raf, bins, wave }
+let running = null;      // { player, raf, bins, wave, byteBins }
 
 function loop() {
     if (!running) return;
@@ -29,20 +29,30 @@ function loop() {
     if (!running.wave || running.wave.length !== a.fftSize) {
         running.wave = new Uint8Array(a.fftSize);
     }
+    if (!running.byteBins || running.byteBins.length !== a.frequencyBinCount) {
+        running.byteBins = new Uint8Array(a.frequencyBinCount);
+    }
 
     // Only transform what someone is actually looking at.
     let wantBins = false;
     let wantWave = false;
+    let wantByte = false;
     for (const s of subs) {
         wantBins = wantBins || s.bins;
         wantWave = wantWave || s.wave;
+        wantByte = wantByte || s.byteBins;
     }
     if (wantBins) a.getFloatFrequencyData(running.bins);
     if (wantWave) a.getByteTimeDomainData(running.wave);
+    // The analyser's own dB window scaled to 0-255. A waterfall wants this
+    // rather than the float dB: the mapping is the analyser's business, and
+    // doing it here would mean every caller picking its own floor and ceiling.
+    if (wantByte) a.getByteFrequencyData(running.byteBins);
 
     const frame = {
         bins: running.bins,
         wave: running.wave,
+        byteBins: running.byteBins,
         binCount: a.frequencyBinCount,
         fftSize: a.fftSize,
         sampleRate: player.sampleRate || 48000,
@@ -64,8 +74,11 @@ function applyFft(player) {
 /**
  * Read the audio spectrum until the returned function is called.
  *
- * opts: { fftSize, bins: true, wave: true } — declare what you need, so a panel
- * that only draws a waterfall does not pay for the time-domain read.
+ * opts: { fftSize, bins, wave, byteBins } — declare what you need, so a panel
+ * that only draws a waterfall does not pay for the time-domain read. `bins` is
+ * float dB, `byteBins` the same data scaled to 0-255 by the analyser, and
+ * `wave` the time domain. `bins` defaults on for the callers that predate the
+ * other two.
  */
 export function subscribeAudioSpectrum(player, opts, cb) {
     const sub = {
@@ -73,11 +86,12 @@ export function subscribeAudioSpectrum(player, opts, cb) {
         fftSize: opts.fftSize || 2048,
         bins: opts.bins !== false,
         wave: !!opts.wave,
+        byteBins: !!opts.byteBins,
     };
     subs.add(sub);
 
     if (!running) {
-        running = { player, raf: 0, bins: null, wave: null };
+        running = { player, raf: 0, bins: null, wave: null, byteBins: null };
         running.raf = requestAnimationFrame(loop);
     }
     applyFft(player);

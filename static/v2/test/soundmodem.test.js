@@ -10,12 +10,16 @@ const assert = require('assert');
 
 const {
     FRAME_PACKET, FRAME_ERROR, FRAME_KISS, FRAME_DCD, FRAME_MONITOR, FRAME_LOG,
-    MODEM_TYPES, FX25_MODES, IL2P_MODES, MAX_CHANNELS, LIMITS,
-    SOUNDMODEM_CONFIG, SOUNDMODEM_FREQUENCIES, FRAME_FILTERS,
+    MODEM_TYPES, FX25_MODES, IL2P_MODES, MAX_CHANNELS, LIMITS, RCVR_PAIRS, CHANNEL_NAMES,
+    SOUNDMODEM_CONFIG, SOUNDMODEM_FREQUENCIES, FRAME_FILTERS, FRAME_LIMITS,
+    DEFAULT_FRAME_LIMIT, MAX_FRAMES,
     decodeFrame, attachParams, defaultChannel, anyChannelEnabled,
-    matchesFilter, matchesSearch,
+    matchesFilter, matchesSearch, looksLikeRealFrame, trimFrames,
 } = require('./.build/soundmodem.cjs');
 const { parseAX25: parse, pidName } = require('./.build/ax25.cjs');
+const {
+    MAX_AUDIO_HZ, LINE_MS, CHANNEL_COLOURS, rampR, rampG, rampB, buildBinMap, xOf, modemBandwidth,
+} = require('./.build/smwaterfall.cjs');
 const { tunedOption } = require('./.build/extfreq.cjs');
 
 let pass = 0;
@@ -225,18 +229,53 @@ const row = (over) => ({
     frameType: 'aprs', isAPRS: true, info: '<UI C> !test', infoRaw: '!test', ...over,
 });
 
-t('the filters split traffic from link housekeeping', () => {
+t('the filters are v1\u2019s seven categories, with v1\u2019s type sets', () => {
     const aprs = row();
+    const ui = row({ frameType: 'ui', isAPRS: false });
     const rr = row({ frameType: 'rr', isAPRS: false, info: '<RR R R5>', infoRaw: '' });
+    const sabm = row({ frameType: 'sabm', isAPRS: false });
+    const nodes = row({ frameType: 'nodes', isAPRS: false });
+    const ip = row({ frameType: 'ip', isAPRS: false });
+
+    assert.deepStrictEqual(FRAME_FILTERS.map((f) => f.id),
+        ['all', 'aprs', 'ui', 'connected', 'netrom', 'control', 'ip']);
+
     assert.strictEqual(matchesFilter(aprs, 'aprs'), true);
     assert.strictEqual(matchesFilter(rr, 'aprs'), false);
-    assert.strictEqual(matchesFilter(aprs, 'data'), true);
-    assert.strictEqual(matchesFilter(rr, 'data'), false);
-    assert.strictEqual(matchesFilter(rr, 'link'), true);
-    assert.strictEqual(matchesFilter(aprs, 'link'), false);
-    assert.strictEqual(matchesFilter(rr, 'all'), true);
-    // Every filter the menu offers is one the matcher knows.
+    // APRS is a UI frame too, so filtering UI must not hide it.
+    assert.strictEqual(matchesFilter(aprs, 'ui'), true);
+    assert.strictEqual(matchesFilter(ui, 'ui'), true);
+    assert.strictEqual(matchesFilter(rr, 'ui'), false);
+    // "Connected" is the whole link-mode set, S-frames included; "S-frames" is
+    // only the supervisory four.
+    assert.strictEqual(matchesFilter(sabm, 'connected'), true);
+    assert.strictEqual(matchesFilter(rr, 'connected'), true);
+    assert.strictEqual(matchesFilter(rr, 'control'), true);
+    assert.strictEqual(matchesFilter(sabm, 'control'), false);
+    assert.strictEqual(matchesFilter(nodes, 'netrom'), true);
+    assert.strictEqual(matchesFilter(ip, 'ip'), true);
+    assert.strictEqual(matchesFilter(aprs, 'ip'), false);
     for (const f of FRAME_FILTERS) assert.strictEqual(typeof matchesFilter(aprs, f.id), 'boolean');
+});
+
+t('a noise burst that decoded into AX.25-shaped rubbish is dropped', () => {
+    // A packet channel produces a steady trickle of these. v1 drops them rather
+    // than filling the list with rows of punctuation.
+    assert.strictEqual(looksLikeRealFrame(row()), true);
+    assert.strictEqual(looksLikeRealFrame(row({ from: 'GB7RDG-2' })), true);
+    assert.strictEqual(looksLikeRealFrame(row({ from: '\u00b6\u00a4?' })), false);
+    assert.strictEqual(looksLikeRealFrame(row({ to: 'TOOLONGCALL' })), false);
+    assert.strictEqual(looksLikeRealFrame(row({ from: '' })), false);
+    assert.strictEqual(looksLikeRealFrame(null), false);
+});
+
+t('the retention limit is honoured, and unlimited is still bounded', () => {
+    const many = Array.from({ length: 3000 }, (_, i) => ({ key: i }));
+    assert.strictEqual(trimFrames(many, 25).length, 25);
+    assert.strictEqual(trimFrames(many, 0).length, MAX_FRAMES, 'a tab left open overnight');
+    assert.strictEqual(trimFrames([{ key: 1 }], 25).length, 1);
+    assert.ok(FRAME_LIMITS.includes(DEFAULT_FRAME_LIMIT));
+    assert.deepStrictEqual(FRAME_LIMITS, [10, 25, 50, 100, 250, 500, 0]);
 });
 
 t('search reaches the digipeater path, not only the endpoints', () => {
@@ -270,7 +309,9 @@ t('a setting the server would refuse is clamped or falls back', () => {
     });
     assert.strictEqual(p.dcd_threshold, LIMITS.dcd_threshold.max);
     assert.strictEqual(p.channels[0].freq, LIMITS.freq.min);
-    assert.strictEqual(p.channels[0].rcvr_pairs, 8);
+    // rcvr_pairs is a menu, not a range: 40 is not "clamp to 8", it is a value
+    // that was never offered, so it falls back.
+    assert.strictEqual(p.channels[0].rcvr_pairs, 0);
     // The enums are indexes into QtSoundModem's own tables — an unknown one
     // falls back rather than clamping to whatever is at the end of the list.
     assert.strictEqual(p.channels[0].modem, 1);
@@ -283,25 +324,41 @@ t('no more channels are sent than the server accepts', () => {
     assert.strictEqual(attachParams(many).channels.length, MAX_CHANNELS);
 });
 
-t('the modem starts with a channel on, and knows when it has none', () => {
-    // A modem with nothing enabled decodes nothing, and a panel that starts in
-    // that state looks broken.
-    assert.strictEqual(anyChannelEnabled(SOUNDMODEM_CONFIG), true);
-    assert.strictEqual(SOUNDMODEM_CONFIG.channels[0].enabled, true);
-    assert.strictEqual(anyChannelEnabled({ channels: [defaultChannel(), defaultChannel()] }), false);
-    assert.strictEqual(anyChannelEnabled({}), false);
-    // 1700 Hz is the Bell 202 centre — the tones sit at 1200 and 2200.
+t('the starting configuration is v1\u2019s, which is an HF pair', () => {
+    // A and B both on and both 300 baud — 850 Hz AFSK and 2150 Hz BPSK — which
+    // is what the 7.049 MHz entry in the frequency menu wants. Running both is
+    // the point: you do not know which the station is using.
+    assert.deepStrictEqual(SOUNDMODEM_CONFIG.channels[0],
+        { enabled: true, modem: 0, freq: 850, rcvr_pairs: 0, fx25: 1, il2p: 2 });
+    assert.deepStrictEqual(SOUNDMODEM_CONFIG.channels[1],
+        { enabled: true, modem: 6, freq: 2150, rcvr_pairs: 0, fx25: 1, il2p: 2 });
+    // C and D are spare Bell 202 channels, off. 1700 Hz is the Bell 202 centre
+    // — the tones sit at 1200 and 2200.
+    assert.deepStrictEqual(SOUNDMODEM_CONFIG.channels[2], defaultChannel());
+    assert.deepStrictEqual(SOUNDMODEM_CONFIG.channels[3], defaultChannel());
     assert.strictEqual(defaultChannel().freq, 1700);
     assert.strictEqual(defaultChannel().modem, 1);
+    assert.strictEqual(SOUNDMODEM_CONFIG.dcd_threshold, 20);
+
+    assert.strictEqual(anyChannelEnabled(SOUNDMODEM_CONFIG), true);
+    assert.strictEqual(anyChannelEnabled({ channels: [defaultChannel(), defaultChannel()] }), false);
+    assert.strictEqual(anyChannelEnabled({}), false);
 });
 
 t('the menus offer only values the wire format has', () => {
     // The modem index *is* the protocol, so the list order is not a display
     // choice and a gap in it would send the wrong modem.
     assert.deepStrictEqual(MODEM_TYPES.map((m) => m.value), Array.from({ length: 16 }, (_, i) => i));
-    assert.deepStrictEqual(FX25_MODES.map((m) => m.value), [0, 1, 2]);
+    // Two, not the three the server documents: this is a receive-only site, so
+    // FX.25 "RX+TX" is a mode it can never be in.
+    assert.deepStrictEqual(FX25_MODES.map((m) => m.value), [0, 1]);
     assert.deepStrictEqual(IL2P_MODES.map((m) => m.value), [0, 1, 2, 3]);
+    // Powers of two, as v1 offers them — the cost roughly doubles each step.
+    assert.deepStrictEqual(RCVR_PAIRS.map((r) => r.value), [0, 1, 2, 4, 8]);
     for (const m of MODEM_TYPES) assert.ok(m.label, `${m.value} has no label`);
+    // QtSoundModem names its channels by letter and so do the server's logs.
+    assert.deepStrictEqual(CHANNEL_NAMES, ['A', 'B', 'C', 'D']);
+    assert.strictEqual(CHANNEL_NAMES.length, MAX_CHANNELS);
 });
 
 t('the frequency menu says whether the receiver is on one', () => {
@@ -310,6 +367,75 @@ t('the frequency menu says whether the receiver is on one', () => {
     const all = SOUNDMODEM_FREQUENCIES.flatMap((g) => g.options);
     assert.strictEqual(new Set(all.map((o) => o.hz)).size, all.length);
     for (const o of all) assert.ok(o.hz >= 10000 && o.hz <= 30000000, o.label);
+});
+
+// --- the waterfall ----------------------------------------------------------
+
+t('the colour ramp runs black to red without a gap', () => {
+    // v1's piecewise map, kept as it is. A discontinuity would draw a hard band
+    // across the waterfall at whatever level it fell at, which reads as a
+    // signal rather than as a bug.
+    const at = (v) => [rampR(v), rampG(v), rampB(v)];
+    assert.deepStrictEqual(at(0), [0, 0, 0], 'silence is black');
+    // v1's ramp lands on (255, 3, 0) at full scale, not a pure red — the green
+    // leg runs out three counts short. Kept as it is: this is the map v1 draws
+    // and three counts of green is not visible.
+    assert.deepStrictEqual(at(255), [255, 3, 0], 'full scale is red');
+    for (let v = 0; v <= 255; v++) {
+        for (const c of at(v)) {
+            assert.ok(Number.isInteger(c) && c >= 0 && c <= 255, `level ${v} gave ${c}`);
+        }
+    }
+    // Continuous across every segment boundary.
+    for (const edge of [64, 128, 192]) {
+        for (let i = 0; i < 3; i++) {
+            assert.ok(Math.abs(at(edge)[i] - at(edge - 1)[i]) <= 6, `jump at ${edge}, channel ${i}`);
+        }
+    }
+});
+
+t('the bin map spans the display and never runs off the analyser', () => {
+    // The display is 0..3300 Hz and the analyser 0..Nyquist, so a map that
+    // over-ran would read past the end of the array and paint undefined.
+    const map = buildBinMap(400, 1024, 48000);
+    assert.strictEqual(map.length, 400);
+    assert.strictEqual(map[0], 0);
+    for (const b of map) assert.ok(b >= 0 && b < 1024);
+    // Monotonic: the display is a frequency axis, so it cannot double back.
+    for (let i = 1; i < map.length; i++) assert.ok(map[i] >= map[i - 1]);
+    // The last column is the top of the drawn span, not the top of the FFT.
+    const expected = Math.round((MAX_AUDIO_HZ * (399 / 400) / 24000) * 1024);
+    assert.strictEqual(map[399], expected);
+});
+
+t('a marker off the display is not drawn at the edge', () => {
+    // Pinning it to the edge would say a channel is listening somewhere it is
+    // not. 4000 Hz is a legal modem frequency and past the drawn span.
+    assert.strictEqual(xOf(0), 0);
+    assert.strictEqual(xOf(MAX_AUDIO_HZ), 1);
+    assert.strictEqual(xOf(4000), null);
+    assert.strictEqual(xOf(-1), null);
+    assert.strictEqual(xOf(NaN), null);
+});
+
+t('every channel has a marker colour, and the tick rate is v1\u2019s', () => {
+    assert.strictEqual(CHANNEL_COLOURS.length, MAX_CHANNELS);
+    assert.strictEqual(new Set(CHANNEL_COLOURS).size, MAX_CHANNELS);
+    // 50 ms a line — twenty a second — so the scroll speed does not depend on
+    // the animation frame rate.
+    assert.strictEqual(LINE_MS, 50);
+});
+
+t('the marker bar is wider for a wider modem', () => {
+    // A guide to where to put the signal, from the baud rate in the modem name.
+    const afsk1200 = modemBandwidth('AFSK AX.25 1200bd (Bell 202)');
+    const afsk300 = modemBandwidth('AFSK AX.25 300bd');
+    const bpsk300 = modemBandwidth('BPSK AX.25 300bd');
+    assert.ok(afsk1200 > afsk300, 'Bell 202 is far wider than its baud rate alone');
+    assert.ok(afsk300 > bpsk300, 'AFSK carries the shift as well as the symbol rate');
+    // Never zero or NaN, whatever the label says.
+    assert.ok(modemBandwidth('ARDOP Packet') > 0);
+    assert.ok(modemBandwidth(undefined) > 0);
 });
 
 console.log(`\n${pass} Sound Modem checks passed`);

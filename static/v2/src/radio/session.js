@@ -112,3 +112,15 @@ export function wsBase() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}`;
 }
+
+// Bytes in one websocket frame, for the sockets' own byte counters.
+//
+// Text frames are measured in UTF-16 code units rather than encoded bytes:
+// these carry ASCII JSON, where the two are the same, and encoding every
+// control frame to count it would cost more than the number is worth.
+export function frameSize(data) {
+    if (data instanceof ArrayBuffer) return data.byteLength;
+    if (data && typeof data.byteLength === 'number') return data.byteLength;   // TypedArray
+    if (data && typeof data.size === 'number') return data.size;               // Blob
+    return data ? String(data).length : 0;
+}

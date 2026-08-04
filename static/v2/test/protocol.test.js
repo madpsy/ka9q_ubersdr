@@ -16,7 +16,7 @@ const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
 const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
 const {
-    dbfsToSUnits, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    dbfsToSUnits, formatRate, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
     sUnitFraction, sUnitLabel, sUnitLabelAt,
     S_UNITS_MIN, S_UNITS_MAX,
 } = require('./.build/format.cjs');
@@ -718,6 +718,17 @@ t('the held S value reads the same as a live one at the same place', () => {
     // all down there rather than choosing between S0 and S1.
     assert.strictEqual(sUnitFraction(-130), sUnitFraction(-121));
     assert.strictEqual(sUnitLabelAt(0), 'S1');
+});
+
+t('a link rate reads in bits, and scales', () => {
+    // Bytes per second in, bits per second out — a socket is quoted in bits.
+    assert.strictEqual(formatRate(0), '0.0 kbit/s');
+    assert.strictEqual(formatRate(1000), '8.0 kbit/s');       // 8 kbit
+    assert.strictEqual(formatRate(6000), '48 kbit/s');        // Opus + control
+    assert.strictEqual(formatRate(250000), '2.00 Mbit/s');
+    // Nothing measured yet is not the same as nothing flowing.
+    assert.strictEqual(formatRate(null), '—');
+    assert.strictEqual(formatRate(NaN), '—');
 });
 
 t('the bar and the S label never disagree', () => {

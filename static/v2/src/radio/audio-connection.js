@@ -10,7 +10,7 @@
 // unavailable; that path is handled too so the UI still works on such a server.
 
 import { Emitter } from './emitter.js';
-import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
+import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
 
 // Version 2 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
@@ -26,6 +26,10 @@ export class AudioConnection extends Emitter {
         this.maxAttempts = 12;
         this.reconnectTimer = null;
         this.pingTimer = null;
+        // Bytes taken off this socket, ever. Cumulative and never reset, so a
+        // reader only has to take deltas — see the Receiver info panel, which
+        // is the only thing that looks at it.
+        this.bytesIn = 0;
     }
 
     get connected() {
@@ -169,6 +173,7 @@ export class AudioConnection extends Emitter {
     }
 
     _onMessage(ev) {
+        this.bytesIn += frameSize(ev.data);
         if (ev.data instanceof ArrayBuffer) {
             this._onBinary(ev.data);
             this.attempts = 0;

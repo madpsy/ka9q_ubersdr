@@ -1643,6 +1643,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .kv__k { color: var(--text-faint); }
 .kv__v { font-family: var(--mono); text-align: right; overflow-wrap: anywhere; }
 
+/* Throughput beside a link's state: dimmer, because the state is the thing you
+   are looking for and the rate is what you check once you have found it. */
+.kv__rate { margin-left: 8px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
 .state { text-transform: capitalize; }
 .state--open { color: var(--good); }
 .state--connecting, .state--reconnecting { color: var(--warn); }

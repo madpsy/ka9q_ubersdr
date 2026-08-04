@@ -18,6 +18,17 @@ export function formatFreqShort(hz, spanHz) {
     return (hz / 1e3).toFixed(0) + ' kHz';
 }
 
+// A link rate from bytes per second. Bits, because that is what a link is
+// quoted in, and two significant-ish figures — this is a "is it working and
+// roughly how much" readout, not a measurement.
+export function formatRate(bytesPerSec) {
+    if (bytesPerSec == null || !Number.isFinite(bytesPerSec) || bytesPerSec < 0) return '—';
+    const kbit = (bytesPerSec * 8) / 1000;
+    if (kbit >= 1000) return `${(kbit / 1000).toFixed(2)} Mbit/s`;
+    if (kbit >= 10) return `${kbit.toFixed(0)} kbit/s`;
+    return `${kbit.toFixed(1)} kbit/s`;
+}
+
 export function formatSpan(hz) {
     if (hz >= 1e6) return (hz / 1e6).toFixed(2) + ' MHz';
     if (hz >= 1e3) return (hz / 1e3).toFixed(hz >= 100e3 ? 0 : 1) + ' kHz';

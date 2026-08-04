@@ -18,7 +18,7 @@
 // on the way out, into a separate buffer.
 
 import { Emitter } from './emitter.js';
-import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
+import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
 
 const HEADER_BYTES = 22;
 
@@ -38,6 +38,8 @@ export class SpectrumConnection extends Emitter {
         this.maxAttempts = 12;
         this.reconnectTimer = null;
         this.pingTimer = null;
+        // Bytes taken off this socket, ever — see AudioConnection.bytesIn.
+        this.bytesIn = 0;
 
         // Server-reported view geometry, from the `config` message.
         this.centerFreq = 0;
@@ -189,6 +191,7 @@ export class SpectrumConnection extends Emitter {
     }
 
     async _onMessage(ev) {
+        this.bytesIn += frameSize(ev.data);
         if (!(ev.data instanceof ArrayBuffer)) {
             try { this._onControl(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
             return;

@@ -1848,7 +1848,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .floatwin {
     position: absolute;
-    /* Set from the Display panel. Windows go solid on hover or while focused,
+    /* Set from the Layout panel. Windows go solid on hover or while focused,
        so a low resting opacity stays usable. */
     opacity: var(--float-opacity, 1);
     transition: opacity var(--dur) var(--ease);

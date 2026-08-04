@@ -36,7 +36,9 @@ export const DEFAULTS = {
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.42,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
-    floatOpacity: 1,        // resting opacity of floating panel windows
+    // Resting opacity of floating panel windows, 0..1. 0 means "off" — they
+    // stay solid — so the Layout panel's slider has a real bottom end.
+    floatOpacity: 0,
     // The Receiver panel's step size, shared so click-to-tune on the spectrum
     // lands on the same grid as the +/- buttons. 500 Hz suits SSB, which is
     // what most of this band is.
@@ -94,8 +96,11 @@ export function DisplayProvider({ children }) {
     // Exposed as a custom property rather than an inline style so every
     // floating window picks it up without re-rendering — the same approach v1
     // uses for its controls_opacity setting.
+    // 0 disables the effect rather than making the windows invisible.
     useEffect(() => {
-        document.documentElement.style.setProperty('--float-opacity', String(state.floatOpacity ?? 1));
+        const o = Number(state.floatOpacity);
+        const eff = Number.isFinite(o) && o > 0 && o < 1 ? o : 1;
+        document.documentElement.style.setProperty('--float-opacity', String(eff));
     }, [state.floatOpacity]);
 
     // Every font-size in styles.css is calc(Npx * var(--ui-scale)), so this one

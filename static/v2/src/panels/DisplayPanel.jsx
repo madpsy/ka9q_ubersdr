@@ -1,7 +1,6 @@
 import React from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { useLayout } from '../layout/LayoutContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 
@@ -9,9 +8,7 @@ import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
-    const { floatOrder } = useLayout();
     const viewMode = d.viewMode || 'split';
-    const hasFloats = floatOrder.length > 0;
     // null means the operator's default is in force; the slider shows that
     // value so moving it starts from what you are actually looking at.
     const minSpan = d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan;
@@ -192,26 +189,6 @@ export default function DisplayPanel() {
                     </Field>
                 </>
             )}
-
-            {hasFloats && (
-                <>
-                    <div className="divider" />
-                    <Field label="Float opacity" hint={`${Math.round(d.floatOpacity * 100)} %`}>
-                        <Slider
-                            value={Math.round(d.floatOpacity * 100)}
-                            min={30}
-                            max={100}
-                            step={5}
-                            onChange={(v) => d.set({ floatOpacity: v / 100 })}
-                        />
-                    </Field>
-                    <div className="note note--tight">
-                        Floating windows fade to this while idle and go solid
-                        when you point at them.
-                    </div>
-                </>
-            )}
-
 
             <div className="row-end">
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>

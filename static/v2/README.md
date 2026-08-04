@@ -43,6 +43,7 @@ only esbuild and node.
 ```
 index.html          shell; loads vendor React, /opus-decoder.min.js, dist/
 vendor/             React 18 UMD (fetched, do not edit)
+fonts/              Inter + JetBrains Mono, self-hosted — see fonts/README.md
 src/
   react.js          the only file that reads window.React
   App.jsx           providers + desktop/mobile shell selection

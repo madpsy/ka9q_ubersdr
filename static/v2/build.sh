@@ -48,6 +48,10 @@ COMMON=(
     --jsx-factory=React.createElement
     --jsx-fragment=React.Fragment
     --loader:.js=js
+    # The @font-face src urls in styles.css are server paths, not files to
+    # bundle: the woff2 sit in v2/fonts/ and are served from there. Without this
+    # esbuild tries to resolve them against the filesystem and fails the build.
+    --external:/v2/fonts/*
     --log-level=warning
     --outfile="$OUT"
 )

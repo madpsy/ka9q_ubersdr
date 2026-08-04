@@ -85,13 +85,25 @@
  *    consulted for ordinary text. A session that shows no flags pays nothing.
  *  - The metric overrides are not cosmetic. The font's own ascent is 13.6 em
  *    (27829 at 2048 upem), and Safari applies that to `line-height: normal` on
- *    any element whose stack merely names the family — flags present or not,
- *    which is every element here. v1 measured ~280 px-tall rows before adding
- *    these; 100% / 20% / 0% is an ordinary Latin face's proportions.
- *  - It goes first in both stacks so every platform draws the same flags,
- *    rather than Twemoji on Windows and Apple's on macOS. Costs nothing for
- *    text: a face whose unicode-range excludes the character is skipped
- *    without being fetched.
+ *    any element whose stack merely names the family — flags present or not.
+ *    v1 measured ~280 px-tall rows before adding these; 100% / 20% / 0% is an
+ *    ordinary Latin face's proportions.
+ *  - It must NOT be first in either stack, and the overrides are not enough on
+ *    their own to make that safe. `ascent-override` only shipped in Safari 17,
+ *    and where it is not understood the declaration is dropped and the 13.6 em
+ *    ascent comes back — for every element in the UI at once, because Safari
+ *    takes `line-height: normal` from the first *available* font in the stack
+ *    whether or not it draws anything. So it sits behind Inter and JetBrains
+ *    Mono, which are self-hosted here and therefore always the first available
+ *    face. v1 avoids the same trap from the other end, by declaring this file
+ *    under the family names its stacks already begin with.
+ *  - It still goes ahead of every system face, so all platforms draw the same
+ *    flags rather than Twemoji on Windows and Apple's on macOS. Inter and
+ *    JetBrains Mono cannot take the character from it: their unicode-ranges
+ *    exclude the regional indicator block, so matching falls through to this
+ *    face before it ever reaches Apple Color Emoji or Segoe UI Emoji. Costs
+ *    nothing for text — a face whose unicode-range excludes the character is
+ *    skipped without being fetched.
  *  - Only this one family is declared. v1 additionally redeclares Arial,
  *    Helvetica, Segoe UI and the generic `sans-serif` and `monospace` under
  *    the same src, which it needs because its stacks are spread across many
@@ -165,8 +177,8 @@
     /* The downloaded faces first, the OS stack behind them — see the @font-face
        block at the top of this file. The fallbacks are not decoration: until the
        woff2 arrives, and for ever if it 404s, this is what the UI renders in. */
-    --font: 'Twemoji Flags', Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --mono: 'Twemoji Flags', "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --font: Inter, 'Twemoji Flags', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", 'Twemoji Flags', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
     --dur: 160ms;
     --ease: cubic-bezier(0.2, 0.7, 0.3, 1);

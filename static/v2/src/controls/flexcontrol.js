@@ -90,11 +90,42 @@ export class FlexControl extends Emitter {
             }
             return false;
         }
+        return this._start(port, false);
+    }
 
+    // Opens a port the operator has already granted, with no picker and so no
+    // gesture. `getPorts()` returns only ports granted to this origin, and this
+    // origin asks for nothing but a FlexControl, so this can never claim a
+    // device that was not chosen by hand at least once.
+    //
+    // Every way of having no dial — permission never given, cable pulled,
+    // another tab holding the port — lands in the same place: false, quietly.
+    // Autoconnect runs on page load and on hotplug, where a red banner for a
+    // dial the operator has not plugged in would be noise, not news.
+    async autoConnect() {
+        if (!flexAvailable() || this.connected) return false;
+        let ports;
+        try {
+            ports = await navigator.serial.getPorts();
+        } catch (err) {
+            return false;
+        }
+        const port = (ports || []).find((p) => {
+            const info = (p.getInfo && p.getInfo()) || {};
+            return info.usbVendorId === USB_VENDOR_ID && info.usbProductId === USB_PRODUCT_ID;
+        });
+        if (!port) return false;
+        return this._start(port, true);
+    }
+
+    // `quiet` suppresses the failure message, not the success one: a dial that
+    // does connect on its own should still say so, or the log claims nothing
+    // happened while the receiver is taking orders from the desk.
+    async _start(port, quiet) {
         try {
             await port.open({ baudRate: 9600, dataBits: 8, parity: 'none', stopBits: 1 });
         } catch (err) {
-            this.emit('message', { text: `Could not open the port: ${err.message}`, tone: 'error' });
+            if (!quiet) this.emit('message', { text: `Could not open the port: ${err.message}`, tone: 'error' });
             return false;
         }
 

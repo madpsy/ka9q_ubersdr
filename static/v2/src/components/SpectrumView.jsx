@@ -27,6 +27,8 @@ import { useRoomFor } from '../lib/useRoomFor.js';
 import { RING_BG, RING_PAD, ringKeepsHistory, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { getFlex, getMidi, getSync } from '../controls/sources.js';
+import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
@@ -155,6 +157,88 @@ function FilterTags() {
                     {name}
                 </button>
             ))}
+        </>
+    );
+}
+
+// Everything else that is driving, or being driven by, this receiver: a control
+// surface on the desk, a rig following the dial, the operating system's own
+// transport controls.
+//
+// Here for the same reason the filter tags are. Each of these is owned by a
+// panel that may be collapsed, in another dock, or on a tab of a phone nobody
+// is looking at, and "why did the frequency just move?" ought to be answerable
+// from the one strip that is always on screen.
+//
+// Read-only, unlike the filter tags. Clicking those off costs a click to undo;
+// dropping a serial link mid-QSO from a 40 px tag does not.
+//
+// The three surfaces are module singletons outside React (controls/sources.js),
+// so each tag subscribes to the object rather than to a context. `read` must
+// return a primitive: RadioSync emits on every poll it finds a change in, and
+// an equal primitive is a render React skips — which matters here, because this
+// strip sits in the component that owns the draw loop.
+function useSurface(get, read) {
+    const [value, setValue] = useState(() => read(get()));
+    useEffect(() => {
+        const s = get();
+        // It may well have connected before this mounted — the surfaces outlive
+        // every panel, and this tag is younger than most of them.
+        setValue(read(s));
+        return s.on('state', () => setValue(read(s)));
+    }, [get, read]);
+    return value;
+}
+
+const readConnected = (s) => !!s.connected;
+const readMidi = (s) => (s.connected ? (s.deviceName || 'MIDI') : '');
+// Connected, and transmitting or not — two states in one primitive so the tag
+// can turn red on TX without re-rendering for the frequency readout.
+const readRig = (s) => (s.connected ? (s.rig && s.rig.tx ? 'tx' : 'on') : '');
+
+function ControlTags() {
+    const flex = useSurface(getFlex, readConnected);
+    const midi = useSurface(getMidi, readMidi);
+    const rig = useSurface(getSync, readRig);
+    const media = useMediaSession();
+
+    // Metadata-only sessions still count: the OS is showing the card and its
+    // buttons move this receiver, which is the thing worth knowing. Guarded
+    // because the provider is the app's, not this component's.
+    const mediaOn = !!media && media.enabled && media.support.available;
+
+    return (
+        <>
+            {flex && (
+                <span className="tag tag--accent" title="FlexControl connected — the dial is driving this receiver">
+                    FLEX
+                </span>
+            )}
+            {midi && (
+                <span className="tag tag--accent" title={`${midi} connected — mapped controls are driving this receiver`}>
+                    MIDI
+                </span>
+            )}
+            {rig && (
+                <span
+                    className={`tag tag--${rig === 'tx' ? 'bad' : 'accent'}`}
+                    title={rig === 'tx'
+                        ? 'Radio sync — the rig is transmitting'
+                        : 'Radio sync — the rig and this receiver are following each other'}
+                >
+                    RIG{rig === 'tx' ? ' TX' : ''}
+                </span>
+            )}
+            {mediaOn && (
+                <span
+                    className={`tag tag--${media.status.state === 'active' ? 'accent' : 'ghost'}`}
+                    title={media.status.state === 'active'
+                        ? 'Media controls live — this receiver answers the system’s play, pause and track keys'
+                        : 'Media controls enabled — waiting for audio for the system to attach them to'}
+                >
+                    MEDIA
+                </span>
+            )}
         </>
     );
 }
@@ -905,6 +989,7 @@ export default function SpectrumView() {
                     <SquelchTag />
                     <NoiseReductionTag />
                     <FilterTags />
+                    <ControlTags />
                     <ClipTag />
                 </div>
                 <div className="spectrum__tools">

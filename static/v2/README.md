@@ -493,6 +493,15 @@ tests exercise, and it is where a silent mistake actually lives.
   button functions, with the zero ignored so a press does not fire twice —
   v1 spells that `if (value > 0)`. Anything the function still refuses is said
   once in the message log rather than being swallowed.
+  **Autoconnect is per surface and off until asked for.** With it on, the panel
+  reclaims the hardware on load and on hotplug — a MIDI input matched by the
+  remembered name, a serial port from `getPorts()`, which returns only ports the
+  operator has already granted through the OS dialog and so needs no gesture. It
+  can therefore never claim a device that was not chosen by hand at least once.
+  Every way of having no dial — never granted, unplugged, held by another tab —
+  fails silently, because on a receiver left running that is the normal state
+  and not news. A manual Disconnect outranks the switch until the operator
+  connects again or turns it back on, so a hotplug elsewhere cannot undo it.
   Mapping records and the export envelope are v1's byte for byte,
   and v1's `localStorage` mappings are adopted on first run. `nb_toggle` and
   `vfo_ab_toggle` have no v2 equivalent and are listed in `RETIRED` so an

@@ -30,8 +30,11 @@ export const SURFACES = ['off', 'flexcontrol', 'midi'];
 export const DEFAULT_STATE = {
     surface: 'off',
     stepHz: 1000,
-    flexcontrol: { mappings: {} },
-    midi: { mappings: {}, device: '' },
+    // `autoConnect` is off until asked for. Hardware that binds itself on page
+    // load is how a knob left against the desk starts retuning a receiver
+    // nobody is watching, so the operator turns it on per surface.
+    flexcontrol: { mappings: {}, autoConnect: false },
+    midi: { mappings: {}, device: '', autoConnect: false },
     radiosync: {
         rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
         syncFrequency: true, syncMode: true,

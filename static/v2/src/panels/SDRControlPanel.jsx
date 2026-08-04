@@ -190,6 +190,32 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
         setLearn(null);
     };
 
+    // Autoconnect, when the operator has asked for it.
+    //
+    // Only ever to hardware already granted: a MIDI input whose name was
+    // remembered from a Connect, a serial port already picked out of the OS
+    // dialog. Neither can be claimed without that first deliberate act, which
+    // is what makes doing it unattended reasonable. Nothing here reports a
+    // failure — no dial plugged in is the normal state of a receiver nobody is
+    // sitting at, not an error worth a line in the log.
+    //
+    // Kept in a ref for the same reason the input handler is: it is called from
+    // subscriptions made once, and must see the current settings rather than
+    // the render that happened to set them up.
+    const manualOff = useRef(false);
+    const tryAuto = useRef(null);
+    tryAuto.current = () => {
+        // A press of Disconnect outranks the switch until the operator asks
+        // again, or a hotplug would undo it the moment anything moved.
+        if (!conf.autoConnect || manualOff.current || surface.connected) return;
+        if (!isMidi) { surface.autoConnect(); return; }
+        if (!conf.device) return;
+        const match = surface.devices().find((d) => d.name === conf.device);
+        if (!match) return;
+        setDeviceId(match.id);
+        surface.connect(match.id);
+    };
+
     useEffect(() => {
         const offs = [
             surface.on('input', (e) => onInput.current(e)),
@@ -199,11 +225,38 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
                 if (!s.connected) setLearn(null);
             }),
         ];
-        if (isMidi) offs.push(surface.on('devices', setDevices));
+        // The device list changing is also the hotplug signal: a surface that
+        // was not attached at load appears here when it is plugged in.
+        if (isMidi) {
+            offs.push(surface.on('devices', (d) => {
+                setDevices(d);
+                tryAuto.current();
+            }));
+        }
         // Unsubscribe only. The device stays claimed: releasing it belongs to
         // the surface switch, not to this component going away.
         return () => offs.forEach((off) => off());
     }, [surface, isMidi, onMessage]);
+
+    // Web Serial's own hotplug event, which is what `devices` is for MIDI. The
+    // FlexControl surface is chosen far more often than it is plugged in, so
+    // without this the switch would only ever fire on a page load.
+    useEffect(() => {
+        if (isMidi || !flexAvailable()) return undefined;
+        const onPlug = () => tryAuto.current();
+        navigator.serial.addEventListener('connect', onPlug);
+        return () => navigator.serial.removeEventListener('connect', onPlug);
+    }, [isMidi]);
+
+    // On arrival, and again whenever the switch is turned on. Turning it on is
+    // the operator asking, so it also clears a previous manual Disconnect —
+    // and connects there and then if the hardware is already sitting there.
+    // At mount MIDI has no device list yet; the effect that opens access below
+    // is what catches that case.
+    useEffect(() => {
+        if (conf.autoConnect) manualOff.current = false;
+        tryAuto.current();
+    }, [conf.autoConnect, isMidi]);   // eslint-disable-line react-hooks/exhaustive-deps
 
     // Which CC addresses are endless encoders rather than faders. The surface
     // needs this to decide whether a value is a position or a delta.
@@ -217,14 +270,15 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
     // Opening MIDI access is silent and grants no capability on its own, so it
     // happens as soon as this surface is chosen; a serial port, by contrast,
     // cannot be opened without a click. The remembered device is preselected
-    // but never auto-connected — an input bound behind the operator's back is
-    // how a stray fader ends up retuning the receiver.
+    // and left there unless autoconnect is on — an input bound behind the
+    // operator's back is how a stray fader ends up retuning the receiver.
     useEffect(() => {
         if (!isMidi) return;
         surface.open().then((ok) => {
             if (!ok || surface.connected || !conf.device) return;
             const match = surface.devices().find((d) => d.name === conf.device);
             if (match) setDeviceId(match.id);
+            tryAuto.current();
         });
     }, [isMidi, surface]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -249,7 +303,14 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
     );
 
     const button = connected ? (
-        <Button variant="ghost" size="sm" onClick={() => surface.disconnect()}>
+        <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+                manualOff.current = true;
+                surface.disconnect();
+            }}
+        >
             Disconnect
         </Button>
     ) : (
@@ -258,6 +319,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
             size="sm"
             disabled={isMidi && !deviceId}
             onClick={() => {
+                manualOff.current = false;
                 if (!isMidi) { surface.connect(); return; }
                 const d = surface.devices().find((x) => x.id === deviceId);
                 if (surface.connect(deviceId) && d) {
@@ -269,10 +331,28 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
         </Button>
     );
 
+    // What autoconnect will reach for, said plainly: it can only ever be the
+    // remembered MIDI device or a serial port already granted, and if there is
+    // none the switch is honest about having nothing to do yet.
+    const autoHint = isMidi
+        ? (conf.device ? `Reconnects to ${conf.device}` : 'Connect once first, so there is a device to remember')
+        : 'Reopens the dial once you have picked its port here';
+
+    const auto = (
+        <Switch
+            checked={!!conf.autoConnect}
+            onChange={(v) => update((prev) => ({ ...prev, [id]: { ...prev[id], autoConnect: v } }))}
+            label="Connect automatically"
+            title={autoHint}
+        />
+    );
+
     // The connection line and nothing else. The subscriptions above still run,
     // so a device unplugged while the panel is minimal turns the dot red here
     // just as it would in the full view — and a MIDI device remembered from
     // last time is already preselected, so Connect works without the picker.
+    // Autoconnect is setup rather than a connection state, so it stays in the
+    // full view; it still works here, which is the point of it.
     if (minimal) {
         return (
             <>
@@ -306,6 +386,8 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, onMessage, minimal }
             )}
 
             <div className="chip-row">{button}</div>
+
+            {auto}
 
             <div className="divider" />
 

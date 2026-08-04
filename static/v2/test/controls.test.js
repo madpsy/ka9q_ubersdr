@@ -6,7 +6,7 @@
 // maps nothing looks like it worked. None of those throw, so they are pinned.
 
 const assert = require('assert');
-const { parseToken, flexKeyLabel } = require('./.build/flexcontrol.cjs');
+const { parseToken, flexKeyLabel, FlexControl } = require('./.build/flexcontrol.cjs');
 const { midiKey, midiKeyLabel, CC, NOTE_ON, NOTE_OFF } = require('./.build/webmidi.cjs');
 const { runFunction, catalogue, isEncoderFunction, RETIRED } = require('./.build/functions.cjs');
 const { Dispatcher, defaultThrottle, normaliseMidiMappings } = require('./.build/mappings.cjs');
@@ -89,6 +89,68 @@ t('every FlexControl key has a label', () => {
         const { key } = parseToken(token);
         assert.notStrictEqual(flexKeyLabel(key), key, `${key} falls back to its raw id`);
     }
+});
+
+// --- FlexControl autoconnect -------------------------------------------------
+//
+// Runs on page load and on hotplug, where every way of having no dial is
+// ordinary rather than a fault. The thing being pinned is the silence: a
+// receiver left running must not accumulate error banners about a knob box
+// nobody plugged in.
+
+const FLEX_INFO = { usbVendorId: 0x2192, usbProductId: 0x0010 };
+
+function fakePort(info, opens = true) {
+    return {
+        getInfo: () => info,
+        open: async () => { if (!opens) throw new Error('Failed to open serial port'); },
+        close: async () => {},
+        readable: null,   // ends the read loop at once; tokens are tested above
+    };
+}
+
+// Returns [connected, messages] after an autoConnect against these ports.
+async function autoConnectWith(ports) {
+    globalThis.navigator = { serial: { getPorts: async () => ports } };
+    const flex = new FlexControl();
+    const msgs = [];
+    flex.on('message', (m) => msgs.push(m));
+    const ok = await flex.autoConnect();
+    return [ok, msgs];
+}
+
+const async_t = [];
+const at = (name, fn) => async_t.push([name, fn]);
+
+at('nothing granted yet is silent, not an error', async () => {
+    const [ok, msgs] = await autoConnectWith([]);
+    assert.strictEqual(ok, false);
+    assert.deepStrictEqual(msgs, []);
+});
+
+at('a granted port that is not a FlexControl is left alone', async () => {
+    // getPorts() returns everything this origin was ever granted. Opening an
+    // arbitrary serial device at 9600 baud unasked is not on.
+    const [ok] = await autoConnectWith([fakePort({ usbVendorId: 0x0403, usbProductId: 0x6001 })]);
+    assert.strictEqual(ok, false);
+});
+
+at('a granted FlexControl is opened and says so', async () => {
+    const [ok, msgs] = await autoConnectWith([fakePort(FLEX_INFO)]);
+    assert.strictEqual(ok, true);
+    assert.ok(msgs.some((m) => m.tone === 'good'), 'the connection should be logged');
+});
+
+at('a port that will not open fails quietly', async () => {
+    // Unplugged between the event and the open, or held by another tab.
+    const [ok, msgs] = await autoConnectWith([fakePort(FLEX_INFO, false)]);
+    assert.strictEqual(ok, false);
+    assert.deepStrictEqual(msgs, []);
+});
+
+at('no Web Serial at all is not a crash', async () => {
+    globalThis.navigator = {};
+    assert.strictEqual(await new FlexControl().autoConnect(), false);
 });
 
 // --- MIDI addressing --------------------------------------------------------
@@ -392,4 +454,11 @@ t('the CW sidebands do not collapse onto one Hamlib mode', () => {
     assert.notStrictEqual(SDR_TO_HAMLIB.cwu, SDR_TO_HAMLIB.cwl);
 });
 
-console.log(`\nall ${pass} radio control tests passed`);
+// The asynchronous ones last, so the synchronous output above stays in order.
+(async () => {
+    for (const [name, fn] of async_t) {
+        try { await fn(); console.log('ok    ' + name); pass++; }
+        catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
+    }
+    console.log(`\nall ${pass} radio control tests passed`);
+})();

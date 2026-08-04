@@ -38,7 +38,31 @@ export function getSessionId() {
 export function newSessionId() {
     currentId = uuid();
     registration = null;
+    serverSessionId = null;
     return currentId;
+}
+
+// The *server's* id for this audio session, which is a different thing from the
+// UUID above and not interchangeable with it.
+//
+// getSessionId() is ours: minted in the browser, sent as `user_session_id`, and
+// used to pair the audio and spectrum sockets. This one is the server's own
+// session key, handed back in the `status` message — and it is what /stats
+// matches on (`session.ID`) to hoist your row to the front of the listener
+// list. Sending the UUID there instead matches nothing, so nobody is hoisted
+// and the first row is simply another listener.
+//
+// Cleared when the socket closes: an id from a session that has ended would
+// still be sent, still match nothing, and still leave whoever happens to be
+// first looking like you.
+let serverSessionId = null;
+
+export function setServerSessionId(id) {
+    serverSessionId = id || null;
+}
+
+export function getServerSessionId() {
+    return serverSessionId;
 }
 
 // `/connection` registers the UUID against this IP and User-Agent, which both

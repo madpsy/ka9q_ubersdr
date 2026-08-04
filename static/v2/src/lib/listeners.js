@@ -6,12 +6,17 @@
 // server puts *your* session first, and both the panel and channels-map.html
 // rely on that ordering to mark which row is you.
 //
+// That id is the server's session key from the `status` message, not the
+// browser's own UUID — see getServerSessionId. The reply carries no ids at all,
+// so position is the only way to tell which row is yours, and asking with the
+// wrong id silently makes it somebody else's.
+//
 // The poll is shared and refcounted, like the voice-activity one: the panel
 // wants it while it is open, and the map popup wants it for as long as it is
 // on screen — which outlives the panel, since a collapsed section is unmounted.
 // One loop serves both, and nothing polls when neither is watching.
 
-import { getSessionId } from '../radio/session.js';
+import { getServerSessionId } from '../radio/session.js';
 
 // v1's cadence (app.js startStatsUpdates).
 export const POLL_MS = 10000;
@@ -85,7 +90,7 @@ function emit(state) {
 function load() {
     if (inFlight) return;
     inFlight = true;
-    const session = getSessionId();
+    const session = getServerSessionId();
     fetch(endpoint(session))
         .then((r) => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);

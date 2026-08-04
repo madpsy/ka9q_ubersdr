@@ -23,9 +23,13 @@ const reply = {
 };
 
 t('the session id goes on the request, because it is what puts you first', () => {
+    // The server's session key, not the browser's UUID: /stats matches it
+    // against session.ID, and the UUID matches nothing — which would leave the
+    // first row (somebody else) wearing your marker.
     assert.strictEqual(endpoint('abc-123'), '/stats?session_id=abc-123');
-    // Without one the server has no "you" to hoist, and nor do we.
+    // No audio session, so nothing to hoist and nobody to mark.
     assert.strictEqual(endpoint(''), '/stats');
+    assert.strictEqual(endpoint(null), '/stats');
     assert.strictEqual(normaliseChannels(reply, false).some((c) => c.you), false);
 });
 

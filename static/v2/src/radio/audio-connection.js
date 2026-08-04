@@ -10,7 +10,9 @@
 // unavailable; that path is handled too so the UI still works on such a server.
 
 import { Emitter } from './emitter.js';
-import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
+import {
+    connectionCheck, frameSize, getBypassPassword, getSessionId, setServerSessionId, wsBase,
+} from './session.js';
 
 // Version 2 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
@@ -190,6 +192,9 @@ export class AudioConnection extends Emitter {
             return;
         }
         if (msg.type === 'pong') return;
+        // The server's own id for this session. Nothing here needs it, but
+        // /stats does — see setServerSessionId.
+        if (msg.type === 'status' && msg.sessionId) setServerSessionId(msg.sessionId);
         if (msg.type === 'audio' && msg.data) {
             // JSON PCM fallback: base64 signed 16-bit little-endian.
             const raw = atob(msg.data);
@@ -235,6 +240,8 @@ export class AudioConnection extends Emitter {
     _onClose(ev) {
         clearInterval(this.pingTimer);
         this.ws = null;
+        // The session it belonged to is gone; a reconnect is given a new one.
+        setServerSessionId(null);
         this.emit('close', { code: ev.code, reason: ev.reason });
         if (this.closedByUser || ev.code === 1000 || ev.code === 1001) {
             this._setState('idle');

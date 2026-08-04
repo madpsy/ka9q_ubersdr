@@ -3360,3 +3360,86 @@ a.btn { text-decoration: none; }
 }
 .fdv__c-msg { color: var(--text-faint); }
 .fdv__tx { color: var(--bad); font-size: 8px; line-height: 1; }
+
+/* ── SSTV ─────────────────────────────────────────────────────────────────── */
+
+.sstv__freq { max-width: 240px; }
+.sstv__mode, .sstv__call {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    background: var(--surface-3);
+    color: var(--text-dim);
+}
+.sstv__call { color: var(--accent); }
+.sstv__status { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+.sstv__lines, .sstv__tone {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+
+/* The picture, centred in whatever room the window has. SSTV frames are small
+   and fixed — 320×256 for most modes — so they are scaled up to fit rather than
+   sitting in a corner at native size. */
+.sstv__frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 6px;
+    background: var(--spec-bg);
+}
+.sstv__paper { display: flex; max-width: 100%; max-height: 100%; }
+/* Pixellated on purpose: an SSTV picture is a few hundred lines and smoothing a
+   scaled-up one invents detail the transmission never carried. */
+.sstv__paper canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    border-radius: 2px;
+}
+
+.sstv__progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--surface-3);
+}
+.sstv__progress span { display: block; height: 100%; background: var(--accent); }
+
+.sstv__gallery {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 2px 0;
+}
+.sstv__card {
+    flex: none;
+    display: block;
+    width: 104px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--surface-2);
+    text-decoration: none;
+}
+.sstv__card:hover { border-color: var(--accent); }
+.sstv__card img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.sstv__card-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 2px 4px;
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sstv__card-call { color: var(--accent); }
+.sstv__card-mode, .sstv__card-call { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

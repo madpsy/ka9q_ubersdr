@@ -35,6 +35,7 @@ import NavtexExtension from './navtex/NavtexExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
+import SstvExtension from './sstv/SstvExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -100,6 +101,16 @@ export const EXTENSIONS = [
         float: { w: 820, h: 520 },
         minimal: true,
         Component: FreeDVExtension,
+    },
+    {
+        id: 'sstv',
+        title: 'SSTV Decoder',
+        icon: <Icon.Picture />,
+        summary: 'Slow-scan television pictures, mode detected from the VIS code.',
+        requiresAudio: true,
+        float: { w: 780, h: 640 },
+        minimal: true,
+        Component: SstvExtension,
     },
 ];
 

@@ -31,26 +31,59 @@ export const RING_PAD = 8;
 export const SCROLL_MIN_MS = 25;
 export const SCROLL_MAX_MS = 600;
 
+// How much a sample may differ from the estimate, or from the sample before it,
+// and still count as the same rate. Row commits are gated on an animation
+// frame, so a steady 20 Hz feed arrives as an alternating 50 and 67 ms — a
+// third either way — while the rate changes that matter here are the receiver
+// sending half or twice as often, which is 100%.
+export const JITTER_BAND = 0.35;
+
+// Weight given to a new sample within the band. Low, because within the band
+// the variation is noise and following it would make the slide duration swing
+// by a third from row to row, which is itself visible as the scroll surging.
+export const SAMPLE_WEIGHT = 0.3;
+
 /**
  * The running estimate of how long the next row will take to arrive.
  *
  * Smooth scrolling means sliding a row into view over the gap until the next
- * one, and that gap is not known until it has passed — so the last few are
- * averaged and used as the prediction. An average rather than the last value
- * because the arrival times jitter by a frame either way (the commit is gated
- * on an animation frame), and a duration that jumped about with the jitter
- * would itself be visible.
+ * one, and that gap is not known until it has passed — so it is predicted from
+ * the ones before it. Two different things move that gap and they want opposite
+ * treatment, which is the whole of this function:
  *
- * Being *under* is much cheaper than being over: the slide finishes early and
- * the picture rests for a moment, where overshooting cuts the slide off partway
- * and shows a fraction of a row as a jump. Hence clamping the sample before it
- * is averaged in — one late frame nudges the estimate instead of doubling it.
+ *   * **Jitter** — the same rate, sampled against the animation clock. Damped,
+ *     for the reason on SAMPLE_WEIGHT above.
+ *   * **A change of rate** — the span changed and the receiver is now sending
+ *     at a different rate entirely. Adopted at once, because until the estimate
+ *     catches up every row slides for the wrong length of time.
+ *
+ * A plain average cannot tell them apart and treats both as jitter, which reads
+ * as the waterfall going sluggish for a second and then settling — every time
+ * the rate changes, which is every zoom. So a jump is seeded rather than
+ * averaged in, but only once *two* arrivals agree: one sample that disagrees
+ * with the estimate is a dropped frame, and following it would make the next
+ * row slide at half speed and then jump when it was cut off. Two in a row that
+ * agree with each other and not with the estimate is a rate that has genuinely
+ * moved.
+ *
+ * `lastDt` is the previous raw gap — the caller keeps it, so this stays a
+ * function of its arguments.
  */
-export function smoothInterval(prev, dt) {
+export function smoothInterval(prev, dt, lastDt) {
     if (!(dt > 0)) return prev > 0 ? prev : 0;
-    const sample = Math.min(SCROLL_MAX_MS, Math.max(SCROLL_MIN_MS, dt));
+    const clamp = (v) => Math.min(SCROLL_MAX_MS, Math.max(SCROLL_MIN_MS, v));
+    const sample = clamp(dt);
     if (!(prev > 0)) return sample;
-    return prev * 0.7 + sample * 0.3;
+
+    // Clamped before comparison as well as before use: a stalled feed must not
+    // be able to "agree" with itself at thirty seconds and drag the estimate
+    // out to the ceiling.
+    const previous = lastDt > 0 ? clamp(lastDt) : 0;
+    const agree = previous > 0 && Math.abs(sample - previous) <= previous * JITTER_BAND;
+    const stale = Math.abs(sample - prev) > prev * JITTER_BAND;
+    if (agree && stale) return sample;
+
+    return prev * (1 - SAMPLE_WEIGHT) + sample * SAMPLE_WEIGHT;
 }
 
 /**

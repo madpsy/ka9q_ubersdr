@@ -216,54 +216,96 @@ t('there is nothing to keep before the first ring exists', () => {
 
 // --- the smooth scroll -----------------------------------------------------
 
+// Feed a run of gaps through the estimator, keeping the previous raw gap the
+// way the draw loop does.
+function estimate(gaps, from = 0) {
+    let e = from;
+    let last = 0;
+    for (const dt of gaps) {
+        e = smoothInterval(e, dt, last);
+        last = dt;
+    }
+    return e;
+}
+
+const repeat = (dt, n) => new Array(n).fill(dt);
+
 t('a steady feed settles on its own interval', () => {
     // The duration of the slide is this estimate, so on a steady feed it has to
     // converge on the truth or every row is cut short or finishes early.
     for (const dt of [50, 100, 200]) {
-        let e = 0;
-        for (let i = 0; i < 40; i++) e = smoothInterval(e, dt);
+        const e = estimate(repeat(dt, 40));
         assert.ok(Math.abs(e - dt) < 0.5, `${dt} ms feed settled at ${e}`);
     }
 });
 
-t('the first interval is taken whole, with nothing to average against', () => {
-    assert.strictEqual(smoothInterval(0, 200), 200);
-    assert.strictEqual(smoothInterval(undefined, 200), 200);
+t('the first interval is taken whole, with nothing to compare against', () => {
+    assert.strictEqual(smoothInterval(0, 200, 0), 200);
+    assert.strictEqual(smoothInterval(undefined, 200, undefined), 200);
 });
 
 t('no measurement leaves the estimate alone', () => {
     // The first row has no previous one to time against, and must not reset an
     // estimate that had already settled.
-    assert.strictEqual(smoothInterval(120, 0), 120);
-    assert.strictEqual(smoothInterval(120, -5), 120);
-    assert.strictEqual(smoothInterval(0, 0), 0);
+    assert.strictEqual(smoothInterval(120, 0, 100), 120);
+    assert.strictEqual(smoothInterval(120, -5, 100), 120);
+    assert.strictEqual(smoothInterval(0, 0, 0), 0);
 });
 
-t('one late frame nudges the estimate instead of doubling it', () => {
-    // A dropped frame doubles the gap. Following it exactly would make the next
-    // row crawl at half speed and then jump when it was cut off.
-    let e = 0;
-    for (let i = 0; i < 20; i++) e = smoothInterval(e, 100);
-    const after = smoothInterval(e, 200);
+t('jitter against the animation clock is damped', () => {
+    // A steady 20 Hz feed commits on animation frames, so it arrives as an
+    // alternating 50 and 67 ms. Following that would swing the slide duration by
+    // a third from row to row, which reads as the scroll surging.
+    const gaps = [];
+    for (let i = 0; i < 30; i++) gaps.push(i % 2 ? 50 : 67);
+    const e = estimate(gaps);
+    assert.ok(e > 50 && e < 67, `settled at ${e}`);
+    const next = smoothInterval(e, 67, 50);
+    assert.ok(Math.abs(next - e) < 6, `one jittery sample moved it ${Math.abs(next - e)} ms`);
+});
+
+t('a change of rate is adopted within a couple of rows', () => {
+    // Zooming out halves the frame rate. A plain average took about eight rows
+    // to catch up and slid for the wrong duration through every one of them,
+    // which reads as the waterfall going sluggish for a second and then
+    // settling — on every zoom.
+    const halved = estimate([...repeat(100, 20), 200, 200]);
+    assert.ok(Math.abs(halved - 200) < 1, `after halving the rate: ${halved}`);
+
+    // …and the same the other way, zooming back in.
+    const doubled = estimate([...repeat(200, 20), 100, 100]);
+    assert.ok(Math.abs(doubled - 100) < 1, `after doubling the rate: ${doubled}`);
+});
+
+t('one late frame is not mistaken for a change of rate', () => {
+    // A dropped frame doubles a single gap. Believing it would make the next row
+    // slide at half speed and then jump when it was cut off — which is why two
+    // arrivals have to agree before the estimate is replaced.
+    const after = estimate([...repeat(100, 20), 200]);
     assert.ok(after > 100 && after < 135, `${after} ms after one dropped frame`);
-    // …and it is back within about a second of rows, not carrying the glitch.
-    let back = after;
-    for (let i = 0; i < 8; i++) back = smoothInterval(back, 100);
-    assert.ok(Math.abs(back - 100) < 3, `${back} ms after recovering`);
+    // The gap it followed is the outlier, so the next sample cannot pair with it
+    // either: recovery is by damping, not by snapping to the wrong value.
+    const back = estimate([100, 100, 100, 100, 100, 100, 100, 100], after);
+    assert.ok(Math.abs(back - 100) < 5, `${back} ms after recovering`);
 });
 
 t('a stall cannot leave the next row crawling for seconds', () => {
-    let e = smoothInterval(0, 30000);
-    assert.strictEqual(e, SCROLL_MAX_MS);
-    e = smoothInterval(100, 30000);
-    assert.ok(e <= SCROLL_MAX_MS, e);
+    assert.strictEqual(smoothInterval(0, 30000, 0), SCROLL_MAX_MS);
+    assert.ok(smoothInterval(100, 30000, 100) <= SCROLL_MAX_MS);
+    // Two stalls in a row do agree with each other, so this is read as a change
+    // of rate and adopted — correctly, since a feed that has genuinely slowed to
+    // a crawl should scroll like one. The clamp is what bounds where it lands:
+    // the estimate goes to the ceiling rather than to thirty seconds.
+    assert.strictEqual(estimate([...repeat(100, 20), 30000, 30000]), SCROLL_MAX_MS);
 });
 
 t('the estimate always stays within the animatable range', () => {
-    let e = 0;
     // A deliberately horrible feed: alternating fast, slow and stalled.
+    let e = 0;
+    let last = 0;
     for (const dt of [5, 1000, 40, 9000, 16, 250, 1, 600, 33]) {
-        e = smoothInterval(e, dt);
+        e = smoothInterval(e, dt, last);
+        last = dt;
         assert.ok(e >= SCROLL_MIN_MS && e <= SCROLL_MAX_MS, `${dt} -> ${e}`);
     }
 });

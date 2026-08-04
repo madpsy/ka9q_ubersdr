@@ -16,7 +16,7 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN } from '../radio/constants.js';
-import { useDisplay } from '../display/DisplayContext.jsx';
+import { DEFAULTS as DISPLAY_DEFAULTS, useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
@@ -31,6 +31,17 @@ import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 const SCALE_H = 26;       // frequency ruler height, CSS px
 const MIN_SPECTRUM_H = 60;
 const MIN_WATERFALL_H = 40;
+
+// How far the split may be dragged, as the spectrum's share of the height.
+// Exactly the Display panel's slider range, because they are two ways of moving
+// the same value and a limit you can reach with one but not the other reads as
+// one of them being broken.
+const SPLIT_MIN = 0.10;
+const SPLIT_MAX = 0.85;
+
+// Least vertical room, in CSS px, between two dB labels before one is dropped.
+// The type is 10 px, so this is the line plus a little air.
+const DB_LABEL_GAP = 13;
 
 // Width to assume for the cursor-frequency tag before it has ever been on
 // screen to measure — a little over what "14.074.00" needs at the default text
@@ -453,8 +464,15 @@ export default function SpectrumView() {
             if (commitRow) {
                 // How long the last row took to arrive, which is the best guess
                 // at how long the next one will — and so how long this one has
-                // to slide into view. See smoothInterval.
-                if (lastRow) g.rowDt = smoothInterval(g.rowDt, now - lastRow);
+                // to slide into view. The raw gap is kept as well as the
+                // estimate: two arrivals that agree with each other and not with
+                // the estimate are a change of rate rather than a late frame.
+                // See smoothInterval.
+                if (lastRow) {
+                    const gap = now - lastRow;
+                    g.rowDt = smoothInterval(g.rowDt, gap, g.lastGap);
+                    g.lastGap = gap;
+                }
                 lastRow = now;
                 g.rowsPending = 0;
             }
@@ -567,6 +585,83 @@ export default function SpectrumView() {
         const frac = clamp((clientX - r.left) / r.width, 0, 1);
         return cfg.centerFreq - cfg.span / 2 + frac * cfg.span;
     }, []);
+
+    // ---- dragging the scale to re-share the height ----------------------
+    //
+    // The frequency scale sits exactly on the join between the two panes, which
+    // makes it the obvious thing to grab — it is where a window manager would
+    // put a splitter, and it is already the one strip of the display that is
+    // neither spectrum nor waterfall. So it doubles as one, and does the same
+    // thing as the Display panel's Split slider between the same limits.
+    //
+    // The press is swallowed rather than allowed to reach the container, which
+    // would otherwise read it as the start of a pan and retune the receiver on
+    // release.
+    const splitDrag = useRef(null);
+    const splitRaf = useRef(0);
+    const splitNext = useRef(0);
+
+    // Coalesced to one write per animation frame. A pointer can report far
+    // faster than the screen refreshes — a high-rate mouse is 1 kHz — and every
+    // write here re-renders each panel that reads the display settings and
+    // re-allocates the waterfall ring for the new height. One per frame is all
+    // that can be shown, so it is all that is done.
+    // Through dispRef rather than `display` so this and the handlers below keep
+    // their identity for the whole gesture: `display` is a new object on every
+    // settings change — including each of these writes — and a handler that was
+    // replaced between two moves would have React re-attaching listeners
+    // mid-drag. `set` itself is stable.
+    const setSplit = useCallback((v) => {
+        splitNext.current = v;
+        if (splitRaf.current) return;
+        splitRaf.current = requestAnimationFrame(() => {
+            splitRaf.current = 0;
+            dispRef.current.set({ split: splitNext.current });
+        });
+    }, []);
+
+    useEffect(() => () => { if (splitRaf.current) cancelAnimationFrame(splitRaf.current); }, []);
+
+    const onSplitDown = useCallback((e) => {
+        // Only in split view: with one pane there is nothing to share, and the
+        // scale is then an ordinary part of the display.
+        if (viewMode !== 'split' || avail <= 0 || e.button === 2) return;
+        // Deliberately no preventDefault: on pointerdown it suppresses the
+        // compatibility mouse events, and the double-click reset below is one of
+        // them. Selection is held off with user-select in the stylesheet
+        // instead, which is what preventDefault would have been for.
+        e.stopPropagation();
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        // The share at the moment of the press. Every move is measured against
+        // this and the total travel, not accumulated step by step, so the
+        // boundary tracks the pointer exactly however the moves are batched.
+        splitDrag.current = { y: e.clientY, split: dispRef.current.split };
+    }, [viewMode, avail]);
+
+    const onSplitMove = useCallback((e) => {
+        const d0 = splitDrag.current;
+        if (!d0) return;
+        e.stopPropagation();
+        // The pointer moves the boundary, so a pixel of travel is a pixel of
+        // spectrum — which is what makes it feel like dragging the edge rather
+        // than operating a control that happens to live there.
+        setSplit(clamp(d0.split + (e.clientY - d0.y) / avail, SPLIT_MIN, SPLIT_MAX));
+    }, [avail, setSplit]);
+
+    const onSplitUp = useCallback((e) => {
+        if (!splitDrag.current) return;
+        splitDrag.current = null;
+        e.stopPropagation();
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    }, []);
+
+    // Back to the default share, the way a window manager's splitter evens two
+    // panes out on a double-click.
+    const onSplitDouble = useCallback((e) => {
+        if (viewMode !== 'split') return;
+        e.stopPropagation();
+        dispRef.current.set({ split: DISPLAY_DEFAULTS.split });
+    }, [viewMode]);
 
     const onContextMenu = useCallback((e) => {
         const f = freqAtX(e.clientX);
@@ -857,7 +952,21 @@ export default function SpectrumView() {
                     </div>
                 )}
                 {specH > 0 && <canvas ref={specRef} className="spectrum__pane" />}
-                <canvas ref={scaleRef} className="spectrum__pane spectrum__pane--scale" />
+                {/* Doubles as the splitter between the two panes — see
+                    onSplitDown. It sits exactly on the join, so grabbing it is
+                    grabbing the edge. */}
+                <canvas
+                    ref={scaleRef}
+                    className={`spectrum__pane spectrum__pane--scale${viewMode === 'split' ? ' spectrum__pane--split' : ''}`}
+                    title={viewMode === 'split'
+                        ? 'Drag up or down to share the height between the spectrum and the waterfall — double-click to reset'
+                        : undefined}
+                    onPointerDown={onSplitDown}
+                    onPointerMove={onSplitMove}
+                    onPointerUp={onSplitUp}
+                    onPointerCancel={onSplitUp}
+                    onDoubleClick={onSplitDouble}
+                />
                 {/* The waterfall canvas overhangs this box and the box clips it,
                     which is what gives the scroll a row to slide in. The marks
                     sit above, still, on a canvas that is not translated. */}
@@ -1313,19 +1422,21 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
 
     const yOf = (db) => H - ((db - floor) / range) * H;
 
-    // dB gridlines every 10 dB, labelled on the left.
+    // Where the dB scale is marked: every 10 dB, or every 20 when the range is
+    // wide enough that ten would be a thicket.
     //
-    // Over a backdrop the usual near-transparent white is invisible on anything
-    // but a dark image, so the lines are strengthened and the labels drawn solid
-    // white with a dark shadow — which keeps them readable over a light image
-    // too. Lines and labels are drawn in separate passes so the shadow applies
-    // only to the text.
-    if (d.grid) {
-        const step = range > 80 ? 20 : 10;
-        const startDb = Math.ceil(floor / step) * step;
-        const ticks = [];
-        for (let db = startDb; db < floor + range; db += step) ticks.push(db);
+    // Worked out here and used twice, because the two halves of the scale belong
+    // in different layers. The lines are a backdrop and are drawn now, under the
+    // trace. The labels are drawn last, over everything — see the end of this
+    // function.
+    const step = range > 80 ? 20 : 10;
+    const startDb = Math.ceil(floor / step) * step;
+    const ticks = [];
+    for (let db = startDb; db < floor + range; db += step) ticks.push(db);
 
+    // Over a backdrop the usual near-transparent white is invisible on anything
+    // but a dark image, so the lines are strengthened.
+    if (d.grid) {
         c.strokeStyle = overImage ? 'rgba(255,255,255,0.32)' : colGrid;
         c.lineWidth = 1;
         for (const db of ticks) {
@@ -1335,21 +1446,6 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
             c.lineTo(pxW, y);
             c.stroke();
         }
-
-        c.font = `${10 * dpr}px ui-monospace, monospace`;
-        c.textBaseline = 'bottom';
-        c.textAlign = 'left';
-        c.fillStyle = overImage ? '#ffffff' : colGrid;
-        if (overImage) {
-            c.save();
-            c.shadowColor = 'rgba(0,0,0,0.85)';
-            c.shadowBlur = 3 * dpr;
-        }
-        for (const db of ticks) {
-            const y = Math.round(yOf(db)) + 0.5;
-            c.fillText(`${db.toFixed(0)}`, 4 * dpr, y - 2 * dpr);
-        }
-        if (overImage) c.restore();
     }
 
     // Passband shading around the tuned frequency.
@@ -1442,6 +1538,38 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.lineTo(x, H);
         c.stroke();
     }
+
+    // The dB labels, last of all and so on top of the signal.
+    //
+    // They are an axis, not decoration: reading a level off the display is
+    // exactly what you are doing when a signal is large, which is precisely when
+    // a label drawn under the trace disappears behind it. So they are always
+    // over the top, and always shadowed — the fill takes its colour from the
+    // palette and can be anything from near-black to bright yellow, and only the
+    // shadow makes one colour of text legible against all of them.
+    //
+    // Independent of the gridlines: the horizontal rules are a visual aid some
+    // people find noisy over a waterfall, whereas the numbers are the only thing
+    // saying what the vertical axis means. The Display panel's switch turns off
+    // the first and leaves the second alone.
+    c.save();
+    c.font = `${10 * dpr}px ui-monospace, monospace`;
+    c.textBaseline = 'bottom';
+    c.textAlign = 'left';
+    c.fillStyle = overImage ? '#ffffff' : (col['--scale-text'] || '#8b96a9');
+    c.shadowColor = 'rgba(0,0,0,0.85)';
+    c.shadowBlur = 3 * dpr;
+    // Thinned to whatever fits. The tick spacing follows the dB range, so a
+    // short spectrum pane — a low split, or the bottom dock — can want a label
+    // every few pixels, and unthinned they overprint into a grey smear.
+    let lastY = Infinity;
+    for (const db of ticks) {
+        const y = Math.round(yOf(db)) + 0.5;
+        if (lastY - y < DB_LABEL_GAP * dpr) continue;
+        lastY = y;
+        c.fillText(`${db.toFixed(0)}`, 4 * dpr, y - 2 * dpr);
+    }
+    c.restore();
 }
 
 // Measured line widths, keyed by font and text — see drawStationId.

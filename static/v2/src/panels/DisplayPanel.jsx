@@ -208,8 +208,14 @@ export default function DisplayPanel() {
                         </Field>
                     )}
 
-                    <Field label="dB grid" inline>
-                        <Switch checked={d.grid} onChange={(v) => d.set({ grid: v })} />
+                    {/* Lines only. The dB numbers down the left edge are the
+                        vertical axis and are always drawn — see drawSpectrum. */}
+                    <Field label="Grid lines" inline>
+                        <Switch
+                            checked={d.grid}
+                            onChange={(v) => d.set({ grid: v })}
+                            title="Horizontal rules across the spectrum at each labelled dB step. The dB numbers themselves are always shown"
+                        />
                     </Field>
                 </>
             )}

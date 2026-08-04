@@ -24,24 +24,41 @@ const STORAGE_KEY = 'ubersdr.v2.extensions';
 
 const ExtensionsContext = createContext(null);
 
-// Window geometry per extension, so reopening one puts it back where it was.
-function loadGeometry() {
+function stored() {
     try {
-        const raw = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-        const out = {};
-        for (const [id, g] of Object.entries(raw.floats || {})) {
-            if (!EXTENSION_BY_ID[id] || !g) continue;
-            out[id] = {
-                x: Number(g.x) || 0,
-                y: Number(g.y) || 0,
-                w: Math.max(320, Number(g.w) || EXTENSION_BY_ID[id].float.w),
-                h: Math.max(200, Number(g.h) || EXTENSION_BY_ID[id].float.h),
-            };
-        }
-        return out;
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
     } catch (e) {
         return {};
     }
+}
+
+// Window geometry per extension, so reopening one puts it back where it was.
+function loadGeometry() {
+    const raw = stored();
+    const out = {};
+    for (const [id, g] of Object.entries(raw.floats || {})) {
+        if (!EXTENSION_BY_ID[id] || !g) continue;
+        out[id] = {
+            x: Number(g.x) || 0,
+            y: Number(g.y) || 0,
+            w: Math.max(320, Number(g.w) || EXTENSION_BY_ID[id].float.w),
+            h: Math.max(200, Number(g.h) || EXTENSION_BY_ID[id].float.h),
+        };
+    }
+    return out;
+}
+
+// Which extensions are in their minimal view, kept per extension the way a
+// panel's is — see `minimal` in ./registry.jsx. Remembered because it is a way
+// of working rather than a momentary action: someone who wants the cut-down
+// decoder wants it again tomorrow.
+function loadMinimal() {
+    const raw = stored();
+    const out = {};
+    for (const [id, on] of Object.entries(raw.minimal || {})) {
+        if (EXTENSION_BY_ID[id] && EXTENSION_BY_ID[id].minimal && on) out[id] = true;
+    }
+    return out;
 }
 
 export function ExtensionsProvider({ children }) {
@@ -53,8 +70,12 @@ export function ExtensionsProvider({ children }) {
     // Minimised only hides the window. Unlike a panel, an extension is a live
     // decoder — unmounting it would drop the stream and the decodes with it —
     // so the window stays mounted and merely stops being drawn.
+    //
+    // Not to be confused with `minimal` below, which is the panels' cut-down
+    // view: minimised is about the window, minimal is about what is inside it.
     const [minimised, setMinimised] = useState(false);
     const [floats, setFloats] = useState(loadGeometry);
+    const [minimal, setMinimal] = useState(loadMinimal);
 
     useEffect(() => {
         let cancelled = false;
@@ -70,8 +91,8 @@ export function ExtensionsProvider({ children }) {
     }, []);
 
     useEffect(() => {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ floats })); } catch (e) { /* ignore */ }
-    }, [floats]);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ floats, minimal })); } catch (e) { /* ignore */ }
+    }, [floats, minimal]);
 
     // The registry, annotated. `enabled` is null while the fetch is in flight,
     // and nothing is openable until it is known.
@@ -123,6 +144,19 @@ export function ExtensionsProvider({ children }) {
         return floats[id] || { x: 56, y: 44, ...def };
     }, [floats]);
 
+    // Only extensions that declare a minimal view can be in one, so a stored
+    // flag for one that has since lost it cannot strand the user in a view its
+    // component no longer honours.
+    const minimalOf = useCallback(
+        (id) => !!(EXTENSION_BY_ID[id] && EXTENSION_BY_ID[id].minimal && minimal[id]),
+        [minimal],
+    );
+
+    const toggleMinimal = useCallback((id) => {
+        if (!EXTENSION_BY_ID[id] || !EXTENSION_BY_ID[id].minimal) return;
+        setMinimal((prev) => ({ ...prev, [id]: !prev[id] }));
+    }, []);
+
     const value = useMemo(() => ({
         list,
         activeId,
@@ -134,7 +168,9 @@ export function ExtensionsProvider({ children }) {
         toggle,
         geometryOf,
         setFloat,
-    }), [list, activeId, minimised, open, close, toggle, geometryOf, setFloat]);
+        minimalOf,
+        toggleMinimal,
+    }), [list, activeId, minimised, open, close, toggle, geometryOf, setFloat, minimalOf, toggleMinimal]);
 
     return <ExtensionsContext.Provider value={value}>{children}</ExtensionsContext.Provider>;
 }

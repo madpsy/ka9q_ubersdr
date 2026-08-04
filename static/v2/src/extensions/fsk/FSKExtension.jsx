@@ -256,7 +256,15 @@ const Console = memo(function Console({ lines, timestamps, autoScroll }) {
     );
 });
 
-export default function FSKExtension() {
+// `minimal` keeps what you set the decoder up with and what it produces — the
+// preset and its six parameters, the transport, and the console — and drops
+// everything that is there to tell you how it is getting on: the spectrum, the
+// view switches, the baud meter, the lamps and the audio level. See the
+// registry's `minimal`.
+//
+// The transport bar stays. A view that cannot start the decoder is not a
+// smaller version of this panel, it is a broken one.
+export default function FSKExtension({ minimal }) {
     const { running, audioState, tuning, actions } = useRadio();
     // Attaching needs the audio session, not merely the power switch — see the
     // note on the same line in FT8Extension.jsx.
@@ -481,9 +489,12 @@ export default function FSKExtension() {
                 />
             </div>
 
-            {!running && <div className="note note--tight">Start the receiver to decode.</div>}
-            {running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
-            {live && !decoding && <div className="note note--tight">Tune to a signal in USB, set the shift and baud rate, then press Start.</div>}
+            {/* The hints go in the minimal view; the warnings stay. Being told
+                what to do next is what you no longer need once you have cut
+                the panel down, but a warning is news either way. */}
+            {!minimal && !running && <div className="note note--tight">Start the receiver to decode.</div>}
+            {!minimal && running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
+            {!minimal && live && !decoding && <div className="note note--tight">Tune to a signal in USB, set the shift and baud rate, then press Start.</div>}
             {/* The decoder takes whatever audio the session produces, so a wrong
                 mode does not fail — the two tones simply are not there. */}
             {decoding && tuning.mode !== 'usb' && tuning.mode !== 'lsb' && (
@@ -493,6 +504,7 @@ export default function FSKExtension() {
             )}
             {attachState === 'error' && <div className="note note--warn">{error}</div>}
 
+            {!minimal && (
             <div className="fsk__controls">
                 <Switch
                     label="Timestamp"
@@ -515,8 +527,12 @@ export default function FSKExtension() {
                 <span className="fsk__bar-gap" />
                 <BaudMeter error={baudError} />
             </div>
+            )}
 
-            {opts.spectrum && running && (
+            {/* Off in the minimal view whatever the switch says, and back as it
+                was on the way out: the switch is not reachable from here, so
+                writing to it would silently change a setting the user made. */}
+            {opts.spectrum && running && !minimal && (
                 <SpectrumStrip mark={tones.mark} space={tones.space} onTune={tuneAudio} />
             )}
 
@@ -524,6 +540,7 @@ export default function FSKExtension() {
 
             {/* The lamps are cumulative — decoding implies sync implies signal —
                 so how far along they are lit says where the decoder gave up. */}
+            {!minimal && (
             <div className="fsk__foot">
                 <span className={`fsk__lamp${lamps.signal ? ' is-on' : ''}`} title="The demodulator is hearing something above its noise threshold">Signal</span>
                 <span className={`fsk__lamp${lamps.sync ? ' is-on' : ''}`} title="The bit clock has locked to the signal">Sync</span>
@@ -531,6 +548,7 @@ export default function FSKExtension() {
                 <span className="fsk__bar-gap" />
                 {running && <AudioLevel />}
             </div>
+            )}
         </div>
     );
 }

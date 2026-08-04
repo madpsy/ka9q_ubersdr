@@ -18,8 +18,11 @@ import { useExtensions } from './ExtensionsContext.jsx';
 const MIN = { w: 380, h: 240 };
 
 export default function ExtensionWindow({ bounds }) {
-    const { active, close, minimised, setMinimised, geometryOf, setFloat } = useExtensions();
+    const {
+        active, close, minimised, setMinimised, geometryOf, setFloat, minimalOf, toggleMinimal,
+    } = useExtensions();
     const geom = geometryOf(active ? active.id : '');
+    const minimal = minimalOf(active ? active.id : '');
 
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
         geom,
@@ -66,6 +69,19 @@ export default function ExtensionWindow({ bounds }) {
             >
                 <span className="floatwin__icon">{active.icon}</span>
                 <span className="floatwin__title">{active.title}</span>
+                {/* The same control a docked or floating panel gets, in the
+                    same place and with the same icons — see FloatingPanel. */}
+                {active.minimal && (
+                    <button
+                        type="button"
+                        className="floatwin__btn floatwin__ctl"
+                        title={minimal ? 'Show the full extension' : 'Show the minimal view'}
+                        aria-pressed={minimal}
+                        onClick={() => toggleMinimal(active.id)}
+                    >
+                        {minimal ? <Icon.Expand size={13} /> : <Icon.Collapse size={13} />}
+                    </button>
+                )}
                 <button
                     type="button"
                     className="floatwin__btn floatwin__ctl"
@@ -88,7 +104,7 @@ export default function ExtensionWindow({ bounds }) {
                 column that does not scroll, so a decoder can give its own table
                 or image the leftover height and scroll that instead. */}
             <div className="floatwin__body floatwin__body--ext">
-                <active.Component />
+                <active.Component minimal={minimal} />
             </div>
 
             <span

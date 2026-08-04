@@ -21,8 +21,11 @@ import { Icon } from './ui.jsx';
 export default function MobileShell() {
     const { sections } = useLayout();
     const applies = usePanelApplies();
-    const { active: extension, close: closeExtension } = useExtensions();
+    const {
+        active: extension, close: closeExtension, minimalOf, toggleMinimal: toggleExtMinimal,
+    } = useExtensions();
     const [openId, setOpenId] = useState(null);
+    const extMinimal = minimalOf(extension ? extension.id : '');
 
     const visible = PANELS.filter(
         (p) => !sections[p.id]?.hidden && applies(p),
@@ -70,12 +73,26 @@ export default function MobileShell() {
                                 <span className="sheet__icon">{extension.icon}</span>
                                 {extension.title}
                             </span>
+                            {/* Worth more on a phone than anywhere else: the
+                                sheet is the smallest this decoder is ever
+                                drawn in, so cutting it down buys the most. */}
+                            {extension.minimal && (
+                                <button
+                                    type="button"
+                                    className="sheet__act"
+                                    title={extMinimal ? 'Show the full extension' : 'Show the minimal view'}
+                                    aria-pressed={extMinimal}
+                                    onClick={() => toggleExtMinimal(extension.id)}
+                                >
+                                    {extMinimal ? <Icon.Expand size={16} /> : <Icon.Collapse size={16} />}
+                                </button>
+                            )}
                             <button type="button" className="sheet__close" onClick={closeExtension} aria-label="Close">
                                 <Icon.Close size={18} />
                             </button>
                         </div>
                         <div className="sheet__body sheet__body--ext">
-                            <extension.Component />
+                            <extension.Component minimal={extMinimal} />
                         </div>
                     </div>
                 </>

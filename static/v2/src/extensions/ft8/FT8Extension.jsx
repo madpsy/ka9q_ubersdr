@@ -107,7 +107,20 @@ function SpectrumStrip({ labels }) {
     );
 }
 
-export default function FT8Extension() {
+// `minimal` keeps the transport and the decodes — which is what this panel is
+// for — and drops the view switches, the text filter and the spectrum. See the
+// registry's `minimal`.
+//
+// The filters are the right thing to lose rather than, say, the columns: they
+// are how you narrow a busy band once you are working it, and a cut-down FT8
+// window is one you have put beside something else to watch.
+//
+// Whatever they were set to still applies, though — hiding a control is not
+// changing it, and a minimal view that quietly showed you different decodes
+// would be worse than one that shows fewer controls. The table already says
+// "No decodes match these filters" when that is why it is empty, which is what
+// stops a filter left on from reading as a decoder that has stopped.
+export default function FT8Extension({ minimal }) {
     const { running, audioState, tuning, actions, serverInfo } = useRadio();
     // Attaching needs the audio session, not merely the power switch: the
     // server finds the session by the UUID this browser's audio socket opened
@@ -320,9 +333,12 @@ export default function FT8Extension() {
                 <CycleProgress />
             </div>
 
-            {!running && <div className="note note--tight">Start the receiver to decode.</div>}
-            {running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
-            {live && !decoding && <div className="note note--tight">Tune to an FT8 frequency in USB, then press Start.</div>}
+            {/* The hints go in the minimal view; the warnings stay. Being told
+                what to do next is what you no longer need once you have cut
+                the panel down, but a warning is news either way. */}
+            {!minimal && !running && <div className="note note--tight">Start the receiver to decode.</div>}
+            {!minimal && running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
+            {!minimal && live && !decoding && <div className="note note--tight">Tune to an FT8 frequency in USB, then press Start.</div>}
             {/* The decoder takes whatever audio the session produces, so a wrong
                 mode does not fail — it just never decodes anything. */}
             {decoding && tuning.mode !== FT8_MODE && (
@@ -333,6 +349,7 @@ export default function FT8Extension() {
             {/* Each switch says what it does on hover: two words of label is
                 not enough to distinguish "latest cycle" (a view filter) from
                 "auto-clear" (which actually discards decodes). */}
+            {!minimal && (
             <div className="ft8__controls">
                 <Switch
                     label="CQ only"
@@ -373,8 +390,12 @@ export default function FT8Extension() {
                     onChange={(e) => setFilterText(e.target.value)}
                 />
             </div>
+            )}
 
-            {opts.showSpectrum && running && <SpectrumStrip labels={labels} />}
+            {/* Off in the minimal view whatever the switch says, and back as it
+                was on the way out: the switch is not reachable from here, so
+                writing to it would silently change a setting the user made. */}
+            {opts.showSpectrum && running && !minimal && <SpectrumStrip labels={labels} />}
 
             <div className="ft8__table" ref={listRef}>
                 <div className="ft8__row ft8__row--head">

@@ -2075,7 +2075,10 @@ a.btn { text-decoration: none; }
 }
 .sheet__title { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: calc(13px * var(--ui-scale)); }
 .sheet__icon { display: grid; place-items: center; color: var(--accent); }
-.sheet__close {
+/* The close button, and the header actions beside it — an extension's minimal
+   toggle is the only one so far — share the look: same size, same target. */
+.sheet__close,
+.sheet__act {
     display: grid;
     place-items: center;
     width: 30px;
@@ -2086,6 +2089,9 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
     cursor: pointer;
 }
+/* Lit while on, as the dock and window toggles are: a cut-down view must not
+   read as a view that has lost half its controls. */
+.sheet__act[aria-pressed="true"] { color: var(--accent); }
 .sheet__body {
     flex: 1;
     overflow-y: auto;

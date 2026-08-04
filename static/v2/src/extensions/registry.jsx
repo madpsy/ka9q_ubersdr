@@ -20,6 +20,11 @@
 //   requiresAudio true when it needs the receiver running (a server-side
 //                 decoder does; a browser-only one such as QRSS would not)
 //   float         initial window size
+//   minimal       true when the extension has a minimal view. The window and
+//                 the mobile sheet then show a toggle, and Component is called
+//                 with `minimal` — the extension itself decides what survives.
+//                 Exactly the panels' `minimal`, down to the prop name; see
+//                 panels/registry.jsx. The choice is remembered per extension.
 //   Component     the extension body
 
 import React from '../react.js';
@@ -35,6 +40,7 @@ export const EXTENSIONS = [
         summary: 'Weak-signal FT8 decodes with distance, bearing and country.',
         requiresAudio: true,
         float: { w: 880, h: 560 },
+        minimal: true,
         Component: FT8Extension,
     },
     {
@@ -44,6 +50,7 @@ export const EXTENSIONS = [
         summary: 'Live teleprinter copy — RTTY, weather, SITOR-B and NAVTEX.',
         requiresAudio: true,
         float: { w: 760, h: 560 },
+        minimal: true,
         Component: FSKExtension,
     },
 ];

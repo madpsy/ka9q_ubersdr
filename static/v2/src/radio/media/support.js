@@ -45,10 +45,16 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         ? env.hasMediaSession
         : (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
 
-    // iPadOS reports itself as Macintosh, which is exactly what we want here —
-    // both need the bridge and both default to on.
+    // The Apple *platform*, which is what the default-on decision is about.
+    // iPadOS reports itself as Macintosh, which is what we want here: both are
+    // places where lock-screen control is the point.
     const apple = /iPhone|iPad|iPod|Macintosh/i.test(ua);
-    const androidChrome = /Android/i.test(ua) && /Chrome/i.test(ua) && !apple;
+
+    // Every browser on iOS is WebKit underneath whatever badge it wears, so
+    // Chrome there (CriOS) is not Blink and needs what Safari needs.
+    const ios = /iPhone|iPad|iPod/i.test(ua);
+    const blink = !ios && /Chrome\/|Chromium\/|Edg\//i.test(ua);
+    const androidChrome = /Android/i.test(ua) && blink;
 
     // Feature detection rather than a Firefox sniff: the browsers that cannot
     // point an AudioContext at a device are the same ones that will not show
@@ -58,14 +64,24 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         ? env.hasContextSink
         : (typeof AudioContext !== 'undefined' && typeof AudioContext.prototype.setSinkId === 'function');
 
+    // Blink is asked first, and it is never given the bridge.
+    //
+    // Chromium does not raise media controls for a MediaStream-backed element
+    // at all — that is the same behaviour the 'stream' anchor exists to work
+    // around on Android, and it is not an Android quirk. Deciding on the
+    // platform first is what put Chrome on macOS onto the bridge: its user
+    // agent says Macintosh, so it was read as Apple and handed the one anchor
+    // that cannot work there, while the same browser on Linux took the 'none'
+    // path and was fine. Nothing throws — the controls simply never appear.
     let anchor = 'none';
-    if (apple || !contextSink) anchor = 'bridge';
-    else if (androidChrome) anchor = 'stream';
+    if (blink) anchor = androidChrome ? 'stream' : 'none';
+    else if (apple || !contextSink) anchor = 'bridge';
 
     return {
         available,
         anchor,
         apple,
+        blink,
         androidChrome,
         // v1's defaults, kept: Apple has had this working for years and it is
         // where lock-screen control matters most, so it is opt-out there and

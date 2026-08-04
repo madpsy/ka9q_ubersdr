@@ -25,6 +25,9 @@ const CHROME_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTM
 const CHROME_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36';
 const SAFARI_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
+const CHROME_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
+const SAFARI_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15';
+const CHROME_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126 Mobile/15E148 Safari/604.1';
 
 t('desktop Chrome needs no element at all — the context is enough', () => {
     // Pinned: v1 uses this path on desktop Chrome and the controls do appear,
@@ -45,6 +48,39 @@ t('Apple takes the bridge and is on by default', () => {
     const s = detectSupport(SAFARI_IOS, { hasMediaSession: true, hasContextSink: false });
     assert.strictEqual(s.anchor, 'bridge');
     assert.strictEqual(s.defaultEnabled, true);
+});
+
+t('Chrome on a Mac is Chrome, not Apple — no bridge', () => {
+    // The bug this pins: its user agent says Macintosh, so it was read as Apple
+    // and handed the bridge, which Chromium never raises controls for. The same
+    // browser on Linux took the 'none' path and worked, which is what made it
+    // look like a Mac problem rather than a detection one.
+    const s = detectSupport(CHROME_MAC, { hasMediaSession: true, hasContextSink: true });
+    assert.strictEqual(s.anchor, 'none');
+    assert.strictEqual(s.blink, true);
+    // Still an Apple platform for the default-on decision, which is about where
+    // lock-screen control matters and not about which element to play.
+    assert.strictEqual(s.apple, true);
+});
+
+t('Safari on the same Mac still takes the bridge', () => {
+    const s = detectSupport(SAFARI_MAC, { hasMediaSession: true, hasContextSink: false });
+    assert.strictEqual(s.anchor, 'bridge');
+    assert.strictEqual(s.blink, false);
+});
+
+t('Chrome on iOS is WebKit wearing a badge, and needs what Safari needs', () => {
+    const s = detectSupport(CHROME_IOS, { hasMediaSession: true, hasContextSink: false });
+    assert.strictEqual(s.anchor, 'bridge');
+    assert.strictEqual(s.blink, false);
+});
+
+t('Android Chrome takes the URL stream even where it cannot sink a context', () => {
+    // Reaching the bridge first would have caught this too: no Android browser
+    // can point an AudioContext at an output device, and the bridge is exactly
+    // what Chrome ignores there.
+    const s = detectSupport(CHROME_ANDROID, { hasMediaSession: true, hasContextSink: false });
+    assert.strictEqual(s.anchor, 'stream');
 });
 
 t('a browser that cannot sink an AudioContext takes the bridge', () => {

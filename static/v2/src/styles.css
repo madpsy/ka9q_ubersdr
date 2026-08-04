@@ -624,6 +624,47 @@ button, input, select, textarea { font: inherit; color: inherit; }
     flex-direction: column;
 }
 
+/* ── Listeners ────────────────────────────────────────────────────────────── */
+
+.lsn-head { display: flex; align-items: center; gap: 8px; }
+.lsn-count {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+/* Two lines per listener rather than v1's eight columns: where they are tuned,
+   then who they are and how long since they moved. The age is pinned to the
+   right of the second line so the ages form a column of their own. */
+.lsn-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+        "where age"
+        "who   who";
+    column-gap: 8px;
+    align-items: baseline;
+    width: 100%;
+}
+.lsn-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lsn-row__where { grid-area: where; font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); }
+.lsn-row__age {
+    grid-area: age;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.lsn-row__who { grid-area: who; font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+
+/* Your own row, and IQ channels: read, not clicked. Full contrast either way —
+   these are information, not disabled controls. */
+.lsn-row--static { cursor: default; }
+.lsn-row--static:hover { background: transparent; }
+.lsn-row.is-you .lsn-row__where { color: var(--accent); }
+
 /* =========================================================================
    Spectrum
    ========================================================================= */

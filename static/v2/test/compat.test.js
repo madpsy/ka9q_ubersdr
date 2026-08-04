@@ -206,17 +206,21 @@ t('every message the v1 pages post to the opener is handled', () => {
     assert.deepStrictEqual(missing, [], `unhandled inbound messages: ${missing.join(', ')}`);
 });
 
-t('the manifest matches what LegacyBridge actually installs', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'compat', 'LegacyBridge.jsx'), 'utf8');
+t('the manifest matches what the bridge actually installs', () => {
+    // Both halves of the bridge: the component installs the globals that need
+    // React state behind them, and legacyBridge.js the ones tied to a popup's
+    // lifetime (the lookup window, and the map's channel list).
+    const compat = path.join(__dirname, '..', 'src', 'compat');
+    const src = fs.readFileSync(path.join(compat, 'LegacyBridge.jsx'), 'utf8')
+        + fs.readFileSync(path.join(compat, 'legacyBridge.js'), 'utf8');
     for (const name of b.LEGACY_GLOBALS) {
-        if (name === '_callsignLookupWindow') continue;   // set by legacyBridge.js itself
         assert.ok(
             new RegExp(`(w|window)\\.${name}\\s*=`).test(src),
-            `${name} is in the manifest but LegacyBridge never assigns it`,
+            `${name} is in the manifest but the bridge never assigns it`,
         );
     }
     for (const type of b.LEGACY_MESSAGES) {
-        assert.ok(src.includes(`'${type}'`), `${type} is in the manifest but LegacyBridge never handles it`);
+        assert.ok(src.includes(`'${type}'`), `${type} is in the manifest but the bridge never handles it`);
     }
 });
 

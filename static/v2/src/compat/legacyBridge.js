@@ -25,6 +25,7 @@ export const LEGACY_GLOBALS = [
     'tuneToChannel',
     'instanceDescription',
     'userSessionID',
+    'activeChannels',
     '_callsignLookupWindow',
 ];
 
@@ -35,13 +36,12 @@ export const LEGACY_MESSAGES = [
     'request_ant_switch_status',
 ];
 
-// Deliberately not provided, with the reason. `activeChannels` is the active
-// user list from /stats, read only by channels-map.html — which v2 has no way
-// to open (it is not in /api/pages-menu and has no button), so backing it would
-// mean a polling loop for a page nobody can reach. The page degrades to
-// "No activeChannels data in opener window" rather than breaking. Give it an
-// entry point and this needs implementing at the same time.
-export const LEGACY_UNSUPPORTED = ['activeChannels'];
+// Nothing is knowingly unsupported any more. `activeChannels` used to be:
+// channels-map.html reads it off the opener, and v2 had no way to open that
+// page, so backing it would have meant polling for a page nobody could reach.
+// The Listeners panel is that entry point, and openChannelsMap below publishes
+// the list for exactly as long as the map is open.
+export const LEGACY_UNSUPPORTED = [];
 
 // One normalisation rule for the whole app — see lib/callsign.js.
 import { normaliseCallsign } from '../lib/callsign.js';
@@ -151,4 +151,69 @@ export function antSwitchStatusMessage(status, hasPassword) {
 export function _setLookupWindow(win) {
     lookupWindow = win;
     window._callsignLookupWindow = win;
+}
+
+// --- the channels map -------------------------------------------------------
+//
+// v1's geometry (app.js openChannelsMap). The page has no data source of its
+// own: it reads `window.opener.activeChannels`, centres on
+// `window.opener.instanceDescription`, and tunes through
+// `window.opener.tuneToChannel` — all three of which the bridge provides.
+
+const MAP_W = 1000;
+const MAP_H = 700;
+const MAP_NAME = 'channels_map';
+
+let mapWindow = null;
+let mapRelease = null;
+
+export function channelsMapWindow() {
+    return mapWindow && !mapWindow.closed ? mapWindow : null;
+}
+
+/**
+ * Opens the map, or focuses the one already open.
+ *
+ * `subscribe` is lib/listeners.js's subscription, passed in rather than
+ * imported so this file stays free of the polling machinery — and so the
+ * feeding of the popup is visibly tied to its lifetime: the subscription is
+ * held until the window closes and released the moment it has, which is what
+ * stops a closed map leaving a poll running for the rest of the session.
+ */
+export function openChannelsMap(subscribe) {
+    const open = channelsMapWindow();
+    if (open) {
+        try { open.focus(); } catch (e) { /* closed between check and focus */ }
+        return open;
+    }
+
+    const left = Math.round((screen.width - MAP_W) / 2);
+    const top = Math.round((screen.height - MAP_H) / 2);
+    mapWindow = window.open(
+        '/channels-map.html',
+        MAP_NAME,
+        `width=${MAP_W},height=${MAP_H},left=${left},top=${top},resizable=yes,scrollbars=no`,
+    );
+    if (!mapWindow) return null;   // blocked
+
+    if (mapRelease) mapRelease();
+    mapRelease = subscribe((state) => {
+        // v1 publishes the raw server entries and the page reads the server's
+        // field names off them, so it must be given those and not ours.
+        window.activeChannels = (state.channels || []).map((c) => c.raw);
+        const win = channelsMapWindow();
+        if (!win) {
+            // Closed since the last poll: stop feeding it, and stop polling on
+            // its behalf.
+            if (mapRelease) mapRelease();
+            mapRelease = null;
+            mapWindow = null;
+            return;
+        }
+        // v1 calls this after every stats refresh; the page redraws its pins
+        // from the opener's data when it does.
+        try { if (win.updateChannelsMap) win.updateChannelsMap(); } catch (e) { /* cross-origin or closed */ }
+    });
+
+    return mapWindow;
 }

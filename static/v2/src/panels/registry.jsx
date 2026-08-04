@@ -38,6 +38,7 @@ import AudioFiltersPanel from './AudioFiltersPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
+import ListenersPanel from './ListenersPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
 import ScopePanel from './ScopePanel.jsx';
 import LogPanel from './LogPanel.jsx';
@@ -174,6 +175,17 @@ export const PANELS = [
         Component: ScopePanel,
     },
     { id: 'display', title: 'Display', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
+    // Who else is on the receiver, and the map popup that shows where they are.
+    // Minimal: the list without the count and the map button.
+    {
+        id: 'listeners',
+        title: 'Listeners',
+        icon: <Icon.Users />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: ListenersPanel,
+    },
     { id: 'status', title: 'Receiver info', icon: <Icon.Info />, dock: 'right', defaultOpen: false, Component: StatusPanel },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
 

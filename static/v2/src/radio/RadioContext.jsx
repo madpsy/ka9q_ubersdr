@@ -43,6 +43,13 @@ function saveSettings(s) {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ }
 }
 
+// Where the dial starts, and whether anybody actually asked for it.
+//
+// `chosen` is false when nothing but the built-in fallback was available — no
+// ?freq/?mode in the URL and nothing saved from a previous visit. Only then
+// does the operator's own default apply, once /api/description arrives; see
+// applyServerDefaults. A link someone was sent, or the frequency they left the
+// receiver on, both outrank it.
 function initialTuning() {
     const saved = loadSettings();
     const url = new URLSearchParams(location.search);
@@ -61,6 +68,10 @@ function initialTuning() {
         mode,
         bandwidthLow: clamp(restore && saved.bandwidthLow != null ? saved.bandwidthLow : def.low, l.min, l.max),
         bandwidthHigh: clamp(restore && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high, l.min, l.max),
+        chosen: {
+            frequency: urlFreq > 0 || saved.frequency != null,
+            mode: !!MODE_BY_ID[urlMode] || !!MODE_BY_ID[saved.mode],
+        },
     };
 }
 
@@ -68,7 +79,12 @@ export function RadioProvider({ children }) {
     const saved = useMemo(loadSettings, []);
     const start = useMemo(initialTuning, []);
 
-    const [tuning, setTuning] = useState(start);
+    // `chosen` is not part of the tuning: it says where the tuning came from,
+    // and only until the operator's defaults have had their chance.
+    const [tuning, setTuning] = useState(() => {
+        const { chosen, ...t } = start;
+        return t;
+    });
     const [audioState, setAudioState] = useState('idle');
     const [spectrumState, setSpectrumState] = useState('idle');
     const [view, setView] = useState({ centerFreq: 0, binCount: 0, binBandwidth: 0, span: 0, defaultBinBandwidth: 0, defaultBinCount: 0 });
@@ -400,10 +416,44 @@ export function RadioProvider({ children }) {
         return () => { cancelled = true; off(); };
     }, []);
 
+    // The operator's own starting point, for a visitor who did not bring one.
+    //
+    // v1 does this from the same reply (app.js, the default_frequency /
+    // default_mode block) and applies each independently: a receiver that only
+    // sets a default mode still gets it. The mode brings its own passband, as
+    // v1 spells out band by band — `setMode` here already does that.
+    //
+    // Applied before anything is running, so it is a starting position rather
+    // than a retune: the dial simply reads differently by the time you press
+    // Start.
     useEffect(() => {
         fetch('/api/description')
             .then((r) => r.json())
-            .then((d) => setServerInfo(d))
+            .then((d) => {
+                setServerInfo(d);
+                if (!d) return;
+                const freq = Number(d.default_frequency);
+                const mode = String(d.default_mode || '').toLowerCase();
+                const patch = {};
+                if (!start.chosen.frequency && freq >= MIN_FREQ && freq <= MAX_FREQ) {
+                    patch.frequency = freq;
+                }
+                if (!start.chosen.mode && MODE_BY_ID[mode]) {
+                    patch.mode = mode;
+                    // The mode's own passband, not the one the fallback mode
+                    // happened to leave behind.
+                    patch.bandwidthLow = MODE_BY_ID[mode].low;
+                    patch.bandwidthHigh = MODE_BY_ID[mode].high;
+                }
+                if (!Object.keys(patch).length) return;
+                // Straight into the tuning: nothing is connected yet, so there
+                // is nobody to tell and nothing to re-centre. The dial simply
+                // reads differently by the time Start is pressed, exactly as it
+                // would for a frequency restored from a previous visit.
+                const next = { ...tuningRef.current, ...patch };
+                tuningRef.current = next;
+                setTuning(next);
+            })
             .catch(() => { /* non-fatal — the UI just shows fewer details */ });
     }, []);
 

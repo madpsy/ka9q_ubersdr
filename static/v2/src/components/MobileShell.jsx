@@ -19,7 +19,7 @@ import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 
 export default function MobileShell() {
-    const { sections } = useLayout();
+    const { sections, toggleSectionMinimal } = useLayout();
     const applies = usePanelApplies();
     const {
         active: extension, close: closeExtension, minimalOf, toggleMinimal: toggleExtMinimal,
@@ -33,6 +33,10 @@ export default function MobileShell() {
     // The extension wins the sheet: opening one is the more recent choice, and
     // it is opened from a panel that would otherwise sit on top of it.
     const panel = extension ? null : (openId ? PANEL_BY_ID[openId] : null);
+    // Guarded by the panel's own declaration, as Section and FloatingPanel do:
+    // a stored flag from a panel that has since dropped its minimal view would
+    // otherwise render it a prop it no longer honours.
+    const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimal;
 
     return (
         <div className="shell shell--mobile">
@@ -52,12 +56,27 @@ export default function MobileShell() {
                                 <span className="sheet__icon">{panel.icon}</span>
                                 {panel.title}
                             </span>
+                            {/* Same toggle the docked and floating panels carry,
+                                and the same stored flag — it is per panel, not
+                                per placement, so what you cut down here is cut
+                                down in the dock too. */}
+                            {panel.minimal && (
+                                <button
+                                    type="button"
+                                    className="sheet__act"
+                                    title={panelMinimal ? 'Show the full panel' : 'Show the minimal view'}
+                                    aria-pressed={panelMinimal}
+                                    onClick={() => toggleSectionMinimal(panel.id)}
+                                >
+                                    {panelMinimal ? <Icon.Expand size={16} /> : <Icon.Collapse size={16} />}
+                                </button>
+                            )}
                             <button type="button" className="sheet__close" onClick={() => setOpenId(null)} aria-label="Close">
                                 <Icon.Close size={18} />
                             </button>
                         </div>
                         <div className="sheet__body">
-                            <panel.Component />
+                            <panel.Component minimal={panelMinimal} />
                         </div>
                     </div>
                 </>

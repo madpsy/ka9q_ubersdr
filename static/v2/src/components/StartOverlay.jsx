@@ -20,17 +20,13 @@ import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, VibeSdrModal, vibesdrUri } from './StartExtras.jsx';
-import { openChannelsMap } from '../compat/legacyBridge.js';
-import { subscribeListeners } from '../lib/listeners.js';
 import StartMap from './StartMap.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
 //
-// Two different maps, and they are not the same thing: `/session_stats.html` is
-// the D3 world map with the session history and country totals — the one v1's
-// overlay button opens — while the Leaflet map is the live one, a pin per
-// listener right now. It works from here because /stats needs no session: you
-// simply are not on it yet.
+// `/session_stats.html` is the D3 world map with the session history and
+// country totals — the one v1's overlay button opens. It works from here
+// because /stats needs no session: you simply are not on it yet.
 const LISTENER_STATS = '/session_stats.html';
 const DIRECTORY = 'https://instances.ubersdr.org/';
 
@@ -160,14 +156,6 @@ export default function StartOverlay() {
                 )}
 
                 <div className="start__links">
-                    <button
-                        type="button"
-                        className="start__link start__link--btn"
-                        title="Who is listening now, on a map"
-                        onClick={() => openChannelsMap(subscribeListeners)}
-                    >
-                        Listener map
-                    </button>
                     <a className="start__link" href={LISTENER_STATS} target="_blank" rel="noopener noreferrer">
                         Statistics
                     </a>

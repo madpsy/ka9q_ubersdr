@@ -2105,8 +2105,8 @@ a.btn { text-decoration: none; }
 }
 .sheet__title { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: calc(13px * var(--ui-scale)); }
 .sheet__icon { display: grid; place-items: center; color: var(--accent); }
-/* The close button, and the header actions beside it — an extension's minimal
-   toggle is the only one so far — share the look: same size, same target. */
+/* The close button, and the header actions beside it — the minimal toggle a
+   panel or extension carries — share the look: same size, same target. */
 .sheet__close,
 .sheet__act {
     display: grid;

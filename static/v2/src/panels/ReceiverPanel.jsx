@@ -1,8 +1,9 @@
-import React from '../react.js';
+import React, { useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
+import { VFO_IDS, loadVfos, saveVfos, switchTo, vfoSnapshot } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, hasAGCSettings,
     maxFilterWidth, stepLabel,
@@ -50,8 +51,73 @@ function AGCSettings() {
     );
 }
 
-// `minimal` keeps what you tune with — the dial, its step, and the mode — and
-// drops the filter, the passband readout and AGC. See the registry's `minimal`.
+// Four VFOs under the dial. Each holds frequency, mode, passband and the
+// spectrum zoom; the logic is in lib/vfos.js, this is the row of buttons.
+//
+// The state is loaded from storage on mount rather than held in a context: the
+// panel unmounts whenever it is collapsed or dragged to another dock, and
+// storage is the thing that survives that anyway.
+function VfoBar() {
+    const { tuning, view, actions } = useRadio();
+    const [vfos, setVfos] = useState(loadVfos);
+
+    // Zoom is restored through the same actions the buttons use, so a recalled
+    // view goes through the server's binBandwidth ladder exactly as a manual
+    // zoom does. At or beyond full span, `reset` is the way back — it also
+    // hands the private radiod channel back.
+    const applyZoom = (binBandwidth) => {
+        if (!binBandwidth || !view.binCount) return;
+        if (view.defaultBinBandwidth > 0 && binBandwidth >= view.defaultBinBandwidth) {
+            actions.resetSpectrum();
+            return;
+        }
+        actions.setSpan(binBandwidth * view.binCount);
+    };
+
+    const select = (id) => {
+        const { state, recall } = switchTo(vfos, id, vfoSnapshot(tuning, view));
+        if (state === vfos) return;   // already on it
+        setVfos(state);
+        saveVfos(state);
+        if (!recall) return;          // an unused VFO starts as a copy of this one
+        actions.tuneTo({
+            frequency: recall.frequency,
+            mode: recall.mode,
+            bandwidthLow: recall.bandwidthLow,
+            bandwidthHigh: recall.bandwidthHigh,
+        });
+        applyZoom(recall.binBandwidth);
+    };
+
+    return (
+        <div className="vfo-bar">
+            {VFO_IDS.map((id) => {
+                const s = vfos.slots[id];
+                const on = vfos.active === id;
+                return (
+                    <button
+                        key={id}
+                        type="button"
+                        className={`vfo-btn${on ? ' is-active' : ''}`}
+                        aria-pressed={on}
+                        title={on
+                            ? `VFO ${id} — in use`
+                            : s
+                                ? `VFO ${id} — ${(s.frequency / 1e6).toFixed(3)} MHz ${s.mode.toUpperCase()}`
+                                : `VFO ${id} — unused; takes a copy of the current settings`}
+                        onClick={() => select(id)}
+                    >
+                        {id}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+// `minimal` keeps what you tune with — the dial, the VFOs, its step, and the
+// mode — and drops the filter, the passband readout and AGC. See the registry's
+// `minimal`.
 export default function ReceiverPanel({ minimal }) {
     const { tuning, actions, running } = useRadio();
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
@@ -94,6 +160,8 @@ export default function ReceiverPanel({ minimal }) {
     return (
         <div className="stack">
             <FrequencyDial frequency={tuning.frequency} onChange={actions.setFrequency} />
+
+            <VfoBar />
 
             <div className="tune-row">
                 <Button variant="ghost" icon={<Icon.Minus />} title={`− ${stepLabel(step)}`} onClick={() => actions.stepBy(step, -1)} />

@@ -1037,6 +1037,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .dial.is-disabled { opacity: 0.6; pointer-events: none; }
 
+/* VFO A-D. Round, because they are the one control here that is a position
+   rather than a value — you are on one of four, and the shape says so. */
+.vfo-bar { display: flex; justify-content: center; gap: 8px; }
+
+.vfo-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+        border-color var(--dur) var(--ease);
+}
+.vfo-btn:hover { border-color: var(--accent); color: var(--text); }
+.vfo-btn.is-active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+
 .tune-row { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; }
 
 .passband {

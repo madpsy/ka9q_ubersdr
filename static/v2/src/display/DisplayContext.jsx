@@ -73,6 +73,13 @@ export const DEFAULTS = {
     // v1, because the data it saves is data nobody was looking at — but it is a
     // switch because "nobody is looking" is a guess, and someone watching a
     // band for a signal to appear is not idle in the sense that matters.
+    // Hovering a collapsed dock's rail slides it out over the centre, the way
+    // an auto-hidden taskbar does. On by default: the docks that ship collapsed
+    // are otherwise a click each to look into and a click each to put back.
+    //
+    // A peek never becomes the stored state — see Dock — so this changes what
+    // hovering does and nothing about what a click means.
+    hoverPanels: true,
     idleThrottle: true,
     chatUsersWidth: 170,    // px given to the chat user list, drag to change
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'

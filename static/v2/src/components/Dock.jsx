@@ -1,8 +1,10 @@
 // A dock: an ordered, resizable, collapsible column (or, for `bottom`, a row)
 // of sections. Also the drop target for panels dragged past the last section.
 
-import React, { useCallback, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
+import { useMediaQuery } from '../lib/useMediaQuery.js';
 import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
@@ -79,12 +81,61 @@ const COLLAPSE_ICON = {
     bottom: { open: <Icon.Chevron size={14} />, closed: <Icon.Chevron size={14} /> },
 };
 
+// Long enough that crossing the rail on the way somewhere else does nothing;
+// short enough that stopping on it feels like a hover rather than a wait.
+const PEEK_OPEN_MS = 260;
+// Covers the gap between the rail and the overlay, and a hand that wanders.
+const PEEK_CLOSE_MS = 320;
+
 export default function Dock({ side }) {
     const { docks, sections, toggleDock, setDockSize, movePanel, weights, setWeights, heights } = useLayout();
     const applies = usePanelApplies();
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
     const resizeRef = useRef(null);
+
+    // ---- hover to peek --------------------------------------------------
+    //
+    // Both edges are delayed, and they are delayed by different amounts.
+    //
+    // Opening waits longer, because the rail sits between the spectrum and the
+    // window edge and the pointer crosses it on its way to anything else. An
+    // instant open would fire while you were reaching for a scrollbar.
+    //
+    // Closing waits too, and for the more important reason: the pointer has to
+    // travel from the rail into the overlay, and for part of that journey it is
+    // over neither. Without the delay the dock would shut in the gap.
+    const display = useDisplay();
+    // Only where hovering is a thing the pointer does. On a touch screen
+    // pointerenter fires on the tap that is already toggling the dock, so the
+    // panel would open and instantly close again.
+    const canHover = useMediaQuery('(hover: hover) and (pointer: fine)');
+    const peekEnabled = display.hoverPanels !== false && canHover;
+    const [peeking, setPeeking] = useState(false);
+    const peekTimer = useRef(null);
+
+    const clearPeekTimer = () => { clearTimeout(peekTimer.current); peekTimer.current = null; };
+
+    const startPeek = useCallback(() => {
+        if (!peekEnabled) return;
+        clearPeekTimer();
+        peekTimer.current = setTimeout(() => setPeeking(true), PEEK_OPEN_MS);
+    }, [peekEnabled]);
+
+    const endPeek = useCallback(() => {
+        clearPeekTimer();
+        peekTimer.current = setTimeout(() => setPeeking(false), PEEK_CLOSE_MS);
+    }, []);
+
+    const cancelClose = useCallback(() => clearPeekTimer(), []);
+
+    // Turning the setting off, or a dock the operator has just opened for real,
+    // must not leave an overlay behind.
+    useEffect(() => {
+        if (!peekEnabled || !dock.collapsed) { clearPeekTimer(); setPeeking(false); }
+    }, [peekEnabled, dock.collapsed]);
+
+    useEffect(() => clearPeekTimer, []);
 
     // Covers a cancelled drag (Escape), where no drop fires at all. It cannot
     // cover a completed drop: moving the panel unmounts the drag source, so its
@@ -125,40 +176,33 @@ export default function Dock({ side }) {
         try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     }, []);
 
-    const style = dock.collapsed
-        ? undefined
-        : side === 'bottom'
-            ? { height: dock.size }
-            : { width: dock.size };
+    // Computed even while collapsed: the peek overlay is the same markup and
+    // needs the same size, and the collapsed rail does not use it.
+    const style = side === 'bottom' ? { height: dock.size } : { width: dock.size };
 
-    if (dock.collapsed) {
-        return (
-            <div className={`dock dock--${side} is-collapsed`}>
-                <button
-                    type="button"
-                    className="dock__rail"
-                    onClick={() => toggleDock(side)}
-                    title={`Show ${side} panels`}
-                >
-                    <span className="dock__rail-icon">{COLLAPSE_ICON[side].closed}</span>
-                    <span className="dock__rail-label">
-                        {visible.map((id) => PANEL_BY_ID[id].title).join(' · ') || 'Panels'}
-                    </span>
-                </button>
-            </div>
-        );
-    }
-
-    return (
-        <div className={`dock dock--${side}`} style={style}>
+    // Peeking: the dock is collapsed, and the pointer is over its rail.
+    //
+    // Rendered as an overlay rather than by un-collapsing, so the centre area
+    // does not reflow. A dock that opened in flow would resize the spectrum
+    // canvas and rebuild the waterfall's history every time the pointer crossed
+    // the rail, which is a high price for a glance.
+    //
+    // It never writes `collapsed`. That flag is the operator's own answer and
+    // is only ever changed by clicking — see the note in LayoutContext. So a
+    // dock left open stays open, a dock closed by hand stays closed, and a peek
+    // is forgotten the moment the pointer leaves.
+    const expanded = (extra) => (
+        <div className={`dock dock--${side}${extra.className || ''}`} style={style} {...extra.props}>
             {/* The whole header collapses the dock, the way a panel's header
                 opens and closes it. One button rather than a bar with a button
                 inside it, so there is no nested click target to disagree. */}
             <button
                 type="button"
                 className="dock__header"
-                title={`Collapse ${side} panels`}
-                aria-expanded="true"
+                // In a peek this header is what pins the dock open, so it must
+                // not offer to collapse something that is already collapsed.
+                title={dock.collapsed ? `Keep ${side} panels open` : `Collapse ${side} panels`}
+                aria-expanded={!dock.collapsed}
                 onClick={() => toggleDock(side)}
             >
                 <span className="dock__name">{side} panels</span>
@@ -216,4 +260,35 @@ export default function Dock({ side }) {
             />
         </div>
     );
+
+    if (dock.collapsed) {
+        return (
+            <div
+                className={`dock dock--${side} is-collapsed`}
+                onPointerLeave={endPeek}
+            >
+                <button
+                    type="button"
+                    className="dock__rail"
+                    onClick={() => { endPeek(); toggleDock(side); }}
+                    onPointerEnter={startPeek}
+                    title={`Show ${side} panels`}
+                >
+                    <span className="dock__rail-icon">{COLLAPSE_ICON[side].closed}</span>
+                    <span className="dock__rail-label">
+                        {visible.map((id) => PANEL_BY_ID[id].title).join(' · ') || 'Panels'}
+                    </span>
+                </button>
+                {peeking && expanded({
+                    className: ' dock--peek',
+                    // Entering the overlay keeps it open — the pointer has left
+                    // the rail by then, and the timer started on that would
+                    // otherwise close it under the pointer.
+                    props: { onPointerEnter: cancelClose },
+                })}
+            </div>
+        );
+    }
+
+    return expanded({});
 }

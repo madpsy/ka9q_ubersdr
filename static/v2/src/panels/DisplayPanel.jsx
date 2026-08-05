@@ -242,6 +242,20 @@ export default function DisplayPanel() {
                 own — is something you notice here first. The Status panel's
                 "Poll rate" says what it is doing at any moment. */}
             <div className="section-label"><span>Data</span></div>
+            <Field label="Show panels on hover" inline>
+                <Switch
+                    checked={d.hoverPanels !== false}
+                    onChange={(v) => d.set({ hoverPanels: v })}
+                    title="Slides a collapsed dock out over the receiver while the pointer rests on its rail"
+                />
+            </Field>
+            <div className="note note--tight">
+                Resting the pointer on a collapsed dock's rail slides it out over the
+                receiver, and moving away puts it back — nothing is resized either way.
+                Clicking the rail is unchanged: that is what opens or closes a dock for
+                good, and a hover never overrides it.
+            </div>
+
             <Field
                 label="Slow down when idle"
                 hint={`after ${mobile ? '2.5' : '5'} min`}

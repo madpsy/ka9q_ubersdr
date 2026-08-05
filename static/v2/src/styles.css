@@ -624,6 +624,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
     min-width: 0;
 }
 
+/* A collapsed dock peeked at by hovering its rail — see Dock.
+   Absolute, so the centre area keeps its size and the spectrum is not resized
+   and repainted every time the pointer crosses the rail. It sits just outside
+   the rail, over the centre, and casts a shadow so it reads as being in front
+   of the receiver rather than part of it. */
+.dock--peek {
+    position: absolute;
+    z-index: 30;
+    box-shadow: var(--shadow);
+    animation: dock-peek 120ms var(--ease);
+}
+.dock--left.dock--peek { top: 0; bottom: 0; left: 100%; border-left: 1px solid var(--border); }
+.dock--right.dock--peek { top: 0; bottom: 0; right: 100%; border-right: 1px solid var(--border); }
+.dock--bottom.dock--peek { left: 0; right: 0; bottom: 100%; border-bottom: 1px solid var(--border); }
+@keyframes dock-peek { from { opacity: 0; } }
+
 .dock--left { border-right: 1px solid var(--border); }
 .dock--right { border-left: 1px solid var(--border); }
 .dock--bottom { border-top: 1px solid var(--border); }

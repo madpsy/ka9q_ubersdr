@@ -22,7 +22,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
 import { subscribeSpots } from '../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../lib/voiceActivity.js';
-import { CALLSIGN_TYPES, collectMarkers, findMarkers } from '../lib/markerNav.js';
+import { callsignOf, collectMarkers, countryOf, findMarkers } from '../lib/markerNav.js';
 import { onLookupResolved, peekLookup, startLookup } from '../radio/media/lookup.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
@@ -75,26 +75,28 @@ export default function MarkerNavPanel({ minimal }) {
     // The operator behind a callsign marker. Only for the one you are on:
     // looking up the neighbours would be two more requests per turn of the dial.
     const current = markers.current;
-    const wantsLookup = !!(current && CALLSIGN_TYPES.has(current.type) && current.name
-        && serverInfo && serverInfo.lookup_service);
+    // Not merely a callsign *type*: voice activity with no station decoded is
+    // labelled "Voice 20m", which is not something to look anybody up by.
+    const call = callsignOf(current);
+    const wantsLookup = !!(call && serverInfo && serverInfo.lookup_service);
     useEffect(() => {
         if (!wantsLookup) return;
         // Ours, for the name and flag on this row.
-        startLookup(current.name, getSessionId());
+        startLookup(call, getSessionId());
         // And the Callsign lookup panel, which is the one with the photo, the
         // map and the rest of it. Only when the marker changes — landing on a
         // station is the ask, not every render while you sit on it. The panel
         // wins when it is open; otherwise v1's popup gets it, if that is. This
         // never opens either of them.
-        if (!requestLookup(current.name)) lookupCallsign(current.name);
-    }, [wantsLookup, current && current.name]);
+        if (!requestLookup(call)) lookupCallsign(call);
+    }, [wantsLookup, call]);
 
     // The answer arrives a second or two after the request that asked for it.
     const [tick, setTick] = useState(0);
     useEffect(() => onLookupResolved(() => setTick((n) => n + 1)), []);
     const lookup = useMemo(
-        () => (wantsLookup ? peekLookup(current.name) : null),
-        [wantsLookup, current, tick],
+        () => (wantsLookup ? peekLookup(call) : null),
+        [wantsLookup, call, tick],
     );
 
     const toggle = (t) => {
@@ -128,6 +130,13 @@ export default function MarkerNavPanel({ minimal }) {
                     <span className="mnav__step-label">
                         {markers.prev ? (markers.prev.name || formatFreqShort(markers.prev.freq)) : '—'}
                     </span>
+                    {/* On the inner side of each button — right of the callsign
+                        going back, left of it going forward — so the two flags
+                        face each other across the row rather than hugging the
+                        chevrons. */}
+                    {countryOf(markers.prev) && (
+                        <span className="mnav__step-flag">{countryFlag(countryOf(markers.prev))}</span>
+                    )}
                 </button>
 
                 <button
@@ -139,6 +148,9 @@ export default function MarkerNavPanel({ minimal }) {
                         : 'Nothing above the dial'}
                     onClick={() => step(markers.next)}
                 >
+                    {countryOf(markers.next) && (
+                        <span className="mnav__step-flag">{countryFlag(countryOf(markers.next))}</span>
+                    )}
                     <span className="mnav__step-label">
                         {markers.next ? (markers.next.name || formatFreqShort(markers.next.freq)) : '—'}
                     </span>
@@ -155,18 +167,21 @@ export default function MarkerNavPanel({ minimal }) {
                         interface — and instead of the country on a line of its
                         own, which was a whole row spent on something a flag
                         says in one character. */}
-                    {lookup && lookup.country_code && (
-                        <span className="mnav__flag" title={lookup.country || ''}>
-                            {countryFlag(lookup.country_code)}
+                    {(countryOf(current) || (lookup && lookup.country_code)) && (
+                        <span
+                            className="mnav__flag"
+                            title={(lookup && lookup.country) || ''}
+                        >
+                            {countryFlag(countryOf(current) || lookup.country_code)}
                         </span>
                     )}
                     {wantsLookup ? (
                         <button
                             type="button"
                             className="mnav__name mnav__name--call"
-                            title={`Look up ${current.name}`}
+                            title={`Look up ${call}`}
                             onClick={() => {
-                                if (!requestLookup(current.name)) lookupCallsign(current.name);
+                                if (!requestLookup(call)) lookupCallsign(call);
                             }}
                         >
                             {current.name}

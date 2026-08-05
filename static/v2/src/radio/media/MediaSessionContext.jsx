@@ -12,7 +12,7 @@ import { useDisplay } from '../../display/DisplayContext.jsx';
 import { getSessionId } from '../session.js';
 import { subscribeSpots } from '../../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../../lib/voiceActivity.js';
-import { CALLSIGN_TYPES, NAV_TYPES, collectMarkers, findMarkers } from '../../lib/markerNav.js';
+import { NAV_TYPES, callsignOf, collectMarkers, findMarkers } from '../../lib/markerNav.js';
 import { MediaSessionController } from './controller.js';
 import { ANCHORS, mediaSupport } from './support.js';
 import { onLookupResolved, peekLookup, startLookup } from './lookup.js';
@@ -167,15 +167,18 @@ export function MediaSessionProvider({ children }) {
 
     // Operator name and photo for a callsign marker.
     const marker = markers.current;
-    const wantsLookup = !!(enabled && marker && CALLSIGN_TYPES.has(marker.type) && marker.name
-        && serverInfo && serverInfo.lookup_service);
+    // Being a callsign type is not enough: voice activity with no station
+    // decoded is labelled "Voice 20m", and looking that up spends a request to
+    // be told no. See callsignOf.
+    const markerCall = callsignOf(marker);
+    const wantsLookup = !!(enabled && markerCall && serverInfo && serverInfo.lookup_service);
 
     // The fetch is an effect, not part of the memo below: a memo may be
     // re-evaluated or discarded whenever React likes, and a network request is
     // not something to hang off that.
     useEffect(() => {
-        if (wantsLookup) startLookup(marker.name, getSessionId());
-    }, [wantsLookup, marker]);
+        if (wantsLookup) startLookup(markerCall, getSessionId());
+    }, [wantsLookup, markerCall]);
 
     // Re-read when a lookup lands — it arrives seconds after the tuning change
     // that asked for it, by which point the OS has drawn the card without it.
@@ -183,8 +186,8 @@ export function MediaSessionProvider({ children }) {
     useEffect(() => onLookupResolved(() => setLookupTick((n) => n + 1)), []);
 
     const lookup = useMemo(
-        () => (wantsLookup ? peekLookup(marker.name) : null),
-        [wantsLookup, marker, lookupTick],
+        () => (wantsLookup ? peekLookup(markerCall) : null),
+        [wantsLookup, markerCall, lookupTick],
     );
 
     // ---- push state into the controller ------------------------------------

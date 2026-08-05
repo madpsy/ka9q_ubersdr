@@ -2817,6 +2817,7 @@ a.btn { text-decoration: none; }
 .mnav__step:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
 .mnav__step:disabled { opacity: 0.4; cursor: default; }
 .mnav__step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnav__step-flag { flex: none; }
 
 /* Centred under the prev/next buttons: it is the one thing on the row, and
    left-aligned it read as the start of a list rather than as what you are on. */

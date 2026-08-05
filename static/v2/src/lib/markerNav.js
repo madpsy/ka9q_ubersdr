@@ -8,6 +8,7 @@
 // Pure by construction — callers pass the lists in. Nothing here fetches,
 // subscribes or reads the DOM, which is what makes it testable.
 
+import { isValidCallsign, normaliseCallsign } from './callsign.js';
 import { modeForSpot } from './spots.js';
 import { activityLabel, dialFreq } from './voiceActivity.js';
 
@@ -32,11 +33,22 @@ function voiceMode(hz) {
     return hz >= SIDEBAND_CROSSOVER_HZ ? 'usb' : 'lsb';
 }
 
+// The country a marker's station is in, as an ISO alpha-2 code, or ''.
+//
+// Carried on the marker rather than fetched: the spots and the voice detector
+// already resolve it server-side, so the neighbours either side of the dial can
+// show a flag without a lookup request each — which for a dial being turned
+// would be a request per marker passed.
+export function countryOf(marker) {
+    return (marker && marker.countryCode) || '';
+}
+
 // The marker types, as an allow-list vocabulary for prev/next filtering.
 export const NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark-server', 'bookmark-local'];
 
-// Types whose `name` is a callsign, and so worth a lookup — the album line
-// enriches these, and only these, with the operator's name and photo.
+// Types whose `name` *may* be a callsign, and so worth a lookup — the album
+// line and the Markers panel enrich these, and only these, with the operator's
+// name and photo. Whether it actually is one is callsignOf's job.
 export const CALLSIGN_TYPES = new Set(['cw', 'dx', 'voice']);
 
 // Flattens every marker source into one list of
@@ -52,18 +64,33 @@ export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], l
     // `callsign` — modeForSpot reads the first, the album line reads the second.
     for (const s of cw) {
         if (!(s.frequency > 0)) continue;
-        out.push({ freq: s.frequency, mode: modeForSpot(s), family: 'cw', name: s.callsign || '', type: 'cw', priority: 1 });
+        out.push({
+            freq: s.frequency, mode: modeForSpot(s), family: 'cw',
+            name: s.callsign || '', call: s.callsign || '',
+            countryCode: s.countryCode || '', type: 'cw', priority: 1,
+        });
     }
     for (const s of dx) {
         if (!(s.frequency > 0)) continue;
         const mode = modeForSpot(s);
-        out.push({ freq: s.frequency, mode, family: modeFamily(mode), name: s.callsign || '', type: 'dx', priority: 1 });
+        out.push({
+            freq: s.frequency, mode, family: modeFamily(mode),
+            name: s.callsign || '', call: s.callsign || '',
+            countryCode: s.countryCode || '', type: 'dx', priority: 1,
+        });
     }
     for (const a of voice) {
         const freq = dialFreq(a);
         if (!(freq > 0)) continue;
         const mode = a.mode ? String(a.mode).toLowerCase() : voiceMode(freq);
-        out.push({ freq, mode, family: modeFamily(mode), name: activityLabel(a), type: 'voice', priority: 1 });
+        // `name` is a label — "Voice 20m" when no station was decoded — and
+        // `call` is the station or nothing. Keeping them apart is what stops a
+        // label being looked up as though it were a callsign.
+        out.push({
+            freq, mode, family: modeFamily(mode), name: activityLabel(a),
+            call: a.dx_callsign || '', countryCode: a.dx_country_code || '',
+            type: 'voice', priority: 1,
+        });
     }
     // A bookmark with no mode is a wildcard: `family: null` matches whatever
     // you happen to be listening in, which is what "7.100 — net" means.
@@ -75,12 +102,32 @@ export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], l
                 mode: b.mode || null,
                 family: b.mode ? modeFamily(b.mode) : null,
                 name: b.name || '',
+                // A bookmark's name is whatever its owner typed, so it is never
+                // a callsign to look up even when it looks like one — and it
+                // belongs to no country.
+                call: '',
+                countryCode: '',
                 type,
                 priority: 0,
             });
         }
     }
     return out;
+}
+
+/**
+ * The callsign to look up for a marker, or '' if there is nothing to look up.
+ *
+ * Read from `call`, never from `name`. The two are different on purpose: the
+ * name is what is shown, and for voice activity with no station decoded that is
+ * a label like "Voice 20m" — or just "Voice", which is five letters and passes
+ * any callsign pattern you care to write. Guessing from the label sent those to
+ * the lookup service, which spent a request and a rate-limit slot saying no.
+ */
+export function callsignOf(marker) {
+    if (!marker || !CALLSIGN_TYPES.has(marker.type)) return '';
+    const call = normaliseCallsign(marker.call);
+    return isValidCallsign(call) ? call : '';
 }
 
 // Locates the dial among the markers.

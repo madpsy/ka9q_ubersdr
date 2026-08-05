@@ -8,7 +8,7 @@
 
 const assert = require('assert');
 const {
-    MARKER_TOLERANCE_HZ, collectMarkers, findMarkers, modeFamily,
+    MARKER_TOLERANCE_HZ, callsignOf, collectMarkers, countryOf, findMarkers, modeFamily,
 } = require('./.build/markernav.cjs');
 const { buildMetadata, formatFrequency, markerLabel, sameMetadata } = require('./.build/mediametadata.cjs');
 const { detectSupport, resolveAnchor } = require('./.build/mediasupport.cjs');
@@ -268,6 +268,66 @@ t('the dedup notices a photo arriving after the text is already set', () => {
     assert.ok(sameMetadata({ ...text, photo: '' }, { ...text, photo: '' }));
     assert.ok(!sameMetadata({ ...text, photo: '/api/lookup/image/x' }, { ...text, photo: '' }));
     assert.ok(!sameMetadata(text, null));
+});
+
+// --- what is worth looking up ------------------------------------------------
+
+t('a marker whose name is not a callsign is not looked up', () => {
+    // The bug: voice activity with no station decoded is labelled "Voice 20m",
+    // and being a callsign *type* was the only test — so the lookup service was
+    // asked about it, and spent a request and a rate-limit slot saying no.
+    assert.strictEqual(callsignOf({ type: 'voice', name: 'Voice 20m', call: '' }), '');
+    // "Voice" on its own is five letters and passes any callsign pattern you
+    // care to write, which is why the label is not what gets read.
+    assert.strictEqual(callsignOf({ type: 'voice', name: 'Voice', call: '' }), '');
+    assert.strictEqual(callsignOf({ type: 'dx', name: 'DL1ABC' }), '', 'no call field, no lookup');
+    assert.strictEqual(callsignOf({ type: 'cw', name: 'CQ DX', call: 'CQ DX' }), '');
+});
+
+t('a callsign marker gives its callsign, normalised', () => {
+    assert.strictEqual(callsignOf({ type: 'dx', call: 'dl1abc' }), 'DL1ABC');
+    assert.strictEqual(callsignOf({ type: 'voice', call: 'GM4XYZ' }), 'GM4XYZ');
+    // A portable callsign reduces to its longest part, as the lookup wants.
+    assert.strictEqual(callsignOf({ type: 'cw', call: 'F/GM4XYZ/P' }), 'GM4XYZ');
+});
+
+t('a bookmark is never looked up, whatever it is called', () => {
+    // "GB3TEST" as a bookmark name is a repeater, not a station to look up.
+    assert.strictEqual(callsignOf({ type: 'bookmark-server', name: 'GB3TEST', call: '' }), '');
+    assert.strictEqual(callsignOf({ type: 'bookmark-local', name: 'DL1ABC', call: '' }), '');
+    assert.strictEqual(callsignOf(null), '');
+});
+
+t('collectMarkers keeps the callsign apart from the label', () => {
+    // The voice marker the bug came from: labelled by band, with no station.
+    const m = collectMarkers({
+        voice: [{ start_freq: 14200000, mode: 'usb', band: '20m' }],
+        bookmarks: [{ frequency: 7100000, name: 'GB3TEST' }],
+    });
+    const voice = m.find((x) => x.type === 'voice');
+    assert.ok(voice.name.startsWith('Voice'), voice.name);
+    assert.strictEqual(voice.call, '');
+    assert.strictEqual(callsignOf(voice), '');
+    assert.strictEqual(callsignOf(m.find((x) => x.type === 'bookmark-server')), '');
+});
+
+t('a decoded station does reach the lookup', () => {
+    const m = collectMarkers({ voice: [{ start_freq: 14200000, mode: 'usb', dx_callsign: 'GM4XYZ' }] });
+    assert.strictEqual(callsignOf(m[0]), 'GM4XYZ');
+});
+
+t('a marker carries its country, so a neighbour needs no lookup', () => {
+    // The prev/next buttons show a flag. Fetching one per marker would be a
+    // request for every marker the dial passes.
+    const m = collectMarkers({
+        dx: [{ frequency: 14200000, callsign: 'DL1ABC', countryCode: 'DE', kind: 'dx' }],
+        voice: [{ start_freq: 7100000, mode: 'lsb', dx_callsign: 'GM4XYZ', dx_country_code: 'GB' }],
+        bookmarks: [{ frequency: 3700000, name: 'net' }],
+    });
+    assert.strictEqual(countryOf(m.find((x) => x.type === 'dx')), 'DE');
+    assert.strictEqual(countryOf(m.find((x) => x.type === 'voice')), 'GB');
+    assert.strictEqual(countryOf(m.find((x) => x.type === 'bookmark-server')), '');
+    assert.strictEqual(countryOf(null), '');
 });
 
 console.log(`\n${pass} Media Session checks passed`);

@@ -148,6 +148,28 @@ export default function DXClusterPanel({ minimal }) {
 
     return (
         <div className="stack">
+            {!minimal && (
+                <div className="chip-row chip-row--wrap">
+                    <a
+                        className="chip chip--button"
+                        href={webUrl()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open the full DX Cluster web UI in a new tab"
+                    >
+                        Open web UI
+                    </a>
+                    <a
+                        className="chip chip--button"
+                        href={clientUrl()}
+                        rel="noopener"
+                        title="Download the desktop client"
+                    >
+                        Desktop client ⬇
+                    </a>
+                </div>
+            )}
+
             {!connected ? (
                 <div className="dxc-login">
                     <input
@@ -289,28 +311,6 @@ export default function DXClusterPanel({ minimal }) {
                     >
                         Send
                     </Button>
-                </div>
-            )}
-
-            {!minimal && (
-                <div className="chip-row chip-row--wrap">
-                    <a
-                        className="chip chip--button"
-                        href={webUrl()}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Open the full DX Cluster web UI in a new tab"
-                    >
-                        Open web UI
-                    </a>
-                    <a
-                        className="chip chip--button"
-                        href={clientUrl()}
-                        rel="noopener"
-                        title="Download the desktop client"
-                    >
-                        Desktop client ⬇
-                    </a>
                 </div>
             )}
 

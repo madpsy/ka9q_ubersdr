@@ -23,7 +23,10 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { Field, Segmented, Slider } from '../components/ui.jsx';
 import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
-import { cssVar, drawAudioRuler, drawAudioWaterfall, fmtHz, newRing, sizedCanvas } from '../lib/audioWaterfall.js';
+import {
+    AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN,
+    cssVar, drawAudioRuler, drawAudioWaterfall, fmtHz, newRing, sizedCanvas,
+} from '../lib/audioWaterfall.js';
 
 const VIEWS = [
     { value: 'both', label: 'Both' },
@@ -60,6 +63,7 @@ export default function ScopePanel({ minimal }) {
     const [fftSize, setFftSize] = useState(display.scopeFft || 4096);
     const [timebase, setTimebase] = useState(display.scopeTimebase || 20);   // ms across the scope
     const [contrast, setContrast] = useState(display.scopeContrast || 1);
+    const [wfRate, setWfRate] = useState(display.scopeRate || 30);   // waterfall rows/s
     const [rate, setRate] = useState(null);   // audio sample rate, once known
 
     const scopeRef = useRef(null);
@@ -83,9 +87,13 @@ export default function ScopePanel({ minimal }) {
     // Persist the choices with the other display settings.
     useEffect(() => {
         display.set({
-            scopeView: view, scopeFft: fftSize, scopeTimebase: timebase, scopeContrast: contrast,
+            scopeView: view,
+            scopeFft: fftSize,
+            scopeTimebase: timebase,
+            scopeContrast: contrast,
+            scopeRate: wfRate,
         });
-    }, [view, fftSize, timebase, contrast]);   // eslint-disable-line
+    }, [view, fftSize, timebase, contrast, wfRate]);   // eslint-disable-line
 
     useEffect(() => {
         // One shared FFT: the filter panel's preview reads the same node, and
@@ -105,11 +113,12 @@ export default function ScopePanel({ minimal }) {
                     tuning,
                     palette: display.palette,
                     contrast,
+                    rowsPerSec: wfRate,
                 });
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, contrast, rate]);
+    }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, contrast, rate, wfRate]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -163,6 +172,20 @@ export default function ScopePanel({ minimal }) {
             {!minimal && showScope && (
                 <Field label="Timebase" hint={`${timebase} ms`}>
                     <Slider value={timebase} min={2} max={200} step={1} onChange={setTimebase} />
+                </Field>
+            )}
+
+            {/* Beside the RF waterfall's own speed control in the Display
+                panel, and the same units. Independent of it: the two waterfalls
+                are watched for different things. */}
+            {!minimal && showWf && (
+                <Field label="Waterfall speed" hint={`${wfRate} rows/s`}>
+                    <Slider
+                        value={wfRate}
+                        min={AUDIO_WF_RATE_MIN}
+                        max={AUDIO_WF_RATE_MAX}
+                        onChange={setWfRate}
+                    />
                 </Field>
             )}
 

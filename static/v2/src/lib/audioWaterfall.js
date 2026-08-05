@@ -8,7 +8,27 @@
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
 
-const ROW_MS = 33;             // one row, ~30 fps as in v1
+// One row, ~30 rows a second, as v1 runs it. The default rather than a fixed
+// rate: how fast the history should scroll depends on what is being watched —
+// a slow CW signal wants minutes on screen, and reading a digital burst wants
+// the opposite.
+const DEFAULT_ROWS_PER_SEC = 30;
+export const AUDIO_WF_RATE_MIN = 2;
+export const AUDIO_WF_RATE_MAX = 60;
+
+/**
+ * How long a committed row holds the top of the waterfall, in ms.
+ *
+ * Clamped rather than trusted. This divides, so a zero or a missing setting —
+ * which is what a stored value from an older layout looks like — would come out
+ * as Infinity and commit no rows at all: a waterfall frozen with no error and
+ * nothing to suggest the speed slider caused it.
+ */
+export function audioRowMs(rowsPerSec) {
+    const rate = Number(rowsPerSec);
+    if (!Number.isFinite(rate) || rate <= 0) return 1000 / DEFAULT_ROWS_PER_SEC;
+    return 1000 / Math.min(AUDIO_WF_RATE_MAX, Math.max(AUDIO_WF_RATE_MIN, rate));
+}
 export const WF_FLOOR_DB = -110;   // never map anything quieter than this
 export const WF_MIN_SPAN_DB = 45;  // and never stretch a narrower range
 
@@ -60,6 +80,7 @@ export function newRing() {
  */
 export function drawAudioWaterfall({
     canvas, ring, bins, binCount, sampleRate, tuning, palette, contrast, marks,
+    rowsPerSec = DEFAULT_ROWS_PER_SEC,
 }) {
     if (!canvas || !bins || bins.length !== binCount) return;
     const { w, h } = sizedCanvas(canvas);
@@ -102,8 +123,12 @@ export function drawAudioWaterfall({
     }
     const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
 
+    // Frames arrive as fast as the analyser produces them; this decides how many
+    // of them become history.
+    const rowMs = audioRowMs(rowsPerSec);
+
     const now = performance.now();
-    if (now - ring.at >= ROW_MS) {
+    if (now - ring.at >= rowMs) {
         ring.at = now;
         const lut = getPalette(palette);
         const img = ring.ctx.createImageData(w, 1);

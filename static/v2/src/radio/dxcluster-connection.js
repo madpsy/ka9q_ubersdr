@@ -78,6 +78,10 @@ export class DXClusterConnection extends Emitter {
         this.pingTimer = null;
         this.username = null;      // replayed on reconnect
         this.lastStatus = null;    // frequency/mode, likewise
+        // Whether this socket has already been told who we are. The replay
+        // below is per *socket*, not per subscription confirmation, and the two
+        // are not the same thing — see _onMessage.
+        this.identitySent = false;
         // How many consumers want each stream. Sending a subscribe per consumer
         // would be harmless, but the unsubscribe would not: the first panel to
         // close would cut off every other one.
@@ -200,6 +204,8 @@ export class DXClusterConnection extends Emitter {
         if (password) q.set('password', password);
 
         this.openedWith = sessionId;
+        // A new socket knows nothing about us, whatever the last one was told.
+        this.identitySent = false;
         this._setState('connecting');
         let ws;
         try {
@@ -270,6 +276,9 @@ export class DXClusterConnection extends Emitter {
 
     setUsername(username) {
         this.username = username;
+        // Sent now, so the replay does not send it a second time when the next
+        // subscription confirmation arrives on this same socket.
+        this.identitySent = true;
         return this.send({ type: 'chat_set_username', username });
     }
 
@@ -295,6 +304,7 @@ export class DXClusterConnection extends Emitter {
 
     leave() {
         this.username = null;
+        this.identitySent = false;
         return this.send({ type: 'chat_leave' });
     }
 
@@ -371,7 +381,20 @@ export class DXClusterConnection extends Emitter {
                 if (stream === 'chat' && msg.enabled) {
                     // Safe to talk now. A reconnect must restore identity and
                     // status, or the user silently reverts to anonymous.
-                    if (this.username) this.send({ type: 'chat_set_username', username: this.username });
+                    //
+                    // Once per socket, though, not once per confirmation. Two
+                    // confirmations on one socket are ordinary — acquire()
+                    // subscribes when the ref count goes up on an already-open
+                    // socket, and onopen subscribes everything wanted — and the
+                    // server treats every chat_set_username as a join, announces
+                    // it to the channel and sends its welcome again. That is the
+                    // double join: the first confirmation had nothing to replay,
+                    // ChatContext's own auto-join set the name, and the second
+                    // confirmation replayed it straight back.
+                    if (this.username && !this.identitySent) {
+                        this.identitySent = true;
+                        this.send({ type: 'chat_set_username', username: this.username });
+                    }
                     if (this.lastStatus) this.send({ type: 'chat_set_frequency_mode', ...this.lastStatus });
                     this.send({ type: 'chat_request_users' });
                 }

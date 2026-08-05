@@ -64,6 +64,7 @@ import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
+import WeatherPanel from './WeatherPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 
 export const PANELS = [
@@ -250,6 +251,22 @@ export const PANELS = [
         // to /api/spaceweather fails, so the panel is absent rather than
         // permanently empty. Same gate the top bar's summary uses.
         requires: (serverInfo) => !!(serverInfo && serverInfo.space_weather),
+    },
+    // Under space weather, and the pairing is the point: one says what the
+    // ionosphere is doing and the other what the sky is. Both end up in the
+    // noise floor.
+    //
+    // No `requires`: /api/description does not say whether a weather source is
+    // configured, so the panel asks the endpoint and says what it was told.
+    // Minimal is the glance — conditions, temperature, wind.
+    {
+        id: 'weather',
+        title: 'Weather',
+        icon: <Icon.Cloud />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: WeatherPanel,
     },
     // Minimal: noise reduction. Volume, channel and buffer are set once a
     // session; that one is worked at while you listen. Squelch is in Signal,

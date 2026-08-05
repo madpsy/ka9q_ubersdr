@@ -138,6 +138,8 @@ esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
+esbuild ../src/lib/weather.js --bundle --format=cjs --platform=node \
+    --outfile=.build/weather.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
 esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
@@ -203,6 +205,7 @@ node roomfor.test.js
 node edgehit.test.js
 node appheight.test.js
 node dispatch.test.js
+node weather.test.js
 node operatorphoto.test.js
 node bookmarkgroups.test.js
 node bridge.test.js

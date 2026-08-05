@@ -45,6 +45,10 @@ export const Icon = {
     ZoomOut: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" /></Svg>,
     Sun: (p) => <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
     Moon: (p) => <Svg {...p}><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" /></Svg>,
+    // Terrestrial weather, as opposed to Sun, which is space weather's.
+    Cloud: (p) => <Svg {...p}><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.1 11.2 3.9 3.9 0 0 0 6.5 19z" /></Svg>,
+    // Three streamers, the long one trailing into a curl.
+    Wind: (p) => <Svg {...p}><path d="M3 8h9.5a2.5 2.5 0 1 0-2.5-2.5M3 16h13a2.5 2.5 0 1 1-2.5 2.5M3 12h7" /></Svg>,
     Info: (p) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></Svg>,
     External: (p) => <Svg {...p}><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></Svg>,
     Puzzle: (p) => <Svg {...p}><path d="M10 3h4v2.2a1.8 1.8 0 1 0 3.6 0V3H21v3.4h-2.2a1.8 1.8 0 1 0 0 3.6H21V21h-3.4v-2.2a1.8 1.8 0 1 0-3.6 0V21H3v-4h2.2a1.8 1.8 0 1 0 0-3.6H3V3z" /></Svg>,

@@ -25,6 +25,22 @@ export default function DisplayPanel() {
 
     return (
         <div className="stack">
+            {/* The top bar's toggle is desktop-only — on a phone the space it
+                took belongs to the frequency, the mode and the filter width —
+                so this is where the theme lives on mobile, and it is a display
+                setting either way. */}
+            <Field label="Theme">
+                <Segmented
+                    size="sm"
+                    value={d.theme === 'light' ? 'light' : 'dark'}
+                    onChange={(v) => d.set({ theme: v })}
+                    options={[
+                        { value: 'dark', label: 'Dark' },
+                        { value: 'light', label: 'Light' },
+                    ]}
+                />
+            </Field>
+
             <Field label="View">
                 <Segmented
                     size="sm"

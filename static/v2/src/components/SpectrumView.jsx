@@ -36,11 +36,25 @@ import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
+import { edgeHit } from '../lib/edgeHit.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
 const EDGE_GRAB_PX = 6;
 const EDGE_MIN_PX = 24;
+
+// The same, for a finger. Six pixels is not a touch target — a fingertip is
+// nearer forty across and the contact point is not where you think it is — so
+// touch gets a zone it can actually hit, and the passband has to be wide enough
+// that the two zones do not meet with nothing left between them to tap or pan.
+const TOUCH_GRAB_PX = 22;
+const TOUCH_EDGE_MIN_PX = TOUCH_GRAB_PX * 3;
+
+// How far a finger must travel before a touch near an edge is a resize rather
+// than a tap. The whole reason touch can have a grab zone this size: nothing is
+// decided when the finger lands, so a tap meant to tune is still a tap, and only
+// a deliberate drag moves the filter.
+const TOUCH_SLOP_PX = 8;
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
@@ -777,28 +791,19 @@ export default function SpectrumView() {
         return x >= lo && x <= hi ? 'filter' : null;
     }, []);
 
-    // Which passband edge is under the pointer, if either.
-    //
-    // Only once the passband is worth aiming at: zoomed out to the whole band a
-    // 2.7 kHz filter is a fraction of a pixel wide, both edges sit on the dial,
-    // and a grab zone there would swallow every click meant for tuning. Below
-    // the threshold there is nothing to grab and the wheel is the way to do it.
-    const edgeAtX = useCallback((clientX) => {
+    // Which passband edge is under the pointer, if either. The geometry and the
+    // reasoning about the zone sizes are in lib/edgeHit.js; this is the part
+    // that reads the live view.
+    const edgeAtX = useCallback((clientX, touch = false) => {
         const el = wrapRef.current;
         const cfg = cfgRef.current;
-        const t = tuneRef.current;
         if (!el || !cfg.span) return null;
         const r = el.getBoundingClientRect();
-        if (!r.width) return null;
-        const pxPerHz = r.width / cfg.span;
-        const width = Math.abs(t.bandwidthHigh - t.bandwidthLow) * pxPerHz;
-        if (width < EDGE_MIN_PX) return null;
-        const x = clientX - r.left;
-        const xAt = (hz) => ((t.frequency + hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * r.width;
-        const dLow = Math.abs(x - xAt(t.bandwidthLow));
-        const dHigh = Math.abs(x - xAt(t.bandwidthHigh));
-        if (Math.min(dLow, dHigh) > EDGE_GRAB_PX) return null;
-        return dLow <= dHigh ? 'low' : 'high';
+        return edgeHit(
+            clientX - r.left, r.width, cfg.span, cfg.centerFreq, tuneRef.current,
+            touch ? TOUCH_GRAB_PX : EDGE_GRAB_PX,
+            touch ? TOUCH_EDGE_MIN_PX : EDGE_MIN_PX,
+        );
     }, []);
 
     // ---- pointer interaction --------------------------------------------
@@ -911,6 +916,7 @@ export default function SpectrumView() {
         // a tap and tunes the receiver to wherever the fingers happened to be.
         if (g.pts.size === 2) {
             g.drag = null;
+            g.edge = null;
             g.hover = null;
             setHoverInfo(null);
             const pair = pinchPair(g.pts);
@@ -944,14 +950,23 @@ export default function SpectrumView() {
         // An edge under the pointer takes the gesture: no pan, and no tune on
         // release. Checked before the pan so the two cannot both be live.
         //
-        // Not with a finger. Six pixels is not a touch target, and the failure
-        // is silent in the worst way: a tap meant to tune lands on an edge,
-        // tunes nothing, and quietly resizes the filter instead. Touch keeps
-        // tap, pan and pinch; the Receiver panel's width slider is in its
-        // minimal view for exactly this.
-        const edge = e.pointerType === 'touch' ? null : edgeAtX(e.clientX);
+        // A finger gets a much larger zone and, in exchange, no say yet. The
+        // silent failure to avoid is a tap meant to tune landing on an edge,
+        // tuning nothing and quietly resizing the filter instead — so touch
+        // starts *pending*: it is a resize only once the finger has moved, and a
+        // tap that never moves still tunes. See onPointerMove and onPointerUp.
+        const touch = e.pointerType === 'touch';
+        const edge = edgeAtX(e.clientX, touch);
         if (edge) {
-            g.edge = { which: edge };
+            g.edge = {
+                which: edge,
+                pending: touch,
+                startX: e.clientX,
+                // What counts as too narrow to grab depends on which zone this
+                // gesture is using, so the clamp below cannot shut a filter to a
+                // width the same gesture could not pick up again.
+                minPx: touch ? TOUCH_EDGE_MIN_PX : EDGE_MIN_PX,
+            };
             g.drag = null;
             return;
         }
@@ -1044,6 +1059,12 @@ export default function SpectrumView() {
         }
 
         if (g.edge) {
+            // Still undecided: a finger resting near an edge, which is a tap
+            // until it travels far enough to be a drag.
+            if (g.edge.pending) {
+                if (Math.abs(e.clientX - g.edge.startX) < TOUCH_SLOP_PX) return;
+                g.edge.pending = false;
+            }
             const t = tuneRef.current;
             const raw = f == null ? null : f - t.frequency;
             if (raw != null) {
@@ -1056,7 +1077,7 @@ export default function SpectrumView() {
                 // floor, which at any normal zoom is a fraction of a pixel —
                 // the two lines then sat on top of each other with nothing left
                 // to take hold of, and the only way back out was the panel.
-                const minHz = EDGE_MIN_PX * (cfg.span / r.width);
+                const minHz = (g.edge.minPx || EDGE_MIN_PX) * (cfg.span / r.width);
                 const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t, minHz);
                 if (low !== t.bandwidthLow || high !== t.bandwidthHigh) {
                     actions.setBandwidth(low, high);
@@ -1081,6 +1102,16 @@ export default function SpectrumView() {
         }
     }, [actions, freqAtX, edgeAtX, markAtX]);
 
+    // A release that means "tune here". Snapped to whatever the Receiver panel's
+    // step is set to, so clicking the spectrum and pressing +/- agree about where
+    // the channels are.
+    const tuneAt = useCallback((clientX) => {
+        const f = freqAtX(clientX);
+        if (f == null) return;
+        const step = dispRef.current.tuneStep || 1;
+        actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
+    }, [actions, freqAtX]);
+
     const onPointerUp = useCallback((e) => {
         const g = gfx.current;
         g.pts.delete(e.pointerId);
@@ -1096,8 +1127,15 @@ export default function SpectrumView() {
 
         // An edge drag is finished, and never tunes: the pointer went down on
         // the filter, not on a frequency.
+        //
+        // Unless it never became a drag. A finger that landed in the touch grab
+        // zone and lifted without moving was always a tap, and this is where
+        // that is settled — which is what lets the zone be finger-sized without
+        // taking taps away from tuning.
         if (g.edge) {
+            const tapped = g.edge.pending;
             g.edge = null;
+            if (tapped) tuneAt(e.clientX);
             return;
         }
 
@@ -1105,13 +1143,21 @@ export default function SpectrumView() {
         g.drag = null;
         if (!drag) return;
         if (drag.moved) return;
-        const f = freqAtX(e.clientX);
-        if (f == null) return;
-        // Snap to whatever the Receiver panel's step is set to, so clicking the
-        // spectrum and pressing +/- agree about where the channels are.
-        const step = dispRef.current.tuneStep || 1;
-        actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
-    }, [actions, freqAtX]);
+        tuneAt(e.clientX);
+    }, [tuneAt]);
+
+    // A gesture taken away from us — the browser claiming it, the window losing
+    // the pointer — is abandoned, not completed. Sharing onPointerUp would tune
+    // to wherever the finger happened to be when it was cancelled, which is not
+    // something anybody asked for.
+    const onPointerCancel = useCallback((e) => {
+        const g = gfx.current;
+        g.pts.delete(e.pointerId);
+        try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        g.edge = null;
+        g.drag = null;
+        if (g.pts.size === 0) g.pinch = null;
+    }, []);
 
     // The readout has to follow the data, not the mouse: standing still over a
     // signal and watching it fade should change the numbers. Recomputed from
@@ -1266,7 +1312,7 @@ export default function SpectrumView() {
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
+                onPointerCancel={onPointerCancel}
                 onPointerLeave={onPointerLeave}
             >
                 {hoverInfo && hoverInfo.db != null && (

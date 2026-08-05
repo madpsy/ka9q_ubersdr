@@ -495,9 +495,14 @@ export default function TopBar({ compact }) {
                 {running ? 'Stop' : 'Listen'}
             </Button>
 
-            <div className="topbar__status" title={`audio: ${audioState} · spectrum: ${spectrumState}`}>
-                <span className={`dot dot--${linkTone}`} />
-            </div>
+            {/* Not on mobile. The Status panel says the same thing in words,
+                one tap away on the tab bar, and here it is a lit dot competing
+                for the width the filter readout needs. */}
+            {!compact && (
+                <div className="topbar__status" title={`audio: ${audioState} · spectrum: ${spectrumState}`}>
+                    <span className={`dot dot--${linkTone}`} />
+                </div>
+            )}
 
             {/* Never on mobile, where the bar is down to the frequency, the
                 mode and Listen — and where the space this would take is the
@@ -520,13 +525,19 @@ export default function TopBar({ compact }) {
                 />
             )}
 
-            <Button
-                variant="ghost"
-                size="sm"
-                icon={display.theme === 'dark' ? <Icon.Sun /> : <Icon.Moon />}
-                title="Toggle theme"
-                onClick={() => display.set({ theme: display.theme === 'dark' ? 'light' : 'dark' })}
-            />
+            {/* Also not on mobile — the Display panel carries the theme there.
+                A setting changed once and then left alone is a poor use of a bar
+                that has to hold the frequency, the mode, the filter width and
+                Listen. */}
+            {!compact && (
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={display.theme === 'dark' ? <Icon.Sun /> : <Icon.Moon />}
+                    title="Toggle theme"
+                    onClick={() => display.set({ theme: display.theme === 'dark' ? 'light' : 'dark' })}
+                />
+            )}
 
             {!compact && (
                 <div className="topbar__docks">

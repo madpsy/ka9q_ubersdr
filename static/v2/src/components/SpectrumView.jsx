@@ -29,6 +29,7 @@ import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
+import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
@@ -219,6 +220,8 @@ const readMidi = (s) => (s.connected ? (s.deviceName || 'MIDI') : '');
 const readRig = (s) => (s.connected ? (s.rig && s.rig.tx ? 'tx' : 'on') : '');
 
 function ControlTags() {
+    const [announce, setAnnounce] = useState(announceSettings);
+    useEffect(() => onAnnounceSettings(setAnnounce), []);
     const flex = useSurface(getFlex, readConnected);
     const midi = useSurface(getMidi, readMidi);
     const rig = useSurface(getSync, readRig);
@@ -260,6 +263,26 @@ function ControlTags() {
                 >
                     MEDIA
                 </span>
+            )}
+            {announce.enabled && (
+                // Clickable, unlike the four above it. Those report a
+                // connection you would go to its own panel to change; this one
+                // is the receiver talking, and the thing you want when it is
+                // talking over you is to stop it where you are.
+                //
+                // Ghost rather than accent when neither reading is selected:
+                // switched on and silent is a state worth being able to see,
+                // and it is the one the panel has to explain in a note.
+                <button
+                    type="button"
+                    className={`tag tag--button tag--${announce.frequency || announce.mode ? 'accent' : 'ghost'}`}
+                    title={announce.frequency || announce.mode
+                        ? 'Announcements on — click to silence them'
+                        : 'Announcements on, but neither frequency nor mode is selected — click to switch off'}
+                    onClick={() => setAnnounceSettings({ enabled: false })}
+                >
+                    SPEAK
+                </button>
             )}
         </>
     );

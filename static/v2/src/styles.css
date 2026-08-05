@@ -463,6 +463,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent);
 }
 .topbar__mode:hover { filter: brightness(1.25); }
+/* The filter width, beside the mode. Quieter than it — the mode is a control
+   and this is a readout — and monospaced so the bar does not shuffle as the
+   passband is dragged on the spectrum. */
+.topbar__bw {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
 
 /* Sized in ch so the box is the width of the number it replaces, and the bar
    does not jump as the readout turns into an input. */

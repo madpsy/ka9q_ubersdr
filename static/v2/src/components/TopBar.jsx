@@ -24,6 +24,17 @@ import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 const SESSION_W = 68;
 const SPACE_WEATHER_W = 210;
 const CLOCK_W = 96;
+// "12.00k" and a space.
+const FILTER_W = 46;
+
+// The passband as one number: the width, which is what a filter is called when
+// anybody talks about one. Sub-kilohertz filters — CW, and a narrowed SSB —
+// read in hertz, because "0.25k" is a worse way of writing 250 Hz.
+function formatFilterWidth(low, high) {
+    const hz = Math.abs((high || 0) - (low || 0));
+    if (!hz) return '';
+    return hz < 1000 ? `${Math.round(hz)}` : `${(hz / 1000).toFixed(2)}k`;
+}
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -290,6 +301,7 @@ export default function TopBar({ compact }) {
         { key: 'session', width: SESSION_W },
         { key: 'clock', width: CLOCK_W },
         { key: 'spaceWeather', width: SPACE_WEATHER_W },
+        { key: 'width', width: FILTER_W },
     ]);
 
     // Tuning straight from the readout: the frequency swaps for an input, the
@@ -353,6 +365,22 @@ export default function TopBar({ compact }) {
                 >
                     {(MODE_BY_ID[tuning.mode] || {}).label || tuning.mode}
                 </button>
+                {/* The filter, beside the mode it belongs to. The Receiver
+                    panel's minimal view drops its width slider, and the panel
+                    can be collapsed entirely, so without this there is nowhere
+                    to read the passband you are listening through.
+                    
+                    Optional: the first thing to go as the bar narrows, because
+                    the mode beside it is the one that changes what you hear. */}
+                {room.width && (
+                    <span
+                        className="topbar__bw"
+                        data-optional="width"
+                        title={`Passband ${tuning.bandwidthLow} to ${tuning.bandwidthHigh} Hz`}
+                    >
+                        {formatFilterWidth(tuning.bandwidthLow, tuning.bandwidthHigh)}
+                    </span>
+                )}
 
                 {/* Inside the readout rather than a child of the bar itself:
                     it is position:fixed either way, but useRoomFor counts the

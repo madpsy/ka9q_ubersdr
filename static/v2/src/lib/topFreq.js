@@ -21,6 +21,29 @@ export const TOP_FREQ_ROWS = 5;
 // limit — and the weakest go first, so what is dropped is what was never used.
 export const TOP_FREQ_STORE = 100;
 
+/**
+ * A count of minutes as a duration: "4m", "2h20m", "3d5h".
+ *
+ * The count is the score *and* the time spent, so it may as well read as the
+ * time spent — a leaderboard row saying 140 makes you do the division.
+ *
+ * Two units at most, largest first, and the smaller one dropped when it is zero:
+ * "2h" rather than "2h0m". Past a day the minutes stop mattering, and a row that
+ * grew to four figures would push the column about.
+ */
+export function formatDwell(minutes) {
+    const m = Math.max(0, Math.round(Number(minutes) || 0));
+    if (m < 60) return `${m}m`;
+    const hours = Math.floor(m / 60);
+    if (hours < 24) {
+        const rem = m % 60;
+        return rem ? `${hours}h${rem}m` : `${hours}h`;
+    }
+    const days = Math.floor(hours / 24);
+    const rem = hours % 24;
+    return rem ? `${days}d${rem}h` : `${days}d`;
+}
+
 export const comboKey = (hz, mode) => `${Math.round(hz)}|${String(mode || '').toLowerCase()}`;
 
 /**

@@ -18,7 +18,7 @@ import { Button, Empty, Icon, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 import {
-    TOP_FREQ_ROWS, comboKey, creditMinute, loadCombos, saveCombos, sortedCombos,
+    TOP_FREQ_ROWS, comboKey, creditMinute, formatDwell, loadCombos, saveCombos, sortedCombos,
 } from '../lib/topFreq.js';
 
 const MINUTE_MS = 60 * 1000;
@@ -91,13 +91,13 @@ export default function TopFreqPanel({ minimal }) {
                             key={comboKey(rec.hz, rec.mode)}
                             type="button"
                             className={`tfm__row${comboKey(rec.hz, rec.mode) === key ? ' is-active' : ''}`}
-                            title={`Tune to ${formatFreqShort(rec.hz)} ${modeLabel(rec.mode)} — ${rec.count} min`}
+                            title={`Tune to ${formatFreqShort(rec.hz)} ${modeLabel(rec.mode)} — ${formatDwell(rec.count)} spent here`}
                             onClick={() => tuneTo(rec)}
                         >
                             <span className="tfm__rank">{i + 1}</span>
                             <span className="tfm__freq">{formatFreqShort(rec.hz)}</span>
                             <span className="tfm__mode">{modeLabel(rec.mode)}</span>
-                            <span className="tfm__count">{rec.count}</span>
+                            <span className="tfm__count">{formatDwell(rec.count)}</span>
                         </button>
                     ))}
                 </div>

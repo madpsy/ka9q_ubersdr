@@ -3029,10 +3029,16 @@ a.btn { text-decoration: none; }
 .tfm { display: flex; flex-direction: column; gap: 2px; }
 
 /* A row is a button: the whole thing tunes, so the target is the row rather
-   than the frequency inside it. */
+   than the frequency inside it.
+ *
+ * Every row is its own grid, so `auto` tracks are sized per row rather than
+ * shared down the list — the mode would sit at a different place in each row
+ * depending on how long that row's duration happened to be ("4m" against
+ * "2h20m"). The last two tracks are therefore fixed, wide enough for the longest
+ * value each can hold: "CW-L" for the mode, and "23h59m" for the time. */
 .tfm__row {
     display: grid;
-    grid-template-columns: 14px 1fr auto auto;
+    grid-template-columns: 14px 1fr 4.4ch 6ch;
     align-items: baseline;
     gap: 8px;
     padding: 5px 7px;
@@ -3059,19 +3065,23 @@ a.btn { text-decoration: none; }
     font-variant-numeric: tabular-nums;
 }
 .tfm__mode {
+    /* Mono so the fixed track above is measured in the characters that go in
+       it, rather than in whatever the body font makes of "CW-L". */
+    font-family: var(--mono);
     font-size: calc(10px * var(--ui-scale));
     font-weight: 650;
-    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--accent);
 }
 .tfm__row.is-active .tfm__mode { color: inherit; }
-/* Minutes. Tabular so the column does not shuffle as the numbers grow. */
+/* How long has been spent there. Right-aligned in its fixed track, so the unit
+   ends at the same place whether the row reads "4m" or "3d5h". */
 .tfm__count {
     font-family: var(--mono);
     font-size: calc(11px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
+    text-align: right;
 }
 
 /* What is being timed now — including a frequency that has not scored yet, so

@@ -107,6 +107,35 @@ t('the store is capped, and it is the weakest that go', () => {
     }
 });
 
+// --- how long it reads as ----------------------------------------------------
+
+t('minutes read as a duration', () => {
+    assert.strictEqual(tf.formatDwell(0), '0m');
+    assert.strictEqual(tf.formatDwell(1), '1m');
+    assert.strictEqual(tf.formatDwell(4), '4m');
+    assert.strictEqual(tf.formatDwell(59), '59m');
+    assert.strictEqual(tf.formatDwell(140), '2h20m');
+});
+
+t('a whole hour or day drops the empty smaller unit', () => {
+    assert.strictEqual(tf.formatDwell(60), '1h');
+    assert.strictEqual(tf.formatDwell(120), '2h');
+    assert.strictEqual(tf.formatDwell(24 * 60), '1d');
+});
+
+t('past a day it reads in days and hours', () => {
+    assert.strictEqual(tf.formatDwell(24 * 60 + 60), '1d1h');
+    assert.strictEqual(tf.formatDwell(3 * 24 * 60 + 5 * 60), '3d5h');
+    // The minutes stop mattering, and a four-figure column would shift the row.
+    assert.strictEqual(tf.formatDwell(3 * 24 * 60 + 5 * 60 + 30), '3d5h');
+});
+
+t('nonsense reads as nothing rather than NaN', () => {
+    for (const bad of [null, undefined, NaN, -5, 'lots']) {
+        assert.strictEqual(tf.formatDwell(bad), '0m', String(bad));
+    }
+});
+
 // --- persistence -------------------------------------------------------------
 
 t('the store survives a round trip', () => {

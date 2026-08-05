@@ -301,7 +301,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
     z-index: 20;
 }
 
-.topbar__brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+/* `flex: none` is load-bearing.
+ *
+ * useRoomFor decides whether the clock and the rest still fit by summing the
+ * row's other children, and that sum is only meaningful if those children are
+ * the width they say they are. With `min-width: 0` the brand shrank below its
+ * own text as the window narrowed — the text spilled out of the box rather than
+ * truncating, so the clock ended up drawn underneath the receiver name, and the
+ * measured width shrank in step with the window so the clock was never dropped.
+ *
+ * Not shrinking means the name has to be bounded some other way, which is what
+ * the ellipsis below is for: a long receiver name truncates instead of pushing
+ * the readout off the end. */
+.topbar__brand { display: flex; align-items: center; gap: 9px; flex: none; }
 
 /* The receiver's mark, and the links menu's trigger.
    Only slightly rounded — a smaller radius than the surrounding controls on
@@ -405,7 +417,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .links__note { padding: 7px 9px; color: var(--text-faint); font-size: calc(11.5px * var(--ui-scale)); }
 
-.topbar__id { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.topbar__id {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 0;
+    /* Long enough for any real callsign or receiver name, short enough that one
+       cannot take the bar over. */
+    max-width: 20ch;
+}
+.topbar__name, .topbar__sub {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
 .topbar__name { font-weight: 650; letter-spacing: 0.01em; }
 .topbar__sub { font-size: calc(10.5px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }
 

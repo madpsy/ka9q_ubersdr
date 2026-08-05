@@ -19,6 +19,17 @@
 //                          and its width is whatever is left over, which would
 //                          otherwise make every row look exactly full.
 //
+// Two things the row's own CSS has to hold up, because nothing here can check
+// them:
+//
+//   * a child that is counted must be the width it says it is. A flex child that
+//     shrinks below its content reports the shrunken box, so the figure that is
+//     supposed to hold still falls in step with the window and the optional
+//     children are never dropped — they just get drawn on top of. Non-optional
+//     children of a measured row want `flex: none` and a bounded width.
+//   * an optional child is absent from the DOM when it does not fit, not merely
+//     invisible. A `visibility: hidden` child still measures.
+//
 // An optional child does not have to be a direct child of the row. The top bar's
 // filter width sits inside the frequency readout, beside the mode it belongs to,
 // and a nested one has to be discounted from the ancestor it is inside or the

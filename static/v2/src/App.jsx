@@ -11,6 +11,7 @@ import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
+import ControlWatch from './components/ControlWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
@@ -122,6 +123,11 @@ export default function App() {
                                 <IdleWatch />
                                 <AnnounceWatch />
                                 <ShortcutWatch />
+                                {/* Hardware control outlives its panels: a
+                                    collapsed section is unmounted, and a knob
+                                    that was tuning the receiver has to go on
+                                    doing it. */}
+                                <ControlWatch />
                                 <StartOverlay />
                                 <LegacyBridge />
                                 <BridgeHost />

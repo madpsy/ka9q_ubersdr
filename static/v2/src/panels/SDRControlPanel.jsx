@@ -22,7 +22,7 @@
 // shared and everything goes through `actions`, so a mapped control takes
 // exactly the path a click takes.
 
-import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Empty, Field, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
@@ -30,8 +30,9 @@ import {
     catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
 } from '../controls/functions.js';
 import { hardwareMessages } from '../controls/hardware.js';
+import { setLearnHandler, setManualOff, tryAutoConnect } from '../controls/dispatch.js';
 import {
-    Dispatcher, defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
+    defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
 } from '../controls/mappings.js';
 import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
 import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
@@ -40,7 +41,7 @@ import {
     bridgeAttached, bridgeSettings, onBridgeAttached, onBridgeSettings, setBridgeSettings,
 } from '../bridge/settings.js';
 import {
-    MessageLog, useControlContext, useControlState, useHardware, useMessages,
+    MessageLog, useControlState, useHardware, useMessages,
 } from '../controls/panel.jsx';
 
 const SURFACE_OPTIONS = [
@@ -65,7 +66,6 @@ export default function SDRControlPanel({ minimal }) {
     const radio = useRadio();
     const [cfg, update] = useControlState();
     const [messages, pushMessage, clearMessages] = useMessages();
-    const ctx = useControlContext(cfg.stepHz);
     const hw = useHardware();
 
     const surface = cfg.surface;
@@ -115,7 +115,6 @@ export default function SDRControlPanel({ minimal }) {
                     id={surface}
                     cfg={cfg}
                     update={update}
-                    ctx={ctx}
                     dspSchemas={radio.dsp.schemas}
                     hw={hw}
                     onMessage={pushMessage}
@@ -172,7 +171,7 @@ function BridgeSwitch({ minimal }) {
 
 // --- the two mapped control surfaces ---------------------------------------
 
-function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minimal }) {
+function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal }) {
     const isMidi = id === 'midi';
     const conf = cfg[id];
     const mappings = conf.mappings;
@@ -191,47 +190,34 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
     const [limit, setLimit] = useState(PAGE);
     const fileRef = useRef(null);
 
-    const dispatcher = useMemo(() => new Dispatcher(), []);
-    dispatcher.setMappings(mappings);
-
-    // A function that refuses the event it was handed is the one failure with
-    // nothing to see — the control is mapped, the row looks right, and the
-    // receiver ignores it. Said once per control: a fader on an encoder-only
-    // function sends a message per degree of travel and would bury the log.
-    const warned = useRef(null);
-    if (!warned.current) warned.current = new Set();
-    dispatcher.onResult = (key, fn, ok) => {
-        if (ok) { warned.current.delete(key); return; }
-        if (warned.current.has(key)) return;
-        warned.current.add(key);
-        const why = isMidi && isCCKey(key)
-            ? 'if it is an endless encoder, press “fader” on its row to say so'
-            : 'that function cannot be driven by this control';
-        onMessage(`${labelFor(isMidi)(key)} → ${functionLabel(fn, dspSchemas, hw)} ignored — ${why}`, 'warn');
-    };
-
-    // Learn has to see the input before the dispatcher does, and both need the
-    // values from this render — so the handler is kept in a ref and the
-    // subscription is made once.
+    // Learning is the one part of control that belongs to the panel: it only
+    // means anything while somebody is watching for the light to come on.
+    // Everything else — the mapping table driving the receiver — is
+    // ControlWatch's, so it keeps working when this panel is collapsed.
+    //
+    // The handler is kept in a ref and installed once, because it needs the
+    // values from the current render and the subscription must not churn.
+    // Returning true means the event was taken and the dispatcher must not also
+    // see it: while learning, every control on the surface is being offered up
+    // rather than acted on.
     const onInput = useRef(null);
-    onInput.current = ({ key, event, isNoteOn, isNoteOff }) => {
-        if (learn) {
-            // "Map both" waits for the release so one button can fire the same
-            // function twice — press to mute, release to unmute.
-            if (learn.mapBoth && isNoteOn && !learn.pressKey) {
-                setLearn({ ...learn, pressKey: key });
-                return;
-            }
-            if (learn.mapBoth && learn.pressKey) {
-                if (!isNoteOff) return;
-                commit([learn.pressKey, key], learn.fn);
-                return;
-            }
-            commit([key], learn.fn);
-            return;
+    onInput.current = ({ key, isNoteOn, isNoteOff }) => {
+        if (!learn) return false;
+        // "Map both" waits for the release so one button can fire the same
+        // function twice — press to mute, release to unmute.
+        if (learn.mapBoth && isNoteOn && !learn.pressKey) {
+            setLearn({ ...learn, pressKey: key });
+            return true;
         }
-        dispatcher.handle(key, event, ctx);
+        if (learn.mapBoth && learn.pressKey) {
+            if (isNoteOff) commit([learn.pressKey, key], learn.fn);
+            return true;
+        }
+        commit([key], learn.fn);
+        return true;
     };
+
+    useEffect(() => setLearnHandler((e) => onInput.current(e)), []);
 
     const commit = (keys, fn) => {
         const record = { function: fn, ...defaultThrottle(fn) };
@@ -272,40 +258,30 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
     // failure — no dial plugged in is the normal state of a receiver nobody is
     // sitting at, not an error worth a line in the log.
     //
-    // Kept in a ref for the same reason the input handler is: it is called from
-    // subscriptions made once, and must see the current settings rather than
-    // the render that happened to set them up.
-    const manualOff = useRef(false);
+    // The rule itself, and the Disconnect that outranks it, live in dispatch.js
+    // — ControlWatch runs the same one on load and on hotplug, which is what
+    // makes an unattended receiver come up with its dial live. This is only the
+    // panel's own triggers: the switch being turned on, and access being
+    // granted while somebody is sitting here.
     const tryAuto = useRef(null);
-    tryAuto.current = () => {
-        // A press of Disconnect outranks the switch until the operator asks
-        // again, or a hotplug would undo it the moment anything moved.
-        if (!conf.autoConnect || manualOff.current || surface.connected) return;
-        if (!isMidi) { surface.autoConnect(); return; }
-        if (!conf.device) return;
-        const match = surface.devices().find((d) => d.name === conf.device);
-        if (!match) return;
-        setDeviceId(match.id);
-        surface.connect(match.id);
-    };
+    tryAuto.current = () => tryAutoConnect(id, conf);
 
     useEffect(() => {
         const offs = [
-            surface.on('input', (e) => onInput.current(e)),
             surface.on('message', ({ text, tone }) => onMessage(text, tone)),
             surface.on('state', (s) => {
                 setConnected(s.connected);
+                // Whoever connected it — this panel, or ControlWatch on load or
+                // on a hotplug — the picker shows what is actually open.
+                setDeviceId(surface.deviceId || '');
                 if (!s.connected) setLearn(null);
             }),
         ];
-        // The device list changing is also the hotplug signal: a surface that
-        // was not attached at load appears here when it is plugged in.
-        if (isMidi) {
-            offs.push(surface.on('devices', (d) => {
-                setDevices(d);
-                tryAuto.current();
-            }));
-        }
+        // A surface that was not attached at load appears in this list when it
+        // is plugged in. Connecting to it on the strength of that is
+        // ControlWatch's — it has to happen with the panel closed too — so all
+        // that is left here is showing it in the picker.
+        if (isMidi) offs.push(surface.on('devices', setDevices));
         // Unsubscribe only. The device stays claimed: releasing it belongs to
         // the surface switch, not to this component going away.
         return () => offs.forEach((off) => off());
@@ -318,25 +294,14 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
     // messages, which is the only thing on screen when the knob is the UI.
     useEffect(() => hardwareMessages.on('message', ({ text, tone }) => onMessage(text, tone)), [onMessage]);
 
-    // Web Serial's own hotplug event, which is what `devices` is for MIDI. The
-    // FlexControl surface is chosen far more often than it is plugged in, so
-    // without this the switch would only ever fire on a page load.
+    // Turning the switch on is the operator asking, so it clears a previous
+    // manual Disconnect and connects there and then if the hardware is already
+    // sitting there. Hotplug is ControlWatch's — it has to happen whether this
+    // panel is open or not.
     useEffect(() => {
-        if (isMidi || !flexAvailable()) return undefined;
-        const onPlug = () => tryAuto.current();
-        navigator.serial.addEventListener('connect', onPlug);
-        return () => navigator.serial.removeEventListener('connect', onPlug);
-    }, [isMidi]);
-
-    // On arrival, and again whenever the switch is turned on. Turning it on is
-    // the operator asking, so it also clears a previous manual Disconnect —
-    // and connects there and then if the hardware is already sitting there.
-    // At mount MIDI has no device list yet; the effect that opens access below
-    // is what catches that case.
-    useEffect(() => {
-        if (conf.autoConnect) manualOff.current = false;
+        if (conf.autoConnect) setManualOff(id, false);
         tryAuto.current();
-    }, [conf.autoConnect, isMidi]);   // eslint-disable-line react-hooks/exhaustive-deps
+    }, [conf.autoConnect, id]);   // eslint-disable-line react-hooks/exhaustive-deps
 
     // Which CC addresses are endless encoders rather than faders. The surface
     // needs this to decide whether a value is a position or a delta.
@@ -352,13 +317,15 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
     // cannot be opened without a click. The remembered device is preselected
     // and left there unless autoconnect is on — an input bound behind the
     // operator's back is how a stray fader ends up retuning the receiver.
+    // Seeds the picker with the remembered surface so Connect is ready to press.
+    // Connecting to it is ControlWatch's, which asks for access too — this only
+    // needs the list once it is there.
     useEffect(() => {
         if (!isMidi) return;
         surface.open().then((ok) => {
             if (!ok || surface.connected || !conf.device) return;
             const match = surface.devices().find((d) => d.name === conf.device);
             if (match) setDeviceId(match.id);
-            tryAuto.current();
         });
     }, [isMidi, surface]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -387,7 +354,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
             variant="ghost"
             size="sm"
             onClick={() => {
-                manualOff.current = true;
+                setManualOff(id, true);
                 surface.disconnect();
             }}
         >
@@ -399,7 +366,7 @@ function SurfaceControl({ id, cfg, update, ctx, dspSchemas, hw, onMessage, minim
             size="sm"
             disabled={isMidi && !deviceId}
             onClick={() => {
-                manualOff.current = false;
+                setManualOff(id, false);
                 if (!isMidi) { surface.connect(); return; }
                 const d = surface.devices().find((x) => x.id === deviceId);
                 if (surface.connect(deviceId) && d) {

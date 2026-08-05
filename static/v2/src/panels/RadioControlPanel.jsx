@@ -17,7 +17,7 @@ import React, { useEffect, useState } from '../react.js';
 import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
 import { serialAvailable } from '../controls/radiosync.js';
 import { getSync } from '../controls/sources.js';
-import { MessageLog, useControlContext, useControlState, useMessages } from '../controls/panel.jsx';
+import { MessageLog, useControlState, useMessages } from '../controls/panel.jsx';
 
 const DIRECTIONS = [
     { value: 'sdr-to-radio', label: 'SDR → radio', title: 'The receiver leads; the rig follows it' },
@@ -33,7 +33,6 @@ const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 export default function RadioControlPanel({ minimal }) {
     const [cfg, update] = useControlState();
     const [messages, pushMessage, clearMessages] = useMessages();
-    const ctx = useControlContext(cfg.stepHz);
 
     // Also a singleton: an open CAT link and a loaded 14 MB module must both
     // survive this panel being dragged to another dock.
@@ -41,8 +40,6 @@ export default function RadioControlPanel({ minimal }) {
     const [rigs, setRigs] = useState(() => sync.byManufacturer());
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState(() => sync.snapshot());
-
-    sync.setContext(ctx);
 
     useEffect(() => {
         if (!serialAvailable()) return undefined;
@@ -58,15 +55,6 @@ export default function RadioControlPanel({ minimal }) {
         sync.ensureLoaded().catch(() => { /* reported through 'message' */ });
         return () => offs.forEach((off) => off());
     }, [sync, pushMessage]);
-
-    useEffect(() => {
-        sync.setDirection(cfg.radiosync.direction);
-        sync.setMuteOnTx(cfg.radiosync.muteOnTx);
-    }, [sync, cfg.radiosync.direction, cfg.radiosync.muteOnTx]);
-
-    useEffect(() => {
-        sync.setSyncFields({ frequency: cfg.radiosync.syncFrequency, mode: cfg.radiosync.syncMode });
-    }, [sync, cfg.radiosync.syncFrequency, cfg.radiosync.syncMode]);
 
     if (!serialAvailable()) {
         return (

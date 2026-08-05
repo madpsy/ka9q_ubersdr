@@ -179,7 +179,16 @@ not undo an arrangement its owner made.
 
 `open` is not layout state at all: it says which sheet `MobileShell` starts with,
 and it is deliberately not remembered between visits — the open sheet is where
-you *are*, and the tab bar is right there.
+you *are*, and closing it is one tap.
+
+The tab bar is shown only when no sheet is open. It is a row of labelled icons
+worth about a tenth of a handset's screen, and while a sheet is open it is
+navigation nobody is using in front of a panel somebody is; hiding it gives the
+height back to the spectrum and to the sheet, which is a share of the centre area
+and so grows with it. Swapping panels therefore costs two taps rather than one.
+The sheet's own × is the way back, which is why every sheet has one — and why
+`.sheet__body` carries the bottom safe-area inset itself rather than leaning on
+the tab bar for it.
 
 ### The Multipad, and barrels
 

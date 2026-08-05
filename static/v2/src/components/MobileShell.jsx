@@ -18,9 +18,15 @@
 // So it lies over the bottom of the spectrum instead: inside .shell__center, on
 // top, taking no space of its own. The waterfall keeps its full height and goes
 // on running behind — nothing is resized when a panel opens, and the part still
-// showing is live to tune, drag and pinch. The tab bar stays clear below it, so
-// one panel can be swapped for another without closing anything, and a sheet
-// closes from its own button or from the tab that opened it.
+// showing is live to tune, drag and pinch.
+//
+// The tab bar, though, does go: it is a row of labelled icons that on a handset
+// is worth about a tenth of the screen, and while a sheet is open it is a
+// navigation control nobody is using in front of a panel somebody is. Hiding it
+// gives that back to the spectrum *and* to the sheet, which is a share of the
+// centre area and so grows with it. The cost is that swapping panels is two taps
+// rather than one — close, then open the next — which is the trade a phone is
+// worth making and a desktop is not.
 
 import React, { useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
@@ -42,7 +48,7 @@ export default function MobileShell() {
     // arrives at a full-bleed spectrum with one sheet over the foot of it.
     //
     // Not remembered between visits, deliberately: the open sheet is where you
-    // are, not a setting, and the tab bar is right there to change it.
+    // are, not a setting, and closing it is one tap.
     const [openId, setOpenId] = useState(() => {
         const first = PANELS.find((p) => p.mobile && p.mobile.open && !sections[p.id]?.hidden);
         return first ? first.id : null;
@@ -146,19 +152,24 @@ export default function MobileShell() {
                 )}
             </main>
 
-            <nav className="tabbar">
-                {visible.map((p) => (
-                    <button
-                        key={p.id}
-                        type="button"
-                        className={`tabbar__item${openId === p.id ? ' is-active' : ''}`}
-                        onClick={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
-                    >
-                        <span className="tabbar__icon">{p.icon}</span>
-                        <span className="tabbar__label">{p.title}</span>
-                    </button>
-                ))}
-            </nav>
+            {/* Only with the screen to itself — see the note at the top. The
+                sheet's own × is what brings it back, which is why that button
+                exists on every sheet including an extension's. */}
+            {!panel && !extension && (
+                <nav className="tabbar">
+                    {visible.map((p) => (
+                        <button
+                            key={p.id}
+                            type="button"
+                            className="tabbar__item"
+                            onClick={() => setOpenId(p.id)}
+                        >
+                            <span className="tabbar__icon">{p.icon}</span>
+                            <span className="tabbar__label">{p.title}</span>
+                        </button>
+                    ))}
+                </nav>
+            )}
         </div>
     );
 }

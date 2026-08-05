@@ -3639,7 +3639,6 @@ a.btn { text-decoration: none; }
     cursor: pointer;
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.tabbar__item.is-active { background: var(--accent-soft); color: var(--accent); }
 .tabbar__icon { display: grid; place-items: center; }
 .tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
 
@@ -3715,8 +3714,10 @@ a.btn { text-decoration: none; }
 .sheet__body {
     flex: 1;
     overflow-y: auto;
-    /* No safe-area inset: the tab bar is below this now and carries it. */
-    padding: 4px 14px 16px;
+    /* The inset is this sheet's own: the tab bar that used to carry it is
+       hidden while a sheet is open, so there is nothing between the last
+       control in here and the home indicator. */
+    padding: 4px 14px calc(16px + env(safe-area-inset-bottom));
 }
 
 @media (prefers-reduced-motion: reduce) {

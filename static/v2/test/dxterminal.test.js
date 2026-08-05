@@ -18,10 +18,10 @@ const t = (name, fn) => {
 };
 
 // The shape the cluster sends, from the widget's own comment.
-const SSB = 'DX de G0ABC:      14205.0  R6AU           CQ DX             1701Z';
-const CW = 'DX de MM3NDH-#:   14033.0  R6AU           13 dB  23 WPM  CQ   1701Z';
-const FT8 = 'DX de M0XYZ-#:    14074.0  EA1ABC         FT8  -12 dB       1701Z';
-const LOW = 'DX de G0ABC:       7150.0  GM4XYZ         LSB net           1701Z';
+const SSB = 'DX de N0CALL:      14205.0  R6AU           CQ DX             1701Z';
+const CW = 'DX de W1AW-#:     14033.0  R6AU           13 dB  23 WPM  CQ   1701Z';
+const FT8 = 'DX de W1AW-#:     14074.0  EA1ABC         FT8  -12 dB       1701Z';
+const LOW = 'DX de N0CALL:       7150.0  GM4XYZ         LSB net           1701Z';
 
 // --- what counts as a spot ---------------------------------------------------
 
@@ -40,7 +40,7 @@ t('ordinary cluster output is not a spot', () => {
         '',
         'Hello and welcome to the cluster',
         'M9PSY de GB7DXS 5-Aug-2026 1701Z >',
-        'DX de G0ABC:      14205.0  R6AU           CQ DX',        // no time
+        'DX de N0CALL:      14205.0  R6AU           CQ DX',        // no time
         'WWV de VE7CC <18Z> : SFI=180, A=12, K=3',
         '> show/dx',
     ]) {

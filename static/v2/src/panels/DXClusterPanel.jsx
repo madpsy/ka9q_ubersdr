@@ -9,16 +9,18 @@
 // The socket is not opened until Connect, and is closed when the panel is
 // unmounted — which in this interface means when it is collapsed or hidden. A
 // login on a shared cluster is not something to hold open because a panel
-// happens to be on screen.
+// happens to be on screen. A remembered callsign connects on its own, as the
+// widget does, because opening the panel is the asking.
 //
 // `minimal` keeps the transcript and the command line, and drops the quick
-// commands and the status row.
+// commands and the links.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { Button, Empty } from '../components/ui.jsx';
+import { Button, Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import {
-    QUICK_COMMANDS, openTerminal, parseSpotLine, saveCallsign, savedCallsign, trimLines,
+    MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, openTerminal,
+    parseSpotLine, saveLogin, savedLogin, trimLines, webUrl,
 } from '../lib/dxclusterTerminal.js';
 
 export const ADDON_NAME = 'dxcluster';
@@ -26,47 +28,60 @@ export const ADDON_NAME = 'dxcluster';
 /** Is the addon on this receiver? Same test the widget makes. */
 export function dxClusterAvailable(serverInfo) {
     const addons = serverInfo && serverInfo.addons;
-    return Array.isArray(addons) && addons.includes(ADDON_NAME);
+    return Array.isArray(addons)
+        && addons.some((n) => String(n).toLowerCase() === ADDON_NAME);
 }
+
+// How near the bottom still counts as following the output.
+const STICK_PX = 40;
 
 export default function DXClusterPanel({ minimal }) {
     const { actions } = useRadio();
-    const [callsign, setCallsign] = useState(savedCallsign);
+    const [login, setLogin] = useState(savedLogin);
     const [state, setState] = useState('closed');
     const [detail, setDetail] = useState('');
     const [text, setText] = useState('');
     const [line, setLine] = useState('');
     const [flash, setFlash] = useState('');
+    // A quick command that needs a callsign before it can be sent.
+    const [asking, setAsking] = useState(null);   // { cmd, label, value }
     const termRef = useRef(null);
     const outRef = useRef(null);
+    const inputRef = useRef(null);
     const flashRef = useRef(null);
+    // Whether the next render should scroll to the bottom. Decided when the
+    // text arrives, not after — see the note in the effect below.
+    const stickRef = useRef(true);
 
     const connected = state === 'open';
 
-    // The panel's lifetime is the login's. Nothing is left connected behind a
-    // collapsed panel.
-    useEffect(() => () => {
-        if (termRef.current) termRef.current.close();
+    const say = useCallback((msg) => {
+        setFlash(msg);
         clearTimeout(flashRef.current);
+        flashRef.current = setTimeout(() => setFlash(''), 1600);
     }, []);
 
-    // Follow the tail, unless the operator has scrolled up to read something.
-    useEffect(() => {
-        const el = outRef.current;
-        if (!el) return;
-        if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) el.scrollTop = el.scrollHeight;
-    }, [text]);
-
     const connect = useCallback(() => {
-        const call = callsign.trim().toUpperCase();
+        const call = login.callsign.trim().toUpperCase();
         if (!call || termRef.current) return;
-        saveCallsign(call);
+        saveLogin({ callsign: call, password: login.password });
         setText('');
         setDetail('');
+        stickRef.current = true;
         termRef.current = openTerminal({
             callsign: call,
+            password: login.password,
             on: {
-                text: (chunk) => setText((t) => trimLines(t + chunk)),
+                text: (chunk, isEcho) => {
+                    // Decided *before* the state update, because after it the
+                    // new lines have already pushed the view away from the
+                    // bottom and it would read as "the user scrolled up".
+                    // Echoes always follow: you typed it, you should see it.
+                    const el = outRef.current;
+                    stickRef.current = isEcho || !el
+                        || el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+                    setText((t) => trimLines(t + chunk));
+                },
                 state: (st, why) => {
                     setState(st);
                     setDetail(why);
@@ -74,7 +89,33 @@ export default function DXClusterPanel({ minimal }) {
                 },
             },
         });
-    }, [callsign]);
+    }, [login]);
+
+    // The panel's lifetime is the login's.
+    useEffect(() => () => {
+        if (termRef.current) termRef.current.close();
+        clearTimeout(flashRef.current);
+    }, []);
+
+    // A remembered callsign connects on its own, as the widget does. Once:
+    // a disconnect is a decision, and reconnecting over it would be a fight.
+    const tried = useRef(false);
+    useEffect(() => {
+        if (tried.current) return;
+        tried.current = true;
+        if (savedLogin().callsign.trim()) connect();
+    }, [connect]);
+
+    useEffect(() => {
+        if (!stickRef.current) return;
+        const el = outRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [text]);
+
+    // The command line is where you are once you are in.
+    useEffect(() => {
+        if (connected && inputRef.current) inputRef.current.focus();
+    }, [connected]);
 
     const disconnect = () => {
         if (termRef.current) termRef.current.close();
@@ -83,23 +124,20 @@ export default function DXClusterPanel({ minimal }) {
         setDetail('');
     };
 
-    const send = (cmd) => {
+    const send = useCallback((cmd) => {
         if (termRef.current) termRef.current.send(cmd);
-    };
+        if (inputRef.current) inputRef.current.focus();
+    }, []);
 
-    const say = (msg) => {
-        setFlash(msg);
-        clearTimeout(flashRef.current);
-        flashRef.current = setTimeout(() => setFlash(''), 1600);
-    };
-
-    // Spot lines are found once per transcript change rather than on every
-    // click: the transcript is the thing that changes, and a click has to know
-    // immediately whether the line under it is tuneable.
-    const lines = useMemo(() => text.split('\n').map((raw) => ({ raw, spot: parseSpotLine(raw) })), [text]);
+    // Parsed once per transcript change rather than per click: a click has to
+    // know immediately whether the line under it is tuneable.
+    const lines = useMemo(
+        () => text.split('\n').map((raw) => ({ raw, spot: parseSpotLine(raw) })),
+        [text],
+    );
 
     const tune = (spot) => {
-        // Frequency and mode together: separately, the receiver passes through
+        // Frequency and mode together: separately the receiver passes through
         // the old mode's passband on the new frequency on the way.
         actions.tuneTo({ frequency: spot.hz, mode: spot.mode });
         actions.ensureVisible(spot.hz);
@@ -111,10 +149,25 @@ export default function DXClusterPanel({ minimal }) {
             {!connected ? (
                 <div className="dxc-login">
                     <input
-                        className="input"
+                        className="input dxc-login__call"
                         placeholder="Callsign"
-                        value={callsign}
-                        onChange={(e) => setCallsign(e.target.value)}
+                        value={login.callsign}
+                        maxLength={MAX_CALLSIGN}
+                        onChange={(e) => setLogin((l) => ({ ...l, callsign: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') connect(); }}
+                        autoComplete="off"
+                        spellCheck={false}
+                    />
+                    {/* Only some clusters want one, and only for spotting — so
+                        it is offered rather than demanded, and Connect does not
+                        wait for it. */}
+                    <input
+                        className="input dxc-login__pass"
+                        type="password"
+                        placeholder="Password (optional)"
+                        value={login.password}
+                        maxLength={MAX_PASSWORD}
+                        onChange={(e) => setLogin((l) => ({ ...l, password: e.target.value }))}
                         onKeyDown={(e) => { if (e.key === 'Enter') connect(); }}
                         autoComplete="off"
                         spellCheck={false}
@@ -122,7 +175,7 @@ export default function DXClusterPanel({ minimal }) {
                     <Button
                         size="sm"
                         variant="primary"
-                        disabled={!callsign.trim() || state === 'connecting'}
+                        disabled={!login.callsign.trim() || state === 'connecting'}
                         onClick={connect}
                     >
                         {state === 'connecting' ? 'Connecting…' : 'Connect'}
@@ -131,27 +184,34 @@ export default function DXClusterPanel({ minimal }) {
             ) : (
                 <div className="dxc-status">
                     <span className="dot dot--good" />
-                    <span className="dxc-status__text">{flash || `Connected as ${callsign.toUpperCase()}`}</span>
+                    <span className="dxc-status__text">
+                        {flash || `Connected as ${login.callsign.toUpperCase()}`}
+                    </span>
                     <Button size="sm" variant="ghost" onClick={disconnect}>Disconnect</Button>
                 </div>
             )}
 
             {detail && <div className="note note--warn">{detail}</div>}
 
-            {/* The cluster's own words. Rendered as text, never as markup, and
-                one element per line so a spot can be a click target. */}
+            {/* The cluster's own words. Text, never markup, and one element per
+                line so a spot can be a click target. */}
             <div className="dxc-out" ref={outRef}>
                 {text ? lines.map(({ raw, spot }, i) => (
                     spot ? (
                         <button
                             // The transcript is append-only and trimmed from the
-                            // front, so the index is stable for as long as a line
-                            // is on screen.
+                            // front, so the index is stable while a line is up.
                             key={i}
                             type="button"
                             className="dxc-out__line dxc-out__line--spot"
                             title={`Tune to ${spot.callsign} — ${spot.khz} kHz ${spot.mode.toUpperCase()}`}
-                            onClick={() => tune(spot)}
+                            onClick={() => {
+                                // Not while text is being selected: dragging
+                                // across a line to copy it should not retune.
+                                const sel = window.getSelection && window.getSelection();
+                                if (sel && !sel.isCollapsed) return;
+                                tune(spot);
+                            }}
                         >
                             {raw}
                         </button>
@@ -179,10 +239,14 @@ export default function DXClusterPanel({ minimal }) {
                             className="chip chip--button"
                             title={q.title || q.cmd || `${q.prompt} …`}
                             onClick={() => {
-                                // The two that need an argument put themselves in
-                                // the command line rather than guessing one.
+                                // The two that take an argument ask for it,
+                                // prefilled with your own callsign.
                                 if (q.prompt) {
-                                    setLine(`${q.prompt} `);
+                                    setAsking({
+                                        cmd: q.prompt,
+                                        label: q.label,
+                                        value: login.callsign.toUpperCase(),
+                                    });
                                     return;
                                 }
                                 send(q.cmd);
@@ -196,13 +260,19 @@ export default function DXClusterPanel({ minimal }) {
 
             {connected && (
                 <div className="dxc-input">
+                    <span className="dxc-input__prompt">&gt;</span>
                     <input
+                        ref={inputRef}
                         className="input"
-                        placeholder="Command — try help"
+                        placeholder="Type a command and press Enter…"
                         value={line}
+                        maxLength={MAX_COMMAND}
                         onChange={(e) => setLine(e.target.value)}
                         onKeyDown={(e) => {
                             if (e.key !== 'Enter' || !line.trim()) return;
+                            // The shortcut watcher is on the window and would
+                            // otherwise see this too.
+                            e.stopPropagation();
                             send(line);
                             setLine('');
                         }}
@@ -220,6 +290,28 @@ export default function DXClusterPanel({ minimal }) {
                 </div>
             )}
 
+            {!minimal && (
+                <div className="chip-row chip-row--wrap">
+                    <a
+                        className="chip chip--button"
+                        href={webUrl()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open the full DX Cluster web UI in a new tab"
+                    >
+                        Open web UI
+                    </a>
+                    <a
+                        className="chip chip--button"
+                        href={clientUrl()}
+                        rel="noopener"
+                        title="Download the desktop client"
+                    >
+                        Desktop client ⬇
+                    </a>
+                </div>
+            )}
+
             {!minimal && !connected && (
                 <div className="note note--tight">
                     The DX cluster this receiver runs. Log in with your callsign and type
@@ -227,6 +319,45 @@ export default function DXClusterPanel({ minimal }) {
                     <code>help</code>. Any spot in the output is clickable and tunes the
                     receiver to it.
                 </div>
+            )}
+
+            {asking && (
+                <Modal onClose={() => setAsking(null)} label={`${asking.label} — ${asking.cmd}`}>
+                    <div className="stack">
+                        <span className="section-label">{asking.label} — {asking.cmd}</span>
+                        <input
+                            className="input"
+                            value={asking.value}
+                            maxLength={MAX_CALLSIGN}
+                            autoFocus
+                            autoComplete="off"
+                            spellCheck={false}
+                            onChange={(e) => setAsking((a) => ({ ...a, value: e.target.value }))}
+                            onKeyDown={(e) => {
+                                if (e.key !== 'Enter' || !asking.value.trim()) return;
+                                e.stopPropagation();
+                                send(`${asking.cmd} ${asking.value.trim().toUpperCase()}`);
+                                setAsking(null);
+                            }}
+                        />
+                        <div className="row-end">
+                            <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>
+                                Cancel
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={!asking.value.trim()}
+                                onClick={() => {
+                                    send(`${asking.cmd} ${asking.value.trim().toUpperCase()}`);
+                                    setAsking(null);
+                                }}
+                            >
+                                Send
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
             )}
         </div>
     );

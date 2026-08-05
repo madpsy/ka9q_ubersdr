@@ -18,6 +18,18 @@
 // The widget's key, so a callsign entered in either place is remembered in both.
 const CALLSIGN_KEY = 'dxc_widget_callsign';
 
+// The addon's own terminal page stores the callsign under a different name and
+// the spot password under this one. Read as a fallback for the callsign and as
+// the only home for the password, so logging in on either side carries over.
+const ADDON_CALLSIGN_KEY = 'ubersdr_terminal_callsign';
+const PASSWORD_KEY = 'ubersdr_terminal_spotpass';
+
+// Long enough for the longest real callsign with a prefix and a suffix —
+// VP2E/GM4ABC/P is 13 — and short enough that the field cannot be used as a
+// notepad.
+export const MAX_CALLSIGN = 16;
+export const MAX_PASSWORD = 32;
+
 // What the server prints when it wants the login.
 const CALLSIGN_PROMPT = 'callsign';
 
@@ -39,17 +51,46 @@ export const QUICK_COMMANDS = [
     { label: 'help', cmd: 'help' },
 ];
 
-export function savedCallsign() {
+export function savedLogin() {
     try {
-        return localStorage.getItem(CALLSIGN_KEY) || '';
+        return {
+            callsign: localStorage.getItem(CALLSIGN_KEY)
+                || localStorage.getItem(ADDON_CALLSIGN_KEY) || '',
+            password: localStorage.getItem(PASSWORD_KEY) || '',
+        };
     } catch (e) {
-        return '';
+        return { callsign: '', password: '' };
     }
 }
 
-export function saveCallsign(callsign) {
-    try { localStorage.setItem(CALLSIGN_KEY, callsign || ''); } catch (e) { /* private mode */ }
+export function saveLogin({ callsign, password }) {
+    try {
+        localStorage.setItem(CALLSIGN_KEY, callsign || '');
+        localStorage.setItem(PASSWORD_KEY, password || '');
+    } catch (e) { /* private mode */ }
 }
+
+/**
+ * The line sent in answer to the callsign prompt.
+ *
+ * A cluster that wants a password for spotting takes it on the same line,
+ * separated by a space; one that does not is given the callsign alone rather
+ * than a trailing space it would have to strip.
+ */
+export function loginLine(callsign, password) {
+    const call = String(callsign || '').trim().toUpperCase();
+    const pass = String(password || '').trim();
+    return pass ? `${call} ${pass}` : call;
+}
+
+/** Where the addon's own full web UI lives. */
+export const webUrl = (base = '/addon/dxcluster') => `${base}/`;
+
+/** The desktop client download the widget links to. */
+export const clientUrl = (base = '/addon/dxcluster') => `${base}/client/download`;
+
+// The command line the cluster accepts. The widget's limit.
+export const MAX_COMMAND = 512;
 
 export function terminalUrl(base = '/addon/dxcluster') {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -124,16 +165,18 @@ export function trimLines(text, max = SCROLLBACK_LIMIT) {
 /**
  * Open the terminal.
  *
- * @param on.text   (chunk) => void  server output, and our own echoed commands
+ * @param on.text   (chunk, isEcho) => void  server output, and our own echoed
+ *                  commands — flagged, because a terminal always follows what
+ *                  you typed even when you have scrolled back to read
  * @param on.state  ('connecting'|'open'|'closed', detail) => void
  */
-export function openTerminal({ callsign, base, on = {} }) {
+export function openTerminal({ callsign, password, base, on = {} }) {
     let ws = null;
     let sentCallsign = false;
     let byUser = false;
 
     const say = (state, detail) => { if (on.state) on.state(state, detail || ''); };
-    const write = (chunk) => { if (on.text) on.text(chunk); };
+    const write = (chunk, isEcho) => { if (on.text) on.text(chunk, !!isEcho); };
 
     try {
         ws = new WebSocket(terminalUrl(base));
@@ -149,7 +192,7 @@ export function openTerminal({ callsign, base, on = {} }) {
         const text = typeof e.data === 'string' ? e.data : '';
         if (!sentCallsign && text.includes(CALLSIGN_PROMPT)) {
             sentCallsign = true;
-            ws.send(`${callsign}\r\n`);
+            ws.send(`${loginLine(callsign, password)}\r\n`);
         }
         write(text);
     };
@@ -170,7 +213,7 @@ export function openTerminal({ callsign, base, on = {} }) {
             if (!cmd || !ws || ws.readyState !== WebSocket.OPEN) return false;
             // Echoed locally: a telnet server does not echo, so without this you
             // cannot see what you typed once the input clears.
-            write(`> ${cmd}\n`);
+            write(`> ${cmd}\n`, true);
             ws.send(`${cmd}\r\n`);
             return true;
         },

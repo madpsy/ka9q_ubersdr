@@ -2610,8 +2610,15 @@ a.btn { text-decoration: none; }
 
 /* DX cluster terminal. A transcript of the cluster's own output, in which any
    line that parses as a spot is a button that tunes the receiver. */
-.dxc-login, .dxc-input { display: flex; align-items: center; gap: 6px; }
-.dxc-login .input, .dxc-input .input { flex: 1; min-width: 0; }
+.dxc-login, .dxc-input { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dxc-input__prompt { font-family: var(--mono); color: var(--text-faint); }
+/* The command line takes the width; the login fields do not. A callsign is
+   never more than a dozen characters and a box stretched across the panel for
+   one invites the wrong kind of input — it also made a password field the
+   widest thing on screen. */
+.dxc-input .input { flex: 1; min-width: 0; }
+.dxc-login__call { flex: none; width: 11ch; text-transform: uppercase; }
+.dxc-login__pass { flex: 1 1 12ch; min-width: 0; max-width: 22ch; }
 .dxc-status { display: flex; align-items: center; gap: 8px; }
 .dxc-status__text {
     flex: 1;
@@ -2623,9 +2630,17 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
+/* The transcript follows the panel, not the other way round.
+   
+   Sized to its content it was one height logged out and another once the
+   cluster started talking, so connecting resized the dock under you. A fixed
+   height fixes that but ignores the panel you just dragged bigger. So: a
+   definite height by default — stable whatever arrives — and `flex` wherever
+   the panel is given a height of its own, which is the bottom dock and a
+   floating window. Both of those are resizable, and the transcript takes
+   whatever is left after the login row, the quick commands and the input. */
 .dxc-out {
-    min-height: 120px;
-    max-height: 340px;
+    height: 260px;
     overflow: auto;
     padding: 6px 8px;
     background: var(--surface-3);
@@ -2654,6 +2669,14 @@ a.btn { text-decoration: none; }
 .dxc-out__line--spot { color: var(--text); cursor: pointer; }
 .dxc-out__line--spot:hover { background: var(--surface-hover); }
 .dxc-out__line--spot:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* Where the panel has a height of its own, the transcript takes what is left.
+   `min-height: 0` on both is what lets a flex child actually shrink — without
+   it the transcript's content sets a floor and the panel scrolls instead. */
+.dock--bottom .section--fill .section__body > .stack,
+.floatwin__body > .stack { height: 100%; min-height: 0; }
+.dock--bottom .section--fill .dxc-out,
+.floatwin__body .dxc-out { height: auto; flex: 1 1 auto; min-height: 80px; }
 
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }

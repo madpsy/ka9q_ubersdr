@@ -27,7 +27,11 @@ const HEADER_BYTES = 22;
 // MIN_ZOOM_SPAN_HZ so both frontends stop at the same place. It is a *span*,
 // not a Hz/bin value, so zoom depth does not change with spectrum.bin_count.
 // The server allows down to 0.5 Hz/bin for explicit requests.
-const MIN_ZOOM_SPAN_HZ = 10240;
+//
+// Exported because a control that draws the zoom ladder rather than stepping
+// along it — the Multipad's zoom barrel — has to know where the ladder ends,
+// and a second copy of the number is a second place for it to drift from v1's.
+export const MIN_ZOOM_SPAN_HZ = 10240;
 
 export class SpectrumConnection extends Emitter {
     constructor() {

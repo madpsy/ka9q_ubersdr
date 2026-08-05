@@ -72,6 +72,39 @@ export function zoomCenter({ centerFreq, span, binCount }, newBinBW, aboutHz, tu
     return clampCenter(aboutHz - (aboutHz - centerFreq) * (newSpan / span), newSpan);
 }
 
+// ---------------------------------------------------------------------------
+// The zoom as a ladder of rungs.
+//
+// zoomIn/zoomOut move one rung at a time and read the span the *server* last
+// confirmed, which is all a button needs. A control that shows the ladder —
+// the Multipad's zoom barrel — needs to name the rungs instead: which one is in
+// force, what is either side of it, and how far the ladder goes. Rung 0 is the
+// full span and each one after it halves, matching the factor-of-two steps the
+// zoom actions take, so a rung here is the same thing a button press is.
+
+/** Rung of a span. 0 is full span; deeper rungs are narrower views. */
+export function rungOfSpan(span, fullSpan) {
+    if (!(span > 0) || !(fullSpan > 0)) return 0;
+    return Math.max(0, Math.round(Math.log2(fullSpan / span)));
+}
+
+/** The span at a rung. */
+export function spanAtRung(rung, fullSpan) {
+    return fullSpan / (2 ** Math.max(0, rung));
+}
+
+/**
+ * The deepest rung the zoom controls will reach.
+ *
+ * Floored rather than rounded: the last rung has to be a span the controls can
+ * actually produce, and half a rung past the stop is a detent that looks
+ * available and does nothing.
+ */
+export function deepestRung(fullSpan, minSpan) {
+    if (!(fullSpan > 0) || !(minSpan > 0) || minSpan >= fullSpan) return 0;
+    return Math.max(0, Math.floor(Math.log2(fullSpan / minSpan)));
+}
+
 /**
  * The spectrum view to open with: where this browser last had it.
  *

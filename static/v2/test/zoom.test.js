@@ -4,7 +4,9 @@
 // you are panned away from the dial, so both are pinned here.
 
 const assert = require('assert');
-const { clampCenter, needsRecenter, resumeView, zoomCenter } = require('./.build/zoom.cjs');
+const {
+    clampCenter, deepestRung, needsRecenter, resumeView, rungOfSpan, spanAtRung, zoomCenter,
+} = require('./.build/zoom.cjs');
 const { MAX_FREQ, MIN_FREQ } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -207,6 +209,58 @@ t('a saved zoom with no span is trusted for the zoom but not the centre', () => 
     const old = { spectrumCenter: 14.1e6, spectrumBinBandwidth: 100 };
     assert.deepStrictEqual(resumeView(old, at(14.1e6, USB)),
         { frequency: 14.1e6, binBandwidth: 100 });
+});
+
+// --- the ladder, as the Multipad's zoom barrel reads it ---------------------
+
+// A 30 MHz full span over 1024 bins, and the 10.24 kHz floor both frontends
+// stop at.
+const FULL = 30e6;
+const FLOOR = 10240;
+
+t('the rung of a span, and the span of a rung, are the same ladder', () => {
+    assert.strictEqual(rungOfSpan(FULL, FULL), 0);
+    assert.strictEqual(rungOfSpan(FULL / 2, FULL), 1);
+    assert.strictEqual(rungOfSpan(FULL / 8, FULL), 3);
+    assert.strictEqual(spanAtRung(0, FULL), FULL);
+    assert.strictEqual(spanAtRung(3, FULL), FULL / 8);
+    for (let k = 0; k <= 11; k++) {
+        assert.strictEqual(rungOfSpan(spanAtRung(k, FULL), FULL), k, `rung ${k}`);
+    }
+});
+
+t('a span between two rungs reads as the nearer one', () => {
+    // The server snaps binBandwidth to a ladder of its own, so the span that
+    // comes back is rarely exactly a power of two down from full.
+    assert.strictEqual(rungOfSpan(FULL / 2 * 1.1, FULL), 1);
+    assert.strictEqual(rungOfSpan(FULL / 2 * 0.92, FULL), 1);
+});
+
+t('nothing goes above full span', () => {
+    // Zoomed out past the default — which the reset path can produce — is still
+    // rung 0, not a negative one that would draw detents off the top.
+    assert.strictEqual(rungOfSpan(FULL * 4, FULL), 0);
+    assert.strictEqual(spanAtRung(-3, FULL), FULL);
+});
+
+t('the ladder stops at the floor rather than half a rung past it', () => {
+    // 30 MHz / 10.24 kHz is 2930, which is 11.5 doublings. The twelfth rung
+    // would be a span the controls cannot ask for, so the ladder ends at 11.
+    assert.strictEqual(deepestRung(FULL, FLOOR), 11);
+    assert.ok(spanAtRung(11, FULL) >= FLOOR);
+    assert.ok(spanAtRung(12, FULL) < FLOOR);
+});
+
+t('a receiver whose full span is already the floor has no ladder at all', () => {
+    assert.strictEqual(deepestRung(FLOOR, FLOOR), 0);
+    assert.strictEqual(deepestRung(0, FLOOR), 0);
+    assert.strictEqual(deepestRung(FULL, 0), 0);
+});
+
+t('an unconnected spectrum reads as rung zero rather than as NaN', () => {
+    // view.span and the defaults are all zero until the first config message.
+    assert.strictEqual(rungOfSpan(0, 0), 0);
+    assert.strictEqual(rungOfSpan(1e6, 0), 0);
 });
 
 if (process.exitCode) console.log('\nzoom tests FAILED');

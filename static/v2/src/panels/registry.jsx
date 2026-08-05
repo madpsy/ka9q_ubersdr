@@ -23,6 +23,14 @@
 //                    export default function FooPanel({ minimal }) { … }
 //                The choice is remembered per panel and applies wherever the
 //                panel is drawn, docked or floating.
+//   mobile       first-run defaults for a phone, where the same answer does not
+//                suit both machines: { hidden, minimal, open }. `hidden` and
+//                `minimal` override defaultHidden and the mobile minimal flag
+//                the first time a layout is built; `open` says this panel's
+//                sheet is the one showing when the app opens. All three are
+//                defaults and never preferences — once someone has hidden,
+//                expanded or closed the panel their layout says so and this is
+//                not consulted again.
 //   requires     optional (serverInfo, env) => bool; false hides the panel
 //                entirely — see usePanelApplies() at the foot of this file
 //   Component    the panel body
@@ -32,6 +40,7 @@ import Icon from '../components/icons.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 
+import MultipadPanel from './MultipadPanel.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
 import MarkerNavPanel from './MarkerNavPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
@@ -71,6 +80,28 @@ import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 
 export const PANELS = [
+    // First, and first is the point: on a phone this is the panel that opens
+    // with the app, because it is the one that covers the whole of listening —
+    // frequency, mode, zoom, filter width and squelch, in the height the dial
+    // alone takes in the Receiver panel. Everything else on a handset is
+    // something you go and get; this is already there.
+    //
+    // Hidden on a desktop, where there is room for the real panels and the pad
+    // would only be a smaller copy of them. Still listed in the layout manager,
+    // so anyone who wants it on a touchscreen laptop can have it.
+    //
+    // Minimal: the two barrels alone — the controls that exist here because
+    // they have no good small form anywhere else.
+    {
+        id: 'multipad',
+        title: 'Multipad',
+        icon: <Icon.Pad />,
+        dock: 'left',
+        defaultHidden: true,
+        minimal: true,
+        mobile: { hidden: false, minimal: false, open: true },
+        Component: MultipadPanel,
+    },
     // Minimal: the dial, the mode buttons and the filter width — what you tune
     // with. The filter shift, the passband readout and AGC are settings you
     // reach for occasionally.

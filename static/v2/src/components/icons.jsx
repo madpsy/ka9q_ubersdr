@@ -113,6 +113,10 @@ export const Icon = {
     // A keyboard: the outline, three key rows and a space bar.
     Keyboard: (p) => <Svg {...p}><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01" /><path d="M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01" /><path d="M8 15.5h8" /></Svg>,
     Announce: (p) => <Svg {...p}><path d="M4 9v6h3.5L13 19V5L7.5 9z" /><path d="M16.5 9.5a4 4 0 0 1 0 5" /><path d="M19.5 6.5a8 8 0 0 1 0 11" /></Svg>,
+    // A control pad: a panel carrying a wheel and two faders. Deliberately not
+    // Knob or Sliders — the Multipad's whole claim is that it is all of them at
+    // once, and it sits in the mobile tab bar next to panels using both.
+    Pad: (p) => <Svg {...p}><rect x="2.5" y="3.5" width="19" height="17" rx="2.5" /><circle cx="7.5" cy="8.5" r="2.2" /><path d="M12 8.5h6M6 13.5h12M6 17h8" /></Svg>,
 };
 
 export default Icon;

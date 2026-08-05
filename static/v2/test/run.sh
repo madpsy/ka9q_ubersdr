@@ -138,6 +138,8 @@ esbuild ../src/lib/haptics.js --bundle --format=cjs --platform=node \
     --outfile=.build/haptics.cjs --log-level=warning
 esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
+esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
+    --outfile=.build/barrel.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
 esbuild ../src/lib/weather.js --bundle --format=cjs --platform=node \
@@ -215,6 +217,7 @@ node roomfor.test.js
 node edgehit.test.js
 node haptics.test.js
 node appheight.test.js
+node barrel.test.js
 node dispatch.test.js
 node weather.test.js
 node radiosync.test.js

@@ -36,7 +36,17 @@ export default function MobileShell() {
     const {
         active: extension, close: closeExtension, minimalOf, toggleMinimal: toggleExtMinimal,
     } = useExtensions();
-    const [openId, setOpenId] = useState(null);
+    // Which sheet the app opens on. A registry `mobile.open` panel is showing
+    // from the start — the Multipad, whose whole claim is that it is the panel
+    // you were going to open anyway — and nothing else is, so a phone still
+    // arrives at a full-bleed spectrum with one sheet over the foot of it.
+    //
+    // Not remembered between visits, deliberately: the open sheet is where you
+    // are, not a setting, and the tab bar is right there to change it.
+    const [openId, setOpenId] = useState(() => {
+        const first = PANELS.find((p) => p.mobile && p.mobile.open && !sections[p.id]?.hidden);
+        return first ? first.id : null;
+    });
     const extMinimal = minimalOf(extension ? extension.id : '');
 
     const visible = PANELS.filter(

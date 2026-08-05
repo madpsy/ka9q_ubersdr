@@ -160,6 +160,55 @@ one that follows. Appending instead would drop every new panel at the bottom of
 an existing user's dock, so a panel declared "directly under Receiver" would
 appear under everything else for anyone who had used the app before.
 
+### Panels a phone should treat differently
+
+One registry entry, two machines: `mobile: { hidden, minimal, open }` gives a
+panel first-run defaults for a handset where the same answer does not suit both.
+The Multipad is the case it exists for — hidden on a desktop, which has room for
+the real panels, and on a phone the first tab, expanded, with its sheet already
+open.
+
+All three are *defaults*, read only when a layout is built for the first time or
+when a panel joins a layout stored before it existed (`firstRun()` in
+`layout/LayoutContext.jsx`). Nothing rearranges itself afterwards: once someone
+has hidden, expanded or closed a panel, their layout says so and the registry is
+not consulted again — which is also why the phone test is a `matchMedia` read at
+that moment rather than a subscription. Dragging a desktop window narrow must
+not undo an arrangement its owner made.
+
+`open` is not layout state at all: it says which sheet `MobileShell` starts with,
+and it is deliberately not remembered between visits — the open sheet is where
+you *are*, and the tab bar is right there.
+
+### The Multipad, and barrels
+
+`MultipadPanel` is the whole receiver under one thumb: frequency, mode, zoom,
+filter width and squelch, in roughly the height the Receiver panel's dial takes
+on its own. It exists because those five are one activity and were four sheets.
+Its minimal view is the two barrels alone.
+
+A barrel (`components/Barrel.jsx`) is a drum seen edge-on: drag it and the strip
+slides under a fixed index line, crossing a detent fires one step, and letting go
+with the thumb still moving spins on until friction stops it. Two rules keep it
+reusable — the value never lives in the component (the owner supplies
+`label(i)`, i being detents from the centre, and applies the steps), and the
+strip is moved with a style write per frame rather than a re-render, so
+sub-detent movement costs one element and not thirty spans. `onStep(n)` returns
+how many detents it could actually take; anything short of what was asked is a
+stop, which is how the ends of the band and of the zoom ladder are felt rather
+than merely enforced.
+
+The physics is in `lib/barrel.js` and tested (`test/barrel.test.js`): a flick
+throws at the speed of the last 90 ms and not the whole gesture, a drag that came
+to rest before the finger lifted throws nothing, and every frame's travel is
+either a whole detent taken or a remainder still on the drum, so a spin cannot
+lose steps. The zoom barrel drives `lib/zoom.js`'s rung helpers — rung 0 is full
+span and each one halves, matching the factor-of-two steps the zoom buttons take,
+because anything gentler rounds back to the rung it started on. It keeps its own
+rung while spinning and hands it back to the server's answer when the drum stops:
+a zoom is confirmed a round trip later, so a drum reading `view.span` would ask
+for the same rung several frames running.
+
 ## Extensions
 
 Extensions are the decoders and tools v1 ships in `static/extensions/`. They are

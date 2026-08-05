@@ -8,6 +8,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
+import { MOBILE_QUERY } from '../lib/useMediaQuery.js';
 
 const STORAGE_KEY = 'ubersdr.v2.layout';
 const VERSION = 1;
@@ -32,23 +33,44 @@ const DOCK_DEFAULTS = {
     bottom: { size: 240, collapsed: true, minSize: 120, maxSize: 560 },
 };
 
+// Is this a phone, for the purpose of picking first-run defaults?
+//
+// Read at the moment a default is needed rather than subscribed to: these are
+// the values someone arriving for the first time gets, and a layout that
+// rearranged itself when a desktop window was dragged narrower would be undoing
+// an arrangement its owner had made. Once stored, the layout is the authority.
+function onPhone() {
+    try { return window.matchMedia(MOBILE_QUERY).matches; } catch (e) { return false; }
+}
+
+// The panel's first-run state, honouring its `mobile` block on a handset. Two
+// machines can want opposite answers for the same panel — the Multipad is off
+// on a desktop and is the first thing a phone shows — and the registry is where
+// that is said, so it is read here rather than being decided per shell.
+function firstRun(p, phone) {
+    const m = (phone && p.mobile) || {};
+    return {
+        open: p.defaultOpen !== false,
+        hidden: m.hidden != null ? !!m.hidden : !!p.defaultHidden,
+        minimal: false,
+        // On a phone a panel starts cut down. A sheet over the spectrum has a
+        // fraction of a dock's room, and the minimal view is the part of a
+        // panel worth having in that space — see minimalMobile below. A panel
+        // built for the phone in the first place says so and starts whole.
+        minimalMobile: m.minimal != null ? !!m.minimal : true,
+    };
+}
+
 function defaultLayout() {
     const docks = {};
     for (const dock of DOCKS) {
         docks[dock] = { ...DOCK_DEFAULTS[dock], panels: [] };
     }
+    const phone = onPhone();
     const sections = {};
     for (const p of PANELS) {
         docks[p.dock].panels.push(p.id);
-        sections[p.id] = {
-            open: p.defaultOpen !== false,
-            hidden: !!p.defaultHidden,
-            minimal: false,
-            // On a phone a panel starts cut down. A sheet over the spectrum has
-            // a fraction of a dock's room, and the minimal view is the part of a
-            // panel worth having in that space — see minimalMobile below.
-            minimalMobile: true,
-        };
+        sections[p.id] = firstRun(p, phone);
     }
     return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {}, heights: {} };
 }
@@ -135,19 +157,24 @@ function reconcile(stored) {
         base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);
     }
     base.sections = {};
+    const phone = onPhone();
     for (const p of PANELS) {
         const s = stored.sections?.[p.id];
+        // A panel registered since this layout was stored has no entry at all,
+        // so it gets its first-run state — including the phone's answer where
+        // the registry gives one.
+        const d = firstRun(p, phone);
         base.sections[p.id] = {
-            open: s?.open ?? (p.defaultOpen !== false),
-            hidden: s?.hidden ?? !!p.defaultHidden,
+            open: s?.open ?? d.open,
+            hidden: s?.hidden ?? d.hidden,
             // Only panels that declare a minimal view can be in one, so a
             // stored flag on a panel that has since dropped it is discarded
             // rather than leaving the panel stuck showing nothing extra.
             minimal: !!p.minimal && !!s?.minimal,
-            // `?? true` rather than `!!`: absent means a layout stored before
-            // this existed, and those should get the mobile default like
+            // `?? d.minimalMobile` rather than `!!`: absent means a layout
+            // stored before this existed, and those should get the default like
             // everybody else, not be pinned to full because the key was missing.
-            minimalMobile: !!p.minimal && (s?.minimalMobile ?? true),
+            minimalMobile: !!p.minimal && (s?.minimalMobile ?? d.minimalMobile),
         };
     }
     return base;

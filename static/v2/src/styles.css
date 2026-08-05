@@ -1838,6 +1838,207 @@ a.btn { text-decoration: none; }
 .passband__mode { color: var(--accent); font-weight: 650; }
 
 /* =========================================================================
+   Multipad — the barrels and the compact rows around them
+   ========================================================================= */
+
+/* A drum seen edge-on.
+ *
+ * Three things do the work, and none of them is a picture of a cylinder: the
+ * strip fades out at both ends, so the scale appears to curve away rather than
+ * stopping at a hard edge; a shadow along the top and bottom of the box gives
+ * it a belly; and the index needle stays put while everything else moves under
+ * it. Together they say "this thing turns" before it has been touched, which
+ * on a control with no affordance of its own is the whole job.
+ *
+ * The strip is transformed by the component on every frame, so nothing here may
+ * transition — a transition on the drum is a drum that lags the thumb. */
+.barrel {
+    position: relative;
+    overflow: hidden;
+    height: 48px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    cursor: grab;
+    user-select: none;
+}
+.barrel:active { cursor: grabbing; }
+.barrel.is-disabled { opacity: 0.45; pointer-events: none; }
+/* The belly. Over the strip, under the needle. */
+.barrel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(180deg,
+        rgba(0, 0, 0, 0.30), rgba(0, 0, 0, 0) 40%,
+        rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.34));
+}
+
+.barrel__strip {
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+    /* The ends of the scale fall away, which is what makes it read as a curve
+       and, incidentally, keeps a label from being cut in half at the edge. */
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+}
+.barrel__cell {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 88px;
+    margin-left: -44px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding-top: 7px;
+}
+.barrel__tick {
+    width: 1px;
+    height: 8px;
+    border-radius: 1px;
+    background: var(--border-strong);
+}
+.barrel__cell.is-major .barrel__tick { height: 13px; background: var(--text-faint); }
+.barrel__text {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+/* The detent under the needle, which on the zoom drum is the span in force. */
+.barrel__cell.is-centre .barrel__tick { background: var(--accent); }
+.barrel__cell.is-centre .barrel__text { color: var(--accent); font-weight: 700; }
+
+/* Fades downwards: the ticks are at the top of the drum and the labels below
+   them, so a full-height line would strike through the reading it points at. */
+.barrel__index {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    margin-left: -1.5px;
+    pointer-events: none;
+    border-radius: 0 0 2px 2px;
+    background: linear-gradient(180deg, var(--accent), rgba(0, 0, 0, 0) 70%);
+}
+
+.barrel__caption {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    font-size: calc(9px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+/* Only a dozen rungs deep and every one of them labelled, so it is shorter than
+   the frequency drum and its ticks are hints rather than a scale. */
+.barrel--zoom { height: 38px; }
+.barrel--zoom .barrel__cell { padding-top: 6px; gap: 3px; }
+.barrel--zoom .barrel__tick { height: 5px; }
+.barrel--zoom .barrel__cell.is-major .barrel__tick { height: 7px; }
+
+/* Tighter than a stack of ordinary fields, and deliberately: the pad's claim is
+   that all of it is on screen at once. */
+.pad { gap: 8px; padding-top: 4px; }
+
+/* The frequency drum and what it is showing, as one control: the reading is
+   part of the wheel rather than a separate row above it, which is what lets the
+   minimal view be the two wheels and still be readable. */
+.pad-wheel { display: flex; flex-direction: column; gap: 5px; }
+.pad-wheel__head { display: flex; align-items: center; gap: 8px; }
+.pad-wheel__freq {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 7px;
+    padding: 3px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: clamp(20px, 6vw, 27px);
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.pad-wheel__freq:hover { background: var(--accent-soft); color: var(--accent); }
+.pad-wheel__unit {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.pad-wheel__input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: calc(19px * var(--ui-scale));
+    text-align: center;
+}
+.pad-wheel__input.is-invalid { border-color: var(--bad); color: var(--bad); }
+/* Sized to its content rather than to the row: the reading is what the row is
+   for, and the step is set once and then glanced at. */
+.pad-wheel__step {
+    flex: none;
+    padding: 5px 6px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    font-size: calc(11px * var(--ui-scale));
+    cursor: pointer;
+}
+.pad-wheel__step:focus { border-color: var(--accent); outline: none; }
+
+/* Label, control, reading — the same three columns for the filter width and the
+   squelch, so the pair scans as one block rather than as two settings. */
+.pad-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pad-row__label {
+    flex: none;
+    width: 50px;
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.pad-row__value {
+    flex: none;
+    min-width: 44px;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.pad-row .slider, .pad-row .slider-wrap { flex: 1; min-width: 0; }
+
+/* A thumb, not a pointer: the mode buttons are the only tap targets in the pad
+   and they get the height for it. */
+.shell--mobile .pad .segmented__item { padding-block: 9px; }
+
+/* =========================================================================
    Meters and readouts
    ========================================================================= */
 

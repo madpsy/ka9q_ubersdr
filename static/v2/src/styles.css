@@ -2099,14 +2099,24 @@ a.btn { text-decoration: none; }
  * turns that into a scrollbar flickering once a second rather than settling.
  * Reserving the gutter means toggling the scrollbar no longer changes the
  * content width, so the loop cannot start. */
-.cs-result {
+/* Grows to fit what it found, rather than scrolling inside a fixed 340px.
+   A lookup with a photo is taller than that by definition, so the pane always
+   had a scrollbar for the one result anybody actually wants to look at — and
+   in a dock the panel can simply be taller. This is the house rule anyway:
+   one scroller per dock, not one per panel.
+   
+   Where the panel is given a height of its own — the bottom dock and a
+   floating window — there is nowhere to grow into, so it scrolls there. The
+   stable gutter stays with it: without it the scrollbar appears and vanishes
+   as the photo loads, which is what made this flicker on Edge. */
+.cs-result { min-width: 0; }
+.dock--bottom .section--fill .cs-result,
+.floatwin__body .cs-result {
     flex: 1;
     min-height: 0;
-    max-height: 340px;
     overflow-y: auto;
     scrollbar-gutter: stable;
 }
-.dock--bottom .section--fill .cs-result { max-height: none; }
 
 .cs-result__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; }
 .cs-result__call {

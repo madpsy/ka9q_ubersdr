@@ -2612,6 +2612,9 @@ a.btn { text-decoration: none; }
    line that parses as a spot is a button that tunes the receiver. */
 .dxc-login, .dxc-input { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dxc-input__prompt { font-family: var(--mono); color: var(--text-faint); }
+/* The two links live at the end of whichever header row is showing — the login
+   one or the connected one — so they sit in the same place either way. */
+.dxc-top__links { display: flex; gap: 5px; margin-left: auto; }
 /* The command line takes the width; the login fields do not. A callsign is
    never more than a dozen characters and a box stretched across the panel for
    one invites the wrong kind of input — it also made a password field the

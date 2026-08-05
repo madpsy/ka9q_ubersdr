@@ -61,6 +61,7 @@ import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
+import BackupPanel from './BackupPanel.jsx';
 
 export const PANELS = [
     // Minimal: the dial, the mode buttons and the filter width — what you tune
@@ -304,6 +305,19 @@ export const PANELS = [
         Component: StatusPanel,
     },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
+    // Beside Layout, because it is the same kind of housekeeping and because
+    // the arrangement built there is one of the things worth keeping.
+    // Minimal: export, import and the merge/replace choice, without the
+    // per-section switches — most backups are all of it.
+    {
+        id: 'backup',
+        title: 'Backup',
+        icon: <Icon.Archive />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: BackupPanel,
+    },
 
     // The launcher for the extensions, not the extensions themselves: an open
     // extension is a window of its own (extensions/ExtensionWindow.jsx) and

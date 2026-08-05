@@ -2572,6 +2572,35 @@ a.btn { text-decoration: none; }
 .layout-row__icon { display: grid; place-items: center; color: var(--accent); }
 .layout-row__name { flex: 1; font-size: calc(12.5px * var(--ui-scale)); }
 
+/* Backup: one row per group of settings, each saying how much of it there is.
+   The count is the point of the row — "0" beside a section is the answer to
+   "did my mappings save?" — so it sits next to the switch rather than in the
+   hint under it. */
+.bk-list { display: flex; flex-direction: column; gap: 6px; }
+.bk-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.bk-row__head { display: flex; align-items: center; gap: 8px; }
+.bk-row__name { flex: 1; min-width: 0; font-size: calc(12.5px * var(--ui-scale)); }
+.bk-row__count {
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.bk-row__hint { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+/* The "restored — now reload" note. Same shape as the shortcut editor's:
+   the sentence takes the slack and the button drops to its own line in a
+   narrow dock rather than squeezing the text. */
+.bk-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bk-note > span { flex: 1 1 60%; min-width: 0; }
+
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }
 /* Dimmed with its slider while muted, so the number does not read as live. */

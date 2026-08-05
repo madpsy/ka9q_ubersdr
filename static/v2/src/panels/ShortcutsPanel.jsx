@@ -19,6 +19,9 @@ import {
 } from '../lib/shortcuts.js';
 
 const PAGE = 14;
+// Below this the list is shorter than the box would be useful for, and the box
+// is one more thing between the switch and what it controls.
+const SEARCH_FROM = 8;
 
 export default function ShortcutsPanel({ minimal }) {
     const radio = useRadio();
@@ -31,7 +34,11 @@ export default function ShortcutsPanel({ minimal }) {
     // is removed when the new key lands.
     const [recording, setRecording] = useState(null);
     const [pick, setPick] = useState('');
+    const [query, setQuery] = useState('');
     const [limit, setLimit] = useState(PAGE);
+
+    // A new search starts from the top again, as the band and bookmark lists do.
+    useEffect(() => { setLimit(PAGE); }, [query]);
     // What just happened, and how to put it back. A key can only run one
     // function, so giving it to a second takes it off the first — see the note
     // in lib/shortcuts.js. That is the right behaviour, but it is not one to
@@ -55,10 +62,33 @@ export default function ShortcutsPanel({ minimal }) {
     // rather than in whatever order the keys were assigned.
     const rows = useMemo(() => {
         const order = new Map(all.map((f, i) => [f.id, i]));
+        const groupOf = new Map(all.map((f) => [f.id, f.group]));
         return Object.entries(s.bindings)
-            .map(([combo, fn]) => ({ combo, fn, at: order.has(fn) ? order.get(fn) : Infinity }))
+            .map(([combo, fn]) => ({
+                combo,
+                fn,
+                at: order.has(fn) ? order.get(fn) : Infinity,
+                // What a search looks at: the name shown, the group it sits
+                // under, and the key itself in both spellings — so "left"
+                // finds ArrowLeft and "shift + k" finds Shift+k.
+                hay: [
+                    functionLabel(fn, schemas, hw),
+                    groupOf.get(fn) || '',
+                    combo,
+                    comboLabel(combo),
+                ].join(' ').toLowerCase(),
+            }))
             .sort((a, b) => a.at - b.at || a.combo.localeCompare(b.combo));
-    }, [s.bindings, all]);
+    }, [s.bindings, all, schemas, hw]);
+
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return rows;
+        // Every word has to appear somewhere, in any order: "usb mode" and
+        // "mode usb" both find the same row.
+        const words = q.split(/\s+/);
+        return rows.filter((r) => words.every((w) => r.hay.includes(w)));
+    }, [rows, query]);
 
     // While recording, the next keystroke is the binding rather than a
     // shortcut. Registered above the watcher's own listener by being on the
@@ -138,14 +168,29 @@ export default function ShortcutsPanel({ minimal }) {
 
             <span className="section-label">
                 Keys
-                <span className="section-label__note">{rows.length}</span>
+                <span className="section-label__note">
+                    {query.trim() && filtered.length !== rows.length
+                        ? `${filtered.length} of ${rows.length}`
+                        : rows.length}
+                </span>
             </span>
 
-            {rows.length === 0 ? (
-                <Empty>No shortcuts. Add one below.</Empty>
+            {rows.length > SEARCH_FROM && (
+                <input
+                    className="input"
+                    placeholder="Search by function or key…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                />
+            )}
+
+            {filtered.length === 0 ? (
+                <Empty>
+                    {rows.length === 0 ? 'No shortcuts. Add one below.' : 'No match'}
+                </Empty>
             ) : (
                 <div className="rc-map">
-                    {rows.slice(0, limit).map(({ combo, fn }) => (
+                    {filtered.slice(0, limit).map(({ combo, fn }) => (
                         <ShortcutRow
                             key={combo}
                             combo={combo}
@@ -159,10 +204,10 @@ export default function ShortcutsPanel({ minimal }) {
                 </div>
             )}
 
-            {rows.length > limit && (
+            {filtered.length > limit && (
                 <ShowMore
                     shown={limit}
-                    total={rows.length}
+                    total={filtered.length}
                     onMore={() => setLimit((n) => n + PAGE)}
                     label="Show more shortcuts"
                 />

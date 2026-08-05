@@ -194,12 +194,6 @@ export class SpectrumConnection extends Emitter {
         const centre = span > 0 && wanted > 0 ? clampCenter(wanted, span) : wanted;
 
         const msg = { type: 'zoom' };
-        // TEMPORARY — VFO recall diagnosis. Remove with the [vfo] logs.
-        console.log('[vfo] setView', {
-            askedCentre: centerFreq, askedBinBandwidth: binBandwidth,
-            currentCentre: this.centerFreq, currentBinBandwidth: this.binBandwidth,
-            clampedTo: centre,
-        });
         // The centre goes out when the caller asked for one, and also when the
         // clamp has moved a centre nobody touched — which is the span-change
         // case above.

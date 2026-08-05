@@ -508,16 +508,7 @@ export function RadioProvider({ children }) {
         // rule itself is in lib/zoom.js, with the rest of the view geometry.
         const recenterIfNeeded = (t) => {
             if (!followRef.current || !spectrumConn.connected) return;
-            // TEMPORARY — VFO recall diagnosis. Remove with the [vfo] logs.
-            const need = needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span);
-            console.log('[vfo] recenterIfNeeded', {
-                dial: t.frequency,
-                follow: followRef.current,
-                centre: spectrumConn.centerFreq,
-                span: spectrumConn.span,
-                needsRecenter: need,
-            });
-            if (need) {
+            if (needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span)) {
                 spectrumConn.setView(clamp(t.frequency, MIN_FREQ, MAX_FREQ), null);
             }
         };
@@ -782,6 +773,28 @@ export function RadioProvider({ children }) {
                 if (Math.abs(target - spectrumConn.centerFreq) > span * 0.3) {
                     spectrumConn.setView(target, null);
                 }
+            },
+
+            // Centre and zoom together, in one message.
+            //
+            // For recalling a stored view — a VFO, and anything else that knows
+            // both halves. Doing it as a tune and then a setSpan looks
+            // equivalent and is not: the recentre that follows the tune is
+            // decided against the *old* span, so from a full-span view it
+            // correctly does nothing, and the span then shrinks around whatever
+            // the spectrum happened to be pointing at. A 205 kHz window closing
+            // around 15 MHz leaves a dial at 14.18 MHz three-quarters of a
+            // megahertz outside it, with the tune already past and nothing left
+            // to move the view.
+            setSpectrumView(centerHz, spanHz) {
+                const bins = spectrumConn.binCount;
+                if (!bins) return;
+                const binBW = clamp(
+                    spanHz / bins,
+                    spectrumConn.minBinBandwidthForUI(),
+                    spectrumConn.fullSpanBinBandwidth(),
+                );
+                spectrumConn.setView(clamp(centerHz, MIN_FREQ, MAX_FREQ), binBW);
             },
 
             setSpan(spanHz) {

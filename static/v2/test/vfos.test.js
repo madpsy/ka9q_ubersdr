@@ -5,7 +5,9 @@
 // the spectrum zoom, which is the part with no visible clue that it was lost.
 
 const assert = require('assert');
-const { VFO_IDS, cleanSlot, storeInto, switchTo, vfoSnapshot } = require('./.build/vfos.cjs');
+const {
+    VFO_IDS, cleanSlot, selectVfo, setVfos, storeInto, switchTo, vfoSnapshot,
+} = require('./.build/vfos.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -114,6 +116,80 @@ t('a zero or missing stored zoom reads as "no zoom", so recall leaves it alone',
     assert.strictEqual(s.binBandwidth, null);
     // A passband low of 0 is legitimate (AM straddles zero) and must survive.
     assert.strictEqual(s.bandwidthLow, 0);
+});
+
+// --- recalling the view ------------------------------------------------------
+
+// A radio the recall can be driven against, recording what it was asked to do.
+function fakeRadio(view, tuning) {
+    const calls = [];
+    return {
+        calls,
+        tuning,
+        view,
+        actions: {
+            tuneTo: (t2) => calls.push(['tuneTo', t2]),
+            setSpectrumView: (c, span) => calls.push(['setSpectrumView', c, span]),
+            setSpan: (span) => calls.push(['setSpan', span]),
+            resetSpectrum: () => calls.push(['resetSpectrum']),
+        },
+    };
+}
+
+const slot = (frequency, binBandwidth) => ({
+    frequency, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700, binBandwidth,
+});
+
+t('recalling a VFO sets where the view is and how wide, together', () => {
+    // The reported case: full span, and a VFO stored at 14.182 MHz zoomed to
+    // 100 Hz/bin. Setting the span on its own closed a 205 kHz window around
+    // the old 15 MHz centre and left the dial 800 kHz outside it — frequency
+    // right, marker gone.
+    setVfos({ active: 'B', slots: { A: null, B: null, C: slot(14182000, 100), D: null } });
+    const radio = fakeRadio(
+        { centerFreq: 15000000, span: 30000000, binCount: 2048, binBandwidth: 14648.4375, defaultBinBandwidth: 14648.4375 },
+        { frequency: 10169000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50 },
+    );
+
+    selectVfo(radio, 'C');
+
+    const names = radio.calls.map((c) => c[0]);
+    assert.ok(names.includes('tuneTo'), 'the dial moves');
+    assert.ok(!names.includes('setSpan'), 'the span is never set without a centre');
+
+    const view = radio.calls.find((c) => c[0] === 'setSpectrumView');
+    assert.ok(view, 'the view is restored');
+    const [, centre, span] = view;
+    assert.strictEqual(centre, 14182000);
+    assert.strictEqual(span, 100 * 2048);
+    // ...and the dial ends up inside it, which is the whole point.
+    assert.ok(Math.abs(14182000 - centre) <= span / 2, 'dial is inside the recalled view');
+});
+
+t('a VFO stored at full span resets rather than centring', () => {
+    // Full span contains the dial wherever it is, and reset also hands the
+    // private radiod channel back.
+    setVfos({ active: 'A', slots: { A: null, B: slot(7100000, 14648.4375), C: null, D: null } });
+    const radio = fakeRadio(
+        { centerFreq: 14100000, span: 204800, binCount: 2048, binBandwidth: 100, defaultBinBandwidth: 14648.4375 },
+        { frequency: 14100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+    );
+    selectVfo(radio, 'B');
+    const names = radio.calls.map((c) => c[0]);
+    assert.ok(names.includes('resetSpectrum'), 'full span goes through reset');
+    assert.ok(!names.includes('setSpectrumView'), 'and needs no centre');
+});
+
+t('a VFO with no stored zoom leaves the view alone', () => {
+    // Saved before the spectrum ever connected. The tune still happens, and the
+    // auto-recentre is correct there because the span has not changed under it.
+    setVfos({ active: 'A', slots: { A: null, B: slot(7100000, null), C: null, D: null } });
+    const radio = fakeRadio(
+        { centerFreq: 14100000, span: 204800, binCount: 2048, binBandwidth: 100, defaultBinBandwidth: 14648.4375 },
+        { frequency: 14100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+    );
+    selectVfo(radio, 'B');
+    assert.deepStrictEqual(radio.calls.map((c) => c[0]), ['tuneTo']);
 });
 
 console.log(`\n${pass} VFO checks passed`);

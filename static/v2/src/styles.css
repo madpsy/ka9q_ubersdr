@@ -561,6 +561,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__sw-p.is-bad { color: var(--bad); }
 
 .topbar__zoom { display: flex; align-items: center; gap: 2px; }
+/* The dock buttons and the hover toggle. A rule of its own because without one
+   this is a plain block div: its buttons are inline boxes, so a squeezed bar
+   wrapped them onto a second line and made the whole header taller. `flex: none`
+   is what stops the squeeze — these are the smallest controls in the bar and
+   there is nothing to gain by shrinking them. */
+.topbar__docks { display: flex; align-items: center; gap: 2px; flex: none; }
 .topbar__zoom-val {
     font-family: var(--mono);
     font-size: calc(11px * var(--ui-scale));

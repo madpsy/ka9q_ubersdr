@@ -23,6 +23,7 @@ import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 // readings and a border.
 const SESSION_W = 68;
 const SPACE_WEATHER_W = 210;
+const CLOCK_W = 96;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -45,7 +46,7 @@ function Clock({ tzOffset }) {
         });
 
     return (
-        <div className="topbar__clock" title="Receiver time">
+        <div className="topbar__clock" data-optional="clock" title="Receiver time">
             <span className="topbar__clock-line">
                 <span className="topbar__clock-time">{utc}</span>
                 <span className="topbar__clock-tag">UTC</span>
@@ -275,14 +276,19 @@ export default function TopBar({ compact }) {
 
     // What the bar gives up first as it narrows, in the order it gives them up.
     //
-    // Space weather goes before the countdown: it is a summary of five figures
-    // that the Space weather panel shows in full, and the spectrum carries the
-    // propagation grade too, whereas the countdown is the only place a session
-    // limit appears at all. Both go before anything else here, because
-    // everything else is a control.
+    // Space weather goes first: it is a summary of five figures that the Space
+    // weather panel shows in full, and the spectrum carries the propagation
+    // grade too. The clocks next — the receiver's local time is worth having
+    // and UTC is worth a lot to a log, but every machine running this already
+    // has a clock on it somewhere. The countdown lasts longest of the three,
+    // being the only place a session limit appears at all.
+    //
+    // All three go before anything else in the bar, because everything else
+    // here is a control rather than a readout.
     const barRef = useRef(null);
     const room = useRoomFor(barRef, [
         { key: 'session', width: SESSION_W },
+        { key: 'clock', width: CLOCK_W },
         { key: 'spaceWeather', width: SPACE_WEATHER_W },
     ]);
 
@@ -306,7 +312,7 @@ export default function TopBar({ compact }) {
                 </div>
             </div>
 
-            {!compact && <Clock tzOffset={serverInfo?.receiver?.timezone_offset} />}
+            {!compact && room.clock && <Clock tzOffset={serverInfo?.receiver?.timezone_offset} />}
 
             {/* The readout is also the shortest way to tune: the frequency
                 opens the same type-in box as the Receiver panel's dial, the

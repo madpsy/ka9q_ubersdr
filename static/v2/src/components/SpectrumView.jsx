@@ -1896,7 +1896,26 @@ function drawStationId(g, c, pxW, dpr) {
     c.restore();
 }
 
+// TEMPORARY — negative-edge diagnosis. Fires at most once a second so a bad
+// view does not fill the console at frame rate.
+let lastEdgeLog = 0;
+function logNegativeEdge(cfg) {
+    const lo = cfg.centerFreq - cfg.span / 2;
+    if (!(lo < 0)) return;
+    const now = Date.now();
+    if (now - lastEdgeLog < 1000) return;
+    lastEdgeLog = now;
+    console.log('[edge] drawing a negative left edge', {
+        leftEdge: lo,
+        centerFreq: cfg.centerFreq,
+        span: cfg.span,
+        binCount: cfg.binCount,
+        binBandwidth: cfg.binBandwidth,
+    });
+}
+
 function drawScale(g, d, scale, pxW, cfg, tuning, cssW) {
+    logNegativeEdge(cfg);
     if (!scale) return;
     const c = scale.getContext('2d', { alpha: false });
     const dpr = g.dpr;

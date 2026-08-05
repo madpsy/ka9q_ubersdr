@@ -106,6 +106,18 @@ export class SpectrumConnection extends Emitter {
         // zoom instead of snapping to the default span first.
         if (initial && initial.frequency > 0) q.set('frequency', String(Math.round(initial.frequency)));
         if (initial && initial.binBandwidth > 0) q.set('bin_bandwidth', String(initial.binBandwidth));
+        // TEMPORARY — negative-edge diagnosis. This path does not go through
+        // setView, so nothing clamps what it asks for.
+        if (initial && initial.frequency > 0) {
+            console.log('[edge] connect asks for', {
+                frequency: initial.frequency,
+                binBandwidth: initial.binBandwidth,
+                binCount: this.binCount,
+                leftEdge: initial.binBandwidth > 0 && this.binCount > 0
+                    ? initial.frequency - (initial.binBandwidth * this.binCount) / 2
+                    : null,
+            });
+        }
 
         this._setState('connecting');
         let ws;
@@ -193,6 +205,27 @@ export class SpectrumConnection extends Emitter {
         const wanted = centerFreq != null ? centerFreq : this.centerFreq;
         const centre = span > 0 && wanted > 0 ? clampCenter(wanted, span) : wanted;
 
+        // TEMPORARY — negative-edge diagnosis. Remove once the cause is known.
+        const edgeOf = (c) => (span > 0 ? c - span / 2 : null);
+        const askedEdge = edgeOf(wanted);
+        const sentEdge = edgeOf(centre);
+        if (askedEdge === null || askedEdge < 0 || sentEdge < 0) {
+            console.log('[edge] setView', {
+                askedCentre: centerFreq,
+                askedBinBandwidth: binBandwidth,
+                usingBinBandwidth: bw,
+                binCount: this.binCount,
+                span,
+                clampedCentre: centre,
+                leftEdgeAsked: askedEdge,
+                leftEdgeSent: sentEdge,
+                // false means the clamp could not run: the view geometry is not
+                // known yet, so nothing bounded this at all.
+                clampRan: span > 0 && wanted > 0,
+                from: (new Error().stack || '').split('\n').slice(2, 5).join(' | '),
+            });
+        }
+
         const msg = { type: 'zoom' };
         // The centre goes out when the caller asked for one, and also when the
         // clamp has moved a centre nobody touched — which is the span-change
@@ -201,6 +234,7 @@ export class SpectrumConnection extends Emitter {
             msg.frequency = Math.round(centre);
         }
         if (binBandwidth != null) msg.binBandwidth = binBandwidth;
+        this._lastAsked = { ...msg, at: Date.now() };   // TEMPORARY — see above
         if (this.send(msg)) return true;
         this.pendingView = {
             ...(this.pendingView || {}),
@@ -284,6 +318,22 @@ export class SpectrumConnection extends Emitter {
     _onControl(msg) {
         if (!msg) return;
         if (msg.type === 'config' || msg.type === 'status') {
+            // TEMPORARY — negative-edge diagnosis. What the *server* says the
+            // view is, which is what actually gets drawn.
+            const sbw = msg.binBandwidth || this.binBandwidth;
+            const sbins = msg.binCount || this.binCount;
+            const left = msg.centerFreq != null ? msg.centerFreq - (sbw * sbins) / 2 : null;
+            if (left != null && left < 0) {
+                console.log('[edge] server view is negative', {
+                    type: msg.type,
+                    centerFreq: msg.centerFreq,
+                    binBandwidth: sbw,
+                    binCount: sbins,
+                    span: sbw * sbins,
+                    leftEdge: left,
+                    weAsked: this._lastAsked || null,
+                });
+            }
             if (msg.centerFreq) this.centerFreq = msg.centerFreq;
             if (msg.binCount) this.binCount = msg.binCount;
             if (msg.binBandwidth) {

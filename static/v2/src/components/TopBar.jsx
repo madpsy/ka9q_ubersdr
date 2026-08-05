@@ -124,17 +124,20 @@ function SpaceWeather() {
 // look the same until something says which.
 //
 // This was a slider with a separate VU bar underneath it, and the meter is now
-// the slider: the filled part of the track is coloured by the output level, on
-// v1's own VU zones, so one bar says both where the control is set and how hard
-// the audio is hitting. Nothing sits under it and nothing has to be lined up by
-// eye. Muting dims the two together for free, because there is only one element
-// and it is the disabled input.
+// the slider itself: the filled part of the track rides with the output level
+// and takes v1's VU colours as it goes, while the thumb stays where the volume
+// is set. One bar says both — what you asked for, and what is coming out.
+// Nothing sits under it and nothing has to be lined up by eye, and muting dims
+// the two together for free because there is only one element and it is the
+// disabled input.
 //
 // Sampled in its own component so the rest of the bar — the frequency, the
-// clock — does not re-render with it.
+// clock — does not re-render with it, and fast enough to look like a meter: the
+// fill is a gradient stop, which cannot be transitioned, so the sample rate is
+// all the smoothing there is.
 function VolumeSlider() {
     const { audio, actions } = useRadio();
-    const m = useMeters(15);
+    const m = useMeters(24);
 
     return (
         <div className="topbar__volume">
@@ -155,6 +158,7 @@ function VolumeSlider() {
                 max={100}
                 disabled={audio.muted}
                 onChange={(v) => actions.setVolume(v / 100)}
+                level={audioLevelPercent(m.outLevel) / 100}
                 fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
             />
         </div>

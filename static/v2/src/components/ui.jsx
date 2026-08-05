@@ -75,6 +75,19 @@ export function Slider({
 }) {
     // Percentage drives the filled-track gradient without a second element.
     const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+    // A live level takes the filled part of the track over from the value.
+    //
+    // The thumb still shows where the control is set — the browser positions
+    // that from `value`, not from this — so the two readings coexist on one
+    // control: thumb for what you asked for, fill for what is coming out. That
+    // is a fader with its meter in the track, which is what a mixing desk does
+    // and why the volume slider needs no separate VU bar beside it.
+    //
+    // Not when there is a `track`, though. Those sliders draw a gradient of
+    // their own instead of a fill — the EQ's cut-to-boost ramp — and take their
+    // level as a brightening overlay through `--level` rather than as a length.
+    const levelPct = level == null ? null : Math.max(0, Math.min(1, level)) * 100;
+    const fillPct = levelPct != null && !track ? levelPct : pct;
     // `track` replaces the accent fill with a gradient of its own, for scales
     // where the position means something (the EQ's cut/boost).
     const input = (
@@ -82,15 +95,15 @@ export function Slider({
             type="range"
             className={`slider${track ? ' slider--track' : ''}`}
             style={{
-                '--fill': `${pct}%`,
+                '--fill': `${fillPct}%`,
                 ...(track ? { '--track': track } : {}),
                 // Colours the filled part of the track. The volume slider uses
                 // it to carry its own output level, so the control and its
                 // meter are one bar rather than two.
                 ...(fillColor ? { '--fill-color': fillColor } : {}),
-                // A live level lights the track up from the left, so the
-                // control and its meter are one object rather than two.
-                ...(level != null ? { '--level': `${Math.max(0, Math.min(1, level)) * 100}%` } : {}),
+                // Read by .slider--track, whose meter is an overlay rather than
+                // the fill itself.
+                ...(levelPct != null ? { '--level': `${levelPct}%` } : {}),
             }}
             value={value}
             min={min}

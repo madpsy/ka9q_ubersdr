@@ -102,6 +102,8 @@ esbuild ../src/lib/shortcuts.js --bundle --format=cjs --platform=node \
     --outfile=.build/shortcuts.cjs --log-level=warning
 esbuild ../src/lib/backup.js --bundle --format=cjs --platform=node \
     --outfile=.build/backup.cjs --log-level=warning
+esbuild ../src/lib/radioSettings.js --bundle --format=cjs --platform=node \
+    --outfile=.build/radiosettings.cjs --log-level=warning
 esbuild ../src/bridge/protocol.js --bundle --format=cjs --platform=node \
     --outfile=.build/bridgeprotocol.cjs --log-level=warning
 esbuild ../src/bridge/host.js --bundle --format=cjs --platform=node \
@@ -171,6 +173,7 @@ node mediasession.test.js
 node announce.test.js
 node shortcuts.test.js
 node backup.test.js
+node radiosettings.test.js
 node bridge.test.js
 node bridgecommands.test.js
 node bridgeclient.test.js

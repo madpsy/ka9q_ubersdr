@@ -26,22 +26,9 @@ import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
 import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
+import { loadRadioSettings, saveRadioSettings } from '../lib/radioSettings.js';
 
 const RadioContext = createContext(null);
-
-const SETTINGS_KEY = 'ubersdr.v2.radio';
-
-function loadSettings() {
-    try {
-        return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
-    } catch (e) {
-        return {};
-    }
-}
-
-function saveSettings(s) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ }
-}
 
 // Where the dial starts, and whether anybody actually asked for it.
 //
@@ -51,7 +38,7 @@ function saveSettings(s) {
 // applyServerDefaults. A link someone was sent, or the frequency they left the
 // receiver on, both outrank it.
 function initialTuning() {
-    const saved = loadSettings();
+    const saved = loadRadioSettings();
     const url = new URLSearchParams(location.search);
 
     const urlFreq = Number(url.get('freq') || url.get('frequency'));
@@ -76,7 +63,7 @@ function initialTuning() {
 }
 
 export function RadioProvider({ children }) {
-    const saved = useMemo(loadSettings, []);
+    const saved = useMemo(loadRadioSettings, []);
     const start = useMemo(initialTuning, []);
 
     // `chosen` is not part of the tuning: it says where the tuning came from,
@@ -478,7 +465,7 @@ export function RadioProvider({ children }) {
 
     // Persist the parts of the session worth restoring.
     useEffect(() => {
-        saveSettings({
+        saveRadioSettings({
             frequency: tuning.frequency,
             mode: tuning.mode,
             bandwidthLow: tuning.bandwidthLow,
@@ -595,7 +582,7 @@ export function RadioProvider({ children }) {
                 // Read now rather than from the load-time snapshot: powering
                 // off and on again within one visit should come back to the
                 // view you left, not the one you arrived with.
-                const last = loadSettings();
+                const last = loadRadioSettings();
                 await spectrumConn.connect(resumeView(last, t));
             },
 

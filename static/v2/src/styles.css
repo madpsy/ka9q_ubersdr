@@ -3005,6 +3005,77 @@ a.btn { text-decoration: none; }
 .volume-row__value.is-muted { opacity: 0.4; }
 
 /* =========================================================================
+   Most used frequencies
+   ========================================================================= */
+
+.tfm { display: flex; flex-direction: column; gap: 2px; }
+
+/* A row is a button: the whole thing tunes, so the target is the row rather
+   than the frequency inside it. */
+.tfm__row {
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 7px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.tfm__row:hover { background: var(--surface-2); }
+/* Where the dial is now. Same treatment as the active bookmark. */
+.tfm__row.is-active { background: var(--accent-soft); color: var(--accent); }
+
+.tfm__rank {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    text-align: right;
+}
+.tfm__freq {
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+}
+.tfm__mode {
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.tfm__row.is-active .tfm__mode { color: inherit; }
+/* Minutes. Tabular so the column does not shuffle as the numbers grow. */
+.tfm__count {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+}
+
+/* What is being timed now — including a frequency that has not scored yet, so
+   the panel is visibly counting rather than apparently idle. */
+.tfm__now {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.tfm__now svg { color: var(--accent); flex: none; }
+.tfm__now-freq {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.tfm__now-min { margin-left: auto; font-family: var(--mono); flex: none; }
+
+/* =========================================================================
    World clocks
    ========================================================================= */
 

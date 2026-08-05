@@ -67,6 +67,7 @@ import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
 import WeatherPanel from './WeatherPanel.jsx';
 import NewsPanel from './NewsPanel.jsx';
 import ClocksPanel from './ClocksPanel.jsx';
+import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 
 export const PANELS = [
@@ -218,6 +219,19 @@ export const PANELS = [
 
     { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
     { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },
+    // A leaderboard of where the dial actually spends its time, under the two
+    // bookmark lists because it is the third of the same kind: one you curate,
+    // one you save locally, and one that curates itself.
+    // Minimal: the leaderboard, without what is being timed now or Clear.
+    {
+        id: 'topfreq',
+        title: 'Most used',
+        icon: <Icon.Gauge />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: TopFreqPanel,
+    },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 
     // Minimal: the two bar meters and the squelch. The numeric readouts and the

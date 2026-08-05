@@ -146,6 +146,8 @@ esbuild ../src/lib/news.js --bundle --format=cjs --platform=node \
     --outfile=.build/news.cjs --log-level=warning
 esbuild ../src/lib/clocks.js --bundle --format=cjs --platform=node \
     --outfile=.build/clocks.cjs --log-level=warning
+esbuild ../src/lib/topFreq.js --bundle --format=cjs --platform=node \
+    --outfile=.build/topfreq.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
 esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
@@ -216,6 +218,7 @@ node radiosync.test.js
 node audiowaterfall.test.js
 node news.test.js
 node clocks.test.js
+node topfreq.test.js
 node operatorphoto.test.js
 node bookmarkgroups.test.js
 node bridge.test.js

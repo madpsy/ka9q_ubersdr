@@ -2818,9 +2818,13 @@ a.btn { text-decoration: none; }
 .mnav__step:disabled { opacity: 0.4; cursor: default; }
 .mnav__step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.mnav__now { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+/* Centred under the prev/next buttons: it is the one thing on the row, and
+   left-aligned it read as the start of a list rather than as what you are on. */
+.mnav__now { display: flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; }
 .mnav__name {
-    flex: 1;
+    /* Shrinks and ellipsizes, but does not stretch — with `flex: 1` it filled
+       the row and there was nothing left for the centring to do. */
+    flex: 0 1 auto;
     min-width: 0;
     font-size: calc(13px * var(--ui-scale));
     font-weight: 650;
@@ -2829,6 +2833,18 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 .mnav__flag { flex: none; }
+/* A callsign is a link to who it belongs to. */
+.mnav__name--call {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 650;
+    text-align: left;
+    cursor: pointer;
+}
+.mnav__name--call:hover { text-decoration: underline; }
 /* The same vocabulary the spot markers use above the waterfall. */
 .mnav__type {
     flex: none;
@@ -2844,7 +2860,7 @@ a.btn { text-decoration: none; }
 .mnav__type--cw { background: rgba(69, 214, 154, 0.14); color: var(--good); }
 .mnav__type--voice { background: rgba(242, 181, 68, 0.14); color: var(--warn); }
 
-.mnav__who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mnav__who { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
 .mnav__who-name { font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); }
 .mnav__who-qth { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
 .mnav__who-name, .mnav__who-qth { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

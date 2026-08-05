@@ -25,6 +25,8 @@ import { subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { CALLSIGN_TYPES, collectMarkers, findMarkers } from '../lib/markerNav.js';
 import { onLookupResolved, peekLookup, startLookup } from '../radio/media/lookup.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
+import { requestLookup } from '../lib/callsign.js';
+import { lookupCallsign } from '../compat/legacyBridge.js';
 import { NAV_LABELS, saveNavTypes, savedNavTypes } from '../lib/markerNavSettings.js';
 
 export default function MarkerNavPanel({ minimal }) {
@@ -76,8 +78,16 @@ export default function MarkerNavPanel({ minimal }) {
     const wantsLookup = !!(current && CALLSIGN_TYPES.has(current.type) && current.name
         && serverInfo && serverInfo.lookup_service);
     useEffect(() => {
-        if (wantsLookup) startLookup(current.name, getSessionId());
-    }, [wantsLookup, current]);
+        if (!wantsLookup) return;
+        // Ours, for the name and flag on this row.
+        startLookup(current.name, getSessionId());
+        // And the Callsign lookup panel, which is the one with the photo, the
+        // map and the rest of it. Only when the marker changes — landing on a
+        // station is the ask, not every render while you sit on it. The panel
+        // wins when it is open; otherwise v1's popup gets it, if that is. This
+        // never opens either of them.
+        if (!requestLookup(current.name)) lookupCallsign(current.name);
+    }, [wantsLookup, current && current.name]);
 
     // The answer arrives a second or two after the request that asked for it.
     const [tick, setTick] = useState(0);
@@ -141,26 +151,40 @@ export default function MarkerNavPanel({ minimal }) {
                     <span className={`mnav__type mnav__type--${current.type}`}>
                         {NAV_LABELS[current.type] || current.type}
                     </span>
-                    <span className="mnav__name">{current.name || formatFreqShort(current.freq)}</span>
+                    {/* Left of the callsign, as everywhere else in this
+                        interface — and instead of the country on a line of its
+                        own, which was a whole row spent on something a flag
+                        says in one character. */}
                     {lookup && lookup.country_code && (
-                        <span className="mnav__flag">{countryFlag(lookup.country_code)}</span>
+                        <span className="mnav__flag" title={lookup.country || ''}>
+                            {countryFlag(lookup.country_code)}
+                        </span>
+                    )}
+                    {wantsLookup ? (
+                        <button
+                            type="button"
+                            className="mnav__name mnav__name--call"
+                            title={`Look up ${current.name}`}
+                            onClick={() => {
+                                if (!requestLookup(current.name)) lookupCallsign(current.name);
+                            }}
+                        >
+                            {current.name}
+                        </button>
+                    ) : (
+                        <span className="mnav__name">{current.name || formatFreqShort(current.freq)}</span>
                     )}
                 </div>
             ) : (
                 <Empty>Nothing on this frequency</Empty>
             )}
 
-            {/* What the lookup found, when it found anything. Two lines at most:
-                this is context for what you are listening to, not the Callsign
-                lookup panel in miniature. */}
-            {current && lookup && (lookup.name || lookup.country || lookup.qth) && (
+            {/* Who they are and where — the country is not repeated here,
+                because the flag beside the callsign already said it. */}
+            {current && lookup && (lookup.name || lookup.qth) && (
                 <div className="mnav__who">
                     {lookup.name && <span className="mnav__who-name">{lookup.name}</span>}
-                    {(lookup.qth || lookup.country) && (
-                        <span className="mnav__who-qth">
-                            {[lookup.qth, lookup.country].filter(Boolean).join(', ')}
-                        </span>
-                    )}
+                    {lookup.qth && <span className="mnav__who-qth">{lookup.qth}</span>}
                 </div>
             )}
 

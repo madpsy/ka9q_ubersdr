@@ -13,6 +13,23 @@ const ChatContext = createContext(null);
 const NAME_KEY = 'ubersdr.v2.chatName';
 const MAX_MESSAGES = 300;
 
+// What makes two deliveries of the same line the same line.
+//
+// The server replays its recent buffer on every `subscribe_chat`, which is how
+// history arrives — and a re-subscribe on a live socket is ordinary: acquire()
+// sends one when the reference count goes up, and onopen sends one for every
+// stream it wants. So the same messages are delivered more than once by design.
+//
+// The id used to end in `prev.length`, which made every delivery unique by
+// construction and left the second copy of a replayed buffer sitting in the
+// list underneath the first — your own join and the welcome that follows it,
+// printed twice, looking exactly like joining twice.
+//
+// Timestamp, who, and what: the server's timestamps carry sub-second precision,
+// so this only collides for the same person saying the same thing inside the
+// same instant, where showing it once is the better answer anyway.
+const msgKey = (timestamp, username, body) => `${timestamp}|${username}|${body}`;
+
 // Two short notes. Deliberately synthesised rather than shipped as an asset:
 // one small file to fetch, and it cannot 404 on a server that has not copied it.
 function playMentionChime() {
@@ -81,26 +98,36 @@ export function ChatProvider({ children }) {
         offs.push(chat.on('message', (m) => {
             const mine = m.username === nameRef.current;
             const mentioned = !mine && isMention(m.message, nameRef.current);
+            const key = msgKey(m.timestamp, m.username, m.message);
+            let fresh = true;
             setMessages((prev) => {
+                // Already have it — see msgKey. The server replays its buffer on
+                // every subscribe_chat, so this is the ordinary case, not a
+                // corner one.
+                if (prev.some((x) => x.key === key)) { fresh = false; return prev; }
                 const next = prev.concat({
-                    ...m, mention: mentioned, id: `${m.timestamp}-${m.username}-${prev.length}`,
+                    ...m, mention: mentioned, key, id: key,
                 });
                 return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
             });
-            if (mentioned) {
+            // Only for a message being seen for the first time: a replayed
+            // buffer must not chime again for a mention already read.
+            if (mentioned && fresh) {
                 setUnreadMentions((n) => n + 1);
                 if (chimeRef.current) playMentionChime();
             }
         }));
         offs.push(chat.on('presence', (p) => {
-            setMessages((prev) => prev.concat({
-                id: `${p.timestamp}-${p.kind}-${p.username}-${prev.length}`,
+            const key = msgKey(p.timestamp, p.username, p.kind);
+            setMessages((prev) => (prev.some((x) => x.key === key) ? prev : prev.concat({
+                key,
+                id: key,
                 system: true,
                 username: p.username,
                 message: p.kind === 'joined' ? 'joined' : 'left',
                 country: p.country,
                 timestamp: p.timestamp,
-            }).slice(-MAX_MESSAGES));
+            }).slice(-MAX_MESSAGES)));
             // The list is authoritative only from the server, so ask rather
             // than trying to patch it locally.
             chat.requestUsers();

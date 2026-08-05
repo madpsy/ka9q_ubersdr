@@ -23,7 +23,7 @@ KEY FEATURES
 
 • VFO assignment — when two instances are open, assign each one to VFO A or VFO B on your transceiver. The extension switches the active VFO automatically as you move between tabs.
 
-• flrig sync — optional bidirectional frequency and mode synchronisation with flrig (the popular rig-control application). Direction is configurable: SDR → rig, rig → SDR, or both ways. The extension connects to flrig's built-in XML-RPC server on localhost.
+• flrig sync — optional frequency and mode synchronisation with flrig (the popular rig-control application). Pick a direction: SDR → rig, or rig → SDR. The extension connects to flrig's built-in XML-RPC server on localhost.
 
 • Local instance discovery — if an UberSDR server is running on your local network and advertising itself as ubersdr.local, the extension probes it automatically and shows it at the top of the instance list, above public instances.
 

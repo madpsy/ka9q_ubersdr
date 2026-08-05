@@ -45,6 +45,11 @@ export function audioSnapshot(src) {
     return {
         volume: num(a.volume),
         muted: !!a.muted,
+        // Silenced for a moment by something other than the user's mute — a
+        // transmitting rig, an extension speaking over it. Reported separately
+        // so a client showing a mute button shows the *mute*, and nothing has
+        // to guess why the audio stopped.
+        ducked: !!a.ducked,
         channel: a.channel || 'both',
         bufferSec: num(a.bufferSec),
         squelch: {

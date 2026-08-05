@@ -184,13 +184,13 @@ t('the manifest and the package agree on the version', () => {
     assert.strictEqual(manifest.version, pkg.version);
 });
 
-t('the content script is the same file as the Chrome extension ships', () => {
+t('the content script is the same file as the Firefox extension ships', () => {
     // One file, two stores. It is only possible because the v2 API is a message
     // channel — with no page-world access to arrange, all that differs between
     // the browsers is the name of the extension API, and one line reconciles
     // that. If they drift, the fix is to make them the same again rather than
     // to relax this test.
-    const other = path.join(__dirname, '..', '..', 'chrome-bridge', 'extension', 'content_script.js');
+    const other = path.join(__dirname, '..', '..', 'firefox-bridge', 'extension', 'content_script.js');
     assert.strictEqual(content, read(other), 'the two content scripts have diverged');
 });
 
@@ -202,11 +202,13 @@ t('the content script is the only thing injected, on every page, at idle', () =>
     assert.strictEqual(cs.all_frames, false);
 });
 
-t('no page-world declaration survives', () => {
-    // Firefox never needed one, but a copy of the Chrome manifest would bring
-    // it across, and it would be injecting a file that no longer exists.
+t('no page-world injection survives', () => {
+    // This is the one that mattered here: Chrome needed a MAIN-world script to
+    // reach window.radioAPI, and with it went the two-world relay, the ping to
+    // cover the race between them, and the eight-second probe.
     assert.ok(!JSON.stringify(manifest).includes('page_world'), 'page_world is still declared');
     assert.ok(!fs.existsSync(path.join(EXT, 'page_world.js')), 'page_world.js is still present');
+    assert.ok(!JSON.stringify(manifest).includes('MAIN'), 'a MAIN-world content script is back');
 });
 
 console.log(`\n${pass} ok`);

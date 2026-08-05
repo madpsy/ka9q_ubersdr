@@ -212,15 +212,33 @@ export const COMMANDS = {
      * that genuinely means "the other one".
      */
     mute(args, ctx) {
-        const audio = ctx.state().audio;
         const wanted = bool(args, 'muted');
         if (wanted === null) {
             if (!bool(args, 'toggle')) throw new BridgeError(ERR.BAD_ARGS, 'muted or toggle is required');
             ctx.actions.toggleMute();
-            return { muted: !audio.muted };
+            return { muted: !ctx.state().audio.muted };
         }
-        if (wanted !== audio.muted) ctx.actions.toggleMute();
+        // Straight through to the absolute setter rather than reading the
+        // current value and toggling if it differs: that emulation is a
+        // read-modify-write, and two controllers doing it at once both read the
+        // same value, both toggle, and cancel each other out.
+        ctx.actions.setMuted(wanted);
         return { muted: wanted };
+    },
+
+    /**
+     * duck — silence that is not the user's mute.
+     *
+     * For a controller that has to make the receiver quiet for a moment and
+     * then stop: a transmitting rig, a tab you have switched away from. It
+     * leaves `muted` alone, so a transmission cannot end with the receiver
+     * permanently muted, and the mute a client is showing stays true.
+     */
+    duck(args, ctx) {
+        const wanted = bool(args, 'ducked');
+        if (wanted === null) throw new BridgeError(ERR.BAD_ARGS, 'ducked is required');
+        ctx.actions.setDucked(wanted);
+        return { ducked: wanted };
     },
 
     /**

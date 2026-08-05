@@ -68,6 +68,9 @@ const modalCancel     = document.getElementById('modal-cancel');
 
 let currentState = null;   // Last known radio state { freq, mode, bwLow, bwHigh }
 let selectedTabId = null;
+// The receiver's mute, as last reported by the page. Never guessed: the button
+// writes through the page API and redraws from what comes back, so the icon
+// cannot claim something the receiver is not doing.
 let isMuted = false;
 let isSyncEnabled    = false;  // mirrors background flrigEnabled (default: disabled)
 let isPluginEnabled  = true;   // mirrors background pluginEnabled
@@ -634,15 +637,26 @@ function renderState(state) {
     }
     if (state.muted !== undefined && state.muted !== isMuted) {
         isMuted = state.muted;
-        btnMute.textContent = isMuted ? '🔇' : '🔊';
-        btnMute.classList.toggle('muted', isMuted);
-        btnMute.title = isMuted ? 'Unmute' : 'Mute';
+        drawMuteButton();
     }
+}
+
+function drawMuteButton() {
+    btnMute.textContent = isMuted ? '🔇' : '🔊';
+    btnMute.classList.toggle('muted', isMuted);
+    btnMute.title = isMuted ? 'Unmute' : 'Mute';
 }
 
 // ── Controls enable/disable ────────────────────────────────────────────────────
 
 function setControlsEnabled(enabled) {
+    // Including mute: with no tab attached there is no receiver whose mute this
+    // could be, and a live-looking button would be showing the last one's.
+    btnMute.disabled = !enabled;
+    if (!enabled) {
+        isMuted = false;
+        drawMuteButton();
+    }
     btnSetFreq.disabled = !enabled;
     btnSetBw.disabled   = !enabled;
     inputFreq.disabled  = !enabled;
@@ -690,15 +704,22 @@ stepButtons.forEach(btn => {
 
 // ── Mute ──────────────────────────────────────────────────────────────────────
 
+// This button is the *receiver's* mute, which is what the state row beside it
+// reports. It used to read that and write the browser tab's mute instead —
+// two different things behind one icon — so muting from here silenced the tab
+// while the next state update flipped the icon back to unmuted, because the
+// receiver had never been told anything.
+//
+// PTT mute and multi-tab muting stay at the browser mixer: those are about
+// your speakers rather than the receiver's setting, and they must not overwrite
+// the mute the operator chose on the page (which the page remembers).
+//
+// No local guess is kept. The button is drawn from the state the page reports,
+// so it cannot claim something the receiver is not doing.
 btnMute.addEventListener('click', () => {
-    isMuted = !isMuted;
-    btnMute.textContent = isMuted ? '🔇' : '🔊';
-    btnMute.classList.toggle('muted', isMuted);
-    btnMute.title = isMuted ? 'Unmute' : 'Mute';
-    // Use tab-level mute (browser mixer) — same mechanism as PTT-mute and
-    // multi-tab muting — for instant, consistent behaviour.
-    browser.runtime.sendMessage({ type: 'popup:set_tab_mute', muted: isMuted }).catch(() => {});
-    setStatus(isMuted ? 'Muted' : 'Unmuted', 'info');
+    const wanted = !isMuted;
+    sendCommand({ type: 'cmd:set_mute', muted: wanted });
+    setStatus(wanted ? 'Muted' : 'Unmuted', 'info');
 });
 
 // ── Sync toggle (header shortcut for flrig enabled) ───────────────────────────

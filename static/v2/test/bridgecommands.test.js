@@ -58,6 +58,8 @@ function ctxFor(over = {}) {
                 setBandwidth: record('setBandwidth'),
                 setVolume: record('setVolume'),
                 toggleMute: record('toggleMute'),
+                setMuted: record('setMuted'),
+                setDucked: record('setDucked'),
                 setSquelch: record('setSquelch'),
                 autoSquelch: record('autoSquelch'),
                 ensureVisible: record('ensureVisible'),
@@ -87,7 +89,7 @@ const refuses = (code, fn) => {
 
 t('the command set is the published one', () => {
     assert.deepStrictEqual(COMMAND_NAMES,
-        ['tune', 'mode', 'passband', 'volume', 'mute', 'squelch', 'vfo', 'spectrum', 'power']);
+        ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power']);
 });
 
 t('an unknown command names the ones that exist', () => {
@@ -206,14 +208,18 @@ t('volume is absolute or relative, and refuses to leave 0..1', () => {
     assert.deepStrictEqual(h.calls[2], ['setVolume', 1]);
 });
 
-t('mute is absolute — a toggle would desync PTT permanently', () => {
-    // The rig says "transmitting: true/false". One missed message and a toggle
-    // un-mutes on every transmit thereafter.
+t('mute is absolute, and says so rather than emulating it with a toggle', () => {
+    // The rig says "transmitting: true/false". Reading the current value and
+    // toggling if it differs is a read-modify-write: two controllers doing it
+    // at once both read the same value, both toggle, and cancel out.
     const h = ctxFor();
-    runCommand('mute', { muted: false }, h.ctx);
-    assert.deepStrictEqual(h.calls, [], 'already unmuted: nothing to do');
     assert.deepStrictEqual(runCommand('mute', { muted: true }, h.ctx), { muted: true });
-    assert.deepStrictEqual(h.calls[0], ['toggleMute']);
+    assert.deepStrictEqual(h.calls[0], ['setMuted', true]);
+    // Repeating it is a no-op at the receiver, not a flip back.
+    assert.deepStrictEqual(runCommand('mute', { muted: true }, h.ctx), { muted: true });
+    assert.deepStrictEqual(h.calls[1], ['setMuted', true]);
+    runCommand('mute', { muted: false }, h.ctx);
+    assert.deepStrictEqual(h.calls[2], ['setMuted', false]);
 });
 
 t('mute can still be told to flip, when that is what is meant', () => {
@@ -222,6 +228,23 @@ t('mute can still be told to flip, when that is what is meant', () => {
     assert.deepStrictEqual(h.calls[0], ['toggleMute']);
     refuses(ERR.BAD_ARGS, () => runCommand('mute', {}, h.ctx));
     refuses(ERR.BAD_ARGS, () => runCommand('mute', { muted: 'yes' }, h.ctx));
+});
+
+t('duck silences without touching the mute the operator chose', () => {
+    // A transmission must not end with the receiver permanently muted, and a
+    // client showing a mute button must not be made to lie about it.
+    const h = ctxFor();
+    assert.deepStrictEqual(runCommand('duck', { ducked: true }, h.ctx), { ducked: true });
+    assert.deepStrictEqual(h.calls[0], ['setDucked', true]);
+    runCommand('duck', { ducked: false }, h.ctx);
+    assert.deepStrictEqual(h.calls[1], ['setDucked', false]);
+    refuses(ERR.BAD_ARGS, () => runCommand('duck', {}, h.ctx));
+    assert.ok(!h.calls.some((c) => c[0] === 'setMuted'), 'ducking touched the mute');
+});
+
+t('audio reports ducking separately from muting', () => {
+    assert.strictEqual(audioSnapshot({ audio: { muted: false, ducked: true } }).ducked, true);
+    assert.strictEqual(audioSnapshot({ audio: { muted: true } }).ducked, false);
 });
 
 t('squelch sets a value, switches off, or finds its own level', () => {

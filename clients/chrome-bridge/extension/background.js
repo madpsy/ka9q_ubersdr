@@ -46,7 +46,14 @@ let pluginEnabled  = true;
 let flrigEnabled    = false;
 let flrigHost       = '127.0.0.1';
 let flrigPort       = 12345;
-let flrigDirection  = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'
+// One way or the other, never both.
+//
+// Two-way sync is a feedback loop with a timer holding it apart: every push to
+// flrig comes back as a change from flrig, so it needs an echo-suppression
+// window, and anything that arrives inside that window — a real move on the
+// rig, a VFO switch, a tab change — is indistinguishable from the echo and gets
+// dropped. Picking a direction removes the loop instead of policing it.
+let flrigDirection  = 'sdr-to-rig';   // 'sdr-to-rig' | 'rig-to-sdr'
 let flrigConnected  = false;
 
 // PTT mute: when true, the selected SDR tab is muted while the rig is transmitting.
@@ -67,8 +74,8 @@ let _lastSdrMode   = null;
 
 // Cooldown: after pushing SDR→rig, suppress rig→SDR for a short window to
 // prevent the round-trip echo (SDR tunes → flrig updates → poll reads back → SDR tunes again).
-const FLRIG_ECHO_COOLDOWN_MS = 2000;
-let _sdrToRigLastPushTime = 0;
+const FLRIG_SWITCH_SETTLE_MS = 2000;
+let _flrigSwitchedAt = 0;   // when flrig or the selected tab last changed VFO
 
 // Debounce for SDR→rig pushes: accumulate rapid freq/mode changes (e.g. page
 // load burst, user dragging) and only push to flrig once things settle.
@@ -100,7 +107,11 @@ async function restoreState() {
     if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
     if (stored.flrigHost       !== undefined) flrigHost       = stored.flrigHost;
     if (stored.flrigPort       !== undefined) flrigPort       = stored.flrigPort;
-    if (stored.flrigDirection  !== undefined) flrigDirection  = stored.flrigDirection;
+    // 'both' was an option until it was removed; anyone who had it selected is
+    // moved to the direction that does what they most likely wanted.
+    if (stored.flrigDirection !== undefined) {
+        flrigDirection = stored.flrigDirection === 'both' ? 'sdr-to-rig' : stored.flrigDirection;
+    }
     if (stored.pluginEnabled   !== undefined) pluginEnabled   = stored.pluginEnabled;
     if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
 
@@ -189,14 +200,14 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
     }
 
     // Mute all other UberSDR tabs; unmute the newly active one.
-    muteAllExcept(tabId);
+    duckAllExcept(tabId);
 
     // Reset echo-prevention for the new tab context.
     _lastFlrigFreq = null;
     _lastFlrigMode = null;
     _lastSdrFreq = null;
     _lastSdrMode = null;
-    _sdrToRigLastPushTime = Date.now();
+    _flrigSwitchedAt = Date.now();
     if (_sdrToRigDebounceTimer) {
         clearTimeout(_sdrToRigDebounceTimer);
         _sdrToRigDebounceTimer = null;
@@ -294,7 +305,15 @@ function handleMessage(msg, sender) {
             registry.set(tabId, {
                 tabId:        tabId,
                 sessionId:    msg.sessionId,
+                // The instance's public UUID and its operator's details, from
+                // the page's announce. `receiver.id` is stable across sessions
+                // and reloads, unlike sessionId, so it is what a saved profile
+                // should recognise a receiver by.
+                receiver:     msg.receiver || null,
                 url:          msg.url,
+                // The receiver's name, not the document title: v2 rewrites the
+                // title on every turn of the dial, so a title-derived label
+                // flickered and told you nothing the state row does not.
                 title:        msg.title || sender.tab.title || msg.url,
                 lastState:    null,
                 vfo:          assignedVfo,
@@ -324,13 +343,22 @@ function handleMessage(msg, sender) {
                     registry.get(tabId).vfo = inst.vfo;
                     broadcastRegistry();
                 }
-                setTimeout(() => {
-                    if (inst.freq  != null) chrome.tabs.sendMessage(tabId, { type: 'cmd:set_freq',      freq: inst.freq }).catch(() => {});
-                    if (inst.mode  != null) chrome.tabs.sendMessage(tabId, { type: 'cmd:set_mode',      mode: inst.mode }).catch(() => {});
-                    if (inst.bwLow != null && inst.bwHigh != null) {
-                        chrome.tabs.sendMessage(tabId, { type: 'cmd:set_bandwidth', low: inst.bwLow, high: inst.bwHigh }).catch(() => {});
-                    }
-                }, 1500);
+                // One tune carrying all three, sent immediately.
+                //
+                // The old code sent three separate commands behind a 1.5 second
+                // timer, because v1's radioAPI took an unknowable amount of time
+                // to finish assembling itself after the content script found it.
+                // A registration now happens *because* the page announced
+                // itself, so there is nothing left to wait for — and sending the
+                // three together stops the receiver passing through
+                // intermediate mode/passband pairs on the way to the profile.
+                chrome.tabs.sendMessage(tabId, {
+                    type: 'cmd:tune',
+                    freq: inst.freq,
+                    mode: inst.mode,
+                    low:  inst.bwLow,
+                    high: inst.bwHigh,
+                }).catch(() => {});
             }
             break;
         }
@@ -353,19 +381,14 @@ function handleMessage(msg, sender) {
         }
 
         // ── Content script: page title changed ────────────────────────────────
-        case 'ubersdr:title_update': {
-            const tabId = sender.tab ? sender.tab.id : null;
-            if (!tabId || !registry.has(tabId)) break;
-            registry.get(tabId).title = msg.title;
-            broadcastRegistry();
-            break;
-        }
-
-        // ── Content script: user pressed play ─────────────────────────────────
+        // ── Content script: the receiver started or stopped playing ──────────
+        // v1 could only ever report the start, because it read a CSS class on
+        // an overlay that is removed once. The page now says which, so a
+        // receiver switched off stops being treated as live for flrig sync.
         case 'ubersdr:audio_started': {
             const tabId = sender.tab ? sender.tab.id : null;
             if (!tabId || !registry.has(tabId)) break;
-            registry.get(tabId).audioStarted = true;
+            registry.get(tabId).audioStarted = msg.running !== false;
             broadcastRegistry();
             break;
         }
@@ -382,10 +405,10 @@ function handleMessage(msg, sender) {
                 lastKnownState = entry.lastState;
                 broadcastToPopup({ type: 'state:update', state: entry.lastState });
 
-                const inVfoCooldown = (Date.now() - _sdrToRigLastPushTime) < FLRIG_ECHO_COOLDOWN_MS;
+                const inVfoCooldown = (Date.now() - _flrigSwitchedAt) < FLRIG_SWITCH_SETTLE_MS;
                 const tabVfoForSync = entry.vfo || null;
                 if (flrigEnabled && flrigConnected && entry.audioStarted && tabVfoForSync &&
-                    (flrigDirection === 'sdr-to-rig' || flrigDirection === 'both')) {
+                    flrigDirection === 'sdr-to-rig') {
                     if (!inVfoCooldown) {
                         pushSdrStateToFlrig(msg.state);
                     }
@@ -439,14 +462,14 @@ function handleMessage(msg, sender) {
                     flrigSetAB(tabVfo).catch(() => {});
                 }
 
-                muteAllExcept(newTabId);
+                duckAllExcept(newTabId);
                 chrome.tabs.update(newTabId, { active: true }).catch(() => {});
 
                 _lastFlrigFreq = null;
                 _lastFlrigMode = null;
                 _lastSdrFreq = null;
                 _lastSdrMode = null;
-                _sdrToRigLastPushTime = Date.now();
+                _flrigSwitchedAt = Date.now();
                 if (_sdrToRigDebounceTimer) {
                     clearTimeout(_sdrToRigDebounceTimer);
                     _sdrToRigDebounceTimer = null;
@@ -499,7 +522,9 @@ function handleMessage(msg, sender) {
             flrigEnabled   = !!msg.enabled;
             if (msg.host      !== undefined) flrigHost      = msg.host;
             if (msg.port      !== undefined) flrigPort      = msg.port;
-            if (msg.direction !== undefined) flrigDirection = msg.direction;
+            if (msg.direction === 'sdr-to-rig' || msg.direction === 'rig-to-sdr') {
+                flrigDirection = msg.direction;
+            }
             chrome.storage.local.set({ flrigEnabled, flrigHost, flrigPort, flrigDirection });
 
             if (!flrigEnabled) {
@@ -520,16 +545,10 @@ function handleMessage(msg, sender) {
 
             if (!pttMuteEnabled && _lastPtt) {
                 if (selectedTabId && registry.has(selectedTabId)) {
-                    chrome.tabs.update(selectedTabId, { muted: false }).catch(() => {});
+                    chrome.tabs.sendMessage(selectedTabId, {
+                        type: 'cmd:set_duck', ducked: false,
+                    }).catch(() => {});
                 }
-            }
-            break;
-        }
-
-        // ── Popup: mute / unmute the selected tab ─────────────────────────────
-        case 'popup:set_tab_mute': {
-            if (selectedTabId && registry.has(selectedTabId)) {
-                chrome.tabs.update(selectedTabId, { muted: !!msg.muted }).catch(() => {});
             }
             break;
         }
@@ -656,6 +675,7 @@ function registrySnapshot() {
     return Array.from(registry.values()).map(e => ({
         tabId:        e.tabId,
         sessionId:    e.sessionId,
+        receiver:     e.receiver || null,
         url:          e.url,
         title:        e.title,
         selected:     e.tabId === selectedTabId,
@@ -675,11 +695,22 @@ function forwardCommandToTab(command) {
     });
 }
 
-function muteAllExcept(activeTabId) {
+// Through the page rather than the browser mixer.
+//
+// Tab mute was chosen for "instant response" against v1, whose mute flushed the
+// audio queue; v2's is a 15 ms gain ramp, so there was nothing left to win. And
+// a tab mute is invisible to the page — the receiver went on showing itself
+// unmuted with nothing coming out of it.
+//
+// Ducking rather than muting: this is the extension deciding you are not
+// listening to that tab, not the operator muting it, and it must not overwrite
+// the mute they chose (which their browser remembers).
+function duckAllExcept(activeTabId) {
     if (registry.size < 2) return;
     for (const [tabId] of registry) {
-        const shouldMute = tabId !== activeTabId;
-        chrome.tabs.update(tabId, { muted: shouldMute }).catch(() => {});
+        chrome.tabs.sendMessage(tabId, {
+            type: 'cmd:set_duck', ducked: tabId !== activeTabId,
+        }).catch(() => {});
     }
 }
 
@@ -820,7 +851,7 @@ function pushSdrStateToFlrig(state) {
                 const tabVfo = registry.get(selectedTabId).vfo || null;
                 if (tabVfo && tabVfo !== flrigActiveVfo) {
                     await flrigSetAB(tabVfo);
-                    _sdrToRigLastPushTime = Date.now();
+                    _flrigSwitchedAt = Date.now();
                     try {
                         const newVfoFreq = await flrigGetFreq();
                         const newVfoMode = await flrigGetMode();
@@ -848,9 +879,14 @@ function pushSdrStateToFlrig(state) {
                     pushed = true;
                 }
             }
-            if (pushed) _sdrToRigLastPushTime = Date.now();
+            // No stamp here. This used to mark "we just wrote to flrig, ignore
+            // the echo coming back" — necessary when both directions ran at
+            // once. With one direction there is no echo, and stamping it made
+            // the gate above swallow the next two seconds of dial movement:
+            // the rig lagged the SDR and skipped everything in between.
+            void pushed;
         } catch (err) {
-            console.warn('[pushSdrStateToFlrig] error:', err);
+            console.warn('[UberSDR Bridge] flrig write failed:', err);
         }
     }, SDR_TO_RIG_DEBOUNCE_MS);
 }
@@ -866,7 +902,7 @@ async function pollFlrigToSdr() {
             _lastFlrigMode = null;
             _lastSdrFreq   = null;
             _lastSdrMode   = null;
-            _sdrToRigLastPushTime = Date.now();
+            _flrigSwitchedAt = Date.now();
             if (_sdrToRigDebounceTimer) {
                 clearTimeout(_sdrToRigDebounceTimer);
                 _sdrToRigDebounceTimer = null;
@@ -884,7 +920,7 @@ async function pollFlrigToSdr() {
                 selectedTabId = matchingTab.tabId;
                 chrome.storage.local.set({ selectedTabId });
                 lastKnownState = matchingTab.lastState;
-                muteAllExcept(selectedTabId);
+                duckAllExcept(selectedTabId);
                 chrome.tabs.update(selectedTabId, { active: true }).catch(() => {});
                 broadcastRegistry();
                 broadcastToPopup({ type: 'vfo:switched', vfo: currentVfo, tabId: selectedTabId });
@@ -910,14 +946,19 @@ async function pollFlrigToSdr() {
             broadcastToPopup({ type: 'ptt:status', active: pttNow });
 
             if (pttMuteEnabled && selectedTabId && registry.has(selectedTabId)) {
-                chrome.tabs.update(selectedTabId, { muted: pttNow }).catch(() => {});
+                // TX → quiet; RX → audible. Ducked, not muted: the operator's
+                // own mute setting is theirs, and a transmission that ended
+                // badly must not leave the receiver silent for good.
+                chrome.tabs.sendMessage(selectedTabId, {
+                    type: 'cmd:set_duck', ducked: pttNow,
+                }).catch(() => {});
             }
         }
 
         broadcastToPopup({ type: 'flrig:state', freq, mode: modeRaw, vfo: flrigActiveVfo, ptt: pttNow });
 
-        if (flrigDirection === 'rig-to-sdr' || flrigDirection === 'both') {
-            const inCooldown = (Date.now() - _sdrToRigLastPushTime) < FLRIG_ECHO_COOLDOWN_MS;
+        if (flrigDirection === 'rig-to-sdr') {
+            const inCooldown = (Date.now() - _flrigSwitchedAt) < FLRIG_SWITCH_SETTLE_MS;
             if (inCooldown) return;
 
             const freqChanged = _lastFlrigFreq === null || freq !== _lastFlrigFreq;

@@ -93,8 +93,17 @@
 
         <div class="control-row">
             <label class="control-label" for="input-freq">kHz</label>
-            <input  class="control-input" type="number" id="input-freq"
-                    placeholder="e.g. 14074" min="10" max="30000" step="0.001">
+            <!-- Deliberately not type="number". Its up/down arrows step the
+                 value themselves, and stepping a kHz field by 0.001 did not
+                 survive the round trip — 1 Hz nudges made with the arrows came
+                 back to where they started, while the same value typed in
+                 worked. Removing the control removes the mechanism; the range
+                 is checked in popup.js, which gives a better message than the
+                 browser's silent rejection anyway. inputmode keeps the numeric
+                 keypad on touch devices, and the keyboard's own Up/Down
+                 stepping goes with the arrows. -->
+            <input  class="control-input" type="text" inputmode="decimal" id="input-freq"
+                    placeholder="e.g. 14074" autocomplete="off">
             <button class="btn btn-primary btn-sm" id="btn-set-freq">Set</button>
         </div>
 
@@ -189,7 +198,6 @@
             <div class="control-row">
                 <label class="control-label" for="select-flrig-dir">Direction</label>
                 <select class="control-select" id="select-flrig-dir">
-                    <option value="both">Both ways</option>
                     <option value="sdr-to-rig">SDR → rig</option>
                     <option value="rig-to-sdr">Rig → SDR</option>
                 </select>

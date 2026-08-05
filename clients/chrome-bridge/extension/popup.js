@@ -114,6 +114,9 @@ const modalCancel     = document.getElementById('modal-cancel');
 
 let currentState = null;   // Last known radio state { freq, mode, bwLow, bwHigh }
 let selectedTabId = null;
+// The receiver's mute, as last reported by the page. Never guessed: the button
+// writes through the page API and redraws from what comes back, so the icon
+// cannot claim something the receiver is not doing.
 let isMuted = false;
 let isSyncEnabled    = false;  // mirrors background flrigEnabled (default: disabled)
 let isPluginEnabled  = true;   // mirrors background pluginEnabled
@@ -639,26 +642,39 @@ function renderState(state) {
         }
     }
     if (state.dbfs !== undefined) {
-        stateDbfs.textContent = state.dbfs.toFixed(1) + ' dBFS';
-        // Non-linear mapping identical to signal-meter.js:
-        //   -120 to -80 dBFS → 0–40%
-        //   -80  to -60 dBFS → 40–80%
-        //   -60  to -20 dBFS → 80–100%
-        let pct;
-        if (state.dbfs < -80) {
-            pct = ((state.dbfs + 120) / 40) * 40;
-        } else if (state.dbfs < -60) {
-            pct = 40 + ((state.dbfs + 80) / 20) * 40;
+        // null is a real value here: the page says so when there is no
+        // measurement rather than sending a very negative number that would be
+        // drawn as a signal.
+        if (state.dbfs === null) {
+            stateDbfs.textContent = '—';
+            signalBarFill.style.width = '0%';
+            signalBarFill.className = 'signal-bar-fill';
         } else {
-            pct = 80 + ((state.dbfs + 60) / 40) * 20;
+            // The S value comes from the page, which is showing the same one —
+            // rather than being re-derived here from a curve that could drift
+            // out of step with it.
+            stateDbfs.textContent = state.dbfs.toFixed(1) + ' dBFS'
+                + (state.s != null ? ' (S' + Math.round(state.s) + ')' : '');
+            // Non-linear mapping identical to signal-meter.js:
+            //   -120 to -80 dBFS → 0–40%
+            //   -80  to -60 dBFS → 40–80%
+            //   -60  to -20 dBFS → 80–100%
+            let pct;
+            if (state.dbfs < -80) {
+                pct = ((state.dbfs + 120) / 40) * 40;
+            } else if (state.dbfs < -60) {
+                pct = 40 + ((state.dbfs + 80) / 20) * 40;
+            } else {
+                pct = 80 + ((state.dbfs + 60) / 40) * 20;
+            }
+            pct = Math.max(0, Math.min(100, pct));
+            signalBarFill.style.width = pct + '%';
+            // Colour thresholds identical to signal-meter.js
+            signalBarFill.className = 'signal-bar-fill ' + (
+                state.dbfs >= -70 ? 'sig-strong' :
+                state.dbfs >= -85 ? 'sig-medium' : 'sig-weak'
+            );
         }
-        pct = Math.max(0, Math.min(100, pct));
-        signalBarFill.style.width = pct + '%';
-        // Colour thresholds identical to signal-meter.js
-        signalBarFill.className = 'signal-bar-fill ' + (
-            state.dbfs >= -70 ? 'sig-strong' :
-            state.dbfs >= -85 ? 'sig-medium' : 'sig-weak'
-        );
     }
     if (state.snr !== undefined) {
         stateSnr.textContent = state.snr !== null
@@ -667,15 +683,26 @@ function renderState(state) {
     }
     if (state.muted !== undefined && state.muted !== isMuted) {
         isMuted = state.muted;
-        btnMute.textContent = isMuted ? '🔇' : '🔊';
-        btnMute.classList.toggle('muted', isMuted);
-        btnMute.title = isMuted ? 'Unmute' : 'Mute';
+        drawMuteButton();
     }
+}
+
+function drawMuteButton() {
+    btnMute.textContent = isMuted ? '🔇' : '🔊';
+    btnMute.classList.toggle('muted', isMuted);
+    btnMute.title = isMuted ? 'Unmute' : 'Mute';
 }
 
 // ── Controls enable/disable ────────────────────────────────────────────────────
 
 function setControlsEnabled(enabled) {
+    // Including mute: with no tab attached there is no receiver whose mute this
+    // could be, and a live-looking button would be showing the last one's.
+    btnMute.disabled = !enabled;
+    if (!enabled) {
+        isMuted = false;
+        drawMuteButton();
+    }
     btnSetFreq.disabled = !enabled;
     btnSetBw.disabled   = !enabled;
     inputFreq.disabled  = !enabled;
@@ -723,15 +750,18 @@ stepButtons.forEach(btn => {
 
 // ── Mute ──────────────────────────────────────────────────────────────────────
 
+// This button is the *receiver's* mute, which is what the state row beside it
+// reports. It used to read that and write the browser tab's mute instead —
+// two different things behind one icon — so muting from here silenced the tab
+// while the next state update flipped the icon back to unmuted, because the
+// receiver had never been told anything.
+//
+// No local guess is kept. The button is drawn from the state the page reports,
+// so it cannot claim something the receiver is not doing.
 btnMute.addEventListener('click', () => {
-    isMuted = !isMuted;
-    btnMute.textContent = isMuted ? '🔇' : '🔊';
-    btnMute.classList.toggle('muted', isMuted);
-    btnMute.title = isMuted ? 'Unmute' : 'Mute';
-    // Use tab-level mute (browser mixer) — same mechanism as PTT-mute and
-    // multi-tab muting — for instant, consistent behaviour.
-    browser.runtime.sendMessage({ type: 'popup:set_tab_mute', muted: isMuted }).catch(() => {});
-    setStatus(isMuted ? 'Muted' : 'Unmuted', 'info');
+    const wanted = !isMuted;
+    sendCommand({ type: 'cmd:set_mute', muted: wanted });
+    setStatus(wanted ? 'Muted' : 'Unmuted', 'info');
 });
 
 // ── Sync toggle (header shortcut for flrig enabled) ───────────────────────────

@@ -107,6 +107,9 @@ export function RadioProvider({ children }) {
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
         muted: !!saved.muted,
+        // Transient, and deliberately not restored: a session that ended while
+        // the rig was transmitting must not start silent.
+        ducked: false,
         bufferSec: saved.bufferSec != null ? saved.bufferSec : 0.2,
         // Whether that came from this browser or is just the built-in. The
         // operator's own default only applies to someone who has never chosen,
@@ -634,6 +637,42 @@ export function RadioProvider({ children }) {
             setVolume(v) {
                 player.setVolume(v);
                 setAudio((a) => ({ ...a, volume: v }));
+            },
+
+            // Absolute, and the one the other two are built on.
+            //
+            // An outside controller has to be able to say "muted" rather than
+            // "the other one": PTT mute is driven by "the rig is transmitting:
+            // true/false", and a toggle desynchronises permanently the first
+            // time a message is missed. Emulating it by reading the current
+            // value and toggling if it differs is not the same thing — two
+            // controllers doing that at once both read `false`, both toggle,
+            // and the receiver ends up unmuted.
+            //
+            // The player call is outside the updater because it is idempotent
+            // and absolute: safe to repeat, unlike the toggle below.
+            setMuted(on) {
+                const muted = !!on;
+                player.setMuted(muted);
+                setAudio((a) => (a.muted === muted ? a : { ...a, muted }));
+            },
+
+            // Silence that is not the user's mute.
+            //
+            // For something that has to be quiet for a moment and then stop
+            // being quiet — a transmitting rig, a tab you have switched away
+            // from, an extension speaking over the audio. It leaves `muted`
+            // alone, which is the setting the operator chose and the one this
+            // browser remembers, so a transmission cannot end with the receiver
+            // permanently muted or with the mute button lying about it.
+            //
+            // The extensions duck through this rather than muting the browser
+            // tab: a tab mute is invisible to the page, so the receiver went on
+            // showing itself unmuted while nothing came out of it.
+            setDucked(on) {
+                const ducked = !!on;
+                player.setDucked(ducked);
+                setAudio((a) => (a.ducked === ducked ? a : { ...a, ducked }));
             },
 
             toggleMute() {

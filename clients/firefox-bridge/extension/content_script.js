@@ -17,9 +17,18 @@
 // The protocol constants below are the published contract. They are duplicated
 // here rather than imported because a content script cannot import from the
 // page's bundle; they change only with the API's major version.
+//
+// This file is identical in the Chrome and Firefox extensions, and a test in
+// each asserts it. That is only possible because the v2 API is a message
+// channel: with no page-world access to arrange, all that is left is the
+// extension API, and one line reconciles the two spellings of it.
 
 (function () {
     'use strict';
+
+    // Firefox gives promises on `browser`; Chrome gives them on `chrome` from
+    // MV3 onwards. Everything used here exists in both.
+    const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
     const EVENT_TO_PAGE = 'ubersdr.to-page';
     const EVENT_FROM_PAGE = 'ubersdr.from-page';
@@ -207,7 +216,7 @@
     }
 
     function tell(msg) {
-        browser.runtime.sendMessage(msg).catch(function () {
+        api.runtime.sendMessage(msg).catch(function () {
             // The background page may be asleep or the extension reloading.
             // Nothing here is worth retrying: the next announce or patch will
             // carry the same information.
@@ -216,7 +225,7 @@
 
     // ── background → page ─────────────────────────────────────────────────────
 
-    browser.runtime.onMessage.addListener(function (msg) {
+    api.runtime.onMessage.addListener(function (msg) {
         if (!msg || !msg.type) return;
 
         // Sent when the extension is switched back on, to rediscover tabs that
@@ -267,10 +276,18 @@
                 break;
 
             case 'cmd:set_mute':
-                // Absolute, not a toggle: PTT mute is driven by "the rig is
-                // transmitting: true/false", and a toggle desynchronises
-                // permanently the first time a message is missed.
+                // Absolute, not a toggle: a toggle desynchronises permanently
+                // the first time a message is missed. This is the operator's
+                // own mute — the thing the popup's button shows.
                 send('command', { name: 'mute', args: { muted: !!msg.muted } });
+                break;
+
+            case 'cmd:set_duck':
+                // Silence that is not the operator's mute: the rig is
+                // transmitting, or this tab is not the selected one. It leaves
+                // the mute setting alone, so a transmission cannot end with the
+                // receiver muted and the button cannot be made to lie.
+                send('command', { name: 'duck', args: { ducked: !!msg.ducked } });
                 break;
         }
     });

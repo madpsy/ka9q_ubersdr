@@ -8,7 +8,7 @@ A Chrome extension (Manifest V3) that connects to any open UberSDR tab and lets 
 
 ```bash
 cd clients/chrome-bridge
-make build          # builds dist/ubersdr_bridge_chrome-1.0.4.zip
+make build          # builds dist/ubersdr_bridge_chrome-2.0.0.zip
 ```
 
 Or without make:
@@ -47,25 +47,64 @@ Build the `.zip` with `make build`, then upload it via the [Chrome Web Store dev
 - **Mode control** — USB, LSB, CWU, CWL, AM, SAM, FM, NFM
 - **Bandwidth control** — set low and high edges independently
 - **flrig sync** — optional bidirectional frequency/mode sync with flrig via XML-RPC
-- **PTT mute** — automatically mutes the SDR tab while the rig is transmitting
+- **PTT mute** — silences the receiver while the rig is transmitting, without touching the mute you set
 - **VFO A/B** — assign each UberSDR tab to a VFO; switching VFOs in flrig auto-selects the matching tab
 - **Profiles** — save and restore sets of UberSDR instances with their frequencies and modes
 
 ---
 
+## Tests
+
+```bash
+make test          # or npm test — needs esbuild and node, no npm install
+```
+
+The content script is tested against the **real** v2 page API rather than a mock
+of it: `test/run.sh` bundles the page's own bridge modules and runs the content
+script, unedited, against them. A test that presses a popup button therefore
+ends in the call the receiver would actually make.
+
+`test/contract.test.js` covers the seams where the two sides can drift apart
+silently — the protocol constants duplicated in the content script, the `cmd:*`
+messages the service worker and popup send, the manifest, and that this content
+script is still identical to the Firefox extension's.
+
 ## How It Works
+
+The extension speaks the **UberSDR v2 page API** — the contract is documented in
+`static/v2/BRIDGE_API.md`, and this extension is a client of it. It requires the
+v2 interface; the older interface is not supported.
+
+`content_script.js` is byte-identical to the one in the Firefox extension, and a
+test in each asserts it. That is only possible because the v2 API is a message
+channel rather than a JavaScript object: **there is no MAIN-world script any
+more**, and with it went the two-world relay, the ping that covered the race
+between them, and the eight-second probe.
 
 ### Detection
 
-The content script (`content_script.js`) is injected into every page. It injects a small script into the real page world (bypassing the content-script sandbox) that waits up to 8 seconds for `window.radioAPI` and `window.userSessionID` to appear — globals that only exist on UberSDR pages. If found, it registers the tab with the background service worker.
+The content script dispatches one `hello` on the page API's event channel, then
+listens. A v2 page answers with an `announce` carrying the receiver's identity,
+the session, and what it can do; the tab is registered on that. A page that is
+not an UberSDR never answers, and the cost there is a single idle listener — no
+polling, no timers, and nothing logged.
 
 ### State observation
 
-The injected page-world script subscribes to `window.radioAPI.on('frequency_changed', ...)`, `mode_changed`, and `bandwidth_changed` — the same event bus used by in-page extensions like FT8 and WEFAX. No polling, no DOM scraping.
+The content script subscribes to the `tuning`, `audio`, `session` and `signal`
+topics. The page pushes only what changed, and the signal meter is asked for at
+most four readings a second. `content_script.js` maps those topics onto the flat
+state object the service worker and popup use, so nothing beyond that file knows
+the page's vocabulary.
 
 ### Command execution
 
-Commands from the popup are forwarded by the background service worker to the content script in the target tab via `chrome.tabs.sendMessage`. The content script relays them into the page world via `postMessage`, where the injected script calls `window.radioAPI.setMode()`, `window.radioAPI.setBandwidth()`, or the full `autoTune()` pipeline for frequency changes.
+Commands from the popup are forwarded by the service worker to the content
+script, which turns them into page API commands — `tune`, `mode`, `passband`,
+`mute`. Each is validated by the page and either succeeds or answers with a
+reason, which is logged; a command never silently does nothing. Loading a saved
+profile sends frequency, mode and passband as a single `tune`, so the receiver
+does not pass through intermediate settings on the way.
 
 ### Multi-tab selection
 
@@ -225,6 +264,6 @@ clients/chrome-bridge/
 ## Limitations
 
 - **Audio in background tabs** — Chrome may throttle or suspend audio in non-visible tabs. Frequency and mode control still work; audio decoders (FT8, WEFAX, etc.) may pause.
-- **Frequency range** — clamped to 10 kHz – 30 MHz, matching UberSDR's `autoTune()` validation.
+- **Frequency range** — 10 kHz – 30 MHz. The page refuses anything outside it with a reason rather than clamping silently; a relative step stops at the band edge, as the dial does.
 - **Service worker lifetime** — Chrome can kill the service worker after ~30 seconds of inactivity. The `chrome.alarms` keepalive re-wakes it every minute; the poll chain restarts automatically. There may be a brief gap in flrig polling while the SW is asleep.
 - **CORS** — the bridge server must include `Access-Control-Allow-Origin: *` in its responses.

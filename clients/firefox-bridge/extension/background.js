@@ -5,7 +5,7 @@
 //   2. Track which tab the user has selected as the "active" target
 //   3. Relay commands from the popup to the selected tab's content script
 //   4. Relay state updates from content scripts to the popup (if open)
-//   5. Sync frequency/mode with flrig via XML-RPC (bidirectional, configurable)
+//   5. Sync frequency/mode with flrig via XML-RPC (one direction, configurable)
 
 'use strict';
 
@@ -37,7 +37,14 @@ let pluginEnabled  = true;
 let flrigEnabled    = false;
 let flrigHost       = '127.0.0.1';
 let flrigPort       = 12345;
-let flrigDirection  = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'
+// One way or the other, never both.
+//
+// Two-way sync is a feedback loop with a timer holding it apart: every push to
+// flrig comes back as a change from flrig, so it needs an echo-suppression
+// window, and anything that arrives inside that window — a real move on the
+// rig, a VFO switch, a tab change — is indistinguishable from the echo and gets
+// dropped. Picking a direction removes the loop instead of policing it.
+let flrigDirection  = 'sdr-to-rig';   // 'sdr-to-rig' | 'rig-to-sdr'
 let flrigConnected  = false;
 
 // PTT mute: when true, the selected SDR tab is muted while the rig is transmitting.
@@ -58,8 +65,8 @@ let _lastSdrMode   = null;
 
 // Cooldown: after pushing SDR→rig, suppress rig→SDR for a short window to
 // prevent the round-trip echo (SDR tunes → flrig updates → poll reads back → SDR tunes again).
-const FLRIG_ECHO_COOLDOWN_MS = 2000;
-let _sdrToRigLastPushTime = 0;
+const FLRIG_SWITCH_SETTLE_MS = 2000;
+let _flrigSwitchedAt = 0;   // when flrig or the selected tab last changed VFO
 
 // Debounce for SDR→rig pushes: accumulate rapid freq/mode changes (e.g. page
 // load burst, user dragging) and only push to flrig once things settle.
@@ -78,7 +85,11 @@ browser.storage.local.get([
     if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
     if (stored.flrigHost       !== undefined) flrigHost       = stored.flrigHost;
     if (stored.flrigPort       !== undefined) flrigPort       = stored.flrigPort;
-    if (stored.flrigDirection  !== undefined) flrigDirection  = stored.flrigDirection;
+    // 'both' was an option until it was removed; anyone who had it selected is
+    // moved to the direction that does what they most likely wanted.
+    if (stored.flrigDirection !== undefined) {
+        flrigDirection = stored.flrigDirection === 'both' ? 'sdr-to-rig' : stored.flrigDirection;
+    }
     if (stored.pluginEnabled   !== undefined) pluginEnabled   = stored.pluginEnabled;
     if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
 });
@@ -126,7 +137,7 @@ browser.tabs.onActivated.addListener(({ tabId }) => {
     }
 
     // Mute all other UberSDR tabs; unmute the newly active one.
-    muteAllExcept(tabId);
+    duckAllExcept(tabId);
 
     // Reset echo-prevention for the new tab context.
     // Clear _lastSdrFreq/Mode so they get re-seeded from flrig's actual current
@@ -138,7 +149,7 @@ browser.tabs.onActivated.addListener(({ tabId }) => {
     _lastSdrMode = null;
     // Activate the SDR→rig cooldown and cancel any pending debounce so stale
     // SDR state from the previous tab can't overwrite flrig after the switch.
-    _sdrToRigLastPushTime = Date.now();
+    _flrigSwitchedAt = Date.now();
     if (_sdrToRigDebounceTimer) {
         clearTimeout(_sdrToRigDebounceTimer);
         _sdrToRigDebounceTimer = null;
@@ -318,15 +329,15 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
                 // SDR → rig: only push if the receiver is actually playing and
                 // the direction allows it.
-                // Also suppress during the VFO-switch cooldown window — the newly
-                // selected tab will echo its current state immediately after being
-                // activated, and we must not write that back to flrig (which is now
-                // on the new VFO and should keep its own frequency).
-                const inVfoCooldown = (Date.now() - _sdrToRigLastPushTime) < FLRIG_ECHO_COOLDOWN_MS;
+                // Nothing is written for a moment after a VFO or tab switch: the
+                // newly selected tab announces its state the instant it becomes
+                // active, and flrig is now on the other VFO and should keep its
+                // own frequency rather than be given that one.
+                const inVfoCooldown = (Date.now() - _flrigSwitchedAt) < FLRIG_SWITCH_SETTLE_MS;
                 // Only sync if this tab has a VFO assigned (null = unassigned / '—').
                 const tabVfoForSync = entry.vfo || null;
                 if (flrigEnabled && flrigConnected && entry.audioStarted && tabVfoForSync &&
-                    (flrigDirection === 'sdr-to-rig' || flrigDirection === 'both')) {
+                    flrigDirection === 'sdr-to-rig') {
                     if (!inVfoCooldown) pushSdrStateToFlrig(msg.state);
                 }
             }
@@ -383,7 +394,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 }
 
                 // Mute all other tabs; unmute the newly selected one.
-                muteAllExcept(newTabId);
+                duckAllExcept(newTabId);
 
                 // Bring the selected browser tab to the foreground.
                 browser.tabs.update(newTabId, { active: true }).catch(() => {});
@@ -398,7 +409,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 _lastSdrMode = null;
                 // Activate the SDR→rig cooldown and cancel any pending debounce
                 // so stale SDR state from the previous tab can't overwrite flrig.
-                _sdrToRigLastPushTime = Date.now();
+                _flrigSwitchedAt = Date.now();
                 if (_sdrToRigDebounceTimer) {
                     clearTimeout(_sdrToRigDebounceTimer);
                     _sdrToRigDebounceTimer = null;
@@ -456,7 +467,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             flrigEnabled   = !!msg.enabled;
             if (msg.host      !== undefined) flrigHost      = msg.host;
             if (msg.port      !== undefined) flrigPort      = msg.port;
-            if (msg.direction !== undefined) flrigDirection = msg.direction;
+            if (msg.direction === 'sdr-to-rig' || msg.direction === 'rig-to-sdr') {
+                flrigDirection = msg.direction;
+            }
             browser.storage.local.set({ flrigEnabled, flrigHost, flrigPort, flrigDirection });
 
             if (!flrigEnabled) {
@@ -474,17 +487,10 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             // If disabling PTT-mute while the rig is transmitting, unmute the SDR.
             if (!pttMuteEnabled && _lastPtt) {
                 if (selectedTabId && registry.has(selectedTabId)) {
-                    browser.tabs.update(selectedTabId, { muted: false }).catch(() => {});
-                    // browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: false }).catch(() => {});
+                    browser.tabs.sendMessage(selectedTabId, {
+                        type: 'cmd:set_duck', ducked: false,
+                    }).catch(() => {});
                 }
-            }
-            break;
-        }
-
-        // ── Popup: mute / unmute the selected tab (tab-level, browser mixer) ──
-        case 'popup:set_tab_mute': {
-            if (selectedTabId && registry.has(selectedTabId)) {
-                browser.tabs.update(selectedTabId, { muted: !!msg.muted }).catch(() => {});
             }
             break;
         }
@@ -653,12 +659,22 @@ function forwardCommandToTab(command) {
 // Mute every registered tab except activeTabId (which gets unmuted).
 // Only acts when there are 2+ tabs — single-tab setups are left alone.
 // Uses browser tab-level mute (instant, OS mixer) for fastest response.
-// Muted at the browser mixer rather than through the page: tab mute is
-// instant, where the page's own mute ramps its gain and lags coming back.
-function muteAllExcept(activeTabId) {
+// Through the page rather than the browser mixer.
+//
+// Tab mute was chosen for "instant response" against v1, whose mute flushed the
+// audio queue; v2's is a 15 ms gain ramp, so there was nothing left to win. And
+// a tab mute is invisible to the page — the receiver went on showing itself
+// unmuted with nothing coming out of it.
+//
+// Ducking rather than muting: this is the extension deciding you are not
+// listening to that tab, not the operator muting it, and it must not overwrite
+// the mute they chose (which their browser remembers).
+function duckAllExcept(activeTabId) {
     if (registry.size < 2) return;
     for (const [tabId] of registry) {
-        browser.tabs.update(tabId, { muted: tabId !== activeTabId }).catch(() => {});
+        browser.tabs.sendMessage(tabId, {
+            type: 'cmd:set_duck', ducked: tabId !== activeTabId,
+        }).catch(() => {});
     }
 }
 
@@ -826,7 +842,7 @@ function pushSdrStateToFlrig(state) {
                     // Activate the cooldown immediately on VFO switch so the poll
                     // doesn't push the new VFO's existing frequency back to SDR
                     // before we've had a chance to write the correct value.
-                    _sdrToRigLastPushTime = Date.now();
+                    _flrigSwitchedAt = Date.now();
                     // Seed _lastFlrigFreq/_lastFlrigMode with the new VFO's current
                     // values so the poll doesn't see freqChanged=true and spam
                     // the page with tune commands.
@@ -851,7 +867,6 @@ function pushSdrStateToFlrig(state) {
                     _lastSdrFreq = freq;
                     await flrigSetFreq(freq);
                     pushed = true;
-                } else {
                 }
             }
             if (mode !== null && mode !== undefined) {
@@ -864,7 +879,12 @@ function pushSdrStateToFlrig(state) {
             }
             // Record the time of the last SDR→rig push so the rig→SDR poll can
             // suppress the round-trip echo for a short cooldown window.
-            if (pushed) _sdrToRigLastPushTime = Date.now();
+            // No stamp here. This used to mark "we just wrote to flrig, ignore
+            // the echo coming back" — necessary when both directions ran at
+            // once. With one direction there is no echo, and stamping it made
+            // the gate above swallow the next two seconds of dial movement:
+            // the rig lagged the SDR and skipped everything in between.
+            void pushed;
         } catch (err) {
             console.warn('[UberSDR Bridge] flrig write failed:', err);
             // flrig not reachable — will be caught by reconnect loop
@@ -890,7 +910,7 @@ async function pollFlrigToSdr() {
             _lastFlrigMode = null;
             _lastSdrFreq   = null;
             _lastSdrMode   = null;
-            _sdrToRigLastPushTime = Date.now();
+            _flrigSwitchedAt = Date.now();
             if (_sdrToRigDebounceTimer) {
                 clearTimeout(_sdrToRigDebounceTimer);
                 _sdrToRigDebounceTimer = null;
@@ -919,7 +939,7 @@ async function pollFlrigToSdr() {
                 browser.storage.local.set({ selectedTabId });
                 lastKnownState = matchingTab.lastState;
                 // Mute all other tabs; unmute the one now active.
-                muteAllExcept(selectedTabId);
+                duckAllExcept(selectedTabId);
                 // Bring the matching browser tab to the foreground.
                 browser.tabs.update(selectedTabId, { active: true }).catch(() => {});
                 broadcastRegistry();
@@ -952,9 +972,12 @@ async function pollFlrigToSdr() {
             broadcastToPopup({ type: 'ptt:status', active: pttNow });
 
             if (pttMuteEnabled && selectedTabId && registry.has(selectedTabId)) {
-                // TX → mute; RX → unmute, at the browser mixer: instant, where
-                // the page's own mute ramps its gain and lags coming back.
-                browser.tabs.update(selectedTabId, { muted: pttNow }).catch(() => {});
+                // TX → quiet; RX → audible. Ducked, not muted: the operator's
+                // own mute setting is theirs, and a transmission that ended
+                // badly must not leave the receiver silent for good.
+                browser.tabs.sendMessage(selectedTabId, {
+                    type: 'cmd:set_duck', ducked: pttNow,
+                }).catch(() => {});
             }
         }
 
@@ -962,13 +985,11 @@ async function pollFlrigToSdr() {
         broadcastToPopup({ type: 'flrig:state', freq, mode: modeRaw, vfo: flrigActiveVfo, ptt: pttNow });
 
         // Only push to SDR if direction allows it.
-        if (flrigDirection === 'rig-to-sdr' || flrigDirection === 'both') {
-            // Suppress rig→SDR during the cooldown window after a SDR→rig push
-            // to prevent the round-trip echo loop.
-            const inCooldown = (Date.now() - _sdrToRigLastPushTime) < FLRIG_ECHO_COOLDOWN_MS;
-            if (inCooldown) {
-                return;
-            }
+        if (flrigDirection === 'rig-to-sdr') {
+            // Nothing is pushed for a moment after flrig or the selected tab
+            // changes VFO: the reading in hand is the old VFO's, and writing it
+            // to the receiver now would tune it somewhere neither is.
+            if ((Date.now() - _flrigSwitchedAt) < FLRIG_SWITCH_SETTLE_MS) return;
 
             // Only send to SDR when flrig value has actually changed (1 Hz resolution)
             const freqChanged = _lastFlrigFreq === null || freq !== _lastFlrigFreq;

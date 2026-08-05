@@ -1,4 +1,13 @@
-// A browser, enough of one to run the content script.
+// A browser, enough of one to run the content script — the Chrome half.
+//
+// Identical to the Firefox harness except for the last argument: the content
+// script picks its extension API with
+//
+//     const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
+//
+// so passing `browser` as undefined and a fake `chrome` exercises the branch
+// Chrome actually takes. The script file itself is byte-identical in both
+// extensions, and contract.test.js asserts it.
 //
 // The content script is loaded as it ships — the file is read and executed with
 // `window`, `document`, `browser`, `CustomEvent` and `console` supplied as
@@ -57,7 +66,7 @@ function makePage(over = {}) {
     const toBackground = [];
     // The background script's listeners, so a test can send it commands.
     const commandListeners = [];
-    const browser = {
+    const chromeApi = {
         runtime: {
             sendMessage: (msg) => { toBackground.push(msg); return Promise.resolve(); },
             onMessage: { addListener: (fn) => commandListeners.push(fn) },
@@ -154,8 +163,8 @@ function makePage(over = {}) {
     // The content script, exactly as it ships.
     const src = fs.readFileSync(SCRIPT, 'utf8');
     // eslint-disable-next-line no-new-func
-    new Function('window', 'document', 'browser', 'CustomEvent', 'console', src)(
-        window, document, browser, CE, fakeConsole,
+    new Function('window', 'document', 'browser', 'chrome', 'CustomEvent', 'console', src)(
+        window, document, undefined, chromeApi, CE, fakeConsole,
     );
 
     return {

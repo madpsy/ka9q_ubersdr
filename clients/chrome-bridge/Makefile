@@ -17,7 +17,7 @@
 # To submit to Chrome Web Store:
 #   Upload dist/ubersdr_bridge_chrome-{version}.zip via the developer dashboard.
 
-.PHONY: all build zip icons clean help
+.PHONY: all build zip test icons clean help
 
 EXTENSION_DIR := extension
 DIST_DIR      := dist
@@ -44,6 +44,10 @@ build: icons
 
 ## zip: Alias for build
 zip: build
+
+## test: Run the extension's tests (needs esbuild and node, no npm install)
+test:
+	./test/run.sh
 
 ## icons: Regenerate PNG icons from icon_source.png (requires ImageMagick)
 icons: $(ICON_48) $(ICON_96) $(ICON_128)

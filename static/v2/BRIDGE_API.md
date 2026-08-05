@@ -121,7 +121,7 @@ neither of them has.
   "page": { "url": "…", "title": "…" },
   "capabilities": ["tune","mode",…,"functions","rotator","antenna"],
   "topics": ["tuning","audio","signal","spectrum","session","page","modes","bands","functions"],
-  "commands": ["tune","mode","passband","volume","mute","squelch","vfo","spectrum","power"]
+  "commands": ["tune","mode","passband","volume","mute","duck","squelch","vfo","spectrum","power"]
 }
 ```
 
@@ -149,9 +149,12 @@ missing value, never an absent key. That is what makes patch merging safe.
 
 ### `audio`
 ```jsonc
-{ "volume": 0.7, "muted": false, "channel": "both", "bufferSec": 0.2,
+{ "volume": 0.7, "muted": false, "ducked": false, "channel": "both", "bufferSec": 0.2,
   "squelch": { "value": 40, "enabled": true, "threshold": 12, "open": true } }
 ```
+`muted` is the operator's setting; `ducked` is transient silence applied by
+something else (a transmitting rig, an extension speaking over the audio).
+They are separate so a client showing a mute button shows the *mute*.
 `squelch.open` is live — whether the gate is passing audio right now.
 
 ### `signal`
@@ -228,6 +231,7 @@ One rule governs bad input:
 | `passband` | `{low, high}` — checked against the mode in force | tuning |
 | `volume` | `{volume}` \| `{delta}` — 0..1 | `{volume, muted}` |
 | `mute` | `{muted}` (absolute) \| `{toggle:true}` | `{muted}` |
+| `duck` | `{ducked}` — silence that is **not** the user's mute | `{ducked}` |
 | `squelch` | `{value}` \| `{enabled:false}` \| `{auto:true}` | `{value, enabled, threshold?}` |
 | `vfo` | `{id:"A"…"D"}` \| `{step:±1}` | `{vfo, …tuning}` |
 | `spectrum` | `{center}`, `{span}`, `{center,span}`, `{zoom:±n, about?}`, `{centerOnTuned:true}`, `{reset:true}` | spectrum |
@@ -235,10 +239,16 @@ One rule governs bad input:
 
 Notes that matter:
 
-- **`mute` is absolute.** PTT mute is driven by "the rig is transmitting:
+- **`mute` is absolute.** PTT is driven by "the rig is transmitting:
   true/false"; a toggle desynchronises permanently the first time a message is
   missed, and un-mutes on every transmit thereafter. `toggle` exists for a
   button that genuinely means "the other one".
+- **Use `duck`, not `mute`, for anything transient.** `mute` is the operator's
+  own setting — it is what the page's mute button shows and what this browser
+  remembers. `duck` silences the audio without touching it, so a transmission
+  that ended badly cannot leave the receiver muted for good, and a client
+  showing a mute button is never made to lie. Both are reported in the `audio`
+  topic, separately.
 - **`tune` carries mode and passband in one call.** Sending them separately
   walks the receiver through intermediate mode/passband pairs, which is audible.
 - **`spectrum` with `center` and `span` together** is one call for the same

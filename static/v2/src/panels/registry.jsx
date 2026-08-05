@@ -154,6 +154,8 @@ export const PANELS = [
         icon: <Icon.Compass />,
         dock: 'left',
         defaultOpen: false,
+        // Minimal: where the beam is pointing, the dial to swing it, and Stop.
+        minimal: true,
         Component: RotatorPanel,
         requires: (serverInfo) => !!(serverInfo && serverInfo.rotator && serverInfo.rotator.enabled),
     },
@@ -163,6 +165,8 @@ export const PANELS = [
         icon: <Icon.Antenna />,
         dock: 'left',
         defaultOpen: false,
+        // Minimal: the antenna buttons and what is live, without the history.
+        minimal: true,
         Component: AntennaPanel,
         requires: (serverInfo) => !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled),
     },

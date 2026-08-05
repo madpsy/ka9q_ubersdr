@@ -54,7 +54,13 @@ function beamPath(azimuth) {
     return `M ${R} ${R} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${R - 12} ${R - 12} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
 }
 
-export default function RotatorPanel() {
+// `minimal` keeps where the beam is pointing and the two things you might need
+// in a hurry: clicking a bearing on the dial, and Stop. What goes is the setup
+// and the reference — the typed-bearing entry, the link to v1's full map page,
+// the note about floating the panel to get the azimuthal map, and the list of
+// countries in the beam. Stop stays because the dial does not: a rotation you
+// can start with one click and cannot stop is worse than no control at all.
+export default function RotatorPanel({ minimal }) {
     const [status, setStatus] = useState(null);
     const [countries, setCountries] = useState([]);
     const [target, setTarget] = useState(null);      // last bearing we asked for
@@ -323,7 +329,7 @@ export default function RotatorPanel() {
             </svg>
             )}
 
-            {mapSize === 0 && !readOnly && (
+            {!minimal && mapSize === 0 && !readOnly && (
                 <div className="note note--tight">
                     {mapFailed
                         ? 'Azimuthal map unavailable — using the compass.'
@@ -332,37 +338,43 @@ export default function RotatorPanel() {
             )}
 
             {readOnly ? (
-                <div className="note note--tight">👁 View only — no rotator password configured.</div>
+                !minimal && <div className="note note--tight">👁 View only — no rotator password configured.</div>
             ) : (
                 <div className="rot-entry">
-                    <input
-                        className="input rot-entry__input"
-                        type="number"
-                        min="0"
-                        max="359"
-                        placeholder="Bearing°"
-                        value={entry}
-                        onChange={(e) => setEntry(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
-                            const v = parseFloat(entry);
-                            if (Number.isFinite(v)) { run(v); setEntry(''); }
-                        }}
-                    />
-                    <button
-                        type="button"
-                        className="btn btn--primary btn--sm"
-                        onClick={() => {
-                            const v = parseFloat(entry);
-                            if (Number.isFinite(v)) { run(v); setEntry(''); }
-                        }}
-                    >
-                        Go
-                    </button>
+                    {!minimal && (
+                        <>
+                            <input
+                                className="input rot-entry__input"
+                                type="number"
+                                min="0"
+                                max="359"
+                                placeholder="Bearing°"
+                                value={entry}
+                                onChange={(e) => setEntry(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    const v = parseFloat(entry);
+                                    if (Number.isFinite(v)) { run(v); setEntry(''); }
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                onClick={() => {
+                                    const v = parseFloat(entry);
+                                    if (Number.isFinite(v)) { run(v); setEntry(''); }
+                                }}
+                            >
+                                Go
+                            </button>
+                        </>
+                    )}
                     <button type="button" className="btn btn--ghost btn--sm" onClick={() => command('stop')}>Stop</button>
-                    <a className="btn btn--ghost btn--sm" href="/rotator.html" target="_blank" rel="noopener noreferrer">
-                        Map <Icon.External size={12} />
-                    </a>
+                    {!minimal && (
+                        <a className="btn btn--ghost btn--sm" href="/rotator.html" target="_blank" rel="noopener noreferrer">
+                            Map <Icon.External size={12} />
+                        </a>
+                    )}
                 </div>
             )}
 
@@ -386,7 +398,7 @@ export default function RotatorPanel() {
 
             {error && pending == null && <div className="note note--warn">{error}</div>}
 
-            {inBeam.length > 0 && (
+            {!minimal && inBeam.length > 0 && (
                 <>
                     <div className="divider" />
                     <span className="section-label">In the beam</span>

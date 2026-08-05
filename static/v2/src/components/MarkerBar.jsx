@@ -18,6 +18,19 @@ import { subscribeSpots } from '../lib/spotStore.js';
 import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
+// How much of the band's own colour carries on down behind the marker rows.
+//
+// The strip alone said which band you were looking at only if you looked at the
+// strip; the markers underneath sat on the bar's background and belonged to
+// nothing. Tinting the whole height puts each pill inside its allocation, so
+// the band a bookmark or a spot is in is read from where it sits rather than by
+// tracking up to the strip and back.
+//
+// A fraction rather than the full colour because it is a backdrop for pills and
+// their labels, not a band of its own — and the palette is already translucent
+// (see bandColors), so this multiplies down from whatever intensity the
+// operator has set rather than fighting it.
+const BAND_BODY_ALPHA = 0.4;
 const ROW_H = 15;         // one bookmark row
 const ROWS = 2;
 const PILL_H = 13;
@@ -168,14 +181,22 @@ export default function MarkerBar({ width }) {
 
             for (const s of spans) {
                 c.fillStyle = colors[s.index % colors.length];
+                // The body first, behind the marker rows, then the strip at
+                // full strength over the top of it.
+                c.globalAlpha = BAND_BODY_ALPHA;
+                c.fillRect(s.x0, BAND_H, s.width, MARKER_BAR_H - BAND_H);
+                c.globalAlpha = 1;
                 c.fillRect(s.x0, 0, s.width, BAND_H);
                 // A brighter top edge reads as a band boundary even where two
                 // allocations of similar colour meet.
                 c.fillStyle = 'rgba(255,255,255,0.18)';
                 c.fillRect(s.x0, 0, Math.max(1, s.width), 1);
                 if (s.width > 2) {
+                    // Full height, so the edge between two allocations is
+                    // followable down past the markers rather than stopping
+                    // where the strip does.
                     c.fillStyle = 'rgba(255,255,255,0.10)';
-                    c.fillRect(s.x0, 0, 1, BAND_H);
+                    c.fillRect(s.x0, 0, 1, MARKER_BAR_H);
                 }
                 hitsRef.current.bands.push(s);
             }

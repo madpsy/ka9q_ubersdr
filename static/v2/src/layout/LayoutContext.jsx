@@ -20,9 +20,15 @@ const FLOAT_DEFAULT = { w: 320, h: 320 };
 const FLOAT_MIN = { w: 220, h: 120 };
 const FLOAT_CASCADE = 26;
 
+// `collapsed` is the first-run state, not a preference: reconcile() below keeps
+// whatever a stored layout says, so this only decides what someone arriving for
+// the first time sees. Both the right and bottom docks start collapsed to their
+// rail — the spectrum is what people come for, and a receiver that opens with
+// three columns of panels around it has to be tidied before it can be used.
+// Everything in them is one click on the rail away.
 const DOCK_DEFAULTS = {
     left: { size: 320, collapsed: false, minSize: 220, maxSize: 560 },
-    right: { size: 320, collapsed: false, minSize: 220, maxSize: 560 },
+    right: { size: 320, collapsed: true, minSize: 220, maxSize: 560 },
     bottom: { size: 240, collapsed: true, minSize: 120, maxSize: 560 },
 };
 

@@ -8,7 +8,11 @@ import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 const STORAGE_KEY = 'ubersdr.v2.display';
 
 export const DEFAULTS = {
-    palette: 'turbo',
+    // The first-run palette. Classic over turbo: black-blue-cyan-yellow-white
+    // is what an SDR waterfall has looked like since the first ones, so it is
+    // the one people arrive already able to read. A stored choice wins — see
+    // load() — so this only decides what a new visitor gets.
+    palette: 'classic',
     contrast: 1.0,          // gamma applied to the waterfall colour mapping
     autoRange: true,
     // Minimum dynamic range in auto-level mode, dB. null follows the operator's

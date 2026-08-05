@@ -508,7 +508,16 @@ export function RadioProvider({ children }) {
         // rule itself is in lib/zoom.js, with the rest of the view geometry.
         const recenterIfNeeded = (t) => {
             if (!followRef.current || !spectrumConn.connected) return;
-            if (needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span)) {
+            // TEMPORARY — VFO recall diagnosis. Remove with the [vfo] logs.
+            const need = needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span);
+            console.log('[vfo] recenterIfNeeded', {
+                dial: t.frequency,
+                follow: followRef.current,
+                centre: spectrumConn.centerFreq,
+                span: spectrumConn.span,
+                needsRecenter: need,
+            });
+            if (need) {
                 spectrumConn.setView(clamp(t.frequency, MIN_FREQ, MAX_FREQ), null);
             }
         };

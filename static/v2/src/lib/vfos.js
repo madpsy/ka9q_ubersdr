@@ -147,13 +147,30 @@ export function switchTo(state, to, live) {
 
 function applyZoom(radio, binBandwidth) {
     const { view, actions } = radio;
-    if (!binBandwidth || !view || !view.binCount) return;
+    if (!binBandwidth || !view || !view.binCount) {
+        // TEMPORARY — VFO recall diagnosis. Remove once the cause is known.
+        console.log('[vfo] applyZoom skipped', {
+            binBandwidth, binCount: view && view.binCount,
+        });
+        return;
+    }
     // At or beyond full span, `reset` is the way back — it also hands the
     // private radiod channel back.
     if (view.defaultBinBandwidth > 0 && binBandwidth >= view.defaultBinBandwidth) {
+        console.log('[vfo] applyZoom -> resetSpectrum', {
+            binBandwidth, defaultBinBandwidth: view.defaultBinBandwidth,
+        });
         actions.resetSpectrum();
         return;
     }
+    console.log('[vfo] applyZoom -> setSpan', {
+        span: binBandwidth * view.binCount,
+        binBandwidth,
+        binCount: view.binCount,
+        // setSpan sends no centre frequency, so whatever the view is centred on
+        // now is what it stays centred on.
+        centreNow: view.centerFreq,
+    });
     actions.setSpan(binBandwidth * view.binCount);
 }
 
@@ -163,6 +180,27 @@ export function selectVfo(radio, to) {
     const { state, recall } = switchTo(before, to, vfoSnapshot(radio.tuning, radio.view));
     if (state === before) return false;
     setVfos(state);
+    // TEMPORARY — VFO recall diagnosis. Remove once the cause is known.
+    const v = radio.view || {};
+    console.log(`[vfo] ${before.active} -> ${to}`, {
+        recall: recall
+            ? { freq: recall.frequency, mode: recall.mode, binBandwidth: recall.binBandwidth }
+            : null,
+        dialNow: radio.tuning.frequency,
+        viewBefore: {
+            centre: v.centerFreq,
+            span: v.span,
+            binBandwidth: v.binBandwidth,
+            binCount: v.binCount,
+            defaultBinBandwidth: v.defaultBinBandwidth,
+        },
+        // Is the recalled dial inside the view as it stands? If it is, the
+        // auto-recentre has nothing to do — and if the span then shrinks around
+        // the old centre, it ends up outside with no second chance to move.
+        recallInsideCurrentView: recall && v.span
+            ? Math.abs(recall.frequency - v.centerFreq) <= v.span / 2
+            : null,
+    });
     if (!recall) return true;   // an unused VFO starts as a copy of this one
     radio.actions.tuneTo({
         frequency: recall.frequency,

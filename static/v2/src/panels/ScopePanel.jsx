@@ -52,9 +52,10 @@ const RULER_H = 13;
 const SCOPE_MIN_PEAK = 0.05;   // fraction of full scale; below this, no extra gain
 const SCOPE_SILENT_LSB = 2;    // +/-2/128 or less is the gate closed, not a signal
 
-// `minimal` keeps the view switch and the two canvases and drops the settings
-// under them — timebase, contrast, resolution — and the bandwidth line. The
-// settings still apply; they are just not on show. See the registry's `minimal`.
+// `minimal` keeps the canvases and drops everything else: the view switch, the
+// settings under them (timebase, waterfall speed, contrast, resolution) and the
+// bandwidth line. All of it still applies — it is just not on show. See the
+// registry's `minimal`.
 export default function ScopePanel({ minimal }) {
     const { player, running, tuning } = useRadio();
     const display = useDisplay();
@@ -63,7 +64,7 @@ export default function ScopePanel({ minimal }) {
     const [fftSize, setFftSize] = useState(display.scopeFft || 4096);
     const [timebase, setTimebase] = useState(display.scopeTimebase || 20);   // ms across the scope
     const [contrast, setContrast] = useState(display.scopeContrast || 1);
-    const [wfRate, setWfRate] = useState(display.scopeRate || 30);   // waterfall rows/s
+    const [wfRate, setWfRate] = useState(display.scopeRate || AUDIO_WF_RATE_MAX);   // rows/s
     const [rate, setRate] = useState(null);   // audio sample rate, once known
 
     const scopeRef = useRef(null);
@@ -135,7 +136,10 @@ export default function ScopePanel({ minimal }) {
 
     return (
         <div className="stack">
-            <Segmented options={VIEWS} value={view} onChange={setView} size="sm" />
+            {/* Which of the two views is on is a setting like the rest, and the
+                minimal view is the picture on its own. Whatever is chosen still
+                applies — it is just not on show. */}
+            {!minimal && <Segmented options={VIEWS} value={view} onChange={setView} size="sm" />}
 
             {showScope && (
                 <div className="scope">

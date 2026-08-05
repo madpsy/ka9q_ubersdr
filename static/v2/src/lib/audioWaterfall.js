@@ -8,11 +8,16 @@
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
 
-// One row, ~30 rows a second, as v1 runs it. The default rather than a fixed
-// rate: how fast the history should scroll depends on what is being watched —
+// How fast the history scrolls, in rows a second. A setting rather than the
+// fixed 33 ms v1 runs at: what it should be depends on what is being watched —
 // a slow CW signal wants minutes on screen, and reading a digital burst wants
 // the opposite.
-const DEFAULT_ROWS_PER_SEC = 30;
+//
+// The maximum is also the default, and both are 60 deliberately. Frames arrive
+// at the analyser's own cadence, which is a display frame — so one row per frame
+// is as fast as this can go however high the number, and asking for more would
+// be a slider with a dead top end. From there it only slows down.
+const DEFAULT_ROWS_PER_SEC = 60;
 export const AUDIO_WF_RATE_MIN = 2;
 export const AUDIO_WF_RATE_MAX = 60;
 

@@ -37,7 +37,8 @@ t('a missing or nonsense rate falls back rather than freezing', () => {
         const ms = audioRowMs(bad);
         assert.ok(Number.isFinite(ms) && ms > 0, `${String(bad)} gave ${ms}`);
     }
-    assert.strictEqual(audioRowMs(undefined), 1000 / 30, 'the v1 default');
+    // The default is the top of the range: one row per analyser frame.
+    assert.strictEqual(audioRowMs(undefined), 1000 / AUDIO_WF_RATE_MAX);
 });
 
 console.log(`\n${pass} ok`);

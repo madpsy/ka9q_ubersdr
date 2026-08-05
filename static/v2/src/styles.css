@@ -3216,6 +3216,19 @@ a.btn { text-decoration: none; }
 .spots__list--digital { --spot-cols: 38px 30px 62px 92px 58px minmax(0, 1fr) 34px 46px minmax(0, 1.6fr); }
 .spots__list--cw { --spot-cols: 38px 30px 62px 92px 34px minmax(0, 1fr) 34px 46px minmax(0, 1fr); }
 
+/* The minimal view drops the UTC cell — see SpotsPanel — so the track it sat in
+   has to go with it, or every column after it lands one place to the left of
+   its heading. The same tracks, less the leading 38px: nothing else changes
+   width, the two free-text tails just get 38px more between them.
+
+   Written out per tab rather than derived. A custom property cannot have a
+   track sliced off it, and the alternatives — an empty `--spot-time`, or
+   `grid-template-columns` rebuilt in JS — are both more cleverness than three
+   plain lines are worth. */
+.spots__list--min.spots__list--dx { --spot-cols: 30px 62px 92px minmax(0, 1fr) minmax(0, 1.8fr); }
+.spots__list--min.spots__list--digital { --spot-cols: 30px 62px 92px 58px minmax(0, 1fr) 34px 46px minmax(0, 1.6fr); }
+.spots__list--min.spots__list--cw { --spot-cols: 30px 62px 92px 34px minmax(0, 1fr) 34px 46px minmax(0, 1fr); }
+
 .spot-row {
     display: grid;
     grid-template-columns: var(--spot-cols);

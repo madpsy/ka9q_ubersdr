@@ -160,7 +160,7 @@ function Filters({ tab, filters, set, countries }) {
     );
 }
 
-function Row({ spot, tab, now, tuned, onTune }) {
+function Row({ spot, tab, now, tuned, onTune, minimal }) {
     const mhz = (spot.frequency / 1e6).toFixed(spot.frequency >= 1e6 ? 4 : 6);
     const flag = countryFlag(spot.countryCode);
     const utc = new Date(spot.at).toISOString().slice(11, 16);
@@ -174,6 +174,9 @@ function Row({ spot, tab, now, tuned, onTune }) {
 
     const title = [
         clickable ? `${mhz} MHz — ${modeForSpot(spot).toUpperCase()}` : `${mhz} MHz`,
+        // Only when the column is not on screen, which is the minimal view —
+        // the Age beside it says how long ago, but not at what time.
+        minimal ? `${utc} UTC` : null,
         spot.country ? `${spot.callsign} · ${spot.country}` : spot.callsign,
         spot.spotter ? `Spotted by ${spot.spotter}` : null,
         spot.grid ? `Grid ${spot.grid}` : null,
@@ -185,7 +188,7 @@ function Row({ spot, tab, now, tuned, onTune }) {
 
     const cells = (
         <>
-            <span className="spot-row__time">{utc}</span>
+            {!minimal && <span className="spot-row__time">{utc}</span>}
             <span className="spot-row__age">{ageLabel(spot.at, now)}</span>
             <span className="spot-row__freq">{mhz}</span>
             <span className="spot-row__call">{flag ? `${flag} ${spot.callsign}` : spot.callsign}</span>
@@ -243,18 +246,27 @@ const HEADINGS = {
     cw: [[T, 'UTC'], [A, 'Age'], [F, 'MHz'], [C, 'Call'], [N, 'WPM'], [X, 'Country'], [S, 'SNR'], [D, 'km'], [O, 'Spotter']],
 };
 
-function Head({ tab }) {
+function Head({ tab, minimal }) {
     return (
         <div className="spot-row spot-row--head" aria-hidden="true">
-            {HEADINGS[tab].map(([cls, label]) => <span key={label} className={cls}>{label}</span>)}
+            {HEADINGS[tab]
+                .filter(([cls]) => !(minimal && cls === T))
+                .map(([cls, label]) => <span key={label} className={cls}>{label}</span>)}
         </div>
     );
 }
 
-// `minimal` hides the filter row and leaves the list. The filters themselves
-// stay in force — hiding a control does not undo it — and the count above the
-// list keeps reading "N of M" whenever they are narrowing anything, so a short
-// list is never a mystery. See the registry's `minimal`.
+// `minimal` keeps the list and drops what is around it: the filter row, the UTC
+// column, and the CW tab's Graph button.
+//
+// The time goes because Age is right beside it saying the same thing in the
+// form you actually read — "4m" rather than a clock you have to subtract from —
+// and because it is 38px of a panel that has none to spare. The exact time
+// moves into the row's tooltip rather than being lost.
+//
+// The filters stay in force — hiding a control does not undo it — and the count
+// above the list keeps reading "N of M" whenever they are narrowing anything,
+// so a short list is never a mystery. See the registry's `minimal`.
 export default function SpotsPanel({ minimal }) {
     const { serverInfo, tuning, actions, running } = useRadio();
     const { sections } = useLayout();
@@ -363,8 +375,13 @@ export default function SpotsPanel({ minimal }) {
                 {/* v1 ships this as the CW skimmer extension's "View Spots"
                     button. The page is a chart of the same spots over time,
                     with its own filters, map and morse decoder — see
-                    compat/cwGraph.js for what it expects from us. */}
-                {active === 'cw' && (
+                    compat/cwGraph.js for what it expects from us.
+
+                    Not in the minimal view: it opens a whole second window, so
+                    it belongs with the setup this view drops rather than with
+                    the list it keeps — and its label is the widest thing in a
+                    row that has the spot count to fit as well. */}
+                {active === 'cw' && !minimal && (
                     <Button
                         size="sm"
                         variant="ghost"
@@ -394,7 +411,7 @@ export default function SpotsPanel({ minimal }) {
 
             {!minimal && <Filters tab={active} filters={f} set={set} countries={countries} />}
 
-            <div className={`list spots__list spots__list--${active}`}>
+            <div className={`list spots__list spots__list--${active}${minimal ? ' spots__list--min' : ''}`}>
                 {page.length === 0 && (
                     <Empty>
                         {list.length === 0
@@ -402,7 +419,7 @@ export default function SpotsPanel({ minimal }) {
                             : 'No spots match these filters.'}
                     </Empty>
                 )}
-                {page.length > 0 && <Head tab={active} />}
+                {page.length > 0 && <Head tab={active} minimal={minimal} />}
                 {page.map((spot) => (
                     <Row
                         key={spot.key}
@@ -411,6 +428,7 @@ export default function SpotsPanel({ minimal }) {
                         now={now}
                         tuned={Math.abs(spot.frequency - tuning.frequency) < 200}
                         onTune={tune}
+                        minimal={minimal}
                     />
                 ))}
             </div>

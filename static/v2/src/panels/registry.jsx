@@ -76,8 +76,11 @@ export const PANELS = [
         // it stays declared for anyone who drags it there. The table is wide,
         // and a side dock is not, so this is a panel people will often float.
         fill: true,
-        // Minimal: the spots, without the filter row. Once the filters are set
-        // they are set, and in a side dock they cost more height than the list.
+        // Minimal: the spots, without the filter row, the UTC column or the CW
+        // tab's Graph button. Once the filters are set they are set, and in a
+        // side dock they cost more height than the list; the time is what Age
+        // beside it already tells you, and the graph opens a second window,
+        // which is not what a compact list is for.
         minimal: true,
         Component: SpotsPanel,
         requires: (serverInfo) => spotTabs(serverInfo).length > 0,

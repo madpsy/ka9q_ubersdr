@@ -32,9 +32,11 @@ export function antennaLabel(status, n) {
     return labels[n - 1] || `Antenna ${n}`;
 }
 
-// `minimal` keeps the antenna buttons, what is live, and Ground all — the panel
-// is a set of buttons, and cutting those down would leave nothing to use. What
-// goes is the switching history and the link to v1's full controls page.
+// `minimal` keeps the antenna buttons and what is live — the panel is a set of
+// buttons, and cutting those would leave nothing to use. What goes is Ground
+// all, the switching history and the link to v1's full controls page. Grounding
+// is a deliberate act rather than a glance, and the readout still says so when
+// the array is grounded.
 export default function AntennaPanel({ minimal }) {
     const [status, setStatus] = useState(null);
     const [history, setHistory] = useState([]);
@@ -136,21 +138,21 @@ export default function AntennaPanel({ minimal }) {
                 ))}
             </div>
 
-            <div className="row-end">
-                <button
-                    type="button"
-                    className={`btn btn--sm${status.grounded ? ' btn--danger' : ' btn--ghost'}`}
-                    disabled={locked}
-                    onClick={() => run({ command: 'ground' })}
-                >
-                    ⏚ Ground all
-                </button>
-                {!minimal && (
+            {!minimal && (
+                <div className="row-end">
+                    <button
+                        type="button"
+                        className={`btn btn--sm${status.grounded ? ' btn--danger' : ' btn--ghost'}`}
+                        disabled={locked}
+                        onClick={() => run({ command: 'ground' })}
+                    >
+                        ⏚ Ground all
+                    </button>
                     <a className="btn btn--ghost btn--sm" href="/switch.html" target="_blank" rel="noopener noreferrer">
                         Controls <Icon.External size={12} />
                     </a>
-                )}
-            </div>
+                </div>
+            )}
 
             {pending && (
                 <PasswordRow

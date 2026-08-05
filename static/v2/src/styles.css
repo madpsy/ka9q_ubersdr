@@ -225,9 +225,16 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Nothing scrolls the document. The shell is exactly the window and every
+   scroller lives inside it, so any document-level scrolling is rubber-banding —
+   and a rubber-band at the top of the page is pull-to-refresh. `overflow:
+   hidden` removes the scrollport, `overscroll-behavior: none` removes the bounce
+   and the horizontal overscroll that browsers read as back/forward. */
 html, body, #root {
     height: 100%;
     margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 body {
@@ -237,7 +244,6 @@ body {
     font-size: calc(14px * var(--ui-scale));
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
-    overscroll-behavior: none;
 }
 
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -3001,6 +3007,17 @@ a.btn { text-decoration: none; }
 /* =========================================================================
    Mobile
    ========================================================================= */
+
+/* A scroller that reaches its end must not hand the rest of the gesture back to
+   the browser. That chaining is what fires pull-to-refresh from a sheet scrolled
+   to its top, and what turns a swipe along the tab bar past its last item into a
+   page back. The property only means anything on a scroll container, so covering
+   the subtree costs nothing and does not rot as panels are added.
+ *
+ * Mobile only: on a desktop, a wheel that runs a list out and carries on into
+ * the dock behind it is the behaviour people expect. */
+.shell--mobile,
+.shell--mobile * { overscroll-behavior: contain; }
 
 .shell--mobile .shell__center { padding: 6px; }
 

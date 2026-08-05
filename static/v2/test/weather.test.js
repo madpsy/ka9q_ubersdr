@@ -256,7 +256,12 @@ t('the cache lets go once it is stale', () => withFetch(
     async (calls) => {
         wx._resetWeather();
         await wx.fetchWeather();
-        await wx.fetchWeather({ now: Date.now() + 61_000 });
+        // Under five minutes is still the cached answer — the panel polls at
+        // five and the spectrum's station block at fifteen, and between them
+        // that should be about one request per interval, not three.
+        await wx.fetchWeather({ now: Date.now() + 4 * 60_000 });
+        assert.strictEqual(calls(), 1);
+        await wx.fetchWeather({ now: Date.now() + 5 * 60_000 + 1000 });
         assert.strictEqual(calls(), 2);
     },
 ));

@@ -37,6 +37,7 @@ import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
 import { edgeHit } from '../lib/edgeHit.js';
+import { fetchWeather, windKmh } from '../lib/weather.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -343,7 +344,12 @@ function ControlTags() {
 //
 // Colour and the on/off switch are the operator's station_id_color and
 // station_id_overlay from /api/ui-config — the same values v1 reads.
-const WIND_DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
+
+// Eight points, not the sixteen lib/weather.js gives the panel. This block is
+// v1's, reproduced line for line so both UIs read the same, and v1 rounds to
+// eight — "WSW" here where v1 says "SW" would be a visible divergence in the one
+// place the two are meant to match.
+const WIND_DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 // No emoji here, unlike v1's thermometer and wind glyphs.
 //
@@ -352,17 +358,18 @@ const WIND_DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
 // differently from the rest, which is what put the weather line — and only the
 // weather line, the other three being plain text — off the right-hand edge.
 // A middle dot separates the parts instead, and reads the same everywhere.
-function weatherLine(wd) {
-    if (!wd || !wd.weather || !wd.weather.length) return null;
-    const desc = String(wd.weather[0].description || '')
-        .split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    const temp = wd.main && wd.main.temp !== undefined
-        ? `${Math.round(wd.main.temp)}°C` : '';
+function weatherLine(w) {
+    if (!w) return null;
+    // Title case, as v1 paints it. lib/weather.js hands over a sentence.
+    const desc = w.description.split(' ')
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    const temp = w.tempC != null ? `${Math.round(w.tempC)}°C` : '';
     let wind = '';
-    if (wd.wind && wd.wind.speed !== undefined) {
-        const kmh = Math.round(wd.wind.speed * 3.6);
-        const dir = wd.wind.deg !== undefined ? WIND_DIRS[Math.round(wd.wind.deg / 45) % 8] : '';
-        wind = `${kmh} km/h${dir ? ' ' + dir : ''}`;
+    if (w.windMs != null) {
+        const dir = w.windDeg != null
+            ? WIND_DIRS[Math.round((((w.windDeg % 360) + 360) % 360) / 45) % 8]
+            : '';
+        wind = `${windKmh(w.windMs)} km/h${dir ? ` ${dir}` : ''}`;
     }
     return [desc, temp, wind].filter(Boolean).join(' · ') || null;
 }
@@ -389,12 +396,15 @@ function useStationOverlay(enabled) {
     useEffect(() => {
         if (!enabled) return undefined;
         let cancelled = false;
-        const load = () => fetch('/api/weather')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => { if (!cancelled) setWeather(weatherLine(d)); })
+        // Through lib/weather.js, which is the Weather panel's source too: one
+        // cache and one request between them, rather than two consumers each
+        // polling an endpoint that allows one request a second.
+        const load = () => fetchWeather()
+            .then((r) => { if (!cancelled) setWeather(r.data ? weatherLine(r.data) : null); })
             .catch(() => { /* weather is optional — leave the line off */ });
         load();
-        // 15 minutes, matching the server-side cache interval v1 tracks.
+        // 15 minutes, matching the server-side cache interval v1 tracks. Mostly
+        // answered from the shared cache without a request going out.
         const id = setInterval(load, 15 * 60 * 1000);
         return () => { cancelled = true; clearInterval(id); };
     }, [enabled]);

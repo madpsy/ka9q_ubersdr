@@ -24,7 +24,8 @@ import {
 } from '../lib/weather.js';
 
 // The server refreshes every fifteen minutes, so asking more often than every
-// five buys nothing; the library's own cache absorbs the rest.
+// five buys nothing. Unforced, so this goes through the cache the spectrum's
+// station-ID block shares — only Refresh insists on a request of its own.
 const POLL_MS = 5 * 60 * 1000;
 
 function Reading({ label, value, title }) {
@@ -48,7 +49,7 @@ export default function WeatherPanel({ minimal }) {
             if (alive) setState({ ...r, loading: false });
         });
         load(false);
-        const id = setInterval(() => load(true), POLL_MS);
+        const id = setInterval(() => load(false), POLL_MS);
         return () => { alive = false; clearInterval(id); };
     }, []);
 

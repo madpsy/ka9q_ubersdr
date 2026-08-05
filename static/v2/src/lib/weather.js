@@ -150,12 +150,19 @@ export function ageLabel(unixSec, nowMs = Date.now()) {
 
 // --- fetching ---------------------------------------------------------------
 //
-// One cache for the page. The endpoint is rate limited to one request a second
-// per IP and the data behind it only moves every fifteen minutes, so a panel
-// that is opened, closed and opened again should not spend requests on it —
-// v1 shares a promise between its two consumers for the same reason.
-
-const MIN_AGE_MS = 60_000;
+// One cache for the page, shared by everything that wants weather: the panel,
+// and the station-ID block painted on the spectrum. They ask on their own
+// schedules and mostly get the same answer back without a request.
+//
+// Worth being strict about. The endpoint is rate limited to one request a second
+// per IP, the data behind it only moves every fifteen minutes, and a panel that
+// is opened, closed and opened again should not spend requests on it. v1 shares
+// a promise between its two consumers for exactly the same reason.
+//
+// Five minutes: often enough that a reading is never badly stale against a
+// server cache that turns over every fifteen, rare enough that two consumers
+// polling independently still come to about one request per interval.
+const MIN_AGE_MS = 5 * 60_000;
 let cached = null;      // { at, result }
 let inFlight = null;
 

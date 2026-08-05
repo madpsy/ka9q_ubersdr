@@ -469,7 +469,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
    is dragged on the spectrum. */
 .topbar__bw {
     font-family: var(--mono);
-    font-size: calc(16px * var(--ui-scale));
+    /* A shade under the frequency: same type, same colour, but the frequency
+       is what you are reading and this is what you are reading it through. */
+    font-size: calc(13px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     color: var(--text);

@@ -24,8 +24,8 @@ import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 const SESSION_W = 68;
 const SPACE_WEATHER_W = 210;
 const CLOCK_W = 96;
-// "12.00k" at the frequency's size, and a space.
-const FILTER_W = 62;
+// "12.00k" a shade under the frequency's size, and a space.
+const FILTER_W = 52;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's

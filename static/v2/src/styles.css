@@ -3025,28 +3025,30 @@ a.btn { text-decoration: none; }
 .tabbar__icon { display: grid; place-items: center; }
 .tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
 
-.sheet__scrim {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    z-index: 40;
-    animation: fade-in 140ms var(--ease);
-}
-@keyframes fade-in { from { opacity: 0; } }
-
+/* A sheet sits *in* the column, between the spectrum and the tab bar, rather
+   than over everything behind a scrim.
+ *
+ * It was modal, and on a receiver that is the wrong shape: the panels are things
+ * you use *with* the spectrum — a bookmark to tune to, a filter to set, a spot
+ * to click — so dimming the spectrum and closing the panel on the first touch of
+ * it made the two mutually exclusive. In flow, the spectrum shrinks to what is
+ * left and stays live, and the tab bar stays reachable underneath so one panel
+ * can be swapped for another without closing anything.
+ *
+ * Bounded so the spectrum always keeps a usable share of the screen; the body
+ * scrolls inside whatever that leaves. */
 .sheet {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    max-height: calc(var(--app-height, 100dvh) * 0.78);
+    position: relative;
+    flex: none;
+    max-height: calc(var(--app-height, 100dvh) * 0.52);
     display: flex;
     flex-direction: column;
     background: var(--surface);
     border-top: 1px solid var(--border-strong);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    /* Over the spectrum, so the shadow along its top edge lands on it. */
+    z-index: 30;
     box-shadow: var(--shadow);
-    z-index: 50;
     animation: sheet-in 200ms var(--ease);
 }
 @keyframes sheet-in { from { transform: translateY(100%); } }
@@ -3091,7 +3093,8 @@ a.btn { text-decoration: none; }
 .sheet__body {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 14px calc(16px + env(safe-area-inset-bottom));
+    /* No safe-area inset: the tab bar is below this now and carries it. */
+    padding: 4px 14px 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3864,7 +3867,9 @@ a.btn { text-decoration: none; }
 }
 /* Same on mobile, where the extension is a sheet rather than a window. A
    decoder needs the height a panel does not, so this sheet is taller. */
-.sheet--ext { max-height: calc(var(--app-height, 100dvh) * 0.88); }
+/* A decoder earns more room than a panel — it is the thing being watched — but
+   not the whole screen: the spectrum it is decoding from stays usable. */
+.sheet--ext { max-height: calc(var(--app-height, 100dvh) * 0.66); }
 .sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
 
 /* ── FT8 ──────────────────────────────────────────────────────────────────── */

@@ -92,6 +92,10 @@ export const Icon = {
     Morse: (p) => <Svg {...p}><circle cx="4.5" cy="12" r="1.4" fill="currentColor" stroke="none" /><rect x="9" y="10.6" width="6" height="2.8" rx="1.4" fill="currentColor" stroke="none" /><circle cx="19.5" cy="12" r="1.4" fill="currentColor" stroke="none" /></Svg>,
     // A control-surface knob: a dial with an index mark and detent ticks.
     Knob: (p) => <Svg {...p}><circle cx="12" cy="12" r="6.5" /><path d="M12 5.5v3" /><path d="M12 2.6v1.2M19.6 7.5l-1 .6M19.6 16.5l-1-.6M12 21.4v-1.2M4.4 16.5l1-.6M4.4 7.5l1 .6" /></Svg>,
+    // A mouse seen from above, for what its wheel does over the spectrum. Its
+    // own glyph rather than a magnifier or a dial, both of which are already in
+    // that toolbar meaning something else.
+    Wheel: (p) => <Svg {...p}><rect x="6.5" y="2.5" width="11" height="19" rx="5.5" /><path d="M12 6.5v3.5" /></Svg>,
 };
 
 export default Icon;

@@ -15,7 +15,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
-import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN, stepLabel } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
@@ -1027,6 +1027,7 @@ export default function SpectrumView() {
 
     const span = view.span || 0;
     const anchorTuned = resolveZoomAnchor(display.zoomAnchor, mobile) === 'tuned';
+    const wheelTunes = (display.wheelAction || 'zoom') === 'tune';
 
     return (
         <div className="spectrum">
@@ -1044,19 +1045,41 @@ export default function SpectrumView() {
                     <ClipTag />
                 </div>
                 <div className="spectrum__tools">
+                    {/* What the wheel does over the spectrum, mirroring the
+                        Display panel's setting. Not on mobile: there is no
+                        wheel there, and the row has no space to spare for a
+                        control that cannot be used.
+
+                        Highlighted when it tunes rather than carrying two
+                        glyphs, because both states are the same wheel doing
+                        something — and the anchor button beside it already
+                        uses the two-icon form for a genuine either/or. */}
+                    {!mobile && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            active={wheelTunes}
+                            icon={<Icon.Wheel />}
+                            title={wheelTunes
+                                ? `Wheel tunes in ${stepLabel(display.tuneStep || 500)} steps — click to zoom instead`
+                                : 'Wheel zooms — click to tune with it instead'}
+                            aria-label="What the scroll wheel does"
+                            onClick={() => display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' })}
+                        />
+                    )}
                     {/* Only while the wheel zooms — with the wheel set to tune
                         there is nothing for an anchor to apply to. Shows the
                         anchor in force rather than the one it would switch to,
                         so the toolbar reads as state. */}
-                    {(display.wheelAction || 'zoom') === 'zoom' && (
+                    {!wheelTunes && (
                         <Button
                             size="sm"
                             variant="ghost"
                             icon={anchorTuned ? <Icon.Knob /> : <Icon.Pointer />}
                             title={anchorTuned
-                                ? 'Wheel zoom keeps the tuned frequency centred — click to zoom about the pointer'
-                                : 'Wheel zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
-                            aria-label="Wheel zoom anchor"
+                                ? 'Zoom keeps the tuned frequency centred — click to zoom about the pointer'
+                                : 'Zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
+                            aria-label="Zoom anchor"
                             onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
                         />
                     )}

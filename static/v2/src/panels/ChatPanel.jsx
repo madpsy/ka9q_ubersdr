@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from '../react.js';
 import { useChat } from '../chat/ChatContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
@@ -9,12 +8,6 @@ import {
     EMOJI_SHORTCODES, applyCompletion, applyEmojiCompletion, emojiQuery, expandShortcodes,
     matchShortcodes, matchUsernames, mentionQuery, shortcodeFor, splitMessage,
 } from '../lib/mentions.js';
-import { clamp } from '../lib/format.js';
-
-// The user list can be dragged narrower or wider. Bounds keep both halves
-// usable however the panel is sized.
-const USERS_MIN = 90;
-const STREAM_MIN = 180;
 
 function time(ts) {
     const d = new Date(ts);
@@ -51,36 +44,6 @@ export default function ChatPanel({ minimal }) {
     const [emojiOpen, setEmojiOpen] = useState(false);
     const inputRef = useRef(null);
     const logRef = useRef(null);
-    const rootRef = useRef(null);
-    const drag = useRef(null);
-
-    // Width of the user list. Held locally while dragging and written to the
-    // display settings on release, so a drag is one persisted value rather than
-    // one per pointer event.
-    const display = useDisplay();
-    const [usersWidth, setUsersWidth] = useState(display.chatUsersWidth ?? 170);
-    useEffect(() => {
-        if (!drag.current) setUsersWidth(display.chatUsersWidth ?? 170);
-    }, [display.chatUsersWidth]);
-
-    const onGripDown = (e) => {
-        e.preventDefault();
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        drag.current = { x: e.clientX, w: usersWidth };
-    };
-    const onGripMove = (e) => {
-        const d = drag.current;
-        if (!d) return;
-        const total = rootRef.current ? rootRef.current.getBoundingClientRect().width : 600;
-        // Dragging left widens the list, so the delta is inverted.
-        setUsersWidth(clamp(d.w - (e.clientX - d.x), USERS_MIN, Math.max(USERS_MIN, total - STREAM_MIN)));
-    };
-    const onGripUp = (e) => {
-        if (!drag.current) return;
-        drag.current = null;
-        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        display.set({ chatUsersWidth: Math.round(usersWidth) });
-    };
 
     // Our own name is always included, even when the server's user list has not
     // caught up — a mention of us is the one that must never fail to highlight.
@@ -237,7 +200,7 @@ export default function ChatPanel({ minimal }) {
     };
 
     return (
-        <div className="chat" ref={rootRef}>
+        <div className="chat">
             <div className="chat__stream">
                 <div className="chat__log" ref={logRef} onScroll={onLogScroll}>
                     {chat.messages.length === 0 && <Empty>No messages yet.</Empty>}
@@ -393,22 +356,8 @@ export default function ChatPanel({ minimal }) {
                 {nameError && <div className="chat__hint">{nameError}</div>}
             </div>
 
-            {/* The grip goes with the list — a splitter with nothing on its far
-                side is a handle that resizes nothing. */}
             {!minimal && (
-                <div
-                    className="chat__grip"
-                    title="Drag to resize the user list"
-                    onPointerDown={onGripDown}
-                    onPointerMove={onGripMove}
-                    onPointerUp={onGripUp}
-                    onPointerCancel={onGripUp}
-                    onDoubleClick={() => { setUsersWidth(170); display.set({ chatUsersWidth: 170 }); }}
-                />
-            )}
-
-            {!minimal && (
-                <div className="chat__users" style={{ flexBasis: usersWidth }}>
+                <div className="chat__users">
                     <div className="section-label"><span>{chat.users.length} here</span></div>
                     {chat.users.length === 0 && <Empty>Nobody yet.</Empty>}
                     {chat.users.map((u) => (

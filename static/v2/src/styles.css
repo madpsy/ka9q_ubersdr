@@ -3691,19 +3691,20 @@ a.btn { text-decoration: none; }
 .chat__stream { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 /* Drag handle between the log and the user list. Kept wider than it looks so
    it is easy to grab, with the visible line drawn by the list's own border. */
-.chat__grip {
-    flex: none;
-    width: 7px;
-    margin: 0 -6px 0 -3px;
-    cursor: col-resize;
-    touch-action: none;
-    align-self: stretch;
-    border-radius: 3px;
-}
-.chat__grip:hover, .chat__grip:active { background: var(--accent-soft); }
-
+/* As wide as the names in it, and no wider.
+ *
+ * It used to be a fixed 170px with a splitter to change it, which meant a chat
+ * with two short callsigns in it gave up a sixth of the panel to white space,
+ * and a chat with nobody in it gave up the same. Sizing to content spends the
+ * width on the conversation instead, which is what the panel is for.
+ *
+ * `max-width` is the guard in the other direction: a long username must not push
+ * the messages into a column, so past that the names ellipsise as they always
+ * did. `fit-content` rather than `auto` so the column does not stretch to fill
+ * the row when there is space going spare. */
 .chat__users {
-    flex: 0 0 170px;
+    flex: 0 0 fit-content;
+    max-width: 40%;
     display: flex;
     flex-direction: column;
     gap: 2px;

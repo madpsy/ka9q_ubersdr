@@ -81,7 +81,6 @@ export const DEFAULTS = {
     // hovering does and nothing about what a click means.
     hoverPanels: true,
     idleThrottle: true,
-    chatUsersWidth: 170,    // px given to the chat user list, drag to change
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope

@@ -500,7 +500,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: var(--radius-sm);
 }
 .topbar__meter:hover .topbar__reading { filter: brightness(1.18); }
-.topbar__meter:hover .topbar__s--label { color: var(--text); }
 
 /* Both readings in the Signal panel's number style — mono, semibold, accent,
    tabular figures — so the same measurement looks the same in both places.
@@ -512,14 +511,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-weight: 600;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
-}
-/* The left slot when it is holding the mode's name rather than a reading —
-   there is only one number in SNR mode, and it is the one on the right. */
-.topbar__s--label {
-    font-weight: 400;
-    font-size: calc(11.5px * var(--ui-scale));
-    color: var(--text-dim);
-    letter-spacing: 0.04em;
 }
 /* Sized for "S9+53", the widest the S label gets. */
 .topbar__s { font-family: var(--mono); min-width: 6ch; text-align: left; }
@@ -540,6 +531,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 /* Sized for the longest either mode produces ("-121 dBFS") so swapping between
    them does not move the bar, and neither does the value changing width. */
+/* Sized for the longest either mode produces — "42 dB SNR" and "-121 dBFS" are
+   both nine characters — so swapping modes does not move the bar. */
 .topbar__snr { font-family: var(--mono); min-width: 9ch; text-align: right; }
 
 .topbar__spacer { flex: 1; }

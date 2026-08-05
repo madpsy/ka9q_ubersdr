@@ -208,9 +208,12 @@ function TopMeter({ meters }) {
 
     const fraction = snrMode ? snrFraction(snr) : sUnitFraction(power);
     const colour = snrMode ? snrColour(snr) : sMeterColour(power);
-    const label = snrMode ? 'SNR' : sUnitLabel(power);
+    // The S reading stays put whichever way the bar is set. It is the one
+    // number an operator glances at without reading it, and swapping it for the
+    // word "SNR" took that away to say something the value beside it already
+    // says. Which reading the *bar* is drawing is the thing that changes.
     const value = snrMode
-        ? (snr == null ? '—' : `${snr.toFixed(0)} dB`)
+        ? (snr == null ? '—' : `${snr.toFixed(0)} dB SNR`)
         : (power == null || power <= -998 ? '—' : `${power.toFixed(0)} dBFS`);
 
     return (
@@ -222,9 +225,7 @@ function TopMeter({ meters }) {
                 ? 'Signal-to-noise ratio — click for the S-meter'
                 : 'Signal strength — click for SNR'}
         >
-            <span className={`topbar__s ${snrMode ? 'topbar__s--label' : 'topbar__reading'}`}>
-                {label}
-            </span>
+            <span className="topbar__s topbar__reading">{sUnitLabel(power)}</span>
             <div className="topbar__bar">
                 <div
                     className="topbar__bar-fill"

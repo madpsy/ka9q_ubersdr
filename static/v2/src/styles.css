@@ -1273,6 +1273,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
    ========================================================================= */
 
 .stack { display: flex; flex-direction: column; gap: 9px; padding-top: 6px; min-width: 0; }
+/* A stack nested inside a Field, where the outer padding and gap would read as
+   the group having drifted away from its own label. */
+.stack--tight { gap: 5px; padding-top: 0; }
 
 .divider { height: 1px; background: var(--border); margin: 1px 0; }
 

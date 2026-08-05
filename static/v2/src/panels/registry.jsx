@@ -40,6 +40,7 @@ import AudioPanel from './AudioPanel.jsx';
 import AudioFiltersPanel from './AudioFiltersPanel.jsx';
 import MediaSessionPanel from './MediaSessionPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
+import AnnouncementsPanel from './AnnouncementsPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
 import ListenersPanel from './ListenersPanel.jsx';
@@ -225,6 +226,20 @@ export const PANELS = [
     // next to the SNR meter it thresholds.
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
+    // Spoken frequency and mode, for operating without watching the screen.
+    // Ships collapsed and switched off: a receiver that starts talking on its
+    // own is one somebody has to work out how to silence.
+    // Minimal: the switch and what is being announced. The voice and the speed
+    // are chosen once.
+    {
+        id: 'announcements',
+        title: 'Announcements',
+        icon: <Icon.Announce />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: AnnouncementsPanel,
+    },
     // OS media controls — lock screen, Control Centre, notification shade, media
     // keys. Ships collapsed because it is a per-device preference rather than
     // part of operating the receiver, and absent entirely on a browser with no

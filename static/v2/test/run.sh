@@ -96,6 +96,8 @@ esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefax.cjs --log-level=warning
 esbuild ../src/lib/markerNav.js --bundle --format=cjs --platform=node \
     --outfile=.build/markernav.cjs --log-level=warning
+esbuild ../src/lib/announce.js --bundle --format=cjs --platform=node \
+    --outfile=.build/announce.cjs --log-level=warning
 esbuild ../src/radio/media/metadata.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediametadata.cjs --log-level=warning
 esbuild ../src/radio/media/support.js --bundle --format=cjs --platform=node \
@@ -152,3 +154,4 @@ node whisper.test.js
 node waterfall.test.js
 node timeconstant.test.js
 node mediasession.test.js
+node announce.test.js

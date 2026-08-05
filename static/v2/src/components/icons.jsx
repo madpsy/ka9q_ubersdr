@@ -96,6 +96,10 @@ export const Icon = {
     // own glyph rather than a magnifier or a dial, both of which are already in
     // that toolbar meaning something else.
     Wheel: (p) => <Svg {...p}><rect x="6.5" y="2.5" width="11" height="19" rx="5.5" /><path d="M12 6.5v3.5" /></Svg>,
+    // Speech, for the announcements panel: a speaker with sound leaving it.
+    // Distinct from Volume, which is the audio output level and already spoken
+    // for by the Audio panel.
+    Announce: (p) => <Svg {...p}><path d="M4 9v6h3.5L13 19V5L7.5 9z" /><path d="M16.5 9.5a4 4 0 0 1 0 5" /><path d="M19.5 6.5a8 8 0 0 1 0 11" /></Svg>,
 };
 
 export default Icon;

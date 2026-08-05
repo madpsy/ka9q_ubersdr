@@ -35,6 +35,22 @@ const STOPS = {
         [0.00, 4, 8, 16], [0.35, 12, 66, 104], [0.7, 62, 180, 208],
         [1.00, 226, 250, 255],
     ],
+    // A radar scope: one green hue from an unlit tube up to a hot trace.
+    //
+    // Single-hue and monotonically brighter, which is what a magnitude scale
+    // wants — every step reads as "more" without the eye having to learn a hue
+    // order first, the way it must with turbo. The hue stays around 140-150°
+    // and only the lightness climbs, so a strong signal cannot be mistaken for
+    // a differently-coloured weak one.
+    //
+    // It ends white rather than at full green: a phosphor tube blooms towards
+    // white where it is driven hardest, and holding a pure hue at the top would
+    // waste the last of the range, since #00ff41 and the green below it are
+    // close in lightness even though they are far apart in signal.
+    radar: [
+        [0.00, 2, 10, 5], [0.30, 6, 54, 24], [0.55, 12, 122, 46],
+        [0.78, 46, 200, 78], [0.92, 130, 240, 132], [1.00, 226, 255, 226],
+    ],
 };
 
 function buildLUT(stops) {

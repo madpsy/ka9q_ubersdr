@@ -61,8 +61,9 @@ import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 
 export const PANELS = [
-    // Minimal: the dial and the mode buttons — what you tune with. The filter,
-    // the passband readout and AGC are settings you reach for occasionally.
+    // Minimal: the dial, the mode buttons and the filter width — what you tune
+    // with. The filter shift, the passband readout and AGC are settings you
+    // reach for occasionally.
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
     // DX, digital and CW spots. One tab per feed the instance actually has, and
     // the panel is absent entirely when it has none — no empty slot explaining

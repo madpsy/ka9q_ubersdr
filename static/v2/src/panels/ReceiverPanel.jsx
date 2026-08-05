@@ -93,9 +93,9 @@ function VfoBar() {
     );
 }
 
-// `minimal` keeps what you tune with — the dial, the VFOs, its step, and the
-// mode — and drops the filter, the passband readout and AGC. See the registry's
-// `minimal`.
+// `minimal` keeps what you tune with — the dial, the VFOs, its step, the mode
+// and the filter width — and drops the filter shift, the passband readout and
+// AGC. See the registry's `minimal`.
 export default function ReceiverPanel({ minimal }) {
     const { tuning, actions, running } = useRadio();
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
@@ -161,18 +161,23 @@ export default function ReceiverPanel({ minimal }) {
                 />
             </Field>
 
+            {/* In the minimal view too. It is the one filter control you work
+                at while listening — narrowing onto a signal next to a louder
+                one is part of tuning, not part of setting the receiver up — and
+                its own hint carries the width, so it needs neither the passband
+                readout below nor a label of its own to be useful. */}
+            <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
+                <Slider
+                    value={Math.min(width, maxFilterWidth(tuning.mode))}
+                    min={100}
+                    max={maxFilterWidth(tuning.mode)}
+                    step={50}
+                    onChange={setWidth}
+                />
+            </Field>
+
             {!minimal && (
                 <>
-                    <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
-                        <Slider
-                            value={Math.min(width, maxFilterWidth(tuning.mode))}
-                            min={100}
-                            max={maxFilterWidth(tuning.mode)}
-                            step={50}
-                            onChange={setWidth}
-                        />
-                    </Field>
-
                     <Field label="Filter shift" hint={`${Math.round(shift)} Hz`}>
                         <Slider value={Math.round(shift)} min={-1500} max={1500} step={10} onChange={setShift} />
                     </Field>

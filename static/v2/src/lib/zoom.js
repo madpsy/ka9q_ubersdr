@@ -75,34 +75,82 @@ export function zoomCenter({ centerFreq, span, binCount }, newBinBW, aboutHz, tu
 // ---------------------------------------------------------------------------
 // The zoom as a ladder of rungs.
 //
-// zoomIn/zoomOut move one rung at a time and read the span the *server* last
-// confirmed, which is all a button needs. A control that shows the ladder —
-// the Multipad's zoom barrel — needs to name the rungs instead: which one is in
-// force, what is either side of it, and how far the ladder goes. Rung 0 is the
-// full span and each one after it halves, matching the factor-of-two steps the
-// zoom actions take, so a rung here is the same thing a button press is.
+// zoomIn/zoomOut halve or double and then read back whatever the server made of
+// it, which is all a button needs: it never has to know where it will land. A
+// control that *draws* the ladder — the Multipad's zoom barrel — does. It has to
+// name the rung in force, the ones either side of it, and where the ladder ends,
+// a detent at a time.
+//
+// So the rungs are the views that actually exist, and there are only two rules
+// making them (both in user_spectrum_websocket.go):
+//
+//   Above BIN_BW_PASSTHROUGH the server takes a request as given, so the wide
+//   end of the ladder is exactly what halving produces.
+//
+//   At or below it every request is snapped to BIN_BW_LADDER, so from there down
+//   the rungs are that list and nothing between.
+//
+// Powers of two below the full span — which is what this used to assume — are
+// right for the first two rungs and drift after that: on a 1024-bin receiver the
+// real ladder runs 30 M, 15 M, 5.12 M, 2.048 M … and its floor sits 11.5
+// doublings down, so flooring that to 11 left the last rung, the one the zoom
+// buttons and a pinch both reach, off the drum entirely.
 
-/** Rung of a span. 0 is full span; deeper rungs are narrower views. */
-export function rungOfSpan(span, fullSpan) {
-    if (!(span > 0) || !(fullSpan > 0)) return 0;
-    return Math.max(0, Math.round(Math.log2(fullSpan / span)));
-}
+// Descending, as the server's if-chain snaps them.
+export const BIN_BW_LADDER = [5000, 2000, 1000, 500, 300, 200, 100, 50, 20, 10, 5, 2, 1, 0.5];
 
-/** The span at a rung. */
-export function spanAtRung(rung, fullSpan) {
-    return fullSpan / (2 ** Math.max(0, rung));
+// Above this a request is passed through untouched — the default full-span
+// bandwidth (30 MHz / bin_count) is far above it, which is the case it exists
+// for.
+export const BIN_BW_PASSTHROUGH = 7500;
+
+/**
+ * Every span the zoom controls can actually produce, widest first.
+ *
+ * `fullBinBW` and `binCount` are the server's defaults (`defaultBinBandwidth`,
+ * `defaultBinCount`); `minBinBW` is the floor, which is
+ * SpectrumConnection.minBinBandwidthForUI. The bin count is deliberately the
+ * default rather than the live one: the server's deep-zoom path reduces it, and
+ * the ladder must not change shape underneath a drum that is being spun.
+ */
+export function zoomLadder(fullBinBW, binCount, minBinBW) {
+    if (!(fullBinBW > 0) || !(binCount > 0)) return [];
+    const floor = Math.max(minBinBW > 0 ? minBinBW : 0.5, 0.5);
+    const bws = [];
+    for (let bw = fullBinBW; bw > BIN_BW_PASSTHROUGH && bw >= floor; bw /= 2) bws.push(bw);
+    for (const bw of BIN_BW_LADDER) {
+        if (bw < floor) break;                                  // the list descends
+        if (bw > fullBinBW) continue;                           // wider than this receiver's full view
+        if (bws.length && bw >= bws[bws.length - 1]) continue;
+        bws.push(bw);
+    }
+    // A receiver whose full span is already at the floor still has one view.
+    if (!bws.length) bws.push(fullBinBW);
+    return bws.map((bw) => bw * binCount);
 }
 
 /**
- * The deepest rung the zoom controls will reach.
+ * Which rung a span is on: the nearest, measured as a ratio.
  *
- * Floored rather than rounded: the last rung has to be a span the controls can
- * actually produce, and half a rung past the stop is a detent that looks
- * available and does nothing.
+ * Ratios rather than differences, because the ladder is geometric — 20 kHz is
+ * nearer 20.48 than 10.24 by either measure, but at the wide end a difference
+ * would put anything below about 17 MHz on the 5 MHz rung.
  */
-export function deepestRung(fullSpan, minSpan) {
-    if (!(fullSpan > 0) || !(minSpan > 0) || minSpan >= fullSpan) return 0;
-    return Math.max(0, Math.floor(Math.log2(fullSpan / minSpan)));
+export function rungOfSpan(span, ladder) {
+    if (!ladder || !ladder.length || !(span > 0)) return 0;
+    let best = 0;
+    let bestErr = Infinity;
+    for (let i = 0; i < ladder.length; i++) {
+        const err = Math.abs(Math.log(ladder[i] / span));
+        if (err < bestErr) { bestErr = err; best = i; }
+    }
+    return best;
+}
+
+/** The span at a rung, clamped to the ends of the ladder. */
+export function spanAtRung(rung, ladder) {
+    if (!ladder || !ladder.length) return 0;
+    return ladder[clamp(Math.round(rung), 0, ladder.length - 1)];
 }
 
 /**

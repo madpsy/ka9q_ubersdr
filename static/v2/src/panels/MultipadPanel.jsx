@@ -16,18 +16,18 @@
 // differently here from the panel it duplicates is a control you have to learn
 // twice.
 
-import React, { useEffect, useRef, useState } from '../react.js';
+import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
 import { Segmented, Slider } from '../components/ui.jsx';
-import { clamp, formatHz, formatSpan, snrColour, snrFraction } from '../lib/format.js';
+import { clamp, formatHz, snrColour, snrFraction } from '../lib/format.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
     bandTip, bandTone, getBandConditions, subscribeBandConditions,
 } from '../lib/bandConditions.js';
-import { deepestRung, rungOfSpan, spanAtRung } from '../lib/zoom.js';
+import { rungOfSpan, spanAtRung, zoomLadder } from '../lib/zoom.js';
 import { MIN_ZOOM_SPAN_HZ } from '../radio/spectrum-connection.js';
 import {
     FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODES, SQUELCH_MAX, SQUELCH_MIN,
@@ -173,9 +173,11 @@ function FreqWheel() {
     );
 }
 
-// Zoom, as the ladder it actually is: one detent per rung, each rung half the
-// span of the one before it — the same factor of two the zoom buttons take,
-// because anything gentler rounds back to the rung it started on.
+// Zoom, one detent per rung of the ladder the server actually offers — see
+// zoomLadder in lib/zoom.js. Not powers of two below the full span: those are
+// right for the first two rungs, drift after that, and put the floor half a rung
+// past the end, which left the drum a detent short of where the zoom buttons and
+// a pinch both stop.
 function ZoomWheel() {
     const { view, tuning, actions } = useRadio();
     // Only to redraw the labels while the drum is driving; the rung itself is
@@ -185,24 +187,35 @@ function ZoomWheel() {
     const rungRef = useRef(0);
     const owned = useRef(false);
 
-    const fullSpan = view.defaultBinBandwidth * view.defaultBinCount;
-    // Mirrors SpectrumConnection.minBinBandwidthForUI, which is the same floor
-    // expressed per bin: a span, so the depth of the ladder does not change with
-    // the server's bin count, and never finer than the 0.5 Hz/bin it will serve.
-    const minSpan = Math.max(MIN_ZOOM_SPAN_HZ, 0.5 * view.defaultBinCount);
-    const deepest = deepestRung(fullSpan, minSpan);
-    const ready = fullSpan > 0 && view.span > 0;
+    // Mirrors SpectrumConnection.minBinBandwidthForUI: a span floor expressed
+    // per bin, so the depth of the ladder does not change with the bin count,
+    // and never finer than the 0.5 Hz/bin the server will serve.
+    const minBinBW = Math.max(0.5, MIN_ZOOM_SPAN_HZ / (view.defaultBinCount || 1));
+    const ladder = useMemo(
+        () => zoomLadder(view.defaultBinBandwidth, view.defaultBinCount, minBinBW),
+        [view.defaultBinBandwidth, view.defaultBinCount, minBinBW],
+    );
+    const deepest = ladder.length - 1;
+    const ready = ladder.length > 1 && view.span > 0;
 
     // Follow the spectrum whenever the drum is not the one moving it: a pinch,
     // a bookmark or the toolbar's buttons all show up here with no wiring.
-    if (!owned.current) rungRef.current = rungOfSpan(view.span, fullSpan);
+    if (!owned.current) rungRef.current = rungOfSpan(view.span, ladder);
     const rung = rungRef.current;
 
+    // Labelled by how far in it is, not by the span it produces.
+    //
+    // "6×" says what the control is; "5.12 MHz" says what the spectrum will
+    // show, which the spectrum's own scale is about to say anyway — and it left
+    // the drum needing a caption to explain that a column of kilohertz was a
+    // zoom. A magnification is also the one reading here that means the same
+    // thing on every receiver: the spans depend on the bin count, and rung 6 is
+    // 307.2 kHz on one instance and something else on the next.
     const label = (i) => {
         if (!ready) return undefined;
         const k = rung + i;
         if (k < 0 || k > deepest) return undefined;     // the ends of the ladder
-        return formatSpan(spanAtRung(k, fullSpan));
+        return `${Math.round(ladder[0] / ladder[k])}×`;
     };
 
     const zoom = (n) => {
@@ -217,7 +230,7 @@ function ZoomWheel() {
         // hands the private radiod channel back instead of leaving one
         // allocated at full span. Same rule zoomOut follows.
         if (next === 0) actions.resetSpectrum();
-        else actions.setSpectrumView(tuning.frequency, spanAtRung(next, fullSpan));
+        else actions.setSpectrumView(tuning.frequency, spanAtRung(next, ladder));
         return next - from;
     };
 
@@ -238,9 +251,7 @@ function ZoomWheel() {
             disabled={!ready}
             ariaLabel="Zoom wheel"
             className="barrel--zoom"
-        >
-            <span className="barrel__caption">Zoom</span>
-        </Barrel>
+        />
     );
 }
 

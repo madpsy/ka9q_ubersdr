@@ -1943,7 +1943,8 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
     white-space: nowrap;
 }
-/* The detent under the needle, which on the zoom drum is the span in force. */
+/* The detent under the needle, which on the zoom drum is the magnification in
+   force. */
 .barrel__cell.is-centre .barrel__tick { background: var(--accent); }
 .barrel__cell.is-centre .barrel__text { color: var(--accent); font-weight: 700; }
 
@@ -1962,22 +1963,10 @@ a.btn { text-decoration: none; }
     background: linear-gradient(180deg, var(--accent), rgba(0, 0, 0, 0) 70%);
 }
 
-.barrel__caption {
-    position: absolute;
-    left: 9px;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 3;
-    pointer-events: none;
-    font-size: calc(9px * var(--ui-scale));
-    font-weight: 650;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-}
-
-/* Only a dozen rungs deep and every one of them labelled, so it is shorter than
-   the frequency drum and its ticks are hints rather than a scale. */
+/* Only a dozen rungs deep and every one of them labelled — "1×, 2×, 6×…", which
+   is what says at a glance that this drum is the zoom and not a second scale —
+   so it is shorter than the frequency drum and its ticks are hints rather than a
+   scale of their own. */
 .barrel--zoom { height: 38px; }
 .barrel--zoom .barrel__cell { padding-top: 6px; gap: 3px; }
 .barrel--zoom .barrel__tick { height: 5px; }

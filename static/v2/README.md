@@ -222,12 +222,26 @@ The physics is in `lib/barrel.js` and tested (`test/barrel.test.js`): a flick
 throws at the speed of the last 90 ms and not the whole gesture, a drag that came
 to rest before the finger lifted throws nothing, and every frame's travel is
 either a whole detent taken or a remainder still on the drum, so a spin cannot
-lose steps. The zoom barrel drives `lib/zoom.js`'s rung helpers — rung 0 is full
-span and each one halves, matching the factor-of-two steps the zoom buttons take,
-because anything gentler rounds back to the rung it started on. It keeps its own
-rung while spinning and hands it back to the server's answer when the drum stops:
-a zoom is confirmed a round trip later, so a drum reading `view.span` would ask
-for the same rung several frames running.
+lose steps.
+
+The zoom barrel is one detent per rung of `zoomLadder()` in `lib/zoom.js`, and
+its detents are labelled by magnification — `1×, 2×, 6×, 15×…` — which is what
+says at a glance that the drum is the zoom rather than a second frequency scale,
+and is the one reading here that means the same thing on every receiver (the
+spans depend on the bin count). A button never needs the ladder: `zoomIn` halves
+and reads back whatever the server made of it. A control that *draws* the ladder
+does, and powers of two are not it. The server snaps `binBandwidth` to a fixed
+list, so on a 1024-bin receiver the reachable spans run 30 M, 15 M, 5.12 M,
+2.048 M … 10.24 k — right for the first two rungs and drifting after that, with
+the floor 11.5 doublings down. Assuming powers of two therefore left the barrel a
+detent short of where the buttons and a pinch both stop, and made the drum jump
+after settling wherever the model and the server disagreed. `zoomLadder()` builds
+the real list from the two rules the server actually applies (pass a request
+through above `BIN_BW_PASSTHROUGH`, snap it to `BIN_BW_LADDER` below), and
+`rungOfSpan()` finds the nearest rung by *ratio*, since the ladder is geometric.
+The barrel keeps its own rung while spinning and hands it back to the server's
+answer when the drum stops: a zoom is confirmed a round trip later, so a drum
+reading `view.span` would ask for the same rung several frames running.
 
 ## Extensions
 

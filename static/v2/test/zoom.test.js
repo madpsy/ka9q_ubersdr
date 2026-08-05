@@ -5,7 +5,8 @@
 
 const assert = require('assert');
 const {
-    clampCenter, deepestRung, needsRecenter, resumeView, rungOfSpan, spanAtRung, zoomCenter,
+    BIN_BW_LADDER, BIN_BW_PASSTHROUGH, clampCenter, needsRecenter, resumeView, rungOfSpan,
+    spanAtRung, zoomCenter, zoomLadder,
 } = require('./.build/zoom.cjs');
 const { MAX_FREQ, MIN_FREQ } = require('./.build/constants.cjs');
 
@@ -213,54 +214,94 @@ t('a saved zoom with no span is trusted for the zoom but not the centre', () => 
 
 // --- the ladder, as the Multipad's zoom barrel reads it ---------------------
 
-// A 30 MHz full span over 1024 bins, and the 10.24 kHz floor both frontends
-// stop at.
-const FULL = 30e6;
-const FLOOR = 10240;
+// A stock receiver: 1024 bins over 0-30 MHz, so 29296.875 Hz/bin at full span,
+// and the 10.24 kHz floor both frontends stop at — 10 Hz/bin over those bins.
+const LADDER_BINS = 1024;
+const FULL_BW = 30e6 / LADDER_BINS;
+const FLOOR_BW = 10;
+const L = zoomLadder(FULL_BW, LADDER_BINS, FLOOR_BW);
 
-t('the rung of a span, and the span of a rung, are the same ladder', () => {
-    assert.strictEqual(rungOfSpan(FULL, FULL), 0);
-    assert.strictEqual(rungOfSpan(FULL / 2, FULL), 1);
-    assert.strictEqual(rungOfSpan(FULL / 8, FULL), 3);
-    assert.strictEqual(spanAtRung(0, FULL), FULL);
-    assert.strictEqual(spanAtRung(3, FULL), FULL / 8);
-    for (let k = 0; k <= 11; k++) {
-        assert.strictEqual(rungOfSpan(spanAtRung(k, FULL), FULL), k, `rung ${k}`);
+// What repeated zoomIn actually produces, worked through the server's snapping
+// (user_spectrum_websocket.go). This is the list the drum has to draw: get it
+// wrong and a detent either does nothing or is missing.
+const REACHABLE = [30e6, 15e6, 5.12e6, 2.048e6, 1.024e6, 512e3, 307.2e3, 204.8e3, 102.4e3, 51.2e3, 20.48e3, 10.24e3];
+
+t('the ladder is the spans the server actually serves', () => {
+    assert.deepStrictEqual(L.map((s) => Math.round(s)), REACHABLE.map((s) => Math.round(s)));
+});
+
+t('the ladder reaches the floor, not half a rung above it', () => {
+    // The regression this exists for: the floor is 11.5 doublings below full
+    // span, so a powers-of-two ladder floored to 11 stopped at 14.6 kHz — one
+    // detent short of where the zoom buttons and a pinch both stop.
+    assert.strictEqual(L[L.length - 1], FLOOR_BW * LADDER_BINS);
+    assert.strictEqual(L.length, 12);
+});
+
+t('every rung round-trips', () => {
+    for (let k = 0; k < L.length; k++) {
+        assert.strictEqual(rungOfSpan(spanAtRung(k, L), L), k, `rung ${k}`);
     }
 });
 
-t('a span between two rungs reads as the nearer one', () => {
-    // The server snaps binBandwidth to a ladder of its own, so the span that
-    // comes back is rarely exactly a power of two down from full.
-    assert.strictEqual(rungOfSpan(FULL / 2 * 1.1, FULL), 1);
-    assert.strictEqual(rungOfSpan(FULL / 2 * 0.92, FULL), 1);
+t('a span the server rounded lands on the rung it meant', () => {
+    // The confirmed span is exact for every rung on this receiver, but a view
+    // set from elsewhere — a band button asking for 350 kHz — is not.
+    assert.strictEqual(rungOfSpan(350e3, L), 6);        // snapped to 307.2 kHz
+    assert.strictEqual(rungOfSpan(20.48e3 * 1.04, L), 10);
+    assert.strictEqual(rungOfSpan(20.48e3 * 0.96, L), 10);
 });
 
-t('nothing goes above full span', () => {
-    // Zoomed out past the default — which the reset path can produce — is still
-    // rung 0, not a negative one that would draw detents off the top.
-    assert.strictEqual(rungOfSpan(FULL * 4, FULL), 0);
-    assert.strictEqual(spanAtRung(-3, FULL), FULL);
+t('nearest is measured as a ratio, not a difference', () => {
+    // 15 kHz lies between the 20.48 and 10.24 kHz rungs. By difference it is
+    // nearer the lower one (4.8 kHz against 5.5); by ratio — which is how a
+    // geometric ladder is read, and how it looks on a screen where each rung is
+    // one detent — it is nearer the upper. The boundary is the geometric mean.
+    assert.strictEqual(rungOfSpan(15e3, L), 10);
+    assert.strictEqual(rungOfSpan(Math.sqrt(20.48e3 * 10.24e3) * 0.99, L), 11);
+    // Same rule at the wide end, where the rungs are megahertz apart.
+    assert.strictEqual(rungOfSpan(12e6, L), 1);
+    assert.strictEqual(rungOfSpan(8e6, L), 2, 'past the geometric mean of 8.76 MHz');
 });
 
-t('the ladder stops at the floor rather than half a rung past it', () => {
-    // 30 MHz / 10.24 kHz is 2930, which is 11.5 doublings. The twelfth rung
-    // would be a span the controls cannot ask for, so the ladder ends at 11.
-    assert.strictEqual(deepestRung(FULL, FLOOR), 11);
-    assert.ok(spanAtRung(11, FULL) >= FLOOR);
-    assert.ok(spanAtRung(12, FULL) < FLOOR);
+t('neither end runs off the ladder', () => {
+    // Zoomed out past the default — which the reset path can produce — is rung
+    // 0, not a negative one that would draw detents off the top.
+    assert.strictEqual(rungOfSpan(FULL_BW * LADDER_BINS * 4, L), 0);
+    assert.strictEqual(spanAtRung(-3, L), L[0]);
+    assert.strictEqual(spanAtRung(99, L), L[L.length - 1]);
 });
 
-t('a receiver whose full span is already the floor has no ladder at all', () => {
-    assert.strictEqual(deepestRung(FLOOR, FLOOR), 0);
-    assert.strictEqual(deepestRung(0, FLOOR), 0);
-    assert.strictEqual(deepestRung(FULL, 0), 0);
+t('the wide end halves and the narrow end is the server\'s list', () => {
+    // Above the passthrough the server takes what it is given, so those rungs
+    // are exact halvings; below it, only the listed bandwidths exist.
+    assert.strictEqual(L[1], L[0] / 2);
+    assert.ok(L[1] / LADDER_BINS > BIN_BW_PASSTHROUGH);
+    for (const span of L.slice(2)) {
+        assert.ok(BIN_BW_LADDER.includes(span / LADDER_BINS), `${span / LADDER_BINS} Hz/bin is not on the server ladder`);
+    }
 });
 
-t('an unconnected spectrum reads as rung zero rather than as NaN', () => {
-    // view.span and the defaults are all zero until the first config message.
-    assert.strictEqual(rungOfSpan(0, 0), 0);
-    assert.strictEqual(rungOfSpan(1e6, 0), 0);
+t('a coarser receiver gets a shallower ladder, still reaching its own floor', () => {
+    // 512 bins: the floor is 20 Hz/bin, so the last two rungs of the 1024-bin
+    // ladder simply do not exist here.
+    const l512 = zoomLadder(30e6 / 512, 512, Math.max(0.5, 10240 / 512));
+    assert.strictEqual(l512[0], 30e6);
+    assert.strictEqual(l512[l512.length - 1], 10240);
+    assert.ok(l512.every((s, i) => i === 0 || s < l512[i - 1]), 'must descend');
+});
+
+t('a receiver already at its floor still has one rung', () => {
+    const one = zoomLadder(10, 1024, 10);
+    assert.deepStrictEqual(one, [10240]);
+});
+
+t('an unconnected spectrum has no ladder rather than a NaN one', () => {
+    // The defaults are all zero until the first config message.
+    assert.deepStrictEqual(zoomLadder(0, 0, 10), []);
+    assert.strictEqual(rungOfSpan(1e6, []), 0);
+    assert.strictEqual(spanAtRung(0, []), 0);
+    assert.strictEqual(rungOfSpan(0, L), 0);
 });
 
 if (process.exitCode) console.log('\nzoom tests FAILED');

@@ -161,10 +161,8 @@ function BridgeSwitch({ minimal }) {
             </Field>
             {!minimal && (
                 <div className="note note--tight">
-                    Lets a browser extension or userscript running on this page read this
-                    receiver and drive it — the same functions a knob or a key can be mapped
-                    to. Nothing on another site can reach it and no password is ever shared.
-                    A badge appears above the spectrum while something is attached.
+                    Lets a browser extension or userscript on this page read and drive this
+                    receiver. Nothing on another site can reach it, and no password is shared.
                 </div>
             )}
             <div className="divider" />

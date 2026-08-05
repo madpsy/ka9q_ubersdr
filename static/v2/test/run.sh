@@ -98,6 +98,8 @@ esbuild ../src/lib/markerNav.js --bundle --format=cjs --platform=node \
     --outfile=.build/markernav.cjs --log-level=warning
 esbuild ../src/lib/markerNavSettings.js --bundle --format=cjs --platform=node \
     --outfile=.build/markernavsettings.cjs --log-level=warning
+esbuild ../src/lib/operatorPhoto.js --bundle --format=cjs --platform=node \
+    --outfile=.build/operatorphoto.cjs --log-level=warning
 esbuild ../src/lib/announce.js --bundle --format=cjs --platform=node \
     --outfile=.build/announce.cjs --log-level=warning
 esbuild ../src/lib/shortcuts.js --bundle --format=cjs --platform=node \
@@ -184,6 +186,7 @@ node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
 node markernavsettings.test.js
+node operatorphoto.test.js
 node bridge.test.js
 node bridgecommands.test.js
 node bridgeclient.test.js

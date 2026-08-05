@@ -25,7 +25,8 @@
 //   4. Replacing MediaMetadata re-fetches every artwork URL, identical content
 //      or not. Hence the dedup, and hence blob: artwork (see artwork.js).
 
-import { logoArtwork, logoNow, photoArtwork, photoPlaceholder, trimPhotoCache } from './artwork.js';
+import { logoArtwork, logoNow, photoArtwork } from './artwork.js';
+import { trimPhotos } from '../../lib/operatorPhoto.js';
 import { buildMetadata, sameMetadata } from './metadata.js';
 import { HttpAudioStream } from './httpStream.js';
 import { mediaSupport, resolveAnchor } from './support.js';
@@ -404,14 +405,20 @@ export class MediaSessionController {
         this.lastMetadata = next;
 
         if (photo) {
-            // The proxy path first so the lock screen shows something at once,
-            // then the blob when it resolves — the fetch can take a second on a
-            // phone and a blank cover in the meantime looks like a failure.
-            this._setMetadata(text, photoPlaceholder(photo));
+            // The station logo first, then the photo when the blob resolves.
+            //
+            // This used to hand the OS the proxy path as a placeholder, so the
+            // card carried the real picture a beat sooner. But that is a second
+            // download of the same image — the blob fetch is already on its way
+            // — and an <img> and a fetch issued in the same tick do not share a
+            // cache entry, because neither has answered yet. With the panel
+            // showing the same photo that made three requests for one picture.
+            // The logo is already in memory, so the card is never blank.
+            this._setMetadata(text, logoNow());
             photoArtwork(photo).then((art) => {
                 if (this.lastMetadata !== next) return;   // moved on while fetching
                 this._setMetadata(text, art);
-                trimPhotoCache(photo);
+                trimPhotos(photo);
             });
             return;
         }

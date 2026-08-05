@@ -12,6 +12,8 @@
 // local IP with a self-signed cert silently fails to load on a phone, and the
 // car stereo shows no art with no error anywhere.
 
+import { _resetPhotos, photoBlobUrl } from '../../lib/operatorPhoto.js';
+
 const LOGO = [
     { path: '/images/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
     { path: '/images/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
@@ -69,65 +71,21 @@ export function logoArtwork() {
     return logoPromise;
 }
 
-// Cache of proxy path -> blob URL for operator photos, and the in-flight
-// fetches, so the panel and the metadata builder share one request per callsign.
-const photos = new Map();
-const photoPending = new Map();
-
 // One operator photo, as a MediaImage[] ready to drop into MediaMetadata.
 //
-// Deliberately not merged with the logo array: the OS picks the largest
-// declared size, so including the 512×512 logo alongside the photo means the
-// logo always wins and the photo is never seen.
+// The fetching and the cache belong to lib/operatorPhoto.js, which the Callsign
+// panel also uses — this only shapes the result for the OS. Deliberately not
+// merged with the logo array: the OS picks the largest declared size, so
+// including the 512x512 logo alongside the photo means the logo always wins and
+// the photo is never seen.
 export function photoArtwork(proxyPath) {
-    if (!proxyPath) return Promise.resolve(null);
-    if (photos.has(proxyPath)) {
-        return Promise.resolve([{ src: photos.get(proxyPath), sizes: PHOTO_SIZE, type: 'image/jpeg' }]);
-    }
-    if (photoPending.has(proxyPath)) return photoPending.get(proxyPath);
-
-    const p = toBlobUrl(proxyPath)
-        .then((blobUrl) => {
-            photos.set(proxyPath, blobUrl);
-            photoPending.delete(proxyPath);
-            return [{ src: blobUrl, sizes: PHOTO_SIZE, type: 'image/jpeg' }];
-        })
-        .catch((err) => {
-            console.warn('[media] operator photo:', err.message);
-            // Remember the failure as the raw path rather than retrying on
-            // every frequency change; the proxy URL may still work directly.
-            photos.set(proxyPath, proxyPath);
-            photoPending.delete(proxyPath);
-            return [{ src: proxyPath, sizes: PHOTO_SIZE, type: 'image/jpeg' }];
-        });
-
-    photoPending.set(proxyPath, p);
-    return p;
-}
-
-// Something to show immediately while the blob is still being fetched, so the
-// lock screen is not blank for the first second after tuning to a spot.
-export function photoPlaceholder(proxyPath) {
-    return proxyPath ? [{ src: proxyPath, sizes: PHOTO_SIZE, type: 'image/jpeg' }] : null;
-}
-
-// Photos accumulate one blob per operator over a long session. Called when the
-// metadata moves off a photo, keeping at most this many alive.
-const MAX_PHOTOS = 12;
-
-export function trimPhotoCache(keep) {
-    if (photos.size <= MAX_PHOTOS) return;
-    for (const [path, url] of photos) {
-        if (photos.size <= MAX_PHOTOS) break;
-        if (path === keep) continue;
-        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-        photos.delete(path);
-    }
+    return photoBlobUrl(proxyPath).then((src) => (
+        src ? [{ src, sizes: PHOTO_SIZE, type: 'image/jpeg' }] : null
+    ));
 }
 
 export function _resetArtwork() {
     logoPromise = null;
     logoResolved = null;
-    photos.clear();
-    photoPending.clear();
+    _resetPhotos();
 }

@@ -16,6 +16,7 @@ import { NAV_TYPES, callsignOf, collectMarkers, findMarkers } from '../../lib/ma
 import { MediaSessionController } from './controller.js';
 import { ANCHORS, mediaSupport } from './support.js';
 import { onLookupResolved, peekLookup, startLookup } from './lookup.js';
+import { onPhotoShown, photoShown } from '../../lib/operatorPhoto.js';
 
 const SETTINGS_KEY = 'ubersdr.v2.media';
 
@@ -185,6 +186,13 @@ export function MediaSessionProvider({ children }) {
     const [lookupTick, setLookupTick] = useState(0);
     useEffect(() => onLookupResolved(() => setLookupTick((n) => n + 1)), []);
 
+    // The operator's photo is a setting, and the switch for it is in the
+    // Callsign panel — but this is the other place the picture is fetched, so
+    // it has to honour it or turning it off would stop the panel showing one
+    // while the artwork went on downloading it anyway.
+    const [showPhoto, setShowPhoto] = useState(photoShown);
+    useEffect(() => onPhotoShown(setShowPhoto), []);
+
     const lookup = useMemo(
         () => (wantsLookup ? peekLookup(markerCall) : null),
         [wantsLookup, markerCall, lookupTick],
@@ -211,9 +219,9 @@ export function MediaSessionProvider({ children }) {
             receiver: (serverInfo && serverInfo.receiver && serverInfo.receiver.callsign) || '',
             marker,
             lookup,
-            photo: (lookup && lookup.photo) || '',
+            photo: showPhoto ? (lookup && lookup.photo) || '' : '',
         });
-    }, [ctl, tuning.frequency, tuning.mode, serverInfo, marker, lookup]);
+    }, [ctl, tuning.frequency, tuning.mode, serverInfo, marker, lookup, showPhoto]);
 
     // Volume, mute and the output device have to reach the HTTP stream element
     // as well: while it is playing, the AudioContext is silent and that element

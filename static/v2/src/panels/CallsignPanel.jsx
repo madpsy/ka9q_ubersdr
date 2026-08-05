@@ -20,7 +20,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
 import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
-import { onPhotoShown, photoShown, setPhotoShown } from '../lib/callsignPhoto.js';
+import { onPhotoShown, photoShown, photoUrl, setPhotoShown } from '../lib/operatorPhoto.js';
 import {
     displayName, distanceBearing, isValidCallsign, lookupCallsignData,
     normaliseCallsign, onLookupRequest, positionOf,
@@ -122,6 +122,10 @@ function Beam({ position, serverInfo }) {
 
 function Result({ call, data, serverInfo, showPhoto }) {
     const [photo, setPhoto] = useState(false);
+    // Whether there is a picture to show is one decision, made in
+    // lib/operatorPhoto.js. `showPhoto` is passed in only so this re-renders
+    // when the setting changes — the answer still comes from there.
+    const photoSrc = showPhoto ? photoUrl(data.image) : '';
     const name = displayName(data);
     const cty = data.cty || {};
     const country = data.country || cty.country || '';
@@ -186,20 +190,20 @@ function Result({ call, data, serverInfo, showPhoto }) {
                 The thumbnail is deliberately small — most of these are portraits
                 or shack photos and the panel is not a gallery — so clicking
                 opens it full size rather than sending anyone to a new tab. */}
-            {showPhoto && data.image && (
+            {photoSrc && (
                 <button
                     type="button"
                     className="cs-photo"
                     title="Show full size"
                     onClick={() => setPhoto(true)}
                 >
-                    <img src={data.image} alt={call} loading="lazy" />
+                    <img src={photoSrc} alt={call} loading="lazy" />
                 </button>
             )}
 
-            {showPhoto && photo && data.image && (
+            {photoSrc && photo && (
                 <Modal onClose={() => setPhoto(false)} label={`${call} photo`}>
-                    <img className="cs-photo-full" src={data.image} alt={call} />
+                    <img className="cs-photo-full" src={photoSrc} alt={call} />
                 </Modal>
             )}
         </div>
@@ -297,7 +301,9 @@ export default function CallsignPanel({ minimal }) {
                         variant="ghost"
                         active={showPhoto}
                         icon={<Icon.Picture />}
-                        title={showPhoto ? 'Photos on — click to hide them' : 'Photos hidden — click to show'}
+                        title={showPhoto
+                            ? 'Operator photos on — click to stop fetching them'
+                            : 'Operator photos off — click to show them'}
                         onClick={() => setShowPhoto(setPhotoShown(!showPhoto))}
                     />
                     {/* The v1 page, which carries the bio, the map and the QSL

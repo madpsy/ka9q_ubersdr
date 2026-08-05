@@ -32,11 +32,14 @@ export function antennaLabel(status, n) {
     return labels[n - 1] || `Antenna ${n}`;
 }
 
-// `minimal` keeps the antenna buttons and what is live — the panel is a set of
-// buttons, and cutting those would leave nothing to use. What goes is Ground
-// all, the switching history and the link to v1's full controls page. Grounding
-// is a deliberate act rather than a glance, and the readout still says so when
-// the array is grounded.
+// `minimal` is the antenna buttons, and little else: the selected one is the lit
+// button, so a line naming it says the same thing twice. What goes is Ground all,
+// the switching history and the link to v1's full controls page — grounding is a
+// deliberate act rather than a glance.
+//
+// The readout survives being grounded, because that is the one state the buttons
+// cannot show: nothing is lit, and without it a grounded array is indistinguishable
+// from one with no antenna selected.
 export default function AntennaPanel({ minimal }) {
     const [status, setStatus] = useState(null);
     const [history, setHistory] = useState([]);
@@ -164,18 +167,24 @@ export default function AntennaPanel({ minimal }) {
 
             {error && !pending && <div className="note note--warn">{error}</div>}
 
-            <div className="kv-list">
-                <div className="kv">
-                    <span className="kv__k">Active</span>
-                    <span className="kv__v">
-                        {status.grounded
-                            ? 'Grounded'
-                            : selected.length
-                                ? selected.map((n) => antennaLabel(status, n)).join(', ')
-                                : 'None'}
-                    </span>
+            {/* Redundant in the minimal view: the selected antennas are the
+                lit buttons above. Except when the array is grounded, which lights
+                nothing — so that one state still needs saying, and the button
+                that would otherwise have said it is not there either. */}
+            {(!minimal || status.grounded) && (
+                <div className="kv-list">
+                    <div className="kv">
+                        <span className="kv__k">Active</span>
+                        <span className="kv__v">
+                            {status.grounded
+                                ? 'Grounded'
+                                : selected.length
+                                    ? selected.map((n) => antennaLabel(status, n)).join(', ')
+                                    : 'None'}
+                        </span>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {!minimal && <>
             <div className="divider" />

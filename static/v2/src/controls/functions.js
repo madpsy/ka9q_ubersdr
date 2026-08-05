@@ -20,10 +20,11 @@
 // look mapped and do nothing.
 
 import {
-    MODES, MODE_BY_ID, bandwidthLimits,
+    MODES, MODE_BY_ID, bandwidthLimits, maxFilterWidth,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, squelchEnabled,
 } from '../radio/constants.js';
 import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
+import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
 import {
     antennaGround, antennaSelect, antennaStep, rotatorCommand, rotatorStep,
 } from './hardware.js';
@@ -204,11 +205,68 @@ const AUDIO = group('Audio', [
         },
     },
     {
+        // Discrete steps, for a button or a key. `volume_set` is the same
+        // control for something that has a position of its own; these are for
+        // the things that do not.
+        id: 'volume_up',
+        label: 'Volume up',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setVolume(clamp(
+            Math.round((ctx.state().audio.volume + 0.05) * 100) / 100, 0, 1,
+        )),
+    },
+    {
+        id: 'volume_down',
+        label: 'Volume down',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setVolume(clamp(
+            Math.round((ctx.state().audio.volume - 0.05) * 100) / 100, 0, 1,
+        )),
+    },
+    {
+        // Narrower and wider by 50 Hz, keeping the passband on the side of the
+        // carrier its mode puts it — the same rule the Receiver panel's width
+        // slider follows, so the two agree.
+        id: 'bw_narrow',
+        label: 'Filter narrower',
+        accepts: PRESS,
+        run: (ev, ctx) => nudgeWidth(ctx, -50),
+    },
+    {
+        id: 'bw_widen',
+        label: 'Filter wider',
+        accepts: PRESS,
+        run: (ev, ctx) => nudgeWidth(ctx, 50),
+    },
+    {
         id: 'squelch_auto',
         label: 'Auto squelch',
         hint: 'set just above the current noise',
         accepts: PRESS,
         run: (ev, ctx) => ctx.actions.autoSquelch(),
+    },
+]);
+
+// Widen or narrow the passband about the carrier, as its mode has it: upward
+// for USB, downward for LSB, both ways for the symmetric modes. Same shape as
+// ReceiverPanel's width slider, and clamped to the mode's own limits.
+function nudgeWidth(ctx, by) {
+    const { tuning } = ctx.state();
+    const l = bandwidthLimits(tuning.mode);
+    const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
+    const next = clamp(width + by, 100, maxFilterWidth(tuning.mode));
+    if (l.sideband === 'lower') ctx.actions.setBandwidth(tuning.bandwidthHigh - next, tuning.bandwidthHigh);
+    else if (l.sideband === 'upper') ctx.actions.setBandwidth(tuning.bandwidthLow, tuning.bandwidthLow + next);
+    else ctx.actions.setBandwidth(-next / 2, next / 2);
+}
+
+const ANNOUNCE = group('Announcements', [
+    {
+        id: 'announce_toggle',
+        label: 'Announcements on/off',
+        hint: 'spoken frequency and mode',
+        accepts: PRESS,
+        run: () => setAnnounceSettings({ enabled: !announceSettings().enabled }),
     },
 ]);
 
@@ -482,7 +540,7 @@ function hasAntenna(hw) { return !!(hw && hw.antenna && hw.antenna.count); }
  */
 export function catalogue(dspSchemas, hw) {
     return [
-        ...FREQUENCY, ...MODE, ...BAND, ...VFO, ...AUDIO, ...SPECTRUM,
+        ...FREQUENCY, ...MODE, ...BAND, ...VFO, ...AUDIO, ...SPECTRUM, ...ANNOUNCE,
         ...dspGroup(dspSchemas),
         ...(hasRotator(hw) ? ROTATOR : []),
         ...(hasAntenna(hw) ? antennaGroup(hw) : []),

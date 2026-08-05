@@ -41,6 +41,7 @@ import AudioFiltersPanel from './AudioFiltersPanel.jsx';
 import MediaSessionPanel from './MediaSessionPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import AnnouncementsPanel from './AnnouncementsPanel.jsx';
+import ShortcutsPanel from './ShortcutsPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
 import ListenersPanel from './ListenersPanel.jsx';
@@ -231,6 +232,19 @@ export const PANELS = [
     // own is one somebody has to work out how to silence.
     // Minimal: the switch and what is being announced. The voice and the speed
     // are chosen once.
+    // Keyboard shortcuts. The keys live in lib/shortcuts.js; what they *do* is
+    // the same function catalogue the SDR control panel maps a MIDI surface to,
+    // so a function added there appears here with no change to either panel.
+    // Minimal: the switch and the list, without adding or resetting.
+    {
+        id: 'shortcuts',
+        title: 'Shortcuts',
+        icon: <Icon.Keyboard />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: ShortcutsPanel,
+    },
     {
         id: 'announcements',
         title: 'Announcements',

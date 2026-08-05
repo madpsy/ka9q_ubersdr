@@ -99,6 +99,8 @@ export const Icon = {
     // Speech, for the announcements panel: a speaker with sound leaving it.
     // Distinct from Volume, which is the audio output level and already spoken
     // for by the Audio panel.
+    // A keyboard: the outline, three key rows and a space bar.
+    Keyboard: (p) => <Svg {...p}><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01" /><path d="M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01" /><path d="M8 15.5h8" /></Svg>,
     Announce: (p) => <Svg {...p}><path d="M4 9v6h3.5L13 19V5L7.5 9z" /><path d="M16.5 9.5a4 4 0 0 1 0 5" /><path d="M19.5 6.5a8 8 0 0 1 0 11" /></Svg>,
 };
 

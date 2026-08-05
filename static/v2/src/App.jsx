@@ -10,6 +10,7 @@ import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
+import ShortcutWatch from './components/ShortcutWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
@@ -119,6 +120,7 @@ export default function App() {
                                 <AudioDefaults />
                                 <IdleWatch />
                                 <AnnounceWatch />
+                                <ShortcutWatch />
                                 <StartOverlay />
                                 <LegacyBridge />
                                 <SpotStreams />

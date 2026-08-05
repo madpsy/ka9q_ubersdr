@@ -78,6 +78,10 @@ export const DEFAULTS = {
     // Signal panel meters: 'bar' or the analogue 'needle'. Clicking a meter
     // switches both — see SignalPanel.
     meterStyle: 'bar',
+    // Which reading the top bar's meter shows: 'signal' (the S-meter, in dBFS)
+    // or 'snr'. Clicking the meter swaps it. Signal by default because it is
+    // the one that answers "is anything there".
+    topMeter: 'signal',
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
 };

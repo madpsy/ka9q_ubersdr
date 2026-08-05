@@ -4,7 +4,10 @@ import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../displa
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
-import { audioLevelPercent, formatHz, sUnitFraction, sUnitLabel } from '../lib/format.js';
+import {
+    audioLevelPercent, formatHz, sMeterColour, snrColour, snrFraction,
+    sUnitFraction, sUnitLabel,
+} from '../lib/format.js';
 import { MODES, MODE_BY_ID } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
@@ -181,6 +184,58 @@ function SessionClock() {
     );
 }
 
+// The bar in the middle of the top bar, showing one reading at a time.
+//
+// Clicking it swaps which — the S-meter, or the SNR. Both were shown at once
+// before, the S value one side of the bar and the SNR the other, which read as
+// one measurement with two numbers attached rather than two measurements
+// sharing a bar. Only one of them can be what the bar is drawing.
+//
+// The colour is the Signal panel's, not a gradient painted across the track.
+// The track gradient ran green to red left to right, so a strong signal was
+// coloured as a problem and the same reading was green up here and red down
+// there. sMeterColour and snrColour are the ramps that panel uses — red at the
+// bottom of the useful range through yellow to green — so a glance at either
+// place says the same thing about the same signal.
+//
+// The mode is a display setting like the panel's bar/needle choice, so it
+// survives a reload rather than resetting every time the tab is opened.
+function TopMeter({ meters }) {
+    const display = useDisplay();
+    const snrMode = display.topMeter === 'snr';
+    const power = meters.basebandPower;
+    const snr = meters.snr;
+
+    const fraction = snrMode ? snrFraction(snr) : sUnitFraction(power);
+    const colour = snrMode ? snrColour(snr) : sMeterColour(power);
+    const label = snrMode ? 'SNR' : sUnitLabel(power);
+    const value = snrMode
+        ? (snr == null ? '—' : `${snr.toFixed(0)} dB`)
+        : (power == null || power <= -998 ? '—' : `${power.toFixed(0)} dBFS`);
+
+    return (
+        <button
+            type="button"
+            className="topbar__meter"
+            onClick={() => display.set({ topMeter: snrMode ? 'signal' : 'snr' })}
+            title={snrMode
+                ? 'Signal-to-noise ratio — click for the S-meter'
+                : 'Signal strength — click for SNR'}
+        >
+            <span className={`topbar__s ${snrMode ? 'topbar__s--label' : 'topbar__reading'}`}>
+                {label}
+            </span>
+            <div className="topbar__bar">
+                <div
+                    className="topbar__bar-fill"
+                    style={{ width: `${fraction * 100}%`, background: colour }}
+                />
+            </div>
+            <span className="topbar__snr topbar__reading">{value}</span>
+        </button>
+    );
+}
+
 export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo, audio } = useRadio();
     const display = useDisplay();
@@ -278,18 +333,7 @@ export default function TopBar({ compact }) {
                 )}
             </div>
 
-            {!compact && (
-                <div className="topbar__meter">
-                    <span className="topbar__s">{sUnitLabel(meters.basebandPower)}</span>
-                    <div className="topbar__bar">
-                        <div
-                            className="topbar__bar-fill"
-                            style={{ width: `${sUnitFraction(meters.basebandPower) * 100}%` }}
-                        />
-                    </div>
-                    <span className="topbar__snr">{meters.snr == null ? '—' : `${meters.snr.toFixed(0)} dB`}</span>
-                </div>
-            )}
+            {!compact && <TopMeter meters={meters} />}
 
             <div className="topbar__spacer" data-slack="" />
 

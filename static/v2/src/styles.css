@@ -1322,15 +1322,24 @@ a.btn { text-decoration: none; }
     background: transparent;
     cursor: pointer;
 }
+/* `--fill-color` defaults to the accent, so every slider looks as it always
+   did. The volume slider drives it from its own output level, which is what
+   makes that one control and meter at the same time — one bar, coloured by what
+   is coming out of it, rather than a slider with a VU strip under it. */
 .slider::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 99px;
-    background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+    background: linear-gradient(90deg,
+        var(--fill-color, var(--accent)) var(--fill, 0%),
+        var(--surface-3) var(--fill, 0%));
+    transition: background-color 160ms linear;
 }
 .slider::-moz-range-track {
     height: 4px;
     border-radius: 99px;
-    background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+    background: linear-gradient(90deg,
+        var(--fill-color, var(--accent)) var(--fill, 0%),
+        var(--surface-3) var(--fill, 0%));
 }
 .slider::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -1367,51 +1376,6 @@ a.btn { text-decoration: none; }
 }
 .slider--track::-webkit-slider-runnable-track,
 .slider--track::-moz-range-track { height: 7px; }
-
-/* A slider that is also its own output meter.
- *
- * The volume control used to have a VU bar sitting under it as a second
- * element. It is inside the track now: the top 4 px are the ordinary accent
- * fill, i.e. where the control is set, and the bottom 3 px are the meter, i.e.
- * what is actually coming out. One object, one row, and muting dims both
- * together because the meter is part of the disabled input rather than a
- * sibling that has to be told.
- *
- * Three layers, bottom-up: the volume fill across the top; v1's VU zones
- * painted across the full width of the bottom strip, so a zone boundary stays
- * where it is instead of sliding with the reading; and a cover over the strip
- * from `--level` rightwards, which is what makes the zones read as a meter.
- */
-.slider--level::-webkit-slider-runnable-track,
-.slider--level::-moz-range-track {
-    height: 7px;
-    background-image:
-        linear-gradient(90deg, transparent var(--level, 0%), var(--surface-3) var(--level, 0%)),
-        linear-gradient(90deg,
-            #28a745 0 66.67%,
-            #ffc107 66.67% 83.33%,
-            #ff9800 83.33% 91.67%,
-            #dc3545 91.67% 100%),
-        linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
-    background-size: 100% 3px, 100% 3px, 100% 4px;
-    background-position: 0 100%, 0 100%, 0 0;
-    background-repeat: no-repeat;
-    /* No transition: what moves is a colour stop inside --level, and a custom
-       property in a gradient cannot be animated without registering it. The
-       meter is sampled fast enough to be smooth without one — see
-       VolumeSlider. */
-}
-/* Clipping paints the whole strip red: by then the reading is against the stop
-   anyway, and the colour is the message. */
-.slider--level.is-clip::-webkit-slider-runnable-track,
-.slider--level.is-clip::-moz-range-track {
-    background-image:
-        linear-gradient(90deg, transparent var(--level, 0%), var(--surface-3) var(--level, 0%)),
-        linear-gradient(90deg, var(--bad), var(--bad)),
-        linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
-}
-/* Centred on the taller track: (7 - 14) / 2. */
-.slider--level::-webkit-slider-thumb { margin-top: -3.5px; }
 
 .slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .slider:disabled { opacity: 0.4; cursor: not-allowed; }

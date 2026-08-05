@@ -229,3 +229,22 @@ export function audioLevelPercent(rms) {
     const db = clamp(20 * Math.log10(rms), AUDIO_FLOOR_DB, 0);
     return ((db - AUDIO_FLOOR_DB) / -AUDIO_FLOOR_DB) * 100;
 }
+
+// v1's VU zones on the same -60..0 dBFS scale (app.js updateVUMeter): green to
+// -20 dB, yellow to -10, orange to -5, red over the last 5 dB. v1 paints them
+// across a bar and reveals as much as the reading has reached; here they colour
+// the volume slider's own fill, so the zone is the whole of the message and the
+// boundaries are the same ones.
+export function audioLevelColour(percent, clipping) {
+    if (clipping) return '#dc3545';
+    const p = Number.isFinite(percent) ? percent : 0;
+    // The boundaries as exact fractions of the -60..0 scale rather than the
+    // rounded 66.67 / 83.33 / 91.67 the old gradient used: a level sitting
+    // exactly on -10 dBFS is 83.333%, which is not below 83.33, so it read as
+    // the zone above its own.
+    const at = (db) => ((db - AUDIO_FLOOR_DB) / -AUDIO_FLOOR_DB) * 100;
+    if (p <= at(-20)) return '#28a745';
+    if (p <= at(-10)) return '#ffc107';
+    if (p <= at(-5)) return '#ff9800';
+    return '#dc3545';
+}

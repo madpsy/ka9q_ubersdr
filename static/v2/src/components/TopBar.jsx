@@ -5,7 +5,7 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import {
-    audioLevelPercent, formatHz, sMeterColour, snrColour, snrFraction,
+    audioLevelColour, audioLevelPercent, formatHz, sMeterColour, snrColour, snrFraction,
     sUnitFraction, sUnitLabel,
 } from '../lib/format.js';
 import { MODES, MODE_BY_ID } from '../radio/constants.js';
@@ -123,16 +123,15 @@ function SpaceWeather() {
 // takes it to nothing, which is the point: a silent receiver and a silent band
 // look the same until something says which.
 //
-// This was a slider with a separate VU bar underneath it. The meter now lives
-// in the slider's own track (see .slider--level), which is one element instead
-// of two, one row shorter, and dims as a whole while muted because the meter is
-// part of the disabled input rather than a sibling that has to be told.
+// This was a slider with a separate VU bar underneath it, and the meter is now
+// the slider: the filled part of the track is coloured by the output level, on
+// v1's own VU zones, so one bar says both where the control is set and how hard
+// the audio is hitting. Nothing sits under it and nothing has to be lined up by
+// eye. Muting dims the two together for free, because there is only one element
+// and it is the disabled input.
 //
 // Sampled in its own component so the rest of the bar — the frequency, the
-// clock — does not re-render with it. At 15 Hz rather than the 10 the separate
-// bar used: that one had a CSS transition smoothing the gap between readings
-// and a gradient stop cannot be transitioned, so the sampling has to do the
-// smoothing itself now.
+// clock — does not re-render with it.
 function VolumeSlider() {
     const { audio, actions } = useRadio();
     const m = useMeters(15);
@@ -156,8 +155,7 @@ function VolumeSlider() {
                 max={100}
                 disabled={audio.muted}
                 onChange={(v) => actions.setVolume(v / 100)}
-                level={audioLevelPercent(m.outLevel) / 100}
-                clipping={m.clipping}
+                fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
             />
         </div>
     );

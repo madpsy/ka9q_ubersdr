@@ -171,7 +171,7 @@ export default function MarkerNavPanel({ minimal }) {
                             <button
                                 key={t}
                                 type="button"
-                                className={`chip chip--button${types.includes(t) ? ' is-on' : ''}`}
+                                className={`chip chip--button${types.includes(t) ? ' is-active' : ''}`}
                                 onClick={() => toggle(t)}
                             >
                                 {label}

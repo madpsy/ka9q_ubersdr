@@ -233,15 +233,6 @@ export default function DisplayPanel() {
                 </>
             )}
 
-            <div className="divider" />
-
-            {/* Not a look but a cost: how much spectrum data this session asks
-                for while nobody is using it. It lives here because this is the
-                panel that owns everything about the spectrum you can see, and
-                because the effect of it — a waterfall that slows down on its
-                own — is something you notice here first. The Status panel's
-                "Poll rate" says what it is doing at any moment. */}
-            <div className="section-label"><span>Data</span></div>
             <Field label="Show panels on hover" inline>
                 <Switch
                     checked={d.hoverPanels !== false}
@@ -256,6 +247,15 @@ export default function DisplayPanel() {
                 good, and a hover never overrides it.
             </div>
 
+            <div className="divider" />
+
+            {/* Not a look but a cost: how much spectrum data this session asks
+                for while nobody is using it. It lives here because this is the
+                panel that owns everything about the spectrum you can see, and
+                because the effect of it — a waterfall that slows down on its
+                own — is something you notice here first. The Status panel's
+                "Poll rate" says what it is doing at any moment. */}
+            <div className="section-label"><span>Data</span></div>
             <Field
                 label="Slow down when idle"
                 hint={`after ${mobile ? '2.5' : '5'} min`}

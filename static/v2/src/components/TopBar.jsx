@@ -16,9 +16,13 @@ import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
-// Width to assume for the session countdown until it has been on screen once —
-// "Unlimited" is the widest it gets. See useRoomFor.
+// Widths to assume until each has been on screen once to measure. See
+// useRoomFor, which drops them in reverse of the order they are listed in.
+//
+// "Unlimited" is the widest the countdown gets. The space weather block is five
+// readings and a border.
 const SESSION_W = 68;
+const SPACE_WEATHER_W = 210;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -100,6 +104,7 @@ function SpaceWeather() {
     return (
         <div
             className="topbar__sw is-clickable"
+            data-optional="spaceWeather"
             title={tip}
             role="button"
             tabIndex={0}
@@ -182,7 +187,7 @@ function SessionClock() {
     if (session.maxSec == null) return null;
 
     if (session.maxSec === 0) {
-        return <span className="topbar__session" data-optional="" title="Session time">Unlimited</span>;
+        return <span className="topbar__session" data-optional="session" title="Session time">Unlimited</span>;
     }
 
     const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
@@ -194,7 +199,7 @@ function SessionClock() {
     return (
         <span
             className={`topbar__session${left < 300 ? ' is-low' : ''}`}
-            data-optional=""
+            data-optional="session"
             title="Time left in this session"
         >
             {hh}:{mm}:{ss}
@@ -268,9 +273,18 @@ export default function TopBar({ compact }) {
         uiScale: Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v)) * 100) / 100,
     });
 
-    // The countdown only goes up while the bar has width to spare for it.
+    // What the bar gives up first as it narrows, in the order it gives them up.
+    //
+    // Space weather goes before the countdown: it is a summary of five figures
+    // that the Space weather panel shows in full, and the spectrum carries the
+    // propagation grade too, whereas the countdown is the only place a session
+    // limit appears at all. Both go before anything else here, because
+    // everything else is a control.
     const barRef = useRef(null);
-    const roomForSession = useRoomFor(barRef, SESSION_W);
+    const room = useRoomFor(barRef, [
+        { key: 'session', width: SESSION_W },
+        { key: 'spaceWeather', width: SPACE_WEATHER_W },
+    ]);
 
     // Tuning straight from the readout: the frequency swaps for an input, the
     // mode drops a menu at the point it was clicked.
@@ -356,7 +370,7 @@ export default function TopBar({ compact }) {
 
             <div className="topbar__spacer" data-slack="" />
 
-            {!compact && serverInfo?.space_weather && <SpaceWeather />}
+            {!compact && room.spaceWeather && serverInfo?.space_weather && <SpaceWeather />}
 
             {!compact && (
                 <div className="topbar__zoom" role="group" aria-label="Text size">
@@ -407,7 +421,7 @@ export default function TopBar({ compact }) {
                 to go when the width runs out: it is the one readout among
                 controls here, and a countdown that disappears costs less than a
                 squeezed frequency or Listen button. */}
-            {!compact && roomForSession && <SessionClock />}
+            {!compact && room.session && <SessionClock />}
 
             {/* v1 pins this next to the voice activity button on the band
                 bar, on the same condition. The page it opens is a v1 one and
@@ -435,6 +449,21 @@ export default function TopBar({ compact }) {
                     <Button size="sm" variant="ghost" active={!docks.left.collapsed} title="Left panels" icon={<Icon.ChevronLeft />} onClick={() => toggleDock('left')} />
                     <Button size="sm" variant="ghost" active={!docks.bottom.collapsed} title="Bottom panels" icon={<Icon.Chevron />} onClick={() => toggleDock('bottom')} />
                     <Button size="sm" variant="ghost" active={!docks.right.collapsed} title="Right panels" icon={<Icon.ChevronRight />} onClick={() => toggleDock('right')} />
+                    {/* Beside the three dock buttons because it governs what
+                        they leave behind: with the docks collapsed, this is
+                        what decides whether resting on a rail opens it. Same
+                        setting as the Display panel's switch. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        active={display.hoverPanels !== false}
+                        title={display.hoverPanels !== false
+                            ? 'Collapsed panels open on hover — click to turn that off'
+                            : 'Collapsed panels stay shut until clicked — click to open them on hover'}
+                        aria-label="Show panels on hover"
+                        icon={<Icon.Eye />}
+                        onClick={() => display.set({ hoverPanels: display.hoverPanels === false })}
+                    />
                 </div>
             )}
         </header>

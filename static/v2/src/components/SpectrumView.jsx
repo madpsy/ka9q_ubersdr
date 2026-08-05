@@ -683,7 +683,7 @@ export default function SpectrumView() {
     // pointer. On a narrow spectrum it is what tips the tag row into wrapping,
     // so it is dropped whenever the row has no width left for it.
     const metaRef = useRef(null);
-    const cursorTagFits = useRoomFor(metaRef, CURSOR_TAG_W);
+    const room = useRoomFor(metaRef, [{ key: 'cursor', width: CURSOR_TAG_W }]);
 
     // The centre frequency goes on a phone: the ruler under the spectrum already
     // has it, and the tags left of the zoom buttons are the scarcest row in the
@@ -1035,8 +1035,8 @@ export default function SpectrumView() {
                 <div className="spectrum__meta" ref={metaRef}>
                     <span className="tag tag--accent">{formatSpan(span)}</span>
                     {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
-                    {hoverInfo && cursorTagFits && (
-                        <span className="tag tag--ghost" data-optional="">{formatFreqShort(hoverInfo.freq, span)}</span>
+                    {hoverInfo && room.cursor && (
+                        <span className="tag tag--ghost" data-optional="cursor">{formatFreqShort(hoverInfo.freq, span)}</span>
                     )}
                     <SquelchTag />
                     <NoiseReductionTag />

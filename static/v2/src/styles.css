@@ -3025,22 +3025,25 @@ a.btn { text-decoration: none; }
 .tabbar__icon { display: grid; place-items: center; }
 .tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
 
-/* A sheet sits *in* the column, between the spectrum and the tab bar, rather
-   than over everything behind a scrim.
+/* A sheet lies over the bottom of the spectrum, and takes no space of its own.
  *
- * It was modal, and on a receiver that is the wrong shape: the panels are things
- * you use *with* the spectrum — a bookmark to tune to, a filter to set, a spot
- * to click — so dimming the spectrum and closing the panel on the first touch of
- * it made the two mutually exclusive. In flow, the spectrum shrinks to what is
- * left and stays live, and the tab bar stays reachable underneath so one panel
- * can be swapped for another without closing anything.
+ * It was modal — the screen dimmed behind a scrim that closed it on any tap —
+ * and on a receiver that is the wrong shape: the panels are things you use
+ * *with* the spectrum, so reaching for the waterfall shut the panel you opened
+ * to use on it.
  *
- * Bounded so the spectrum always keeps a usable share of the screen; the body
- * scrolls inside whatever that leaves. */
+ * Absolute rather than in the column, and that is the point: nothing is resized
+ * when a panel opens. The waterfall keeps its full height and goes on running
+ * behind, the part still showing stays live to tune and drag, and closing the
+ * sheet reveals history that was drawn all along rather than a band that has to
+ * be redrawn at a new size. .shell__center is the containing block; the tab bar
+ * is outside it and stays clear. */
 .sheet {
-    position: relative;
-    flex: none;
-    max-height: calc(var(--app-height, 100dvh) * 0.52);
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 72%;
     display: flex;
     flex-direction: column;
     background: var(--surface);
@@ -3868,8 +3871,8 @@ a.btn { text-decoration: none; }
 /* Same on mobile, where the extension is a sheet rather than a window. A
    decoder needs the height a panel does not, so this sheet is taller. */
 /* A decoder earns more room than a panel — it is the thing being watched — but
-   not the whole screen: the spectrum it is decoding from stays usable. */
-.sheet--ext { max-height: calc(var(--app-height, 100dvh) * 0.66); }
+   not the whole spectrum it is decoding from. */
+.sheet--ext { max-height: 86%; }
 .sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
 
 /* ── FT8 ──────────────────────────────────────────────────────────────────── */

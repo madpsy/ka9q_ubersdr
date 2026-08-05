@@ -998,12 +998,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Two lines per listener rather than v1's eight columns: where they are tuned,
    then who they are and how long since they moved. The age is pinned to the
    right of the second line so the ages form a column of their own. */
-/* Frequency, mode and how long ago on one line, then who. The age sits directly
-   after the mode rather than out at the right margin: at a dock's width that put
-   it a long way from the thing it describes, with the gap between reading as a
-   column that was not there. `auto 1fr` packs it against the mode and leaves the
-   slack on the outside, where slack belongs. */
-.lsn-row {
+/* Frequency, mode and how long ago on one line, then who.
+ *
+ * `.list__row.lsn-row`, not `.lsn-row`. Both are one class, so they carry the
+ * same specificity and the later one in this file wins — and `.list__row`
+ * (`display: flex; flex-direction: column`) is a long way below, so it took the
+ * `display: grid` here and stacked the three cells instead: frequency, then who,
+ * then the age on a line of its own. Naming both classes settles it on
+ * specificity rather than on which block happens to come first.
+ *
+ * The age sits directly after the mode rather than out at the right margin: at a
+ * dock's width that puts it a long way from the thing it describes, with the gap
+ * between reading as a column that is not there. `auto 1fr` packs it against the
+ * mode and leaves the slack on the outside, where slack belongs. */
+.list__row.lsn-row {
     display: grid;
     grid-template-columns: auto 1fr;
     grid-template-areas:

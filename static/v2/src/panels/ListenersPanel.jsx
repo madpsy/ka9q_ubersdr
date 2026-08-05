@@ -78,8 +78,9 @@ function Row({ channel, now, current, onTune }) {
     );
 }
 
-// `minimal` drops the header — the count and the map button — and leaves the
-// list. See the registry's `minimal`.
+// `minimal` drops the header — the count and the map button — and the pager
+// under the list, leaving the first five listeners. See the registry's
+// `minimal`.
 export default function ListenersPanel({ minimal }) {
     const { tuning, actions } = useRadio();
     const [state, setState] = useState(null);      // null until the first reply
@@ -95,7 +96,9 @@ export default function ListenersPanel({ minimal }) {
 
     const channels = (state && state.channels) || [];
     const others = channels.filter((c) => !c.you).length;
-    const page = channels.slice(0, shown);
+    // Minimal is the first page and no way to grow it, so a list left expanded
+    // does not stay expanded when the panel is cut down.
+    const page = channels.slice(0, minimal ? PAGE : shown);
 
     // One tune, so the receiver never passes through an intermediate
     // mode/passband on the way — the same call the spot rows make.
@@ -147,7 +150,9 @@ export default function ListenersPanel({ minimal }) {
                 ))}
             </div>
 
-            <ShowMore shown={page.length} total={channels.length} onMore={() => setShown((n) => n + PAGE)} />
+            {!minimal && (
+                <ShowMore shown={page.length} total={channels.length} onMore={() => setShown((n) => n + PAGE)} />
+            )}
         </div>
     );
 }

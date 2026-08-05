@@ -14,7 +14,7 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Empty, Icon } from '../components/ui.jsx';
+import { Button, Empty, Icon, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 import {
@@ -103,10 +103,12 @@ export default function TopFreqPanel({ minimal }) {
                 </div>
             )}
 
-            {!minimal && rows.length < all.length && (
-                <button type="button" className="show-more" onClick={() => setShown((n) => n + TOP_FREQ_ROWS)}>
-                    Show more <span className="show-more__count">{rows.length} of {all.length}</span>
-                </button>
+            {!minimal && rows.length > 0 && (
+                <ShowMore
+                    shown={rows.length}
+                    total={all.length}
+                    onMore={() => setShown((n) => n + TOP_FREQ_ROWS)}
+                />
             )}
 
             {/* What is being timed right now, and how far into it — so a

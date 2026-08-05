@@ -20,8 +20,9 @@ import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
-// Widths to assume until each has been on screen once to measure. See
-// useRoomFor, which drops them in reverse of the order they are listed in.
+// Widths to assume until each has been on screen once to measure. The order
+// they are dropped in is the keep order passed to useRoomFor below, not the
+// order they are declared here.
 //
 // "Unlimited" is the widest the countdown gets. The space weather block is five
 // readings and a border.
@@ -292,11 +293,17 @@ export default function TopBar({ compact }) {
     // All three go before anything else in the bar, because everything else
     // here is a control rather than a readout.
     const barRef = useRef(null);
+    // Keep order: most important first, so the last listed is the first to go.
+    // The filter width leads because it is part of the tuning readout — what you
+    // are listening through, beside what you are listening to — and the Receiver
+    // panel's own slider is dropped in minimal view, so this can be the only
+    // place it is shown. The session countdown goes first: it matters once, when
+    // it is nearly up, and the Session panel has it either way.
     const room = useRoomFor(barRef, [
-        { key: 'session', width: SESSION_W },
+        { key: 'width', width: FILTER_W },
         { key: 'clock', width: CLOCK_W },
         { key: 'spaceWeather', width: SPACE_WEATHER_W },
-        { key: 'width', width: FILTER_W },
+        { key: 'session', width: SESSION_W },
     ]);
 
     // Tuning straight from the readout: the frequency swaps for an input, the

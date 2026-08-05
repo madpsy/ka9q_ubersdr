@@ -4,6 +4,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
+import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
 import { Button, Empty, Icon, Menu, MenuItem, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODES } from '../radio/constants.js';
@@ -55,7 +57,8 @@ export default function LocalBookmarksPanel() {
     const { actions, tuning } = useRadio();
     const [items, setItems] = useState(null);
     const [query, setQuery] = useState('');
-    const [group, setGroup] = useState('');
+    const [group, setGroup] = useState(ALL);
+    const [hidden, setHidden] = useState(hiddenGroups);
     const [limit, setLimit] = useState(PAGE);
     const [editing, setEditing] = useState(null);   // { original, values } | 'new'
     const [error, setError] = useState('');
@@ -75,24 +78,14 @@ export default function LocalBookmarksPanel() {
 
     useEffect(() => { setLimit(PAGE); }, [query, group]);
 
-    const groups = useMemo(() => {
-        // Counted alongside the names rather than filtered per option: one walk
-        // either way, and the "All groups" entry has always carried a count —
-        // the groups reading as bare names beside it was the odd one out.
-        const counts = new Map();
-        for (const b of items || []) {
-            if (b.group) counts.set(b.group, (counts.get(b.group) || 0) + 1);
-        }
-        return [...counts.entries()]
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-    }, [items]);
+    const groups = useMemo(() => groupsOf(items), [items]);
+    useEffect(() => onGroupsChanged(setHidden), []);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return (items || [])
             .filter((b) => {
-                if (group && b.group !== group) return false;
+                if (group !== ALL && (b.group || UNGROUPED) !== group) return false;
                 if (!q) return true;
                 return `${b.name} ${b.comment || ''} ${b.group || ''} ${b.mode} ${b.frequency}`
                     .toLowerCase().includes(q);
@@ -233,14 +226,13 @@ export default function LocalBookmarksPanel() {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                     />
-                    {groups.length > 0 && (
-                        <select className="select" value={group} onChange={(e) => setGroup(e.target.value)}>
-                            <option value="">All groups ({items.length})</option>
-                            {groups.map((g) => (
-                                <option key={g.name} value={g.name}>{g.name} ({g.count})</option>
-                            ))}
-                        </select>
-                    )}
+                    <GroupPicker
+                        groups={groups}
+                        value={group}
+                        onChange={setGroup}
+                        hidden={hidden}
+                        total={items.length}
+                    />
                 </>
             )}
 

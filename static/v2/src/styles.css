@@ -2866,6 +2866,39 @@ a.btn { text-decoration: none; }
 .mnav__who-qth { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
 .mnav__who-name, .mnav__who-qth { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Bookmark groups: the picker, and the switch for what a group may do.
+   One control rather than a switch per group — a receiver can publish hundreds,
+   and only a native select scrolls and jumps to a typed name at that size. */
+.bmg { display: flex; align-items: center; gap: 6px; }
+.bmg__select { flex: 1; min-width: 0; }
+.bmg__eye {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.bmg__eye:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.bmg__eye:disabled { opacity: 0.35; cursor: default; }
+/* Hidden is a state worth seeing without reading the tooltip. */
+.bmg__eye.is-hidden { border-color: var(--warn); color: var(--warn); }
+.bmg__note { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+.bmg__reset {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+}
+.bmg__reset:hover { text-decoration: underline; }
+
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }
 /* Dimmed with its slider while muted, so the number does not read as live. */

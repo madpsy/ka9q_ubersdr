@@ -1,6 +1,8 @@
 // Server-published bookmarks (/api/bookmarks), grouped and searchable.
 
 import React, { useEffect, useMemo, useState } from '../react.js';
+import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
+import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
@@ -11,33 +13,27 @@ const PAGE = 10;
 
 export default function BookmarksPanel() {
     const { actions, catalog } = useRadio();
-    const items = catalog.bookmarks;
+    // The unfiltered list: this panel is where a hidden group is turned back
+    // on, so it has to keep listing one. `catalog.bookmarks` is what the rest
+    // of the interface sees, which is the filtered one.
+    const items = catalog.allBookmarks;
     const [query, setQuery] = useState('');
-    const [group, setGroup] = useState('');
+    // '__all__' rather than '', because '' is a real group — the ungrouped one.
+    const [group, setGroup] = useState(ALL);
+    const [hidden, setHidden] = useState(hiddenGroups);
+    useEffect(() => onGroupsChanged(setHidden), []);
     const [limit, setLimit] = useState(PAGE);
 
     // Narrowing the search starts from the top again.
     useEffect(() => { setLimit(PAGE); }, [query, group]);
 
-    const groups = useMemo(() => {
-        if (!items) return [];
-        // Counted here rather than filtered per option: the list is walked once
-        // either way, and a group with nothing in it is worth seeing as 0
-        // rather than silently reading as an empty selection.
-        const counts = new Map();
-        for (const b of items) {
-            if (b.group) counts.set(b.group, (counts.get(b.group) || 0) + 1);
-        }
-        return [...counts.entries()]
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-    }, [items]);
+    const groups = useMemo(() => groupsOf(items), [items]);
 
     const filtered = useMemo(() => {
         if (!items) return null;
         const q = query.trim().toLowerCase();
         return items.filter((b) => {
-            if (group && b.group !== group) return false;
+            if (group !== ALL && (b.group || UNGROUPED) !== group) return false;
             if (!q) return true;
             return `${b.name} ${b.comment || ''} ${b.group || ''}`.toLowerCase().includes(q);
         });
@@ -54,14 +50,13 @@ export default function BookmarksPanel() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
             />
-            {groups.length > 0 && (
-                <select className="select" value={group} onChange={(e) => setGroup(e.target.value)}>
-                    <option value="">All groups ({items.length})</option>
-                    {groups.map((g) => (
-                        <option key={g.name} value={g.name}>{g.name} ({g.count})</option>
-                    ))}
-                </select>
-            )}
+            <GroupPicker
+                groups={groups}
+                value={group}
+                onChange={setGroup}
+                hidden={hidden}
+                total={items.length}
+            />
             <div className="list">
                 {filtered.length === 0 && <Empty>No match</Empty>}
                 {filtered.slice(0, limit).map((b, i) => (

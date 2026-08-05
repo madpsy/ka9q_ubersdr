@@ -53,6 +53,8 @@ export const Icon = {
     Users: (p) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16.5 5.5a3.2 3.2 0 0 1 0 6" /><path d="M18 14.6A6 6 0 0 1 21 20" /></Svg>,
     Bookmark: (p) => <Svg {...p}><path d="M6 4h12v17l-6-4-6 4z" /></Svg>,
     Eye: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></Svg>,
+    // The same eye with a line through it: a group kept but not in play.
+    EyeOff: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5c1.6 0 3 .4 4.2 1" /><path d="M20.4 8.9A17 17 0 0 1 22 12s-3.5 6.5-10 6.5c-2.2 0-4-.6-5.4-1.4" /><path d="M3 3l18 18" /></Svg>,
     Plus: (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>,
     Minus: (p) => <Svg {...p}><path d="M5 12h14" /></Svg>,
     // Arrows into the corners / out of them: the minimal-view toggle.

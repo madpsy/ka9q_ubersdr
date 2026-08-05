@@ -27,6 +27,7 @@ import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
 import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
 import { loadRadioSettings, saveRadioSettings } from '../lib/radioSettings.js';
+import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmarkGroups.js';
 
 const RadioContext = createContext(null);
 
@@ -123,6 +124,10 @@ export function RadioProvider({ children }) {
     // payload to pull three times. Bookmarks are kept sorted by frequency so
     // the marker bar can binary-search the visible window.
     const [catalog, setCatalog] = useState({ bands: null, bookmarks: null });
+    // Which bookmark groups are switched off. Held here rather than read by
+    // each consumer so the filtering happens once, at the source.
+    const [hidden, setHidden] = useState(hiddenGroups);
+    useEffect(() => onGroupsChanged(setHidden), []);
     // Bookmarks saved in this browser (see lib/localBookmarks.js). Separate from
     // `catalog` because they change independently of the server fetch.
     const [localMarks, setLocalMarks] = useState([]);
@@ -952,10 +957,22 @@ export function RadioProvider({ children }) {
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log, session,
         audio, squelch, agc, dsp, followTuning, filters,
-        catalog: { ...catalog, local: localMarks },
+        // `bookmarks` and `local` are what *propagates* — the marker bar, the
+        // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
+        // group disappears from all of them without any of them knowing the
+        // feature exists. The panels that manage groups read `allBookmarks` and
+        // `allLocal`: filtering their own lists would hide the switch that
+        // turns a group back on.
+        catalog: {
+            ...catalog,
+            bookmarks: visibleBookmarks(catalog.bookmarks, hidden),
+            local: visibleBookmarks(localMarks, hidden),
+            allBookmarks: catalog.bookmarks,
+            allLocal: localMarks,
+        },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, catalog, localMarks, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, catalog, localMarks, hidden, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

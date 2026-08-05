@@ -36,7 +36,7 @@ import {
 } from '../controls/mappings.js';
 import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
 import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
-import { getSurface, releaseSurfaceExcept } from '../controls/sources.js';
+import { getSurface } from '../controls/sources.js';
 import {
     bridgeAttached, bridgeSettings, onBridgeAttached, onBridgeSettings, setBridgeSettings,
 } from '../bridge/settings.js';
@@ -69,11 +69,6 @@ export default function SDRControlPanel({ minimal }) {
     const hw = useHardware();
 
     const surface = cfg.surface;
-
-    // Exactly one surface may hold hardware. This is the only place either is
-    // released: not on unmount, because a panel unmounts every time it is
-    // dragged to another dock, and a dock drag must not close a serial port.
-    useEffect(() => { releaseSurfaceExcept(surface); }, [surface]);
 
     return (
         <div className="stack">
@@ -302,15 +297,6 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         if (conf.autoConnect) setManualOff(id, false);
         tryAuto.current();
     }, [conf.autoConnect, id]);   // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Which CC addresses are endless encoders rather than faders. The surface
-    // needs this to decide whether a value is a position or a delta.
-    useEffect(() => {
-        if (!isMidi) return;
-        const rel = {};
-        for (const [key, m] of Object.entries(mappings)) if (m.relative) rel[key] = true;
-        surface.setRelative(rel);
-    }, [isMidi, mappings, surface]);
 
     // Opening MIDI access is silent and grants no capability on its own, so it
     // happens as soon as this surface is chosen; a serial port, by contrast,

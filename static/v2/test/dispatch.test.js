@@ -139,6 +139,29 @@ t('watching nothing is safe', () => {
     dispatch.watchSurface('off')();
 });
 
+t('a dial refuses a position, which is why setRelative matters', () => {
+    // The surface decides whether a CC carries a delta or a position, and it
+    // only knows from setRelative. A position landing on a dial function is
+    // refused outright — turning it into a press would tune one way whichever
+    // way the wheel went — so a surface whose encoders were never declared is
+    // connected and completely deaf.
+    //
+    // That call was the SDR Control panel's. A page loaded with the panel
+    // collapsed therefore connected the dial and ignored everything it sent,
+    // which is exactly what "MIDI does not start" looked like.
+    reset();
+    const ctx = fakeCtx();
+    dispatch.setControlContext(ctx);
+    dispatch.setSurfaceMappings('midi', { 'cc:1:10': { function: 'freq_enc_100' } });
+    watch('midi');
+
+    midi.emit('input', { key: 'cc:1:10', event: { kind: 'absolute', value: 64 } });
+    assert.strictEqual(ctx.calls.length, 0, 'a position drove the dial');
+
+    midi.emit('input', { key: 'cc:1:10', event: { kind: 'relative', delta: 1 } });
+    assert.ok(ctx.calls.length > 0, 'a detent did not drive the dial');
+});
+
 // --- connecting unattended ---------------------------------------------------
 
 t('autoconnect does nothing unless it is switched on', () => {

@@ -21,7 +21,7 @@ import {
 import { functionLabel } from '../controls/functions.js';
 import { isCCKey, midiKeyLabel } from '../controls/webmidi.js';
 import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
-import { getSurface, getSync } from '../controls/sources.js';
+import { getSurface, getSync, releaseSurfaceExcept } from '../controls/sources.js';
 
 export default function ControlWatch() {
     const radio = useRadio();
@@ -46,6 +46,22 @@ export default function ControlWatch() {
         setSurfaceMappings(surface, cfg[surface]?.mappings);
     }, [surface, cfg]);
 
+    // Which CC addresses are endless encoders rather than faders. The surface
+    // needs this to tell a delta from a position, and it is not cosmetic: a
+    // position arriving on a dial function is *refused* — turning it into a
+    // press would tune one way whichever way the wheel went — so without this
+    // every encoder on the surface is dead. It was the panel's, which is why a
+    // page loaded with the panel collapsed connected the dial and then ignored
+    // everything it sent.
+    useEffect(() => {
+        if (surface !== 'midi') return;
+        const rel = {};
+        for (const [key, m] of Object.entries(cfg.midi?.mappings || {})) {
+            if (m.relative) rel[key] = true;
+        }
+        getSurface('midi').setRelative(rel);
+    }, [surface, cfg]);
+
     // Named here because naming a function needs the DSP schemas and the
     // hardware list, and dispatch.js has neither.
     useEffect(() => {
@@ -60,6 +76,13 @@ export default function ControlWatch() {
     }, [dspSchemas, hw]);
 
     useEffect(() => watchSurface(surface), [surface]);
+
+    // Exactly one surface may hold hardware. Released when the choice changes
+    // and at no other time — never on unmount, because a panel unmounts every
+    // time it is dragged to another dock and a dock drag must not close a
+    // serial port. Here rather than in the panel because it is a fact about the
+    // setting, not about anything being on screen.
+    useEffect(() => { releaseSurfaceExcept(surface); }, [surface]);
 
     // Connecting on its own: on arrival, and again whenever the hardware turns
     // up. Both were the panel's, and the panel does not open by default — so a

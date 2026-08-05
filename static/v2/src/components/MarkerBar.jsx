@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
-import { formatFreqShort } from '../lib/format.js';
+import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
@@ -480,12 +480,25 @@ export default function MarkerBar({ width }) {
     );
 }
 
+// The station, with its flag if the country is known.
+//
+// The flag goes before the callsign rather than beside the country name, so it
+// reads as part of who this is — and so a glance down a column of tooltips
+// lines the flags up. The tooltips are DOM rather than canvas, so these render
+// as flags rather than as a pair of letters.
+function who(callsign, code, country, fallback) {
+    if (!callsign) return fallback;
+    const flag = countryFlag(code);
+    const name = flag ? `${flag} ${callsign}` : callsign;
+    return country ? `${name} — ${country}` : name;
+}
+
 // What the detector found, not what someone named — so the tooltip leads with
 // the measurement rather than repeating the label already on the pill.
 function voiceTip(a) {
     const parts = [
         `${formatFreqShort(dialFreq(a))} ${(a.mode || 'LSB').toUpperCase()}`,
-        a.dx_callsign ? (a.dx_country ? `${a.dx_callsign} — ${a.dx_country}` : a.dx_callsign) : 'Voice activity',
+        who(a.dx_callsign, a.dx_country_code, a.dx_country, 'Voice activity'),
     ];
     if (a.signal_above_noise != null) parts.push(`${a.signal_above_noise.toFixed(1)} dB`);
     if (a.confidence != null) parts.push(`${Math.round(a.confidence * 100)}%`);
@@ -498,7 +511,7 @@ function voiceTip(a) {
 function spotTip(s) {
     const parts = [
         `${formatFreqShort(s.frequency)} ${modeForSpot(s).toUpperCase()}`,
-        s.country ? `${s.callsign} — ${s.country}` : s.callsign,
+        who(s.callsign, s.countryCode, s.country, s.callsign),
         ageLabel(s.at),
     ];
     if (s.snr != null) parts.push(`${s.snr > 0 ? '+' : ''}${s.snr} dB`);

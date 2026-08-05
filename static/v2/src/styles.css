@@ -2682,9 +2682,24 @@ a.btn { text-decoration: none; }
 .floatwin__body .dxc-out { height: auto; flex: 1 1 auto; min-height: 80px; }
 
 /* SSTV: the picture the addon last decoded. */
+/* Tiled to whatever the panel is wide enough for: one column in a narrow left
+   dock, two or three once it has been widened or dragged to the bottom. The
+   count you asked for is how many pictures, not how many rows — four in a
+   two-column panel is a 2×2 grid, which is what you would draw by hand.
+   
+   `auto-fit` rather than a fixed column count, because the panel is resizable
+   and a fixed grid would either overflow it or waste it. A single picture
+   stretches to the full width, which is what one picture should do. */
+.sstv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
 /* One block per picture. A fixed aspect box would crop them — SSTV modes are
-   not all 4:3 — so each image sets its own height and the panel follows. */
-.sstv-shot { display: flex; flex-direction: column; gap: 4px; }
+   not all 4:3 — so each image sets its own height and the row follows. */
+.sstv-shot { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sstv-shot > a { display: block; line-height: 0; border-radius: var(--radius-sm); overflow: hidden; }
 .sstv-shot img {
     display: block;

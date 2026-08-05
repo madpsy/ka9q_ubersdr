@@ -88,48 +88,52 @@ export default function SSTVPanel({ minimal }) {
 
             {shots.length === 0 ? (
                 <Empty>No pictures decoded yet.</Empty>
-            ) : shots.map((rec, i) => {
-                const src = imageUrl(rec.file);
-                return (
-                    <div className="sstv-shot" key={rec.id != null ? rec.id : src}>
-                        {!minimal && (
-                            <div className="sstv-shot__head">
-                                {/* Only worth labelling once there is more than
-                                    one to tell apart. */}
-                                {shots.length > 1 && (
-                                    <span className="sstv-shot__n">{i === 0 ? 'Latest' : `−${i}`}</span>
-                                )}
-                                <span className="sstv-shot__age">{formatAge(rec.rx_end, now)}</span>
-                                <a
-                                    className="sstv-shot__dl"
-                                    href={src}
-                                    download={downloadName(rec.file)}
-                                    title="Download this picture"
-                                >
-                                    ⬇
-                                </a>
-                            </div>
-                        )}
+            ) : (
+                <div className="sstv-grid">
+                    {shots.map((rec, i) => {
+                    const src = imageUrl(rec.file);
+                    return (
+                        <div className="sstv-shot" key={rec.id != null ? rec.id : src}>
+                            {!minimal && (
+                                <div className="sstv-shot__head">
+                                    {/* Only worth labelling once there is more than
+                                        one to tell apart. */}
+                                    {shots.length > 1 && (
+                                        <span className="sstv-shot__n">{i === 0 ? 'Latest' : `−${i}`}</span>
+                                    )}
+                                    <span className="sstv-shot__age">{formatAge(rec.rx_end, now)}</span>
+                                    <a
+                                        className="sstv-shot__dl"
+                                        href={src}
+                                        download={downloadName(rec.file)}
+                                        title="Download this picture"
+                                    >
+                                        ⬇
+                                    </a>
+                                </div>
+                            )}
 
-                        {/* Full size in a new tab: a dock column is narrower
-                            than any SSTV frame, and the detail is the point. */}
-                        <a href={src} target="_blank" rel="noopener noreferrer">
-                            <img src={src} alt={`SSTV received ${rec.rx_end || ''}`} loading="lazy" />
-                        </a>
+                            {/* Full size in a new tab: a dock column is narrower
+                                than any SSTV frame, and the detail is the point. */}
+                            <a href={src} target="_blank" rel="noopener noreferrer">
+                                <img src={src} alt={`SSTV received ${rec.rx_end || ''}`} loading="lazy" />
+                            </a>
 
-                        {!minimal && (
-                            <dl className="sstv-info">
-                                {detailRows(rec).map(([label, value]) => (
-                                    <React.Fragment key={label}>
-                                        <dt>{label}</dt>
-                                        <dd title={value}>{value}</dd>
-                                    </React.Fragment>
-                                ))}
-                            </dl>
-                        )}
-                    </div>
-                );
-            })}
+                            {!minimal && (
+                                <dl className="sstv-info">
+                                    {detailRows(rec).map(([label, value]) => (
+                                        <React.Fragment key={label}>
+                                            <dt>{label}</dt>
+                                            <dd title={value}>{value}</dd>
+                                        </React.Fragment>
+                                    ))}
+                                </dl>
+                            )}
+                        </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }

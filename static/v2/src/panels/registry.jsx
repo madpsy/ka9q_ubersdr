@@ -65,6 +65,7 @@ import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
 import WeatherPanel from './WeatherPanel.jsx';
+import NewsPanel from './NewsPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 
 export const PANELS = [
@@ -271,6 +272,20 @@ export const PANELS = [
         defaultOpen: false,
         minimal: true,
         Component: WeatherPanel,
+    },
+    // Headlines from ARRL or RSGB. No `requires`: the feeds are on the public
+    // internet rather than on this receiver, so nothing about the instance
+    // decides whether the panel can work — see lib/news.js for the relay it
+    // depends on and what happens when that is down.
+    // Minimal: the headlines, without the source picker or the pager.
+    {
+        id: 'news',
+        title: 'News',
+        icon: <Icon.News />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: NewsPanel,
     },
     // Minimal: noise reduction. Volume, channel and buffer are set once a
     // session; that one is worked at while you listen. Squelch is in Signal,

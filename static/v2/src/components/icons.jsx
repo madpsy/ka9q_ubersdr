@@ -45,6 +45,8 @@ export const Icon = {
     ZoomOut: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" /></Svg>,
     Sun: (p) => <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
     Moon: (p) => <Svg {...p}><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" /></Svg>,
+    // A folded newspaper: a page with a masthead rule and two columns.
+    News: (p) => <Svg {...p}><path d="M4 5h13a1 1 0 0 1 1 1v12a1 1 0 0 0 1 1 1 1 0 0 0 1-1V9h-3M4 5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h15M7 9h7M7 13h7M7 16h4" /></Svg>,
     // Terrestrial weather, as opposed to Sun, which is space weather's.
     Cloud: (p) => <Svg {...p}><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.1 11.2 3.9 3.9 0 0 0 6.5 19z" /></Svg>,
     // Three streamers, the long one trailing into a curl.

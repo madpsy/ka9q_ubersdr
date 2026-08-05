@@ -3005,6 +3005,53 @@ a.btn { text-decoration: none; }
 .volume-row__value.is-muted { opacity: 0.4; }
 
 /* =========================================================================
+   News
+   ========================================================================= */
+
+.news__head { display: flex; gap: 6px; align-items: center; }
+.news__head .select { flex: 1; min-width: 0; }
+
+.news__list { display: flex; flex-direction: column; gap: 2px; }
+
+/* A headline is a link, and has to look like one to read as a list of things
+   you can open — but not so much that five of them become five blue rules. */
+.news__item {
+    display: block;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    text-decoration: none;
+    font-size: calc(12px * var(--ui-scale));
+    line-height: 1.35;
+}
+.news__item:hover { background: var(--surface-2); color: var(--accent); }
+
+/* Ahead of the headline rather than on a line of its own: the date is how you
+   tell "this morning" from "last week" at a glance, and it is three characters. */
+.news__date {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+    margin-right: 7px;
+    white-space: nowrap;
+}
+.news__title { overflow-wrap: anywhere; }
+
+.news__pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.news__page {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+}
+
+/* =========================================================================
    Weather
    ========================================================================= */
 

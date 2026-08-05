@@ -142,6 +142,8 @@ esbuild ../src/lib/weather.js --bundle --format=cjs --platform=node \
     --outfile=.build/weather.cjs --log-level=warning
 esbuild ../src/lib/audioWaterfall.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiowaterfall.cjs --log-level=warning
+esbuild ../src/lib/news.js --bundle --format=cjs --platform=node \
+    --outfile=.build/news.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
 esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
@@ -210,6 +212,7 @@ node dispatch.test.js
 node weather.test.js
 node radiosync.test.js
 node audiowaterfall.test.js
+node news.test.js
 node operatorphoto.test.js
 node bookmarkgroups.test.js
 node bridge.test.js

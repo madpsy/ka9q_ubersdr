@@ -104,8 +104,8 @@ esbuild ../src/lib/backup.js --bundle --format=cjs --platform=node \
     --outfile=.build/backup.cjs --log-level=warning
 esbuild ../src/lib/radioSettings.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosettings.cjs --log-level=warning
-esbuild ../src/lib/dxcluster.js --bundle --format=cjs --platform=node \
-    --outfile=.build/dxaddon.cjs --log-level=warning
+esbuild ../src/lib/dxclusterTerminal.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dxterminal.cjs --log-level=warning
 esbuild ../src/bridge/protocol.js --bundle --format=cjs --platform=node \
     --outfile=.build/bridgeprotocol.cjs --log-level=warning
 esbuild ../src/bridge/host.js --bundle --format=cjs --platform=node \
@@ -177,7 +177,7 @@ node shortcuts.test.js
 node backup.test.js
 node radiosettings.test.js
 node format.test.js
-node dxaddon.test.js
+node dxterminal.test.js
 node bridge.test.js
 node bridgecommands.test.js
 node bridgeclient.test.js

@@ -2608,74 +2608,52 @@ a.btn { text-decoration: none; }
 .bk-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bk-note > span { flex: 1 1 60%; min-width: 0; }
 
-/* DX cluster addon feed. One row per spot, laid out as a table without being
-   one: a grid keeps the columns aligned while each row stays a single button,
-   which is what makes the whole row a tune target. */
-.dxc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.dxc-head__state { font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); }
-.dxc-head__count {
-    margin-left: auto;
+/* DX cluster terminal. A transcript of the cluster's own output, in which any
+   line that parses as a spot is a button that tunes the receiver. */
+.dxc-login, .dxc-input { display: flex; align-items: center; gap: 6px; }
+.dxc-login .input, .dxc-input .input { flex: 1; min-width: 0; }
+.dxc-status { display: flex; align-items: center; gap: 8px; }
+.dxc-status__text {
+    flex: 1;
+    min-width: 0;
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dxc-out {
+    min-height: 120px;
+    max-height: 340px;
+    overflow: auto;
+    padding: 6px 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: calc(11px * var(--ui-scale));
-    color: var(--text-faint);
+    line-height: 1.45;
 }
-
-.dxc-filters { display: flex; flex-direction: column; gap: 8px; }
-.dxc-picker { display: flex; flex-direction: column; gap: 4px; }
-.dxc-picker__label {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-size: calc(11px * var(--ui-scale));
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-}
-.dxc-picker__all { text-transform: none; letter-spacing: 0.04em; color: var(--text-dim); }
-
-.dxc-list { display: flex; flex-direction: column; }
-.dxc-row {
-    display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto auto minmax(0, 1.2fr) auto;
-    align-items: baseline;
-    gap: 8px;
+/* Cluster output is column-aligned with spaces, so it has to be preserved —
+   and wrapped rather than clipped, because a dock is narrower than 80 columns
+   and a spot scrolled off to the right is a spot you cannot click. */
+.dxc-out__line {
+    display: block;
     width: 100%;
-    padding: 4px 6px;
+    padding: 0;
     border: 0;
-    border-bottom: 1px solid var(--border);
     background: none;
-    color: var(--text);
-    font-size: calc(11.5px * var(--ui-scale));
-    text-align: left;
-    cursor: pointer;
-}
-.dxc-row:hover { background: var(--surface-hover); }
-.dxc-row__utc, .dxc-row__freq, .dxc-row__snr, .dxc-row__age { font-family: var(--mono); }
-.dxc-row__utc, .dxc-row__age, .dxc-row__band, .dxc-row__mode { color: var(--text-faint); }
-.dxc-row__call { font-weight: 650; }
-.dxc-row__country, .dxc-row__snr { color: var(--text-dim); }
-.dxc-row__country { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The stream a spot came from, in the same colours the spectrum uses for its
-   own spot markers so the two read as one vocabulary. */
-.dxc-row__type {
-    padding: 0 5px;
-    border-radius: 3px;
-    font-size: calc(9.5px * var(--ui-scale));
-    font-weight: 650;
-    letter-spacing: 0.06em;
-    background: var(--surface-hover);
     color: var(--text-dim);
+    font: inherit;
+    text-align: left;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
-.dxc-row__type--dx { background: var(--accent-soft); color: var(--accent); }
-.dxc-row__type--digital { background: rgba(139, 124, 248, 0.16); color: var(--violet); }
-.dxc-row__type--cw { background: rgba(69, 214, 154, 0.14); color: var(--good); }
-.dxc-row__type--voice { background: rgba(242, 181, 68, 0.14); color: var(--warn); }
-
-/* Narrow docks drop the columns that are context rather than identity. */
-@media (max-width: 520px) {
-    .dxc-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
-    .dxc-row__utc, .dxc-row__band, .dxc-row__mode, .dxc-row__snr, .dxc-row__country { display: none; }
-}
+.dxc-out__line--echo { color: var(--accent); }
+.dxc-out__line--spot { color: var(--text); cursor: pointer; }
+.dxc-out__line--spot:hover { background: var(--surface-hover); }
+.dxc-out__line--spot:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 .volume-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .volume-row__value { font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); min-width: 26px; text-align: right; }

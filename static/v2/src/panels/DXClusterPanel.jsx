@@ -1,273 +1,231 @@
-// The DX cluster addon, natively.
+// The DX cluster terminal.
 //
-// The addon ships its own page at /addon/dxcluster/ and this is the same feed
-// in this interface instead of a second one in another tab: the spots tune the
-// receiver you are looking at, the filters use the same controls as every other
-// panel, and it goes wherever you put it.
+// A port of widgets/dxcluster.widget.html: a login to the cluster the dxcluster
+// addon runs, over the WebSocket it proxies its telnet server on. You type
+// Spider commands and read what comes back, and any line that parses as a spot
+// is clickable — it tunes this receiver, with the mode worked out the way the
+// widget works it out.
 //
-// The connection is the panel's lifetime. Panels are unmounted when collapsed
-// or hidden, so opening this one opens the feed and closing it closes it —
-// nothing is held open for a panel nobody has on screen.
+// The socket is not opened until Connect, and is closed when the panel is
+// unmounted — which in this interface means when it is collapsed or hidden. A
+// login on a shared cluster is not something to hold open because a panel
+// happens to be on screen.
 //
-// `minimal` keeps the spot list and drops the filters and the status line.
+// `minimal` keeps the transcript and the command line, and drops the quick
+// commands and the status row.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { Button, Empty, Field, Icon, ShowMore } from '../components/ui.jsx';
+import { Button, Empty } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { formatFreqShort } from '../lib/format.js';
 import {
-    ALL_MODES, DEFAULT_FILTERS, STREAMS, bandsIn, continentsIn, countriesIn,
-    dialFreq, modeOf, spotKey, spotMatches, streamMeta, streamOf,
-} from '../lib/dxcluster.js';
-import { openFeed } from '../lib/dxclusterFeed.js';
+    QUICK_COMMANDS, openTerminal, parseSpotLine, saveCallsign, savedCallsign, trimLines,
+} from '../lib/dxclusterTerminal.js';
 
-const PAGE = 25;
+export const ADDON_NAME = 'dxcluster';
 
-// Ages tick rather than freezing at whatever they read when the spot arrived.
-const AGE_TICK_MS = 1000;
-
-function ago(iso, now) {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return '—';
-    const s = Math.max(0, Math.round((now - t) / 1000));
-    if (s < 60) return `${s}s`;
-    if (s < 3600) return `${Math.floor(s / 60)}m`;
-    return `${Math.floor(s / 3600)}h`;
-}
-
-const utc = (iso) => {
-    const t = new Date(iso);
-    return Number.isNaN(t.getTime()) ? '—' : t.toISOString().slice(11, 16);
-};
-
-// A multi-select that stays a row of chips rather than becoming a <select
-// multiple>, which is unusable in a dock and worse on touch.
-function ChipPicker({ label, options, value, onChange, empty = 'All' }) {
-    if (!options.length) return null;
-    const toggle = (v) => {
-        const next = value.includes(v) ? value.filter((x) => x !== v) : [...value, v];
-        onChange(next);
-    };
-    return (
-        <div className="dxc-picker">
-            <span className="dxc-picker__label">
-                {label}
-                {value.length === 0 && <span className="dxc-picker__all">{empty}</span>}
-            </span>
-            <div className="chip-row chip-row--wrap">
-                {options.map((o) => {
-                    const v = typeof o === 'string' ? o : o.value;
-                    const text = typeof o === 'string' ? o : o.label;
-                    return (
-                        <button
-                            key={v}
-                            type="button"
-                            className={`chip chip--button${value.includes(v) ? ' is-on' : ''}`}
-                            onClick={() => toggle(v)}
-                        >
-                            {text}
-                        </button>
-                    );
-                })}
-            </div>
-        </div>
-    );
+/** Is the addon on this receiver? Same test the widget makes. */
+export function dxClusterAvailable(serverInfo) {
+    const addons = serverInfo && serverInfo.addons;
+    return Array.isArray(addons) && addons.includes(ADDON_NAME);
 }
 
 export default function DXClusterPanel({ minimal }) {
     const { actions } = useRadio();
-    const [spots, setSpots] = useState([]);
-    const [status, setStatus] = useState(null);
-    const [state, setState] = useState('connecting');
-    const [filters, setFilters] = useState(DEFAULT_FILTERS);
-    const [limit, setLimit] = useState(PAGE);
-    const [showFilters, setShowFilters] = useState(false);
-    const [now, setNow] = useState(() => Date.now());
-    const feedRef = useRef(null);
+    const [callsign, setCallsign] = useState(savedCallsign);
+    const [state, setState] = useState('closed');
+    const [detail, setDetail] = useState('');
+    const [text, setText] = useState('');
+    const [line, setLine] = useState('');
+    const [flash, setFlash] = useState('');
+    const termRef = useRef(null);
+    const outRef = useRef(null);
+    const flashRef = useRef(null);
 
-    // The whole point of the lifecycle: mounted means somebody is looking.
-    useEffect(() => {
-        const feed = openFeed({ spots: setSpots, status: setStatus, state: setState });
-        feedRef.current = feed;
-        return () => {
-            feed.close();
-            feedRef.current = null;
-        };
+    const connected = state === 'open';
+
+    // The panel's lifetime is the login's. Nothing is left connected behind a
+    // collapsed panel.
+    useEffect(() => () => {
+        if (termRef.current) termRef.current.close();
+        clearTimeout(flashRef.current);
     }, []);
 
+    // Follow the tail, unless the operator has scrolled up to read something.
     useEffect(() => {
-        const id = setInterval(() => setNow(Date.now()), AGE_TICK_MS);
-        return () => clearInterval(id);
-    }, []);
+        const el = outRef.current;
+        if (!el) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) el.scrollTop = el.scrollHeight;
+    }, [text]);
 
-    useEffect(() => { setLimit(PAGE); }, [filters]);
+    const connect = useCallback(() => {
+        const call = callsign.trim().toUpperCase();
+        if (!call || termRef.current) return;
+        saveCallsign(call);
+        setText('');
+        setDetail('');
+        termRef.current = openTerminal({
+            callsign: call,
+            on: {
+                text: (chunk) => setText((t) => trimLines(t + chunk)),
+                state: (st, why) => {
+                    setState(st);
+                    setDetail(why);
+                    if (st === 'closed') termRef.current = null;
+                },
+            },
+        });
+    }, [callsign]);
 
-    const set = useCallback((patch) => setFilters((f) => ({ ...f, ...patch })), []);
-
-    const bands = useMemo(() => bandsIn(spots), [spots]);
-    const continents = useMemo(() => continentsIn(spots), [spots]);
-    const countries = useMemo(() => countriesIn(spots), [spots]);
-    const shown = useMemo(() => spots.filter((s) => spotMatches(s, filters)), [spots, filters]);
-
-    const tune = (spot) => {
-        const hz = dialFreq(spot);
-        if (hz == null) return;
-        const mode = modeOf(spot);
-        // Digital and CW decodes carry a mode worth switching to; a cluster spot
-        // does not, and guessing one from the band plan is how you end up in the
-        // wrong sideband on 40 m.
-        if (mode === 'USB' || mode === 'LSB') actions.tuneTo({ frequency: hz, mode: mode.toLowerCase() });
-        else actions.setFrequency(hz);
-        actions.ensureVisible(hz);
+    const disconnect = () => {
+        if (termRef.current) termRef.current.close();
+        termRef.current = null;
+        setState('closed');
+        setDetail('');
     };
 
-    const conn = state === 'live' ? 'good' : state === 'connecting' ? 'warn' : 'bad';
+    const send = (cmd) => {
+        if (termRef.current) termRef.current.send(cmd);
+    };
+
+    const say = (msg) => {
+        setFlash(msg);
+        clearTimeout(flashRef.current);
+        flashRef.current = setTimeout(() => setFlash(''), 1600);
+    };
+
+    // Spot lines are found once per transcript change rather than on every
+    // click: the transcript is the thing that changes, and a click has to know
+    // immediately whether the line under it is tuneable.
+    const lines = useMemo(() => text.split('\n').map((raw) => ({ raw, spot: parseSpotLine(raw) })), [text]);
+
+    const tune = (spot) => {
+        // Frequency and mode together: separately, the receiver passes through
+        // the old mode's passband on the new frequency on the way.
+        actions.tuneTo({ frequency: spot.hz, mode: spot.mode });
+        actions.ensureVisible(spot.hz);
+        say(`Tuned ${spot.khz} ${spot.mode.toUpperCase()}`);
+    };
 
     return (
         <div className="stack">
-            {!minimal && (
-                <div className="dxc-head">
-                    <span className={`dot dot--${conn}`} />
-                    <span className="dxc-head__state">
-                        {state === 'live' ? 'Live' : state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
-                    </span>
-                    {status && status.telnet_addr && (
-                        <span className="tag tag--ghost" title="Telnet address of this cluster">
-                            telnet {status.telnet_addr}
-                        </span>
-                    )}
-                    {status && status.telnet_clients > 0 && (
-                        <span
-                            className="tag"
-                            title={(status.telnet_client_list || [])
-                                .map((c) => `${c.callsign || c.ip}`).join(', ')}
-                        >
-                            {status.telnet_clients} logged in
-                        </span>
-                    )}
-                    <span className="dxc-head__count">{shown.length}</span>
+            {!connected ? (
+                <div className="dxc-login">
+                    <input
+                        className="input"
+                        placeholder="Callsign"
+                        value={callsign}
+                        onChange={(e) => setCallsign(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') connect(); }}
+                        autoComplete="off"
+                        spellCheck={false}
+                    />
+                    <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!callsign.trim() || state === 'connecting'}
+                        onClick={connect}
+                    >
+                        {state === 'connecting' ? 'Connecting…' : 'Connect'}
+                    </Button>
+                </div>
+            ) : (
+                <div className="dxc-status">
+                    <span className="dot dot--good" />
+                    <span className="dxc-status__text">{flash || `Connected as ${callsign.toUpperCase()}`}</span>
+                    <Button size="sm" variant="ghost" onClick={disconnect}>Disconnect</Button>
                 </div>
             )}
 
-            {!minimal && (
-                <div className="chip-row chip-row--wrap">
-                    {STREAMS.map((s) => (
+            {detail && <div className="note note--warn">{detail}</div>}
+
+            {/* The cluster's own words. Rendered as text, never as markup, and
+                one element per line so a spot can be a click target. */}
+            <div className="dxc-out" ref={outRef}>
+                {text ? lines.map(({ raw, spot }, i) => (
+                    spot ? (
                         <button
-                            key={s.id}
+                            // The transcript is append-only and trimmed from the
+                            // front, so the index is stable for as long as a line
+                            // is on screen.
+                            key={i}
                             type="button"
-                            className={`chip chip--button${filters.streams.includes(s.id) ? ' is-on' : ''}`}
-                            title={`Show ${s.label} spots`}
-                            onClick={() => set({
-                                streams: filters.streams.includes(s.id)
-                                    ? filters.streams.filter((x) => x !== s.id)
-                                    : [...filters.streams, s.id],
-                            })}
+                            className="dxc-out__line dxc-out__line--spot"
+                            title={`Tune to ${spot.callsign} — ${spot.khz} kHz ${spot.mode.toUpperCase()}`}
+                            onClick={() => tune(spot)}
                         >
-                            {s.label}
+                            {raw}
+                        </button>
+                    ) : (
+                        <div
+                            key={i}
+                            className={`dxc-out__line${raw.startsWith('> ') ? ' dxc-out__line--echo' : ''}`}
+                        >
+                            {raw}
+                        </div>
+                    )
+                )) : (
+                    <Empty>
+                        {connected ? 'Waiting for the cluster…' : 'Enter your callsign and connect.'}
+                    </Empty>
+                )}
+            </div>
+
+            {connected && !minimal && (
+                <div className="chip-row chip-row--wrap">
+                    {QUICK_COMMANDS.map((q) => (
+                        <button
+                            key={q.label}
+                            type="button"
+                            className="chip chip--button"
+                            title={q.title || q.cmd || `${q.prompt} …`}
+                            onClick={() => {
+                                // The two that need an argument put themselves in
+                                // the command line rather than guessing one.
+                                if (q.prompt) {
+                                    setLine(`${q.prompt} `);
+                                    return;
+                                }
+                                send(q.cmd);
+                            }}
+                        >
+                            {q.label}
                         </button>
                     ))}
+                </div>
+            )}
+
+            {connected && (
+                <div className="dxc-input">
+                    <input
+                        className="input"
+                        placeholder="Command — try help"
+                        value={line}
+                        onChange={(e) => setLine(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key !== 'Enter' || !line.trim()) return;
+                            send(line);
+                            setLine('');
+                        }}
+                        autoComplete="off"
+                        spellCheck={false}
+                    />
                     <Button
                         size="sm"
                         variant="ghost"
-                        active={showFilters}
-                        onClick={() => setShowFilters((v) => !v)}
+                        disabled={!line.trim()}
+                        onClick={() => { send(line); setLine(''); }}
                     >
-                        Filters
+                        Send
                     </Button>
                 </div>
             )}
 
-            {!minimal && showFilters && (
-                <div className="dxc-filters">
-                    <Field label="Callsign starts with">
-                        <input
-                            className="input"
-                            placeholder="e.g. G, EA, VK3"
-                            value={filters.call}
-                            onChange={(e) => set({ call: e.target.value })}
-                        />
-                    </Field>
-                    <ChipPicker
-                        label="Mode"
-                        options={ALL_MODES}
-                        value={filters.modes.length === ALL_MODES.length ? [] : filters.modes}
-                        onChange={(v) => set({ modes: v.length ? v : ALL_MODES })}
-                    />
-                    <ChipPicker label="Band" options={bands} value={filters.bands}
-                        onChange={(v) => set({ bands: v })} />
-                    <ChipPicker label="Continent" options={continents} value={filters.continents}
-                        onChange={(v) => set({ continents: v })} />
-                    <ChipPicker
-                        label="Country"
-                        options={countries.map((c) => ({ value: c.code, label: c.name }))}
-                        value={filters.countries}
-                        onChange={(v) => set({ countries: v })}
-                    />
-                    <div className="row-end">
-                        <Button size="sm" variant="ghost" icon={<Icon.Reset size={13} />}
-                            onClick={() => setFilters(DEFAULT_FILTERS)}>
-                            Clear filters
-                        </Button>
-                    </div>
-                </div>
-            )}
-
-            {shown.length === 0 ? (
-                <Empty>
-                    {spots.length === 0
-                        ? (state === 'down' ? 'No connection to the cluster addon.' : 'Waiting for spots…')
-                        : 'No spot matches these filters'}
-                </Empty>
-            ) : (
-                <div className="dxc-list">
-                    {shown.slice(0, limit).map((spot) => {
-                        const meta = streamMeta(streamOf(spot));
-                        const mode = modeOf(spot);
-                        const snr = Number(spot.snr);
-                        return (
-                            <button
-                                type="button"
-                                key={spotKey(spot)}
-                                className="dxc-row"
-                                onClick={() => tune(spot)}
-                                title={spot.comment || `Spotted by ${spot.spotter || '—'}`}
-                            >
-                                {!minimal && <span className="dxc-row__utc">{utc(spot.timestamp)}</span>}
-                                <span className={`dxc-row__type dxc-row__type--${meta.tone}`}>{meta.label}</span>
-                                <span className="dxc-row__call">{spot.callsign || '—'}</span>
-                                <span className="dxc-row__freq">{formatFreqShort(dialFreq(spot) || 0)}</span>
-                                {!minimal && <span className="dxc-row__band">{spot.band || ''}</span>}
-                                {!minimal && <span className="dxc-row__mode">{mode}</span>}
-                                {!minimal && (
-                                    <span className="dxc-row__snr">
-                                        {Number.isFinite(snr) ? `${snr > 0 ? '+' : ''}${snr} dB` : ''}
-                                    </span>
-                                )}
-                                <span className="dxc-row__country">{spot.country || ''}</span>
-                                <span className="dxc-row__age">{ago(spot.timestamp, now)}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
-
-            {shown.length > limit && (
-                <ShowMore
-                    shown={limit}
-                    total={shown.length}
-                    onMore={() => setLimit((n) => n + PAGE)}
-                    label="Show more spots"
-                />
-            )}
-
-            {!minimal && (
+            {!minimal && !connected && (
                 <div className="note note--tight">
-                    From the DX cluster addon on this receiver — its own spots, this
-                    receiver&apos;s decoders, and the wider cluster network. Clicking a spot
-                    tunes to it; digital decodes tune to the dial frequency rather than to the
-                    tone. <a href={`/addon/dxcluster/`} target="_blank" rel="noopener noreferrer">
-                        The addon&apos;s own page
-                    </a> has the telnet terminal.
+                    The DX cluster this receiver runs. Log in with your callsign and type
+                    Spider commands — <code>show/dx</code>, <code>set/filter band 20m</code>,{' '}
+                    <code>help</code>. Any spot in the output is clickable and tunes the
+                    receiver to it.
                 </div>
             )}
         </div>

@@ -71,3 +71,29 @@ export function zoomCenter({ centerFreq, span, binCount }, newBinBW, aboutHz, tu
     if (!(span > 0)) return clampCenter(centerFreq, newSpan);
     return clampCenter(aboutHz - (aboutHz - centerFreq) * (newSpan / span), newSpan);
 }
+
+/**
+ * The spectrum view to open with: where this browser last had it.
+ *
+ * The zoom is resumed as the bin bandwidth rather than a span, because that is
+ * what the server quantises and what the socket takes — a span would be rounded
+ * to the nearest rung on every reconnect and drift a little further each time.
+ *
+ * The centre is only resumed if the dial would be inside it. A link carrying
+ * `?freq=` opened by someone with a saved view elsewhere would otherwise come
+ * up showing 20 m with the dial on 40 m and nothing on screen to explain it;
+ * keeping the zoom and centring it on the dial is what they meant by following
+ * the link. Same rule the auto-recentre uses, so the two agree.
+ *
+ * Both values or neither: the server applies whichever of the two it is given
+ * and keeps what it had for the other, so a centre without a zoom lands on the
+ * full-span default and asks for a 30 MHz window somewhere it cannot exist.
+ */
+export function resumeView(saved, tuning) {
+    const bw = Number(saved.spectrumBinBandwidth);
+    const centre = Number(saved.spectrumCenter);
+    if (!(bw > 0) || !(centre > 0)) return {};
+    const span = Number(saved.spectrumSpan);
+    const showsDial = span > 0 && !needsRecenter(tuning, centre, span);
+    return { frequency: showsDial ? centre : tuning.frequency, binBandwidth: bw };
+}

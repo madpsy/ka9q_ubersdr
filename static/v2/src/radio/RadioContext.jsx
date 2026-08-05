@@ -25,7 +25,7 @@ import {
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
-import { needsRecenter, zoomCenter } from '../lib/zoom.js';
+import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
 
 const RadioContext = createContext(null);
 
@@ -493,8 +493,26 @@ export function RadioProvider({ children }) {
             dspFilter: dsp.filter,
             dspParams: dsp.params,
             followTuning,
+            // Where the spectrum was looking, so a reload comes back to it
+            // rather than to full span. The zoom is stored as the bin
+            // bandwidth rather than a span because that is what the server
+            // quantises and what it takes on the wire — a span would be
+            // rounded to the nearest rung on reconnect and drift a little
+            // further every time. Only written once the server has said what
+            // the view is; a zero would ask for the default anyway, but
+            // saving one would throw away a good value during startup.
+            ...(view.binBandwidth > 0 && view.centerFreq > 0
+                ? {
+                    spectrumCenter: view.centerFreq,
+                    spectrumBinBandwidth: view.binBandwidth,
+                    // Kept as well as the bin bandwidth, and only for the check
+                    // at connect time: the span is bandwidth × bin count, and
+                    // the bin count is not known until the socket is open.
+                    spectrumSpan: view.span,
+                }
+                : {}),
         });
-    }, [tuning, audio, squelchValue, dsp, followTuning, filters]);
+    }, [tuning, audio, squelchValue, dsp, followTuning, filters, view]);
 
     // ---- actions --------------------------------------------------------
 
@@ -564,7 +582,21 @@ export function RadioProvider({ children }) {
                 }, () => { /* the countdown just stays as it was */ });
                 const t = tuningRef.current;
                 await audioConn.connect(t);
-                await spectrumConn.connect({});
+                // Resume the view this browser was last on. The socket already
+                // carries the pair for reconnects, so a fresh session is the
+                // same journey with the values coming from the last visit
+                // instead of from the last second.
+                //
+                // Both or neither: the server applies whichever of the two it
+                // is given and keeps what it had for the other, so a centre
+                // without a zoom lands on the full-span default and asks for a
+                // 30 MHz window somewhere it cannot exist. connect() clamps for
+                // the same reason.
+                // Read now rather than from the load-time snapshot: powering
+                // off and on again within one visit should come back to the
+                // view you left, not the one you arrived with.
+                const last = loadSettings();
+                await spectrumConn.connect(resumeView(last, t));
             },
 
             powerOff() {

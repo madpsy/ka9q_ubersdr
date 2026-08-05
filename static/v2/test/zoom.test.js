@@ -4,7 +4,7 @@
 // you are panned away from the dial, so both are pinned here.
 
 const assert = require('assert');
-const { clampCenter, needsRecenter, zoomCenter } = require('./.build/zoom.cjs');
+const { clampCenter, needsRecenter, resumeView, zoomCenter } = require('./.build/zoom.cjs');
 const { MAX_FREQ, MIN_FREQ } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -164,6 +164,49 @@ t('a filter wider than the span falls back to keeping the dial visible', () => {
 t('no span yet means nothing to be outside of', () => {
     // Before the spectrum has connected there is no view to move.
     assert.strictEqual(needsRecenter(at(14.1e6, USB), 0, 0), false);
+});
+
+// --- resuming the view a reload came back to -------------------------------
+
+// 200 kHz wide, centred on 14.1 MHz.
+const SAVED = { spectrumCenter: 14.1e6, spectrumBinBandwidth: 100, spectrumSpan: 200e3 };
+
+t('nothing saved asks for nothing, so the server picks the default', () => {
+    assert.deepStrictEqual(resumeView({}, at(14.1e6, USB)), {});
+    assert.deepStrictEqual(resumeView({ spectrumCenter: 14.1e6 }, at(14.1e6, USB)), {},
+        'a centre with no zoom would land on the full-span default');
+    assert.deepStrictEqual(resumeView({ spectrumBinBandwidth: 100 }, at(14.1e6, USB)), {});
+});
+
+t('a saved view is resumed whole when the dial is inside it', () => {
+    assert.deepStrictEqual(resumeView(SAVED, at(14.1e6, USB)),
+        { frequency: 14.1e6, binBandwidth: 100 });
+    assert.deepStrictEqual(resumeView(SAVED, at(14.19e6, USB)),
+        { frequency: 14.1e6, binBandwidth: 100 }, 'off centre but still on screen');
+});
+
+t('a dial outside the saved view keeps the zoom and centres on the dial', () => {
+    // What a shared ?freq= link does to someone whose saved view is elsewhere:
+    // 20 m on screen, the dial on 40 m, and nothing to explain it.
+    assert.deepStrictEqual(resumeView(SAVED, at(7.1e6, USB)),
+        { frequency: 7.1e6, binBandwidth: 100 });
+});
+
+t('the same rule as the auto-recentre, passband included', () => {
+    // The dial itself is inside the view, but its passband is not — and that
+    // is the case needsRecenter exists for, so resuming must agree with it.
+    const edge = 14.1e6 + 100e3 - 1000;   // 1 kHz inside the right edge
+    assert.strictEqual(needsRecenter(at(edge, USB), 14.1e6, 200e3), true);
+    assert.strictEqual(resumeView(SAVED, at(edge, USB)).frequency, edge,
+        'resumed a view the passband hangs out of');
+});
+
+t('a saved zoom with no span is trusted for the zoom but not the centre', () => {
+    // Written by a build before the span was stored. The zoom is still good;
+    // whether the dial is inside it cannot be known, so the dial wins.
+    const old = { spectrumCenter: 14.1e6, spectrumBinBandwidth: 100 };
+    assert.deepStrictEqual(resumeView(old, at(14.1e6, USB)),
+        { frequency: 14.1e6, binBandwidth: 100 });
 });
 
 if (process.exitCode) console.log('\nzoom tests FAILED');

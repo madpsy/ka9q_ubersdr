@@ -11,6 +11,24 @@ export function formatHz(hz) {
     return `${mhz}.${String(khz).padStart(3, '0')}.${String(rest).padStart(3, '0')}`;
 }
 
+/**
+ * Every hertz of it, at a width that does not move.
+ *
+ * For the cursor readouts, where the point is to read a frequency off the
+ * spectrum precisely — formatFreqShort rounds to the zoom, which is right for a
+ * bookmark or a menu label and wrong here: at a wide span it was rounding the
+ * cursor to the nearest kilohertz.
+ *
+ * Fixed decimals rather than trimmed ones, deliberately. These numbers update
+ * as the pointer moves, and a label that changes width as the digits change
+ * makes the readout jitter and the badge beside it shuffle along.
+ */
+export function formatFreqExact(hz) {
+    const n = Math.round(hz || 0);
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(6) + ' MHz';
+    return (n / 1e3).toFixed(3) + ' kHz';
+}
+
 // Compact axis/readout label: picks kHz or MHz based on magnitude.
 export function formatFreqShort(hz, spanHz) {
     if (spanHz != null && spanHz < 100e3) {

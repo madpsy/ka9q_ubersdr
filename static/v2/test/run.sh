@@ -174,6 +174,7 @@ node announce.test.js
 node shortcuts.test.js
 node backup.test.js
 node radiosettings.test.js
+node format.test.js
 node bridge.test.js
 node bridgecommands.test.js
 node bridgeclient.test.js

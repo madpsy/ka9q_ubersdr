@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
-import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
+import { formatFreqExact, formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import {
     FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, SQUELCH_MIN,
     edgesForEdgeDrag, edgesForWidth, stepLabel,
@@ -1170,7 +1170,7 @@ export default function SpectrumView() {
                     <span className="tag tag--accent">{formatSpan(span)}</span>
                     {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
                     {hoverInfo && room.cursor && (
-                        <span className="tag tag--ghost" data-optional="cursor">{formatFreqShort(hoverInfo.freq, span)}</span>
+                        <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
                     )}
                     <SquelchTag />
                     <NoiseReductionTag />
@@ -1247,9 +1247,9 @@ export default function SpectrumView() {
                             transform: hoverInfo.x > sizes.w - 150 ? 'translateX(-100%)' : undefined,
                         }}
                     >
-                        <div>Cursor: {formatFreqShort(hoverInfo.freq, span)} | {hoverInfo.db.toFixed(1)} dB</div>
+                        <div>Cursor: {formatFreqExact(hoverInfo.freq)} | {hoverInfo.db.toFixed(1)} dB</div>
                         {hoverInfo.peakFreq != null && (
-                            <div>Peak: {formatFreqShort(hoverInfo.peakFreq, span)} | {hoverInfo.peakDb.toFixed(1)} dB</div>
+                            <div>Peak: {formatFreqExact(hoverInfo.peakFreq)} | {hoverInfo.peakDb.toFixed(1)} dB</div>
                         )}
                     </div>
                 )}

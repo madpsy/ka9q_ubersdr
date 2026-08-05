@@ -535,6 +535,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
    both nine characters — so swapping modes does not move the bar. */
 .topbar__snr { font-family: var(--mono); min-width: 9ch; text-align: right; }
 
+/* Centres the link dot on the bar. Without it the dot sits on the baseline of
+   an empty line box, which is a couple of pixels low next to the readouts. */
+.topbar__status { display: flex; align-items: center; }
+
 .topbar__spacer { flex: 1; }
 .topbar__sw {
     display: flex;
@@ -584,7 +588,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar--compact { gap: 9px; padding: 7px 10px; }
 .topbar--compact .topbar__hz { font-size: calc(14px * var(--ui-scale)); }
 
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); }
+/* `display` is load-bearing, not tidiness.
+ *
+ * This is a <span>, and width and height do not apply to a non-replaced inline
+ * element. The two dots that looked right — the SDR control connection line and
+ * the rotator's — sit inside flex parents, which blockify their children and
+ * hid the omission. The top bar's link dot sits in a plain block div, so it
+ * stayed inline, collapsed to nothing, and all that rendered was its own
+ * box-shadow ring: a 3px halo at 16% alpha, which is why it read as a green
+ * smudge rather than a lit indicator. */
+.dot {
+    display: inline-block;
+    vertical-align: middle;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--text-faint);
+}
 .dot--good { background: var(--good); box-shadow: 0 0 0 3px rgba(69, 214, 154, 0.16); }
 .dot--warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(242, 181, 68, 0.16); animation: pulse 1.4s infinite; }
 .dot--bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(242, 100, 106, 0.16); }

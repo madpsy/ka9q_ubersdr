@@ -14,9 +14,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
-import { formatFreqExact, formatFreqShort, formatSpan, clamp } from '../lib/format.js';
 import {
-    FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, SQUELCH_MIN,
+    clamp, formatFilterWidth, formatFreqExact, formatFreqShort, formatSpan,
+} from '../lib/format.js';
+import {
+    FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODE_BY_ID, SQUELCH_MIN,
     edgesForEdgeDrag, edgesForWidth, stepLabel,
 } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
@@ -745,6 +747,36 @@ export default function SpectrumView() {
     mobileRef.current = mobile;
     const anchorNow = () => resolveZoomAnchor(dispRef.current.zoomAnchor, mobileRef.current);
 
+    // What the pointer is on: the dial line, or anywhere in the passband.
+    //
+    // Separate from edgeAtX, and deliberately without its width threshold: that
+    // one decides whether an edge can be *grabbed*, and there is no point
+    // offering a handle too narrow to aim at. Saying what a line is costs
+    // nothing, so it answers at any zoom, and the dial wins a tie because when
+    // the passband collapses to a pixel the dial is what you are pointing at.
+    const markAtX = useCallback((clientX) => {
+        const el = wrapRef.current;
+        const cfg = cfgRef.current;
+        const t = tuneRef.current;
+        if (!el || !cfg.span || !(t.frequency > 0)) return null;
+        const r = el.getBoundingClientRect();
+        if (!r.width) return null;
+        const x = clientX - r.left;
+        const xAt = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * r.width;
+        // The dial first, and only within a few pixels: it is a line, and when
+        // the passband collapses to nothing it is what is under the pointer.
+        if (Math.abs(x - xAt(t.frequency)) <= EDGE_GRAB_PX) return 'dial';
+        // Then anywhere in the passband — the shaded area, edges included.
+        // Pointing at the middle of the filter is asking the same question as
+        // pointing at its edge, and the shading is a far easier target than a
+        // line is.
+        const a = xAt(t.frequency + t.bandwidthLow);
+        const b = xAt(t.frequency + t.bandwidthHigh);
+        const lo = Math.min(a, b) - EDGE_GRAB_PX;
+        const hi = Math.max(a, b) + EDGE_GRAB_PX;
+        return x >= lo && x <= hi ? 'filter' : null;
+    }, []);
+
     // Which passband edge is under the pointer, if either.
     //
     // Only once the passband is worth aiming at: zoomed out to the whole band a
@@ -1005,6 +1037,7 @@ export default function SpectrumView() {
             }
             setHoverInfo({
                 freq: f, db, peakDb, peakFreq,
+                mark: markAtX(e.clientX),
                 x: e.clientX - r.left,
                 y: e.clientY - r.top,
             });
@@ -1046,7 +1079,7 @@ export default function SpectrumView() {
                 actions.setSpectrumCenter(center);
             }
         }
-    }, [actions, freqAtX, edgeAtX]);
+    }, [actions, freqAtX, edgeAtX, markAtX]);
 
     const onPointerUp = useCallback((e) => {
         const g = gfx.current;
@@ -1247,6 +1280,17 @@ export default function SpectrumView() {
                             transform: hoverInfo.x > sizes.w - 150 ? 'translateX(-100%)' : undefined,
                         }}
                     >
+                        {hoverInfo.mark && (
+                            <div className="spec-tip__mark">
+                                {hoverInfo.mark === 'dial' ? 'Tuned' : 'Filter'}
+                                {': '}
+                                {formatFreqExact(tuning.frequency)}
+                                {' '}
+                                {(MODE_BY_ID[tuning.mode] || {}).label || tuning.mode}
+                                {' · '}
+                                {formatFilterWidth(tuning.bandwidthLow, tuning.bandwidthHigh)}
+                            </div>
+                        )}
                         <div>Cursor: {formatFreqExact(hoverInfo.freq)} | {hoverInfo.db.toFixed(1)} dB</div>
                         {hoverInfo.peakFreq != null && (
                             <div>Peak: {formatFreqExact(hoverInfo.peakFreq)} | {hoverInfo.peakDb.toFixed(1)} dB</div>

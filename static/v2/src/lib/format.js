@@ -29,6 +29,19 @@ export function formatFreqExact(hz) {
     return (n / 1e3).toFixed(3) + ' kHz';
 }
 
+/**
+ * A passband as one number: its width.
+ *
+ * That is what a filter is called when anybody talks about one. Sub-kilohertz
+ * filters — CW, and a narrowed SSB — read in hertz, because "0.25k" is a worse
+ * way of writing 250 Hz.
+ */
+export function formatFilterWidth(low, high) {
+    const hz = Math.abs((high || 0) - (low || 0));
+    if (!hz) return '';
+    return hz < 1000 ? `${Math.round(hz)}` : `${(hz / 1000).toFixed(2)}k`;
+}
+
 // Compact axis/readout label: picks kHz or MHz based on magnitude.
 export function formatFreqShort(hz, spanHz) {
     if (spanHz != null && spanHz < 100e3) {

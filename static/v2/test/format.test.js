@@ -5,7 +5,9 @@
 // is the cursor readout and must not round at all.
 
 const assert = require('assert');
-const { formatFreqExact, formatFreqShort, formatHz } = require('./.build/format.cjs');
+const {
+    formatFilterWidth, formatFreqExact, formatFreqShort, formatHz,
+} = require('./.build/format.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -67,6 +69,25 @@ t('the short label still rounds to the zoom, which is its job', () => {
 t('formatHz groups the way the dial does', () => {
     assert.strictEqual(formatHz(14175000), '14.175.000');
     assert.strictEqual(formatHz(475000), '0.475.000');
+});
+
+// --- the filter width --------------------------------------------------------
+
+t('a passband reads as its width, in the unit that suits it', () => {
+    // Shown in the top bar beside the mode, and in the spectrum tooltip when
+    // the pointer is on the filter.
+    assert.strictEqual(formatFilterWidth(50, 2700), '2.65k');
+    assert.strictEqual(formatFilterWidth(-2700, -50), '2.65k', 'lower sideband is the same width');
+    assert.strictEqual(formatFilterWidth(-5000, 5000), '10.00k');
+    // Under a kilohertz reads in hertz: "0.25k" is a worse way of writing 250.
+    assert.strictEqual(formatFilterWidth(-125, 125), '250');
+    assert.strictEqual(formatFilterWidth(-200, 200), '400');
+});
+
+t('a passband with no width says nothing rather than zero', () => {
+    assert.strictEqual(formatFilterWidth(0, 0), '');
+    assert.strictEqual(formatFilterWidth(null, null), '');
+    assert.strictEqual(formatFilterWidth(undefined, undefined), '');
 });
 
 console.log(`\n${pass} ok`);

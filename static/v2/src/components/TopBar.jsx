@@ -5,8 +5,8 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import {
-    audioLevelColour, audioLevelPercent, formatHz, sMeterColour, snrColour, snrFraction,
-    sUnitFraction, sUnitLabel,
+    audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
+    snrColour, snrFraction, sUnitFraction, sUnitLabel,
 } from '../lib/format.js';
 import { MODES, MODE_BY_ID } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
@@ -24,17 +24,8 @@ import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 const SESSION_W = 68;
 const SPACE_WEATHER_W = 210;
 const CLOCK_W = 96;
-// "12.00k" and a space.
-const FILTER_W = 46;
-
-// The passband as one number: the width, which is what a filter is called when
-// anybody talks about one. Sub-kilohertz filters — CW, and a narrowed SSB —
-// read in hertz, because "0.25k" is a worse way of writing 250 Hz.
-function formatFilterWidth(low, high) {
-    const hz = Math.abs((high || 0) - (low || 0));
-    if (!hz) return '';
-    return hz < 1000 ? `${Math.round(hz)}` : `${(hz / 1000).toFixed(2)}k`;
-}
+// "12.00k" at the frequency's size, and a space.
+const FILTER_W = 62;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's

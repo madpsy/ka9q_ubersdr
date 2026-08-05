@@ -463,13 +463,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--accent);
 }
 .topbar__mode:hover { filter: brightness(1.25); }
-/* The filter width, beside the mode. Quieter than it — the mode is a control
-   and this is a readout — and monospaced so the bar does not shuffle as the
-   passband is dragged on the spectrum. */
+/* The filter width, beside the mode — set as the frequency is, because it is
+   the same kind of thing: a number describing where you are listening rather
+   than a control. Tabular figures so the bar does not shuffle as the passband
+   is dragged on the spectrum. */
 .topbar__bw {
     font-family: var(--mono);
-    font-size: calc(10.5px * var(--ui-scale));
-    color: var(--text-faint);
+    font-size: calc(16px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--text);
 }
 
 /* Sized in ch so the box is the width of the number it replaces, and the bar
@@ -1863,6 +1866,10 @@ a.btn { text-decoration: none; }
     color: #e9eef6;
     white-space: nowrap;
 }
+/* The line naming what the pointer is on — the dial, or a filter edge. Set
+   apart from the cursor reading below it: one says what this line is, the
+   other says where the pointer happens to be. */
+.spec-tip__mark { color: var(--accent); }
 
 /* =========================================================================
    Audio filters

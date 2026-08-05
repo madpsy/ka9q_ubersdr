@@ -61,7 +61,9 @@ import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
+import { dxClusterAvailable } from '../lib/dxcluster.js';
 import BackupPanel from './BackupPanel.jsx';
+import DXClusterPanel from './DXClusterPanel.jsx';
 
 export const PANELS = [
     // Minimal: the dial, the mode buttons and the filter width — what you tune
@@ -317,6 +319,27 @@ export const PANELS = [
         defaultOpen: false,
         minimal: true,
         Component: BackupPanel,
+    },
+
+    // The DX cluster addon's feed, in here rather than in its own tab. Ships
+    // hidden: it is one addon among several, it holds a connection open while
+    // it is on screen, and the Spots panel already carries the receiver's own
+    // cluster spots — this is for operators running the addon who want its
+    // whole feed, decoders and all.
+    //
+    // Minimal: the spot list alone, without the filters or the status line.
+    {
+        id: 'dxcluster',
+        title: 'DX cluster',
+        icon: <Icon.Packet />,
+        dock: 'bottom',
+        defaultHidden: true,
+        fill: true,
+        minimal: true,
+        Component: DXClusterPanel,
+        // Present only where the addon is: without it every request 404s and
+        // the panel could only say so.
+        requires: (serverInfo) => dxClusterAvailable(serverInfo),
     },
 
     // The launcher for the extensions, not the extensions themselves: an open

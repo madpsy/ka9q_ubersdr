@@ -258,10 +258,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
    Shell
    ========================================================================= */
 
+/* --app-height is the measured window height; see lib/appHeight.js. `100dvh` is
+   the fallback and is correct nearly everywhere — but installed to the home
+   screen on iOS the unit resolves before the standalone viewport has settled,
+   the shell comes out taller than the screen, and the mobile tab bar along the
+   bottom ends up below the fold with no way to scroll to it. */
 .shell {
     display: flex;
     flex-direction: column;
     height: 100dvh;
+    height: var(--app-height, 100dvh);
     background: var(--bg);
 }
 
@@ -1140,7 +1146,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
  * file — the shell, the sheets — is already in dvh. */
 .start__blurb {
     max-height: 30vh;
-    max-height: 30dvh;
+    max-height: calc(var(--app-height, 100dvh) * 0.3);
     overflow: auto;
     text-align: left;
     /* Operator-supplied markup: a long URL or a wide <pre> must not stretch the
@@ -3033,7 +3039,7 @@ a.btn { text-decoration: none; }
     left: 0;
     right: 0;
     bottom: 0;
-    max-height: 78dvh;
+    max-height: calc(var(--app-height, 100dvh) * 0.78);
     display: flex;
     flex-direction: column;
     background: var(--surface);
@@ -3858,7 +3864,7 @@ a.btn { text-decoration: none; }
 }
 /* Same on mobile, where the extension is a sheet rather than a window. A
    decoder needs the height a panel does not, so this sheet is taller. */
-.sheet--ext { max-height: 88dvh; }
+.sheet--ext { max-height: calc(var(--app-height, 100dvh) * 0.88); }
 .sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
 
 /* ── FT8 ──────────────────────────────────────────────────────────────────── */

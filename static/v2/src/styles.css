@@ -2692,21 +2692,29 @@ a.btn { text-decoration: none; }
    stretches to the full width, which is what one picture should do. */
 .sstv-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 8px;
-    align-items: start;
+    /* 96px, not the 140 this started at: a left dock is barely 300px wide, so a
+       wider minimum meant the grid never got past one column — which is the
+       one place tiling was actually wanted. `min(100%, …)` keeps a single
+       picture from overflowing a panel narrower than the minimum itself. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr));
+    gap: 6px;
 }
 
-/* One block per picture. A fixed aspect box would crop them — SSTV modes are
-   not all 4:3 — so each image sets its own height and the row follows. */
 .sstv-shot { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sstv-shot > a { display: block; line-height: 0; border-radius: var(--radius-sm); overflow: hidden; }
+/* Every tile the same shape, so the grid is a grid rather than a ragged
+   column. `contain` rather than `cover`: SSTV modes are not all 4:3 and a
+   Robot 36 frame is wider than a Martin — cropping to make the tiles tidy
+   would cut the edges off the picture, so the odd ones letterbox instead. */
 .sstv-shot img {
     display: block;
     width: 100%;
-    height: auto;
+    aspect-ratio: 4 / 3;
+    object-fit: contain;
     background: var(--surface-3);
 }
+/* On its own it is not a tile, it is the picture. */
+.sstv-grid:has(> :only-child) .sstv-shot img { aspect-ratio: auto; height: auto; }
 .sstv-shot__head { display: flex; align-items: baseline; gap: 6px; }
 .sstv-shot__n {
     font-size: calc(10px * var(--ui-scale));
@@ -2723,6 +2731,43 @@ a.btn { text-decoration: none; }
 }
 .sstv-shot__dl { color: var(--text-faint); text-decoration: none; }
 .sstv-shot__dl:hover { color: var(--text); }
+/* The tile is the button. */
+.sstv-shot__open {
+    display: block;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    line-height: 0;
+    cursor: zoom-in;
+    overflow: hidden;
+}
+.sstv-shot__open:hover img { opacity: 0.88; }
+
+/* Full size: twice what it was decoded at, which is bigger than the viewport
+   on a phone and sometimes on a laptop — so the modal scrolls rather than
+   scaling it back down to fit and undoing the point of opening it. */
+/* The modal body is capped to the viewport, so the scrolling has to happen
+   here — otherwise a 2× frame is simply cut off at the edges. */
+.sstv-zoom {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 92vw;
+    max-height: 88vh;
+    overflow: auto;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.sstv-zoom__img {
+    display: block;
+    max-width: none;
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+    image-rendering: crisp-edges;
+}
 
 /* Label/value pairs, aligned on the label column so the values line up. */
 .sstv-info {

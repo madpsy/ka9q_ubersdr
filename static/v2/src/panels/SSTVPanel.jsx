@@ -14,7 +14,7 @@
 // decoded picture says what it is by being one.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Empty, Field, Segmented } from '../components/ui.jsx';
+import { Button, Empty, Field, Modal, Segmented } from '../components/ui.jsx';
 import {
     AGE_TICK_MS, MAX_IMAGES, POLL_MS, detailRows, downloadName, formatAge,
     imageUrl, imagesUrl, records, saveCount, savedCount, sstvAvailable,
@@ -32,6 +32,8 @@ export default function SSTVPanel({ minimal }) {
     const [shots, setShots] = useState([]);
     const [state, setState] = useState('loading');   // loading | ok | empty | error
     const [now, setNow] = useState(() => Date.now());
+    // The picture opened full size, or null.
+    const [zoomed, setZoomed] = useState(null);
     const aliveRef = useRef(true);
 
     useEffect(() => () => { aliveRef.current = false; }, []);
@@ -113,11 +115,18 @@ export default function SSTVPanel({ minimal }) {
                                 </div>
                             )}
 
-                            {/* Full size in a new tab: a dock column is narrower
-                                than any SSTV frame, and the detail is the point. */}
-                            <a href={src} target="_blank" rel="noopener noreferrer">
+                            {/* A tile is far smaller than the frame, and the
+                                detail is the point of the picture — so it opens
+                                here rather than in a tab you then have to come
+                                back from. */}
+                            <button
+                                type="button"
+                                className="sstv-shot__open"
+                                title="Open full size"
+                                onClick={() => setZoomed(rec)}
+                            >
                                 <img src={src} alt={`SSTV received ${rec.rx_end || ''}`} loading="lazy" />
-                            </a>
+                            </button>
 
                             {!minimal && (
                                 <dl className="sstv-info">
@@ -133,6 +142,46 @@ export default function SSTVPanel({ minimal }) {
                         );
                     })}
                 </div>
+            )}
+
+            {zoomed && (
+                <Modal onClose={() => setZoomed(null)} label="SSTV picture">
+                    <div className="sstv-zoom">
+                        {/* Twice the size it was decoded at, measured from the
+                            picture itself rather than assumed: SSTV frames are
+                            320 or 640 across depending on the mode, so a fixed
+                            width would enlarge one and shrink the other. */}
+                        <img
+                            className="sstv-zoom__img"
+                            src={imageUrl(zoomed.file)}
+                            alt={`SSTV received ${zoomed.rx_end || ''}`}
+                            onLoad={(e) => {
+                                const w = e.target.naturalWidth;
+                                if (w) e.target.style.width = `${w * 2}px`;
+                            }}
+                        />
+                        <dl className="sstv-info">
+                            {detailRows(zoomed).map(([label, value]) => (
+                                <React.Fragment key={label}>
+                                    <dt>{label}</dt>
+                                    <dd title={value}>{value}</dd>
+                                </React.Fragment>
+                            ))}
+                        </dl>
+                        <div className="row-end">
+                            <a
+                                className="btn btn--ghost btn--sm"
+                                href={imageUrl(zoomed.file)}
+                                download={downloadName(zoomed.file)}
+                            >
+                                Download
+                            </a>
+                            <Button size="sm" variant="ghost" onClick={() => setZoomed(null)}>
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
             )}
         </div>
     );

@@ -11,7 +11,7 @@
 import React, { useEffect, useMemo, useState } from '../react.js';
 import { Button, Empty, Field, Icon, ShowMore, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { catalogue, functionLabel } from '../controls/functions.js';
+import { catalogue, functionLabel, functionRepeats } from '../controls/functions.js';
 import { useHardware } from '../controls/panel.jsx';
 import {
     bindShortcut, comboFor, comboLabel, comboProblem, onShortcutSettings, resetShortcuts,
@@ -32,7 +32,12 @@ export default function ShortcutsPanel({ minimal }) {
     const [recording, setRecording] = useState(null);
     const [pick, setPick] = useState('');
     const [limit, setLimit] = useState(PAGE);
-    const [note, setNote] = useState('');
+    // What just happened, and how to put it back. A key can only run one
+    // function, so giving it to a second takes it off the first — see the note
+    // in lib/shortcuts.js. That is the right behaviour, but it is not one to
+    // discover afterwards, so the displaced function is named and the whole
+    // previous map is kept for one press of Undo.
+    const [note, setNote] = useState(null);
 
     const schemas = radio.dsp.schemas;
     const all = useMemo(() => catalogue(schemas, hw), [schemas, hw]);
@@ -68,14 +73,28 @@ export default function ShortcutsPanel({ minimal }) {
             const combo = comboFor(e);
             if (!combo) return;              // a modifier on its own: keep waiting
             const problem = comboProblem(combo);
-            if (problem) { setNote(`${comboLabel(combo)}: ${problem}`); return; }
+            if (problem) { setNote({ text: `${comboLabel(combo)} — ${problem}` }); return; }
+
+            const before = { ...shortcutSettings().bindings };
+            const taken = before[combo];
             // Changing a row's key rather than adding one: the old key goes.
             if (recording.combo && recording.combo !== combo) unbindShortcut(recording.combo);
-            const taken = shortcutSettings().bindings[combo];
             bindShortcut(combo, recording.fn);
-            setNote(taken && taken !== recording.fn
-                ? `${comboLabel(combo)} taken from ${functionLabel(taken, schemas, hw)}`
-                : '');
+
+            // Only a *different* function losing the key is worth reporting.
+            // Re-pressing the key a function already has changes nothing, and
+            // saying so would be noise.
+            const displaced = taken && taken !== recording.fn ? taken : null;
+            const stillBound = displaced
+                && Object.values(shortcutSettings().bindings).includes(displaced);
+            setNote(displaced
+                ? {
+                    text: `${comboLabel(combo)} now runs ${functionLabel(recording.fn, schemas, hw)}`
+                        + ` — ${functionLabel(displaced, schemas, hw)} `
+                        + (stillBound ? 'kept its other key' : 'has no key now'),
+                    undo: before,
+                }
+                : null);
             setRecording(null);
         };
         window.addEventListener('keydown', onKey, true);
@@ -102,7 +121,20 @@ export default function ShortcutsPanel({ minimal }) {
                 </div>
             )}
 
-            {note && <div className="note note--tight">{note}</div>}
+            {note && (
+                <div className="note note--tight shortcut-note">
+                    <span>{note.text}</span>
+                    {note.undo && (
+                        <button
+                            type="button"
+                            className="chip chip--button"
+                            onClick={() => { setShortcutSettings({ bindings: note.undo }); setNote(null); }}
+                        >
+                            Undo
+                        </button>
+                    )}
+                </div>
+            )}
 
             <span className="section-label">
                 Keys
@@ -120,7 +152,7 @@ export default function ShortcutsPanel({ minimal }) {
                             fn={fn}
                             schemas={schemas}
                             hw={hw}
-                            onRebind={() => { setNote(''); setRecording({ fn, combo }); }}
+                            onRebind={() => { setNote(null); setRecording({ fn, combo }); }}
                             onDelete={() => unbindShortcut(combo)}
                         />
                     ))}
@@ -163,7 +195,7 @@ export default function ShortcutsPanel({ minimal }) {
                             size="sm"
                             variant="primary"
                             disabled={!pick || !!recording}
-                            onClick={() => { setNote(''); setRecording({ fn: pick, combo: null }); }}
+                            onClick={() => { setNote(null); setRecording({ fn: pick, combo: null }); }}
                         >
                             Press a key…
                         </Button>
@@ -171,7 +203,11 @@ export default function ShortcutsPanel({ minimal }) {
                             size="sm"
                             variant="ghost"
                             icon={<Icon.Reset size={13} />}
-                            onClick={() => { resetShortcuts(); setNote('Back to the standard keys'); }}
+                            onClick={() => {
+                                const before = { ...shortcutSettings().bindings };
+                                resetShortcuts();
+                                setNote({ text: 'Back to the standard keys', undo: before });
+                            }}
                         >
                             Defaults
                         </Button>
@@ -179,7 +215,8 @@ export default function ShortcutsPanel({ minimal }) {
 
                     <div className="note note--tight">
                         Shortcuts are ignored while you are typing, and a key that is not
-                        bound is left to the browser. Every function listed here is the same
+                        bound is left to the browser. A key marked <em>hold</em> repeats
+                        while it is held down; the rest act once per press. Every function listed here is the same
                         one the SDR control panel maps a hardware surface to — one list,
                         reached by key, by knob or by pad.
                     </div>
@@ -191,6 +228,7 @@ export default function ShortcutsPanel({ minimal }) {
 
 function ShortcutRow({ combo, fn, schemas, hw, onRebind, onDelete }) {
     const label = functionLabel(fn, schemas, hw);
+    const repeats = functionRepeats(fn, schemas, hw);
     return (
         <div className="rc-map__row">
             <span className="rc-map__fn" title={label}>{label}</span>
@@ -206,6 +244,14 @@ function ShortcutRow({ combo, fn, schemas, hw, onRebind, onDelete }) {
                 >
                     {comboLabel(combo)}
                 </button>
+                {/* Which keys keep going when held. The row is the only place
+                    that says so, and holding a key is not a thing anyone tries
+                    on the off chance. */}
+                {repeats && (
+                    <span className="tag tag--ghost" title="Keeps going while the key is held">
+                        hold
+                    </span>
+                )}
             </div>
         </div>
     );

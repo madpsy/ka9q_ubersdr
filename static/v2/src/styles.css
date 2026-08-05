@@ -1549,6 +1549,10 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
 }
 .note--tight { background: transparent; border-left-color: var(--border-strong); padding: 2px 0 2px 9px; }
+/* A note that carries an action — the shortcut editor's "…has no key now" and
+   its Undo. The text takes the slack so the button stays at the end. */
+.shortcut-note { display: flex; align-items: center; gap: 8px; }
+.shortcut-note > span { flex: 1; min-width: 0; }
 
 .empty {
     padding: 18px 10px;

@@ -14,8 +14,18 @@
 import { useEffect, useRef, useState } from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useControlContext } from '../controls/panel.jsx';
-import { runFunction } from '../controls/functions.js';
+import { functionRepeats, runFunction } from '../controls/functions.js';
 import { comboFor, isTyping, onShortcutSettings, shortcutSettings } from '../lib/shortcuts.js';
+
+// Shortest gap between two firings of a held key.
+//
+// The browser's own auto-repeat is roughly 30 a second once it starts, which is
+// faster than the receiver has any use for — RadioContext already coalesces
+// tune commands at 70 ms, so anything quicker is thrown away downstream. 50 ms
+// is deliberately at the low end: a held key walking the dial should feel like
+// turning it, and a tuning step that lags behind the finger is worse than one
+// that occasionally outruns the wire.
+const REPEAT_MS = 50;
 
 export default function ShortcutWatch() {
     const display = useDisplay();
@@ -29,6 +39,10 @@ export default function ShortcutWatch() {
     // rebind would drop a keystroke landing in the gap.
     const live = useRef({ settings, ctx });
     live.current = { settings, ctx };
+    // When each function last ran, for the repeat rate limit. Per function
+    // rather than per key, so holding one key while tapping another bound to
+    // the same thing cannot double the rate.
+    const lastRun = useRef({});
 
     useEffect(() => {
         const onKey = (e) => {
@@ -36,12 +50,29 @@ export default function ShortcutWatch() {
             if (!s.enabled) return;
             // Whatever is being typed into owns the keyboard.
             if (isTyping(e.target)) return;
-            // A held key repeats; a shortcut is a press. Frequency and volume
-            // would otherwise run away while the finger was down.
-            if (e.repeat) return;
 
             const fnId = s.bindings[comboFor(e)];
             if (!fnId) return;
+
+            // A held key only keeps going for the functions that say they are
+            // worth holding — walking the dial, fading the volume. Everything
+            // else fires once per press: a held U setting USB thirty times a
+            // second achieves nothing, and a held band key would fight the
+            // dial. See functionRepeats.
+            if (e.repeat) {
+                if (!functionRepeats(fnId, c.state().dsp.schemas)) {
+                    // Still claimed: the key is bound, so the browser must not
+                    // also act on it while it is held.
+                    e.preventDefault();
+                    return;
+                }
+                const now = Date.now();
+                if (now - (lastRun.current[fnId] || 0) < REPEAT_MS) { e.preventDefault(); return; }
+                lastRun.current[fnId] = now;
+            } else {
+                lastRun.current[fnId] = Date.now();
+            }
+
             // Claimed only once there is something to run, so an unbound key
             // still reaches the browser.
             e.preventDefault();

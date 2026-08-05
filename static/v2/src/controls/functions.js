@@ -86,6 +86,7 @@ const FREQUENCY = group('Frequency', [
         label: `Encoder (${hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`} steps)`,
         accepts: [REL, TRIG],
         encoder: true,
+        repeat: true,
         run: (ev, ctx) => ctx.actions.nudge(hz * detents(ev)),
     })),
     {
@@ -93,6 +94,7 @@ const FREQUENCY = group('Frequency', [
         label: 'Step up',
         hint: 'by the panel’s step size',
         accepts: PRESS,
+        repeat: true,
         run: (ev, ctx) => ctx.actions.nudge(ctx.stepHz),
     },
     {
@@ -100,6 +102,7 @@ const FREQUENCY = group('Frequency', [
         label: 'Step down',
         hint: 'by the panel’s step size',
         accepts: PRESS,
+        repeat: true,
         run: (ev, ctx) => ctx.actions.nudge(-ctx.stepHz),
     },
 ]);
@@ -211,6 +214,7 @@ const AUDIO = group('Audio', [
         id: 'volume_up',
         label: 'Volume up',
         accepts: PRESS,
+        repeat: true,
         run: (ev, ctx) => ctx.actions.setVolume(clamp(
             Math.round((ctx.state().audio.volume + 0.05) * 100) / 100, 0, 1,
         )),
@@ -219,6 +223,7 @@ const AUDIO = group('Audio', [
         id: 'volume_down',
         label: 'Volume down',
         accepts: PRESS,
+        repeat: true,
         run: (ev, ctx) => ctx.actions.setVolume(clamp(
             Math.round((ctx.state().audio.volume - 0.05) * 100) / 100, 0, 1,
         )),
@@ -584,6 +589,23 @@ export function isUnavailable(id, dspSchemas, hw) {
             || catalogue(dspSchemas, hw).every((c) => c.id !== f.id);
     }
     return false;
+}
+
+// True for the functions a held key should keep running.
+//
+// Declared on the function rather than listed against the keys, because it is a
+// property of what the function does: walking the dial or fading the volume is
+// something you hold, and selecting USB is not. A function added to this
+// catalogue with `repeat: true` starts repeating with no change to the keyboard
+// layer — see ShortcutWatch.
+//
+// The frequency steps, the encoders and the volume carry it. Filter width and
+// zoom are plausible candidates and are left off until somebody wants them: a
+// key that keeps firing is much harder to undo than one that does not, and zoom
+// in particular is a factor of two a step.
+export function functionRepeats(id, dspSchemas, hw) {
+    const fn = findFunction(id, dspSchemas, hw);
+    return !!(fn && fn.repeat);
 }
 
 // True for the functions that are a dial and nothing else — the frequency

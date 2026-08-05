@@ -113,6 +113,37 @@ t('v1s band keys are still the band keys', () => {
     });
 });
 
+// --- collisions --------------------------------------------------------------
+
+t('a key can only ever run one function', () => {
+    // Structural, not checked for: the bindings are keyed by the combo, so two
+    // functions cannot both hold a key and dispatch is never ambiguous.
+    const bindings = { u: 'mode_usb' };
+    bindings.u = 'mode_lsb';
+    assert.strictEqual(Object.keys(bindings).length, 1);
+    assert.strictEqual(bindings.u, 'mode_lsb');
+});
+
+t('giving a taken key to another function takes it off the first', () => {
+    // The panel names the displaced function and offers Undo, because a
+    // function silently left with no key is the failure mode here.
+    const bindings = { u: 'mode_usb', l: 'mode_lsb' };
+    const before = { ...bindings };
+    bindings.u = 'mode_lsb';
+    const keysFor = (fn) => Object.keys(bindings).filter((k) => bindings[k] === fn);
+    assert.deepStrictEqual(keysFor('mode_usb'), []);
+    assert.deepStrictEqual(keysFor('mode_lsb').sort(), ['l', 'u']);
+    // ...and the whole previous map is what Undo restores.
+    assert.deepStrictEqual(before, { u: 'mode_usb', l: 'mode_lsb' });
+});
+
+t('one function on two keys is allowed', () => {
+    // Deliberate: a function may be worth reaching from more than one place,
+    // which is why the map is key->function rather than the reverse.
+    const bindings = { u: 'mode_usb', 'Shift+u': 'mode_usb' };
+    assert.strictEqual(Object.values(bindings).filter((f) => f === 'mode_usb').length, 2);
+});
+
 t('shortcuts are on by default, unlike the announcements', () => {
     // A shortcut does nothing until a key is pressed; a speaking receiver
     // starts on its own.

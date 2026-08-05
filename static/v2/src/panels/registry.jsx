@@ -222,7 +222,7 @@ export const PANELS = [
     // A leaderboard of where the dial actually spends its time, under the two
     // bookmark lists because it is the third of the same kind: one you curate,
     // one you save locally, and one that curates itself.
-    // Minimal: the leaderboard, without what is being timed now or Clear.
+    // Minimal: the top five, without Show more, what is being timed now, or Clear.
     {
         id: 'topfreq',
         title: 'Most used',

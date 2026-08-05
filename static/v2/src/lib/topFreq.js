@@ -11,11 +11,15 @@
 
 const KEY = 'ubersdr.v2.topfreq';
 
-// Rows shown, and combinations kept. The store is larger than the display so a
-// frequency you worked last week is still there to climb back, but bounded so a
-// long-running session cannot grow it without limit.
+// Rows shown before "show more", and how many each press adds. Five is the
+// leaderboard the widget shows and about what a side dock holds without the
+// panel becoming the dock.
 export const TOP_FREQ_ROWS = 5;
-export const TOP_FREQ_STORE = 200;
+
+// Combinations kept. Larger than the display so a frequency you worked last week
+// is still there to climb back, bounded so a long session cannot grow it without
+// limit — and the weakest go first, so what is dropped is what was never used.
+export const TOP_FREQ_STORE = 100;
 
 export const comboKey = (hz, mode) => `${Math.round(hz)}|${String(mode || '').toLowerCase()}`;
 

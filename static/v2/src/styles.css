@@ -998,9 +998,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Two lines per listener rather than v1's eight columns: where they are tuned,
    then who they are and how long since they moved. The age is pinned to the
    right of the second line so the ages form a column of their own. */
+/* Frequency, mode and how long ago on one line, then who. The age sits directly
+   after the mode rather than out at the right margin: at a dock's width that put
+   it a long way from the thing it describes, with the gap between reading as a
+   column that was not there. `auto 1fr` packs it against the mode and leaves the
+   slack on the outside, where slack belongs. */
 .lsn-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr;
     grid-template-areas:
         "where age"
         "who   who";
@@ -1009,7 +1014,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
     width: 100%;
 }
 .lsn-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.lsn-row__where { grid-area: where; font-family: var(--mono); font-size: calc(12px * var(--ui-scale)); }
+.lsn-row__where {
+    grid-area: where;
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    min-width: 0;
+}
 .lsn-row__age {
     grid-area: age;
     font-family: var(--mono);

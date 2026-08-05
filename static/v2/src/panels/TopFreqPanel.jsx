@@ -9,8 +9,8 @@
 // scores a dial left parked overnight with the audio stopped. That is not time
 // spent listening, and a leaderboard built from it says nothing.
 //
-// `minimal` is the leaderboard alone, without the line saying what is being
-// timed now or the button to clear it.
+// `minimal` is the top five alone — no Show more, no line saying what is being
+// timed now, no Clear.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -30,6 +30,7 @@ export default function TopFreqPanel({ minimal }) {
     const [combos, setCombos] = useState(loadCombos);
     // Minutes credited during the current stay, for the "timing this now" line.
     const [dwell, setDwell] = useState(0);
+    const [shown, setShown] = useState(TOP_FREQ_ROWS);
 
     const hz = Math.round(tuning.frequency || 0);
     const mode = tuning.mode || '';
@@ -54,7 +55,9 @@ export default function TopFreqPanel({ minimal }) {
         return () => clearInterval(id);
     }, [timing, hz, mode]);
 
-    const rows = sortedCombos(combos).slice(0, TOP_FREQ_ROWS);
+    const all = sortedCombos(combos);
+    // Minimal is the leaderboard: five rows, and no button to grow it.
+    const rows = all.slice(0, minimal ? TOP_FREQ_ROWS : shown);
 
     // The list is rebuilt from what was stored, so a row already knows its own
     // frequency and mode; tuning is the same path a shared frequency in chat or
@@ -70,6 +73,7 @@ export default function TopFreqPanel({ minimal }) {
         setCombos({});
         saveCombos({});
         setDwell(0);
+        setShown(TOP_FREQ_ROWS);
     };
 
     return (
@@ -97,6 +101,12 @@ export default function TopFreqPanel({ minimal }) {
                         </button>
                     ))}
                 </div>
+            )}
+
+            {!minimal && rows.length < all.length && (
+                <button type="button" className="show-more" onClick={() => setShown((n) => n + TOP_FREQ_ROWS)}>
+                    Show more <span className="show-more__count">{rows.length} of {all.length}</span>
+                </button>
             )}
 
             {/* What is being timed right now, and how far into it — so a

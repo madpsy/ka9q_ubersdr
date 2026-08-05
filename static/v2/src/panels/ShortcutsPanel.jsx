@@ -33,6 +33,9 @@ export default function ShortcutsPanel({ minimal }) {
     // `combo` on an existing row means "change this one", and the old binding
     // is removed when the new key lands.
     const [recording, setRecording] = useState(null);
+    // A key press waiting to be confirmed, because it would take the key off
+    // another function: { combo, fn, from, taken }.
+    const [pending, setPending] = useState(null);
     const [pick, setPick] = useState('');
     const [query, setQuery] = useState('');
     const [limit, setLimit] = useState(PAGE);
@@ -90,6 +93,13 @@ export default function ShortcutsPanel({ minimal }) {
         return rows.filter((r) => words.every((w) => r.hay.includes(w)));
     }, [rows, query]);
 
+    // `from` is the key the function is moving off, when this is a rebind rather
+    // than an addition — it has to be released or the function keeps both.
+    const applyBind = (fn, from, combo) => {
+        if (from && from !== combo) unbindShortcut(from);
+        bindShortcut(combo, fn);
+    };
+
     // While recording, the next keystroke is the binding rather than a
     // shortcut. Registered above the watcher's own listener by being on the
     // window with capture, so a key that is already bound is captured here
@@ -105,26 +115,18 @@ export default function ShortcutsPanel({ minimal }) {
             const problem = comboProblem(combo);
             if (problem) { setNote({ text: `${comboLabel(combo)} — ${problem}` }); return; }
 
-            const before = { ...shortcutSettings().bindings };
-            const taken = before[combo];
-            // Changing a row's key rather than adding one: the old key goes.
-            if (recording.combo && recording.combo !== combo) unbindShortcut(recording.combo);
-            bindShortcut(combo, recording.fn);
-
-            // Only a *different* function losing the key is worth reporting.
-            // Re-pressing the key a function already has changes nothing, and
-            // saying so would be noise.
-            const displaced = taken && taken !== recording.fn ? taken : null;
-            const stillBound = displaced
-                && Object.values(shortcutSettings().bindings).includes(displaced);
-            setNote(displaced
-                ? {
-                    text: `${comboLabel(combo)} now runs ${functionLabel(recording.fn, schemas, hw)}`
-                        + ` — ${functionLabel(displaced, schemas, hw)} `
-                        + (stillBound ? 'kept its other key' : 'has no key now'),
-                    undo: before,
-                }
-                : null);
+            const taken = shortcutSettings().bindings[combo];
+            // A key that already runs something else is asked about rather than
+            // taken. One key runs one function, so this is always a loss for
+            // whatever held it — and an Undo offered afterwards is no help to
+            // someone who did not notice what they had just undone.
+            if (taken && taken !== recording.fn) {
+                setPending({ combo, fn: recording.fn, from: recording.combo, taken });
+                setRecording(null);
+                return;
+            }
+            applyBind(recording.fn, recording.combo, combo);
+            setNote(null);
             setRecording(null);
         };
         window.addEventListener('keydown', onKey, true);
@@ -141,30 +143,6 @@ export default function ShortcutsPanel({ minimal }) {
                     title="Keys do nothing at all while this is off — the bindings are kept"
                 />
             </Field>
-
-            {recording && (
-                <div className="rc-learn">
-                    <div className="rc-learn__msg">
-                        Press a key for “{functionLabel(recording.fn, schemas, hw)}”
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => setRecording(null)}>Cancel</Button>
-                </div>
-            )}
-
-            {note && (
-                <div className="note note--tight shortcut-note">
-                    <span>{note.text}</span>
-                    {note.undo && (
-                        <button
-                            type="button"
-                            className="chip chip--button"
-                            onClick={() => { setShortcutSettings({ bindings: note.undo }); setNote(null); }}
-                        >
-                            Undo
-                        </button>
-                    )}
-                </div>
-            )}
 
             <span className="section-label">
                 Keys
@@ -197,7 +175,7 @@ export default function ShortcutsPanel({ minimal }) {
                             fn={fn}
                             schemas={schemas}
                             hw={hw}
-                            onRebind={() => { setNote(null); setRecording({ fn, combo }); }}
+                            onRebind={() => { setNote(null); setPending(null); setRecording({ fn, combo }); }}
                             onDelete={() => unbindShortcut(combo)}
                         />
                     ))}
@@ -211,6 +189,77 @@ export default function ShortcutsPanel({ minimal }) {
                     onMore={() => setLimit((n) => n + PAGE)}
                     label="Show more shortcuts"
                 />
+            )}
+
+            {/* Everything the editor has to say, kept together at the foot of
+                the panel beside the picker that starts it.
+                
+                This list runs to thirty rows and the panel is taller than the
+                dock, so a prompt at the top was off screen exactly when it
+                mattered — the moment after pressing a key. Shown in the minimal
+                view too, where the picker is not: a rebind can be started from
+                any row's key chip, and it must be able to answer. */}
+            {(recording || pending || note) && (
+                <>
+                    <div className="divider" />
+                    {recording && (
+                        <div className="rc-learn">
+                            <div className="rc-learn__msg">
+                                Press a key for “{functionLabel(recording.fn, schemas, hw)}”
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => setRecording(null)}>
+                                Cancel
+                            </Button>
+                        </div>
+                    )}
+
+                    {pending && (
+                        <div className="note note--warn shortcut-note">
+                            <span>
+                                {comboLabel(pending.combo)} already runs{' '}
+                                <strong>{functionLabel(pending.taken, schemas, hw)}</strong>.
+                                Give it to {functionLabel(pending.fn, schemas, hw)}?
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => {
+                                    applyBind(pending.fn, pending.from, pending.combo);
+                                    const kept = Object.values(shortcutSettings().bindings)
+                                        .includes(pending.taken);
+                                    setNote({
+                                        text: `${functionLabel(pending.taken, schemas, hw)} `
+                                            + (kept ? 'kept its other key' : 'now has no key'),
+                                    });
+                                    setPending(null);
+                                }}
+                            >
+                                Replace
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
+                                Keep
+                            </Button>
+                        </div>
+                    )}
+
+                    {note && (
+                        <div className="note note--tight shortcut-note">
+                            <span>{note.text}</span>
+                            {note.undo && (
+                                <button
+                                    type="button"
+                                    className="chip chip--button"
+                                    onClick={() => {
+                                        setShortcutSettings({ bindings: note.undo });
+                                        setNote(null);
+                                    }}
+                                >
+                                    Undo
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </>
             )}
 
             {!minimal && (
@@ -240,7 +289,11 @@ export default function ShortcutsPanel({ minimal }) {
                             size="sm"
                             variant="primary"
                             disabled={!pick || !!recording}
-                            onClick={() => { setNote(null); setRecording({ fn: pick, combo: null }); }}
+                            onClick={() => {
+                                setNote(null);
+                                setPending(null);
+                                setRecording({ fn: pick, combo: null });
+                            }}
                         >
                             Press a key…
                         </Button>

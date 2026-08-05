@@ -1352,6 +1352,26 @@ a.btn { text-decoration: none; }
     color: var(--accent-ink);
     box-shadow: var(--shadow-sm);
 }
+/* Focus must not look like selection.
+ *
+ * The global ring is `var(--accent)`, which in this control is also exactly
+ * what "selected" looks like. Click LSB and then change mode with a shortcut
+ * and the ring appears on LSB — the browser reclassifies the interaction as
+ * keyboard the moment a key is pressed, and the button a click left focused
+ * starts matching :focus-visible — so two buttons read as chosen at once.
+ *
+ * The ring stays, because the focus is real: Space or Enter would select that
+ * button again, and hiding where the keyboard is pointing to tidy up a colour
+ * clash is not a trade worth making. It is drawn in the text colour instead,
+ * which cannot be mistaken for the accent fill. The start button already does
+ * this, for the same reason.
+ *
+ * The same three controls, because all three fill with the accent when chosen
+ * and all three have shortcuts pointed at them: the mode buttons, the band and
+ * quick-tune chips, and the VFO buttons. */
+.segmented__item:focus-visible,
+.chip--button:focus-visible,
+.vfo-btn:focus-visible { outline-color: var(--text); }
 .segmented--sm .segmented__item { padding: 5px 4px; font-size: calc(11px * var(--ui-scale)); }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -1551,8 +1571,12 @@ a.btn { text-decoration: none; }
 .note--tight { background: transparent; border-left-color: var(--border-strong); padding: 2px 0 2px 9px; }
 /* A note that carries an action — the shortcut editor's "…has no key now" and
    its Undo. The text takes the slack so the button stays at the end. */
-.shortcut-note { display: flex; align-items: center; gap: 8px; }
-.shortcut-note > span { flex: 1; min-width: 0; }
+/* A note that carries actions — the shortcut editor's "already runs…" with its
+   Replace and Keep, and the Undo after a reset. Wraps, because the sentence
+   names two functions and the dock it sits in is 320px: the buttons drop to
+   their own line rather than squeezing the text to one word a line. */
+.shortcut-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shortcut-note > span { flex: 1 1 60%; min-width: 0; }
 
 .empty {
     padding: 18px 10px;

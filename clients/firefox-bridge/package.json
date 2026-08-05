@@ -1,13 +1,14 @@
 {
   "name": "ubersdr-bridge",
-  "version": "1.0.0",
-  "description": "Firefox extension bridging the UberSDR web interface to local applications",
+  "version": "2.0.0",
+  "description": "Firefox extension for the UberSDR v2 page API — read and control the receiver, and sync with flrig",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "web-ext build --source-dir=extension --artifacts-dir=dist --overwrite-dest --filename=ubersdr_bridge-{version}.xpi",
     "dev": "web-ext run --source-dir=extension --firefox=firefox",
     "lint": "web-ext lint --source-dir=extension",
+    "test": "./test/run.sh",
     "sign": "web-ext sign --source-dir=extension --artifacts-dir=dist --api-key=$WEB_EXT_API_KEY --api-secret=$WEB_EXT_API_SECRET",
     "clean": "rm -rf dist/"
   },

@@ -5,6 +5,7 @@
 #   make build     — build the .xpi package into dist/
 #   make dev       — run the extension in a temporary Firefox profile (live reload)
 #   make lint      — lint the extension with web-ext
+#   make test      — run the extension's tests against the real v2 page API
 #   make icons     — regenerate PNG icons from icon.svg (requires ImageMagick)
 #   make clean     — remove dist/ and node_modules/
 #   make zip       — build a plain .zip (alternative to .xpi, same format)
@@ -15,7 +16,7 @@
 #   - Firefox (for `make dev`)
 #   - ImageMagick convert (for `make icons`)
 
-.PHONY: all install build dev lint icons clean zip help
+.PHONY: all install build dev lint test icons clean zip help
 
 EXTENSION_DIR := extension
 DIST_DIR      := dist
@@ -47,6 +48,10 @@ dev: install
 ## lint: Lint the extension source with web-ext
 lint: install
 	npm run lint
+
+## test: Run the extension's tests (needs esbuild and node, no npm install)
+test:
+	./test/run.sh
 
 ## icons: Regenerate PNG icons from icon_source.png (requires ImageMagick)
 icons: $(ICON_48) $(ICON_96) $(ICON_128)

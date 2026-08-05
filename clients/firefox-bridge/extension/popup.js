@@ -593,26 +593,39 @@ function renderState(state) {
         }
     }
     if (state.dbfs !== undefined) {
-        stateDbfs.textContent = state.dbfs.toFixed(1) + ' dBFS';
-        // Non-linear mapping identical to signal-meter.js:
-        //   -120 to -80 dBFS → 0–40%
-        //   -80  to -60 dBFS → 40–80%
-        //   -60  to -20 dBFS → 80–100%
-        let pct;
-        if (state.dbfs < -80) {
-            pct = ((state.dbfs + 120) / 40) * 40;
-        } else if (state.dbfs < -60) {
-            pct = 40 + ((state.dbfs + 80) / 20) * 40;
+        // null is a real value here: the page says so when there is no
+        // measurement rather than sending a very negative number that would be
+        // drawn as a signal.
+        if (state.dbfs === null) {
+            stateDbfs.textContent = '—';
+            signalBarFill.style.width = '0%';
+            signalBarFill.className = 'signal-bar-fill';
         } else {
-            pct = 80 + ((state.dbfs + 60) / 40) * 20;
+            // The S value comes from the page, which is showing the same one —
+            // rather than being re-derived here from a curve that could drift
+            // out of step with it.
+            stateDbfs.textContent = state.dbfs.toFixed(1) + ' dBFS'
+                + (state.s != null ? ' (S' + Math.round(state.s) + ')' : '');
+            // Non-linear mapping identical to signal-meter.js:
+            //   -120 to -80 dBFS → 0–40%
+            //   -80  to -60 dBFS → 40–80%
+            //   -60  to -20 dBFS → 80–100%
+            let pct;
+            if (state.dbfs < -80) {
+                pct = ((state.dbfs + 120) / 40) * 40;
+            } else if (state.dbfs < -60) {
+                pct = 40 + ((state.dbfs + 80) / 20) * 40;
+            } else {
+                pct = 80 + ((state.dbfs + 60) / 40) * 20;
+            }
+            pct = Math.max(0, Math.min(100, pct));
+            signalBarFill.style.width = pct + '%';
+            // Colour thresholds identical to signal-meter.js
+            signalBarFill.className = 'signal-bar-fill ' + (
+                state.dbfs >= -70 ? 'sig-strong' :
+                state.dbfs >= -85 ? 'sig-medium' : 'sig-weak'
+            );
         }
-        pct = Math.max(0, Math.min(100, pct));
-        signalBarFill.style.width = pct + '%';
-        // Colour thresholds identical to signal-meter.js
-        signalBarFill.className = 'signal-bar-fill ' + (
-            state.dbfs >= -70 ? 'sig-strong' :
-            state.dbfs >= -85 ? 'sig-medium' : 'sig-weak'
-        );
     }
     if (state.snr !== undefined) {
         stateSnr.textContent = state.snr !== null

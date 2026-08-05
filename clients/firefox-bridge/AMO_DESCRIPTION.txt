@@ -11,6 +11,8 @@ Control any UberSDR software-defined radio directly from your browser toolbar. S
 
 UberSDR Bridge connects Firefox to any open UberSDR software-defined radio page and gives you full radio control without leaving your browser.
 
+Version 2 requires the UberSDR v2 interface, which publishes a page API the extension talks to directly. There is no page scraping and no script injection: the page announces itself, pushes what changes, and answers commands.
+
 Open the toolbar popup to see the current frequency, mode, bandwidth and signal level in real time. Type a new frequency, click a step button, or pick a mode from the dropdown — the SDR tunes instantly. You can also set the filter bandwidth manually.
 
 KEY FEATURES

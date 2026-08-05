@@ -1,0 +1,4 @@
+{
+  "//": "The extension's package.json declares \"type\": \"module\" for web-ext. These tests are plain CommonJS, like static/v2's, so the scope is overridden here rather than renaming every file to .cjs.",
+  "type": "commonjs"
+}

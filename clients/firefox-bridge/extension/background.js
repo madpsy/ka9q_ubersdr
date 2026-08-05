@@ -212,7 +212,15 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             registry.set(tabId, {
                 tabId:        tabId,
                 sessionId:    msg.sessionId,
+                // The instance's public UUID and its operator's details, from
+                // the page's announce. `receiver.id` is stable across sessions
+                // and reloads, unlike sessionId, so it is what a saved profile
+                // should recognise a receiver by.
+                receiver:     msg.receiver || null,
                 url:          msg.url,
+                // The receiver's name, not the document title: v2 rewrites the
+                // title on every turn of the dial, so a title-derived label
+                // flickered and told you nothing the state row does not.
                 title:        msg.title || sender.tab.title || msg.url,
                 lastState:    null,
                 vfo:          assignedVfo,
@@ -246,15 +254,22 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                     registry.get(tabId).vfo = inst.vfo;
                     broadcastRegistry();
                 }
-                // Delay the freq/mode/bw commands slightly so the page has time to
-                // fully initialise radioAPI after the content script registers.
-                setTimeout(() => {
-                    if (inst.freq  != null) browser.tabs.sendMessage(tabId, { type: 'cmd:set_freq',      freq: inst.freq }).catch(() => {});
-                    if (inst.mode  != null) browser.tabs.sendMessage(tabId, { type: 'cmd:set_mode',      mode: inst.mode }).catch(() => {});
-                    if (inst.bwLow != null && inst.bwHigh != null) {
-                        browser.tabs.sendMessage(tabId, { type: 'cmd:set_bandwidth', low: inst.bwLow, high: inst.bwHigh }).catch(() => {});
-                    }
-                }, 1500);
+                // One tune carrying all three, sent immediately.
+                //
+                // The old code sent three separate commands behind a 1.5 second
+                // timer, because v1's radioAPI took an unknowable amount of time
+                // to finish assembling itself after the content script found it.
+                // A registration now happens *because* the page announced
+                // itself, so there is nothing left to wait for — and sending the
+                // three together stops the receiver passing through
+                // intermediate mode/passband pairs on the way to the profile.
+                browser.tabs.sendMessage(tabId, {
+                    type: 'cmd:tune',
+                    freq: inst.freq,
+                    mode: inst.mode,
+                    low:  inst.bwLow,
+                    high: inst.bwHigh,
+                }).catch(() => {});
             }
             break;
         }
@@ -277,20 +292,14 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             break;
         }
 
-        // ── Content script: page title changed (freq/mode shown in title) ─────
-        case 'ubersdr:title_update': {
-            const tabId = sender.tab ? sender.tab.id : null;
-            if (!tabId || !registry.has(tabId)) break;
-            registry.get(tabId).title = msg.title;
-            broadcastRegistry();
-            break;
-        }
-
-        // ── Content script: user pressed play (audio-start overlay dismissed) ─
+        // ── Content script: the receiver started or stopped playing ──────────
+        // v1 could only ever report the start, because it read a CSS class on
+        // an overlay that is removed once. The page now says which, so a
+        // receiver switched off stops being treated as live for flrig sync.
         case 'ubersdr:audio_started': {
             const tabId = sender.tab ? sender.tab.id : null;
             if (!tabId || !registry.has(tabId)) break;
-            registry.get(tabId).audioStarted = true;
+            registry.get(tabId).audioStarted = msg.running !== false;
             broadcastRegistry();
             break;
         }
@@ -307,8 +316,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 lastKnownState = entry.lastState;
                 broadcastToPopup({ type: 'state:update', state: entry.lastState });
 
-                // SDR → rig: only push if audio has started (overlay dismissed)
-                // and direction allows it.
+                // SDR → rig: only push if the receiver is actually playing and
+                // the direction allows it.
                 // Also suppress during the VFO-switch cooldown window — the newly
                 // selected tab will echo its current state immediately after being
                 // activated, and we must not write that back to flrig (which is now
@@ -318,15 +327,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 const tabVfoForSync = entry.vfo || null;
                 if (flrigEnabled && flrigConnected && entry.audioStarted && tabVfoForSync &&
                     (flrigDirection === 'sdr-to-rig' || flrigDirection === 'both')) {
-                    if (inVfoCooldown) {
-                        console.log('[ubersdr:state] suppressed pushSdrStateToFlrig during VFO cooldown — tabId:', tabId, 'freq:', msg.state.freq);
-                    } else {
-                        console.log('[ubersdr:state] calling pushSdrStateToFlrig — tabId:', tabId,
-                            'freq:', msg.state.freq, 'mode:', msg.state.mode,
-                            'flrigActiveVfo:', flrigActiveVfo,
-                            '_lastSdrFreq:', _lastSdrFreq, '_lastFlrigFreq:', _lastFlrigFreq);
-                        pushSdrStateToFlrig(msg.state);
-                    }
+                    if (!inVfoCooldown) pushSdrStateToFlrig(msg.state);
                 }
             }
             break;
@@ -628,6 +629,7 @@ function registrySnapshot() {
     return Array.from(registry.values()).map(e => ({
         tabId:        e.tabId,
         sessionId:    e.sessionId,
+        receiver:     e.receiver || null,
         url:          e.url,
         title:        e.title,
         selected:     e.tabId === selectedTabId,
@@ -651,14 +653,12 @@ function forwardCommandToTab(command) {
 // Mute every registered tab except activeTabId (which gets unmuted).
 // Only acts when there are 2+ tabs — single-tab setups are left alone.
 // Uses browser tab-level mute (instant, OS mixer) for fastest response.
-// radioAPI mute (Web Audio gain ramp) left here for reference but disabled —
-// it introduces unmute lag due to the gain ramp.
+// Muted at the browser mixer rather than through the page: tab mute is
+// instant, where the page's own mute ramps its gain and lags coming back.
 function muteAllExcept(activeTabId) {
     if (registry.size < 2) return;
     for (const [tabId] of registry) {
-        const shouldMute = tabId !== activeTabId;
-        browser.tabs.update(tabId, { muted: shouldMute }).catch(() => {});
-        // browser.tabs.sendMessage(tabId, { type: 'cmd:set_mute', muted: shouldMute }).catch(() => {});
+        browser.tabs.update(tabId, { muted: tabId !== activeTabId }).catch(() => {});
     }
 }
 
@@ -811,8 +811,6 @@ function pushSdrStateToFlrig(state) {
         _sdrToRigDebounceTimer = null;
         const freq = _pendingSdrFreq;
         const mode = _pendingSdrMode;
-        console.log('[pushSdrStateToFlrig] debounce fired — freq:', freq, 'mode:', mode,
-            'selectedTabId:', selectedTabId, 'flrigActiveVfo:', flrigActiveVfo);
         try {
             // Ensure flrig is on the correct VFO for the selected tab before writing.
             // Skip if the tab has no VFO assigned (null = unassigned).
@@ -822,9 +820,8 @@ function pushSdrStateToFlrig(state) {
             // enough that a stale cache only risks one wrong write at most.
             if (selectedTabId && registry.has(selectedTabId)) {
                 const tabVfo = registry.get(selectedTabId).vfo || null;
-                console.log('[pushSdrStateToFlrig] tabVfo:', tabVfo, 'flrigActiveVfo:', flrigActiveVfo);
                 if (tabVfo && tabVfo !== flrigActiveVfo) {
-                    console.log('[pushSdrStateToFlrig] VFO mismatch — switching flrig to', tabVfo);
+                    console.log('[UberSDR Bridge] switching flrig to VFO', tabVfo);
                     await flrigSetAB(tabVfo);
                     // Activate the cooldown immediately on VFO switch so the poll
                     // doesn't push the new VFO's existing frequency back to SDR
@@ -832,7 +829,7 @@ function pushSdrStateToFlrig(state) {
                     _sdrToRigLastPushTime = Date.now();
                     // Seed _lastFlrigFreq/_lastFlrigMode with the new VFO's current
                     // values so the poll doesn't see freqChanged=true and spam
-                    // cmd:set_freq (which calls autoTune() → rate limiting).
+                    // the page with tune commands.
                     // We do this BEFORE writing the new freq below, so the write
                     // will differ from _lastFlrigFreq and actually get sent.
                     try {
@@ -840,11 +837,10 @@ function pushSdrStateToFlrig(state) {
                         const newVfoMode = await flrigGetMode();
                         _lastFlrigFreq = Math.round(newVfoFreq);
                         _lastFlrigMode = newVfoMode;
-                        console.log('[pushSdrStateToFlrig] seeded after VFO switch — _lastFlrigFreq:', _lastFlrigFreq, '_lastFlrigMode:', _lastFlrigMode);
                     } catch (_) {
                         _lastFlrigFreq = null;
                         _lastFlrigMode = null;
-                        console.log('[pushSdrStateToFlrig] seed failed — cleared _lastFlrigFreq/_lastFlrigMode');
+                        console.warn('[UberSDR Bridge] could not read the new VFO from flrig');
                     }
                 }
             }
@@ -852,18 +848,15 @@ function pushSdrStateToFlrig(state) {
             if (freq !== null && freq !== undefined) {
                 // Only push if the SDR freq differs from what we last sent (1 Hz resolution)
                 if (_lastSdrFreq === null || freq !== _lastSdrFreq) {
-                    console.log('[pushSdrStateToFlrig] writing freq to flrig:', freq, '(was _lastSdrFreq:', _lastSdrFreq, ')');
                     _lastSdrFreq = freq;
                     await flrigSetFreq(freq);
                     pushed = true;
                 } else {
-                    console.log('[pushSdrStateToFlrig] freq unchanged, skipping write:', freq);
                 }
             }
             if (mode !== null && mode !== undefined) {
                 const flrigMode = SDR_TO_FLRIG[mode.toLowerCase()];
                 if (flrigMode && flrigMode !== _lastSdrMode) {
-                    console.log('[pushSdrStateToFlrig] writing mode to flrig:', flrigMode, '(was _lastSdrMode:', _lastSdrMode, ')');
                     _lastSdrMode = flrigMode;
                     await flrigSetMode(flrigMode);
                     pushed = true;
@@ -873,7 +866,7 @@ function pushSdrStateToFlrig(state) {
             // suppress the round-trip echo for a short cooldown window.
             if (pushed) _sdrToRigLastPushTime = Date.now();
         } catch (err) {
-            console.warn('[pushSdrStateToFlrig] error:', err);
+            console.warn('[UberSDR Bridge] flrig write failed:', err);
             // flrig not reachable — will be caught by reconnect loop
         }
     }, SDR_TO_RIG_DEBOUNCE_MS);
@@ -886,9 +879,7 @@ async function pollFlrigToSdr() {
         // If so, auto-select the tab assigned to that VFO.
         const currentVfo = await flrigGetAB();
         if (currentVfo !== flrigActiveVfo) {
-            console.log('[pollFlrigToSdr] VFO changed:', flrigActiveVfo, '→', currentVfo,
-                '| selectedTabId:', selectedTabId,
-                '| _lastFlrigFreq:', _lastFlrigFreq, '_lastFlrigMode:', _lastFlrigMode);
+            console.log('[UberSDR Bridge] flrig switched to VFO', currentVfo);
             flrigActiveVfo = currentVfo;
 
             // Always reset echo prevention on VFO switch — _lastFlrigFreq was
@@ -904,7 +895,6 @@ async function pollFlrigToSdr() {
                 clearTimeout(_sdrToRigDebounceTimer);
                 _sdrToRigDebounceTimer = null;
             }
-            console.log('[pollFlrigToSdr] echo prevention reset. cooldown active until +' + FLRIG_ECHO_COOLDOWN_MS + 'ms');
 
             // Seed _lastFlrigFreq/_lastFlrigMode with the new VFO's current values
             // so the first post-cooldown poll doesn't see freqChanged=true and
@@ -916,17 +906,14 @@ async function pollFlrigToSdr() {
                 const seedMode = await flrigGetMode();
                 _lastFlrigFreq = Math.round(seedFreq);
                 _lastFlrigMode = seedMode;
-                console.log('[pollFlrigToSdr] seeded new VFO state — _lastFlrigFreq:', _lastFlrigFreq, '_lastFlrigMode:', _lastFlrigMode);
             } catch (_) {
                 // Leave as null — the cooldown will still suppress the first push
-                console.log('[pollFlrigToSdr] seed fetch failed, leaving _lastFlrigFreq null');
+                console.warn('[UberSDR Bridge] could not read flrig after its VFO changed');
             }
 
             // Find the tab assigned to this VFO and auto-select it.
             // Only consider tabs with an explicit VFO assignment (null = unassigned / '—').
             const matchingTab = Array.from(registry.values()).find(e => e.vfo === currentVfo);
-            console.log('[pollFlrigToSdr] matchingTab for VFO', currentVfo, ':', matchingTab ? matchingTab.tabId : 'none',
-                '| current selectedTabId:', selectedTabId);
             if (matchingTab && matchingTab.tabId !== selectedTabId) {
                 selectedTabId = matchingTab.tabId;
                 browser.storage.local.set({ selectedTabId });
@@ -938,9 +925,7 @@ async function pollFlrigToSdr() {
                 broadcastRegistry();
                 broadcastToPopup({ type: 'vfo:switched', vfo: currentVfo, tabId: selectedTabId });
                 if (lastKnownState) broadcastToPopup({ type: 'state:update', state: lastKnownState });
-                console.log('[pollFlrigToSdr] selectedTabId updated to', selectedTabId);
-            } else {
-                console.log('[pollFlrigToSdr] no tab switch needed (matchingTab already selected or not found)');
+                console.log('[UberSDR Bridge] following flrig to the tab on VFO', currentVfo);
             }
         }
 
@@ -967,12 +952,9 @@ async function pollFlrigToSdr() {
             broadcastToPopup({ type: 'ptt:status', active: pttNow });
 
             if (pttMuteEnabled && selectedTabId && registry.has(selectedTabId)) {
-                // TX → mute; RX → unmute.
-                // Tab-level mute (browser mixer) for instant response.
-                // radioAPI mute (Web Audio gain ramp) left for reference but disabled —
-                // it introduces unmute lag due to the gain ramp.
+                // TX → mute; RX → unmute, at the browser mixer: instant, where
+                // the page's own mute ramps its gain and lags coming back.
                 browser.tabs.update(selectedTabId, { muted: pttNow }).catch(() => {});
-                // browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: pttNow }).catch(() => {});
             }
         }
 
@@ -985,7 +967,6 @@ async function pollFlrigToSdr() {
             // to prevent the round-trip echo loop.
             const inCooldown = (Date.now() - _sdrToRigLastPushTime) < FLRIG_ECHO_COOLDOWN_MS;
             if (inCooldown) {
-                console.log('[pollFlrigToSdr] in cooldown, skipping rig→SDR push. freq from rig:', freq);
                 return;
             }
 
@@ -999,12 +980,9 @@ async function pollFlrigToSdr() {
             if (selectedTabId && registry.has(selectedTabId)) {
                 const selTabVfo = (registry.get(selectedTabId).vfo || 'A');
                 if (freqChanged) {
-                    console.log('[pollFlrigToSdr] cmd:set_freq → tabId:', selectedTabId,
-                        'tabVfo:', selTabVfo, 'flrigActiveVfo:', flrigActiveVfo,
-                        'freq:', freq, '_lastFlrigFreq was:', _lastFlrigFreq === freq ? freq : '(just updated)');
                     if (selTabVfo !== flrigActiveVfo) {
-                        console.warn('[pollFlrigToSdr] ⚠️ VFO MISMATCH — sending freq', freq,
-                            'to tab with VFO', selTabVfo, 'but flrig is on VFO', flrigActiveVfo);
+                        console.warn('[UberSDR Bridge] sending flrig\'s frequency to the tab on VFO',
+                            selTabVfo, 'while flrig is on VFO', flrigActiveVfo);
                     }
                     // Also stamp _lastSdrFreq so the SDR echo via ubersdr:state
                     // doesn't immediately push this value back to flrig.

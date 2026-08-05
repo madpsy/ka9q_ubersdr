@@ -72,19 +72,52 @@ Create simple PNG icons (a radio tower or antenna symbol works well). Without th
 
 ---
 
+## Tests
+
+```bash
+make test          # or npm test — needs esbuild and node, no npm install
+```
+
+The content script is tested against the **real** v2 page API rather than a mock
+of it: `test/run.sh` bundles the page's own bridge modules and runs the content
+script, unedited, against them. A test that presses a popup button therefore
+ends in the call the receiver would actually make.
+
+`test/contract.test.js` covers the seams where the two sides can drift apart
+silently — the protocol constants duplicated in the content script, the `cmd:*`
+messages the background and popup send, and the manifest.
+
 ## How It Works
+
+The extension speaks the **UberSDR v2 page API** — the contract is documented in
+`static/v2/BRIDGE_API.md`, and this extension is a client of it. It requires the
+v2 interface; the older interface is not supported.
 
 ### Detection
 
-The content script (`content_script.js`) is injected into every page. It waits up to 5 seconds for `window.radioAPI` and `window.userSessionID` to appear — globals that only exist on UberSDR pages (set by `static/extensions.js` and `static/app.js`). If found, it registers the tab with the background script.
+`content_script.js` runs on every page and dispatches one `hello` on the page
+API's event channel, then listens. A v2 page answers with an `announce` carrying
+the receiver's identity, the session, and what it can do; the tab is registered
+on that. A page that is not an UberSDR never answers, and the cost there is a
+single idle listener — no polling, no timers, and no page-world injection, which
+is why the content script needs no privileged access to the page at all.
 
 ### State observation
 
-The content script subscribes to `window.radioAPI.on('frequency_changed', ...)`, `mode_changed`, and `bandwidth_changed` — the same event bus used by in-page extensions like FT8 and WEFAX. No polling, no DOM scraping, no monkey-patching.
+The content script subscribes to the `tuning`, `audio`, `session` and `signal`
+topics. The page pushes only what changed, and the signal meter is asked for at
+most four readings a second. `content_script.js` maps those topics onto the flat
+state object the background script and popup use, so nothing beyond that file
+knows the page's vocabulary.
 
 ### Command execution
 
-Commands from the popup are forwarded by the background script to the content script in the target tab. The content script calls `window.setFrequency()` (from `app.js`) or `window.radioAPI.setMode()` / `window.radioAPI.setBandwidth()` — the same functions the in-page UI uses.
+Commands from the popup are forwarded by the background script to the content
+script, which turns them into page API commands — `tune`, `mode`, `passband`,
+`mute`. Each one is validated by the page and either succeeds or answers with a
+reason, which is logged; a command never silently does nothing. Loading a saved
+profile sends frequency, mode and passband as a single `tune`, so the receiver
+does not pass through intermediate settings on the way.
 
 ### Multi-tab selection
 

@@ -77,6 +77,12 @@ export default function SDRControlPanel({ minimal }) {
 
     return (
         <div className="stack">
+            {/* Above the surfaces because it is not one of them: the three
+                below are mutually exclusive and hold hardware, and this holds
+                nothing and runs alongside any of them. It is also the one most
+                people here are looking for. */}
+            <BridgeSwitch minimal={minimal} />
+
             {!minimal && (
                 <Field label="Surface">
                     <Segmented
@@ -118,8 +124,6 @@ export default function SDRControlPanel({ minimal }) {
             )}
 
             {surface !== 'off' && !minimal && <MessageLog messages={messages} onClear={clearMessages} />}
-
-            <BridgeSwitch minimal={minimal} />
         </div>
     );
 }
@@ -139,7 +143,6 @@ function BridgeSwitch({ minimal }) {
 
     return (
         <>
-            <div className="divider" />
             <span className="section-label">
                 Browser bridge
                 {on && attached > 0 && (
@@ -148,7 +151,7 @@ function BridgeSwitch({ minimal }) {
                     </span>
                 )}
             </span>
-            <Field label="Outside programs" inline>
+            <Field label="Allow" inline>
                 <Switch
                     checked={on}
                     onChange={(v) => setBridgeSettings({ enabled: v })}
@@ -158,12 +161,13 @@ function BridgeSwitch({ minimal }) {
             </Field>
             {!minimal && (
                 <div className="note note--tight">
-                    Browser extensions and userscripts running on this page can read the
-                    receiver and drive it — the same functions a knob or a key is mapped to.
-                    Nothing on another site can reach it, and no password is ever shared.
+                    Lets a browser extension or userscript running on this page read this
+                    receiver and drive it — the same functions a knob or a key can be mapped
+                    to. Nothing on another site can reach it and no password is ever shared.
                     A badge appears above the spectrum while something is attached.
                 </div>
             )}
+            <div className="divider" />
         </>
     );
 }

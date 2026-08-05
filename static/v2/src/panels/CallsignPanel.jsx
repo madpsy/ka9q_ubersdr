@@ -234,11 +234,23 @@ export default function CallsignPanel({ minimal }) {
     const live = useRef({});
     live.current = { running, call, data };
 
-    const run = (raw) => {
+    /**
+     * Look a callsign up and show it.
+     *
+     * `auto` means nobody asked: the Markers panel offers whatever the dial has
+     * landed on. Those are shown when they succeed and are silent when they do
+     * not — no error, and no clearing of what is already on screen. The failure
+     * that made this necessary is the ordinary one: powerOn() flips `running`
+     * and *then* registers the audio session, and /api/lookup wants the session,
+     * so an automatic lookup on the way up reliably lost the race and put "Start
+     * the receiver first" on screen for someone who just had.
+     */
+    const run = (raw, { auto = false } = {}) => {
         const c = normaliseCallsign(raw);
-        setEntry(c);
+        if (!auto) setEntry(c);
         if (!c) return;
         if (!isValidCallsign(c)) {
+            if (auto) return;
             setError('That does not look like a callsign.');
             setData(null);
             setCall('');
@@ -251,12 +263,12 @@ export default function CallsignPanel({ minimal }) {
         // of pressing it twice.
         if (c === live.current.call && live.current.data) return;
 
-        // /api/lookup needs an active audio session, not just a registered
-        // UUID. Said here, when something is actually being asked for, rather
-        // than as a standing notice: the panel is docked by default, and a
-        // permanent line telling you to press Start is the first thing on
-        // screen every time the page loads.
+        // /api/lookup needs an active audio session, not merely a registered
+        // UUID. Said when a lookup is actually asked for rather than as a
+        // standing notice: the panel is docked by default, and a permanent line
+        // telling you to press Start was the first thing on screen every load.
         if (!live.current.running) {
+            if (auto) return;
             setError('Start the receiver — lookups need an active audio session.');
             setData(null);
             setCall(c);
@@ -264,22 +276,32 @@ export default function CallsignPanel({ minimal }) {
         }
 
         const mine = ++seq.current;
-        setBusy(true);
-        setError('');
-        setCall(c);
+        // "Looking up …" belongs to a lookup somebody is waiting on. An
+        // automatic one announces itself only by its answer.
+        if (!auto) {
+            setBusy(true);
+            setError('');
+            setCall(c);
+        }
         lookupCallsignData(c, getSessionId())
-            .then((d) => { if (mine === seq.current) { setData(d); setError(''); } })
-            .catch((err) => {
+            .then((d) => {
                 if (mine !== seq.current) return;
+                setCall(c);
+                setEntry(c);
+                setData(d);
+                setError('');
+            })
+            .catch((err) => {
+                if (mine !== seq.current || auto) return;
                 setData(null);
                 setError(err.message || String(err));
             })
-            .finally(() => { if (mine === seq.current) setBusy(false); });
+            .finally(() => { if (mine === seq.current && !auto) setBusy(false); });
     };
 
     // Clicking a spot elsewhere (the voice activity panel) lands here.
-    useEffect(() => onLookupRequest((c) => {
-        run(c);
+    useEffect(() => onLookupRequest((c, opts) => {
+        run(c, opts);
         // Bring the field in step, so the box shows what is on screen.
         if (inputRef.current) inputRef.current.value = c;
     }), []);

@@ -387,6 +387,102 @@ t('an empty callsign is never dispatched', () => {
     off();
 });
 
+// --- retryable failures -----------------------------------------------------
+//
+// The bug these pin down: powerOn() sets `running` and then registers the audio
+// session, so the Markers panel's automatic lookup fires into the gap and gets a
+// 401. Nothing about that is a fact about the callsign, but it was being cached
+// as one — leaving the operator's name blank for the rest of the page.
+
+t('only a 404 says anything about the callsign', () => {
+    assert.strictEqual(cs.lookupRetryable(404), false, 'no such callsign is a fact');
+    for (const status of [401, 429, 500, 502, 503]) {
+        assert.strictEqual(cs.lookupRetryable(status), true, `HTTP ${status}`);
+    }
+});
+
+ta('a 401 is flagged retryable — the session is not registered yet', () => withFetch(
+    () => Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve(null) }),
+    async () => {
+        const err = await cs.lookupCallsignData('M0ABC', 'sess-401').then(
+            () => null, (e) => e,
+        );
+        assert.ok(err, 'expected a rejection');
+        assert.strictEqual(err.retryable, true);
+        assert.match(err.message, /active audio session/);
+    },
+));
+
+ta('a 404 is not retryable — asked, and there is no such station', () => withFetch(
+    () => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve(null) }),
+    async () => {
+        const err = await cs.lookupCallsignData('QQQ9ZZ', 'sess-404').then(
+            () => null, (e) => e,
+        );
+        assert.strictEqual(err.retryable, false);
+    },
+));
+
+ta('a 200 carrying the provider\'s "never heard of it" is not retryable', () => withFetch(
+    () => Promise.resolve({
+        ok: true, status: 200, json: () => Promise.resolve({ error: 'Not found' }),
+    }),
+    async () => {
+        const err = await cs.lookupCallsignData('QQQ9ZZ', 'sess-200').then(
+            () => null, (e) => e,
+        );
+        assert.strictEqual(err.retryable, false, 'the provider answered');
+    },
+));
+
+ta('a dropped connection is retryable', () => withFetch(
+    () => Promise.reject(new TypeError('Failed to fetch')),
+    async () => {
+        const err = await cs.lookupCallsignData('M0ABC', 'sess-net').then(
+            () => null, (e) => e,
+        );
+        assert.strictEqual(err.retryable, true);
+    },
+));
+
+ta('an empty body is retryable rather than a verdict', () => withFetch(
+    () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(null) }),
+    async () => {
+        const err = await cs.lookupCallsignData('M0ABC', 'sess-empty').then(
+            () => null, (e) => e,
+        );
+        assert.strictEqual(err.retryable, true);
+    },
+));
+
+t('having no session at all is retryable — one is about to exist', () => {
+    return cs.lookupCallsignData('M0ABC', '').then(
+        () => { throw new Error('expected a rejection'); },
+        (err) => { assert.strictEqual(err.retryable, true); },
+    );
+});
+
+// --- automatic requests -----------------------------------------------------
+
+t('a request carries whether anybody asked for it', () => {
+    const seen = [];
+    const off = cs.onLookupRequest((c, opts) => seen.push([c, opts.auto]));
+    cs.requestLookup('M0ABC');
+    cs.requestLookup('G4XYZ', { auto: true });
+    off();
+    assert.deepStrictEqual(seen, [['M0ABC', false], ['G4XYZ', true]]);
+});
+
+t('a listener written before the flag existed still works', () => {
+    // Nothing may break by taking one argument: the options object is always
+    // passed, never undefined, so an old listener simply ignores it.
+    const seen = [];
+    const off = cs.onLookupRequest((c) => seen.push(c));
+    cs.requestLookup('M0ABC', { auto: true });
+    off();
+    assert.deepStrictEqual(seen, ['M0ABC']);
+});
+
 chain.then(() => {
     if (process.exitCode) console.log('\ncallsign tests FAILED');
     else console.log(`\nall ${pass} callsign tests passed`);

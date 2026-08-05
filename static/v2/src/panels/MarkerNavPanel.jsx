@@ -87,8 +87,9 @@ export default function MarkerNavPanel({ minimal }) {
         // map and the rest of it. Only when the marker changes — landing on a
         // station is the ask, not every render while you sit on it. The panel
         // wins when it is open; otherwise v1's popup gets it, if that is. This
-        // never opens either of them.
-        if (!requestLookup(call)) lookupCallsign(call);
+        // never opens either of them. Marked automatic so a failure stays quiet:
+        // nobody asked for this one, so an error banner about it is noise.
+        if (!requestLookup(call, { auto: true })) lookupCallsign(call);
     }, [wantsLookup, call]);
 
     // The answer arrives a second or two after the request that asked for it.

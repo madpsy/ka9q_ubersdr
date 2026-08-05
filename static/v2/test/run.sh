@@ -128,6 +128,8 @@ esbuild ../src/radio/media/metadata.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediametadata.cjs --log-level=warning
 esbuild ../src/radio/media/support.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediasupport.cjs --log-level=warning
+esbuild ../src/radio/media/lookup.js --bundle --format=cjs --platform=node \
+    --outfile=.build/medialookup.cjs --log-level=warning
 esbuild ../src/extensions/qrss/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/qrssdsp.cjs --log-level=warning
 esbuild ../src/extensions/freedv/reporter.js --bundle --format=cjs --platform=node \
@@ -188,6 +190,7 @@ node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
 node markernavsettings.test.js
+node medialookup.test.js
 node operatorphoto.test.js
 node bookmarkgroups.test.js
 node bridge.test.js

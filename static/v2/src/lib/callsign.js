@@ -105,6 +105,22 @@ export function displayName(data) {
         .filter(Boolean).join(' ');
 }
 
+/**
+ * Whether a failure says anything about the callsign, or only about the moment.
+ *
+ * A 401 means the audio session is not registered *yet* — the Markers panel asks
+ * the instant the receiver starts, which is before the server has the session.
+ * A 429 means not now, a 503 means the service is off, a dropped connection
+ * means nothing at all. None of those are facts about the callsign, and caching
+ * them as "no such station" leaves the operator's name blank for the rest of the
+ * page. A 404, or a provider that answered and said it has never heard of the
+ * call, is a fact — worth remembering so the dial crossing that spot again does
+ * not spend a rate-limit slot re-asking.
+ */
+export function lookupRetryable(status) {
+    return status !== 404;
+}
+
 // HTTP status -> something an operator can act on. The bare server text for 401
 // ("an active audio session is required to use this endpoint") is accurate but
 // does not tell anyone what to do about it.
@@ -128,7 +144,11 @@ export function lookupError(status, body) {
 const inFlight = new Map();
 
 export function lookupCallsignData(callsign, uuid) {
-    if (!uuid) return Promise.reject(new Error('No session — start the receiver first.'));
+    if (!uuid) {
+        const err = new Error('No session — start the receiver first.');
+        err.retryable = true;
+        return Promise.reject(err);
+    }
     const key = `${normaliseCallsign(callsign)}|${uuid}`;
     const already = inFlight.get(key);
     if (already) return already;
@@ -141,13 +161,33 @@ export function lookupCallsignData(callsign, uuid) {
 
 async function fetchLookup(callsign, uuid) {
     const url = `/api/lookup?callsign=${encodeURIComponent(callsign)}&uuid=${encodeURIComponent(uuid)}`;
-    const resp = await fetch(url);
+    let resp;
+    try {
+        resp = await fetch(url);
+    } catch (err) {
+        // Offline, or the receiver went away mid-request.
+        err.retryable = true;
+        throw err;
+    }
     const body = await resp.json().catch(() => null);
-    if (!resp.ok) throw new Error(lookupError(resp.status, body));
+    if (!resp.ok) {
+        const err = new Error(lookupError(resp.status, body));
+        err.retryable = lookupRetryable(resp.status);
+        throw err;
+    }
     // A 200 can still carry an error field — the provider may have answered
-    // "no such callsign" without that being an HTTP failure.
-    if (body && body.error) throw new Error(body.error);
-    if (!body) throw new Error('Lookup returned nothing.');
+    // "no such callsign" without that being an HTTP failure. It answered, so
+    // this one is not worth asking again.
+    if (body && body.error) {
+        const err = new Error(body.error);
+        err.retryable = false;
+        throw err;
+    }
+    if (!body) {
+        const err = new Error('Lookup returned nothing.');
+        err.retryable = true;
+        throw err;
+    }
     return body;
 }
 
@@ -169,13 +209,23 @@ export function onLookupRequest(fn) {
     return () => listeners.delete(fn);
 }
 
-// Returns true if anything was listening, so a caller can fall back (the voice
-// activity panel routes to the v1 popup when the panel is closed).
-export function requestLookup(callsign) {
+/**
+ * Ask whatever is listening to look a callsign up.
+ *
+ * Returns true if anything was listening, so a caller can fall back (the voice
+ * activity panel routes to the v1 popup when the panel is closed).
+ *
+ * `auto` marks a request nobody typed or clicked — the Markers panel asking
+ * about whatever the dial has landed on. The difference matters at the far end:
+ * a lookup you asked for and cannot have should say why, and one that happened
+ * on your behalf should fail quietly rather than putting an error on screen
+ * about something you did not do.
+ */
+export function requestLookup(callsign, { auto = false } = {}) {
     const call = normaliseCallsign(callsign);
     if (!call || listeners.size === 0) return false;
     for (const fn of listeners) {
-        try { fn(call); } catch (e) { console.error('lookup listener threw', e); }
+        try { fn(call, { auto }); } catch (e) { console.error('lookup listener threw', e); }
     }
     return true;
 }

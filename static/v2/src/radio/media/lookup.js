@@ -16,6 +16,11 @@ import { lookupCallsignData, normaliseCallsign } from '../../lib/callsign.js';
 const cache = new Map();     // callsign -> { firstName, country, photo } | null
 const pending = new Map();   // callsign -> Promise
 const listeners = new Set();
+const retries = new Set();   // timers for the one retry below
+
+// Long enough for the audio session to be registered, short enough that the
+// name appears while the operator is still looking at the station.
+const RETRY_MS = 2000;
 
 // Fires when a lookup lands, so the metadata can be pushed again with the
 // operator's name and photo — they arrive after the tuning change that asked
@@ -39,9 +44,16 @@ export function peekLookup(callsign) {
     return (call && cache.get(call)) || null;
 }
 
-// Starts a lookup if this callsign has never been asked about. The result
-// arrives through onLookupResolved; peekLookup reads it.
-export function startLookup(callsign, uuid) {
+/**
+ * Starts a lookup if this callsign has never been asked about. The result
+ * arrives through onLookupResolved; peekLookup reads it.
+ *
+ * A failure that was not a verdict on the callsign is retried once, because the
+ * caller will not retry for us: the Markers panel asks in an effect keyed on
+ * which marker is selected, so a lookup lost to the startup race would leave the
+ * operator's name blank until the dial moved to another station and back.
+ */
+export function startLookup(callsign, uuid, { retry = true } = {}) {
     const call = normaliseCallsign(callsign);
     if (!call) return;
     if (cache.has(call) || pending.has(call) || !uuid) return;
@@ -57,8 +69,25 @@ export function startLookup(callsign, uuid) {
                 photo: (data.image || '').trim(),
             });
         })
-        .catch(() => {
-            // No result, or the service is off. Cached as a miss so the dial
+        .catch((err) => {
+            if (err && err.retryable) {
+                // Could not ask, rather than asked and told no. Dropped without
+                // being cached: the common case is the Markers panel asking the
+                // instant the receiver starts, before the server has registered
+                // the audio session, and remembering that as "no such station"
+                // would blank this callsign for the life of the page.
+                pending.delete(call);
+                if (!retry) return;
+                const timer = setTimeout(() => {
+                    retries.delete(timer);
+                    startLookup(call, uuid, { retry: false });
+                }, RETRY_MS);
+                // Never a reason to hold a test runner or a closing page open.
+                if (timer.unref) timer.unref();
+                retries.add(timer);
+                return;
+            }
+            // Asked, and there is no such station. Cached as a miss so the dial
             // passing over this spot again does not ask a second time.
             resolved(call, null);
         }));
@@ -67,4 +96,6 @@ export function startLookup(callsign, uuid) {
 export function _resetLookups() {
     cache.clear();
     pending.clear();
+    for (const timer of retries) clearTimeout(timer);
+    retries.clear();
 }

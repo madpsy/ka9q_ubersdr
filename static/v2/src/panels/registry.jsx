@@ -33,6 +33,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 
 import ReceiverPanel from './ReceiverPanel.jsx';
+import MarkerNavPanel from './MarkerNavPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
 import BookmarksPanel from './BookmarksPanel.jsx';
 import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
@@ -70,6 +71,17 @@ export const PANELS = [
     // with. The filter shift, the passband readout and AGC are settings you
     // reach for occasionally.
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
+    // Directly under the Receiver, because it is about where the dial is: what
+    // is on this frequency, and what is either side of it.
+    // Minimal: the three markers and who is on this one, without the picker.
+    {
+        id: 'markernav',
+        title: 'Markers',
+        icon: <Icon.Pointer />,
+        dock: 'left',
+        minimal: true,
+        Component: MarkerNavPanel,
+    },
     // DX, digital and CW spots. One tab per feed the instance actually has, and
     // the panel is absent entirely when it has none — no empty slot explaining
     // that this receiver publishes no spots.

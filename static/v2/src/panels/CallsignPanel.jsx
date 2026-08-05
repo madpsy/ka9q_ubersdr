@@ -20,6 +20,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
 import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
+import { onPhotoShown, photoShown, setPhotoShown } from '../lib/callsignPhoto.js';
 import {
     displayName, distanceBearing, isValidCallsign, lookupCallsignData,
     normaliseCallsign, onLookupRequest, positionOf,
@@ -119,7 +120,7 @@ function Beam({ position, serverInfo }) {
     );
 }
 
-function Result({ call, data, serverInfo }) {
+function Result({ call, data, serverInfo, showPhoto }) {
     const [photo, setPhoto] = useState(false);
     const name = displayName(data);
     const cty = data.cty || {};
@@ -139,7 +140,10 @@ function Result({ call, data, serverInfo }) {
                 >
                     {call}
                 </a>
-                {name && <span className="cs-result__name">{name}</span>}
+                {/* Ellipsized when it does not fit — operator names run to
+                    three or four words and the header shares its row with the
+                    callsign — so the whole of it is on hover. */}
+                {name && <span className="cs-result__name" title={name}>{name}</span>}
             </div>
 
             <div className="kv-list">
@@ -182,7 +186,7 @@ function Result({ call, data, serverInfo }) {
                 The thumbnail is deliberately small — most of these are portraits
                 or shack photos and the panel is not a gallery — so clicking
                 opens it full size rather than sending anyone to a new tab. */}
-            {data.image && (
+            {showPhoto && data.image && (
                 <button
                     type="button"
                     className="cs-photo"
@@ -193,7 +197,7 @@ function Result({ call, data, serverInfo }) {
                 </button>
             )}
 
-            {photo && data.image && (
+            {showPhoto && photo && data.image && (
                 <Modal onClose={() => setPhoto(false)} label={`${call} photo`}>
                     <img className="cs-photo-full" src={data.image} alt={call} />
                 </Modal>
@@ -207,6 +211,10 @@ function Result({ call, data, serverInfo }) {
 // onLookupRequest, so it becomes a read-out of whoever you last clicked on.
 // See the registry's `minimal`.
 export default function CallsignPanel({ minimal }) {
+    const [showPhoto, setShowPhoto] = useState(photoShown);
+    // Another copy of this panel — a floating one, or the mobile sheet — has
+    // its own state, so the change has to reach it.
+    useEffect(() => onPhotoShown(setShowPhoto), []);
     const { serverInfo, running } = useRadio();
     const [entry, setEntry] = useState('');
     const [call, setCall] = useState('');
@@ -274,6 +282,18 @@ export default function CallsignPanel({ minimal }) {
                         disabled={busy || !entry.trim()}
                         title="Look up"
                     />
+                    {/* Whether a result carries its photo. Here rather than in
+                        the display settings because the reason to turn it off is
+                        the picture in front of you — it is the largest thing the
+                        panel fetches, for the least it tells you. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        active={showPhoto}
+                        icon={<Icon.Picture />}
+                        title={showPhoto ? 'Photos on — click to hide them' : 'Photos hidden — click to show'}
+                        onClick={() => setShowPhoto(setPhotoShown(!showPhoto))}
+                    />
                     {/* The v1 page, which carries the bio, the map and the QSL
                         details this panel does not. Whatever is in the box goes
                         with it. Icon only — it sits next to the primary action
@@ -311,7 +331,7 @@ export default function CallsignPanel({ minimal }) {
                 </Empty>
             )}
 
-            {data && <Result call={call} data={data} serverInfo={serverInfo} />}
+            {data && <Result call={call} data={data} serverInfo={serverInfo} showPhoto={showPhoto} />}
         </div>
     );
 }

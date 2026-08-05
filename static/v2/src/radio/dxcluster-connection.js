@@ -222,6 +222,8 @@ export class DXClusterConnection extends Emitter {
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
+            // TEMPORARY — see send().
+            console.log(`[chat-wire] socket OPEN session=${this.openedWith} wants(chat)=${this.wants('chat')}`);
             this.attempts = 0;
             this._setState('open');
             // Subscribing is what makes the socket carry anything at all, and
@@ -247,7 +249,11 @@ export class DXClusterConnection extends Emitter {
             this._onMessage(msg);
         };
         ws.onerror = () => this.emit('error', { message: 'dxcluster socket error' });
-        ws.onclose = () => this._onClose();
+        ws.onclose = (ev) => {
+            // TEMPORARY — see send().
+            console.log(`[chat-wire] socket CLOSE code=${ev && ev.code} session=${this.openedWith}`);
+            this._onClose();
+        };
         return true;
     }
 
@@ -267,6 +273,14 @@ export class DXClusterConnection extends Emitter {
     }
 
     send(msg) {
+        // TEMPORARY — chat double-join diagnosis. Remove once the cause is
+        // known. Logs every chat message that reaches the wire, with the
+        // session the socket carries and where the call came from.
+        if (typeof msg.type === 'string' && msg.type.startsWith('chat_')) {
+            const where = (new Error().stack || '').split('\n').slice(2, 5).join(' | ');
+            console.log(`[chat-wire] ${msg.type} session=${this.openedWith} connected=${this.connected}`,
+                msg.username || '', '\n           from:', where);
+        }
         if (!this.connected) return false;
         this.ws.send(JSON.stringify(msg));
         return true;
@@ -376,6 +390,11 @@ export class DXClusterConnection extends Emitter {
                 break;
             case 'subscription_status': {
                 const stream = msg.stream;
+                // TEMPORARY — see send().
+                if (stream === 'chat') {
+                    console.log(`[chat-wire] <- subscription_status chat enabled=${!!msg.enabled}`
+                        + ` session=${this.openedWith} username=${this.username} identitySent=${this.identitySent}`);
+                }
                 if (!(stream in this.confirmed)) break;
                 this.confirmed[stream] = !!msg.enabled;
                 if (stream === 'chat' && msg.enabled) {

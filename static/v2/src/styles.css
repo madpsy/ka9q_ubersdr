@@ -1795,7 +1795,13 @@ a.btn { text-decoration: none; }
     color: var(--accent-ink);
 }
 
-.tune-row { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; }
+/* The two step buttons take the room and the picker takes what it needs, rather
+   than the other way round: the picker is set once and read at a glance, while
+   the buttons are pressed over and over — and at icon width they were the
+   smallest targets in the panel. `auto` still holds the widest step label, so
+   the row never squeezes the text it has to show. */
+.tune-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; }
+.tune-row > .btn { width: 100%; }
 
 .passband {
     display: flex;

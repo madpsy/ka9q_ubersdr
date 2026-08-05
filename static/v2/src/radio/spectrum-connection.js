@@ -104,20 +104,25 @@ export class SpectrumConnection extends Emitter {
         if (password) q.set('password', password);
         // Passing the view up front means a reconnect resumes at the current
         // zoom instead of snapping to the default span first.
-        if (initial && initial.frequency > 0) q.set('frequency', String(Math.round(initial.frequency)));
-        if (initial && initial.binBandwidth > 0) q.set('bin_bandwidth', String(initial.binBandwidth));
-        // TEMPORARY — negative-edge diagnosis. This path does not go through
-        // setView, so nothing clamps what it asks for.
+        //
+        // Clamped here as well as in setView, because this path does not go
+        // through it — and because of what the server does with the pair: it
+        // applies whichever of the two is given and keeps what it already had
+        // for the other. A frequency with no bin bandwidth therefore lands on
+        // the full-span default, so resuming at 1.19 MHz asks for a 30 MHz
+        // window centred there and gets a left edge of -13.8 MHz back in the
+        // first config.
+        const initialBins = this.defaultBinCount || this.binCount;
+        const initialSpan = initial && initial.binBandwidth > 0 && initialBins
+            ? initial.binBandwidth * initialBins
+            : 0;
         if (initial && initial.frequency > 0) {
-            console.log('[edge] connect asks for', {
-                frequency: initial.frequency,
-                binBandwidth: initial.binBandwidth,
-                binCount: this.binCount,
-                leftEdge: initial.binBandwidth > 0 && this.binCount > 0
-                    ? initial.frequency - (initial.binBandwidth * this.binCount) / 2
-                    : null,
-            });
+            const centre = initialSpan > 0
+                ? clampCenter(initial.frequency, initialSpan)
+                : initial.frequency;
+            q.set('frequency', String(Math.round(centre)));
         }
+        if (initial && initial.binBandwidth > 0) q.set('bin_bandwidth', String(initial.binBandwidth));
 
         this._setState('connecting');
         let ws;
@@ -205,27 +210,6 @@ export class SpectrumConnection extends Emitter {
         const wanted = centerFreq != null ? centerFreq : this.centerFreq;
         const centre = span > 0 && wanted > 0 ? clampCenter(wanted, span) : wanted;
 
-        // TEMPORARY — negative-edge diagnosis. Remove once the cause is known.
-        const edgeOf = (c) => (span > 0 ? c - span / 2 : null);
-        const askedEdge = edgeOf(wanted);
-        const sentEdge = edgeOf(centre);
-        if (askedEdge === null || askedEdge < 0 || sentEdge < 0) {
-            console.log('[edge] setView', {
-                askedCentre: centerFreq,
-                askedBinBandwidth: binBandwidth,
-                usingBinBandwidth: bw,
-                binCount: this.binCount,
-                span,
-                clampedCentre: centre,
-                leftEdgeAsked: askedEdge,
-                leftEdgeSent: sentEdge,
-                // false means the clamp could not run: the view geometry is not
-                // known yet, so nothing bounded this at all.
-                clampRan: span > 0 && wanted > 0,
-                from: (new Error().stack || '').split('\n').slice(2, 5).join(' | '),
-            });
-        }
-
         const msg = { type: 'zoom' };
         // The centre goes out when the caller asked for one, and also when the
         // clamp has moved a centre nobody touched — which is the span-change
@@ -234,7 +218,6 @@ export class SpectrumConnection extends Emitter {
             msg.frequency = Math.round(centre);
         }
         if (binBandwidth != null) msg.binBandwidth = binBandwidth;
-        this._lastAsked = { ...msg, at: Date.now() };   // TEMPORARY — see above
         if (this.send(msg)) return true;
         this.pendingView = {
             ...(this.pendingView || {}),
@@ -285,6 +268,31 @@ export class SpectrumConnection extends Emitter {
         };
     }
 
+    // Puts the view back inside the band when the server reports one that is not.
+    //
+    // The server pairs a frequency with whatever zoom the session already had
+    // and validates neither against the other, so it will report a 30 MHz span
+    // centred on 1.19 MHz without complaint. That view cannot be drawn — the
+    // ruler runs to -13.8 MHz and there are no bins there — and the client is
+    // the only party that notices, so it asks for the corrected centre.
+    //
+    // Once per bad centre: were the server to insist on the same impossible
+    // view, this would otherwise ask again for every config it sent back.
+    _correctOutOfBand() {
+        if (!this.span || !this.centerFreq) return;
+        const fixed = clampCenter(this.centerFreq, this.span);
+        if (Math.round(fixed) === Math.round(this.centerFreq)) {
+            this._corrected = 0;
+            return;
+        }
+        if (this._corrected === Math.round(this.centerFreq)) return;
+        this._corrected = Math.round(this.centerFreq);
+        console.warn('[spectrum] server reported a view outside the band —'
+            + ` centre ${this.centerFreq} with a ${this.span} Hz span puts the edge at`
+            + ` ${this.centerFreq - this.span / 2}; asking for ${fixed}`);
+        this.setView(fixed, null);
+    }
+
     _setState(state) {
         if (this.state === state) return;
         this.state = state;
@@ -318,22 +326,6 @@ export class SpectrumConnection extends Emitter {
     _onControl(msg) {
         if (!msg) return;
         if (msg.type === 'config' || msg.type === 'status') {
-            // TEMPORARY — negative-edge diagnosis. What the *server* says the
-            // view is, which is what actually gets drawn.
-            const sbw = msg.binBandwidth || this.binBandwidth;
-            const sbins = msg.binCount || this.binCount;
-            const left = msg.centerFreq != null ? msg.centerFreq - (sbw * sbins) / 2 : null;
-            if (left != null && left < 0) {
-                console.log('[edge] server view is negative', {
-                    type: msg.type,
-                    centerFreq: msg.centerFreq,
-                    binBandwidth: sbw,
-                    binCount: sbins,
-                    span: sbw * sbins,
-                    leftEdge: left,
-                    weAsked: this._lastAsked || null,
-                });
-            }
             if (msg.centerFreq) this.centerFreq = msg.centerFreq;
             if (msg.binCount) this.binCount = msg.binCount;
             if (msg.binBandwidth) {
@@ -345,6 +337,7 @@ export class SpectrumConnection extends Emitter {
             // Bin count changes invalidate the delta accumulators.
             if (this._float && this._float.length !== this.binCount) this._float = null;
             if (this._u8 && this._u8.length !== this.binCount) this._u8 = null;
+            this._correctOutOfBand();
             this.emit('config', this._config());
             return;
         }

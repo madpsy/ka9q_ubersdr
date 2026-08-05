@@ -1072,6 +1072,44 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		newBinCount = binCount
 	}
 
+	// Keep the whole view inside the band, not just its centre.
+	//
+	// The check above bounds the centre and says nothing about the span it is
+	// paired with, and the three ways in here each supply one of the two and
+	// leave the other as it was: the connect handler applies an initial
+	// frequency while keeping whatever zoom the session had, the zoom handler
+	// does the reverse, and a pan supplies only a frequency. So a client
+	// resuming at 1.19 MHz with no bin bandwidth was given 1.19 MHz paired with
+	// the full-span default — a 30 MHz window whose left edge sits at
+	// -13.8 MHz. radiod has no such bins and the client cannot draw them, but
+	// nothing refused it, and the impossible view came straight back in the
+	// first config message.
+	//
+	// The rule is the client's clampCenter, deliberately: the two have to agree
+	// or a client that corrects an out-of-band view and a server that permits
+	// one will push it back and forth between them.
+	if span := newBinBW * float64(newBinCount); span > 0 {
+		half := uint64(math.Round(span / 2))
+		lo := uint64(minFrequency)
+		if half > lo {
+			lo = half
+		}
+		hi := lo
+		if maxFrequency > half && maxFrequency-half > lo {
+			hi = maxFrequency - half
+		}
+		if clamped := newFreq; clamped < lo || clamped > hi {
+			if clamped < lo {
+				clamped = lo
+			} else {
+				clamped = hi
+			}
+			log.Printf("Spectrum: centre %d Hz with a %.0f Hz span runs outside 0–%d Hz; using %d Hz",
+				newFreq, span, maxFrequency, clamped)
+			newFreq = clamped
+		}
+	}
+
 	// ── Shared → private migration ───────────────────────────────────────────
 	// If the session is currently on the shared channel and the new params are
 	// NOT the defaults, we must give it a private radiod channel.
@@ -1153,14 +1191,14 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	// Update session state
 	session.mu.Lock()
 
-	if frequency > 0 {
-		session.Frequency = frequency
-	}
-	if binBandwidth > 0 {
-		session.BinBandwidth = binBandwidth
-	}
-	if binCount > 0 && binCount != session.BinCount {
-		session.BinCount = binCount
+	// The effective values rather than the raw parameters: each is already the
+	// current one where the caller passed a zero, and a call that supplies only
+	// a bin bandwidth can still have moved the centre — widening the span around
+	// a low frequency is exactly when the clamp above has something to do.
+	session.Frequency = newFreq
+	session.BinBandwidth = newBinBW
+	if newBinCount != session.BinCount {
+		session.BinCount = newBinCount
 		binCountChanged = true
 	}
 	session.LastActive = time.Now()
@@ -1171,7 +1209,10 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 	// Send update command to radiod
 	// The radiod controller will calculate appropriate filter edges based on the new bandwidth
-	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, frequency, binBandwidth, session.BinCount, binCountChanged); err != nil {
+	// The bin bandwidth is still the raw one, so a call that did not change it
+	// does not put it on the wire; the frequency always goes, because the clamp
+	// can have changed it when the caller did not.
+	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, newFreq, binBandwidth, session.BinCount, binCountChanged); err != nil {
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}
 

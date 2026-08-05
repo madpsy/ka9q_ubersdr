@@ -642,7 +642,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
  * is in front of the receiver rather than part of it. */
 .dock--peek {
     position: absolute;
-    z-index: 30;
+    /* Above the minimised-float chips (.floatbar, 70), below the menus (80).
+     *
+     * The chips are deliberately high — one a window can cover is one you
+     * cannot click to get that window back — and they live along the bottom of
+     * the centre area, which is exactly where a peeked bottom dock lands. At 30
+     * they punched straight through it.
+     *
+     * A peek outranks them because it is transient and the pointer is on it:
+     * it goes when you move away, and the chips are back. It stays under 80 so
+     * a menu opened from a panel inside the peek still comes out on top. */
+    z-index: 75;
     box-shadow: var(--shadow);
     animation: dock-peek 120ms var(--ease);
 }

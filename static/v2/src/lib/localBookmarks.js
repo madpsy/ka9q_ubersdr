@@ -64,7 +64,7 @@ export function exportText(m, format) {
     }
 }
 
-export function download(text, filename, type) {
+export function downloadFile(text, filename, type) {
     const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement('a');
     a.href = url;

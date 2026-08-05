@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Button, Field, Icon, Segmented, Switch } from '../components/ui.jsx';
-import { download, localBookmarks, mutate } from '../lib/localBookmarks.js';
+import { downloadFile, localBookmarks, mutate } from '../lib/localBookmarks.js';
 import {
     SECTIONS, applyBundle, buildBundle, bundleFilename, inspect, presentCount,
 } from '../lib/backup.js';
@@ -75,7 +75,7 @@ export default function BackupPanel({ minimal }) {
                 setError('Nothing selected has anything saved yet.');
                 return;
             }
-            download(JSON.stringify(bundle, null, 2), bundleFilename(), 'application/json');
+            downloadFile(JSON.stringify(bundle, null, 2), bundleFilename(), 'application/json');
             setStatus(`Saved ${settings} setting${settings === 1 ? '' : 's'}`
                 + (bundle.bookmarks ? ` and ${bundle.bookmarks.length} bookmarks` : '') + '.');
         } catch (e) {

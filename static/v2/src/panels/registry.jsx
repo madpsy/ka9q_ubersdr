@@ -63,6 +63,7 @@ import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
+import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 
 export const PANELS = [
     // Minimal: the dial, the mode buttons and the filter width — what you tune
@@ -106,6 +107,20 @@ export const PANELS = [
         // The lookup provider is configured per instance; without it every
         // request would 503, so the panel is absent rather than broken.
         requires: (serverInfo) => !!(serverInfo && serverInfo.lookup_service),
+    },
+    // Under Callsign lookup, and for the same reason it is there: both are
+    // things you glance at while listening rather than controls you work.
+    // Minimal: the picture and how long ago it arrived.
+    {
+        id: 'sstv',
+        title: 'SSTV',
+        icon: <Icon.Picture />,
+        dock: 'left',
+        minimal: true,
+        Component: SSTVPanel,
+        // The addon decodes the pictures; without it there is nothing to show
+        // and every request would 404.
+        requires: (serverInfo) => sstvAvailable(serverInfo),
     },
     {
         id: 'addons',

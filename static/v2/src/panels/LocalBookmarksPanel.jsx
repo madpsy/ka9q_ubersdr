@@ -8,7 +8,7 @@ import { Button, Empty, Icon, Menu, MenuItem, ShowMore } from '../components/ui.
 import { formatFreqShort } from '../lib/format.js';
 import { MODES } from '../radio/constants.js';
 import {
-    EXPORT_FORMATS, download, exportText, importText,
+    EXPORT_FORMATS, downloadFile, exportText, importText,
     localBookmarks, mutate, onLocalBookmarksChanged,
 } from '../lib/localBookmarks.js';
 
@@ -159,7 +159,7 @@ export default function LocalBookmarksPanel() {
     const doExport = (fmt) => {
         const m = localBookmarks();
         const stamp = new Date().toISOString().slice(0, 10);
-        download(exportText(m, fmt.id), `ubersdr-bookmarks-${stamp}.${fmt.ext}`, fmt.type);
+        downloadFile(exportText(m, fmt.id), `ubersdr-bookmarks-${stamp}.${fmt.ext}`, fmt.type);
     };
 
     if (items == null) return <Empty>Loading local bookmarks…</Empty>;

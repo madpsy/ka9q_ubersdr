@@ -16,6 +16,7 @@ import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
+import BridgeHost from './bridge/BridgeHost.jsx';
 import { useDisplay } from './display/DisplayContext.jsx';
 import { subscribeSpots } from './lib/spotStore.js';
 
@@ -123,6 +124,7 @@ export default function App() {
                                 <ShortcutWatch />
                                 <StartOverlay />
                                 <LegacyBridge />
+                                <BridgeHost />
                                 <SpotStreams />
                                 {mobile ? <MobileShell /> : <DesktopShell />}
                             </MediaSessionProvider>

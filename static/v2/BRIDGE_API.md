@@ -1,0 +1,350 @@
+# UberSDR v2 page API
+
+How a browser extension, a userscript, or anything else running in an UberSDR v2
+page reads the receiver and drives it.
+
+Implementation: `src/bridge/` — `protocol.js` (wire format), `host.js` (serving),
+`commands.js` (the command set), `snapshots.js` (topic shapes), `client.js` (the
+client library), `BridgeHost.jsx` (the wiring). Tests: `test/bridge.test.js`,
+`test/bridgecommands.test.js`, `test/bridgeclient.test.js`. Those tests are the
+specification — if one has to change, the change is a breaking one.
+
+- Protocol (envelope) version: **1**
+- API version: **1.0**
+
+---
+
+## 1. Transport
+
+Two `CustomEvent`s on `window`, one per direction, with the message as a **JSON
+string** in `detail`:
+
+| Event | Direction |
+|---|---|
+| `ubersdr.to-page` | client → page |
+| `ubersdr.from-page` | page → client |
+
+A string rather than an object, deliberately: page→content `detail` is
+structured-cloned in Chrome and Xray-wrapped in Firefox and the two differ in
+what survives. A string is identical on both, so one content script serves both
+browsers **and needs no MAIN-world injection**.
+
+`window.postMessage` is not used: it is forgeable by any frame and does not
+reliably cross MV3's world boundary.
+
+There is no authentication, by design. Anything already running in the page is
+same-origin and could drive the receiver directly. The boundary is the origin,
+and CustomEvents do not cross it. No password is ever exposed.
+
+## 2. Envelope
+
+```jsonc
+{
+  "v": 1,                 // protocol version — ignore messages whose v you don't know
+  "from": "client",       // or "page"
+  "client": "abc123",     // client-chosen id; echoed on anything addressed to it
+  "id": 7,                // client-assigned; correlates a result to a request
+  "type": "command"
+}
+```
+
+**Every client message carries an `id`, including `hello`**, so every message has
+exactly one reply and nothing waits on something that was never coming.
+
+A message that fails envelope validation (wrong `v`, no `client`, no `id`, not
+`from: "client"`) is dropped silently — it is not ours. An *unknown type* is
+answered with an `unknown_type` error, because the sender is addressable and
+waiting.
+
+## 3. Handshake
+
+Either side may start first:
+
+- The page broadcasts `announce` when it mounts and whenever the descriptor
+  changes.
+- A client sends `hello` whenever it likes; the page replies with an `announce`
+  addressed to it.
+
+A content script sends one `hello` at `document_idle` and then listens. On a
+page that is not UberSDR nothing ever arrives — no polling, no timers, one idle
+listener. Register the tab on `announce`, not on `hello`.
+
+Treat **every** `announce` as *reset and re-subscribe*: it means the page has
+(re)started and anything you knew about its state is from a previous life. The
+client library clears its cache for you.
+
+`closing` is broadcast on `pagehide`.
+
+## 4. Messages
+
+### Client → page
+
+| Type | Fields | Reply |
+|---|---|---|
+| `hello` | — | `announce` (addressed) |
+| `bye` | — | `result` `{attached}` |
+| `subscribe` | `topics[]`, `minIntervalMs?` | `result` — a full snapshot of each topic |
+| `unsubscribe` | `topics[]` | `result` `{subscribed[]}` |
+| `get` | `topic?` (`"*"` or omitted = all live topics) | `result` — the topic, or a map of them |
+| `command` | `name`, `args` | `result` — see §6 |
+| `run` | `fn`, `event?` (default `{kind:"trigger"}`) | `result` `{dispatched: fn}` |
+
+### Page → client
+
+| Type | Fields |
+|---|---|
+| `announce` | the descriptor, flattened into the envelope (§5) |
+| `state` | `client`, `topic`, `patch` — **addressed**, and only the changed fields |
+| `result` | `id`, `client`, `ok`, and `value` or `error {code, message}` |
+| `closing` | `client?` — broadcast when the page goes away or the bridge is switched off; addressed when that one client has been let go |
+
+`state` is addressed rather than broadcast because patches are computed per
+subscriber, against what *that* client was last sent and at the rate *it* asked
+for. Merging one client's delta into another's picture would invent a state
+neither of them has.
+
+## 5. The descriptor
+
+```jsonc
+{
+  "v": 1, "from": "page", "type": "announce",
+  "app": "ubersdr",
+  "ui": "v2",
+  "api": { "major": 1, "minor": 0 },
+  "receiver": {
+    "id": "<public_uuid>",      // stable across sessions and reloads
+    "name": "…", "callsign": "…", "location": "…",
+    "url": "https://…",         // the operator's public URL
+    "serverVersion": "…"
+  },
+  "session": { … },             // the `session` topic (§6)
+  "page": { "url": "…", "title": "…" },
+  "capabilities": ["tune","mode",…,"functions","rotator","antenna"],
+  "topics": ["tuning","audio","signal","spectrum","session","page","modes","bands","functions"],
+  "commands": ["tune","mode","passband","volume","mute","squelch","vfo","spectrum","power"]
+}
+```
+
+**Identify a receiver by `receiver.id`** (the server's `public_uuid`) — it
+survives reloads and new sessions. `session.id` identifies one sitting. They
+answer different questions; a tab list wants the first.
+
+**Feature-detect on `capabilities`, never on version numbers.** Check `v` and
+`api.major` for compatibility and nothing else. `api.minor` rises when something
+is added; `capabilities` says what.
+
+## 6. Topics
+
+Live topics can be subscribed to and are pushed as patches. Static topics are
+reference data — `get` only, since they change only when the page reloads.
+
+Every topic has a **fixed shape**: the same keys every time, `null` for a
+missing value, never an absent key. That is what makes patch merging safe.
+
+### `tuning`
+```jsonc
+{ "frequency": 14074000, "mode": "usb", "bandwidthLow": 50, "bandwidthHigh": 2700,
+  "vfo": "A", "band": "20m" }
+```
+
+### `audio`
+```jsonc
+{ "volume": 0.7, "muted": false, "channel": "both", "bufferSec": 0.2,
+  "squelch": { "value": 40, "enabled": true, "threshold": 12, "open": true } }
+```
+`squelch.open` is live — whether the gate is passing audio right now.
+
+### `signal`
+```jsonc
+{ "dbfs": -73, "noise": -110.2, "snr": 37.2, "s": 9, "level": 0.432, "clipping": false }
+```
+`s` is the S-meter reading **the page itself is showing**, so a client's meter
+agrees with the one on screen instead of re-deriving it from dBFS with a
+different curve. Values are rounded at the source (0.1 dB); a reading that does
+not exist is `null`, never a very negative number.
+
+This topic changes continuously. It is rate limited to **10 messages a second
+per client** by default; ask for less with `minIntervalMs`. A patch held back by
+the limit is *held, not dropped* — the true final value always arrives.
+
+### `spectrum`
+```jsonc
+{ "centerFreq": 14100000, "span": 204800, "binBandwidth": 100, "binCount": 2048, "follow": true }
+```
+
+### `session`
+```jsonc
+{ "id": "…", "receiverId": "…", "running": true, "maxSec": 0, "idleSec": 300, "startedAt": 0 }
+```
+`running` is v2's "audio is playing" — what the old extension read off an
+overlay's CSS class as `audioStarted`.
+
+### `page`
+```jsonc
+{ "url": "https://…/v2/", "title": "M9PSY UberSDR - 14.074 MHz USB" }
+```
+The title is derived from the tuning, so do not watch the document title —
+subscribe to `tuning` and compose your own label from `receiver` + `tuning`.
+
+### `modes` (static)
+```jsonc
+[{ "id": "usb", "label": "USB", "group": "voice",
+   "default": { "low": 50, "high": 2700 },
+   "limits": { "min": 0, "max": 6000, "sideband": "upper" } }]
+```
+Build mode lists from this, not from a hardcoded copy. Note `cwu`/`cwl` are
+`sideband: "both"` — CW is symmetric about the carrier despite the name.
+
+### `bands` (static)
+```jsonc
+[{ "name": "20m", "min": 14000000, "max": 14350000 }]
+```
+
+### `functions` (static)
+```jsonc
+[{ "id": "freq_step_up", "label": "Step up", "group": "Frequency",
+   "encoder": false, "repeat": true, "needs": null }]
+```
+
+## 7. Commands
+
+Precise, typed, and stable. Each returns the state it just set, so you do not
+need a follow-up `get`.
+
+One rule governs bad input:
+
+- **Absolute values are refused** (`bad_args`) when they are impossible — a
+  frequency outside 10 kHz–30 MHz, a volume above 1, a passband wider than the
+  mode allows. The caller asked for somewhere that does not exist, and clamping
+  would report success for a state the receiver is not in.
+- **Relative movements stop at the edge** — `tune {delta}`, `volume {delta}` —
+  because that is what turning the dial or the volume knob does, and what the
+  receiver does with them anyway.
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `tune` | `{frequency}` \| `{delta}` \| `{step?, dir}`, plus optional `mode`, `bandwidthLow`+`bandwidthHigh`, `ensureVisible` | tuning |
+| `mode` | `{mode}` — passband becomes the mode default | tuning |
+| `passband` | `{low, high}` — checked against the mode in force | tuning |
+| `volume` | `{volume}` \| `{delta}` — 0..1 | `{volume, muted}` |
+| `mute` | `{muted}` (absolute) \| `{toggle:true}` | `{muted}` |
+| `squelch` | `{value}` \| `{enabled:false}` \| `{auto:true}` | `{value, enabled, threshold?}` |
+| `vfo` | `{id:"A"…"D"}` \| `{step:±1}` | `{vfo, …tuning}` |
+| `spectrum` | `{center}`, `{span}`, `{center,span}`, `{zoom:±n, about?}`, `{centerOnTuned:true}`, `{reset:true}` | spectrum |
+| `power` | `{on:false}` | `{running:false}` |
+
+Notes that matter:
+
+- **`mute` is absolute.** PTT mute is driven by "the rig is transmitting:
+  true/false"; a toggle desynchronises permanently the first time a message is
+  missed, and un-mutes on every transmit thereafter. `toggle` exists for a
+  button that genuinely means "the other one".
+- **`tune` carries mode and passband in one call.** Sending them separately
+  walks the receiver through intermediate mode/passband pairs, which is audible.
+- **`spectrum` with `center` and `span` together** is one call for the same
+  reason: separately, the span closes around wherever the view had got to.
+- **`power {on:true}` is refused** with `unsupported`: browsers require a user
+  gesture to start audio. Watch `session.running` instead.
+
+### `run` — the rest of the receiver
+
+`run` dispatches into the *mappable function catalogue* — the same list MIDI,
+FlexControl and the keyboard shortcuts are mapped to — by id:
+
+```jsonc
+{ "type": "run", "fn": "freq_step_up", "event": { "kind": "trigger" } }
+{ "type": "run", "fn": "volume",       "event": { "kind": "absolute", "value": 0.5 } }
+{ "type": "run", "fn": "freq_enc_1k",  "event": { "kind": "relative", "delta": -3 } }
+```
+
+Get the list from `get {topic:"functions"}`. Anything added to that catalogue
+later — including the rotator and antenna functions, which keep the operator's
+password on the page side — becomes reachable with **no protocol change**. The
+curated commands are the contract; this is the extension point.
+
+## 8. Errors
+
+```jsonc
+{ "type": "result", "id": 7, "client": "abc", "ok": false,
+  "error": { "code": "bad_args", "message": "frequency 40000000 is outside 10000–30000000" } }
+```
+
+| Code | Meaning |
+|---|---|
+| `unknown_type` | no such message type |
+| `unsupported` | known, not available here (or no such command) |
+| `bad_args` | malformed or out of range |
+| `disabled` | the operator has switched the bridge off |
+| `failed` | it threw; `message` says what |
+
+These are the codes the page actually sends — the enum carries nothing it does
+not emit. Treat an unrecognised code as a failure anyway: adding one is an
+additive change and costs only a minor version.
+
+A **command** never silently does nothing: anything that escapes becomes
+`failed` with its message rather than being swallowed.
+
+**`run` is different, and deliberately so.** It reports `{dispatched: fn}` — the
+function was invoked, not that it achieved anything. The catalogue's functions
+are fire-and-forget because a knob has no reply path, so (for example) a rotator
+function on a receiver with no stored password logs to the SDR Control panel and
+returns like any other. If you need a real answer, use a command.
+
+At most **8 clients** may attach at once. A ninth does not get refused — the
+stalest registration is dropped and told (an addressed `closing`), because
+client ids are per-injection: an extension reloaded a few times during
+development leaves dead registrations behind, and refusing the newcomer would
+lock out the live client. A client that said hello and never subscribed is
+dropped before one that is subscribed.
+
+## 9. When the bridge is off
+
+The operator can switch it off (SDR Control panel → *Browser bridge*). A
+disabled page answers every message with `disabled` rather than going silent, so
+a client can say "switched off on this receiver" instead of looking broken. No
+announce is broadcast and no state is pushed while it is off.
+
+While anything is attached, an **API** badge appears above the spectrum.
+
+## 10. Using it
+
+### In the page (userscript, console)
+
+`window.UberSDR` is a client of the same channel — not a shortcut past it — so
+it behaves identically to an extension.
+
+```js
+await UberSDR.hello();                          // → descriptor
+await UberSDR.subscribe(['tuning', 'signal'], { minIntervalMs: 250 });
+UberSDR.on('signal', (s) => console.log(s.s, s.snr));
+await UberSDR.command('tune', { frequency: 14074000, mode: 'usb' });
+await UberSDR.run('freq_step_up');
+UberSDR.state('tuning');                        // merged from patches
+```
+
+### From an extension content script
+
+`src/bridge/client.js` is the reference implementation and can be copied
+verbatim into an extension — it depends only on `protocol.js`. A content script
+is then that client plus the plumbing to its own background page:
+
+```js
+const client = createClient(window);
+client.on('announce', (d) => chrome.runtime.sendMessage({ type: 'ubersdr:register', d }));
+client.on('tuning',   (s) => chrome.runtime.sendMessage({ type: 'ubersdr:state', s }));
+client.hello().catch(() => { /* not an UberSDR page — stop here */ });
+```
+
+No MAIN-world script, no `window.radioAPI`, no polling probe, and the same file
+works in Chrome and Firefox.
+
+## 11. Versioning rules
+
+| Change | What moves |
+|---|---|
+| New command, topic, capability or catalogue function | `api.minor`, and `capabilities` grows |
+| Changed meaning, removed capability | `api.major` |
+| Changed envelope or event names | `v` |
+
+Clients: check `v` and `api.major`; feature-detect everything else on
+`capabilities`. Never branch on `api.minor`.

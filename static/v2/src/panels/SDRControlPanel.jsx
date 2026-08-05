@@ -37,6 +37,9 @@ import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
 import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
 import { getSurface, releaseSurfaceExcept } from '../controls/sources.js';
 import {
+    bridgeAttached, bridgeSettings, onBridgeAttached, onBridgeSettings, setBridgeSettings,
+} from '../bridge/settings.js';
+import {
     MessageLog, useControlContext, useControlState, useHardware, useMessages,
 } from '../controls/panel.jsx';
 
@@ -115,7 +118,53 @@ export default function SDRControlPanel({ minimal }) {
             )}
 
             {surface !== 'off' && !minimal && <MessageLog messages={messages} onClear={clearMessages} />}
+
+            <BridgeSwitch minimal={minimal} />
         </div>
+    );
+}
+
+// The page API, here because a browser extension driving this receiver is a
+// control surface — the same list of functions, reached over a message channel
+// instead of a knob. It is not one of the three above: those are mutually
+// exclusive because they hold hardware, and this holds nothing.
+//
+// Minimal keeps the switch and the count, and drops the explanation.
+function BridgeSwitch({ minimal }) {
+    const [settings, setSettings] = useState(bridgeSettings);
+    const [attached, setAttached] = useState(bridgeAttached);
+    useEffect(() => onBridgeSettings(setSettings), []);
+    useEffect(() => onBridgeAttached(setAttached), []);
+    const on = settings.enabled !== false;
+
+    return (
+        <>
+            <div className="divider" />
+            <span className="section-label">
+                Browser bridge
+                {on && attached > 0 && (
+                    <span className="section-label__note">
+                        {attached === 1 ? '1 attached' : `${attached} attached`}
+                    </span>
+                )}
+            </span>
+            <Field label="Outside programs" inline>
+                <Switch
+                    checked={on}
+                    onChange={(v) => setBridgeSettings({ enabled: v })}
+                    label={on ? 'On' : 'Off'}
+                    title="Lets a browser extension or userscript read and drive this receiver"
+                />
+            </Field>
+            {!minimal && (
+                <div className="note note--tight">
+                    Browser extensions and userscripts running on this page can read the
+                    receiver and drive it — the same functions a knob or a key is mapped to.
+                    Nothing on another site can reach it, and no password is ever shared.
+                    A badge appears above the spectrum while something is attached.
+                </div>
+            )}
+        </>
     );
 }
 

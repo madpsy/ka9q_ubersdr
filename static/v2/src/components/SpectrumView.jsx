@@ -30,6 +30,7 @@ import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
+import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
@@ -222,6 +223,8 @@ const readRig = (s) => (s.connected ? (s.rig && s.rig.tx ? 'tx' : 'on') : '');
 function ControlTags() {
     const [announce, setAnnounce] = useState(announceSettings);
     useEffect(() => onAnnounceSettings(setAnnounce), []);
+    const [attached, setAttached] = useState(bridgeAttached);
+    useEffect(() => onBridgeAttached(setAttached), []);
     const flex = useSurface(getFlex, readConnected);
     const midi = useSurface(getMidi, readMidi);
     const rig = useSurface(getSync, readRig);
@@ -283,6 +286,21 @@ function ControlTags() {
                 >
                     SPEAK
                 </button>
+            )}
+            {attached > 0 && (
+                // Something outside this page — a browser extension, a
+                // userscript — is attached to the page API and can retune this
+                // receiver. Not clickable: switching the bridge off from here
+                // would be a one-way door with no way back on the same strip,
+                // and the SDR Control panel is where the switch lives.
+                <span
+                    className="tag tag--accent"
+                    title={attached === 1
+                        ? 'One program outside this page is attached to the receiver'
+                        : `${attached} programs outside this page are attached to the receiver`}
+                >
+                    API
+                </span>
             )}
         </>
     );

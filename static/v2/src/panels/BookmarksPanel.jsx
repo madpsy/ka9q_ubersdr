@@ -21,7 +21,16 @@ export default function BookmarksPanel() {
 
     const groups = useMemo(() => {
         if (!items) return [];
-        return [...new Set(items.map((b) => b.group).filter(Boolean))].sort();
+        // Counted here rather than filtered per option: the list is walked once
+        // either way, and a group with nothing in it is worth seeing as 0
+        // rather than silently reading as an empty selection.
+        const counts = new Map();
+        for (const b of items) {
+            if (b.group) counts.set(b.group, (counts.get(b.group) || 0) + 1);
+        }
+        return [...counts.entries()]
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     }, [items]);
 
     const filtered = useMemo(() => {
@@ -48,7 +57,9 @@ export default function BookmarksPanel() {
             {groups.length > 0 && (
                 <select className="select" value={group} onChange={(e) => setGroup(e.target.value)}>
                     <option value="">All groups ({items.length})</option>
-                    {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                    {groups.map((g) => (
+                        <option key={g.name} value={g.name}>{g.name} ({g.count})</option>
+                    ))}
                 </select>
             )}
             <div className="list">

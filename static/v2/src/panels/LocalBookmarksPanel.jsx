@@ -75,10 +75,18 @@ export default function LocalBookmarksPanel() {
 
     useEffect(() => { setLimit(PAGE); }, [query, group]);
 
-    const groups = useMemo(
-        () => [...new Set((items || []).map((b) => b.group).filter(Boolean))].sort(),
-        [items],
-    );
+    const groups = useMemo(() => {
+        // Counted alongside the names rather than filtered per option: one walk
+        // either way, and the "All groups" entry has always carried a count —
+        // the groups reading as bare names beside it was the odd one out.
+        const counts = new Map();
+        for (const b of items || []) {
+            if (b.group) counts.set(b.group, (counts.get(b.group) || 0) + 1);
+        }
+        return [...counts.entries()]
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [items]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -228,7 +236,9 @@ export default function LocalBookmarksPanel() {
                     {groups.length > 0 && (
                         <select className="select" value={group} onChange={(e) => setGroup(e.target.value)}>
                             <option value="">All groups ({items.length})</option>
-                            {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                            {groups.map((g) => (
+                                <option key={g.name} value={g.name}>{g.name} ({g.count})</option>
+                            ))}
                         </select>
                     )}
                 </>

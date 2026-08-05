@@ -48,7 +48,13 @@ export default function MobileShell() {
     // Guarded by the panel's own declaration, as Section and FloatingPanel do:
     // a stored flag from a panel that has since dropped its minimal view would
     // otherwise render it a prop it no longer honours.
-    const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimal;
+    //
+    // `minimalMobile`, not `minimal`: a panel that has a cut-down form starts in
+    // it here, because a sheet over the spectrum has a fraction of a dock's room
+    // and the minimal view is the part worth having in that space. Kept apart
+    // from the docked flag so expanding one on a phone does not expand it on a
+    // desktop that had room for it all along.
+    const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimalMobile;
 
     return (
         <div className="shell shell--mobile">
@@ -65,17 +71,17 @@ export default function MobileShell() {
                                 <span className="sheet__icon">{panel.icon}</span>
                                 {panel.title}
                             </span>
-                            {/* Same toggle the docked and floating panels carry,
-                                and the same stored flag — it is per panel, not
-                                per placement, so what you cut down here is cut
-                                down in the dock too. */}
+                            {/* The same toggle the docked and floating panels
+                                carry, but its own stored flag: what a phone has
+                                room for and what a dock has room for are not the
+                                same question. */}
                             {panel.minimal && (
                                 <button
                                     type="button"
                                     className="sheet__act"
                                     title={panelMinimal ? 'Show the full panel' : 'Show the minimal view'}
                                     aria-pressed={panelMinimal}
-                                    onClick={() => toggleSectionMinimal(panel.id)}
+                                    onClick={() => toggleSectionMinimal(panel.id, true)}
                                 >
                                     {panelMinimal ? <Icon.Expand size={16} /> : <Icon.Collapse size={16} />}
                                 </button>

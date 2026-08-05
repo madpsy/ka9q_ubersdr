@@ -40,7 +40,15 @@ function defaultLayout() {
     const sections = {};
     for (const p of PANELS) {
         docks[p.dock].panels.push(p.id);
-        sections[p.id] = { open: p.defaultOpen !== false, hidden: !!p.defaultHidden, minimal: false };
+        sections[p.id] = {
+            open: p.defaultOpen !== false,
+            hidden: !!p.defaultHidden,
+            minimal: false,
+            // On a phone a panel starts cut down. A sheet over the spectrum has
+            // a fraction of a dock's room, and the minimal view is the part of a
+            // panel worth having in that space — see minimalMobile below.
+            minimalMobile: true,
+        };
     }
     return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {}, heights: {} };
 }
@@ -136,6 +144,10 @@ function reconcile(stored) {
             // stored flag on a panel that has since dropped it is discarded
             // rather than leaving the panel stuck showing nothing extra.
             minimal: !!p.minimal && !!s?.minimal,
+            // `?? true` rather than `!!`: absent means a layout stored before
+            // this existed, and those should get the mobile default like
+            // everybody else, not be pinned to full because the key was missing.
+            minimalMobile: !!p.minimal && (s?.minimalMobile ?? true),
         };
     }
     return base;
@@ -191,10 +203,17 @@ export function LayoutProvider({ children }) {
     // Minimal view: the panel renders its cut-down form. It is per panel and
     // not per placement, so a panel reads the same whether it is docked or
     // floating — the point is what you want to see from it, not where it is.
-    const toggleSectionMinimal = useCallback((id) => {
+    //
+    // A phone is the exception, and it is a difference of kind rather than of
+    // placement: a sheet over the spectrum has a fraction of a dock's room, so
+    // panels start cut down there and are remembered separately. Otherwise
+    // trimming a panel to fit a phone would trim it on the desktop too, and the
+    // machine you are not holding is the one that had room for all of it.
+    const toggleSectionMinimal = useCallback((id, mobile = false) => {
+        const key = mobile ? 'minimalMobile' : 'minimal';
         setLayout((l) => ({
             ...l,
-            sections: { ...l.sections, [id]: { ...l.sections[id], minimal: !l.sections[id]?.minimal } },
+            sections: { ...l.sections, [id]: { ...l.sections[id], [key]: !l.sections[id]?.[key] } },
         }));
     }, []);
 

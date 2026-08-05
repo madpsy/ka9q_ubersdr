@@ -134,6 +134,8 @@ esbuild ../src/lib/roomFor.js --bundle --format=cjs --platform=node \
     --outfile=.build/roomfor.cjs --log-level=warning
 esbuild ../src/lib/edgeHit.js --bundle --format=cjs --platform=node \
     --outfile=.build/edgehit.cjs --log-level=warning
+esbuild ../src/lib/haptics.js --bundle --format=cjs --platform=node \
+    --outfile=.build/haptics.cjs --log-level=warning
 esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
@@ -211,6 +213,7 @@ node markernavsettings.test.js
 node medialookup.test.js
 node roomfor.test.js
 node edgehit.test.js
+node haptics.test.js
 node appheight.test.js
 node dispatch.test.js
 node weather.test.js

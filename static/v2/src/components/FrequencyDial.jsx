@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { formatHz, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
+import { haptic } from '../lib/haptics.js';
 
 const DIGITS = 8;   // 30 MHz upper limit needs eight decimal digits
 
@@ -24,6 +25,10 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
     const bump = useCallback((place, steps) => {
         const next = clamp(Math.round(freqRef.current + place * steps), MIN_FREQ, MAX_FREQ);
         freqRef.current = next;
+        // A digit dragging past a place value is the one gesture in the app
+        // that is literally a detent, so it gets one — and it is rate limited
+        // in haptics.js, since a fast drag can ask for several steps a frame.
+        haptic('step');
         onChange(next);
     }, [onChange]);
 
@@ -69,6 +74,9 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
                 className={`dial__digit${leading ? ' is-dim' : ''}`}
                 title={`${place >= 1000 ? place / 1000 + ' kHz' : place + ' Hz'} step — scroll or drag`}
                 data-place={place}
+                /* Not a button, so the delegated press pulse (HapticWatch)
+                   would miss it. */
+                data-haptic="tap"
                 onPointerDown={(e) => {
                     if (disabled) return;
                     e.currentTarget.setPointerCapture(e.pointerId);

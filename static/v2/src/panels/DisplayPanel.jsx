@@ -4,6 +4,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
 export default function DisplayPanel() {
@@ -13,7 +14,31 @@ export default function DisplayPanel() {
     // small screen, and a hint that named the wrong figure would be worse than
     // none. Same query IdleWatch uses to decide.
     const mobile = useMediaQuery(MOBILE_QUERY);
+    // No vibrator, no setting: a switch that provably cannot do anything is
+    // worse than none, and every desktop would carry it. See hapticsSupported.
+    const canBuzz = hapticsSupported();
+    const hapticMode = d.haptics || 'off';
+    const hapticOn = hapticMode !== 'off';
     const viewMode = d.viewMode || 'split';
+
+    // Both of these write straight into the haptics module as well as into the
+    // settings, so the sample pulse is felt on this click rather than on the
+    // next one: HapticWatch mirrors the same values, but its effect runs after
+    // the render this click causes, by which point the pulse has been and gone.
+    const setHaptics = (v) => {
+        setHapticMode(v);
+        d.set({ haptics: v });
+        haptic('toggle');
+    };
+
+    // A switch turned on demonstrates itself, with a pulse from the scope it
+    // just enabled. Turned off there is deliberately nothing to feel.
+    const setScope = (key, on, kind, scope) => {
+        const next = { ui: d.hapticButtons !== false, spectrum: d.hapticSpectrum !== false, [scope]: on };
+        setHapticScopes(next);
+        d.set({ [key]: on });
+        if (on) haptic(kind, scope);
+    };
     // null means the operator's default is in force; the slider shows that
     // value so moving it starts from what you are actually looking at.
     const minSpan = d.autoMinSpan != null ? d.autoMinSpan : d.server.autoMinSpan;
@@ -262,6 +287,62 @@ export default function DisplayPanel() {
                 Clicking the rail is unchanged: that is what opens or closes a dock for
                 good, and a hover never overrides it.
             </div>
+
+            {/* Touch only, so the whole section is absent where there is
+                nothing to vibrate — see hapticsSupported. */}
+            {canBuzz && (
+                <>
+                    <div className="divider" />
+
+                    <div className="section-label"><span>Haptics</span></div>
+                    {/* The master switch. Off here means off everywhere, and
+                        the two scope switches below go with it rather than
+                        staying on screen doing nothing. */}
+                    <Field label="Vibrate on touch" inline>
+                        <Switch
+                            checked={hapticOn}
+                            onChange={(v) => setHaptics(v ? 'medium' : 'off')}
+                            title="Vibrate when something responds to your finger"
+                        />
+                    </Field>
+                    {hapticOn && (
+                        <>
+                            <Field label="Strength">
+                                <Segmented
+                                    size="sm"
+                                    value={hapticMode}
+                                    onChange={setHaptics}
+                                    options={[
+                                        { value: 'light', label: 'Light' },
+                                        { value: 'medium', label: 'Medium' },
+                                        { value: 'strong', label: 'Strong' },
+                                    ]}
+                                />
+                            </Field>
+
+                            {/* Two scopes, because they are two different
+                                questions — see lib/haptics.js. Buttons are
+                                confirmation of a press you meant; the spectrum
+                                is the display reporting a result you cannot
+                                see, usually because your own finger is over it. */}
+                            <Field label="Button presses" inline>
+                                <Switch
+                                    checked={d.hapticButtons !== false}
+                                    onChange={(v) => setScope('hapticButtons', v, 'tap', 'ui')}
+                                    title="Every control in the app"
+                                />
+                            </Field>
+                            <Field label="Spectrum &amp; waterfall" inline>
+                                <Switch
+                                    checked={d.hapticSpectrum !== false}
+                                    onChange={(v) => setScope('hapticSpectrum', v, 'tune', 'spectrum')}
+                                    title="Tap to tune, pinch zoom, pan, filter edges"
+                                />
+                            </Field>
+                        </>
+                    )}
+                </>
+            )}
 
             <div className="divider" />
 

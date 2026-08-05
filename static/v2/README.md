@@ -261,6 +261,27 @@ band is part guesswork, and which part matters.
 
 * **Audio requires a gesture.** The AudioContext is created inside the *Listen*
   click; browsers block it otherwise.
+* **Haptics are delegated, not wired up per control.** `HapticWatch` puts one
+  capture-phase `pointerdown` listener on the document and asks
+  `lib/haptics.js: hapticKindFor` what the element under the finger is worth — a
+  button is a tap, a `role="switch"` is heavier, one of a set (segmented item,
+  band chip, palette, list row) gets its own weight, a disabled control gets
+  nothing. So every panel written since, and every extension loaded later, is
+  felt without anybody remembering to make it so; `data-haptic="..."` names a
+  kind for markup that is not a button (the frequency dial's digits) and
+  `data-haptic="off"` opts a control out. Only the gestures a delegated listener
+  cannot see call `haptic()` themselves: tap-to-tune, a marker pill found,
+  each rung of a pinch zoom, a pan or a filter edge taking hold, the end of the
+  band, a long press opening the spectrum menu, and each detent of a dial digit.
+  Every pulse carries one of two **scopes** — `ui` for a control responding to a
+  press, `spectrum` for the display reporting a result that landed somewhere
+  other than under your finger — and the Display panel's *Haptics* section
+  switches them separately, because wanting silent buttons and a talkative
+  waterfall (or the reverse) is a normal preference rather than an edge case.
+  Everything is 5-30 ms — a press, not an alert — rate limited per kind so a
+  gesture cannot turn into a buzz, and silent unless `any-pointer: coarse` and
+  `navigator.vibrate` are both there, which is why the whole section is absent
+  on a desktop rather than present and inert.
 * **Spectrum uses `binary8`.** ~75% less bandwidth than float32, and the 1 dB
   quantisation is finer than a waterfall can show.
 * **The waterfall scrolls on the compositor, not in JavaScript.** How often the

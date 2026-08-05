@@ -37,6 +37,7 @@ import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
 import { edgeHit } from '../lib/edgeHit.js';
+import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
@@ -877,6 +878,7 @@ export default function SpectrumView() {
         // this and the total travel, not accumulated step by step, so the
         // boundary tracks the pointer exactly however the moves are batched.
         splitDrag.current = { y: e.clientY, split: dispRef.current.split };
+        haptic('grab', 'spectrum');
     }, [viewMode, avail]);
 
     const onSplitMove = useCallback((e) => {
@@ -908,6 +910,11 @@ export default function SpectrumView() {
         const f = freqAtX(e.clientX);
         if (f == null) return;   // no view yet; leave the browser menu alone
         e.preventDefault();
+        // On a phone this arrives from a long press, which has no click and no
+        // release to tell you it worked — the menu simply appears, some way
+        // into a press you were holding for an unknown length of time. The
+        // pulse is what says "now", and it is the same one a right button gets.
+        haptic('grab', 'spectrum');
         setMenu({ x: e.clientX, y: e.clientY, freq: Math.round(f) });
     }, [freqAtX]);
 
@@ -1029,6 +1036,11 @@ export default function SpectrumView() {
                     // The anchor is fixed when the fingers go down; see
                     // onPointerDown.
                     actions.zoomSteps(steps, g.pinch.about);
+                    // One pulse per rung actually asked for. The view is the
+                    // only other feedback a pinch has, and it arrives a server
+                    // round trip later — so on a slow link this is what tells
+                    // the fingers the gesture is being heard at all.
+                    haptic('step', 'spectrum');
                     g.pinch.last = now;
                 }
             }
@@ -1074,6 +1086,11 @@ export default function SpectrumView() {
             if (g.edge.pending) {
                 if (Math.abs(e.clientX - g.edge.startX) < TOUCH_SLOP_PX) return;
                 g.edge.pending = false;
+                // The moment the finger stops being a tap and takes hold of the
+                // filter. Worth saying out loud: the two gestures start
+                // identically, and this is the only instant at which the
+                // difference is decided.
+                haptic('grab', 'spectrum');
             }
             const t = tuneRef.current;
             const raw = f == null ? null : f - t.frequency;
@@ -1103,10 +1120,28 @@ export default function SpectrumView() {
 
         if (g.drag) {
             const dx = e.clientX - g.drag.startX;
-            if (Math.abs(dx) > 3) g.drag.moved = true;
+            if (Math.abs(dx) > 3 && !g.drag.moved) {
+                g.drag.moved = true;
+                // Once, at the instant the press stops being a tap. Same
+                // reasoning as the filter edge above: a tap tunes and a drag
+                // pans, the two start identically, and this is the moment the
+                // choice is made — after which the release will *not* tune, so
+                // without it nothing says why.
+                haptic('grab', 'spectrum');
+            }
             if (g.drag.moved && cfg.span) {
                 const hzPerPx = cfg.span / r.width;
-                const center = clamp(g.drag.startCenter - dx * hzPerPx, MIN_FREQ, MAX_FREQ);
+                const want = g.drag.startCenter - dx * hzPerPx;
+                const center = clamp(want, MIN_FREQ, MAX_FREQ);
+                // Panning itself is silent — it is continuous, and a pulse per
+                // move is a buzz. The end of the band is the one event in it:
+                // fired once, when the view first stops following the finger,
+                // and re-armed as soon as it is following again.
+                if (center !== want) {
+                    if (!g.drag.bumped) { g.drag.bumped = true; haptic('bump', 'spectrum'); }
+                } else {
+                    g.drag.bumped = false;
+                }
                 actions.setSpectrumCenter(center);
             }
         }
@@ -1120,6 +1155,9 @@ export default function SpectrumView() {
         if (f == null) return;
         const step = dispRef.current.tuneStep || 1;
         actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
+        // The receiver moved, and on a phone the finger is covering the place it
+        // moved to. This is the confirmation.
+        haptic('tune', 'spectrum');
     }, [actions, freqAtX]);
 
     const onPointerUp = useCallback((e) => {

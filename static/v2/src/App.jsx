@@ -11,6 +11,7 @@ import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
+import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
@@ -123,6 +124,10 @@ export default function App() {
                                 <IdleWatch />
                                 <AnnounceWatch />
                                 <ShortcutWatch />
+                                {/* One delegated listener gives every button
+                                    in the app its haptic tap; the gestures on
+                                    the spectrum fire their own. */}
+                                <HapticWatch />
                                 {/* Hardware control outlives its panels: a
                                     collapsed section is unmounted, and a knob
                                     that was tuning the receiver has to go on

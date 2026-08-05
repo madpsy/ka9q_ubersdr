@@ -16,6 +16,7 @@ import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { subscribeSpots } from '../lib/spotStore.js';
 import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
+import { haptic } from '../lib/haptics.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
 // How much of the band's own colour carries on down behind the marker rows.
@@ -424,7 +425,11 @@ export default function MarkerBar({ width }) {
 
     const onClick = useCallback((e) => {
         const hit = locate(e);
+        // Deliberately silent on a miss. The pills are a few millimetres of a
+        // canvas, so hitting one is not a certainty — the pulse is what says
+        // the tap found something, and no pulse says it did not.
         if (!hit) return;
+        haptic('tune', 'spectrum');
         if (hit.kind === 'voice') {
             const freq = dialFreq(hit.activity);
             actions.tuneTo({ frequency: freq, mode: (hit.activity.mode || 'lsb').toLowerCase() });

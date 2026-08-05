@@ -94,6 +94,21 @@ export const DEFAULTS = {
     topMeter: 'signal',
     theme: 'dark',
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
+    // Vibration on touch: 'off' | 'light' | 'medium' | 'strong'. On by default,
+    // because a phone's controls have no travel and nothing else says a tap
+    // landed — see lib/haptics.js. It costs nothing where there is no vibrator:
+    // every device with a pointer rather than a finger fails hapticsSupported()
+    // and never fires, which is also why the Display panel hides these controls
+    // there rather than offering settings with no effect.
+    haptics: 'medium',
+    // …and what it applies to. Two switches rather than one because they answer
+    // different questions: hapticButtons is confirmation of something you did
+    // to a control you were looking at, hapticSpectrum is the waterfall telling
+    // you a tap tuned, a pinch took a step or a drag grabbed a filter edge —
+    // results that land somewhere other than under your finger. Wanting one
+    // without the other is a normal preference, not an edge case.
+    hapticButtons: true,
+    hapticSpectrum: true,
 };
 
 // Text-size range and step for the top bar's zoom buttons.

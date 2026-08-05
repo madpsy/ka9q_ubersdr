@@ -87,6 +87,16 @@ export function ChatProvider({ children }) {
     chimeRef.current = chimeOn;
     const joinedRef = useRef(joined);
     joinedRef.current = joined;
+    // A join has been sent and the server has not yet announced it back.
+    //
+    // Everything sent in that window can be refused with "username not set",
+    // because the server answers it against a chat user that does not exist
+    // yet. That refusal is a race with our own join, not the server having
+    // forgotten us — and re-joining on it, which is what the handler below is
+    // for, produces a second join and a second welcome for the whole channel.
+    const joinPending = useRef(false);
+    // The same fact as a piece of state, so the status effect can wait for it.
+    const [announced, setAnnounced] = useState(false);
     // Bounds the automatic re-join so a name the server will never accept
     // (now restricted, or newly caught by the profanity filter) cannot turn
     // into an error loop.
@@ -118,6 +128,12 @@ export function ChatProvider({ children }) {
             }
         }));
         offs.push(chat.on('presence', (p) => {
+            // Our own join, echoed back: the server has us now, so anything
+            // held back for it can go.
+            if (p.kind === 'joined' && p.username === nameRef.current) {
+                joinPending.current = false;
+                setAnnounced(true);
+            }
             const key = msgKey(p.timestamp, p.username, p.kind);
             setMessages((prev) => (prev.some((x) => x.key === key) ? prev : prev.concat({
                 key,
@@ -149,11 +165,21 @@ export function ChatProvider({ children }) {
             // It is also the one error whose instruction you cannot follow —
             // the name *is* set, and setting it again is exactly what just
             // happened underneath.
-            if (message === 'username not set' && nameRef.current && autoJoins.current < 3) {
-                autoJoins.current += 1;
-                setError(null);
-                chat.setUsername(nameRef.current);
-                return;
+            if (message === 'username not set') {
+                // Still waiting to be announced: this is the race described at
+                // joinPending, so the join that is already on its way is the
+                // answer and a second one would only duplicate it.
+                if (joinPending.current) {
+                    setError(null);
+                    return;
+                }
+                if (nameRef.current && autoJoins.current < 3) {
+                    autoJoins.current += 1;
+                    setError(null);
+                    joinPending.current = true;
+                    chat.setUsername(nameRef.current);
+                    return;
+                }
             }
             setError(message);
             // A name the server refuses outright drops us back to the join form
@@ -182,6 +208,8 @@ export function ChatProvider({ children }) {
             // ordinary on a fresh start — passed this guard too and sent a
             // second setUsername, which is the double join.
             joinedRef.current = true;
+            joinPending.current = true;
+            setAnnounced(false);
             setError(null);
             chat.setUsername(saved);
             setJoined(true);
@@ -219,10 +247,17 @@ export function ChatProvider({ children }) {
 
     // Publish what we are tuned to, so it shows beside our name in the user
     // list. Throttled — this fires on every dial movement.
+    //
+    // Not until the server has announced our join. `joined` means "we have sent
+    // a name", which is a frame or two ahead of the server having a chat user
+    // to hang a frequency on, and this effect fires the instant it flips — so
+    // the first status push went out in exactly that window and came back
+    // refused. Waiting on the announcement costs nothing: there is no status
+    // worth publishing for someone the channel cannot see yet.
     const pushStatus = useMemo(() => throttle((t) => chat.setStatus(t), 1500), [chat]);
     useEffect(() => {
-        if (joined && chat.connected) pushStatus(tuning);
-    }, [joined, tuning, pushStatus, chat]);
+        if (joined && announced && chat.connected) pushStatus(tuning);
+    }, [joined, announced, tuning, pushStatus, chat]);
 
     const actions = useMemo(() => ({
         join(name) {
@@ -232,6 +267,8 @@ export function ChatProvider({ children }) {
             // name there would re-join as whoever we were last time.
             nameRef.current = name;
             joinedRef.current = true;
+            joinPending.current = true;
+            setAnnounced(false);
             chat.setUsername(name);
             setUsername(name);
             setJoined(true);
@@ -241,6 +278,8 @@ export function ChatProvider({ children }) {
         leave() {
             chat.leave();
             joinedRef.current = false;
+            joinPending.current = false;
+            setAnnounced(false);
             setJoined(false);
             // Forget the name too, or the next connection silently re-joins the
             // person who just chose to leave. The ref goes with it, or the

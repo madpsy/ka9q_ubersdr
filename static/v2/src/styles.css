@@ -2065,6 +2065,24 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
+/* What the spectrum shows, under the zoom drum: three items rather than the
+   mode row's eight, each an icon and a word. The icon is what makes it scannable
+   as a different kind of control from the two rows of words below it; the word
+   is what makes it legible on a phone, which has no tooltip. */
+.pad .pad-view .segmented__item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding-inline: 4px;
+}
+/* The word is what gives way when the item is narrow, not the glyph: an icon
+   clipped down the middle says nothing, whereas an elided word beside a whole
+   icon is still the same three choices. Below about 230 px of usable width
+   auto-fit wraps the row instead, as it does for the bands. */
+.pad-view .segmented__item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pad-view .segmented__item > svg { flex: none; }
+
 /* The band row is the mode row's twin — same track, same items, so a pad this
    small has one kind of button rather than two — but each item is painted with
    that band's conditions, the one thing here that is about the ionosphere and

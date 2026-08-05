@@ -117,6 +117,15 @@ export const Icon = {
     // Knob or Sliders — the Multipad's whole claim is that it is all of them at
     // once, and it sits in the mobile tab bar next to panels using both.
     Pad: (p) => <Svg {...p}><rect x="2.5" y="3.5" width="19" height="17" rx="2.5" /><circle cx="7.5" cy="8.5" r="2.2" /><path d="M12 8.5h6M6 13.5h12M6 17h8" /></Svg>,
+    // The three spectrum views, as one family: a trace is drawn as columns of
+    // different heights, a waterfall as rows of broken texture, and the split is
+    // literally the two of them stacked in the halves they occupy on screen.
+    // Frameless on purpose — these are read at 13 px in the Multipad, where a
+    // panel outline round each would close up into a smudge and the columns and
+    // rows are what tells them apart anyway.
+    ViewSpectrum: (p) => <Svg {...p}><path d="M3 20v-6M7.5 20V8M12 20V4M16.5 20v-9M21 20v-4" /></Svg>,
+    ViewWaterfall: (p) => <Svg {...p}><path d="M3 6h4M9 6h6M17 6h4M3 12h6M11 12h3M16 12h5M3 18h3M8 18h7M17 18h4" /></Svg>,
+    ViewSplit: (p) => <Svg {...p}><path d="M4 11V7.5M8 11V4M12 11V8M16 11V5.5M20 11V9" /><path d="M3 15.5h5M10 15.5h5M17 15.5h4M3 20h7M12 20h3M17 20h4" /></Svg>,
 };
 
 export default Icon;

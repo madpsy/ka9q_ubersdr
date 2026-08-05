@@ -211,6 +211,14 @@ Receiver panel's dial takes on its own. It exists because those are one activity
 and were four sheets. Its minimal view is the two barrels alone, which — like
 every panel on a phone — is what it opens as; the header's toggle gives the rest.
 
+Under the zoom drum is the view row: split, spectrum alone, waterfall alone, an
+icon and a word each. It sits with the zoom because it answers the same question
+— how the spectrum is drawn, not what the receiver is doing — and because the
+pad's sheet covers the foot of that spectrum, so a press changes something
+already on screen. It writes `display.viewMode`, the same setting the Display
+panel's own View field writes; the pad is a second way to reach it rather than a
+second copy of it, exactly as the pad's mode row is for the Receiver panel's.
+
 The band row is a `Segmented` like the mode row above it (one kind of button on a
 pad this small), with the tuned band as the selected item and each item painted
 with that band's conditions — which is what `options[].className` on `Segmented`

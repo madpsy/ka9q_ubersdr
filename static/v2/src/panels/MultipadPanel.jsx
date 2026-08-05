@@ -21,7 +21,7 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
-import { Segmented, Slider } from '../components/ui.jsx';
+import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { clamp, formatHz, snrColour, snrFraction } from '../lib/format.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
@@ -255,6 +255,45 @@ function ZoomWheel() {
     );
 }
 
+// What the spectrum shows: split, spectrum alone, or waterfall alone.
+//
+// It lives directly under the zoom drum because it belongs to the same
+// question — how the spectrum is drawn, not what the receiver is doing — and
+// because on a phone the pad's sheet sits over the foot of that spectrum, so a
+// press here changes something already in view. The setting is the one the
+// Display panel writes (`display.viewMode`); this is a second way to reach it,
+// not a second copy of it, which is the same relation the pad's mode row has to
+// the Receiver panel's.
+//
+// Icon and word rather than either alone: three icons on a phone have no
+// tooltip to fall back on, and three words at this size read as a fourth row of
+// the same buttons the modes and the bands already are. `minItemWidth` wraps it
+// to two rows in a floating panel too narrow for three, as the band row wraps.
+function ViewRow() {
+    const display = useDisplay();
+
+    const options = [
+        { value: 'split', icon: <Icon.ViewSplit size={13} />, label: 'Split', title: 'Spectrum above waterfall' },
+        { value: 'spectrum', icon: <Icon.ViewSpectrum size={13} />, label: 'Spectrum', title: 'Spectrum only' },
+        { value: 'waterfall', icon: <Icon.ViewWaterfall size={13} />, label: 'Waterfall', title: 'Waterfall only' },
+    ];
+
+    return (
+        <Segmented
+            className="pad-view"
+            minItemWidth={68}
+            size="sm"
+            value={display.viewMode || 'split'}
+            onChange={(v) => display.set({ viewMode: v })}
+            options={options.map((o) => ({
+                value: o.value,
+                title: o.title,
+                label: <>{o.icon}<span>{o.label}</span></>,
+            }))}
+        />
+    );
+}
+
 // The ten HF bands, in one row under the modes: the pad answers "what am I
 // listening to" and this is the other half of it, "where should I be". Same
 // track and same items as the mode row above — on a pad this size a second kind
@@ -339,8 +378,8 @@ function SquelchRow() {
 
 // `minimal` keeps the two barrels and drops the rest. They are the controls a
 // pad is *for* — the ones with no good small form anywhere else — and the mode,
-// the width and the squelch are all a tap away in their own panels. See the
-// registry's `minimal`.
+// the width, the view and the squelch are all a tap away in their own panels.
+// See the registry's `minimal`.
 export default function MultipadPanel({ minimal }) {
     const { tuning, actions } = useRadio();
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
@@ -353,6 +392,8 @@ export default function MultipadPanel({ minimal }) {
 
             {!minimal && (
                 <>
+                    <ViewRow />
+
                     {/* The Receiver panel's own mode control, not a second one
                         that behaves almost like it — but at a width that puts
                         all eight on one row. A second row of modes is the pad's

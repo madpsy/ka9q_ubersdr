@@ -1491,6 +1491,13 @@ a.btn { text-decoration: none; }
    chip keeps its own width. Off is not here — it lives on the state line below,
    which the minimal view drops. */
 .squelch-row { display: flex; align-items: center; gap: 6px; }
+/* Both selectors, and it has to be both: a slider with a marker on it — which
+   this one has, carrying the live SNR — is wrapped in .slider-wrap so the
+   marker can be positioned against the track. The wrapper is then the flex
+   child, and giving the growth to .slider alone left it sizing to its content
+   with the row's spare width stranded after the Auto button. Same reason
+   .eqband names both. */
+.squelch-row .slider-wrap,
 .squelch-row .slider { flex: 1; min-width: 0; }
 .squelch-row .chip { flex: none; margin-left: 0; }
 

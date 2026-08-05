@@ -74,13 +74,23 @@ let _lastSdrMode   = null;
 
 // Cooldown: after pushing SDR→rig, suppress rig→SDR for a short window to
 // prevent the round-trip echo (SDR tunes → flrig updates → poll reads back → SDR tunes again).
-const FLRIG_SWITCH_SETTLE_MS = 2000;
+// How long after a VFO or tab switch nothing is written in either direction.
+//
+// Long enough for the newly selected tab to announce its state — which it does
+// as soon as it becomes active — and no longer. Two seconds was chosen when
+// this was an echo-suppression window for two-way sync; as a settle window it
+// is just latency you feel after every switch.
+const FLRIG_SWITCH_SETTLE_MS = 400;
 let _flrigSwitchedAt = 0;   // when flrig or the selected tab last changed VFO
 
 // Debounce for SDR→rig pushes: accumulate rapid freq/mode changes (e.g. page
 // load burst, user dragging) and only push to flrig once things settle.
-const SDR_TO_RIG_DEBOUNCE_MS = 150;
-let _sdrToRigDebounceTimer = null;
+// Shortest gap between two writes to flrig. The first change goes out
+// immediately; this only collapses a burst behind it.
+const SDR_TO_RIG_MIN_GAP_MS = 40;
+let _sdrToRigTimer = null;
+let _sdrToRigBusy = false;
+let _lastSdrToRigAt = 0;
 let _pendingSdrFreq = null;
 let _pendingSdrMode = null;
 
@@ -208,9 +218,9 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
     _lastSdrFreq = null;
     _lastSdrMode = null;
     _flrigSwitchedAt = Date.now();
-    if (_sdrToRigDebounceTimer) {
-        clearTimeout(_sdrToRigDebounceTimer);
-        _sdrToRigDebounceTimer = null;
+    if (_sdrToRigTimer) {
+        clearTimeout(_sdrToRigTimer);
+        _sdrToRigTimer = null;
     }
 
     persistSession();
@@ -470,9 +480,9 @@ function handleMessage(msg, sender) {
                 _lastSdrFreq = null;
                 _lastSdrMode = null;
                 _flrigSwitchedAt = Date.now();
-                if (_sdrToRigDebounceTimer) {
-                    clearTimeout(_sdrToRigDebounceTimer);
-                    _sdrToRigDebounceTimer = null;
+                if (_sdrToRigTimer) {
+                    clearTimeout(_sdrToRigTimer);
+                    _sdrToRigTimer = null;
                 }
 
                 persistSession();
@@ -834,61 +844,97 @@ async function flrigSetAB(vfo) {
 }
 
 // Push SDR state changes → flrig (sdr-to-rig direction).
-// Debounced: accumulates rapid changes and only sends to flrig once settled.
+//
+// Leading edge: the first change goes out immediately, and further changes
+// inside the coalescing window are collapsed into one trailing write. A
+// trailing-only debounce meant every tune waited for the dial to be still
+// before the rig moved, which is a lag you feel on a single click; collapsing
+// is only needed for a drag or a page-load burst, and this still does that.
+//
+// `_sdrToRigBusy` matters as much as the window: XML-RPC writes must not
+// interleave, or a set_vfo and a set_mode can reach the rig in the wrong order.
 function pushSdrStateToFlrig(state) {
+    // Short-circuit: only act if freq or mode is present in this update.
     if (state.freq === undefined && state.mode === undefined) return;
 
+    // Accumulate the latest values into pending slots.
     if (state.freq !== undefined) _pendingSdrFreq = state.freq;
     if (state.mode !== undefined) _pendingSdrMode = state.mode;
 
-    if (_sdrToRigDebounceTimer) clearTimeout(_sdrToRigDebounceTimer);
-    _sdrToRigDebounceTimer = setTimeout(async () => {
-        _sdrToRigDebounceTimer = null;
-        const freq = _pendingSdrFreq;
-        const mode = _pendingSdrMode;
-        try {
-            if (selectedTabId && registry.has(selectedTabId)) {
-                const tabVfo = registry.get(selectedTabId).vfo || null;
-                if (tabVfo && tabVfo !== flrigActiveVfo) {
-                    await flrigSetAB(tabVfo);
-                    _flrigSwitchedAt = Date.now();
-                    try {
-                        const newVfoFreq = await flrigGetFreq();
-                        const newVfoMode = await flrigGetMode();
-                        _lastFlrigFreq = Math.round(newVfoFreq);
-                        _lastFlrigMode = newVfoMode;
-                    } catch (_) {
-                        _lastFlrigFreq = null;
-                        _lastFlrigMode = null;
-                    }
+    const since = Date.now() - _lastSdrToRigAt;
+    if (!_sdrToRigBusy && since >= SDR_TO_RIG_MIN_GAP_MS) {
+        flushSdrToFlrig();
+        return;
+    }
+    // One trailing flush is enough — it will pick up whatever the pending slots
+    // hold by the time it runs, which is the latest value either way.
+    if (_sdrToRigTimer) return;
+    _sdrToRigTimer = setTimeout(flushSdrToFlrig, Math.max(0, SDR_TO_RIG_MIN_GAP_MS - since));
+}
+
+async function flushSdrToFlrig() {
+    if (_sdrToRigTimer) {
+        clearTimeout(_sdrToRigTimer);
+        _sdrToRigTimer = null;
+    }
+    if (_sdrToRigBusy) return;
+    _sdrToRigBusy = true;
+    _lastSdrToRigAt = Date.now();
+
+    const freq = _pendingSdrFreq;
+    const mode = _pendingSdrMode;
+    try {
+        // Ensure flrig is on the correct VFO for the selected tab before writing.
+        // Skip if the tab has no VFO assigned (null = unassigned). Uses the
+        // cached flrigActiveVfo rather than asking: the poll refreshes it every
+        // cycle, so a stale cache risks one wrong write at most.
+        if (selectedTabId && registry.has(selectedTabId)) {
+            const tabVfo = registry.get(selectedTabId).vfo || null;
+            if (tabVfo && tabVfo !== flrigActiveVfo) {
+                console.log('[UberSDR Bridge] switching flrig to VFO', tabVfo);
+                await flrigSetAB(tabVfo);
+                // Settle window starts now, so the poll does not push the new
+                // VFO's existing frequency back before the correct value lands.
+                _flrigSwitchedAt = Date.now();
+                // Seed the last-seen values with the new VFO's, so the poll does
+                // not read them as a change and tune the page to them.
+                try {
+                    const newVfoFreq = await flrigGetFreq();
+                    const newVfoMode = await flrigGetMode();
+                    _lastFlrigFreq = Math.round(newVfoFreq);
+                    _lastFlrigMode = newVfoMode;
+                } catch (_) {
+                    _lastFlrigFreq = null;
+                    _lastFlrigMode = null;
+                    console.warn('[UberSDR Bridge] could not read the new VFO from flrig');
                 }
             }
-            let pushed = false;
-            if (freq !== null && freq !== undefined) {
-                if (_lastSdrFreq === null || freq !== _lastSdrFreq) {
-                    _lastSdrFreq = freq;
-                    await flrigSetFreq(freq);
-                    pushed = true;
-                }
-            }
-            if (mode !== null && mode !== undefined) {
-                const flrigMode = SDR_TO_FLRIG[mode.toLowerCase()];
-                if (flrigMode && flrigMode !== _lastSdrMode) {
-                    _lastSdrMode = flrigMode;
-                    await flrigSetMode(flrigMode);
-                    pushed = true;
-                }
-            }
-            // No stamp here. This used to mark "we just wrote to flrig, ignore
-            // the echo coming back" — necessary when both directions ran at
-            // once. With one direction there is no echo, and stamping it made
-            // the gate above swallow the next two seconds of dial movement:
-            // the rig lagged the SDR and skipped everything in between.
-            void pushed;
-        } catch (err) {
-            console.warn('[UberSDR Bridge] flrig write failed:', err);
         }
-    }, SDR_TO_RIG_DEBOUNCE_MS);
+        if (freq !== null && freq !== undefined) {
+            // Only write what the rig is not already on (1 Hz resolution).
+            if (_lastSdrFreq === null || freq !== _lastSdrFreq) {
+                _lastSdrFreq = freq;
+                await flrigSetFreq(freq);
+            }
+        }
+        if (mode !== null && mode !== undefined) {
+            const flrigMode = SDR_TO_FLRIG[mode.toLowerCase()];
+            if (flrigMode && flrigMode !== _lastSdrMode) {
+                _lastSdrMode = flrigMode;
+                await flrigSetMode(flrigMode);
+            }
+        }
+    } catch (err) {
+        console.warn('[UberSDR Bridge] flrig write failed:', err);
+        // flrig not reachable — the reconnect loop will pick it up.
+    } finally {
+        _sdrToRigBusy = false;
+        _lastSdrToRigAt = Date.now();
+        // Anything that arrived while the write was in flight goes now.
+        if (_pendingSdrFreq !== freq || _pendingSdrMode !== mode) {
+            _sdrToRigTimer = setTimeout(flushSdrToFlrig, SDR_TO_RIG_MIN_GAP_MS);
+        }
+    }
 }
 
 // Poll flrig — runs when connected (for display + optional rig-to-sdr push).
@@ -903,9 +949,9 @@ async function pollFlrigToSdr() {
             _lastSdrFreq   = null;
             _lastSdrMode   = null;
             _flrigSwitchedAt = Date.now();
-            if (_sdrToRigDebounceTimer) {
-                clearTimeout(_sdrToRigDebounceTimer);
-                _sdrToRigDebounceTimer = null;
+            if (_sdrToRigTimer) {
+                clearTimeout(_sdrToRigTimer);
+                _sdrToRigTimer = null;
             }
 
             try {
@@ -991,7 +1037,14 @@ async function pollFlrigToSdr() {
 // The alarm also serves as the reconnect trigger: if flrig is disconnected,
 // each alarm tick attempts a reconnect.
 
-const FLRIG_POLL_INTERVAL_MS = 100;
+// Gap between the end of one poll cycle and the start of the next.
+//
+// Measured from the end, not a fixed tick: a cycle is four XML-RPC calls and
+// flrig answers some of them from the radio over CAT, so on a slow serial link
+// a cycle can outlast a fixed interval. The chain below already re-arms only
+// after the previous cycle resolves, which is what makes a short gap safe —
+// it runs at whatever rate the rig can sustain rather than piling up on it.
+const FLRIG_POLL_GAP_MS = 25;
 
 let _flrigPollActive = false;
 
@@ -1027,7 +1080,7 @@ function schedulePollTick() {
             return;
         }
         schedulePollTick();
-    }, FLRIG_POLL_INTERVAL_MS);
+    }, FLRIG_POLL_GAP_MS);
 }
 
 async function flrigConnect() {

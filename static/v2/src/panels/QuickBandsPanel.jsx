@@ -5,6 +5,9 @@
 // last ten minutes from /api/noisefloor/aggregate, refreshed once a minute,
 // bucketed exactly as static/bands_state.js does it.
 //
+// The conditions themselves are in lib/bandConditions.js, shared with the
+// Multipad's band row: one poll, one answer, two panels that cannot disagree.
+//
 // Bottom row, under a divider: this instance's own quick-tune bands, i.e. the
 // entries in /api/bands that the operator gave a `button_name`. v1 renders
 // those as a second row too. They carry no conditions data, so they are styled
@@ -16,69 +19,25 @@
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { BAND_NAMES, HAM_BANDS, tuneToBand } from '../lib/bands.js';
-
-const POLL_MS = 60 * 1000;
-const WINDOW_MIN = 10;      // minutes of history averaged
-
-// v1's thresholds (static/bands_state.js).
-function classify(snr) {
-    if (snr < 6) return 'POOR';
-    if (snr < 20) return 'FAIR';
-    if (snr < 30) return 'GOOD';
-    return 'EXCELLENT';
-}
-
-// Average ft8_snr per band over the returned window, as v1 does.
-function summarise(primary) {
-    const out = {};
-    for (const band of BAND_NAMES) {
-        const points = (primary || {})[band];
-        let total = 0;
-        let n = 0;
-        for (const p of points || []) {
-            const v = p.values && p.values.ft8_snr;
-            if (v != null) { total += v; n++; }
-        }
-        out[band] = n ? { status: classify(total / n), snr: total / n } : { status: 'UNKNOWN', snr: null };
-    }
-    return out;
-}
+import { HAM_BANDS, tuneToBand } from '../lib/bands.js';
+import {
+    bandTip, bandTone, getBandConditions, subscribeBandConditions,
+} from '../lib/bandConditions.js';
 
 // `minimal` drops the operator's own quick-tune row and leaves the amateur
 // bands. See the registry's `minimal`.
 export default function QuickBandsPanel({ minimal }) {
     const { tuning, actions, serverInfo, catalog } = useRadio();
-    const [states, setStates] = useState({});
+    // Shared with the Multipad's band row — see lib/bandConditions.js for why
+    // the poll is not this panel's own.
+    const [states, setStates] = useState(getBandConditions);
 
     const conditions = !!(serverInfo && serverInfo.noise_floor);
 
-    useEffect(() => {
-        if (!conditions) return undefined;
-        let cancelled = false;
-
-        const load = () => {
-            const to = new Date();
-            const from = new Date(to.getTime() - WINDOW_MIN * 60 * 1000);
-            fetch('/api/noisefloor/aggregate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    primary: { from: from.toISOString(), to: to.toISOString() },
-                    bands: BAND_NAMES,
-                    fields: ['ft8_snr'],
-                    interval: 'minute',
-                }),
-            })
-                .then((r) => (r.ok ? r.json() : null))
-                .then((d) => { if (!cancelled && d) setStates(summarise(d.primary)); })
-                .catch(() => { /* leave the last known conditions up */ });
-        };
-
-        load();
-        const id = setInterval(load, POLL_MS);
-        return () => { cancelled = true; clearInterval(id); };
-    }, [conditions]);
+    useEffect(
+        () => (conditions ? subscribeBandConditions(setStates) : undefined),
+        [conditions],
+    );
 
     // One tune action for both rows — and the same one the band conditions
     // table uses, see lib/bands.js.
@@ -91,20 +50,13 @@ export default function QuickBandsPanel({ minimal }) {
             <div className="chip-row chip-row--wrap chip-row--center">
                 {HAM_BANDS.map(([name, min, max]) => {
                     const state = states[name];
-                    // v1 shows a band with no data as open rather than greying
-                    // it out, so an instance without FT8 history still reads.
-                    const status = !conditions ? 'none'
-                        : !state || state.status === 'UNKNOWN' ? 'excellent' : state.status.toLowerCase();
                     const active = tuning.frequency >= min && tuning.frequency <= max;
-                    const tip = state && state.snr != null
-                        ? `${name}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB`
-                        : `${name}: No data available`;
                     return (
                         <button
                             key={name}
                             type="button"
-                            title={conditions ? tip : name}
-                            className={`chip chip--button band-chip band-chip--${status}${active ? ' is-current' : ''}`}
+                            title={bandTip(name, state, conditions)}
+                            className={`chip chip--button band-chip band-chip--${bandTone(state, conditions)}${active ? ' is-current' : ''}`}
                             onClick={() => go(min, max)}
                         >
                             {name}

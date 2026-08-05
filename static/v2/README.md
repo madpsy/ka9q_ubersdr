@@ -184,10 +184,28 @@ you *are*, and the tab bar is right there.
 ### The Multipad, and barrels
 
 `MultipadPanel` is the whole receiver under one thumb: frequency, mode, zoom,
-filter width and squelch, in roughly the height the Receiver panel's dial takes
-on its own. It exists because those five are one activity and were four sheets.
-Its minimal view is the two barrels alone, which — like every panel on a phone —
-is what it opens as; the header's toggle gives the rest.
+filter width and squelch, plus the ten HF bands, in roughly the height the
+Receiver panel's dial takes on its own. It exists because those are one activity
+and were four sheets. Its minimal view is the two barrels alone, which — like
+every panel on a phone — is what it opens as; the header's toggle gives the rest.
+
+The band row is a `Segmented` like the mode row above it (one kind of button on a
+pad this small), with the tuned band as the selected item and each item painted
+with that band's conditions — which is what `options[].className` on `Segmented`
+is for. The colours come from `lib/bandConditions.js`, shared with the Quick
+bands panel: one poll of `/api/noisefloor/aggregate` a minute however many panels
+are drawing bands, acquired on the first subscriber and released with the last,
+with the last answer kept so a reopened panel paints immediately. Two panels
+polling separately would ask twice for one answer and then disagree about it for
+up to a minute.
+
+Behind the frequency scale, at low opacity, is the SNR — the same reading and the
+same 30–60 dB ramp as the top bar's meter and the Signal panel's, filling from
+the left as that bar does. It is there so that tuning across a band on a phone
+does not mean watching one panel while working another. The fill has no edge: it
+dissolves over its last third, because a hard vertical boundary at some x, on a
+frequency scale, beside an index needle, is read as a mark at that frequency. So
+what moves is the reach of a glow, not the position of a line.
 
 A barrel (`components/Barrel.jsx`) is a drum seen edge-on: drag it and the strip
 slides under a fixed index line, crossing a detent fires one step, and letting go

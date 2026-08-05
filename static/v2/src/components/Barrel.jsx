@@ -42,6 +42,11 @@ const HALF_STRIP_PX = 620;
  * `onStep(n)` applies n detents (positive = rightwards along the scale) and
  * returns how many it could actually take. Anything less than asked for is a
  * stop: the spin ends there rather than grinding on against a limit.
+ *
+ * `children` are drawn inside the box — either behind the scale or over it,
+ * whichever the class says (see .barrel__snr and .barrel__caption). A live
+ * reading belongs behind: it is there to be seen while the thumb is on the
+ * drum, so it must not take the room the scale needs or the touches it wants.
  */
 export default function Barrel({
     detent = 46,

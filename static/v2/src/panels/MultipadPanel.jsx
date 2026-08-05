@@ -16,13 +16,17 @@
 // differently here from the panel it duplicates is a control you have to learn
 // twice.
 
-import React, { useRef, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
 import { Segmented, Slider } from '../components/ui.jsx';
-import { clamp, formatHz, formatSpan } from '../lib/format.js';
+import { clamp, formatHz, formatSpan, snrColour, snrFraction } from '../lib/format.js';
+import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
+import {
+    bandTip, bandTone, getBandConditions, subscribeBandConditions,
+} from '../lib/bandConditions.js';
 import { deepestRung, rungOfSpan, spanAtRung } from '../lib/zoom.js';
 import { MIN_ZOOM_SPAN_HZ } from '../radio/spectrum-connection.js';
 import {
@@ -48,6 +52,41 @@ const FREQ_MAJOR_EVERY = 5;
 function scaleLabel(hz, step) {
     const dp = step >= 1000 ? 0 : step >= 100 ? 1 : step >= 10 ? 2 : 3;
     return (hz / 1000).toFixed(dp);
+}
+
+// The SNR, as a tide behind the frequency scale.
+//
+// The same reading and the same ramp as the top bar's meter and the Signal
+// panel's — `snrFraction` over 30–60 dB, `snrColour` red through yellow to
+// green — so a glance at any of the three says the same thing about the same
+// signal. What differs is that this one is not a control and is not read: it is
+// there to be seen out of the corner of the eye while the thumb is on the drum,
+// which is the whole reason it is on the drum and not beside it. Tuning across a
+// band on a phone otherwise means watching one panel and working another.
+//
+// It fills from the left, as the top bar's bar does, because that is where the
+// room is: the drum is 48 px tall and about 330 wide, so sideways is seven times
+// the travel for the same reading. What sideways costs is an edge — a vertical
+// boundary at some x, on a frequency scale, beside an index needle, is read as a
+// mark at that frequency — so the fill has none: it dissolves over its last
+// third, and what moves is the reach of a glow rather than the position of a
+// line. See .barrel__snr.
+//
+// Its own component so the 10 Hz meter sampling re-renders one span and not the
+// drum's thirty, the same split the Signal panel makes for its squelch row.
+function SnrWash() {
+    const m = useMeters(10);
+    const snr = m.snr;
+    return (
+        <span
+            className="barrel__snr"
+            aria-hidden="true"
+            style={{
+                width: `${snrFraction(snr) * 100}%`,
+                background: snr == null ? 'transparent' : snrColour(snr),
+            }}
+        />
+    );
 }
 
 // Frequency: the readout, the step, and the drum that turns it.
@@ -127,7 +166,9 @@ function FreqWheel() {
                 onStep={tune}
                 ariaLabel="Frequency wheel"
                 className="barrel--freq"
-            />
+            >
+                <SnrWash />
+            </Barrel>
         </div>
     );
 }
@@ -203,6 +244,50 @@ function ZoomWheel() {
     );
 }
 
+// The ten HF bands, in one row under the modes: the pad answers "what am I
+// listening to" and this is the other half of it, "where should I be". Same
+// track and same items as the mode row above — on a pad this size a second kind
+// of button would read as a different kind of control — but each one painted
+// with that band's conditions, which is the one thing here that is about the
+// ionosphere rather than about the receiver.
+//
+// The tuned band is the selected item, so which one you are in needs no separate
+// marking, and pressing one does exactly what the Quick bands panel does: the
+// middle of the band, its mode, and the spectrum zoomed to its width.
+function BandRow() {
+    const { tuning, actions, serverInfo } = useRadio();
+    const [states, setStates] = useState(getBandConditions);
+    const conditions = !!(serverInfo && serverInfo.noise_floor);
+
+    useEffect(
+        () => (conditions ? subscribeBandConditions(setStates) : undefined),
+        [conditions],
+    );
+
+    const options = HAM_BANDS.map(([name]) => ({
+        value: name,
+        label: name,
+        title: bandTip(name, states[name], conditions),
+        className: `pad-band pad-band--${bandTone(states[name], conditions)}`,
+    }));
+
+    const go = (name) => {
+        const b = HAM_BANDS.find(([n]) => n === name);
+        if (b) tuneToBand(actions, b[1], b[2]);
+    };
+
+    return (
+        <Segmented
+            className="pad-bands"
+            minItemWidth={26}
+            size="sm"
+            value={bandForFrequency(tuning.frequency)}
+            onChange={go}
+            options={options}
+        />
+    );
+}
+
 // One line: what it is, the control, what it reads. Two of these are the whole
 // bottom half of the pad, and keeping them identical is what makes it scan.
 function PadRow({ label, value, children }) {
@@ -275,6 +360,8 @@ export default function MultipadPanel({ minimal }) {
                         onChange={actions.setMode}
                         options={MODES.map((m) => ({ value: m.id, label: m.label }))}
                     />
+
+                    <BandRow />
 
                     <PadRow label="Width" value={`${(width / 1000).toFixed(2)}k`}>
                         <Slider

@@ -1864,11 +1864,14 @@ a.btn { text-decoration: none; }
 }
 .barrel:active { cursor: grabbing; }
 .barrel.is-disabled { opacity: 0.45; pointer-events: none; }
-/* The belly. Over the strip, under the needle. */
+/* Four layers, bottom to top: whatever the owner puts behind the scale (the
+   frequency drum's SNR wash), the scale itself, the belly shading, and the
+   index needle over the lot. */
 .barrel::after {
     content: '';
     position: absolute;
     inset: 0;
+    z-index: 2;
     pointer-events: none;
     border-radius: inherit;
     background: linear-gradient(180deg,
@@ -1876,9 +1879,36 @@ a.btn { text-decoration: none; }
         rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.34));
 }
 
+/* The SNR behind the frequency scale — see SnrWash in MultipadPanel.
+ *
+ * Barely there on purpose: enough colour to catch the eye of somebody whose
+ * attention is on the drum under their thumb, not enough to compete with the
+ * ticks and labels it is behind.
+ *
+ * It fills from the left as the top bar's meter does, and for the resolution:
+ * the box is 48 px tall and 330 wide, so sideways is seven times the travel for
+ * the same reading. The one hazard of that is the edge — a hard vertical
+ * boundary at some x, on a *frequency* scale, next to an index needle, reads as
+ * a marker at that frequency — so there is no edge. The fill dissolves over its
+ * last third, which leaves a glow that reaches further right as the signal
+ * improves and nothing that can be mistaken for a mark on the scale. */
+.barrel__snr {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.28;
+    -webkit-mask-image: linear-gradient(90deg, #000 62%, transparent);
+    mask-image: linear-gradient(90deg, #000 62%, transparent);
+    transition: width 120ms linear, background 240ms linear;
+}
+
 .barrel__strip {
     position: absolute;
     inset: 0;
+    z-index: 1;
     will-change: transform;
     /* The ends of the scale fall away, which is what makes it read as a curve
        and, incidentally, keeps a label from being cut in half at the edge. */
@@ -1926,6 +1956,7 @@ a.btn { text-decoration: none; }
     bottom: 0;
     width: 3px;
     margin-left: -1.5px;
+    z-index: 3;
     pointer-events: none;
     border-radius: 0 0 2px 2px;
     background: linear-gradient(180deg, var(--accent), rgba(0, 0, 0, 0) 70%);
@@ -1936,6 +1967,7 @@ a.btn { text-decoration: none; }
     left: 9px;
     top: 50%;
     transform: translateY(-50%);
+    z-index: 3;
     pointer-events: none;
     font-size: calc(9px * var(--ui-scale));
     font-weight: 650;
@@ -2042,6 +2074,33 @@ a.btn { text-decoration: none; }
     padding-inline: 2px;
     font-size: calc(10.5px * var(--ui-scale));
     white-space: nowrap;
+}
+
+/* The band row is the mode row's twin — same track, same items, so a pad this
+   small has one kind of button rather than two — but each item is painted with
+   that band's conditions, the one thing here that is about the ionosphere and
+   not about the receiver.
+ *
+ * Ten across needs a little more room than eight, and it comes out of the side
+ * padding again rather than out of the type. Below about 270 px of usable width
+ * — a narrow floating panel, not any phone — auto-fit wraps it. */
+.pad .pad-bands .segmented__item { padding-inline: 1px; font-size: calc(9.5px * var(--ui-scale)); }
+
+/* Two classes deep, and after .segmented__item.is-active on purpose: the tuned
+   band must keep its colour rather than being repainted in the accent, and that
+   rule is exactly as specific as this one. */
+.pad-bands .pad-band { color: #fff; font-weight: 650; }
+.pad-bands .pad-band--excellent { background: #22c55e; }
+.pad-bands .pad-band--good { background: #fbbf24; color: #14202e; }
+.pad-bands .pad-band--fair { background: #ff9800; color: #14202e; }
+.pad-bands .pad-band--poor { background: #ef4444; }
+.pad-bands .pad-band--none { background: var(--surface-hover); color: var(--text-dim); }
+.pad-bands .segmented__item:hover { filter: brightness(1.12); }
+/* The band the dial is in: ringed, not recoloured — v1 rings its active badge
+   for the same reason, that the colour is already saying something else. */
+.pad-bands .pad-band.is-active {
+    box-shadow: inset 0 0 0 2px var(--text);
+    font-weight: 750;
 }
 
 /* A thumb, not a pointer: the mode buttons are the only tap targets in the pad

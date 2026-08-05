@@ -16,13 +16,19 @@ export function Button({ children, variant = 'default', size = 'md', active, ico
     );
 }
 
-// Row of mutually exclusive options. `options` is [{value,label,title}].
+// Row of mutually exclusive options. `options` is [{value,label,title,className}].
 //
 // By default the options share one row. Pass `minItemWidth` to let them wrap
 // onto as many rows as needed — the grid fits as many columns as will hold an
 // item of that width, so labels never get ellipsed in a narrow dock. `columns`
 // pins an exact column count instead.
-export function Segmented({ options, value, onChange, size = 'md', columns, minItemWidth }) {
+//
+// `className` on an option is for a set whose members carry a meaning of their
+// own on top of which one is chosen — the Multipad's band row, where each button
+// is painted with that band's conditions. It is deliberately per option rather
+// than a render prop: anything that needs more than a class wants a row of
+// buttons, not a control that says "one of these".
+export function Segmented({ options, value, onChange, size = 'md', columns, minItemWidth, className }) {
     let style;
     if (minItemWidth) {
         // auto-flow must become `row`, or the items extend the track sideways
@@ -38,13 +44,13 @@ export function Segmented({ options, value, onChange, size = 'md', columns, minI
         };
     }
     return (
-        <div className={`segmented segmented--${size}`} style={style} role="group">
+        <div className={`segmented segmented--${size}${className ? ` ${className}` : ''}`} style={style} role="group">
             {options.map((o) => (
                 <button
                     key={o.value}
                     type="button"
                     title={o.title || o.label}
-                    className={`segmented__item${o.value === value ? ' is-active' : ''}`}
+                    className={`segmented__item${o.className ? ` ${o.className}` : ''}${o.value === value ? ' is-active' : ''}`}
                     onClick={() => onChange(o.value)}
                 >
                     {o.label}

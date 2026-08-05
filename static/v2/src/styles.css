@@ -3616,6 +3616,17 @@ a.btn { text-decoration: none; }
 
 .shell--mobile .shell__center { padding: 6px; }
 
+/* Turned on its side, a handset has about 390 px of height against 800 the
+   other way up. The two rows above the marker bar — the top bar and the
+   spectrum toolbar — are not rendered at all there (MobileShell and
+   SpectrumView decide that, and set this class from the same answer, so the
+   two cannot disagree), and what is left gives up its margins too.
+   The tab bar is squeezed rather than dropped: it only shows when no sheet is
+   open, and that is exactly when someone is looking for a panel. */
+.shell--landscape .shell__center { padding: 2px; }
+.shell--landscape .tabbar { padding: 2px 4px calc(2px + env(safe-area-inset-bottom)); }
+.shell--landscape .tabbar__item { padding: 4px; gap: 2px; }
+
 .tabbar {
     display: flex;
     gap: 2px;

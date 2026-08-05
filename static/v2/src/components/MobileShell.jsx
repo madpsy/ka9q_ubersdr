@@ -32,12 +32,15 @@ import React, { useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
+import { LANDSCAPE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 
 export default function MobileShell() {
     const { sections, toggleSectionMinimal } = useLayout();
+    // Turned on its side, everything above the marker bar goes — see below.
+    const landscape = useMediaQuery(LANDSCAPE_QUERY);
     const applies = usePanelApplies();
     const {
         active: extension, close: closeExtension, minimalOf, toggleMinimal: toggleExtMinimal,
@@ -73,8 +76,16 @@ export default function MobileShell() {
     const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimalMobile;
 
     return (
-        <div className="shell shell--mobile">
-            <TopBar compact />
+        <div className={`shell shell--mobile${landscape ? ' shell--landscape' : ''}`}>
+            {/* Not in landscape. A handset on its side has about 390 px of
+                height against 800 the other way up, and this row is a tenth of
+                it — spent on a readout the Multipad's own carries and controls
+                a rotation away. The receiver is started from the overlay rather
+                than from here, so nothing is unreachable before there is
+                anything to listen to; Stop is the one thing that is, and it is
+                one rotation off. Not rendered rather than hidden: it samples
+                the meters eight times a second and would go on doing it. */}
+            {!landscape && <TopBar compact />}
 
             <main className="shell__center">
                 <SpectrumView />

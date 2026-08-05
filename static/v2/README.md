@@ -181,6 +181,19 @@ not undo an arrangement its owner made.
 and it is deliberately not remembered between visits — the open sheet is where
 you *are*, and closing it is one tap.
 
+**In landscape**, everything above the marker bar goes: the top bar and the
+spectrum toolbar are not rendered, so the spectrum starts at the markers. A
+handset on its side has around 390 CSS px of height against 800 the other way
+up, and those two rows are about a fifth of it. The test is
+`LANDSCAPE_QUERY` — keyed on the *height*, since height is what has run out,
+with an orientation clause only to keep a merely short desktop window out of it.
+Both components read the same query and `MobileShell` sets `.shell--landscape`
+from its answer, so the CSS that squeezes the remaining margins cannot disagree
+with the JS that dropped the rows. Nothing is lost permanently: pinch zooms, a
+drag pans, the Multipad carries the frequency and mode, and a rotation brings it
+all back — but **Stop lives only in the top bar**, so stopping the receiver in
+landscape means rotating first.
+
 The tab bar is shown only when no sheet is open. It is a row of labelled icons
 worth about a tenth of a handset's screen, and while a sheet is open it is
 navigation nobody is using in front of a panel somebody is; hiding it gives the

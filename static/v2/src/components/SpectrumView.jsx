@@ -31,7 +31,7 @@ import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.j
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { RING_BG, RING_PAD, ringKeepsHistory, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
-import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
@@ -766,6 +766,14 @@ export default function SpectrumView() {
     // layout there.
     const mobile = useMediaQuery(MOBILE_QUERY);
 
+    // A handset on its side gives the whole toolbar up, tags and all. With the
+    // top bar gone too (see MobileShell) the spectrum starts at the marker bar,
+    // which is about a fifth of the screen back on a display with 390 px of
+    // height to begin with. Nothing is lost for good: pinch zooms, a drag pans,
+    // the marker bar is untouched, and a rotation brings the row back.
+    const shortLandscape = useMediaQuery(LANDSCAPE_QUERY);
+    const bare = mobile && shortLandscape;
+
     // The pointer handlers below are registered once and must not close over a
     // stale answer, so this goes in a ref like `display` does.
     const mobileRef = useRef(mobile);
@@ -1292,64 +1300,66 @@ export default function SpectrumView() {
 
     return (
         <div className="spectrum">
-            <div className="spectrum__toolbar">
-                <div className="spectrum__meta" ref={metaRef}>
-                    <span className="tag tag--accent">{formatSpan(span)}</span>
-                    {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
-                    {hoverInfo && room.cursor && (
-                        <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
-                    )}
-                    <SquelchTag />
-                    <NoiseReductionTag />
-                    <FilterTags />
-                    <ControlTags />
-                    <ClipTag />
-                </div>
-                <div className="spectrum__tools">
-                    {/* What the wheel does over the spectrum, mirroring the
-                        Display panel's setting. Not on mobile: there is no
-                        wheel there, and the row has no space to spare for a
-                        control that cannot be used.
+            {!bare && (
+                <div className="spectrum__toolbar">
+                    <div className="spectrum__meta" ref={metaRef}>
+                        <span className="tag tag--accent">{formatSpan(span)}</span>
+                        {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
+                        {hoverInfo && room.cursor && (
+                            <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
+                        )}
+                        <SquelchTag />
+                        <NoiseReductionTag />
+                        <FilterTags />
+                        <ControlTags />
+                        <ClipTag />
+                    </div>
+                    <div className="spectrum__tools">
+                        {/* What the wheel does over the spectrum, mirroring the
+                            Display panel's setting. Not on mobile: there is no
+                            wheel there, and the row has no space to spare for a
+                            control that cannot be used.
 
-                        Highlighted when it tunes rather than carrying two
-                        glyphs, because both states are the same wheel doing
-                        something — and the anchor button beside it already
-                        uses the two-icon form for a genuine either/or. */}
-                    {!mobile && (
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            active={wheelTunes}
-                            icon={<Icon.Wheel />}
-                            title={wheelTunes
-                                ? `Wheel tunes in ${stepLabel(display.tuneStep || 500)} steps — click to zoom instead`
-                                : 'Wheel zooms — click to tune with it instead'}
-                            aria-label="What the scroll wheel does"
-                            onClick={() => display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' })}
-                        />
-                    )}
-                    {/* Only while the wheel zooms — with the wheel set to tune
-                        there is nothing for an anchor to apply to. Shows the
-                        anchor in force rather than the one it would switch to,
-                        so the toolbar reads as state. */}
-                    {!wheelTunes && (
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            icon={anchorTuned ? <Icon.Knob /> : <Icon.Pointer />}
-                            title={anchorTuned
-                                ? 'Zoom keeps the tuned frequency centred — click to zoom about the pointer'
-                                : 'Zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
-                            aria-label="Zoom anchor"
-                            onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
-                        />
-                    )}
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
-                    <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
-                    <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
-                    <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
+                            Highlighted when it tunes rather than carrying two
+                            glyphs, because both states are the same wheel doing
+                            something — and the anchor button beside it already
+                            uses the two-icon form for a genuine either/or. */}
+                        {!mobile && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={wheelTunes}
+                                icon={<Icon.Wheel />}
+                                title={wheelTunes
+                                    ? `Wheel tunes in ${stepLabel(display.tuneStep || 500)} steps — click to zoom instead`
+                                    : 'Wheel zooms — click to tune with it instead'}
+                                aria-label="What the scroll wheel does"
+                                onClick={() => display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' })}
+                            />
+                        )}
+                        {/* Only while the wheel zooms — with the wheel set to tune
+                            there is nothing for an anchor to apply to. Shows the
+                            anchor in force rather than the one it would switch to,
+                            so the toolbar reads as state. */}
+                        {!wheelTunes && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                icon={anchorTuned ? <Icon.Knob /> : <Icon.Pointer />}
+                                title={anchorTuned
+                                    ? 'Zoom keeps the tuned frequency centred — click to zoom about the pointer'
+                                    : 'Zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
+                                aria-label="Zoom anchor"
+                                onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
+                            />
+                        )}
+                        <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
+                        <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
+                        <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
+                        <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
+                    </div>
                 </div>
-            </div>
+            )}
 
             <MarkerBar width={sizes.w} />
 

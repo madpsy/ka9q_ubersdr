@@ -3005,6 +3005,102 @@ a.btn { text-decoration: none; }
 .volume-row__value.is-muted { opacity: 0.4; }
 
 /* =========================================================================
+   World clocks
+   ========================================================================= */
+
+/* As many faces as the width holds, at a size where the hands are still
+   readable. In a side dock that is two columns; floated wide it is more. */
+.wclk__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+    gap: 10px 8px;
+}
+.wclk__cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* The face is the control: clicking any of them switches the whole panel. */
+.wclk__button {
+    display: block;
+    width: 100%;
+    max-width: 64px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+}
+.wclk__face { display: block; width: 100%; height: auto; }
+
+/* Day and night, as the widget tints them. The dial carries the difference and
+   everything on it follows, so the hands stay legible either way. */
+.wclk__dial { fill: var(--surface-3); stroke: var(--accent); stroke-width: 1.6; }
+.wclk__face.is-day .wclk__dial { fill: #e8edf2; }
+.wclk__face.is-night .wclk__dial { fill: #253347; }
+.wclk__tick { stroke: rgba(255, 255, 255, 0.45); }
+.wclk__face.is-day .wclk__tick { stroke: rgba(30, 42, 58, 0.5); }
+.wclk__hand { stroke: #eef2f7; }
+.wclk__face.is-day .wclk__hand { stroke: #1e2a3a; }
+.wclk__second, .wclk__cap { stroke: var(--bad); fill: var(--bad); }
+
+/* Digital: the time takes the space the face had, so switching modes does not
+   reflow the grid. */
+.wclk__big {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+}
+
+.wclk__city {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.03em;
+    color: var(--text-dim);
+    text-align: center;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.wclk__time {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+}
+
+/* Only on hover or keyboard focus: a grid of faces each wearing a cross reads
+   as a form to be filled in rather than a row of clocks. */
+.wclk__remove {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    display: grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+}
+.wclk__cell:hover .wclk__remove,
+.wclk__remove:focus-visible { opacity: 1; }
+.wclk__remove:hover { color: var(--bad); border-color: var(--bad); }
+
+/* =========================================================================
    News
    ========================================================================= */
 

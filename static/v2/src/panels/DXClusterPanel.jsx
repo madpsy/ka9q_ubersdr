@@ -13,7 +13,9 @@
 // widget does, because opening the panel is the asking.
 //
 // `minimal` keeps the transcript and the command line, and drops the quick
-// commands and the links.
+// commands, the links and the connected/disconnect row — once you are in,
+// those are the two things you are actually using. The login row stays: a
+// minimal panel still has to be able to let you in.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Empty, Modal } from '../components/ui.jsx';
@@ -181,7 +183,7 @@ export default function DXClusterPanel({ minimal }) {
                         {state === 'connecting' ? 'Connecting…' : 'Connect'}
                     </Button>
                 </div>
-            ) : (
+            ) : !minimal && (
                 <div className="dxc-status">
                     <span className="dot dot--good" />
                     <span className="dxc-status__text">
@@ -242,11 +244,11 @@ export default function DXClusterPanel({ minimal }) {
                                 // The two that take an argument ask for it,
                                 // prefilled with your own callsign.
                                 if (q.prompt) {
-                                    setAsking({
-                                        cmd: q.prompt,
-                                        label: q.label,
-                                        value: login.callsign.toUpperCase(),
-                                    });
+                                    // Empty, not prefilled with your own
+                                    // callsign: you are looking somebody else
+                                    // up, and the widget's prefill just meant
+                                    // clearing the box before typing.
+                                    setAsking({ cmd: q.prompt, label: q.label, value: '' });
                                     return;
                                 }
                                 send(q.cmd);

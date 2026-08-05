@@ -115,7 +115,7 @@ function SpaceWeather() {
     );
 }
 
-// The output VU, tucked under the volume slider it belongs to.
+// Volume, and the output level it produces, as one control.
 //
 // Measured after the volume control (meters.outLevel), so it answers the
 // question the slider raises — is anything actually coming out, and how hard —
@@ -123,26 +123,42 @@ function SpaceWeather() {
 // takes it to nothing, which is the point: a silent receiver and a silent band
 // look the same until something says which.
 //
-// Sampled at its own rate rather than the S-meter's: this is a 3px bar, and
-// re-rendering it faster than the eye resolves buys nothing. The zone colours
-// are v1's VU (app.js updateVUMeter) — green to −20 dBFS, yellow, orange, then
-// red over the last 5 dB — and they live in the stylesheet, so the fill is one
-// number and no per-frame colour arithmetic.
-function VuBar({ muted }) {
-    const m = useMeters(10);
-    const pct = audioLevelPercent(m.outLevel);
+// This was a slider with a separate VU bar underneath it. The meter now lives
+// in the slider's own track (see .slider--level), which is one element instead
+// of two, one row shorter, and dims as a whole while muted because the meter is
+// part of the disabled input rather than a sibling that has to be told.
+//
+// Sampled in its own component so the rest of the bar — the frequency, the
+// clock — does not re-render with it. At 15 Hz rather than the 10 the separate
+// bar used: that one had a CSS transition smoothing the gap between readings
+// and a gradient stop cannot be transitioned, so the sampling has to do the
+// smoothing itself now.
+function VolumeSlider() {
+    const { audio, actions } = useRadio();
+    const m = useMeters(15);
 
     return (
-        <div
-            className={`topbar__vu${m.clipping ? ' is-clip' : ''}${muted ? ' is-muted' : ''}`}
-            title={m.clipping
-                ? 'Output is hitting full scale — turn the volume, makeup or EQ boost down'
-                : muted ? 'Output level — muted' : 'Output level'}
-        >
-            {/* The colours are painted across the whole track and this covers
-                what the level has not reached, so a zone boundary stays at the
-                same place on the bar instead of sliding with the reading. */}
-            <span className="topbar__vu-mask" style={{ left: `${pct}%` }} />
+        <div className="topbar__volume">
+            <Button
+                variant="ghost"
+                size="sm"
+                icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
+                onClick={actions.toggleMute}
+                active={audio.muted}
+                title={audio.muted ? 'Unmute' : 'Mute'}
+            />
+            {/* Disabled rather than hidden while muted: the level is still what
+                you will hear when you unmute, and a control that vanishes takes
+                the reading with it. */}
+            <Slider
+                value={Math.round(audio.volume * 100)}
+                min={0}
+                max={100}
+                disabled={audio.muted}
+                onChange={(v) => actions.setVolume(v / 100)}
+                level={audioLevelPercent(m.outLevel) / 100}
+                clipping={m.clipping}
+            />
         </div>
     );
 }
@@ -238,7 +254,7 @@ function TopMeter({ meters }) {
 }
 
 export default function TopBar({ compact }) {
-    const { tuning, running, actions, audioState, spectrumState, serverInfo, audio } = useRadio();
+    const { tuning, running, actions, audioState, spectrumState, serverInfo } = useRadio();
     const display = useDisplay();
     const { docks, toggleDock } = useLayout();
     const meters = useMeters(8);
@@ -369,31 +385,7 @@ export default function TopBar({ compact }) {
                 </div>
             )}
 
-            {!compact && (
-                <div className="topbar__volume">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
-                        onClick={actions.toggleMute}
-                        active={audio.muted}
-                        title={audio.muted ? 'Unmute' : 'Mute'}
-                    />
-                    <div className="topbar__vol-stack">
-                        {/* Disabled rather than hidden while muted: the level is
-                            still what you will hear when you unmute, and a
-                            control that vanishes takes the reading with it. */}
-                        <Slider
-                            value={Math.round(audio.volume * 100)}
-                            min={0}
-                            max={100}
-                            disabled={audio.muted}
-                            onChange={(v) => actions.setVolume(v / 100)}
-                        />
-                        <VuBar muted={audio.muted} />
-                    </div>
-                </div>
-            )}
+            {!compact && <VolumeSlider />}
 
             <Button
                 variant={running ? 'danger' : 'primary'}

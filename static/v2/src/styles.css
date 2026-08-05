@@ -572,46 +572,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__zoom-val:hover { color: var(--text); }
 .topbar__volume { display: flex; align-items: center; gap: 8px; width: 150px; }
 
-/* Slider with its output meter under it. The stack is narrower than the row is
-   tall, so nothing else in the bar moves to make room for the bar. */
-.topbar__vol-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-/* Directly under the slider's box, which puts it 3px clear of the bottom of the
-   thumb — close enough that the two read as one control, and not so close that
-   the thumb looks like it is resting on the meter. */
-.topbar__vu {
-    position: relative;
-    height: 3px;
-    border-radius: 99px;
-    overflow: hidden;
-    /* v1's VU zones on the −60..0 dBFS scale (app.js updateVUMeter): green to
-       −20 dB, yellow to −10, orange to −5, red over the last 5 dB. Painted
-       across the full width so a boundary stays put; the mask below hides
-       whatever the level has not reached. */
-    background: linear-gradient(90deg,
-        #28a745 0 66.67%,
-        #ffc107 66.67% 83.33%,
-        #ff9800 83.33% 91.67%,
-        #dc3545 91.67% 100%);
-}
-.topbar__vu-mask {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    background: var(--surface-3);
-    /* Fast enough to look live, slow enough not to strobe at the sample rate
-       the meter is read at. */
-    transition: left 90ms linear;
-}
-/* Clipping paints the whole track red: by then the reading is against the stop
-   anyway, and the colour is the message. */
-.topbar__vu.is-clip { background: var(--bad); }
-/* Muted: the meter reads zero because the output really is zero, so it is
-   dimmed to match the disabled slider rather than left looking like a meter
-   that has died. */
-.topbar__vu.is-muted { opacity: 0.4; }
-.topbar__docks { display: flex; gap: 2px; padding-left: 4px; border-left: 1px solid var(--border); }
-.topbar__status { display: grid; place-items: center; }
 .topbar__session {
     font-family: var(--mono);
     font-size: calc(11.5px * var(--ui-scale));
@@ -1407,6 +1367,51 @@ a.btn { text-decoration: none; }
 }
 .slider--track::-webkit-slider-runnable-track,
 .slider--track::-moz-range-track { height: 7px; }
+
+/* A slider that is also its own output meter.
+ *
+ * The volume control used to have a VU bar sitting under it as a second
+ * element. It is inside the track now: the top 4 px are the ordinary accent
+ * fill, i.e. where the control is set, and the bottom 3 px are the meter, i.e.
+ * what is actually coming out. One object, one row, and muting dims both
+ * together because the meter is part of the disabled input rather than a
+ * sibling that has to be told.
+ *
+ * Three layers, bottom-up: the volume fill across the top; v1's VU zones
+ * painted across the full width of the bottom strip, so a zone boundary stays
+ * where it is instead of sliding with the reading; and a cover over the strip
+ * from `--level` rightwards, which is what makes the zones read as a meter.
+ */
+.slider--level::-webkit-slider-runnable-track,
+.slider--level::-moz-range-track {
+    height: 7px;
+    background-image:
+        linear-gradient(90deg, transparent var(--level, 0%), var(--surface-3) var(--level, 0%)),
+        linear-gradient(90deg,
+            #28a745 0 66.67%,
+            #ffc107 66.67% 83.33%,
+            #ff9800 83.33% 91.67%,
+            #dc3545 91.67% 100%),
+        linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+    background-size: 100% 3px, 100% 3px, 100% 4px;
+    background-position: 0 100%, 0 100%, 0 0;
+    background-repeat: no-repeat;
+    /* No transition: what moves is a colour stop inside --level, and a custom
+       property in a gradient cannot be animated without registering it. The
+       meter is sampled fast enough to be smooth without one — see
+       VolumeSlider. */
+}
+/* Clipping paints the whole strip red: by then the reading is against the stop
+   anyway, and the colour is the message. */
+.slider--level.is-clip::-webkit-slider-runnable-track,
+.slider--level.is-clip::-moz-range-track {
+    background-image:
+        linear-gradient(90deg, transparent var(--level, 0%), var(--surface-3) var(--level, 0%)),
+        linear-gradient(90deg, var(--bad), var(--bad)),
+        linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+}
+/* Centred on the taller track: (7 - 14) / 2. */
+.slider--level::-webkit-slider-thumb { margin-top: -3.5px; }
 
 .slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .slider:disabled { opacity: 0.4; cursor: not-allowed; }

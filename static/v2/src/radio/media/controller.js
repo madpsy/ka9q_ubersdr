@@ -144,7 +144,7 @@ export class MediaSessionController {
         this.enabled = on;
         this.error = '';
         if (on) await this._start();
-        else { this._stop(); this._report('disabled'); }
+        else this._stop();
         this._emit();
     }
 
@@ -214,7 +214,6 @@ export class MediaSessionController {
         // with the receiver stopped, and it activates the moment audio starts.
         this._watchAudio();
         if (this.host.player) this.host.player.armFlowing();
-        this._report('enabled');
     }
 
     // Re-pushes everything the OS needs, from a point where the browser has a
@@ -230,7 +229,6 @@ export class MediaSessionController {
         // session that has to exist first, and setting it against nothing
         // throws — harmlessly caught, but it was never going to work.
         this._startPositionUpdates();
-        this._report('activated');
         // The panel learns everything through _emit, so reaching the state it
         // exists to report has to say so — without this the badge sits on
         // WAITING while the OS is already showing the card.
@@ -435,33 +433,6 @@ export class MediaSessionController {
         } catch (err) {
             console.warn('[media] metadata:', err.message);
         }
-    }
-
-    // One line saying exactly what the browser was handed and what it kept.
-    //
-    // Worth having permanently. Every failure this feature has is silent: the
-    // API never reports that the OS declined to show anything, so without a
-    // read-back there is no way to tell "we set nothing" from "we set it and it
-    // was ignored" — and those have completely different fixes.
-    _report(what) {
-        const ms = navigator.mediaSession;
-        const held = ms && ms.metadata;
-        console.log('[media] %s', what, {
-            anchor: this.anchor,
-            override: this.override,
-            enabled: this.enabled,
-            running: this.running,
-            playbackState: ms && ms.playbackState,
-            // Read back rather than trusting the assignment: this is the line
-            // that says whether the browser took it.
-            metadata: held ? `${held.title} | ${held.artist} | ${held.album}` : null,
-            artwork: held && held.artwork ? held.artwork.length : 0,
-            streamMode: this.stream ? this.stream.mode : null,
-            streamPlaying: !!(this.stream && this.stream.playing),
-            audioContext: this.host.player && this.host.player.ctx
-                ? this.host.player.ctx.state : 'none',
-            error: this.error || null,
-        });
     }
 
     _applyPlaybackState() {

@@ -3232,7 +3232,23 @@ a.btn { text-decoration: none; }
    column position. The tracks are therefore fixed rather than content-derived;
    only the free-text tails flex, and they flex by the same fraction in every
    row because the row widths are identical. */
-.spots__list--dx { --spot-cols: 38px 30px 62px 92px minmax(0, 1fr) minmax(0, 1.8fr); }
+/* Country and Comment carry minimums; the equivalents on the other two tabs do
+   not need them.
+ *
+   A row scrolls sideways when it is wider than the panel, and what holds it
+   open is the sum of its tracks' minimum widths. Digital and CW reach 360 and
+   336px on their fixed numeric columns alone — mode, SNR, km — so they overflow
+   a side dock and get a scrollbar. DX has no numeric columns after the
+   frequency: its last two tracks were both minmax(0, …fr), which collapse to
+   nothing, leaving a 222px minimum that fits any dock. So DX never scrolled. It
+   squeezed instead, and the only way to read a country or a comment was to
+   widen the panel.
+
+   The minimums below are what those two columns need to be worth reading rather
+   than the smallest that would produce a scrollbar — the point of scrolling is
+   to reach the text, and stopping at parity with the other tabs would have
+   produced a scrollbar that revealed almost nothing. */
+.spots__list--dx { --spot-cols: 38px 30px 62px 92px minmax(80px, 1fr) minmax(110px, 1.8fr); }
 .spots__list--digital { --spot-cols: 38px 30px 62px 92px 58px minmax(0, 1fr) 34px 46px minmax(0, 1.6fr); }
 .spots__list--cw { --spot-cols: 38px 30px 62px 92px 34px minmax(0, 1fr) 34px 46px minmax(0, 1fr); }
 
@@ -3245,7 +3261,7 @@ a.btn { text-decoration: none; }
    track sliced off it, and the alternatives — an empty `--spot-time`, or
    `grid-template-columns` rebuilt in JS — are both more cleverness than three
    plain lines are worth. */
-.spots__list--min.spots__list--dx { --spot-cols: 30px 62px 92px minmax(0, 1fr) minmax(0, 1.8fr); }
+.spots__list--min.spots__list--dx { --spot-cols: 30px 62px 92px minmax(80px, 1fr) minmax(110px, 1.8fr); }
 .spots__list--min.spots__list--digital { --spot-cols: 30px 62px 92px 58px minmax(0, 1fr) 34px 46px minmax(0, 1.6fr); }
 .spots__list--min.spots__list--cw { --spot-cols: 30px 62px 92px 34px minmax(0, 1fr) 34px 46px minmax(0, 1fr); }
 

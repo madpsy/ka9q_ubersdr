@@ -174,40 +174,75 @@ export function Bar({ value, min = 0, max = 1, peak, tone = 'accent', color }) {
     );
 }
 
-// Popover anchored to its trigger; closes on outside click or Escape.
+/**
+ * A dropdown anchored under its trigger.
+ *
+ * Positioned fixed and placed by measurement rather than laid out inside the
+ * trigger, for the reason Modal gives below: a panel that fills its dock clips
+ * its body, and a menu that belongs to the panel's own chrome has no business
+ * being cropped to it. Made small enough and a docked panel is narrower than its
+ * own move menu, which then opened half off the left edge with no way to read
+ * it. Nothing between here and the viewport establishes a containing block, so
+ * fixed escapes the clip without a portal.
+ *
+ * `align` says which edge of the menu meets which edge of the trigger; either
+ * way it is then nudged back on screen, since being readable outranks being
+ * aligned.
+ */
 export function Menu({ trigger, children, align = 'end' }) {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
     const panelRef = useRef(null);
-    // Horizontal nudge that keeps the panel on screen. A menu anchored in a
-    // narrow side dock — or one whose trigger has wrapped to the dock's edge —
-    // would otherwise open past the edge of the window and be unreadable.
-    const [shift, setShift] = useState(0);
+    const [pos, setPos] = useState(null);
 
     useLayoutEffect(() => {
         if (!open) {
-            setShift(0);
+            setPos(null);
             return;
         }
+        const trig = ref.current;
         const el = panelRef.current;
-        if (!el) return;
+        if (!trig || !el) return;
+        const t = trig.getBoundingClientRect();
         const r = el.getBoundingClientRect();
         const pad = 8;
-        if (r.left < pad) setShift(pad - r.left);
-        else if (r.right > window.innerWidth - pad) setShift(window.innerWidth - pad - r.right);
-    }, [open]);
+        const gap = 5;
+
+        const left = Math.max(pad, Math.min(
+            align === 'end' ? t.right - r.width : t.left,
+            window.innerWidth - r.width - pad,
+        ));
+        // Below the trigger, or above it when there is no room below — a menu
+        // that runs off the bottom of the window is as unreachable as one that
+        // runs off the side.
+        const below = t.bottom + gap;
+        const top = below + r.height > window.innerHeight - pad
+            ? Math.max(pad, t.top - r.height - gap)
+            : below;
+        setPos({ left, top });
+    }, [open, align]);
 
     useEffect(() => {
         if (!open) return undefined;
         const onDown = (e) => {
-            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+            if (ref.current && ref.current.contains(e.target)) return;
+            if (panelRef.current && panelRef.current.contains(e.target)) return;
+            setOpen(false);
         };
         const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+        const close = () => setOpen(false);
         document.addEventListener('pointerdown', onDown);
         document.addEventListener('keydown', onKey);
+        // Fixed means it does not travel with the dock it was opened in, so a
+        // scroll would leave it hanging over whatever is now underneath.
+        // Capture, to hear scrolls on the dock rather than only on the page.
+        document.addEventListener('scroll', close, true);
+        window.addEventListener('resize', close);
         return () => {
             document.removeEventListener('pointerdown', onDown);
             document.removeEventListener('keydown', onKey);
+            document.removeEventListener('scroll', close, true);
+            window.removeEventListener('resize', close);
         };
     }, [open]);
 
@@ -217,8 +252,14 @@ export function Menu({ trigger, children, align = 'end' }) {
             {open && (
                 <div
                     ref={panelRef}
-                    className={`menu__panel menu__panel--${align}`}
-                    style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+                    className="menu__panel"
+                    // Hidden until measured, or the first paint puts it at the
+                    // top-left of the window and it visibly jumps into place.
+                    style={{
+                        left: pos ? pos.left : 0,
+                        top: pos ? pos.top : 0,
+                        visibility: pos ? 'visible' : 'hidden',
+                    }}
                     onClick={() => setOpen(false)}
                 >
                     {children}

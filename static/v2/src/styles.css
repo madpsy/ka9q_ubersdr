@@ -2626,10 +2626,12 @@ a.btn { text-decoration: none; }
    Menu
    ========================================================================= */
 
-.menu { position: relative; display: inline-flex; }
+.menu { display: inline-flex; }
+/* Fixed, and placed by measurement — see Menu in ui.jsx. Absolute inside the
+   trigger meant the dock's own `overflow` cropped it, so a panel made narrow
+   enough showed half its move menu. */
 .menu__panel {
-    position: absolute;
-    top: calc(100% + 5px);
+    position: fixed;
     min-width: 172px;
     padding: 4px;
     background: var(--surface-3);
@@ -2639,8 +2641,6 @@ a.btn { text-decoration: none; }
     z-index: 60;
     animation: menu-in 120ms var(--ease);
 }
-.menu__panel--end { right: 0; }
-.menu__panel--start { left: 0; }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }
 
 .menu__item {

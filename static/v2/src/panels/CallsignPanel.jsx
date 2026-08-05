@@ -235,6 +235,12 @@ export default function CallsignPanel({ minimal }) {
             setCall('');
             return;
         }
+        // Already showing this one. Clicking the same marker again, or landing
+        // on it a second time while tuning around, is not a reason to ask
+        // again — the answer is on screen and the server's copy is a day old
+        // at worst. A failed lookup is not skipped: retrying that is the point
+        // of pressing it twice.
+        if (c === call && data) return;
 
         const mine = ++seq.current;
         setBusy(true);

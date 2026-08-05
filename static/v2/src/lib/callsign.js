@@ -116,8 +116,30 @@ export function lookupError(status, body) {
     return (body && body.error) || `Lookup failed (HTTP ${status}).`;
 }
 
-export async function lookupCallsignData(callsign, uuid) {
-    if (!uuid) throw new Error('No session — start the receiver first.');
+// Lookups in flight, by callsign. Not a result cache — the server already keeps
+// one for a day — but a guard against the same callsign being asked for twice
+// at the same moment by two different parts of the UI.
+//
+// Which is exactly what clicking a marker did: the Markers panel asked so it
+// could show the operator's name, and the same click drove the Callsign panel,
+// which asked again. Two requests, two rate-limit slots, one answer wanted.
+// Sharing the promise means both get the result — and both get the error, so
+// neither has to care that it was not the one who sent it.
+const inFlight = new Map();
+
+export function lookupCallsignData(callsign, uuid) {
+    if (!uuid) return Promise.reject(new Error('No session — start the receiver first.'));
+    const key = `${normaliseCallsign(callsign)}|${uuid}`;
+    const already = inFlight.get(key);
+    if (already) return already;
+
+    const request = fetchLookup(callsign, uuid)
+        .finally(() => { inFlight.delete(key); });
+    inFlight.set(key, request);
+    return request;
+}
+
+async function fetchLookup(callsign, uuid) {
     const url = `/api/lookup?callsign=${encodeURIComponent(callsign)}&uuid=${encodeURIComponent(uuid)}`;
     const resp = await fetch(url);
     const body = await resp.json().catch(() => null);
@@ -127,6 +149,11 @@ export async function lookupCallsignData(callsign, uuid) {
     if (body && body.error) throw new Error(body.error);
     if (!body) throw new Error('Lookup returned nothing.');
     return body;
+}
+
+/** Test seam. */
+export function _resetInFlight() {
+    inFlight.clear();
 }
 
 // --- in-app lookup requests -------------------------------------------------

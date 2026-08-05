@@ -201,10 +201,12 @@ t('an unrecognised failure falls back to the server text, then the status', () =
 
 // --- the lookup call --------------------------------------------------------
 
+// The stub is handed to the body as well as installed, so a test can ask it how
+// many times it was called.
 function withFetch(impl, fn) {
     const prev = global.fetch;
     global.fetch = impl;
-    return Promise.resolve(fn()).finally(() => { global.fetch = prev; });
+    return Promise.resolve(fn(impl)).finally(() => { global.fetch = prev; });
 }
 
 // Sequential: each of these swaps global.fetch for its own stub.
@@ -240,6 +242,85 @@ ta('an HTTP failure becomes the friendly message', () => withFetch(
     () => Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve({ error: 'nope' }) }),
     async () => {
         await assert.rejects(() => cs.lookupCallsignData('M0ABC', 'u'), /start the receiver/i);
+    },
+));
+
+ta('two callers asking at once share one request', () => withFetch(
+    // The bug: clicking a marker had the Markers panel ask so it could show the
+    // operator's name, while the same click drove the Callsign panel, which
+    // asked again. Two requests and two rate-limit slots for one answer.
+    (() => {
+        let calls = 0;
+        const fn = () => {
+            calls++;
+            return new Promise((resolve) => setTimeout(() => resolve({
+                ok: true, status: 200, json: () => Promise.resolve({ call: 'M0ABC' }),
+            }), 5));
+        };
+        fn.count = () => calls;
+        return fn;
+    })(),
+    async (fetchFn) => {
+        cs._resetInFlight();
+        const [a, b] = await Promise.all([
+            cs.lookupCallsignData('M0ABC', 'u'),
+            cs.lookupCallsignData('m0abc', 'u'),
+        ]);
+        assert.strictEqual(a.call, 'M0ABC');
+        assert.strictEqual(b.call, 'M0ABC');
+        assert.strictEqual(fetchFn.count(), 1, 'asked twice');
+    },
+));
+
+ta('both callers get the failure, not just the one who sent it', () => withFetch(
+    () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ error: 'not found' }) }),
+    async () => {
+        cs._resetInFlight();
+        const both = [cs.lookupCallsignData('M0ABC', 'u'), cs.lookupCallsignData('M0ABC', 'u')];
+        await assert.rejects(() => both[0], /not found/);
+        await assert.rejects(() => both[1], /not found/);
+    },
+));
+
+ta('a later request is a new one, not the finished one handed back', () => withFetch(
+    (() => {
+        let calls = 0;
+        const fn = () => {
+            calls++;
+            return Promise.resolve({
+                ok: true, status: 200, json: () => Promise.resolve({ call: 'M0ABC', n: calls }),
+            });
+        };
+        fn.count = () => calls;
+        return fn;
+    })(),
+    async (fetchFn) => {
+        // Sharing is only for the moment they overlap: this is not a cache, and
+        // the server keeps one of its own.
+        cs._resetInFlight();
+        await cs.lookupCallsignData('M0ABC', 'u');
+        await cs.lookupCallsignData('M0ABC', 'u');
+        assert.strictEqual(fetchFn.count(), 2);
+    },
+));
+
+ta('different callsigns are never shared', () => withFetch(
+    (() => {
+        const seen = [];
+        const fn = (url) => {
+            seen.push(url);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ call: 'x' }) });
+        };
+        fn.seen = () => seen;
+        return fn;
+    })(),
+    async (fetchFn) => {
+        cs._resetInFlight();
+        await Promise.all([
+            cs.lookupCallsignData('M0ABC', 'u'),
+            cs.lookupCallsignData('G4XYZ', 'u'),
+        ]);
+        assert.strictEqual(fetchFn.seen().length, 2);
     },
 ));
 

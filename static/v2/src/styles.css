@@ -3014,9 +3014,16 @@ a.btn { text-decoration: none; }
 .news__list { display: flex; flex-direction: column; gap: 2px; }
 
 /* A headline is a link, and has to look like one to read as a list of things
-   you can open — but not so much that five of them become five blue rules. */
+   you can open — but not so much that five of them become five blue rules.
+ *
+ * Two columns rather than one flow: the date is its own column so a headline
+ * that runs to a second line wraps under itself, not back under the date.
+ * Baselines, so the date sits on the first line of the title however tall the
+ * title turns out to be. */
 .news__item {
-    display: block;
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
     padding: 6px 8px;
     border-radius: var(--radius-sm);
     color: var(--text);
@@ -3033,10 +3040,12 @@ a.btn { text-decoration: none; }
     font-size: calc(10.5px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     color: var(--text-faint);
-    margin-right: 7px;
     white-space: nowrap;
+    flex: none;
 }
-.news__title { overflow-wrap: anywhere; }
+/* min-width:0 so a long unbroken word shrinks the column rather than pushing
+   the date out of the panel. */
+.news__title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 .news__pager {
     display: flex;

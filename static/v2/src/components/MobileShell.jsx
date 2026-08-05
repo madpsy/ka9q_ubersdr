@@ -63,8 +63,15 @@ export default function MobileShell() {
             <main className="shell__center">
                 <SpectrumView />
 
+                {/* `fill` means the panel owns its own scroller and needs a
+                    height to fill — the same thing the bottom dock does for the
+                    same panels. See .sheet--fill. */}
                 {panel && (
-                    <div className="sheet" role="region" aria-label={panel.title}>
+                    <div
+                        className={`sheet${panel.fill ? ' sheet--fill' : ''}`}
+                        role="region"
+                        aria-label={panel.title}
+                    >
                         <div className="sheet__head">
                             <span className="sheet__grip" />
                             <span className="sheet__title">

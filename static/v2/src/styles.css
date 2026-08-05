@@ -3049,7 +3049,8 @@ a.btn { text-decoration: none; }
     left: 0;
     right: 0;
     bottom: 0;
-    max-height: 72%;
+    --sheet-height: 72%;
+    max-height: var(--sheet-height);
     display: flex;
     flex-direction: column;
     background: var(--surface);
@@ -3878,7 +3879,22 @@ a.btn { text-decoration: none; }
    decoder needs the height a panel does not, so this sheet is taller. */
 /* A decoder earns more room than a panel — it is the thing being watched — but
    not the whole spectrum it is decoding from. */
-.sheet--ext { max-height: 86%; }
+.sheet--ext { --sheet-height: 86%; }
+
+/* A `fill` panel keeps its own scroller — a chat log, a cluster terminal — with
+   its controls pinned below it. That only works if it is given a height to fill.
+ *
+ * Without one the sheet is as tall as its content, a percentage height inside it
+ * is indeterminate, and the panel lays out at its natural height instead: the
+ * chat log grows without bound, the sheet body becomes the scroller, and the
+ * message box ends up below the fold. Worse, the log's own pin-to-bottom then
+ * scrolls an element that does not scroll, so a sent message never came into
+ * view either. The bottom dock makes the same arrangement for the same panels. */
+.sheet--fill { height: var(--sheet-height); }
+.sheet--fill .sheet__body {
+    min-height: 0;
+    overflow: hidden;
+}
 .sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
 
 /* ── FT8 ──────────────────────────────────────────────────────────────────── */

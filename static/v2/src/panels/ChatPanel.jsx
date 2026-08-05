@@ -212,7 +212,13 @@ export default function ChatPanel({ minimal }) {
         // Anything typed in full and never completed is expanded here, so
         // ":fire:" works whether or not the suggestion list was used — v1 does
         // the same on the way out.
-        if (chat.actions.send(expandShortcodes(draft))) setDraft('');
+        if (chat.actions.send(expandShortcodes(draft))) {
+            setDraft('');
+            // Sending is asking to see what you sent. Without this, having
+            // scrolled up to read something leaves your own message off the
+            // bottom of the log with no sign it went anywhere.
+            pinned.current = true;
+        }
     };
 
     // Clicking a frequency someone shared tunes there, as v1 does. setMode
@@ -227,6 +233,7 @@ export default function ChatPanel({ minimal }) {
     // are is one action, and anything already half-typed is left alone.
     const shareFrequency = () => {
         chat.actions.send(freqMessage(tuning.frequency, tuning.mode));
+        pinned.current = true;
     };
 
     return (

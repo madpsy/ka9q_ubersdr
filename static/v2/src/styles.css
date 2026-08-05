@@ -440,10 +440,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border: 1px solid var(--border);
     border-radius: var(--radius);
 }
-/* Both halves of the readout are buttons — one opens the type-in box, one the
-   mode menu — but they have to go on reading as a readout: the top bar has
-   enough chrome without two more framed controls in the middle of it. */
-.topbar__hz, .topbar__mode {
+/* All three parts of the readout are buttons — one opens the type-in box, one
+   the mode menu, one the filter width slider — but they have to go on reading as
+   a readout: the top bar has enough chrome without three more framed controls in
+   the middle of it. */
+.topbar__hz, .topbar__mode, .topbar__bw {
     padding: 0;
     border: 0;
     background: none;
@@ -475,6 +476,45 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     color: var(--text);
+}
+.topbar__bw:hover { color: var(--accent); }
+
+/* The filter width slider, under the readout that opens it. Wider than a menu
+   because a slider you cannot aim at is worse than no slider. */
+.bwpop {
+    min-width: 200px;
+    padding: 9px 11px 10px;
+    gap: 7px;
+}
+.bwpop__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+.bwpop__label {
+    font-size: calc(10.5px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.bwpop__value {
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+/* The edges the width works out to, the pair the Receiver panel prints under
+   its own slider. Which one moves depends on the sideband. */
+.bwpop__edges {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
 }
 
 /* Sized in ch so the box is the width of the number it replaces, and the bar

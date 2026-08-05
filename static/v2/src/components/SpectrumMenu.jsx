@@ -5,66 +5,15 @@
 // caller passes in, so the top bar's mode picker is the same component opened
 // under a button instead of at a pointer.
 //
-// Positioned at the point given and nudged back on screen where that would put
-// it over an edge, which is the one thing such a menu must always get right:
-// all of it has to be reachable from where the pointer already is.
+// The floating, placing and dismissing is Popover's; this is the list of items
+// that goes inside one.
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from '../react.js';
-
-// Kept clear of the viewport edge so the menu never sits flush against it.
-const EDGE = 8;
+import React from '../react.js';
+import Popover from './Popover.jsx';
 
 export default function SpectrumMenu({ at, items, onClose }) {
-    const ref = useRef(null);
-    const [pos, setPos] = useState({ left: at.x, top: at.y, ready: false });
-
-    // Measured, then placed: a menu whose height depends on how many entries it
-    // has cannot know in advance whether it fits below the pointer.
-    useLayoutEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const r = el.getBoundingClientRect();
-        const maxLeft = window.innerWidth - r.width - EDGE;
-        const maxTop = window.innerHeight - r.height - EDGE;
-        setPos({
-            left: Math.max(EDGE, Math.min(at.x, maxLeft)),
-            top: Math.max(EDGE, Math.min(at.y, maxTop)),
-            ready: true,
-        });
-    }, [at.x, at.y, items.length]);
-
-    // Anything that is not a click on the menu closes it, including a second
-    // right-click elsewhere — which then opens a fresh one where it landed.
-    useEffect(() => {
-        const away = (e) => {
-            if (ref.current && ref.current.contains(e.target)) return;
-            onClose();
-        };
-        const key = (e) => { if (e.key === 'Escape') onClose(); };
-        // Capture, so a handler that stops propagation cannot strand the menu.
-        document.addEventListener('pointerdown', away, true);
-        document.addEventListener('contextmenu', away, true);
-        document.addEventListener('keydown', key);
-        window.addEventListener('blur', onClose);
-        window.addEventListener('resize', onClose);
-        return () => {
-            document.removeEventListener('pointerdown', away, true);
-            document.removeEventListener('contextmenu', away, true);
-            document.removeEventListener('keydown', key);
-            window.removeEventListener('blur', onClose);
-            window.removeEventListener('resize', onClose);
-        };
-    }, [onClose]);
-
     return (
-        <div
-            ref={ref}
-            className="specmenu"
-            role="menu"
-            // Hidden until measured, or the first paint shows it at the click
-            // point and it visibly jumps to where it fits.
-            style={{ left: pos.left, top: pos.top, visibility: pos.ready ? 'visible' : 'hidden' }}
-        >
+        <Popover at={at} onClose={onClose} role="menu" remeasure={items.length}>
             {items.map((item) => (
                 item.separator ? (
                     <div key={item.key} className="specmenu__sep" />
@@ -82,6 +31,6 @@ export default function SpectrumMenu({ at, items, onClose }) {
                     </button>
                 )
             ))}
-        </div>
+        </Popover>
     );
 }

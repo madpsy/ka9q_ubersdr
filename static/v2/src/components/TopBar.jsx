@@ -8,8 +8,12 @@ import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
 } from '../lib/format.js';
-import { MODES, MODE_BY_ID } from '../radio/constants.js';
+import {
+    FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID,
+    edgesForWidth, maxFilterWidth,
+} from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
+import Popover from './Popover.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
@@ -300,6 +304,14 @@ export default function TopBar({ compact }) {
     const [editingFreq, setEditingFreq] = useState(false);
     const [modeAt, setModeAt] = useState(null);
     const modeClosedAt = useRef(0);
+    const [widthAt, setWidthAt] = useState(null);
+    const widthClosedAt = useRef(0);
+
+    const filterWidth = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
+    // The Receiver panel's slider does exactly this. Shared through
+    // edgesForWidth so the two, and the spectrum's edge dragging, cannot
+    // disagree about which way a lower-sideband filter opens.
+    const setFilterWidth = (w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning));
 
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
@@ -359,18 +371,58 @@ export default function TopBar({ compact }) {
                 {/* The filter, beside the mode it belongs to. The Receiver
                     panel's minimal view drops its width slider, and the panel
                     can be collapsed entirely, so without this there is nowhere
-                    to read the passband you are listening through.
-                    
+                    to read the passband you are listening through — or, since
+                    it opens the same slider, to change it.
+
                     Optional: the first thing to go as the bar narrows, because
                     the mode beside it is the one that changes what you hear. */}
                 {room.width && (
-                    <span
+                    <button
+                        type="button"
                         className="topbar__bw"
                         data-optional="width"
-                        title={`Passband ${tuning.bandwidthLow} to ${tuning.bandwidthHigh} Hz`}
+                        aria-haspopup="dialog"
+                        title={`Filter width — passband ${tuning.bandwidthLow} to ${tuning.bandwidthHigh} Hz`}
+                        onClick={(e) => {
+                            // Same guard as the mode button: the press that
+                            // opens the popover has already dismissed an open
+                            // one on the way down, so without this a second
+                            // click blinks it shut and straight back open.
+                            if (performance.now() - widthClosedAt.current < 250) return;
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setWidthAt({ x: r.left, y: r.bottom + 4 });
+                        }}
                     >
                         {formatFilterWidth(tuning.bandwidthLow, tuning.bandwidthHigh)}
-                    </span>
+                    </button>
+                )}
+
+                {widthAt && (
+                    <Popover
+                        at={widthAt}
+                        className="bwpop"
+                        aria-label="Filter width"
+                        onClose={() => {
+                            widthClosedAt.current = performance.now();
+                            setWidthAt(null);
+                        }}
+                    >
+                        <div className="bwpop__head">
+                            <span className="bwpop__label">Filter width</span>
+                            <span className="bwpop__value">{(filterWidth / 1000).toFixed(2)} kHz</span>
+                        </div>
+                        <Slider
+                            value={Math.min(filterWidth, maxFilterWidth(tuning.mode))}
+                            min={FILTER_WIDTH_MIN}
+                            max={maxFilterWidth(tuning.mode)}
+                            step={FILTER_WIDTH_STEP}
+                            onChange={setFilterWidth}
+                        />
+                        <div className="bwpop__edges">
+                            <span>{tuning.bandwidthLow} Hz</span>
+                            <span>{tuning.bandwidthHigh} Hz</span>
+                        </div>
+                    </Popover>
                 )}
 
                 {/* Inside the readout rather than a child of the bar itself:

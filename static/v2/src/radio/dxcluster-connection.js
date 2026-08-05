@@ -357,6 +357,8 @@ export class DXClusterConnection extends Emitter {
                 });
                 break;
             case 'chat_user_joined':
+                // TEMPORARY — see send().
+                console.log(`[chat-wire] <- chat_user_joined ${d.username} session=${this.openedWith}`);
                 this.emit('presence', { kind: 'joined', ...d });
                 break;
             case 'chat_user_left':
@@ -386,6 +388,9 @@ export class DXClusterConnection extends Emitter {
                 });
                 break;
             case 'chat_error':
+                // TEMPORARY — see send(). The exact text matters: the client
+                // only auto-rejoins on one particular message.
+                console.log(`[chat-wire] <- chat_error "${msg.error}" session=${this.openedWith}`);
                 this.emit('error', { message: msg.error });
                 break;
             case 'subscription_status': {

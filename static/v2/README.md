@@ -162,13 +162,14 @@ appear under everything else for anyone who had used the app before.
 
 ### Panels a phone should treat differently
 
-One registry entry, two machines: `mobile: { hidden, minimal, open }` gives a
-panel first-run defaults for a handset where the same answer does not suit both.
-The Multipad is the case it exists for — hidden on a desktop, which has room for
-the real panels, and on a phone the first tab, expanded, with its sheet already
-open.
+One registry entry, two machines: `mobile: { hidden, open }` gives a panel
+first-run defaults for a handset where the same answer does not suit both. The
+Multipad is the case it exists for — hidden on a desktop, which has room for the
+real panels, and on a phone the first tab, with its sheet already open. There is
+deliberately no minimal override: every panel opens cut down on a phone,
+including this one.
 
-All three are *defaults*, read only when a layout is built for the first time or
+Both are *defaults*, read only when a layout is built for the first time or
 when a panel joins a layout stored before it existed (`firstRun()` in
 `layout/LayoutContext.jsx`). Nothing rearranges itself afterwards: once someone
 has hidden, expanded or closed a panel, their layout says so and the registry is
@@ -185,7 +186,8 @@ you *are*, and the tab bar is right there.
 `MultipadPanel` is the whole receiver under one thumb: frequency, mode, zoom,
 filter width and squelch, in roughly the height the Receiver panel's dial takes
 on its own. It exists because those five are one activity and were four sheets.
-Its minimal view is the two barrels alone.
+Its minimal view is the two barrels alone, which — like every panel on a phone —
+is what it opens as; the header's toggle gives the rest.
 
 A barrel (`components/Barrel.jsx`) is a drum seen edge-on: drag it and the strip
 slides under a fixed index line, crossing a detent fires one step, and letting go

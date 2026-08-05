@@ -2034,6 +2034,16 @@ a.btn { text-decoration: none; }
 }
 .pad-row .slider, .pad-row .slider-wrap { flex: 1; min-width: 0; }
 
+/* Eight modes on one row, down to a 320 px handset. The room comes out of the
+   gaps and the side padding rather than the type, which stays legible: at 32 px
+   a column has 28 px of text width and "CW-L" needs 25 of them. */
+.pad .segmented { gap: 2px; }
+.pad .segmented--sm .segmented__item {
+    padding-inline: 2px;
+    font-size: calc(10.5px * var(--ui-scale));
+    white-space: nowrap;
+}
+
 /* A thumb, not a pointer: the mode buttons are the only tap targets in the pad
    and they get the height for it. */
 .shell--mobile .pad .segmented__item { padding-block: 9px; }

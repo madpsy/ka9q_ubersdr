@@ -24,13 +24,13 @@
 //                The choice is remembered per panel and applies wherever the
 //                panel is drawn, docked or floating.
 //   mobile       first-run defaults for a phone, where the same answer does not
-//                suit both machines: { hidden, minimal, open }. `hidden` and
-//                `minimal` override defaultHidden and the mobile minimal flag
-//                the first time a layout is built; `open` says this panel's
-//                sheet is the one showing when the app opens. All three are
-//                defaults and never preferences — once someone has hidden,
-//                expanded or closed the panel their layout says so and this is
-//                not consulted again.
+//                suit both machines: { hidden, open }. `hidden` overrides
+//                defaultHidden the first time a layout is built; `open` says
+//                this panel's sheet is the one showing when the app opens.
+//                Both are defaults and never preferences — once someone has
+//                hidden or closed the panel their layout says so and this is
+//                not consulted again. There is deliberately no minimal
+//                override: every panel starts cut down on a phone.
 //   requires     optional (serverInfo, env) => bool; false hides the panel
 //                entirely — see usePanelApplies() at the foot of this file
 //   Component    the panel body
@@ -91,7 +91,9 @@ export const PANELS = [
     // so anyone who wants it on a touchscreen laptop can have it.
     //
     // Minimal: the two barrels alone — the controls that exist here because
-    // they have no good small form anywhere else.
+    // they have no good small form anywhere else. Like every panel it opens cut
+    // down on a phone, which for this one is the two wheels; the mode buttons,
+    // the width and the squelch are one tap on the header away.
     {
         id: 'multipad',
         title: 'Multipad',
@@ -99,7 +101,7 @@ export const PANELS = [
         dock: 'left',
         defaultHidden: true,
         minimal: true,
-        mobile: { hidden: false, minimal: false, open: true },
+        mobile: { hidden: false, open: true },
         Component: MultipadPanel,
     },
     // Minimal: the dial, the mode buttons and the filter width — what you tune

@@ -53,11 +53,13 @@ function firstRun(p, phone) {
         open: p.defaultOpen !== false,
         hidden: m.hidden != null ? !!m.hidden : !!p.defaultHidden,
         minimal: false,
-        // On a phone a panel starts cut down. A sheet over the spectrum has a
-        // fraction of a dock's room, and the minimal view is the part of a
-        // panel worth having in that space — see minimalMobile below. A panel
-        // built for the phone in the first place says so and starts whole.
-        minimalMobile: m.minimal != null ? !!m.minimal : true,
+        // On a phone every panel starts cut down, this one included. A sheet
+        // over the spectrum has a fraction of a dock's room, and the minimal
+        // view is the part of a panel worth having in that space — see
+        // minimalMobile below. One rule for all of them: a panel that opened
+        // whole where its neighbours opened trimmed would read as one that had
+        // forgotten the setting rather than as one making a point.
+        minimalMobile: true,
     };
 }
 

@@ -258,10 +258,18 @@ export default function MultipadPanel({ minimal }) {
             {!minimal && (
                 <>
                     {/* The Receiver panel's own mode control, not a second one
-                        that behaves almost like it: four to a row on a handset,
-                        eight across wherever there is room. */}
+                        that behaves almost like it — but at a width that puts
+                        all eight on one row. A second row of modes is the pad's
+                        most expensive line: it costs as much height as the zoom
+                        barrel to say what four extra buttons already say.
+
+                        32, not the Receiver panel's 54: that is the narrowest a
+                        four-character label fits in (see .pad .segmented), and
+                        it holds one row down to a 320 px handset. Still
+                        auto-fit, so a 220 px floating panel wraps rather than
+                        clipping. */}
                     <Segmented
-                        minItemWidth={52}
+                        minItemWidth={32}
                         size="sm"
                         value={tuning.mode}
                         onChange={actions.setMode}

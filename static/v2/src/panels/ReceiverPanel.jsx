@@ -6,7 +6,7 @@ import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, MODES, MODE_BY_ID, TUNING_STEPS, bandwidthLimits, hasAGCSettings,
-    maxFilterWidth, stepLabel,
+    edgesForWidth, maxFilterWidth, stepLabel,
 } from '../radio/constants.js';
 
 // AGC, shown only for USB and LSB — the only modes v1 exposes it for.
@@ -109,15 +109,9 @@ export default function ReceiverPanel({ minimal }) {
 
     // Lower-sideband modes are edited as a positive width around the carrier so
     // the sliders behave the same way regardless of sideband.
-    const setWidth = (w) => {
-        if (limits.sideband === 'lower') {
-            actions.setBandwidth(tuning.bandwidthHigh - w, tuning.bandwidthHigh);
-        } else if (limits.sideband === 'upper') {
-            actions.setBandwidth(tuning.bandwidthLow, tuning.bandwidthLow + w);
-        } else {
-            actions.setBandwidth(-w / 2, w / 2);
-        }
-    };
+    // Shared with the spectrum's edge dragging and shift+wheel, so the two ways
+    // of setting a filter width cannot disagree about what a width means.
+    const setWidth = (w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning));
 
     const setShift = (shift) => {
         if (limits.sideband === 'lower') {

@@ -10,7 +10,8 @@
 
 const assert = require('assert');
 const {
-    MODES, MODE_BY_ID, bandwidthLimits, maxFilterWidth,
+    FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, edgesForEdgeDrag,
+    edgesForWidth, maxFilterWidth,
 } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -109,6 +110,115 @@ t('AM, SAM and NFM are symmetric', () => {
         const m = MODE_BY_ID[id];
         assert.strictEqual(m.low, -m.high, `${id}: ${m.low}..${m.high}`);
         assert.strictEqual(bandwidthLimits(id).sideband, 'both');
+    }
+});
+
+// --- editing the filter ------------------------------------------------------
+//
+// Three controls set the same thing now — the Receiver panel's width slider,
+// dragging a passband edge on the spectrum, and shift+wheel over it — so the
+// rule lives here and all three call it.
+
+const at = (mode) => ({ mode, bandwidthLow: MODE_BY_ID[mode].low, bandwidthHigh: MODE_BY_ID[mode].high });
+
+t('a width grows the sideband away from the carrier', () => {
+    assert.deepStrictEqual(edgesForWidth('usb', 3000, at('usb')), [50, 3050]);
+    assert.deepStrictEqual(edgesForWidth('lsb', 3000, at('lsb')), [-3050, -50]);
+});
+
+t('a width grows a symmetric mode either side of where it already is', () => {
+    assert.deepStrictEqual(edgesForWidth('am', 8000, at('am')), [-4000, 4000]);
+    // And keeps the shift: an AM filter offset by 1 kHz stays offset.
+    assert.deepStrictEqual(
+        edgesForWidth('am', 8000, { mode: 'am', bandwidthLow: -4000, bandwidthHigh: 6000 }),
+        [-3000, 5000],
+    );
+});
+
+t('a width is held between the narrowest useful filter and the mode maximum', () => {
+    assert.deepStrictEqual(edgesForWidth('usb', 10, at('usb')), [50, 50 + FILTER_WIDTH_MIN]);
+    const [low, high] = edgesForWidth('usb', 99999, at('usb'));
+    const l = bandwidthLimits('usb');
+    assert.ok(low >= l.min && high <= l.max, `${low}..${high} outside ${l.min}..${l.max}`);
+});
+
+t('dragging an SSB edge moves that edge and leaves the other alone', () => {
+    assert.deepStrictEqual(edgesForEdgeDrag('usb', 'high', 2000, at('usb')), [50, 2000]);
+    assert.deepStrictEqual(edgesForEdgeDrag('usb', 'low', 300, at('usb')), [300, 2700]);
+    assert.deepStrictEqual(edgesForEdgeDrag('lsb', 'low', -2000, at('lsb')), [-2000, -50]);
+});
+
+t('dragging a symmetric mode mirrors, about the passband it already has', () => {
+    // An AM filter with one side longer than the other is almost never what
+    // dragging an edge meant; the shift slider is there for when it is.
+    assert.deepStrictEqual(edgesForEdgeDrag('am', 'high', 3000, at('am')), [-3000, 3000]);
+    assert.deepStrictEqual(edgesForEdgeDrag('am', 'low', -3000, at('am')), [-3000, 3000]);
+    // CW is symmetric too, whatever its name says about sidebands.
+    assert.deepStrictEqual(edgesForEdgeDrag('cwu', 'high', 400, at('cwu')), [-400, 400]);
+    // A shifted filter stays shifted.
+    assert.deepStrictEqual(
+        edgesForEdgeDrag('am', 'high', 5000, { mode: 'am', bandwidthLow: 0, bandwidthHigh: 2000 }),
+        [-3000, 5000],
+    );
+});
+
+t('an edge cannot be dragged through the other one', () => {
+    // Past it, the filter would be inside out. It stops at the narrowest the
+    // width slider offers.
+    const [low, high] = edgesForEdgeDrag('usb', 'high', -5000, at('usb'));
+    assert.strictEqual(low, 50);
+    assert.strictEqual(high, 50 + FILTER_WIDTH_MIN);
+    const dragged = edgesForEdgeDrag('usb', 'low', 9000, at('usb'));
+    assert.deepStrictEqual(dragged, [2700 - FILTER_WIDTH_MIN, 2700]);
+});
+
+// Every mode, by name, because "symmetric" is a property of the mode rather
+// than of the code editing it — and the one that bit before was CW, which is
+// symmetric despite a name that says sideband.
+const SYMMETRY = {
+    usb: 'upper', lsb: 'lower',
+    am: 'both', sam: 'both', nfm: 'both', fm: 'both', cwu: 'both', cwl: 'both',
+};
+
+t('every mode is covered by the symmetry table', () => {
+    assert.deepStrictEqual(MODES.map((m) => m.id).sort(), Object.keys(SYMMETRY).sort());
+});
+
+for (const [id, sideband] of Object.entries(SYMMETRY)) {
+    t(`${id}: ${sideband === 'both' ? 'a dragged edge mirrors' : 'a dragged edge moves alone'}`, () => {
+        assert.strictEqual(bandwidthLimits(id).sideband, sideband, `${id} changed sideband class`);
+        const start = at(id);
+        const l = bandwidthLimits(id);
+        // Somewhere inside the mode's limits and clear of the other edge.
+        const target = Math.round(l.max * 0.6);
+
+        const [low, high] = edgesForEdgeDrag(id, 'high', target, start);
+        if (sideband === 'both') {
+            const mid = (start.bandwidthLow + start.bandwidthHigh) / 2;
+            assert.strictEqual(high - mid, mid - low, `${id} came out lopsided: ${low}..${high}`);
+            assert.notStrictEqual(low, start.bandwidthLow, `${id} left the far edge behind`);
+        } else if (sideband === 'upper') {
+            assert.strictEqual(low, start.bandwidthLow, `${id} moved the edge nobody grabbed`);
+            assert.strictEqual(high, target);
+        } else {
+            // The low edge is the outer one below the carrier; grabbing `high`
+            // moves the inner edge and leaves the outer where it was.
+            assert.strictEqual(low, start.bandwidthLow, `${id} moved the edge nobody grabbed`);
+        }
+    });
+}
+
+t('a dragged edge stays inside the mode limits', () => {
+    for (const m of MODES) {
+        const l = bandwidthLimits(m.id);
+        for (const which of ['low', 'high']) {
+            for (const offset of [-99999, 99999]) {
+                const [low, high] = edgesForEdgeDrag(m.id, which, offset, at(m.id));
+                assert.ok(low >= l.min && high <= l.max,
+                    `${m.id} ${which} ${offset}: ${low}..${high} outside ${l.min}..${l.max}`);
+                assert.ok(high > low, `${m.id} ${which} ${offset}: inside out`);
+            }
+        }
     }
 });
 

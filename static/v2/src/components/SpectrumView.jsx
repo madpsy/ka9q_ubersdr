@@ -15,7 +15,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { formatFreqShort, formatSpan, clamp } from '../lib/format.js';
-import { MAX_FREQ, MIN_FREQ, SQUELCH_MIN, stepLabel } from '../radio/constants.js';
+import {
+    FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, SQUELCH_MIN,
+    edgesForEdgeDrag, edgesForWidth, stepLabel,
+} from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { bandwidthColor } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
@@ -31,6 +34,11 @@ import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
+
+// How near a passband edge counts as grabbing it, and how wide the passband
+// has to be on screen before either edge can be grabbed at all.
+const EDGE_GRAB_PX = 6;
+const EDGE_MIN_PX = 24;
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
@@ -737,6 +745,30 @@ export default function SpectrumView() {
     mobileRef.current = mobile;
     const anchorNow = () => resolveZoomAnchor(dispRef.current.zoomAnchor, mobileRef.current);
 
+    // Which passband edge is under the pointer, if either.
+    //
+    // Only once the passband is worth aiming at: zoomed out to the whole band a
+    // 2.7 kHz filter is a fraction of a pixel wide, both edges sit on the dial,
+    // and a grab zone there would swallow every click meant for tuning. Below
+    // the threshold there is nothing to grab and the wheel is the way to do it.
+    const edgeAtX = useCallback((clientX) => {
+        const el = wrapRef.current;
+        const cfg = cfgRef.current;
+        const t = tuneRef.current;
+        if (!el || !cfg.span) return null;
+        const r = el.getBoundingClientRect();
+        if (!r.width) return null;
+        const pxPerHz = r.width / cfg.span;
+        const width = Math.abs(t.bandwidthHigh - t.bandwidthLow) * pxPerHz;
+        if (width < EDGE_MIN_PX) return null;
+        const x = clientX - r.left;
+        const xAt = (hz) => ((t.frequency + hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * r.width;
+        const dLow = Math.abs(x - xAt(t.bandwidthLow));
+        const dHigh = Math.abs(x - xAt(t.bandwidthHigh));
+        if (Math.min(dLow, dHigh) > EDGE_GRAB_PX) return null;
+        return dLow <= dHigh ? 'low' : 'high';
+    }, []);
+
     // ---- pointer interaction --------------------------------------------
 
     const freqAtX = useCallback((clientX) => {
@@ -877,13 +909,28 @@ export default function SpectrumView() {
         }
         if (g.pts.size > 2) return;   // a third finger changes nothing
 
+        // An edge under the pointer takes the gesture: no pan, and no tune on
+        // release. Checked before the pan so the two cannot both be live.
+        //
+        // Not with a finger. Six pixels is not a touch target, and the failure
+        // is silent in the worst way: a tap meant to tune lands on an edge,
+        // tunes nothing, and quietly resizes the filter instead. Touch keeps
+        // tap, pan and pinch; the Receiver panel's width slider is in its
+        // minimal view for exactly this.
+        const edge = e.pointerType === 'touch' ? null : edgeAtX(e.clientX);
+        if (edge) {
+            g.edge = { which: edge };
+            g.drag = null;
+            return;
+        }
+
         g.drag = {
             startX: e.clientX,
             startCenter: cfgRef.current.centerFreq,
             moved: false,
             pointerId: e.pointerId,
         };
-    }, [freqAtX]);
+    }, [freqAtX, edgeAtX]);
 
     const onPointerMove = useCallback((e) => {
         const el = wrapRef.current;
@@ -963,6 +1010,27 @@ export default function SpectrumView() {
             });
         }
 
+        if (g.edge) {
+            const t = tuneRef.current;
+            const raw = f == null ? null : f - t.frequency;
+            if (raw != null) {
+                // Snapped to the same grain the width slider moves in, so a
+                // dragged filter reads as a round number rather than as
+                // whatever pixel the pointer stopped on.
+                const offset = Math.round(raw / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
+                const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t);
+                if (low !== t.bandwidthLow || high !== t.bandwidthHigh) {
+                    actions.setBandwidth(low, high);
+                }
+            }
+            return;
+        }
+
+        // The affordance. Without it nothing says the lines can be grabbed.
+        if (e.pointerType !== 'touch') {
+            el.style.cursor = edgeAtX(e.clientX) ? 'col-resize' : '';
+        }
+
         if (g.drag) {
             const dx = e.clientX - g.drag.startX;
             if (Math.abs(dx) > 3) g.drag.moved = true;
@@ -972,7 +1040,7 @@ export default function SpectrumView() {
                 actions.setSpectrumCenter(center);
             }
         }
-    }, [actions, freqAtX]);
+    }, [actions, freqAtX, edgeAtX]);
 
     const onPointerUp = useCallback((e) => {
         const g = gfx.current;
@@ -984,6 +1052,13 @@ export default function SpectrumView() {
         // finger picks up a pan from wherever it happens to be.
         if (g.pinch) {
             if (g.pts.size === 0) g.pinch = null;
+            return;
+        }
+
+        // An edge drag is finished, and never tunes: the pointer went down on
+        // the filter, not on a frequency.
+        if (g.edge) {
+            g.edge = null;
             return;
         }
 
@@ -1041,6 +1116,18 @@ export default function SpectrumView() {
         if (Math.abs(wheelAcc.current) < 50) return;
         const dir = wheelAcc.current < 0 ? -1 : 1;
         wheelAcc.current = 0;
+
+        // Shift: the filter width, which works at any zoom — including the
+        // wide views where the passband is too narrow on screen to grab an edge
+        // of. Up is wider, on the same "up is more" reading as the volume and
+        // gain controls.
+        if (e.shiftKey) {
+            const t = tuneRef.current;
+            const width = Math.abs(t.bandwidthHigh - t.bandwidthLow);
+            const next = width + (dir < 0 ? FILTER_WIDTH_STEP : -FILTER_WIDTH_STEP);
+            actions.setBandwidth(...edgesForWidth(t.mode, next, t));
+            return;
+        }
 
         // Wheel either zooms or tunes, per the Display panel. Tuning uses the
         // Receiver panel's step and its snapping, so it agrees with the +/-

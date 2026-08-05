@@ -58,6 +58,55 @@ export function maxFilterWidth(mode) {
     return Math.abs(l.max - l.min);
 }
 
+// Narrowest filter worth offering, and the grain the controls move in. The
+// Receiver panel's width slider has always used these; they are named here
+// because the spectrum's own filter editing has to agree with it.
+export const FILTER_WIDTH_MIN = 100;
+export const FILTER_WIDTH_STEP = 50;
+
+const clampEdge = (v, l) => Math.max(l.min, Math.min(l.max, v));
+
+/**
+ * Passband edges for a width, keeping whatever shift is in force.
+ *
+ * Lower-sideband modes are edited as a positive width below the carrier and
+ * upper as one above it, so a width control behaves the same way whichever
+ * sideband is in use; symmetric modes grow either side of where they are.
+ */
+export function edgesForWidth(mode, width, tuning) {
+    const l = bandwidthLimits(mode);
+    const w = Math.max(FILTER_WIDTH_MIN, Math.min(maxFilterWidth(mode), width));
+    if (l.sideband === 'lower') return [clampEdge(tuning.bandwidthHigh - w, l), tuning.bandwidthHigh];
+    if (l.sideband === 'upper') return [tuning.bandwidthLow, clampEdge(tuning.bandwidthLow + w, l)];
+    const mid = (tuning.bandwidthLow + tuning.bandwidthHigh) / 2;
+    return [clampEdge(mid - w / 2, l), clampEdge(mid + w / 2, l)];
+}
+
+/**
+ * Passband edges after dragging one of them to `offsetHz` from the dial.
+ *
+ * Single-sideband modes move the edge you grabbed and leave the other alone —
+ * which changes the width and the shift together, and is what grabbing an edge
+ * plainly means. Symmetric modes mirror instead: an AM or CW filter with one
+ * side longer than the other is almost never what someone dragging an edge was
+ * after, and the shift slider is there for when it is. Mirroring is about the
+ * passband's own centre, so a shifted filter stays shifted.
+ */
+export function edgesForEdgeDrag(mode, which, offsetHz, tuning) {
+    const l = bandwidthLimits(mode);
+    if (l.sideband === 'both') {
+        const mid = (tuning.bandwidthLow + tuning.bandwidthHigh) / 2;
+        const half = Math.max(FILTER_WIDTH_MIN / 2, Math.abs(offsetHz - mid));
+        return [clampEdge(mid - half, l), clampEdge(mid + half, l)];
+    }
+    if (which === 'low') {
+        const low = clampEdge(Math.min(offsetHz, tuning.bandwidthHigh - FILTER_WIDTH_MIN), l);
+        return [low, tuning.bandwidthHigh];
+    }
+    const high = clampEdge(Math.max(offsetHz, tuning.bandwidthLow + FILTER_WIDTH_MIN), l);
+    return [tuning.bandwidthLow, high];
+}
+
 // CW modes are tuned to the carrier, so the audible tone sits at the offset.
 export const CW_TONE_OFFSET = 700;
 

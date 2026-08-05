@@ -110,18 +110,31 @@ export function ChatProvider({ children }) {
         offs.push(chat.on('idle', () => chat.requestUsers()));
         offs.push(chat.on('error', (e) => {
             const message = e.message || 'chat error';
-            setError(message);
             // The server forgets our identity when its session goes (a restart,
             // or a socket it had already dropped). Re-join rather than making
-            // the user notice and retype.
+            // the user notice and retype — and say nothing while doing it,
+            // because from the operator's side nothing went wrong.
+            //
+            // This used to raise the bar first and then recover, which left
+            // "username not set" on screen after a re-join that had worked.
+            // Nothing cleared it: the auto-join does not go through
+            // actions.join, which is the only other place the error is reset.
+            // It is also the one error whose instruction you cannot follow —
+            // the name *is* set, and setting it again is exactly what just
+            // happened underneath.
             if (message === 'username not set' && nameRef.current && autoJoins.current < 3) {
                 autoJoins.current += 1;
+                setError(null);
                 chat.setUsername(nameRef.current);
                 return;
             }
+            setError(message);
             // A name the server refuses outright drops us back to the join form
             // with the reason showing.
-            if (/username/i.test(message)) setJoined(false);
+            if (/username/i.test(message)) {
+                joinedRef.current = false;
+                setJoined(false);
+            }
         }));
 
         // Auto-join with a remembered name, as v1 does. Driven by the
@@ -132,6 +145,17 @@ export function ChatProvider({ children }) {
             autoJoins.current = 0;
             const saved = nameRef.current;
             if (!saved || joinedRef.current || validateUsername(saved)) return;
+            // The ref is claimed here, before the send, rather than being left
+            // to `joinedRef.current = joined` on the next render.
+            //
+            // That assignment happens while rendering, so between calling
+            // setJoined(true) and React getting round to re-rendering, the ref
+            // still reads false. A second confirmation in that window — the
+            // socket resubscribes on open as well as on acquire, so two are
+            // ordinary on a fresh start — passed this guard too and sent a
+            // second setUsername, which is the double join.
+            joinedRef.current = true;
+            setError(null);
             chat.setUsername(saved);
             setJoined(true);
         }));
@@ -157,6 +181,11 @@ export function ChatProvider({ children }) {
     const actions = useMemo(() => ({
         join(name) {
             setError(null);
+            // Both refs before the send, for the same reason as the auto-join:
+            // an error arriving before the next render reads them, and a stale
+            // name there would re-join as whoever we were last time.
+            nameRef.current = name;
+            joinedRef.current = true;
             chat.setUsername(name);
             setUsername(name);
             setJoined(true);
@@ -165,9 +194,12 @@ export function ChatProvider({ children }) {
         },
         leave() {
             chat.leave();
+            joinedRef.current = false;
             setJoined(false);
             // Forget the name too, or the next connection silently re-joins the
-            // person who just chose to leave.
+            // person who just chose to leave. The ref goes with it, or the
+            // error handler's auto-join would put them straight back.
+            nameRef.current = '';
             setUsername('');
             try { localStorage.removeItem(NAME_KEY); } catch (e) { /* ignore */ }
         },

@@ -193,8 +193,27 @@ export function ChatProvider({ children }) {
     // for someone who has not started listening. Acquiring the stream is what
     // opens it — the connection is shared, so it stays up for as long as chat
     // *or* any other consumer (the spots panel) still wants it.
+    //
+    // The refresh is what stops the server seeing two joins.
+    //
+    // This socket is usually already open by the time chat wants it: the marker
+    // bar subscribes to the DX and CW spot feeds on load, with no `running`
+    // guard, so it opens under whatever session id existed then. powerOn() mints
+    // a *new* one — audio and spectrum have to be paired under a single UUID —
+    // which leaves the socket carrying an id the server has since replaced.
+    // Joining on it announces us under the old session; the server then retires
+    // that session, the socket closes, and the reconnect replays our identity
+    // under the new one — a second join, from the server's point of view by a
+    // different user session. v1 never sees this because it does not open the
+    // chat socket before the receiver starts.
+    //
+    // So the socket is put on the current session id *before* anyone joins on
+    // it. refresh() is a no-op when it is already there, and costs one round
+    // trip when it is not; useAudioExtension does the same thing for the same
+    // reason, its attach being keyed by the same UUID.
     useEffect(() => {
         if (!wanted || !running) return undefined;
+        chat.refresh();
         return chat.acquire('chat');
     }, [wanted, running, chat]);
 

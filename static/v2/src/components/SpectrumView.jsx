@@ -77,8 +77,8 @@ const SPLIT_MAX = 0.85;
 // The type is 10 px, so this is the line plus a little air.
 const DB_LABEL_GAP = 13;
 
-// Weight of the spectrum trace in CSS px, as a bare line. Halved when the fill
-// is on — see where it is used.
+// Weight of the spectrum trace in CSS px. Only drawn when the fill is off — see
+// where it is used — so this is always its full weight.
 const TRACE_WIDTH = 1.25;
 
 // Width to assume for the cursor-frequency tag before it has ever been on
@@ -1984,18 +1984,24 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.stroke();
     }
 
-    c.beginPath();
-    for (let x = 0; x < pxW; x++) {
-        const y = yOf(trace[x]);
-        if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+    // The line, and only when there is no fill under it.
+    //
+    // Filled, the shape is what you read and the line adds nothing: it follows
+    // the same path the fill already ends on, so all it does is thicken every
+    // peak by its own width and close up the gap between two signals that are
+    // nearly touching. It used to be drawn at half weight for that reason, which
+    // was treating the symptom. Unfilled the line *is* the trace and carries it
+    // on its own, at full weight.
+    if (!filled) {
+        c.beginPath();
+        for (let x = 0; x < pxW; x++) {
+            const y = yOf(trace[x]);
+            if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+        }
+        c.strokeStyle = g.traceGrad;
+        c.lineWidth = TRACE_WIDTH * dpr;
+        c.stroke();
     }
-    c.strokeStyle = g.traceGrad;
-    // Half thickness when the fill is there. Filled, the shape is what you read
-    // and the line is only its edge — at full weight it thickens every peak and
-    // closes up the gap between two signals that are nearly touching. Unfilled
-    // the line *is* the trace, and has to carry it on its own.
-    c.lineWidth = (filled ? TRACE_WIDTH / 2 : TRACE_WIDTH) * dpr;
-    c.stroke();
 
     drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colEdge);
 

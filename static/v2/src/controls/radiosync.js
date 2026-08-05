@@ -27,6 +27,12 @@ const POLL_MS = 100;
 // never answers ends the attempt rather than hanging it.
 const CONNECT_TIMEOUT_MS = 20000;
 
+// The same for closing. Every call into the module goes through one queue, so a
+// close is behind whatever else is in flight — and a rig that has stopped
+// answering is exactly when somebody presses Disconnect. Letting that wait for
+// ever is how the panel ends up showing a connected rig it will not let go of.
+const CLOSE_TIMEOUT_MS = 5000;
+
 // Why the port could not be opened, in the operator's terms. The DOMException
 // names are what Web Serial throws — the messages themselves are unhelpful
 // ("Failed to execute 'requestPort'…"), so they are not passed through.
@@ -229,29 +235,49 @@ export class RadioSync extends Emitter {
                 Number(rig.dataBits), Number(rig.stopBits), Number(rig.parity), Number(rig.handshake),
             ));
             if (this.handle <= 0) throw new Error(portErrorText(this.portError));
-
-            this.connected = true;
-            this.failures = 0;
-            this.emit('message', { text: `Connected to ${rig.mfg} ${rig.name}`, tone: 'good' });
-
-            // Push the SDR's current state at the rig so the two start together
-            // rather than waiting for the operator to touch something.
-            if (this.direction === 'sdr-to-radio' && this.ctx) {
-                const t = this.ctx.state().tuning;
-                if (this.syncFrequency) await this._pushFrequency(t.frequency);
-                if (this.syncMode) await this._pushMode(t.mode);
-            }
-            this._startPolling();
         } catch (err) {
             this.emit('message', { text: `Connection failed: ${err.message}`, tone: 'error' });
             this.handle = 0;
             this.connected = false;
             if (err.timedOut) this._dropModule();
-        } finally {
             this.busy = false;
             this.emit('state', this.snapshot());
+            return false;
         }
-        return this.connected;
+
+        // The port is open, so the connect is over — whatever the rig does next.
+        //
+        // `busy` used to be held until after the initial push below, and that is
+        // a rig that answers the open and then stops talking: the log said
+        // "Connected", because the message goes out here, while the panel still
+        // showed a disabled "Connecting…" and the port could not be closed. The
+        // push is a courtesy; the link is up either way, and the state that says
+        // so goes out before anything else is attempted.
+        this.connected = true;
+        this.failures = 0;
+        this.busy = false;
+        this.emit('message', { text: `Connected to ${rig.mfg} ${rig.name}`, tone: 'good' });
+        this.emit('state', this.snapshot());
+
+        this._startPolling();
+
+        // Push the SDR's current state at the rig so the two start together
+        // rather than waiting for the operator to touch something.
+        //
+        // Not awaited, and its failures are its own: both helpers report through
+        // the log, and neither may undo a connection that succeeded — the catch
+        // above used to zero the handle for this, losing the only reference to
+        // an open serial port.
+        if (this.direction === 'sdr-to-radio' && this.ctx) {
+            try {
+                const t = this.ctx.state().tuning;
+                if (this.syncFrequency) this._pushFrequency(t.frequency);
+                if (this.syncMode) this._pushMode(t.mode);
+            } catch (err) {
+                this.emit('message', { text: `Could not send the current state: ${err.message}`, tone: 'warn' });
+            }
+        }
+        return true;
     }
 
     // Fails the open out if the rig never answers, so the button comes back
@@ -300,15 +326,51 @@ export class RadioSync extends Emitter {
     }
 
     async disconnect() {
-        if (!this.handle || this.busy) return;
+        // Never silently. A press that does nothing and says nothing is
+        // indistinguishable from a dead button, and both states this guards
+        // against are reachable — the panel reads `connected` from the last
+        // state it was sent, which can outlive the handle it refers to.
+        if (this.busy) {
+            this.emit('message', { text: 'Still working on the last request…', tone: 'warn' });
+            return;
+        }
+        if (!this.handle) {
+            // Connected with nothing to close: put the panel back in step with
+            // reality rather than leaving it offering a button that cannot work.
+            if (this.connected) {
+                this._stopPolling();
+                this._endTx();
+                this.connected = false;
+                this.rig = { frequency: 0, mode: '---', tx: false };
+                this.emit('message', { text: 'The radio link was already closed', tone: 'info' });
+                this.emit('state', this.snapshot());
+            }
+            return;
+        }
         this.busy = true;
+        // Said before the close is attempted, so the button greys out while it
+        // happens rather than looking like the press did nothing.
+        this.emit('state', this.snapshot());
         this._stopPolling();
+
+        let timedOut = false;
         try {
-            await this.closeRig(this.handle);
+            await Promise.race([
+                this.closeRig(this.handle),
+                new Promise((_, reject) => { setTimeout(() => {
+                    timedOut = true;
+                    reject(new Error('the radio did not answer'));
+                }, CLOSE_TIMEOUT_MS); }),
+            ]);
             this.emit('message', { text: 'Disconnected from radio', tone: 'info' });
         } catch (err) {
             this.emit('message', { text: `Disconnect error: ${err.message}`, tone: 'error' });
         } finally {
+            // A close that never came back is still suspended inside Asyncify
+            // with everything after it queued behind, so the module is finished
+            // either way. Dropping it abandons the stuck call and lets the next
+            // Connect build a fresh one from the cached download.
+            if (timedOut) this._dropModule();
             // Unmute before letting go: leaving the receiver muted because the
             // rig happened to be transmitting when the link dropped is a fault
             // report waiting to happen.

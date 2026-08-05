@@ -228,6 +228,11 @@ export default function CallsignPanel({ minimal }) {
     const inputRef = useRef(null);
     // Guards against an earlier, slower lookup overwriting a later one.
     const seq = useRef(0);
+    // What `run` needs to see *now*. The lookup-request listener is registered
+    // once, so without this it would judge everything by the state of the very
+    // first render: never running, nothing looked up yet.
+    const live = useRef({});
+    live.current = { running, call, data };
 
     const run = (raw) => {
         const c = normaliseCallsign(raw);
@@ -244,7 +249,19 @@ export default function CallsignPanel({ minimal }) {
         // again — the answer is on screen and the server's copy is a day old
         // at worst. A failed lookup is not skipped: retrying that is the point
         // of pressing it twice.
-        if (c === call && data) return;
+        if (c === live.current.call && live.current.data) return;
+
+        // /api/lookup needs an active audio session, not just a registered
+        // UUID. Said here, when something is actually being asked for, rather
+        // than as a standing notice: the panel is docked by default, and a
+        // permanent line telling you to press Start is the first thing on
+        // screen every time the page loads.
+        if (!live.current.running) {
+            setError('Start the receiver — lookups need an active audio session.');
+            setData(null);
+            setCall(c);
+            return;
+        }
 
         const mine = ++seq.current;
         setBusy(true);
@@ -323,19 +340,15 @@ export default function CallsignPanel({ minimal }) {
                 </form>
             )}
 
-            {!running && (
-                <div className="note note--tight">
-                    Start the receiver — lookups need an active audio session.
-                </div>
-            )}
-
             {error && <div className="note note--warn">{error}</div>}
 
             {busy && !data && <Empty>Looking up {call}…</Empty>}
 
             {/* Without the box there is nothing to type into, so the prompt has
-                to name the other way in. */}
-            {!busy && !data && !error && running && (
+                to name the other way in. Shown before the receiver is started
+                as well: the panel should look like itself on load, and what a
+                lookup needs is said when one is asked for. */}
+            {!busy && !data && !error && (
                 <Empty>
                     {minimal
                         ? 'Click a callsign in the spots or activity lists.'

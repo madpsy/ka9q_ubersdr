@@ -178,9 +178,11 @@ export const PANELS = [
     { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },
     { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
 
-    // Minimal: the two bar meters. The numeric readouts and the SNR trace are
-    // the same information at a resolution you only want when you are studying
-    // a signal rather than glancing at it.
+    // Minimal: the two bar meters and the squelch. The numeric readouts and the
+    // SNR trace are the same information at a resolution you only want when you
+    // are studying a signal rather than glancing at it; the squelch stays
+    // because it is a threshold on the SNR the meter is drawing, and it is the
+    // one control here you touch while listening.
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', minimal: true, Component: SignalPanel },
     // Directly under Signal: the band you are on and how it is doing are read
     // together, and the chips are a row of buttons rather than a wide table —
@@ -214,8 +216,9 @@ export const PANELS = [
         // permanently empty. Same gate the top bar's summary uses.
         requires: (serverInfo) => !!(serverInfo && serverInfo.space_weather),
     },
-    // Minimal: squelch and noise reduction. Volume, channel and buffer are set
-    // once a session; these two are worked at while you listen.
+    // Minimal: noise reduction. Volume, channel and buffer are set once a
+    // session; that one is worked at while you listen. Squelch is in Signal,
+    // next to the SNR meter it thresholds.
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
     // OS media controls — lock screen, Control Centre, notification shade, media

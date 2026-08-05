@@ -4,7 +4,8 @@
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { Bar, Readout } from '../components/ui.jsx';
+import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
+import { Bar, Field, Readout, Slider } from '../components/ui.jsx';
 import {
     audioLevelPercent, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
     snrFraction, sUnitFraction, sUnitLabel, sUnitLabelAt,
@@ -194,8 +195,85 @@ function NeedleMeter({ ticks, fraction, peak, colourAt, title }) {
     return <canvas ref={ref} className="needle" style={{ height: NEEDLE_H }} title={title} />;
 }
 
-// `minimal` keeps the two meters and drops the numeric readouts, the SNR trace
-// and the buffer counters. See the registry's `minimal`.
+// The squelch, which lives here rather than in Audio because it is a threshold
+// on the SNR this panel meters. The slider carries a live SNR marker and the
+// badge says whether the gate is passing audio — both of them the same reading
+// the SNR meter above is drawing, so setting the threshold against the noise is
+// one glance instead of two panels.
+//
+// Split out so the 12 Hz meter sampling that drives the marker and the
+// open/closed badge re-renders only this control, not the whole panel.
+function SquelchControl({ minimal }) {
+    const { squelch, actions } = useRadio();
+    const m = useMeters(12);
+    const snr = m.snr;
+    const open = m.squelchOpen;
+
+    return (
+        <>
+            <Field
+                label="Squelch"
+                hint={squelch.enabled ? `≥ ${squelch.value.toFixed(1)} dB SNR` : 'Off'}
+            >
+                {/* Auto sits with the slider rather than below it: it sets the
+                    same number the slider does, and it is the one action worth
+                    having in the minimal view, where the state line below is
+                    dropped. */}
+                <div className="squelch-row">
+                    <Slider
+                        value={squelch.value}
+                        min={SQUELCH_MIN}
+                        max={SQUELCH_MAX}
+                        step={SQUELCH_STEP}
+                        onChange={actions.setSquelch}
+                        marker={snr == null ? null : snr}
+                        markerTone={squelch.enabled && !open ? 'closed' : 'open'}
+                        markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
+                    />
+                    <button
+                        type="button"
+                        className="chip chip--button"
+                        title="Set the threshold just above the recent noise level"
+                        disabled={snr == null}
+                        onClick={actions.autoSquelch}
+                    >
+                        Auto
+                    </button>
+                </div>
+            </Field>
+            {/* The state and the off switch, full view only. Minimal carries
+                the state twice over already — the SNR meter is directly above,
+                and the marker on the slider is drawn in the gate's own colour —
+                and dragging the slider to the floor is the same thing Off does. */}
+            {!minimal && (
+                <div className="squelch-status">
+                    <span className={`badge badge--${!squelch.enabled ? 'idle' : open ? 'open' : 'closed'}`}>
+                        {!squelch.enabled ? 'DISABLED' : open ? 'OPEN' : 'CLOSED'}
+                    </span>
+                    <span className="squelch-status__snr">
+                        SNR {snr == null ? '--' : snr.toFixed(1)}
+                    </span>
+                    {/* Disabled rather than absent when the squelch is already
+                        off, so the row keeps its shape and the control stays
+                        where you last saw it. */}
+                    <button
+                        type="button"
+                        className="chip chip--button"
+                        title="Switch the squelch off"
+                        disabled={!squelch.enabled}
+                        onClick={() => actions.setSquelch(SQUELCH_MIN)}
+                    >
+                        Off
+                    </button>
+                </div>
+            )}
+        </>
+    );
+}
+
+// `minimal` keeps the two meters and the squelch — what you watch and what you
+// ride — and drops the numeric readouts, the SNR trace and the buffer counters.
+// See the registry's `minimal`.
 export default function SignalPanel({ minimal }) {
     const { running } = useRadio();
     const display = useDisplay();
@@ -350,8 +428,17 @@ export default function SignalPanel({ minimal }) {
                 </div>
             </button>
 
+            {/* In the minimal view too: the meters say what is there and this is
+                the one control you reach for while listening to it. */}
+            <SquelchControl minimal={minimal} />
+
             {!minimal && (
                 <>
+                    <div className="note note--tight">
+                        Gates audio below the threshold, server-side. The marker shows
+                        live SNR — set the threshold just above the noise.
+                    </div>
+
                     <div className="readout-grid">
                         <Readout label="Signal" value={power == null ? '—' : power.toFixed(1)} unit="dBFS" />
                         <Readout label="Noise" value={m.noiseDensity == null ? '—' : m.noiseDensity.toFixed(1)} unit="dBFS" />

@@ -1,60 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { useMeters, useRadio } from '../radio/RadioContext.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
 import { listOutputDevices, sinkLabel, sinkSupport, unlockDeviceLabels } from '../lib/audioSinks.js';
-import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
-
-// Split out so the 12 Hz meter sampling that drives the live SNR marker and the
-// open/closed badge re-renders only this control, not the whole panel.
-function SquelchControl() {
-    const { squelch, actions } = useRadio();
-    const m = useMeters(12);
-    const snr = m.snr;
-    const open = m.squelchOpen;
-
-    return (
-        <>
-            <Field
-                label="Squelch"
-                hint={squelch.enabled ? `≥ ${squelch.value.toFixed(1)} dB SNR` : 'Off'}
-            >
-                <Slider
-                    value={squelch.value}
-                    min={SQUELCH_MIN}
-                    max={SQUELCH_MAX}
-                    step={SQUELCH_STEP}
-                    onChange={actions.setSquelch}
-                    marker={snr == null ? null : snr}
-                    markerTone={squelch.enabled && !open ? 'closed' : 'open'}
-                    markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
-                />
-            </Field>
-            <div className="squelch-status">
-                <span className={`badge badge--${!squelch.enabled ? 'idle' : open ? 'open' : 'closed'}`}>
-                    {!squelch.enabled ? 'DISABLED' : open ? 'OPEN' : 'CLOSED'}
-                </span>
-                <span className="squelch-status__snr">
-                    SNR {snr == null ? '--' : snr.toFixed(1)}
-                </span>
-                <button
-                    type="button"
-                    className="chip chip--button"
-                    title="Set the threshold just above the recent noise level"
-                    disabled={snr == null}
-                    onClick={actions.autoSquelch}
-                >
-                    Auto
-                </button>
-                {squelch.enabled && (
-                    <button type="button" className="chip chip--button" onClick={() => actions.setSquelch(SQUELCH_MIN)}>
-                        Off
-                    </button>
-                )}
-            </div>
-        </>
-    );
-}
 
 const CHANNELS = [
     { value: 'both', label: 'Both' },
@@ -220,10 +168,13 @@ function OutputDevicePicker() {
     );
 }
 
-// `minimal` keeps squelch and noise reduction — the two you ride while
-// listening — and drops volume, channel and buffer, which are set once. The
-// squelch explainer goes with them: it describes a control you already know how
-// to use by the time you are running minimal. See the registry's `minimal`.
+// `minimal` keeps noise reduction — the one thing here you ride while
+// listening — and drops volume, channel and buffer, which are set once.
+//
+// Squelch used to live here and is now in the Signal panel, beside the SNR
+// meter it is a threshold on: the number you set it against is drawn there, and
+// having the two in different panels meant watching one while dragging the
+// other. See SquelchControl there.
 export default function AudioPanel({ minimal }) {
     const { audio, actions } = useRadio();
 
@@ -271,14 +222,6 @@ export default function AudioPanel({ minimal }) {
 
                     <div className="divider" />
                 </>
-            )}
-
-            <SquelchControl />
-            {!minimal && (
-                <div className="note note--tight">
-                    Gates audio below the threshold, server-side. The marker shows
-                    live SNR — set the threshold just above the noise.
-                </div>
             )}
 
             <DspControl />

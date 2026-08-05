@@ -1402,6 +1402,13 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 
+/* The threshold slider with Auto beside it: the slider takes the slack, the
+   chip keeps its own width. Off is not here — it lives on the state line below,
+   which the minimal view drops. */
+.squelch-row { display: flex; align-items: center; gap: 6px; }
+.squelch-row .slider { flex: 1; min-width: 0; }
+.squelch-row .chip { flex: none; margin-left: 0; }
+
 .squelch-status { display: flex; align-items: center; gap: 6px; }
 .squelch-status__snr {
     flex: 1;
@@ -1511,7 +1518,8 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
     transition: all var(--dur) var(--ease);
 }
-.chip--button:hover { color: var(--text); border-color: var(--border-strong); }
+.chip--button:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+.chip--button:disabled { opacity: 0.45; cursor: not-allowed; }
 .chip--button.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 /* Band buttons: condition colours are v1's, so the two UIs read the same at a

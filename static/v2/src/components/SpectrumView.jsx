@@ -1018,7 +1018,13 @@ export default function SpectrumView() {
                 // dragged filter reads as a round number rather than as
                 // whatever pixel the pointer stopped on.
                 const offset = Math.round(raw / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
-                const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t);
+                // Never narrower than the grab zone needs. Dragging an edge
+                // through the other one used to shut the filter to its 100 Hz
+                // floor, which at any normal zoom is a fraction of a pixel —
+                // the two lines then sat on top of each other with nothing left
+                // to take hold of, and the only way back out was the panel.
+                const minHz = EDGE_MIN_PX * (cfg.span / r.width);
+                const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t, minHz);
                 if (low !== t.bandwidthLow || high !== t.bandwidthHigh) {
                     actions.setBandwidth(low, high);
                 }

@@ -85,6 +85,12 @@ export function edgesForWidth(mode, width, tuning) {
 /**
  * Passband edges after dragging one of them to `offsetHz` from the dial.
  *
+ * `minWidth` is how narrow the drag may make it, above the mode's own floor.
+ * The spectrum passes the width of its own grab zone, so a drag cannot leave
+ * the two edges closer together than they have to be to be grabbed again —
+ * otherwise the gesture can reach a state it cannot undo, and the only way out
+ * of a filter dragged shut is a control somewhere else.
+ *
  * Single-sideband modes move the edge you grabbed and leave the other alone —
  * which changes the width and the shift together, and is what grabbing an edge
  * plainly means. Symmetric modes mirror instead: an AM or CW filter with one
@@ -92,18 +98,19 @@ export function edgesForWidth(mode, width, tuning) {
  * after, and the shift slider is there for when it is. Mirroring is about the
  * passband's own centre, so a shifted filter stays shifted.
  */
-export function edgesForEdgeDrag(mode, which, offsetHz, tuning) {
+export function edgesForEdgeDrag(mode, which, offsetHz, tuning, minWidth = FILTER_WIDTH_MIN) {
     const l = bandwidthLimits(mode);
+    const min = Math.max(FILTER_WIDTH_MIN, minWidth);
     if (l.sideband === 'both') {
         const mid = (tuning.bandwidthLow + tuning.bandwidthHigh) / 2;
-        const half = Math.max(FILTER_WIDTH_MIN / 2, Math.abs(offsetHz - mid));
+        const half = Math.max(min / 2, Math.abs(offsetHz - mid));
         return [clampEdge(mid - half, l), clampEdge(mid + half, l)];
     }
     if (which === 'low') {
-        const low = clampEdge(Math.min(offsetHz, tuning.bandwidthHigh - FILTER_WIDTH_MIN), l);
+        const low = clampEdge(Math.min(offsetHz, tuning.bandwidthHigh - min), l);
         return [low, tuning.bandwidthHigh];
     }
-    const high = clampEdge(Math.max(offsetHz, tuning.bandwidthLow + FILTER_WIDTH_MIN), l);
+    const high = clampEdge(Math.max(offsetHz, tuning.bandwidthLow + min), l);
     return [tuning.bandwidthLow, high];
 }
 

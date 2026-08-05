@@ -208,6 +208,35 @@ for (const [id, sideband] of Object.entries(SYMMETRY)) {
     });
 }
 
+t('a drag cannot shut the filter to something it can no longer grab', () => {
+    // The trap: dragging an edge through the other one closed the filter to its
+    // 100 Hz floor, which at any normal zoom is a fraction of a pixel wide. The
+    // two lines then sat on top of each other with nothing to take hold of, and
+    // the gesture had reached a state it could not undo. The spectrum passes
+    // the width of its own grab zone as the floor.
+    const MIN = 600;   // whatever the grab zone works out to in Hz at this zoom
+    for (const id of Object.keys(SYMMETRY)) {
+        const start = at(id);
+        for (const which of ['low', 'high']) {
+            // Dragged hard through the other edge, from both directions.
+            for (const offset of [-99999, 99999]) {
+                const [low, high] = edgesForEdgeDrag(id, which, offset, start, MIN);
+                const width = high - low;
+                const room = maxFilterWidth(id);
+                assert.ok(width >= Math.min(MIN, room) - 1e-9,
+                    `${id} ${which} ${offset}: ${width} Hz is narrower than ${MIN}`);
+            }
+        }
+    }
+});
+
+t('the floor never overrides the mode floor downwards', () => {
+    // A zoom so deep that the grab zone is only a few Hz wide must not let the
+    // filter go below what the width slider offers.
+    const [low, high] = edgesForEdgeDrag('usb', 'high', -9999, at('usb'), 5);
+    assert.strictEqual(high - low, FILTER_WIDTH_MIN);
+});
+
 t('a dragged edge stays inside the mode limits', () => {
     for (const m of MODES) {
         const l = bandwidthLimits(m.id);

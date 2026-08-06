@@ -28,10 +28,13 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import { bandForFrequency } from '../lib/bands.js';
 import {
-    AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl, createAutoRange,
-    dbFromByte, decodeFrame, rangeOf, savePrefs, savedPrefs, streamUrl, updateAutoRange,
+    AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, binAt, clampDb, configUrl,
+    createAutoRange, dbFromByte, decodeFrame, formatAgeSec, formatDb, formatMHz, ft8Window,
+    hzAt, rangeOf, rowAt, savePrefs, savedPrefs, scaleTicks, streamUrl, updateAutoRange,
     validValues,
 } from '../lib/bandSpectrum.js';
+import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
+import { formatRate } from '../lib/format.js';
 
 // The card's proportions, from band_activity.html: the block is this much of its
 // own width, and the spectrum trace takes the top of it with the waterfall below.
@@ -49,7 +52,11 @@ export default function BandSpectrumPanel({ minimal }) {
     const display = useDisplay();
     const [bands, setBands] = useState(null);       // name → config, or null while loading
     const [prefs, setPrefs] = useState(savedPrefs);
-    const [live, setLive] = useState(false);
+    // Bytes a second on the stream, or null before the first second is up.
+    // A rate says both things the word "live" did and one it did not: whether
+    // anything is arriving, and what it costs — a busy band's deltas are bigger
+    // than a quiet one's, and a stall reads as 0 rather than as a still picture.
+    const [rate, setRate] = useState(null);
     const aliveRef = useRef(true);
 
     useEffect(() => () => { aliveRef.current = false; }, []);
@@ -94,7 +101,7 @@ export default function BandSpectrumPanel({ minimal }) {
                 meta={meta}
                 prefs={prefs}
                 palette={display.palette}
-                onLive={setLive}
+                onRate={setRate}
             />
 
             {!minimal && (
@@ -102,7 +109,12 @@ export default function BandSpectrumPanel({ minimal }) {
                     <div className="bsp__foot">
                         <span className="bsp__band">{band}</span>
                         <span className="bsp__range">{formatSpanMHz(meta)}</span>
-                        <span className={`bsp__state${live ? ' is-live' : ''}`}>{live ? 'live' : 'waiting'}</span>
+                        <span
+                            className={`bsp__state${rate ? ' is-live' : ''}`}
+                            title="Data arriving on this band's spectrum stream"
+                        >
+                            {formatRate(rate)}
+                        </span>
                     </div>
 
                     <div className="bsp__ctl">
@@ -160,10 +172,15 @@ function formatSpanMHz(meta) {
 // Keyed on the band by its caller, so tuning to another band remounts it — a
 // new stream, a new bin count and an empty history, which is what changing band
 // means. Nothing here has to unpick the old band's state.
-function BandChart({ band, meta, prefs, palette, onLive }) {
+function BandChart({ band, meta, prefs, palette, onRate }) {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
+    // What the pointer is over, or null. State rather than a ref: it is drawn as
+    // DOM, and it changes at pointer speed rather than frame speed.
+    const [at, setAt] = useState(null);
+    // Measured width, which decides how many scale labels fit.
+    const [width, setWidth] = useState(0);
 
     // Everything the draw path touches lives in one ref: React state per frame
     // at 4 Hz would re-render the panel forty times a minute for a picture that
@@ -179,9 +196,16 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
         rowPx: null, rowBuf: null,
         head: 0,
         dirty: false,
+        ft8: null,
+        // Inter-arrival period, for putting an age on a waterfall row. Measured
+        // rather than assumed: the rate is the server's, not ours.
+        period: 250, lastAt: 0,
+        // Bytes since the throughput was last read.
+        bytes: 0,
     }).current;
 
     st.prefs = prefs;
+    st.ft8 = ft8Window(meta);
 
     // Palette as one Uint32 per level, which is what writing a waterfall row
     // wants — the LUT is three bytes a level for the main view's ImageData.
@@ -214,21 +238,37 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
         let seen = false;
 
         es.addEventListener('spectrum', (e) => {
+            // Counted before decoding, and as delivered: this is what the
+            // stream costs, not what the picture is worth.
+            st.bytes += e.data.length;
             const frame = decodeFrame(e.data);
             if (!frame) return;
             const next = applyFrame(st.bins, frame, meta.bin_count);
             if (!next) return;                  // a delta with no full frame yet
             st.bins = next;
             commit(st, meta.bin_count);
-            if (!seen) { seen = true; onLive(true); }
+            seen = true;
         });
-        es.onerror = () => { onLive(false); };
+        es.addEventListener('heartbeat', (e) => { st.bytes += (e.data || '').length; });
+
+        // Throughput, read once a second. A stall then reads as 0 rather than
+        // leaving the last figure up, which is the thing worth knowing.
+        let last = performance.now();
+        const rateTimer = setInterval(() => {
+            const now = performance.now();
+            const elapsed = now - last;
+            last = now;
+            const bytes = st.bytes;
+            st.bytes = 0;
+            if (elapsed > 0 && (seen || bytes)) onRate((bytes * 1000) / elapsed);
+        }, 1000);
 
         return () => {
+            clearInterval(rateTimer);
             es.close();
-            onLive(false);
+            onRate(null);
         };
-    }, [band, meta.bin_count, st, onLive]);
+    }, [band, meta.bin_count, st, onRate]);
 
     // ── Drawing ──────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -243,6 +283,57 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
         raf = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(raf);
     }, [st]);
+
+    // ── Hover readout ────────────────────────────────────────────────────────
+    //
+    // Frequency from the band's own edges, level from the nearest bin — over the
+    // trace that is the live frame, over the waterfall it is the stored row
+    // under the pointer, which is a measurement from a minute ago rather than
+    // one reconstructed from a colour.
+    const read = useCallback((e) => {
+        const wrap = wrapRef.current;
+        const spec = specRef.current;
+        if (!wrap || !spec || !st.bins) return;
+        const r = wrap.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+
+        const xFrac = (e.clientX - r.left) / r.width;
+        const xPct = Math.min(100, Math.max(0, xFrac * 100));
+        const yPct = Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100));
+
+        const hz = hzAt(meta, xFrac);
+        const bin = binAt(st.bins.length, xFrac);
+
+        // Which canvas the pointer is on, by its own box rather than by the
+        // fraction — the two are not the same height.
+        const specBox = spec.getBoundingClientRect();
+        const overWf = e.clientY > specBox.bottom;
+
+        let db = dbFromByte(st.bins[bin]);
+        let age = null;
+        if (overWf) {
+            const wfBox = wfRef.current ? wfRef.current.getBoundingClientRect() : null;
+            const yf = wfBox && wfBox.height ? (e.clientY - wfBox.top) / wfBox.height : 0;
+            const idx = rowAt(st.rows.length, yf, WF_ROWS);
+            if (idx >= 0 && st.rows[idx] && bin < st.rows[idx].length) {
+                db = st.rows[idx][bin];
+                age = (st.rows.length - 1 - idx) * st.period;
+            }
+        }
+
+        setAt({
+            freq: formatMHz(hz),
+            db: formatDb(db),
+            age: age === null ? null : formatAgeSec(age / 1000),
+            xPct,
+            yPct,
+            ...tipPlacement(e.pointerType, xPct, yPct),
+        });
+    }, [meta, st]);
+
+    const leave = useCallback((e) => {
+        if (readoutClearsOn(e.pointerType)) setAt(null);
+    }, []);
 
     // Canvas pixels follow the box and the display density, so the trace is a
     // hairline on a phone as on a monitor.
@@ -262,6 +353,7 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
                 c.width = Math.round(w * dpr);
                 c.height = Math.round(cssH * dpr);
             }
+            setWidth(w);
             st.dirty = true;
         };
         size();
@@ -272,9 +364,51 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
     }, [st]);
 
     return (
-        <div className="bsp__chart" ref={wrapRef}>
+        <div
+            className="bsp__chart"
+            ref={wrapRef}
+            onPointerDown={read}
+            onPointerMove={read}
+            onPointerLeave={leave}
+        >
             <canvas className="bsp__spec" ref={specRef} />
+
+            {/* The frequency scale, between the two pictures it belongs to
+                equally. No unit: the strip is 14 px tall and "MHz" three times
+                over says nothing the band name has not already. */}
+            <div className="bsp__scale">
+                {scaleTicks(meta, width).map((k) => (
+                    <React.Fragment key={k.hz}>
+                        <span
+                            className="bsp__notch"
+                            style={k.align === 'end' ? { right: 0 } : { left: `${k.pct}%` }}
+                        />
+                        <span
+                            className={`bsp__tick bsp__tick--${k.align}`}
+                            style={k.align === 'center' ? { left: `${k.pct}%` } : undefined}
+                        >
+                            {k.label}
+                        </span>
+                    </React.Fragment>
+                ))}
+            </div>
+
             <canvas className="bsp__wf" ref={wfRef} />
+            {at && (
+                <>
+                    <span className="bsp__cross" style={{ left: `${at.xPct}%` }} />
+                    <span
+                        className={`bsp__tip${at.left ? ' bsp__tip--left' : ''}${at.above ? ' bsp__tip--above' : ''}`}
+                        style={{ left: `${at.xPct}%`, top: `${at.yPct}%` }}
+                    >
+                        <span className="bsp__tip-row">
+                            <b>{at.freq}</b>
+                            <span className="bsp__tip-db">{at.db}</span>
+                        </span>
+                        {at.age && <span className="bsp__tip-age">{at.age}</span>}
+                    </span>
+                </>
+            )}
         </div>
     );
 }
@@ -283,6 +417,14 @@ function BandChart({ band, meta, prefs, palette, onLive }) {
 
 // A frame has arrived: keep it, re-run the auto range, push a waterfall row.
 function commit(st, binCount) {
+    const now = Date.now();
+    if (st.lastAt) {
+        const gap = now - st.lastAt;
+        // Plausible gaps only: a stall or a throttled tab is not the data rate.
+        if (gap >= 60 && gap <= 4000) st.period += (gap - st.period) * 0.2;
+    }
+    st.lastAt = now;
+
     const n = st.bins.length;
     const row = new Float32Array(n);
     for (let i = 0; i < n; i++) row[i] = dbFromByte(st.bins[i]);
@@ -291,7 +433,7 @@ function commit(st, binCount) {
 
     let moved = false;
     const valid = validValues(st.bins);
-    if (valid) moved = updateAutoRange(st.auto, valid, valid.length, Date.now());
+    if (valid) moved = updateAutoRange(st.auto, valid, valid.length, now);
 
     // A fresh ring has just been painted from the history, this row included, so
     // writing it again would put a duplicate at the other end of the buffer.
@@ -387,6 +529,34 @@ function drawSpectrum(st, canvas) {
         c.moveTo(0, y);
         c.lineTo(w, y);
         c.stroke();
+    }
+
+    // ── The FT8 window ───────────────────────────────────────────────────────
+    // The band's configured dial frequency and the 3 kHz of USB above it, which
+    // is where the traffic that makes a band look busy actually is. Drawn under
+    // the trace so it reads as a region of the band rather than as data.
+    if (st.ft8) {
+        const x1 = Math.max(0, st.ft8.start * w);
+        const x2 = Math.min(w, st.ft8.end * w);
+        if (x2 > x1) {
+            c.fillStyle = 'rgba(76,175,80,0.12)';
+            c.fillRect(x1, 0, Math.max(x2 - x1, 1), h);
+            c.strokeStyle = 'rgba(76,175,80,0.6)';
+            c.lineWidth = 1;
+            c.setLineDash([3, 3]);
+            c.beginPath();
+            c.moveTo(Math.round(x1) + 0.5, 0);
+            c.lineTo(Math.round(x1) + 0.5, h);
+            c.stroke();
+            c.setLineDash([]);
+
+            const size = Math.max(9, Math.round(h / 9));
+            c.font = `${size}px ui-monospace, monospace`;
+            c.textBaseline = 'top';
+            c.fillStyle = 'rgba(190,240,190,0.9)';
+            const tw = c.measureText('FT8').width;
+            c.fillText('FT8', x1 + tw + 6 > w ? Math.max(0, x1 - tw - 4) : x1 + 4, 3);
+        }
     }
 
     const bins = st.bins;

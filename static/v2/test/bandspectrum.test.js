@@ -13,8 +13,10 @@
 const assert = require('assert');
 const {
     AUTO_DEADBAND, AUTO_MIN_INTERVAL, AUTO_RESEED_DB, AUTO_SPAN_DEFAULT, AUTO_STEP,
-    applyFrame, bandsFromConfig, clampDb, createAutoRange, dbFromByte, decodeFrame,
-    rangeOf, savedPrefs, updateAutoRange, validValues,
+    FT8_SPAN_HZ, applyFrame, bandsFromConfig, binAt, clampDb, createAutoRange, dbFromByte,
+    decodeFrame, formatAgeSec, formatDb, formatMHz, fracOfHz, ft8Window, hzAt, rangeOf,
+    rowAt, savedPrefs, scaleDecimals, scaleTickCount, scaleTicks, updateAutoRange,
+    validValues, SCALE_LABEL_PX, SCALE_MAX_TICKS,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 
@@ -222,6 +224,164 @@ t('preferences survive having nowhere to store them', () => {
     assert.strictEqual(clampDb(50), 0);
     assert.strictEqual(clampDb('-73.4'), -73);
     assert.strictEqual(clampDb('rubbish'), 0);
+});
+
+// ── Reading the chart ────────────────────────────────────────────────────────
+
+const META40 = { name: '40m', start: 7000000, end: 7200000, bin_count: 400, ft8_frequency: 7074000 };
+
+t('frequency comes from the band edges, not from a bin index', () => {
+    // A reading taken as binIndex x bin_bandwidth drifts further off the further
+    // across the band you are — the two conventions disagree by a bin.
+    assert.strictEqual(hzAt(META40, 0), 7000000);
+    assert.strictEqual(hzAt(META40, 0.5), 7100000);
+    assert.strictEqual(hzAt(META40, 1), 7200000);
+    assert.strictEqual(hzAt(META40, 0.37), 7074000);
+});
+
+t('a pointer off either end of the chart still reads a frequency in the band', () => {
+    assert.strictEqual(hzAt(META40, -3), 7000000);
+    assert.strictEqual(hzAt(META40, 4), 7200000);
+    assert.strictEqual(binAt(400, -1), 0);
+    assert.strictEqual(binAt(400, 2), 399);
+    assert.strictEqual(binAt(400, 0.5), 200);
+});
+
+t('the waterfall reads the row under the pointer, newest at the top', () => {
+    // Rows are held oldest-first and drawn newest-first, and getting that
+    // backwards reads a value from 20 minutes ago as if it were now.
+    const rows = 100;
+    assert.strictEqual(rowAt(rows, 0, rows), rows - 1, 'the top row is the newest');
+    assert.strictEqual(rowAt(rows, 0.999, rows), 0, 'the bottom row is the oldest');
+    // A part-full history is drawn from the top, so the visible span is the
+    // ring's, not the history's.
+    assert.strictEqual(rowAt(10, 0, 220), 9);
+    assert.strictEqual(rowAt(0, 0.5, 220), -1);
+});
+
+t('the FT8 window is the dial frequency and the 3 kHz above it', () => {
+    const w = ft8Window(META40);
+    assert.strictEqual(w.hz, 7074000);
+    assert.ok(Math.abs(w.start - 0.37) < 1e-9, `${w.start}`);
+    assert.ok(Math.abs(w.end - fracOfHz(META40, 7074000 + FT8_SPAN_HZ)) < 1e-12);
+    assert.ok(w.end > w.start);
+});
+
+t('a band with no FT8 frequency configured gets no marker', () => {
+    // 2200m and 630m on a real receiver report 0.
+    assert.strictEqual(ft8Window({ ...META40, ft8_frequency: 0 }), null);
+    assert.strictEqual(ft8Window({ ...META40, ft8_frequency: undefined }), null);
+    assert.strictEqual(ft8Window(null), null);
+});
+
+t('an FT8 frequency outside the recorded span is not drawn at the edge', () => {
+    // The recorder covers 7.0-7.2; a marker at 7.25 belongs to nothing on
+    // screen, and clamping it would put a green line on a signal it is not.
+    assert.strictEqual(ft8Window({ ...META40, ft8_frequency: 7250000 }), null);
+    assert.strictEqual(ft8Window({ ...META40, ft8_frequency: 6900000 }), null);
+});
+
+t('the readout reads as a measurement', () => {
+    // Four decimals: the bins are 500 Hz apart on this band, and 7.074 MHz
+    // would round two of them onto the same reading.
+    assert.strictEqual(formatMHz(7074000), '7.0740 MHz');
+    assert.strictEqual(formatMHz(7074500), '7.0745 MHz');
+    assert.strictEqual(formatDb(-117.25), '-117.3 dBFS');
+    assert.strictEqual(formatAgeSec(0), 'now');
+    assert.strictEqual(formatAgeSec(1), '1 s ago');
+    assert.strictEqual(formatAgeSec(59), '59 s ago');
+    assert.strictEqual(formatAgeSec(60), '1 min ago');
+    assert.strictEqual(formatAgeSec(95), '1 min 35 s ago');
+});
+
+// ── The frequency strip ──────────────────────────────────────────────────────
+
+t('the strip has as many labels as it has room for, and no more', () => {
+    assert.strictEqual(scaleTickCount(0), 2, 'before it has been measured');
+    assert.strictEqual(scaleTickCount(120), 2);
+    assert.strictEqual(scaleTickCount(300), 4);
+    assert.strictEqual(scaleTickCount(2000), SCALE_MAX_TICKS, 'a wide panel is not a ruler');
+    // Whatever the width, no two labels are closer than one label's width.
+    for (const w of [90, 140, 210, 300, 480, 900]) {
+        const ticks = scaleTicks(META40, w);
+        const gapPx = (w * (ticks[1].pct - ticks[0].pct)) / 100;
+        assert.ok(gapPx >= SCALE_LABEL_PX - 1, `${w}px: labels ${gapPx.toFixed(0)}px apart`);
+    }
+});
+
+t('both ends of the band are labelled, and pushed inward to stay readable', () => {
+    const ticks = scaleTicks(META40, 300);
+    assert.strictEqual(ticks[0].hz, 7000000);
+    assert.strictEqual(ticks[ticks.length - 1].hz, 7200000);
+    assert.strictEqual(ticks[0].align, 'start');
+    assert.strictEqual(ticks[ticks.length - 1].align, 'end');
+    assert.ok(ticks.slice(1, -1).every((k) => k.align === 'center'));
+    assert.strictEqual(ticks[0].pct, 0);
+    assert.strictEqual(ticks[ticks.length - 1].pct, 100);
+});
+
+t('the labels carry enough decimals to be different numbers', () => {
+    // 40m's ticks are whole hundreds of kHz, so one decimal states them exactly
+    // and there is no reason to print three.
+    assert.deepStrictEqual(scaleTicks(META40, 210).map((k) => k.label),
+        ['7.0', '7.1', '7.2']);
+    // 20m's middle tick lands on 14.175, which one decimal would print as a
+    // frequency that is not there.
+    assert.deepStrictEqual(scaleTicks({ start: 14000000, end: 14350000 }, 210).map((k) => k.label),
+        ['14.000', '14.175', '14.350']);
+    // ...and 30m is 50 kHz wide, where two decimals would print 10.10 twice.
+    const m30 = { start: 10100000, end: 10150000 };
+    assert.deepStrictEqual(scaleTicks(m30, 210).map((k) => k.label),
+        ['10.100', '10.125', '10.150']);
+    // 2200m is 2.1 kHz wide and still gets distinct labels rather than a unit
+    // change nobody asked for.
+    const m2200 = { start: 135700, end: 137800 };
+    const labels = scaleTicks(m2200, 210).map((k) => k.label);
+    assert.strictEqual(new Set(labels).size, labels.length, labels.join(' '));
+});
+
+t('every band the receiver records gets a strip that reads', () => {
+    const bands = [
+        [135700, 137800], [472000, 479000], [1800000, 2000000], [3500000, 4000000],
+        [5250000, 5450000], [7000000, 7200000], [10100000, 10150000], [14000000, 14350000],
+        [18068000, 18168000], [21000000, 21450000], [24890000, 24990000], [28000000, 28300000],
+    ];
+    for (const [start, end] of bands) {
+        for (const w of [140, 300, 520]) {
+            const labels = scaleTicks({ start, end }, w).map((k) => k.label);
+            assert.strictEqual(new Set(labels).size, labels.length,
+                `${start}-${end} at ${w}px: ${labels.join(' ')}`);
+            assert.ok(labels.every((l) => !/[A-Za-z]/.test(l)), 'no unit on the strip');
+        }
+    }
+});
+
+t('a label never states a frequency the tick is not on', () => {
+    // Distinctness alone would print this band as 7.0 / 7.1 / 7.2, and its top
+    // end is 7.199 — a band edge that does not exist.
+    // The middle tick of this odd band is 7.0995, and the labels say so rather
+    // than rounding three real frequencies onto 7.0 / 7.1 / 7.2.
+    assert.deepStrictEqual(scaleTicks({ start: 7000000, end: 7199000 }, 210).map((k) => k.label),
+        ['7.0000', '7.0995', '7.1990']);
+
+    // In general: every label is its tick to within half of the last place it
+    // prints, so it can be read as a frequency rather than as an approximation.
+    for (const [start, end] of [[7000000, 7199000], [3500000, 3999000], [28000000, 28299000]]) {
+        for (const w of [140, 300, 520]) {
+            for (const k of scaleTicks({ start, end }, w)) {
+                const dp = (k.label.split('.')[1] || '').length;
+                const unit = 1e6 / (10 ** dp);
+                assert.ok(Math.abs(parseFloat(k.label) * 1e6 - k.hz) <= unit / 2 + 1e-6,
+                    `${k.label} is not ${k.hz} to ${dp} places`);
+            }
+        }
+    }
+});
+
+t('a band with no span at all gets no strip', () => {
+    assert.deepStrictEqual(scaleTicks({ start: 7e6, end: 7e6 }, 300), []);
+    assert.deepStrictEqual(scaleTicks(null, 300), []);
+    assert.strictEqual(scaleDecimals([7e6, 7e6]), 5);
 });
 
 console.log(`\n${pass} passed`);

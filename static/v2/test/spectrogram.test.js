@@ -5,9 +5,9 @@ const assert = require('assert');
 const {
     DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, bandLabel, formatRange,
     formatClock, formatTickHz, formatTzTag, freqLabelEvery,
-    freqTickStep, freqTicks, pointReadout, readoutClearsOn, timeTickStepMinutes,
-    timeTicks, tipPlacement,
+    freqTickStep, freqTicks, pointReadout, timeTickStepMinutes, timeTicks,
 } = require('./.build/spectrogram.cjs');
+const { readoutClearsOn, tipPlacement } = require('./.build/hovertip.cjs');
 
 let pass = 0;
 const t = (name, fn) => {

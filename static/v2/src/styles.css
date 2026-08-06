@@ -3273,6 +3273,74 @@ a.btn { text-decoration: none; }
 }
 .bsp__spec, .bsp__wf { display: block; width: 100%; }
 
+/* The frequency strip between the trace and the waterfall. The end labels are
+   pushed inward rather than centred on their notch, which is the only way to
+   read the band's own edges in a panel this narrow — a centred label at 0%
+   would be half outside it. */
+.bsp__scale {
+    position: relative;
+    height: 15px;
+    flex: none;
+    background: var(--surface-3);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    line-height: 15px;
+    color: var(--text-faint);
+    overflow: hidden;
+}
+.bsp__notch {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 4px;
+    background: var(--border);
+}
+.bsp__tick { position: absolute; top: 0; white-space: nowrap; }
+.bsp__tick--start { left: 3px; }
+.bsp__tick--end { right: 3px; }
+.bsp__tick--center { transform: translateX(-50%); }
+
+/* Hover readout. The line spans both canvases, because a frequency is a
+   frequency whether you are reading it off the trace or off the waterfall. */
+.bsp__chart { position: relative; }
+.bsp__cross {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    pointer-events: none;
+    background: rgba(255, 255, 255, 0.55);
+}
+.bsp__tip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: max-content;
+    gap: 1px;
+    margin: 10px 0 0 10px;
+    padding: 3px 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    line-height: 1.4;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.bsp__tip-row { display: flex; align-items: baseline; gap: 6px; }
+.bsp__tip b { color: var(--text); font-weight: 600; }
+.bsp__tip-db { color: var(--text); }
+.bsp__tip-age { color: var(--text-faint); }
+.bsp__tip--left { transform: translateX(-100%); margin-left: -10px; }
+.bsp__tip--above { transform: translateY(-100%); margin-top: -10px; }
+.bsp__tip--left.bsp__tip--above { transform: translate(-100%, -100%); }
+
 .bsp__foot {
     display: flex;
     align-items: baseline;

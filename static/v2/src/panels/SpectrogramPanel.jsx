@@ -25,8 +25,9 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import {
     POLL_MS, bandForView, bandLabel, formatTzTag, freqTicks, fullUrl, listUrl, metaUrl,
-    pointReadout, readoutClearsOn, spectrogramEnabled, thumbUrl, timeTicks, tipPlacement,
+    pointReadout, spectrogramEnabled, thumbUrl, timeTicks,
 } from '../lib/spectrogram.js';
+import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 
 export { spectrogramEnabled };
 

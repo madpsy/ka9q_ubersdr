@@ -273,3 +273,121 @@ export function savePrefs(p) {
 export function clampDb(v) {
     return Math.max(-160, Math.min(0, Math.round(Number(v) || 0)));
 }
+
+// ── Reading the chart ────────────────────────────────────────────────────────
+//
+// Frequency comes from the band's own start/end, not from a bin index: bins are
+// spaced (end − start) / n, and a reading taken as `binIndex × bin_bandwidth`
+// drifts further off the true frequency the more bins there are. The dB value
+// does come from a bin, because that is what a bin is.
+
+export function hzAt(meta, xFrac) {
+    const start = meta.start || 0;
+    const span = (meta.end || 0) - start;
+    const x = Math.min(1, Math.max(0, xFrac));
+    return Math.round(start + x * span);
+}
+
+export function fracOfHz(meta, hz) {
+    const start = meta.start || 0;
+    const span = (meta.end || 0) - start;
+    if (!(span > 0)) return 0;
+    return (hz - start) / span;
+}
+
+export function binAt(binCount, xFrac) {
+    if (!binCount) return 0;
+    const x = Math.min(1, Math.max(0, xFrac));
+    return Math.min(binCount - 1, Math.max(0, Math.round(x * (binCount - 1))));
+}
+
+// Which stored row a point down the waterfall is on. Rows are held oldest-first
+// and drawn newest at the top, so y = 0 is the last row in the array.
+export function rowAt(rowCount, yFrac, visibleRows) {
+    if (!rowCount) return -1;
+    const y = Math.min(1, Math.max(0, yFrac));
+    const idx = Math.floor(y * (visibleRows || rowCount));   // 0 = newest on screen
+    return rowCount - 1 - Math.min(rowCount - 1, idx);
+}
+
+// The 3 kHz FT8 window: the dial frequency the band is configured with, and the
+// USB passband above it. A band without one configured reports 0.
+export const FT8_SPAN_HZ = 3000;
+
+export function ft8Window(meta) {
+    const hz = (meta && meta.ft8_frequency) || 0;
+    if (hz <= 0) return null;
+    const start = fracOfHz(meta, hz);
+    const end = fracOfHz(meta, hz + FT8_SPAN_HZ);
+    if (end <= 0 || start >= 1) return null;      // configured, but outside this band
+    return { hz, start, end };
+}
+
+export function formatMHz(hz) {
+    return `${(hz / 1e6).toFixed(4)} MHz`;
+}
+
+export function formatDb(db) {
+    return `${db.toFixed(1)} dBFS`;
+}
+
+export function formatAgeSec(sec) {
+    if (!(sec > 0)) return 'now';
+    if (sec < 60) return `${Math.round(sec)} s ago`;
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return s ? `${m} min ${s} s ago` : `${m} min ago`;
+}
+
+// ── The frequency scale between the trace and the waterfall ──────────────────
+//
+// A thin strip, so the count comes from the width: a label is about seven
+// monospace characters and needs room either side of it, and two labels touching
+// is worse than one label fewer. Both ends are always ticks — the band's own
+// edges are the two most useful numbers on the strip, and they are what tell you
+// which band you are looking at.
+
+// Room a label wants, including the gap to its neighbour.
+export const SCALE_LABEL_PX = 70;
+export const SCALE_MAX_TICKS = 5;
+
+export function scaleTickCount(widthPx) {
+    if (!widthPx) return 2;
+    return Math.max(2, Math.min(SCALE_MAX_TICKS, Math.floor(widthPx / SCALE_LABEL_PX)));
+}
+
+// The fewest decimals that both tell the labels apart and state each tick
+// exactly. Distinctness alone would print a 7.000–7.199 band as 7.0 / 7.1 / 7.2,
+// which is a band edge that does not exist; exactness alone would print every
+// band at five places on a 15 px strip. So 40m reads 7.0 / 7.1 / 7.2 and 20m —
+// whose ticks land on 14.175 — reads 14.000 / 14.175 / 14.350.
+export function scaleDecimals(values) {
+    for (const dp of [1, 2, 3, 4, 5]) {
+        const labels = values.map((hz) => (hz / 1e6).toFixed(dp));
+        if (new Set(labels).size !== values.length) continue;
+        const exact = labels.every((l, i) => Math.abs(parseFloat(l) * 1e6 - values[i]) < 1);
+        if (exact) return dp;
+    }
+    return 5;
+}
+
+// Ticks across the strip: evenly spaced, both edges included. `align` says how
+// the label sits against its tick — the end ones are pushed inward so they are
+// readable rather than half off the panel.
+export function scaleTicks(meta, widthPx) {
+    const start = (meta && meta.start) || 0;
+    const end = (meta && meta.end) || 0;
+    if (!(end > start)) return [];
+
+    const n = scaleTickCount(widthPx);
+    const hzs = [];
+    for (let i = 0; i < n; i++) hzs.push(start + ((end - start) * i) / (n - 1));
+    const dp = scaleDecimals(hzs);
+
+    return hzs.map((hz, i) => ({
+        hz,
+        pct: (i / (n - 1)) * 100,
+        label: (hz / 1e6).toFixed(dp),
+        align: i === 0 ? 'start' : i === n - 1 ? 'end' : 'center',
+    }));
+}

@@ -54,28 +54,18 @@ import { Icon } from './ui.jsx';
  */
 function useHeadGesture(enabled, minimal, toggle) {
     const at = useRef(null);
+    // Is the touch now in progress one this bar started? Separate from `at`,
+    // which pointerup clears — and touchend runs *after* pointerup.
+    const ours = useRef(false);
 
     const onPointerDown = useCallback((e) => {
         // The buttons on the bar are their own gesture. Without this a tap on
         // Close would land here too and toggle the panel on its way out — and
-        // the preventDefault below would stop the button ever seeing its click.
+        // the touchend below would stop the button ever seeing its click.
         if (e.target.closest && e.target.closest('button')) return;
-        // No compatibility mouse events for this touch.
-        //
-        // A touch produces a delayed mousedown/mouseup/click after it ends, and
-        // those are hit-tested against the DOM *as it is then* rather than
-        // retargeted the way the pointer events are — pointer capture does not
-        // cover them. This gesture's whole job is to resize the sheet, so by the
-        // time that click is dispatched the bar has moved and something else is
-        // under the finger: expanding the Multipad grew the sheet upwards until
-        // the view row sat where the title bar had been, and a tap in the middle
-        // of the bar came back as a tap on "Spectrum". Shrinking is worse — the
-        // sheet moves down, the click lands on the spectrum behind it and
-        // retunes the receiver.
-        //
-        // Cancelling the pointerdown suppresses the whole compatibility
-        // sequence, which is exactly the sequence that has nowhere valid to
-        // land. The bar has no click behaviour of its own to lose.
+        ours.current = e.pointerType === 'touch';
+        // Selection and focus only; this does *not* stop the click — see
+        // onTouchEnd, which is the part that does.
         e.preventDefault();
         at.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
         // Captured so a drag that leaves the bar — which a downward one does
@@ -96,10 +86,47 @@ function useHeadGesture(enabled, minimal, toggle) {
         haptic('toggle');
     }, [minimal, toggle]);
 
-    const onPointerCancel = useCallback(() => { at.current = null; }, []);
+    const onPointerCancel = useCallback(() => {
+        at.current = null;
+        ours.current = false;
+    }, []);
+
+    /**
+     * The one thing that actually stops the click a touch leaves behind.
+     *
+     * A touch ends with a delayed mousedown/mouseup/click, and those are
+     * hit-tested against the DOM *as it is then* — pointer capture does not
+     * retarget them. This gesture resizes the sheet, so by the time that click
+     * is dispatched the bar has moved and something else is in that spot:
+     * expanding the Multipad grew the sheet upwards until the view row sat where
+     * the title bar had been, and a tap in the middle of the bar came back as a
+     * tap on "Spectrum" — the middle of that row's three. Shrinking is worse:
+     * the sheet moves down and the click lands on the spectrum behind it.
+     *
+     * Cancelling `pointerdown` looks like it should prevent this and does not.
+     * Chrome builds the compatibility mouse events from the *touch* stream, not
+     * the pointer stream, so the click arrived regardless — which is why the
+     * first attempt at this changed nothing. `touchend` is the event that
+     * suppresses them, and cancelling it is the documented way to do so.
+     *
+     * Registered natively and non-passively, because React registers touch
+     * listeners as passive and preventDefault on a passive listener is ignored:
+     * an `onTouchEnd` prop here would have been a second no-op.
+     */
+    const onTouchEnd = useCallback((e) => {
+        if (!ours.current) return;
+        ours.current = false;
+        if (e.cancelable) e.preventDefault();
+    }, []);
+
+    // Attached by ref rather than by prop, for the same reason. The listener
+    // goes with the node when the sheet closes.
+    const bind = useCallback((el) => {
+        if (el) el.addEventListener('touchend', onTouchEnd, { passive: false });
+    }, [onTouchEnd]);
 
     if (!enabled) return null;
-    return { onPointerDown, onPointerUp, onPointerCancel };
+    return { ref: bind, onPointerDown, onPointerUp, onPointerCancel };
 }
 
 export default function MobileShell() {

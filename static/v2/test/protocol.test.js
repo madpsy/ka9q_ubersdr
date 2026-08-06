@@ -515,6 +515,31 @@ t('lowerBound finds the first index at or after the target', () => {
     assert.strictEqual(mk.lowerBound(arr, 99), 4);
 });
 
+t('a layer that outranks the bookmarks keeps its row', () => {
+    // The VFO markers are laid out before the bookmarks and handed to them as
+    // occupied space: a VFO is somewhere you put down yourself, and a bookmark
+    // shuffling it up a row — or off the bar — would be the wrong way round.
+    const vfo = { x: 100, width: 13, row: 1 };
+    const placed = mk.layoutBookmarks({
+        sorted: [{ name: 'X', frequency: 7.1e6 }],
+        startFreq: 7.0e6,
+        endFreq: 7.2e6,
+        width: 200,
+        measure: () => 60,
+        occupied: [vfo],
+    });
+    assert.ok(placed.every((p) => p.row !== vfo.row), 'a bookmark took the VFO row');
+    assert.ok(!placed.includes(vfo), 'and the seed is not drawn twice');
+});
+
+t('without a seed the bookmarks lay out as they always did', () => {
+    const args = {
+        sorted: [{ name: 'X', frequency: 7.1e6 }],
+        startFreq: 7.0e6, endFreq: 7.2e6, width: 200, measure: () => 60,
+    };
+    assert.deepStrictEqual(mk.layoutBookmarks(args), mk.layoutBookmarks({ ...args, occupied: [] }));
+});
+
 t('full span with 2450 bookmarks yields a readable handful', () => {
     const placed = mk.layoutBookmarks({
         sorted: MARKS, startFreq: 0, endFreq: 30e6, width: 1600, measure,

@@ -63,7 +63,6 @@ const VOICE_INK = '#ffffff';
 // Crimson against the purple of voice activity, which is the nearest hue here.
 const VFO_FILL = 'rgba(233, 30, 99, 0.95)';
 const VFO_INK = '#ffffff';
-const VFO_R = 7;             // radius, a shade over half the pill height
 
 // Spot colours are v1's, so a green pill means the same thing in both
 // frontends: green for DX cluster spots (dx-cluster drawDXSpotsOnSpectrum),
@@ -234,6 +233,33 @@ export default function MarkerBar({ width }) {
         // ---- bookmarks ---------------------------------------------------
         // Kept so the voice layer below can avoid the space they took.
         let placedMarks = [];
+
+        // ---- VFOs: laid out first, drawn last -------------------------------
+        // First because they outrank everything else in the bar: a bookmark or
+        // a spot can move up a row or be dropped, and a VFO is somewhere you
+        // put down yourself and expect to find again. Everything below is
+        // seeded with these, so they fit around the VFOs rather than over them.
+        //
+        // The drawing waits until the end so the circles sit on top of any
+        // stem that crosses them — see the block at the foot of this function.
+        let placedVfos = [];
+        if (showVfos) {
+            const items = [];
+            for (const v of markableVfos(vfos, tuning.frequency)) {
+                if (v.frequency < startFreq || v.frequency > endFreq) continue;
+                items.push({
+                    vfo: v,
+                    x: ((v.frequency - startFreq) / span) * width,
+                    // A round mark is as wide as it is tall, and it takes a row
+                    // the same way a pill does — same height, same baseline, so
+                    // the bar reads as one set of markers rather than two.
+                    width: PILL_H,
+                });
+            }
+            items.sort((a, b) => a.x - b.x);
+            placedVfos = assignRows(items);
+            placedMarks = placedVfos.slice();
+        }
         if (marks.length) {
             c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
             c.textBaseline = 'middle';
@@ -251,11 +277,12 @@ export default function MarkerBar({ width }) {
                 return w;
             };
 
-            placedMarks = layoutBookmarks({
-                sorted: marks, startFreq, endFreq, width, measure,
+            // Seeded with the VFOs, which were placed first and outrank these.
+            const placedBookmarks = layoutBookmarks({
+                sorted: marks, startFreq, endFreq, width, measure, occupied: placedMarks,
             });
 
-            for (const p of placedMarks) {
+            for (const p of placedBookmarks) {
                 const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
                 const x = p.x;
                 const w = p.width;
@@ -284,6 +311,8 @@ export default function MarkerBar({ width }) {
 
                 hitsRef.current.bookmarks.push({ x, y, w, h: PILL_H, item: p.item });
             }
+            // The layers below avoid these as well as the VFOs.
+            placedMarks = placedMarks.concat(placedBookmarks);
         }
 
         // ---- voice activity ----------------------------------------------
@@ -392,42 +421,38 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
-        // ---- VFOs ----------------------------------------------------------
-        // Last, and round rather than a pill: these are the only marks in the
-        // bar that are not a label for something, so a letter in a circle says
-        // "a place, and which one" in the width of a full stop. Drawn over
-        // everything else because a VFO is the one mark you go looking for.
-        if (showVfos) {
-            const parked = markableVfos(vfos, tuning.frequency);
-            for (const v of parked) {
-                if (v.frequency < startFreq || v.frequency > endFreq) continue;
-                const x = ((v.frequency - startFreq) / span) * width;
-                const y = BAND_H + 2 + PILL_H / 2;
+        // ---- VFOs, drawn -----------------------------------------------------
+        // Placed at the top of this function so the other layers fit around
+        // them; drawn here so the circles sit over any stem that crosses one.
+        // Same rows, same baseline and same stem as every other marker — the
+        // only difference is the shape and that they had first claim on a row.
+        for (const p of placedVfos) {
+            const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
+            const x = p.x;
+            const cy = y + PILL_H / 2;
+            const r = PILL_H / 2;
 
-                c.strokeStyle = 'rgba(233, 30, 99, 0.55)';
-                c.lineWidth = 1;
-                c.beginPath();
-                c.moveTo(Math.round(x) + 0.5, y + VFO_R);
-                c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
-                c.stroke();
+            c.strokeStyle = 'rgba(233, 30, 99, 0.55)';
+            c.lineWidth = 1;
+            c.beginPath();
+            c.moveTo(Math.round(x) + 0.5, y + PILL_H);
+            c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+            c.stroke();
 
-                c.beginPath();
-                c.arc(x, y, VFO_R, 0, Math.PI * 2);
-                c.fillStyle = VFO_FILL;
-                c.fill();
-                c.strokeStyle = 'rgba(255,255,255,0.65)';
-                c.stroke();
+            c.beginPath();
+            c.arc(x, cy, r, 0, Math.PI * 2);
+            c.fillStyle = VFO_FILL;
+            c.fill();
+            c.strokeStyle = 'rgba(255,255,255,0.65)';
+            c.stroke();
 
-                c.font = '700 9px ui-sans-serif, system-ui, sans-serif';
-                c.textBaseline = 'middle';
-                c.textAlign = 'center';
-                c.fillStyle = VFO_INK;
-                c.fillText(v.id, x, y + 0.5);
+            c.font = '700 9px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+            c.fillStyle = VFO_INK;
+            c.fillText(p.vfo.id, x, cy + 0.5);
 
-                hitsRef.current.vfos.push({
-                    x, y: y - VFO_R, w: VFO_R * 2, h: VFO_R * 2, vfo: v,
-                });
-            }
+            hitsRef.current.vfos.push({ x, y, w: PILL_H, h: PILL_H, vfo: p.vfo });
         }
 
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,

@@ -123,7 +123,9 @@ export function capDensity(items, max = MAX_MARKERS) {
 }
 
 // Full bookmark layout: window -> positions -> cap -> rows.
-export function layoutBookmarks({ sorted, startFreq, endFreq, width, measure, max = MAX_MARKERS }) {
+export function layoutBookmarks({
+    sorted, startFreq, endFreq, width, measure, max = MAX_MARKERS, occupied = [],
+}) {
     const span = endFreq - startFreq;
     if (!(span > 0) || !(width > 0)) return [];
 
@@ -136,7 +138,10 @@ export function layoutBookmarks({ sorted, startFreq, endFreq, width, measure, ma
     // Two stages: the even sample bounds the work and keeps the survivors
     // spread across the whole width; the row assignment then drops whatever
     // still will not fit, so the bar never overlaps itself.
-    return assignRows(capDensity(placed, max));
+    // `occupied` is what has already claimed space — a layer that outranks the
+    // bookmarks and was laid out before them. Bookmarks then fit around it
+    // rather than the other way round.
+    return assignRows(capDensity(placed, max), occupied);
 }
 
 // Band colours, matching v1's generateBandColors so the two frontends agree.

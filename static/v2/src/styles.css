@@ -3271,7 +3271,11 @@ a.btn { text-decoration: none; }
     overflow: hidden;
     line-height: 0;
 }
-.bsp__spec, .bsp__wf { display: block; width: 100%; }
+.bsp__spec { display: block; width: 100%; }
+/* Clipped by .bsp__chart's overflow: the canvas is RING_PAD taller than the
+   space it occupies, and the slide moves it within that. */
+.bsp__wf { display: block; width: 100%; will-change: transform; }
+.bsp__wfclip { position: relative; overflow: hidden; line-height: 0; }
 
 /* The frequency strip between the trace and the waterfall. The end labels are
    pushed inward rather than centred on their notch, which is the only way to

@@ -300,6 +300,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     st.prefs = prefs;
     st.ft8 = ft8Window(meta);
     st.dial = dialWindow(meta, tuning);
+    st.bandName = band;
     st.vfoId = vfoId;
     // The Display panel's settings, read on every render: this pane honours the
     // same ones the main spectrum and waterfall do, so one switch governs both
@@ -933,14 +934,41 @@ function drawSpectrum(st, canvas) {
         }
     }
 
-    // Both labels live at the top of the trace, and on most bands they are
-    // within a few kHz of each other — 7.074 is inside 40m's FT8 window. So the
-    // VFO's box is worked out first and the FT8 label steps down a line when it
-    // would land on it: the dial is the one you are reading, and it keeps the
-    // top line.
+    // The labels along the top of the trace: the band's name, the dial, and the
+    // FT8 window. All three want the same corner, and on most bands two of them
+    // are within a few kHz of each other — 7.074 is inside 40m's FT8 window — so
+    // each is placed on the first line it fits, in that order of precedence. The
+    // band's name goes first because it is the one that says what you are
+    // looking at rather than where something is in it.
     const labelSize = Math.max(9, Math.round(h / 9));
-    const labelY = 3;
+    const labelLine = labelSize + 2;
+    const labelTop = 3;
+    const placed = [];
+    const placeLabel = (x, tw) => {
+        for (let line = 0; line < 3; line++) {
+            const clash = placed.some((q) => q.line === line
+                && x < q.x + q.w + 4 && x + tw + 4 > q.x);
+            if (!clash) {
+                placed.push({ line, x, w: tw });
+                return labelTop + line * labelLine;
+            }
+        }
+        return labelTop + 2 * labelLine;
+    };
+
     c.font = `${labelSize}px ui-monospace, monospace`;
+    c.textBaseline = 'top';
+    c.textAlign = 'left';
+
+    // The band, in the corner. White, because it is the caption for the whole
+    // picture rather than a mark on part of it.
+    if (st.bandName) {
+        const tw = c.measureText(st.bandName).width;
+        const y = placeLabel(4, tw);
+        c.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        c.fillText(st.bandName, 4, y);
+    }
+
     let dialLabel = null;
     if (st.dial) {
         const dx = viewFrac(st.zoom, st.dial.at) * w;
@@ -948,7 +976,7 @@ function drawSpectrum(st, canvas) {
             const text = `VFO ${st.vfoId || 'A'}`;
             const tw = c.measureText(text).width;
             const x = dx + tw + 6 > w ? Math.max(0, dx - tw - 4) : dx + 4;
-            dialLabel = { text, x, w: tw, dx };
+            dialLabel = { text, x, w: tw, y: placeLabel(x, tw) };
         }
     }
 
@@ -978,9 +1006,7 @@ function drawSpectrum(st, canvas) {
             c.fillStyle = 'rgba(190,240,190,0.9)';
             const tw = c.measureText('FT8').width;
             const lx = x1 + tw + 6 > w ? Math.max(0, x1 - tw - 4) : x1 + 4;
-            const clash = dialLabel
-                && lx < dialLabel.x + dialLabel.w + 4 && lx + tw + 4 > dialLabel.x;
-            c.fillText('FT8', lx, clash ? labelY + labelSize + 2 : labelY);
+            c.fillText('FT8', lx, placeLabel(lx, tw));
         }
     }
 
@@ -1014,7 +1040,7 @@ function drawSpectrum(st, canvas) {
                 c.textBaseline = 'top';
                 c.textAlign = 'left';
                 c.fillStyle = 'rgba(255, 190, 215, 0.95)';
-                c.fillText(dialLabel.text, dialLabel.x, labelY);
+                c.fillText(dialLabel.text, dialLabel.x, dialLabel.y);
             }
         }
     }

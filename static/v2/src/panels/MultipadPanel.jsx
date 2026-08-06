@@ -222,14 +222,19 @@ function MarkerEdges() {
                    no click count, a mouse or finger always does. */
                 onClick={(e) => { if (m && e.detail === 0) act(); }}
             >
-                {side === 'prev' && chevron}
-                {/* Between the label and the middle of the drum, as in the
-                    Markers panel, so the two flags face each other rather than
-                    hugging the chevrons. */}
-                {side === 'next' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
-                {label && <span className="barrel__edge-label">{label}</span>}
-                {side === 'prev' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
-                {side === 'next' && chevron}
+                {chevron}
+                {/* The name is a caption on the button, not part of it: it hangs
+                    off the inner side and takes no pointer events, so the target
+                    stays the narrow box around the chevron however long the
+                    marker is called. Its own wrapper because that is what can be
+                    hung there as one piece — the flag sits between the name and
+                    the middle of the drum, as in the Markers panel, so the two
+                    flags face each other rather than hugging the chevrons. */}
+                <span className="barrel__edge-text">
+                    {side === 'next' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
+                    {label && <span className="barrel__edge-label">{label}</span>}
+                    {side === 'prev' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
+                </span>
             </button>
         );
     };

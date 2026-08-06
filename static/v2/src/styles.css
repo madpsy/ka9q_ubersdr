@@ -1986,21 +1986,30 @@ a.btn { text-decoration: none; }
 
 /* Prev/next marker, on the ends of the frequency drum — see MarkerEdges.
  *
- * Full height rather than a chip floated in the middle of it: this is aimed at
- * with a thumb, and the drum's 48 px is the tallest target the pad has. Content
- * width, capped at a third, so a five-letter callsign takes a callsign's worth of
- * the drum and only a long bookmark name takes the cap.
+ * A fixed narrow box at each end, full height. Narrow deliberately: a tap here
+ * jumps somewhere else in the band, and the same finger is spinning the drum, so
+ * it should take aiming at the edge rather than being where a thumb lands anyway.
+ * Full height because the aiming that matters is horizontal — the drum's 48 px is
+ * the tallest target the pad has and there is no reason to spend any of it.
+ *
+ * Fixed rather than sized to the name, which is the other half of that: a target
+ * that grew with the callsign under it would be a different gesture on every
+ * frequency, and would move while the dial was turning.
  *
  * They cost the drum no width at all: a press on one still reaches the barrel and
  * still spins it, and only a press that goes nowhere counts as aiming at the
  * button (MarkerEdges, and isTap in lib/barrel.js).
  *
- * The zone is washed in the drum's own colour, fading out towards the middle:
- * that is what puts the label over a clear background instead of over the ticks,
- * without fencing it off with a border. A border here would be a vertical line
- * at some x on a frequency scale, next to an index needle — read as a mark at
- * that frequency, which is the same trap .barrel__snr goes out of its way to
- * avoid.
+ * They cost it no *reading* either, which is why there is no background here: the
+ * SNR wash runs the full width of the drum behind them, as it did before these
+ * existed, and a panel of the drum's own colour at each end would have cut the
+ * ends off it. Nothing is needed in its place — the strip's mask (see
+ * .barrel__strip) already fades the scale to nothing over exactly these last few
+ * dozen pixels, so the label is over faded ticks rather than a live scale, and
+ * the text-shadow below covers what is left of them. A border would have been
+ * worse than either: a vertical line at some x on a frequency scale, beside an
+ * index needle, is read as a mark at that frequency — the trap .barrel__snr goes
+ * out of its way to avoid.
  *
  * z-index 2, the same as the belly shading, so the shading — later in paint
  * order, being a pseudo-element — carries on across the ends and the drum still
@@ -2013,12 +2022,18 @@ a.btn { text-decoration: none; }
     z-index: 2;
     display: flex;
     align-items: center;
-    gap: 3px;
-    max-width: 33%;
-    padding: 0 5px;
+    justify-content: center;
+    /* The whole target, and all of it: about two thirds of a fingertip, which is
+       small enough to have to be meant. The name hangs outside it — see
+       .barrel__edge-text — so this never changes with what is on either side. */
+    width: 28px;
+    padding: 0;
+    /* The caption is outside the box on purpose; nothing here may clip it. */
+    overflow: visible;
     border: 0;
-    /* The wash, in the drum's own colour, fading towards the middle. */
-    --edge-wash: var(--surface-3);
+    /* Nothing behind the label but the drum and whatever the SNR is doing there.
+       A wash appears under the pointer only — see the hover rule. */
+    background: none;
     /* Set by the marker's kind below, so hover and press can change the ink
        without a specificity fight with the tint. */
     --edge-ink: var(--text-dim);
@@ -2026,34 +2041,63 @@ a.btn { text-decoration: none; }
     font-family: var(--font);
     font-size: calc(10px * var(--ui-scale));
     font-weight: 650;
+    /* Enough to lift six characters off the faded tail of the scale without
+       putting a panel over the SNR wash. The drum's own colour, so it reads as
+       the label sitting proud of the surface rather than as a glow. */
+    text-shadow: 0 0 3px var(--surface-3), 0 0 3px var(--surface-3);
     cursor: pointer;
     /* The drum's, not `manipulation`: a press here is left to reach the barrel so
        the scale can be spun from its ends, and that only works while sideways
        still belongs to us and only vertical is the sheet's to scroll with. */
     touch-action: pan-y;
 }
-.barrel__edge--prev {
-    left: 0;
-    padding-right: 10px;
-    background: linear-gradient(90deg, var(--edge-wash) 60%, rgba(0, 0, 0, 0));
+/* Which way the hover wash fades: away from the end it is anchored to, so it
+   dissolves into the middle of the drum rather than stopping at a line. Declared
+   here and not on the hover rule itself, so the variable always exists — an
+   undefined one would throw the whole gradient away. */
+.barrel__edge--prev { left: 0; --edge-fade: 90deg; }
+.barrel__edge--next { right: 0; --edge-fade: 270deg; }
+
+/* The name, hung off the inner side of the box and pressable through: a press on
+   the caption is a press on the drum, and spins it. Absolute so the box's width
+   is the box's own business — the alternative was letting the flex line overflow,
+   which lays out differently at each end and clips in some browsers.
+
+   Capped in px rather than as a fraction: this is positioned against a 28 px
+   containing block, so a percentage here would mean 28 px of it. The cap is well
+   clear of the eight characters shortMarkerName allows and only exists so two
+   long names on a narrow pad cannot meet in the middle. */
+.barrel__edge-text {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 108px;
+    white-space: nowrap;
+    pointer-events: none;
 }
-.barrel__edge--next {
-    right: 0;
-    padding-left: 10px;
-    background: linear-gradient(270deg, var(--edge-wash) 60%, rgba(0, 0, 0, 0));
+.barrel__edge--prev .barrel__edge-text { left: 100%; }
+.barrel__edge--next .barrel__edge-text { right: 100%; }
+
+/* Hover brings in the wash rather than changing the ink, because the ink is
+   already saying which feed this marker came from and a highlight that flattened
+   it back to plain text would cost more than it gave. It is also the one moment
+   the wash is worth covering the SNR for: a pointer is on the zone, so what is
+   wanted from it is "this is a button", not a signal reading. Touch never sees
+   it, which is the whole point — a thumb gets the drum's reading back the instant
+   it lifts. The press takes the accent, as every other button here does. */
+.barrel__edge:not([aria-disabled]):hover {
+    background: linear-gradient(var(--edge-fade), var(--surface-hover) 60%, rgba(0, 0, 0, 0));
 }
-/* Hover lifts the wash rather than the ink, because the ink is already saying
-   which feed this marker came from and a highlight that flattened it back to
-   plain text would cost more than it gave. The press does take the accent, as
-   every other button here does. */
-.barrel__edge:not([aria-disabled]):hover { --edge-wash: var(--surface-hover); }
 .barrel__edge:not([aria-disabled]):active { --edge-ink: var(--accent); }
 /* Nothing that way: the chevron stays, faded, so the end of the drum does not
    become a dead area that used to have a button in it. Still draggable, which is
    why this is aria-disabled and not :disabled — see MarkerEdges. */
 .barrel__edge[aria-disabled] { opacity: 0.3; cursor: grab; }
-/* The label is the only part that gives ground: a chevron squashed to fit a long
-   bookmark name would stop reading as a direction. */
+/* If the caption ever does hit its cap, the name is what gives ground — the flag
+   is one glyph and reading half of it says nothing. */
 .barrel__edge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .barrel__edge-flag, .barrel__edge svg { flex: none; }
 

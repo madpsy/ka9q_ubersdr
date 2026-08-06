@@ -2033,7 +2033,15 @@ a.btn { text-decoration: none; }
        small enough to have to be meant. The name hangs outside it — see
        .barrel__edge-text — so this never changes with what is on either side. */
     width: 28px;
-    padding: 0;
+    /* Sat a little high, not centred in the drum: the scale's own labels start
+       25 px down (.barrel__cell padding-top 7, a major tick 13, then its 5 px
+       gap) and a centred caption's descenders reached into them — the flags
+       worst, being taller than the type around them. 16 px of padding moves the
+       chevron's centre up 8, which puts it and the name in the band the ticks
+       occupy and leaves the numbers a row of their own. The padding does not
+       shrink the target: top and bottom fix the height, so all 48 px still take
+       a press. */
+    padding: 0 0 16px;
     /* The caption is outside the box on purpose; nothing here may clip it. */
     overflow: visible;
     border: 0;
@@ -2076,7 +2084,9 @@ a.btn { text-decoration: none; }
 .barrel__edge-text {
     position: absolute;
     top: 0;
-    bottom: 0;
+    /* The same 16 px the box above reserves, so the name and the chevron it
+       belongs to share a centre line however either is sized. */
+    bottom: 16px;
     display: flex;
     align-items: center;
     gap: 3px;

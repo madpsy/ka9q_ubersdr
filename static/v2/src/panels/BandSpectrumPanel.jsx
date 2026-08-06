@@ -200,8 +200,10 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         rows: [],                    // raw dBFS history, newest last
         auto: createAutoRange(),
         prefs,
-        lut: getPalette(palette),
-        cmap: null,                  // palette as packed ABGR, for row writes
+        // The palette as packed ABGR, one entry per level — what colouring a
+        // waterfall row wants. Filled by the palette effect, which runs before
+        // any frame can arrive.
+        cmap: null,
         // The waterfall ring, in device pixels — the same shape as the main
         // waterfall's, so the same scroll works on it.
         ring: null, ringCtx: null,
@@ -247,7 +249,6 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         for (let i = 0; i < 256; i++) {
             cmap[i] = (255 << 24) | (lut[i * 3 + 2] << 16) | (lut[i * 3 + 1] << 8) | lut[i * 3];
         }
-        st.lut = lut;
         st.cmap = cmap;
         st.gradKey = '';                     // gradients belong to the old palette
         repaintHistory(st, meta.bin_count);

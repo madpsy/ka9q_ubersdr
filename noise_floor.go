@@ -164,9 +164,21 @@ func (fb *FFTBuffer) GetMaxHoldFFT(duration time.Duration) *BandFFT {
 		}
 	}
 
-	// If no samples in the window, use all available samples
+	// If no samples landed in the window, degrade to the newest sample alone.
+	//
+	// Falling back to *all* buffered samples here was a whole-band level
+	// explosion. GetLatestFFT sizes this window at exactly one background poll
+	// period, and the ingest goroutine appends at that same nominal rate off an
+	// independent ticker, so ordinary jitter — or a few hundred ms of stall in
+	// the radiod → multicast → addBandSampleToBuffer path — regularly leaves
+	// zero samples inside it. Max-holding MaxAge (a full minute, ~600 samples)
+	// instead of one poll cycle lifts every bin to its 60-second peak: measured
+	// at +7 to +11 dB band-wide on the live SSE stream, on ~1 % of frames, and
+	// on every band simultaneously, which is what made the band-activity charts
+	// jump and pulse. A window containing one sample *is* that sample, so that
+	// is what an empty one has to degrade to.
 	if len(validSamples) == 0 {
-		validSamples = fb.Samples
+		validSamples = fb.Samples[len(fb.Samples)-1:]
 	}
 
 	// Take maximum value for each bin (max hold)
@@ -212,9 +224,14 @@ func (fb *FFTBuffer) GetAveragedFFT(duration time.Duration) *BandFFT {
 		}
 	}
 
-	// If no samples in the window, use all available samples (better than returning nil)
+	// If no samples landed in the window, degrade to the newest sample alone —
+	// same reasoning as GetMaxHoldFFT above. Averaging is far more forgiving
+	// than max-hold (the mean of a minute of noise is close to the mean of one
+	// sample, where the *max* is ~10 dB above it), so this is not the source of
+	// the band-activity spikes, but silently turning a caller's 5- or 10-second
+	// average into a 60-second one still measures the wrong thing.
 	if len(validSamples) == 0 {
-		validSamples = fb.Samples
+		validSamples = fb.Samples[len(fb.Samples)-1:]
 	}
 
 	// Average the FFT data in LINEAR power domain

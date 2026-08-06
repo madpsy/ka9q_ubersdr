@@ -229,6 +229,7 @@ node radiosettings.test.js
 node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
+node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js
 node roomfor.test.js

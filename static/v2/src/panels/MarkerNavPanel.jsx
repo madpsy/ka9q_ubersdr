@@ -7,70 +7,34 @@
 // widget's "basic lookup info" is.
 //
 // The finding is lib/markerNav.js, which already existed for the lock-screen
-// ⏮/⏭ buttons. This panel is a second consumer of it rather than a second
-// implementation, so the two agree about what "the next marker" means.
+// ⏮/⏭ buttons, and the feeds behind it are lib/useMarkerNav.js, shared with the
+// Multipad's barrel edges. This panel is a consumer of both rather than a second
+// implementation, so all three agree about what "the next marker" means.
 //
-// Which kinds count is a setting here rather than a shared one: skipping
-// between DX spots on the lock screen and between bookmarks on screen are both
-// reasonable, and neither should decide the other.
+// Which kinds count is the one on-screen selection, shared with the Multipad's
+// barrel edges — but not with the lock screen, which keeps its own. See
+// lib/markerNavSettings.js.
 //
 // `minimal` keeps the three markers and drops the type picker.
 
 import React, { useEffect, useMemo, useState } from '../react.js';
-import { Button, Empty, Field, Icon } from '../components/ui.jsx';
+import { Empty, Icon } from '../components/ui.jsx';
+import NavTypes from '../components/NavTypes.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
-import { subscribeSpots } from '../lib/spotStore.js';
-import { subscribeVoiceActivity } from '../lib/voiceActivity.js';
-import { callsignOf, collectMarkers, countryOf, findMarkers } from '../lib/markerNav.js';
+import { callsignOf, countryOf } from '../lib/markerNav.js';
+import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
 import { onLookupResolved, peekLookup, startLookup } from '../radio/media/lookup.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
-import { NAV_LABELS, saveNavTypes, savedNavTypes } from '../lib/markerNavSettings.js';
+import { NAV_LABELS } from '../lib/markerNavSettings.js';
 
 export default function MarkerNavPanel({ minimal }) {
-    const { tuning, actions, catalog, serverInfo, running } = useRadio();
-    const [types, setTypes] = useState(savedNavTypes);
-    const [dx, setDx] = useState([]);
-    const [cw, setCw] = useState([]);
-    const [voice, setVoice] = useState([]);
-
-    // Subscribed to only what this receiver has and only what is being skipped
-    // between: the voice detector is a request every five seconds, and a feed
-    // nobody is navigating by should cost nothing.
-    const wants = (t) => types.includes(t);
-    const hasDx = !!(serverInfo && serverInfo.dx_cluster);
-    const hasCw = !!(serverInfo && serverInfo.cw_skimmer);
-    const hasVoice = !!(serverInfo && serverInfo.noise_floor);
-
-    useEffect(() => {
-        if (!running || !hasDx || !wants('dx')) { setDx([]); return undefined; }
-        return subscribeSpots('dx', setDx);
-    }, [running, hasDx, types]);
-
-    useEffect(() => {
-        if (!running || !hasCw || !wants('cw')) { setCw([]); return undefined; }
-        return subscribeSpots('cw', setCw);
-    }, [running, hasCw, types]);
-
-    useEffect(() => {
-        if (!running || !hasVoice || !wants('voice')) { setVoice([]); return undefined; }
-        return subscribeVoiceActivity((state) => setVoice((state && state.activities) || []));
-    }, [running, hasVoice, types]);
-
-    const markers = useMemo(() => findMarkers(
-        collectMarkers({
-            dx,
-            cw,
-            voice,
-            bookmarks: wants('bookmark-server') ? (catalog.bookmarks || []) : [],
-            local: wants('bookmark-local') ? (catalog.local || []) : [],
-        }),
-        tuning.frequency,
-        tuning.mode,
-        types,
-    ), [dx, cw, voice, catalog.bookmarks, catalog.local, tuning.frequency, tuning.mode, types]);
+    const radio = useRadio();
+    const { serverInfo } = radio;
+    const [types] = useNavTypes();
+    const markers = useMarkerNav(radio, types);
 
     // The operator behind a callsign marker. Only for the one you are on:
     // looking up the neighbours would be two more requests per turn of the dial.
@@ -100,20 +64,7 @@ export default function MarkerNavPanel({ minimal }) {
         [wantsLookup, call, tick],
     );
 
-    const toggle = (t) => {
-        const next = types.includes(t) ? types.filter((x) => x !== t) : [...types, t];
-        // Never all-off: with nothing selected there is nothing to step to and
-        // the panel would just be three dashes.
-        if (!next.length) return;
-        setTypes(next);
-        saveNavTypes(next);
-    };
-
-    const step = (m) => {
-        if (!m) return;
-        actions.tuneTo({ frequency: m.freq, mode: m.mode || undefined });
-        actions.ensureVisible(m.freq);
-    };
+    const step = (m) => stepToMarker(radio.actions, m);
 
     return (
         <div className="stack">
@@ -204,22 +155,7 @@ export default function MarkerNavPanel({ minimal }) {
                 </div>
             )}
 
-            {!minimal && (
-                <Field label="Skip between">
-                    <div className="chip-row chip-row--wrap">
-                        {Object.entries(NAV_LABELS).map(([t, label]) => (
-                            <button
-                                key={t}
-                                type="button"
-                                className={`chip chip--button${types.includes(t) ? ' is-active' : ''}`}
-                                onClick={() => toggle(t)}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-                </Field>
-            )}
+            {!minimal && <NavTypes />}
         </div>
     );
 }

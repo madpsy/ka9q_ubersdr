@@ -14,15 +14,20 @@
 // Frequency and zoom are barrels — see components/Barrel.jsx. Everything else
 // is the ordinary controls at their compact size, because a control that behaves
 // differently here from the panel it duplicates is a control you have to learn
-// twice.
+// twice. The ends of the frequency barrel are the Markers panel's prev/next, for
+// the same reason: hunting for a signal is one activity, and the marker four
+// kilohertz up should be reachable without letting go of the drum.
 
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
+import NavTypes from '../components/NavTypes.jsx';
 import { Icon, Segmented, Slider } from '../components/ui.jsx';
-import { clamp, formatHz, snrColour, snrFraction } from '../lib/format.js';
+import { countryOf, shortMarkerName } from '../lib/markerNav.js';
+import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
+import { clamp, countryFlag, formatFreqShort, formatHz, snrColour, snrFraction } from '../lib/format.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
     bandTip, bandTone, getBandConditions, subscribeBandConditions,
@@ -87,6 +92,73 @@ function SnrWash() {
             }}
         />
     );
+}
+
+// Prev/next marker, on the two ends of the frequency drum.
+//
+// The same act as the Markers panel's step buttons, in the place the thumb
+// already is: the drum is what you are holding while you hunt, so "there is
+// something 4 kHz up" and "take me to it" belong on it rather than in a panel
+// you have to go and open. Which markers count is the picker below — see
+// NavTypes — and it is the same selection the Markers panel offers, because
+// these are the same act and a drum that disagreed with the panel above it would
+// be a bug however it was documented.
+//
+// The name is shortened to about six characters (shortMarkerName): a callsign,
+// which is what most of these are, fits whole, and a bookmark called "Shannon
+// Volmet" reads as "Shannon". The full name and the frequency are in the title,
+// and the colour says which feed it came from — the same three colours the
+// panel's type chips use.
+//
+// Its own component, and not for tidiness: the spot feeds land every few seconds
+// and re-rendering the drum's thirty detent cells for a marker two kilohertz away
+// would be the same waste SnrWash exists to avoid.
+function MarkerEdges() {
+    const radio = useRadio();
+    const [types] = useNavTypes();
+    const markers = useMarkerNav(radio, types);
+
+    const edge = (m, side) => {
+        const flag = countryOf(m);
+        const label = m ? (shortMarkerName(m) || formatFreqShort(m.freq)) : '';
+        const chevron = side === 'prev'
+            ? <Icon.ChevronLeft size={12} />
+            : <Icon.ChevronRight size={12} />;
+        return (
+            <button
+                type="button"
+                className={`barrel__edge barrel__edge--${side}`}
+                data-type={m ? m.type : undefined}
+                disabled={!m}
+                title={m
+                    ? `${m.name || 'Marker'} — ${formatFreqShort(m.freq)}`
+                    : `Nothing ${side === 'prev' ? 'below' : 'above'} the dial`}
+                aria-label={m
+                    ? `${side === 'prev' ? 'Previous' : 'Next'} marker: ${m.name || formatFreqShort(m.freq)}`
+                    : undefined}
+                /* The drum must not turn as well: a press here is a jump, and a
+                   barrel that also took the gesture would tune two ways at once.
+                   What that costs is the ends of the drum as somewhere to *begin*
+                   a spin — a spin already under way is unaffected, because the
+                   barrel captures the pointer and keeps it wherever the finger
+                   goes — and the ends are the part the strip's mask has faded to
+                   nothing anyway. */
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => stepToMarker(radio.actions, m)}
+            >
+                {side === 'prev' && chevron}
+                {/* Between the label and the middle of the drum, as in the
+                    Markers panel, so the two flags face each other rather than
+                    hugging the chevrons. */}
+                {side === 'next' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
+                {label && <span className="barrel__edge-label">{label}</span>}
+                {side === 'prev' && flag && <span className="barrel__edge-flag">{countryFlag(flag)}</span>}
+                {side === 'next' && chevron}
+            </button>
+        );
+    };
+
+    return <>{edge(markers.prev, 'prev')}{edge(markers.next, 'next')}</>;
 }
 
 // Frequency: the readout, the step, and the drum that turns it.
@@ -189,6 +261,7 @@ function FreqWheel() {
                 className="barrel--freq"
             >
                 <SnrWash />
+                <MarkerEdges />
             </Barrel>
         </div>
     );
@@ -485,6 +558,19 @@ export default function MultipadPanel({ minimal }) {
     return (
         <div className="stack stack--tight pad">
             <FreqWheel />
+
+            {/* Which markers the drum's ends step to. Directly under the drum it
+                controls, rather than down with the other settings: five chips
+                reading "DX CW Voice…" mean something under a frequency wheel with
+                markers on its ends, and nothing at all at the foot of the pad. It
+                does separate the two barrels, which are a pair — but only in the
+                full view; the minimal one, where that pairing is the whole
+                layout, does not have this.
+
+                The edges still work in the minimal view, on whatever was last
+                chosen here or in the Markers panel — it is one setting, so a pad
+                cut down to the two wheels has not lost the way to change it. */}
+            {!minimal && <NavTypes />}
 
             {/* The zoom drum and the NR dropdown share a line: the drum takes
                 what is left after the dropdown, which is as wide as its widest

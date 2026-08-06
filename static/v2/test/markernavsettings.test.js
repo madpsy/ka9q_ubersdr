@@ -1,12 +1,17 @@
-// Which marker kinds the Markers panel steps between.
+// Which marker kinds the on-screen prev/next controls step between.
 //
 // Small, but it decides what the prev/next buttons can reach — and an empty
 // selection would leave them permanently dead with nothing on screen to
 // explain why.
+//
+// One selection serves two controls — the Markers panel's step buttons and the
+// Multipad's barrel edges — and both draw a picker for it, so the other thing
+// worth pinning is the notification: without it the pad and the panel would sit
+// side by side showing different chips lit.
 
 const assert = require('assert');
 const {
-    DEFAULT_NAV_TYPES, NAV_LABELS, saveNavTypes, savedNavTypes,
+    DEFAULT_NAV_TYPES, NAV_LABELS, onNavTypes, saveNavTypes, savedNavTypes,
 } = require('./.build/markernavsettings.cjs');
 const { NAV_TYPES } = require('./.build/markernav.cjs');
 
@@ -83,10 +88,68 @@ t('a save keeps only the kinds that exist', () => {
     assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['dx', 'bookmark-local']);
 });
 
-t('a storage that refuses the write does not take the panel down', () => {
+t('the two controls read one selection, whichever of them wrote it', () => {
+    // Shared on purpose: stepping between markers is one act, and the pad
+    // disagreeing with the panel above it would be a bug — see the module.
+    const s = install();
+    saveNavTypes(['cw']);
+    assert.deepStrictEqual(savedNavTypes(), ['cw']);
+    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['cw'], 'one key, not one each');
+});
+
+t('a change reaches everybody watching, with the cleaned list', () => {
+    // Both pickers are on screen at once often enough — the pad floats over the
+    // dock on a touchscreen desktop — so this is what keeps them agreeing.
+    install();
+    const seen = [];
+    const off = onNavTypes((list) => seen.push(list));
+    saveNavTypes(['dx', 'nope']);
+    assert.deepStrictEqual(seen, [['dx']]);
+    // One array for every listener, so a memo keyed on it does not re-run per
+    // subscriber.
+    const both = [];
+    const off2 = onNavTypes((list) => both.push(list));
+    saveNavTypes(['cw']);
+    assert.strictEqual(both[both.length - 1], seen[seen.length - 1]);
+    off();
+    off2();
+    saveNavTypes(['voice']);
+    assert.deepStrictEqual(seen[seen.length - 1], ['cw'], 'nothing after unsubscribing');
+});
+
+t('a refused change is not announced either', () => {
+    // A picker that redrew from an empty selection it was not given would light
+    // no chips at all until something else changed it.
+    install({ [KEY]: JSON.stringify(['dx']) });
+    const seen = [];
+    const off = onNavTypes((list) => seen.push(list));
+    saveNavTypes([]);
+    saveNavTypes(['nonsense']);
+    assert.deepStrictEqual(seen, []);
+    off();
+});
+
+t('one listener throwing does not cost the others the change', () => {
+    install();
+    const seen = [];
+    const off1 = onNavTypes(() => { throw new Error('a panel mid-unmount'); });
+    const off2 = onNavTypes((list) => seen.push(list));
+    assert.doesNotThrow(() => saveNavTypes(['cw']));
+    assert.deepStrictEqual(seen, [['cw']]);
+    off1();
+    off2();
+});
+
+t('a storage that refuses the write still moves the setting for this session', () => {
+    // Private mode: it cannot be persisted, but the pickers must still follow —
+    // a press that visibly does nothing reads as a broken control.
     const s = install();
     s.refuse = true;
+    const seen = [];
+    const off = onNavTypes((list) => seen.push(list));
     assert.doesNotThrow(() => saveNavTypes(['dx']));
+    assert.deepStrictEqual(seen, [['dx']]);
+    off();
 });
 
 console.log(`\n${pass} ok`);

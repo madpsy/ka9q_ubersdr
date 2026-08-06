@@ -46,6 +46,35 @@ export function countryOf(marker) {
 // The marker types, as an allow-list vocabulary for prev/next filtering.
 export const NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark-server', 'bookmark-local'];
 
+// The marker's name at the width a step button has for it.
+//
+// The Markers panel gives prev and next half a row each and can print a
+// bookmark's full name. The ends of the Multipad's frequency drum have about six
+// characters between the chevron and the scale, and that is where this is for.
+//
+// Callsigns — which is what most of these markers are — already fit and come
+// back untouched. What needs deciding is the long ones, and there whole words
+// beat a cut: "Shannon V…" says less about which marker this is than "Shannon"
+// does, and "Voice 20m" is "Voice" rather than "Voice 2…". As many words as fit,
+// so a name that is several short ones does not lose all but the first.
+//
+// A single word longer than the budget has nothing to fall back on and is cut
+// with an ellipsis, which at least says it was cut. One character survives even
+// when the budget cannot pay for the ellipsis: a label that is nothing but an
+// ellipsis is worse than one letter of the name.
+export function shortMarkerName(marker, max = 8) {
+    const name = String((marker && marker.name) || '').trim().replace(/\s+/g, ' ');
+    if (name.length <= max) return name;
+    const words = name.split(' ');
+    if (words[0].length > max) return `${words[0].slice(0, Math.max(1, max - 1))}…`;
+    let out = words[0];
+    for (const w of words.slice(1)) {
+        if (out.length + 1 + w.length > max) break;
+        out += ` ${w}`;
+    }
+    return out;
+}
+
 // Types whose `name` *may* be a callsign, and so worth a lookup — the album
 // line and the Markers panel enrich these, and only these, with the operator's
 // name and photo. Whether it actually is one is callsignOf's job.

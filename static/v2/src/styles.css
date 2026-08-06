@@ -1984,6 +1984,80 @@ a.btn { text-decoration: none; }
     background: linear-gradient(180deg, var(--accent), rgba(0, 0, 0, 0) 70%);
 }
 
+/* Prev/next marker, on the ends of the frequency drum — see MarkerEdges.
+ *
+ * Full height rather than a chip floated in the middle of it: this is aimed at
+ * with a thumb, and the drum's 48 px is the tallest target the pad has. Content
+ * width, capped at a third, so a five-letter callsign takes a callsign's worth of
+ * the drum and only a long bookmark name takes the cap.
+ *
+ * The zone is washed in the drum's own colour, fading out towards the middle:
+ * that is what puts the label over a clear background instead of over the ticks,
+ * without fencing it off with a border. A border here would be a vertical line
+ * at some x on a frequency scale, next to an index needle — read as a mark at
+ * that frequency, which is the same trap .barrel__snr goes out of its way to
+ * avoid.
+ *
+ * z-index 2, the same as the belly shading, so the shading — later in paint
+ * order, being a pseudo-element — carries on across the ends and the drum still
+ * reads as one curved surface. Above the strip at 1, which is what matters for
+ * the press. */
+.barrel__edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 33%;
+    padding: 0 5px;
+    border: 0;
+    /* The wash, in the drum's own colour, fading towards the middle. */
+    --edge-wash: var(--surface-3);
+    /* Set by the marker's kind below, so hover and press can change the ink
+       without a specificity fight with the tint. */
+    --edge-ink: var(--text-dim);
+    color: var(--edge-ink);
+    font-family: var(--font);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.barrel__edge--prev {
+    left: 0;
+    padding-right: 10px;
+    background: linear-gradient(90deg, var(--edge-wash) 60%, rgba(0, 0, 0, 0));
+}
+.barrel__edge--next {
+    right: 0;
+    padding-left: 10px;
+    background: linear-gradient(270deg, var(--edge-wash) 60%, rgba(0, 0, 0, 0));
+}
+/* Hover lifts the wash rather than the ink, because the ink is already saying
+   which feed this marker came from and a highlight that flattened it back to
+   plain text would cost more than it gave. The press does take the accent, as
+   every other button here does. */
+.barrel__edge:hover:not(:disabled) { --edge-wash: var(--surface-hover); }
+.barrel__edge:active:not(:disabled) { --edge-ink: var(--accent); }
+/* Nothing that way: the chevron stays, faded, so the end of the drum does not
+   become a dead area that used to have a button in it. */
+.barrel__edge:disabled { opacity: 0.3; cursor: default; }
+/* The label is the only part that gives ground: a chevron squashed to fit a long
+   bookmark name would stop reading as a direction. */
+.barrel__edge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barrel__edge-flag, .barrel__edge svg { flex: none; }
+
+/* Which feed the marker came from, in the colours the Markers panel's type chips
+   use. The chevron takes the tint too, which is the point: the colour is legible
+   at a glance in a way a six-character name at 10 px is not. Bookmarks keep the
+   default ink — they are the ones that are always there, and it is the live
+   feeds that are worth calling out. */
+.barrel__edge[data-type="dx"] { --edge-ink: var(--accent); }
+.barrel__edge[data-type="cw"] { --edge-ink: var(--good); }
+.barrel__edge[data-type="voice"] { --edge-ink: var(--warn); }
+
 /* Only a dozen rungs deep and every one of them labelled — "1×, 2×, 6×…", which
    is what says at a glance that this drum is the zoom and not a second scale —
    so it is shorter than the frequency drum and its ticks are hints rather than a
@@ -2101,6 +2175,11 @@ a.btn { text-decoration: none; }
     font-family: var(--mono);
 }
 .pad-row .slider, .pad-row .slider-wrap { flex: 1; min-width: 0; }
+
+/* The marker picker under the drum — the pad's only ordinary field, and it takes
+   the pad's spacing rather than a full panel's: its label is a caption on a
+   control the drum above it has already explained. */
+.pad .field { gap: 3px; }
 
 /* Eight modes on one row, down to a 320 px handset. The room comes out of the
    gaps and the side padding rather than the type, which stays legible: at 32 px

@@ -11,7 +11,8 @@
 // Bottom row, under a divider: this instance's own quick-tune bands, i.e. the
 // entries in /api/bands that the operator gave a `button_name`. v1 renders
 // those as a second row too. They carry no conditions data, so they are styled
-// neutrally rather than being painted permanently green.
+// neutrally rather than being painted permanently green — the same key, in the
+// colour that means "nothing has been said about this band".
 //
 // Clicking either kind does what v1's setBand() does: tune to the middle of the
 // band, take the band's mode (LSB below 10 MHz, USB above, unless the band
@@ -56,7 +57,7 @@ export default function QuickBandsPanel({ minimal }) {
                             key={name}
                             type="button"
                             title={bandTip(name, state, conditions)}
-                            className={`chip chip--button band-chip band-chip--${bandTone(state, conditions)}${active ? ' is-current' : ''}`}
+                            className={`band-btn band-btn--${bandTone(state, conditions)}${active ? ' is-current' : ''}`}
                             onClick={() => go(min, max)}
                         >
                             {name}
@@ -82,7 +83,12 @@ export default function QuickBandsPanel({ minimal }) {
                                     key={`${b.button_name}-${b.start}`}
                                     type="button"
                                     title={tip}
-                                    className={`chip chip--button${active ? ' is-active' : ''}`}
+                                    /* The same key as the row above, in its
+                                       no-conditions colour: these are the same
+                                       act — tune to a band — and looked like two
+                                       different kinds of control when one row was
+                                       keys and the other pills. */
+                                    className={`band-btn band-btn--none${active ? ' is-current' : ''}`}
                                     onClick={() => go(b.start, b.end, b.mode)}
                                 >
                                     {b.button_name}

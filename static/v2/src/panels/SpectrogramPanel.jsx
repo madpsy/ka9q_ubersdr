@@ -25,7 +25,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import {
     POLL_MS, bandForView, bandLabel, freqTicks, fullUrl, listUrl, metaUrl,
-    spectrogramEnabled, thumbUrl, timeTicks,
+    pointReadout, readoutClearsOn, spectrogramEnabled, thumbUrl, timeTicks, tipPlacement,
 } from '../lib/spectrogram.js';
 
 export { spectrogramEnabled };
@@ -118,10 +118,19 @@ export default function SpectrogramPanel({ minimal }) {
 // the spectrogram page: frequency across the bottom, UTC time down the left,
 // positioned as percentages of the image because it is drawn at one scale here
 // — there is no zoom to keep them in step with.
+//
+// The image's width is measured rather than assumed, for one reason: it decides
+// how many frequency labels fit. A 20m recorder ticks every 25 kHz, which is
+// fourteen labels across a band that has room for four, and the unmeasured
+// version printed them on top of each other.
 function SpectrogramModal({ band, minute, onClose }) {
     const [meta, setMeta] = useState(null);
     const [state, setState] = useState('loading');  // loading | ok | error
+    const [width, setWidth] = useState(0);
+    // What the pointer is over, or null when it is not over the picture.
+    const [at, setAt] = useState(null);
     const aliveRef = useRef(true);
+    const imgWrapRef = useRef(null);
 
     useEffect(() => () => { aliveRef.current = false; }, []);
 
@@ -132,14 +141,51 @@ function SpectrogramModal({ band, minute, onClose }) {
             .catch(() => { /* the picture is still worth showing without scales */ });
     }, [band]);
 
+    // The modal is sized off the viewport, so this settles once on open and
+    // again if the window is resized under it.
+    useEffect(() => {
+        const el = imgWrapRef.current;
+        if (!el) return undefined;
+        const measure = () => setWidth(el.getBoundingClientRect().width);
+        measure();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
     const fTicks = useMemo(
-        () => (meta ? freqTicks(meta.start_freq_hz, meta.end_freq_hz) : []),
-        [meta],
+        () => (meta ? freqTicks(meta.start_freq_hz, meta.end_freq_hz, width) : []),
+        [meta, width],
     );
     const tTicks = useMemo(
         () => (meta ? timeTicks(meta.rows, meta.row_count) : []),
         [meta],
     );
+
+    // Pointer rather than mouse, so one handler serves a mouse, a stylus and a
+    // finger. On touch the tap is what asks the question — pointerdown puts the
+    // readout up, dragging scrubs it along, and lifting leaves it up to be read.
+    // Nothing here calls preventDefault or sets touch-action: a tall image in a
+    // modal has to stay scrollable with the same finger.
+    const read = useCallback((e) => {
+        const el = imgWrapRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        const xFrac = (e.clientX - r.left) / r.width;
+        const yFrac = (e.clientY - r.top) / r.height;
+        const point = pointReadout(meta, xFrac, yFrac);
+        if (!point) return;
+        const xPct = Math.min(100, Math.max(0, xFrac * 100));
+        const yPct = Math.min(100, Math.max(0, yFrac * 100));
+        setAt({ ...point, xPct, yPct, ...tipPlacement(e.pointerType, xPct, yPct) });
+    }, [meta]);
+
+    // A mouse leaving has stopped asking; a finger lifting has not.
+    const onLeave = useCallback((e) => {
+        if (readoutClearsOn(e.pointerType)) setAt(null);
+    }, []);
 
     return (
         <Modal onClose={onClose} label="Rolling 24-hour spectrogram">
@@ -148,6 +194,9 @@ function SpectrogramModal({ band, minute, onClose }) {
                     <strong>{band === 'wideband-hf' ? 'Wideband HF' : band}</strong>
                     <span>{bandLabel(band)}</span>
                     <span>rolling 24 hours, one row per minute, UTC</span>
+                    {/* The readout also lives here, at a fixed place, so it can
+                        be read without following the pointer around. */}
+                    {at && <span className="sgram-zoom__read">{at.freq} · {at.time} · {at.ago}</span>}
                 </div>
 
                 <div className="sgram-zoom__plot">
@@ -161,7 +210,13 @@ function SpectrogramModal({ band, minute, onClose }) {
                         ))}
                     </div>
 
-                    <div className="sgram-zoom__imgwrap">
+                    <div
+                        className="sgram-zoom__imgwrap"
+                        ref={imgWrapRef}
+                        onPointerDown={read}
+                        onPointerMove={read}
+                        onPointerLeave={onLeave}
+                    >
                         <img
                             className="sgram-zoom__img"
                             src={fullUrl(band, minute)}
@@ -170,13 +225,33 @@ function SpectrogramModal({ band, minute, onClose }) {
                             onError={() => setState('error')}
                         />
                         {/* Tick lines over the picture, so a label on the edge
-                            still says which column it belongs to. */}
+                            still says which column it belongs to — and so an
+                            unlabelled tick still marks its interval. */}
                         {fTicks.map((f) => (
                             <span key={f.hz} className="sgram-grid sgram-grid--v" style={{ left: `${f.pct}%` }} />
                         ))}
                         {tTicks.map((t) => (
                             <span key={`g${t.label}${t.pct}`} className="sgram-grid sgram-grid--h" style={{ top: `${t.pct}%` }} />
                         ))}
+
+                        {at && (
+                            <>
+                                <span className="sgram-cross sgram-cross--v" style={{ left: `${at.xPct}%` }} />
+                                <span className="sgram-cross sgram-cross--h" style={{ top: `${at.yPct}%` }} />
+                                {/* Above the point on touch, where a fingertip
+                                    is not covering it, and flipped away from the
+                                    edges so it is never clipped. */}
+                                <span
+                                    className={`sgram-tip${at.left ? ' sgram-tip--left' : ''}${at.above ? ' sgram-tip--above' : ''}`}
+                                    style={{ left: `${at.xPct}%`, top: `${at.yPct}%` }}
+                                >
+                                    <b>{at.freq}</b>
+                                    <span>{at.time}</span>
+                                    <span className="sgram-tip__ago">{at.ago}</span>
+                                </span>
+                            </>
+                        )}
+
                         {state === 'loading' && <span className="sgram-zoom__wait">Loading full resolution…</span>}
                         {state === 'error' && <span className="sgram-zoom__wait">Image not available</span>}
                     </div>
@@ -185,7 +260,7 @@ function SpectrogramModal({ band, minute, onClose }) {
                 {/* Frequency across the bottom, inset to clear the time gutter
                     so the two axes meet at the image's own corner. */}
                 <div className="sgram-axis sgram-axis--freq">
-                    {fTicks.map((f) => (
+                    {fTicks.filter((f) => f.label).map((f) => (
                         <span key={f.hz} className="sgram-axis__f" style={{ left: `${f.pct}%` }}>
                             {f.label}
                         </span>

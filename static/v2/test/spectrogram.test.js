@@ -3,8 +3,9 @@
 
 const assert = require('assert');
 const {
-    DEFAULT_BAND, bandForView, formatTickHz, freqTickStep, freqTicks,
-    timeTickStepMinutes, timeTicks,
+    DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, formatTickHz, freqLabelEvery,
+    freqTickStep, freqTicks, pointReadout, readoutClearsOn, timeTickStepMinutes,
+    timeTicks, tipPlacement,
 } = require('./.build/spectrogram.cjs');
 
 let pass = 0;
@@ -105,6 +106,129 @@ t('no metadata means no axis, not a broken one', () => {
     assert.deepStrictEqual(freqTicks(0, 0), []);
     assert.deepStrictEqual(timeTicks([], 0), []);
     assert.deepStrictEqual(timeTicks([{}], 1), []);   // rows without timestamps
+});
+
+// ── Labels that do not overlap ───────────────────────────────────────────────
+
+t('a narrow axis labels every other tick rather than printing them on top', () => {
+    // 20m: 14.0-14.35 MHz ticks every 25 kHz — thirteen ticks.
+    const wide = freqTicks(14000000, 14350000, 4000);
+    assert.ok(wide.every((k) => k.label), 'a wide axis labels everything');
+
+    const narrow = freqTicks(14000000, 14350000, 300);
+    const labelled = narrow.filter((k) => k.label);
+    assert.strictEqual(narrow.length, wide.length, 'the ticks themselves stay');
+    assert.ok(labelled.length < narrow.length, 'but not all of them are labelled');
+    // Never more labels than there is room for.
+    assert.ok(labelled.length <= Math.floor(300 / FREQ_LABEL_PX) , `${labelled.length} labels in 300px`);
+});
+
+t('labels that survive are round numbers, evenly spaced', () => {
+    const ticks = freqTicks(0, 30e6, 320);
+    const labelled = ticks.filter((k) => k.label);
+    assert.ok(labelled.length >= 2);
+    const stepHz = labelled[1].hz - labelled[0].hz;
+    for (let i = 1; i < labelled.length; i++) {
+        assert.strictEqual(labelled[i].hz - labelled[i - 1].hz, stepHz, 'uneven label spacing');
+        assert.strictEqual(labelled[i].hz % stepHz, 0, `${labelled[i].hz} is not round`);
+    }
+});
+
+t('the skip is a whole multiple, so labels never drift off the round values', () => {
+    for (const [n, w] of [[13, 300], [6, 1000], [29, 400], [3, 90]]) {
+        const every = freqLabelEvery(n, w);
+        assert.ok(Number.isInteger(every) && every >= 1, `${every}`);
+        assert.ok(Math.ceil(n / every) <= Math.max(1, Math.floor(w / FREQ_LABEL_PX)) || every === n,
+            `${n} ticks in ${w}px still overlap at every ${every}`);
+    }
+});
+
+t('an unmeasured axis labels everything, rather than nothing', () => {
+    assert.ok(freqTicks(0, 30e6, 0).every((k) => k.label));
+    assert.ok(freqTicks(0, 30e6).every((k) => k.label));
+});
+
+// ── The hover readout ────────────────────────────────────────────────────────
+
+const META = {
+    start_freq_hz: 7000000,
+    end_freq_hz: 7200000,
+    bin_width_hz: 500,
+    row_count: 1440,
+    rows: Array.from({ length: 1440 }, (_, i) => ({
+        unix: Date.UTC(2026, 7, 5, 9, 37) / 1000 + i * 60,
+    })),
+};
+
+t('the readout says the frequency under the pointer', () => {
+    assert.strictEqual(pointReadout(META, 0, 0).freq, '7.0000 MHz');
+    assert.strictEqual(pointReadout(META, 0.5, 0).freq, '7.1000 MHz');
+    assert.strictEqual(pointReadout(META, 1, 0).freq, '7.2000 MHz');
+});
+
+t('decimals follow the bin width, not the number', () => {
+    // A wideband bin is 7.3 kHz: four decimals would be inventing precision.
+    const wide = { ...META, start_freq_hz: 0, end_freq_hz: 30e6, bin_width_hz: 7324 };
+    assert.strictEqual(pointReadout(wide, 0.5, 0).freq, '15.000 MHz');
+    assert.strictEqual(pointReadout(META, 0.5, 0).freq, '7.1000 MHz');
+});
+
+t('the readout says the UTC time of the row under the pointer', () => {
+    // Row 0 is 09:37, and the window runs forward from there.
+    assert.strictEqual(pointReadout(META, 0, 0).time, '09:37 UTC');
+    assert.strictEqual(pointReadout(META, 0, 0.5).time, '21:37 UTC');
+    assert.strictEqual(pointReadout(META, 0, 1).time, '09:36 UTC');
+});
+
+t('the newest row is the bottom of the image', () => {
+    assert.strictEqual(pointReadout(META, 0, 1).row, 1439);
+    assert.strictEqual(pointReadout(META, 0, 1).ago, 'now');
+    assert.strictEqual(pointReadout(META, 0, 0).ago, '23 h 59 min ago');
+});
+
+t('a pointer that has strayed off the image is clamped, not wrong', () => {
+    assert.strictEqual(pointReadout(META, -0.4, 2).freq, '7.0000 MHz');
+    assert.strictEqual(pointReadout(META, 5, -1).row, 0);
+});
+
+t('no metadata means no readout', () => {
+    assert.strictEqual(pointReadout(null, 0.5, 0.5), null);
+    assert.strictEqual(pointReadout({}, 0.5, 0.5), null);
+    assert.strictEqual(pointReadout({ start_freq_hz: 0, end_freq_hz: 0, row_count: 10 }, 0.5, 0.5), null);
+});
+
+t('ages read the way people say them', () => {
+    assert.strictEqual(agoLabel(0), 'now');
+    assert.strictEqual(agoLabel(1), '1 min ago');
+    assert.strictEqual(agoLabel(59), '59 min ago');
+    assert.strictEqual(agoLabel(60), '1 h ago');
+    assert.strictEqual(agoLabel(125), '2 h 5 min ago');
+});
+
+// ── Touch ────────────────────────────────────────────────────────────────────
+
+t('a tap leaves the readout up — only a mouse leaving clears it', () => {
+    // The bug this is here for: treating a tap as a hover puts the answer up on
+    // pointerdown and takes it away again on pointerup.
+    assert.strictEqual(readoutClearsOn('touch'), false);
+    assert.strictEqual(readoutClearsOn('pen'), false);
+    assert.strictEqual(readoutClearsOn('mouse'), true);
+});
+
+t('on touch the readout sits above the point, clear of the fingertip', () => {
+    assert.strictEqual(tipPlacement('touch', 20, 20).above, true);
+    assert.strictEqual(tipPlacement('pen', 20, 20).above, true);
+    // A mouse pointer is small enough to sit above what it is describing.
+    assert.strictEqual(tipPlacement('mouse', 20, 20).above, false);
+});
+
+t('the readout flips away from the edges rather than being clipped', () => {
+    assert.strictEqual(tipPlacement('mouse', 90, 20).left, true);
+    assert.strictEqual(tipPlacement('mouse', 10, 20).left, false);
+    assert.strictEqual(tipPlacement('mouse', 10, 95).above, true);
+    // Bottom right corner: both ways at once.
+    const corner = tipPlacement('touch', 95, 95);
+    assert.deepStrictEqual(corner, { left: true, above: true });
 });
 
 console.log(`\n${pass} passed`);

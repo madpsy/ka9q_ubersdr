@@ -88,10 +88,35 @@ export function formatTickHz(hz) {
     return `${hz} Hz`;
 }
 
+// Width a frequency label needs before it touches its neighbour: "14.075 MHz"
+// in the 10px mono the axis uses, plus a gap.
+export const FREQ_LABEL_PX = 78;
+
+// How many tick intervals to put between labels so they do not overlap in
+// `widthPx`. A whole multiple of the tick step, and labels are then placed on
+// multiples of that — so the labelled values are round numbers in their own
+// right (10 MHz, 20 MHz) rather than every second tick counted from the left
+// (5, 15, 25). 4 is in the list so a 25 kHz tick can label every 100 kHz.
+export function freqLabelEvery(tickCount, widthPx) {
+    if (!widthPx || tickCount < 2) return 1;
+    const fits = Math.max(1, Math.floor(widthPx / FREQ_LABEL_PX));
+    if (tickCount <= fits) return 1;
+    for (const m of [2, 4, 5, 10, 20, 50]) {
+        if (Math.ceil(tickCount / m) <= fits) return m;
+    }
+    return tickCount;
+}
+
 // Ticks across the frequency axis: { hz, pct, label }, pct being 0–100 across
 // the image. Edge ticks are dropped — a label half off the image reads as a
 // mistake, and the range is stated next to the picture anyway.
-export function freqTicks(startHz, endHz) {
+//
+// `label` is null on a tick that is drawn as a line but not labelled, which is
+// how a narrow modal keeps its axis readable: at 25 kHz steps a 20m recorder
+// has fourteen ticks and room for four labels, and the alternative to dropping
+// ten of them is printing them on top of each other. Pass no width and every
+// tick is labelled.
+export function freqTicks(startHz, endHz, widthPx) {
     const span = endHz - startHz;
     if (!(span > 0)) return [];
     const step = freqTickStep(span);
@@ -101,6 +126,21 @@ export function freqTicks(startHz, endHz) {
         const pct = ((hz - startHz) / span) * 100;
         if (pct < 2 || pct > 98) continue;
         ticks.push({ hz, pct, label: formatTickHz(hz) });
+    }
+    const every = freqLabelEvery(ticks.length, widthPx);
+    if (every > 1) {
+        const labelStep = step * every;
+        let any = false;
+        for (let i = 0; i < ticks.length; i++) {
+            if (ticks[i].hz % labelStep === 0) { any = true; continue; }
+            ticks[i] = { ...ticks[i], label: null };
+        }
+        // A short range can contain no multiple of the label step at all. One
+        // label in the middle beats an axis of unexplained lines.
+        if (!any && ticks.length) {
+            const mid = Math.floor(ticks.length / 2);
+            ticks[mid] = { ...ticks[mid], label: formatTickHz(ticks[mid].hz) };
+        }
     }
     return ticks;
 }
@@ -136,4 +176,85 @@ export function timeTicks(rows, rowCount) {
         ticks.push({ pct, label: `${hh}:${mm}` });
     }
     return ticks;
+}
+
+// ── Cursor readout ───────────────────────────────────────────────────────────
+
+// What the pointer is over, as a frequency and a UTC time. Fractions are 0–1
+// across and down the image, which is what a pointer position over an <img>
+// gives directly — the image is drawn at one scale, so nothing else is needed.
+//
+// Decimals follow the recorder's bin width rather than being fixed: a wideband
+// bin is 7.3 kHz and three decimals is already more than it can tell you, while
+// a per-band recorder at 100 Hz deserves four. Constant for a given view, so
+// the readout does not change width as the pointer moves.
+export function pointReadout(meta, xFrac, yFrac) {
+    if (!meta) return null;
+    const start = meta.start_freq_hz || 0;
+    const span = (meta.end_freq_hz || 0) - start;
+    const rows = meta.row_count || (meta.rows ? meta.rows.length : 0);
+    if (!(span > 0) || !rows) return null;
+
+    const x = Math.min(1, Math.max(0, xFrac));
+    const y = Math.min(1, Math.max(0, yFrac));
+
+    const hz = start + x * span;
+    const dp = (meta.bin_width_hz || 0) >= 1000 ? 3 : 4;
+
+    const row = Math.min(rows - 1, Math.floor(y * rows));
+    const meta0 = meta.rows && meta.rows[row];
+    let unix = meta0 && meta0.unix;
+    if (!unix) {
+        const first = meta.rows && meta.rows[0] && meta.rows[0].unix;
+        unix = first ? first + row * 60 : 0;
+    }
+
+    let time = (meta0 && meta0.utc_time) || '';
+    if (unix) {
+        const d = new Date(unix * 1000);
+        time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    }
+
+    return {
+        hz,
+        row,
+        freq: `${(hz / 1e6).toFixed(dp)} MHz`,
+        // Which day it is matters on a rolling window: the top of the image is
+        // yesterday.
+        time: time ? `${time} UTC` : '',
+        ago: agoLabel(rows - 1 - row),
+    };
+}
+
+// How long ago that row is, in the shape people say it: one row is one minute.
+export function agoLabel(minutesAgo) {
+    if (!(minutesAgo > 0)) return 'now';
+    if (minutesAgo < 60) return `${minutesAgo} min ago`;
+    const h = Math.floor(minutesAgo / 60);
+    const m = minutesAgo % 60;
+    return m ? `${h} h ${m} min ago` : `${h} h ago`;
+}
+
+// Where to put the readout relative to the point it describes.
+//
+// A mouse pointer is a few pixels of arrow and the tip can sit below-right of
+// it. A fingertip is not: it covers the thing it just tapped, so on touch the
+// tip always goes above, where it can be read while the finger is still down.
+// Near the right or bottom edge it flips the other way rather than being
+// clamped, so it stays attached to the point it is describing.
+export function tipPlacement(pointerType, xPct, yPct) {
+    const touch = pointerType !== 'mouse';
+    return {
+        left: xPct > 60,
+        above: touch || yPct > 80,
+    };
+}
+
+// Whether losing the pointer should clear the readout.
+//
+// A mouse leaving the picture has stopped asking. A finger lifting has not —
+// the tap was the question, and clearing on pointerup would make the answer
+// flash up and vanish, which is what a tap does if you treat it as a hover.
+export function readoutClearsOn(pointerType) {
+    return pointerType === 'mouse';
 }

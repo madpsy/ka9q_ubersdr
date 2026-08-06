@@ -3315,12 +3315,21 @@ a.btn { text-decoration: none; }
 }
 .sgram-zoom__head {
     display: flex;
+    flex-wrap: wrap;      /* a phone's modal is not wide enough for one row */
     align-items: baseline;
-    gap: 8px;
+    gap: 4px 8px;
     font-size: calc(11px * var(--ui-scale));
     color: var(--text-faint);
 }
 .sgram-zoom__head strong { color: var(--text); font-size: calc(12px * var(--ui-scale)); }
+/* Pushed to the end and monospaced: it updates as the pointer moves, and a
+   proportional font would shuffle the row along with every digit. */
+.sgram-zoom__read {
+    margin-left: auto;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    white-space: nowrap;
+}
 
 /* The plot proper: time gutter, then the image. The frequency axis below is a
    sibling with the same left inset, so the two axes meet at the image corner. */
@@ -3371,6 +3380,38 @@ a.btn { text-decoration: none; }
 .sgram-grid { position: absolute; pointer-events: none; background: rgba(255, 255, 255, 0.22); }
 .sgram-grid--v { top: 0; bottom: 0; width: 1px; }
 .sgram-grid--h { left: 0; right: 0; height: 1px; }
+
+/* Crosshair and readout under the pointer. Brighter than the grid, because
+   this one is answering a question you just asked. */
+.sgram-cross { position: absolute; pointer-events: none; background: rgba(255, 255, 255, 0.7); }
+.sgram-cross--v { top: 0; bottom: 0; width: 1px; }
+.sgram-cross--h { left: 0; right: 0; height: 1px; }
+
+.sgram-tip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 2;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 10px 0 0 10px;
+    padding: 3px 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    line-height: 1.4;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.sgram-tip b { color: var(--text); font-weight: 600; }
+.sgram-tip__ago { color: var(--text-faint); }
+/* Flipped rather than clamped: the tip stays attached to the cursor, which is
+   what says which pixel it is describing. */
+.sgram-tip--left { transform: translateX(-100%); margin-left: -10px; }
+.sgram-tip--above { transform: translateY(-100%); margin-top: -10px; }
+.sgram-tip--left.sgram-tip--above { transform: translate(-100%, -100%); }
 
 /* Markers: what the dial is on, and what is either side. */
 .mnav { display: flex; gap: 6px; }

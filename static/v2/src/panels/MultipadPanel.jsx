@@ -408,13 +408,21 @@ function BandRow() {
 
 // One line: what it is, the control, what it reads. Two of these are the whole
 // bottom half of the pad, and keeping them identical is what makes it scan.
-function PadRow({ label, value, children }) {
+// `action` is a button that belongs to the row — squelch's Auto. It sits
+// *outside* the label rather than among its children: a label's job is to hand
+// a click to the control it names, and a button inside one is a click two
+// elements want. The spec says the button wins; not every browser has always
+// agreed, and the row reads the same either way.
+function PadRow({ label, value, children, action }) {
     return (
-        <label className="pad-row">
-            <span className="pad-row__label">{label}</span>
-            {children}
+        <div className="pad-row">
+            <label className="pad-row__field">
+                <span className="pad-row__label">{label}</span>
+                {children}
+            </label>
+            {action}
             <span className="pad-row__value">{value}</span>
-        </label>
+        </div>
     );
 }
 
@@ -429,6 +437,27 @@ function SquelchRow() {
         <PadRow
             label="Squelch"
             value={squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off'}
+            /* The Signal panel's Auto, on the same line for the same reason it
+               is on the same line there: it sets the number the slider sets, so
+               it belongs beside it rather than under it. It also turns the
+               squelch on, because the threshold it picks is above the floor and
+               the floor is what "off" means here.
+
+               Disabled until there is an SNR to measure against, and it says so
+               — a threshold set from no measurement would be a guess. */
+            action={(
+                <button
+                    type="button"
+                    className="chip chip--button pad-row__act"
+                    title={snr == null
+                        ? 'Waiting for a signal reading to set the threshold from'
+                        : 'Set the threshold just above the recent noise level'}
+                    disabled={snr == null}
+                    onClick={actions.autoSquelch}
+                >
+                    Auto
+                </button>
+            )}
         >
             <Slider
                 value={squelch.value}
@@ -440,20 +469,6 @@ function SquelchRow() {
                 markerTone={squelch.enabled && !m.squelchOpen ? 'closed' : 'open'}
                 markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
             />
-            {/* The Signal panel's Auto, on the same line for the same reason it
-                is on the same line there: it sets the number the slider sets,
-                so it belongs beside it rather than under it. Disabled until
-                there is an SNR to place it against — a threshold set from no
-                measurement is a guess. */}
-            <button
-                type="button"
-                className="chip chip--button pad-row__act"
-                title="Set the threshold just above the recent noise level"
-                disabled={snr == null}
-                onClick={actions.autoSquelch}
-            >
-                Auto
-            </button>
         </PadRow>
     );
 }

@@ -2062,6 +2062,9 @@ a.btn { text-decoration: none; }
 /* Label, control, reading — the same three columns for the filter width and the
    squelch, so the pair scans as one block rather than as two settings. */
 .pad-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The label and the control it names. A row's action button is a sibling of
+   this, not a child — see PadRow. */
+.pad-row__field { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .pad-row__label {
     flex: none;
     width: 50px;

@@ -1835,13 +1835,30 @@ const MARK_HALO_PX = 1;
 // wide spans.
 const MARK_MIN_GAP_PX = 5;
 
+// Dash patterns, [ink, gap] in CSS px.
+//
+// The two marks are told apart by their rhythm before anything else. The dial
+// is nearly solid, two parts ink to one of gap; an edge has the same length of
+// dash with twice the gap, so it reads as intermittent where the dial reads as
+// continuous. They were 4-on/4-off against 6-on/3-off, which is a real
+// difference on paper and not one you see at a glance on a moving waterfall —
+// both were simply "a dashed line", and the passband edges were mistakable for
+// the line you tune by.
+//
+// Doubling the gap rather than shortening the dash on purpose: the dash length
+// is what carries the mark's weight against a busy waterfall, and these marks
+// stopped relying on alpha for their difference precisely because faded edges
+// vanished there.
+const DIAL_DASH = [6, 3];
+const EDGE_DASH = [4, 8];
+
 // `width` and the dash are in CSS px; everything below works in device px.
-function markLine(c, x, H, dpr, colour, dashOn, dashOff, width) {
+function markLine(c, x, H, dpr, colour, dash, width) {
     const xr = Math.round(x) + 0.5;
     c.beginPath();
     c.moveTo(xr, 0);
     c.lineTo(xr, H);
-    c.setLineDash([dashOn * dpr, dashOff * dpr]);
+    c.setLineDash([dash[0] * dpr, dash[1] * dpr]);
     c.lineCap = 'butt';
     c.lineWidth = (width + 2 * MARK_HALO_PX) * dpr;
     c.strokeStyle = MARK_HALO;
@@ -1857,12 +1874,15 @@ function markLine(c, x, H, dpr, colour, dashOn, dashOff, width) {
 // leaving you to line it up against the spectrum above.
 //
 // The dial stays the loud one and the edges stay quieter — they are context,
-// not the thing you are aiming with — but the difference is now carried by the
-// dash and the weight rather than by fading the edges out. They were drawn at
-// 0.38 alpha with a 2-on/4-off dash, so a third of a faint line: legible on the
+// not the thing you are aiming with — but the difference is carried by the dash
+// and the weight rather than by fading the edges out. They were drawn at 0.38
+// alpha with a 2-on/4-off dash, so a third of a faint line: legible on the
 // spectrum's flat background and effectively gone over a busy waterfall, which
 // is where they matter most, since the waterfall is what you read a signal's
 // width off.
+//
+// The dashes are DIAL_DASH and EDGE_DASH above, and the gap between them is
+// what says which line is which.
 function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
@@ -1882,13 +1902,13 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
         // apart are not a passband, they are a thicker dial. Zooming back in
         // brings them back one at a time, in the order they became readable.
         if (Math.abs(x - dial) < gap) continue;
-        markLine(c, x, H, dpr, edgeColor, 4, 4, 1.4);
+        markLine(c, x, H, dpr, edgeColor, EDGE_DASH, 1.4);
     }
 
     // Last, so where the passband collapses to nothing the dial is what is left
     // on top — it is the line you tune by.
     const x = hzToX(tuning.frequency);
-    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, 6, 3, 1.6);
+    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, DIAL_DASH, 1.6);
 }
 
 function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {

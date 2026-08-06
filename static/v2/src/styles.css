@@ -176,6 +176,12 @@
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
 
+    /* The ruler under the waterfall, so layout that has to clear it can say so.
+       Its real height is WF_SCALE_H in components/SpectrumView.jsx, which sizes
+       the canvas — the two must agree, and there is no way for a canvas height to
+       come from a stylesheet. Only .floatbar reads this. */
+    --wf-scale-h: 14px;
+
     /* The downloaded faces first, the OS stack behind them — see the @font-face
        block at the top of this file. The fallbacks are not decoration: until the
        woff2 arrives, and for ever if it 404s, this is what the UI renders in. */
@@ -4458,11 +4464,23 @@ a.btn { text-decoration: none; }
    layer, which ends where the bottom dock begins, so the chips sit just above
    it. Inset to the centre area's padding so they line up with the spectrum.
    wrap-reverse: a second row grows upwards rather than off the bottom. */
+/* The strip of minimised windows, resting on the ruler under the waterfall.
+ *
+ * On it rather than over it: 10px is the centre area's padding, which put the
+ * chips' feet on the bottom edge of the spectrum — flush against the bar of
+ * whatever is docked below and covering the frequencies at the same time. The
+ * ruler's height lifts them clear of both, and the numbers under a minimised
+ * window stay readable, which is the half of it worth having: a chip is a thing
+ * you left there, and the scale is a thing you are using.
+ *
+ * A fixed offset, so in spectrum-only view — where there is no ruler — the strip
+ * sits that much higher over the trace instead. Better than a strip that moves
+ * when the view mode changes. */
 .floatbar {
     position: absolute;
     left: 10px;
     right: 10px;
-    bottom: 10px;
+    bottom: calc(10px + var(--wf-scale-h));
     /* Above every window (panels at 10+, the extension at 60) — a chip that a
        window can cover is a chip you cannot click to get that window back. */
     z-index: 70;

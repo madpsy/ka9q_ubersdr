@@ -86,6 +86,10 @@ const SCALE_H = 26;       // frequency ruler height, CSS px
 // the waterfall, which is where a signal actually is. The audio scope panel has
 // had one under its waterfall from the start; this is the same idea on the RF
 // pane.
+//
+// Mirrored as `--wf-scale-h` in styles.css, where the strip of minimised windows
+// uses it to sit on top of this ruler rather than over it. Duplicated because a
+// canvas's height cannot come from a stylesheet — change one, change the other.
 const WF_SCALE_H = 14;
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
 // short of the cap height of the label under it, which is what makes the two

@@ -3398,8 +3398,13 @@ a.btn { text-decoration: none; }
     pointer-events: none;
     z-index: 2;
     display: flex;
+    /* Frequency and time on one line, the age under them: the first two are
+       what the pixel *is* and the third is a gloss on the time, so they read as
+       two facts and a note rather than three things of equal standing. Wrapped
+       rather than a column, so the two on the top line stay on one baseline. */
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 6px;
+    gap: 1px 6px;
     margin: 10px 0 0 10px;
     padding: 3px 6px;
     background: var(--surface);
@@ -3412,7 +3417,8 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 .sgram-tip b { color: var(--text); font-weight: 600; }
-.sgram-tip__ago { color: var(--text-faint); }
+/* Its own line, always — a full-width flex item breaks the row before it. */
+.sgram-tip__ago { flex: 0 0 100%; color: var(--text-faint); }
 /* Flipped rather than clamped: the tip stays attached to the cursor, which is
    what says which pixel it is describing. */
 .sgram-tip--left { transform: translateX(-100%); margin-left: -10px; }

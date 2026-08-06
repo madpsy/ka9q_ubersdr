@@ -38,6 +38,8 @@ esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
     --outfile=.build/audioband.cjs --log-level=warning
+esbuild ../src/lib/audioSinks.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audiosinks.cjs --log-level=warning
 esbuild ../src/radio/audio-filters.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiofilters.cjs --log-level=warning
 esbuild ../src/lib/eqLevels.js --bundle --format=cjs --platform=node \
@@ -229,6 +231,7 @@ node radiosettings.test.js
 node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
+node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js

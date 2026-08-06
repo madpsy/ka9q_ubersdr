@@ -21,7 +21,18 @@ export function sinkSupport() {
     const onElement = typeof HTMLAudioElement !== 'undefined' &&
         typeof HTMLAudioElement.prototype.setSinkId === 'function';
     if (!onContext && !onElement) {
-        return { supported: false, reason: 'This browser cannot choose an audio output device.' };
+        // Safari, at the time of writing: WebKit implements neither setSinkId, so
+        // there is no way to send this page's audio anywhere but wherever the
+        // system is sending it. Said with what to do instead, because "cannot"
+        // on its own reads as a fault in the receiver.
+        //
+        // A feature test rather than a browser test, deliberately: the day WebKit
+        // ships setSinkId the dropdown appears here on its own, with no release of
+        // ours in between.
+        return {
+            supported: false,
+            reason: 'This browser cannot route audio to a chosen device — pick the output in the system’s sound settings instead.',
+        };
     }
     return { supported: true, reason: '' };
 }
@@ -32,20 +43,57 @@ function byLabel(a, b) {
     return (a.label || '￿').localeCompare(b.label || '￿');
 }
 
-// The device list, plus whether the browser is withholding the names.
+// Is the browser withholding the devices, given what enumerateDevices returned?
 //
-// Until microphone permission is granted, Chrome returns the outputs with empty
-// labels and Firefox returns none at all — in both cases there is nothing worth
-// showing, which is what `hidden` reports. Unlocking them costs a permission
-// prompt, so that is a separate call the operator asks for.
+// Both hold them back until microphone permission is granted, and they do it in
+// shapes different enough that testing for one misses the other:
+//
+//   Firefox returns no audiooutput entries at all.
+//   Chrome returns one, as the spec's "at least one device of each kind you have"
+//     placeholder — kind 'audiooutput' with an empty deviceId, label and groupId.
+//
+// The test used to be "some real device, and none of them named", which reads the
+// Chrome case as a machine that has one output and nothing to unlock: the
+// placeholder has no deviceId, so it is not a real device, so there was nothing
+// for `every` to be true of. `hidden` came back false, the panel never asked for
+// the microphone, and Refresh on Chrome did nothing at all — no prompt, no
+// devices, no explanation.
+//
+// So the question is asked the other way round, in terms of what would actually
+// be worth showing: is there a single output with an id we can point the audio at
+// and a name to put in the list. On both browsers, before permission, there is
+// not.
+export function namesHidden(outputs) {
+    // 'default' and '' are the browser's own aliases for the system device, which
+    // the panel offers as an option of its own — so neither says anything about
+    // what real devices exist.
+    return !outputs.some((d) => d && d.deviceId && d.deviceId !== 'default' && d.label);
+}
+
+// The device list, plus whether the browser is withholding the names. Unlocking
+// them costs a permission prompt, so that is a separate call the operator asks
+// for — see unlockDeviceLabels.
 export async function listOutputDevices() {
     const all = await navigator.mediaDevices.enumerateDevices();
     const outputs = all.filter((d) => d.kind === 'audiooutput').slice().sort(byLabel);
-    // 'default' and '' are the browser's own aliases for the system device and
-    // carry a label of their own, so they say nothing about the real devices.
-    const real = outputs.filter((d) => d.deviceId && d.deviceId !== 'default');
-    const hidden = outputs.length === 0 || (real.length > 0 && real.every((d) => !d.label));
-    return { devices: outputs, hidden };
+    return { devices: outputs, hidden: namesHidden(outputs) };
+}
+
+// Has the microphone question already been answered? 'granted', 'denied' or
+// 'prompt', and null where the browser will not say — Firefox does not accept
+// 'microphone' as a permission name and throws, which is not an error worth
+// reporting anywhere.
+//
+// Only used to tell two identical-looking dead ends apart: names still missing
+// because nobody has been asked, and names still missing with permission in hand,
+// which means this machine really does have nothing else to offer.
+export async function micPermission() {
+    try {
+        const status = await navigator.permissions.query({ name: 'microphone' });
+        return status.state;
+    } catch (e) {
+        return null;
+    }
 }
 
 // Asks for the microphone purely to unlock the device names, then drops the

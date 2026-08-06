@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
-import { listOutputDevices, sinkLabel, sinkSupport, unlockDeviceLabels } from '../lib/audioSinks.js';
+import {
+    listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
+} from '../lib/audioSinks.js';
 
 const CHANNELS = [
     { value: 'both', label: 'Both' },
@@ -40,6 +42,10 @@ function OutputDevicePicker() {
     const support = useMemo(sinkSupport, []);
     const [devices, setDevices] = useState([]);
     const [hidden, setHidden] = useState(false);
+    // Whether the microphone has already been asked about — only to tell "nobody
+    // has been asked" apart from "asked, granted, and there is still nothing to
+    // list", which look the same from here and want opposite advice.
+    const [perm, setPerm] = useState(null);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const alive = useRef(true);
@@ -52,6 +58,7 @@ function OutputDevicePicker() {
         try {
             let { devices: found, hidden: anon } = await listOutputDevices();
             if (!alive.current) return;
+            micPermission().then((state) => { if (alive.current) setPerm(state); });
             if (anon && unlock) {
                 setBusy(true);
                 try {
@@ -160,8 +167,13 @@ function OutputDevicePicker() {
                 ? <div className="note note--tight note--warn">{error}</div>
                 : hidden && (
                     <div className="note note--tight">
-                        The browser hides device names until microphone permission is
-                        granted — Refresh asks for it. Nothing is recorded.
+                        {perm === 'granted'
+                            /* Permission is in hand and the browser still names
+                               nothing: this machine has one output and the system
+                               default is it. Repeating the advice to press Refresh
+                               would send the operator round the same loop. */
+                            ? 'This browser reports no output devices besides the system default.'
+                            : 'The browser hides device names until microphone permission is granted — Refresh asks for it. Nothing is recorded.'}
                     </div>
                 )}
         </>

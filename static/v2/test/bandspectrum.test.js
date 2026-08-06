@@ -20,6 +20,7 @@ const {
     FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, dialWindow, isZoomed, panByFraction,
     viewFrac, zoomAt, zoomBins, zoomHz,
     AUTO_BAND, bandList, chosenBand,
+    RETRY_BASE_MS, RETRY_MAX_MS, retryDelay,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 
@@ -568,6 +569,51 @@ t('the choice is remembered, and a rubbish one is not', () => {
     // savePrefs normalises rather than writing whatever it is handed.
     assert.doesNotThrow(() => savePrefs({ auto: true, min: -120, max: -60, band: 7 }));
     assert.doesNotThrow(() => savePrefs({ auto: true, min: -120, max: -60 }));
+});
+
+// --- reopening a stream that failed ------------------------------------------
+//
+// The panel takes EventSource's reconnect over, because the browser's covers one
+// of the two ways a stream ends and gives up on the other — see retryDelay. What
+// is worth pinning is that it never stops trying and never runs away: a receiver
+// being restarted must be found again, and must not be asked ten times a second
+// while it is down.
+
+t('the first retry is quick', () => {
+    // A stream that dropped for a moment — a proxy timeout, a wifi hiccup — comes
+    // straight back rather than making the operator wait out a long delay.
+    assert.strictEqual(retryDelay(0), RETRY_BASE_MS);
+});
+
+t('the wait grows, and stops growing at 30 seconds', () => {
+    let prev = 0;
+    for (let n = 0; n < 40; n++) {
+        const d = retryDelay(n);
+        assert.ok(d >= prev, `attempt ${n} waited less than ${n - 1}`);
+        assert.ok(d <= RETRY_MAX_MS, `attempt ${n} waited ${d}`);
+        prev = d;
+    }
+    // The ceiling is reached rather than merely approached, or a receiver down for
+    // an hour would be polled at a rate that keeps climbing.
+    assert.strictEqual(retryDelay(40), RETRY_MAX_MS);
+});
+
+t('the first minute holds several attempts', () => {
+    // The point of a curve rather than a flat 30 s: most outages are seconds long,
+    // and the panel should have found the stream again before anybody looks up.
+    let total = 0;
+    let tries = 0;
+    while (total < 60000) { total += retryDelay(tries); tries++; }
+    assert.ok(tries >= 6, `only ${tries} attempts in the first minute`);
+});
+
+t('nonsense attempt counts do not produce a nonsense wait', () => {
+    // Never a negative delay, a NaN passed to setTimeout (which fires at once and
+    // spins), or an Infinity that never fires at all.
+    for (const bad of [-1, -100, NaN, Infinity, undefined, null, '3']) {
+        const d = retryDelay(bad);
+        assert.ok(d >= RETRY_BASE_MS && d <= RETRY_MAX_MS, `${bad} gave ${d}`);
+    }
 });
 
 console.log(`\n${pass} passed`);

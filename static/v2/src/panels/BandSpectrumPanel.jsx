@@ -18,6 +18,11 @@
 // nothing. Same for a hidden panel, a closed mobile sheet, and a dock collapsed
 // to its rail.
 //
+// While it *is* open the stream is kept open: a failure reopens it on a backoff
+// and keeps trying for as long as the panel is there, so a receiver restarted
+// under it is found again without anybody touching the panel. See retryDelay in
+// lib/bandSpectrum.js for why the browser's own reconnect is not enough.
+//
 // `minimal` is the chart alone — the range controls are the first thing to go
 // when a panel has been shrunk to glance at.
 
@@ -31,7 +36,7 @@ import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
     AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
     decodeFrame, dialWindow, formatAgeSec,
-    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, rowAt, savePrefs,
+    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, retryDelay, rowAt, savePrefs,
     savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
     zoomHz,
 } from '../lib/bandSpectrum.js';
@@ -348,26 +353,65 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // Opened here and closed by the cleanup, which is what ties it to the panel
     // being open: an unmounted panel — collapsed, hidden, or a sheet that is not
     // showing — has no EventSource at all.
+    //
+    // And reopened by this effect rather than by the browser. EventSource retries
+    // a dropped stream itself, on a fixed timer and only for that one case; a
+    // failure at the HTTP level closes it for good and leaves the panel showing a
+    // picture that will never be added to. See retryDelay for the whole argument.
+    // Every error is treated the same way here — close it and come back on the
+    // curve — so there is one policy rather than the browser's timer running
+    // alongside ours.
     useEffect(() => {
-        const es = new EventSource(streamUrl(band));
+        let es = null;
+        let retry = null;
+        let attempts = 0;
+        let stopped = false;
         let seen = false;
 
-        es.addEventListener('spectrum', (e) => {
-            // Counted before decoding, and as delivered: this is what the
-            // stream costs, not what the picture is worth.
-            st.bytes += e.data.length;
-            const frame = decodeFrame(e.data);
-            if (!frame) return;
-            const next = applyFrame(st.bins, frame, meta.bin_count);
-            if (!next) return;                  // a delta with no full frame yet
-            st.bins = next;
-            commit(st, meta.bin_count);
-            seen = true;
-        });
-        es.addEventListener('heartbeat', (e) => { st.bytes += (e.data || '').length; });
+        const open = () => {
+            es = new EventSource(streamUrl(band));
+
+            es.addEventListener('spectrum', (e) => {
+                // Counted before decoding, and as delivered: this is what the
+                // stream costs, not what the picture is worth.
+                st.bytes += e.data.length;
+                // A frame is proof the stream works, which is what resets the
+                // backoff. Deliberately not the `open` event: a server that
+                // accepts the connection and drops it immediately — a proxy with
+                // nothing behind it — would reset the delay on every attempt and
+                // turn this back into a fixed-rate retry.
+                attempts = 0;
+                const frame = decodeFrame(e.data);
+                if (!frame) return;
+                const next = applyFrame(st.bins, frame, meta.bin_count);
+                if (!next) return;                  // a delta with no full frame yet
+                st.bins = next;
+                commit(st, meta.bin_count);
+                seen = true;
+            });
+            es.addEventListener('heartbeat', (e) => {
+                st.bytes += (e.data || '').length;
+                attempts = 0;
+            });
+
+            es.addEventListener('error', () => {
+                // Ours now: closing it stops the browser retrying on its own
+                // schedule as well, which would otherwise mean two clients asking
+                // for the same stream at two different rates.
+                if (es) { es.close(); es = null; }
+                if (stopped || retry) return;
+                const wait = retryDelay(attempts);
+                attempts++;
+                retry = setTimeout(() => { retry = null; if (!stopped) open(); }, wait);
+            });
+        };
+
+        open();
 
         // Throughput, read once a second. A stall then reads as 0 rather than
-        // leaving the last figure up, which is the thing worth knowing.
+        // leaving the last figure up, which is the thing worth knowing — and a
+        // stream waiting to be reopened is exactly such a stall, so the readout
+        // says so for as long as it lasts.
         let last = performance.now();
         const rateTimer = setInterval(() => {
             const now = performance.now();
@@ -379,8 +423,10 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         }, 1000);
 
         return () => {
+            stopped = true;
+            clearTimeout(retry);
             clearInterval(rateTimer);
-            es.close();
+            if (es) es.close();
             onRate(null);
         };
     }, [band, meta.bin_count, st, onRate]);

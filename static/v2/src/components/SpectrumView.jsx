@@ -22,7 +22,7 @@ import {
     edgesForEdgeDrag, edgesForWidth, stepLabel,
 } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
-import { bandwidthColor } from '../display/uiConfig.js';
+import { markColors } from '../display/uiConfig.js';
 import { Button, Icon } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
@@ -42,15 +42,31 @@ import { fetchWeather, windKmh } from '../lib/weather.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
+//
+// The threshold is three times the smallest zone still worth aiming at, not
+// three times the zone above: edgeHit() shrinks the zone to a third of the
+// passband as that narrows, so the two can never meet whatever this is set to,
+// and what it has to decide is only "is the handle big enough to hit".
 const EDGE_GRAB_PX = 6;
-const EDGE_MIN_PX = 24;
+const EDGE_MIN_PX = 15;         // a 5 px zone at the threshold
 
 // The same, for a finger. Six pixels is not a touch target — a fingertip is
 // nearer forty across and the contact point is not where you think it is — so
-// touch gets a zone it can actually hit, and the passband has to be wide enough
-// that the two zones do not meet with nothing left between them to tap or pan.
+// touch gets a zone it can actually hit wherever the passband has room for one.
+//
+// 10 px is small for a fingertip and deliberately so: it is the worst case, at
+// the narrowest passband the gesture is offered on at all, and nothing is lost
+// by missing it. A touch near an edge is a tap until it has travelled
+// TOUCH_SLOP_PX (see below), so a miss tunes rather than resizing, and a grab
+// that took the wrong edge is undone by dragging back.
+//
+// The old threshold was 3 × the full 22 px zone. A 66 px passband is 2.7 kHz of
+// SSB across about a 15 kHz view, so on a phone the filter could only be
+// dragged at the very last rung of the zoom ladder — and, because the same
+// number is the narrowest a drag may leave it (see minHz in onPointerMove),
+// only ever widened from there.
 const TOUCH_GRAB_PX = 22;
-const TOUCH_EDGE_MIN_PX = TOUCH_GRAB_PX * 3;
+const TOUCH_EDGE_MIN_PX = 30;   // a 10 px zone at the threshold
 
 // How far a finger must travel before a touch near an edge is a resize rather
 // than a tap. The whole reason touch can have a grab zone this size: nothing is
@@ -847,6 +863,14 @@ export default function SpectrumView() {
     // The press is swallowed rather than allowed to reach the container, which
     // would otherwise read it as the start of a pan and retune the receiver on
     // release.
+    //
+    // Switchable from the Display panel, under the Split slider. The scale is
+    // also the strip you point at to read a frequency off, and those two uses
+    // are hard to tell apart from a few pixels of travel — so an operator who
+    // keeps re-sharing the display by accident can turn the drag off and keep
+    // the slider. The double-click reset stays either way: it cannot be
+    // triggered by aiming at something.
+    const canSplitDrag = viewMode === 'split' && display.splitDrag !== false;
     const splitDrag = useRef(null);
     const splitRaf = useRef(0);
     const splitNext = useRef(0);
@@ -874,20 +898,28 @@ export default function SpectrumView() {
 
     const onSplitDown = useCallback((e) => {
         // Only in split view: with one pane there is nothing to share, and the
-        // scale is then an ordinary part of the display.
-        if (viewMode !== 'split' || avail <= 0 || e.button === 2) return;
+        // scale is then an ordinary part of the display that a press should
+        // reach. A right-click is the context menu's, in every mode.
+        if (viewMode !== 'split' || e.button === 2) return;
         // Deliberately no preventDefault: on pointerdown it suppresses the
         // compatibility mouse events, and the double-click reset below is one of
         // them. Selection is held off with user-select in the stylesheet
         // instead, which is what preventDefault would have been for.
+        //
+        // Swallowed before the switch is consulted, so turning the drag off
+        // leaves the scale inert rather than handing the press to tap-to-tune.
+        // The reason for turning it off is a gesture aimed at reading a
+        // frequency that keeps re-sharing the display; replacing that with a
+        // gesture that retunes the receiver would be the worse accident.
         e.stopPropagation();
+        if (!canSplitDrag || avail <= 0) return;
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         // The share at the moment of the press. Every move is measured against
         // this and the total travel, not accumulated step by step, so the
         // boundary tracks the pointer exactly however the moves are batched.
         splitDrag.current = { y: e.clientY, split: dispRef.current.split };
         haptic('grab', 'spectrum');
-    }, [viewMode, avail]);
+    }, [viewMode, canSplitDrag, avail]);
 
     const onSplitMove = useCallback((e) => {
         const d0 = splitDrag.current;
@@ -1107,11 +1139,17 @@ export default function SpectrumView() {
                 // dragged filter reads as a round number rather than as
                 // whatever pixel the pointer stopped on.
                 const offset = Math.round(raw / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
-                // Never narrower than the grab zone needs. Dragging an edge
-                // through the other one used to shut the filter to its 100 Hz
-                // floor, which at any normal zoom is a fraction of a pixel —
-                // the two lines then sat on top of each other with nothing left
-                // to take hold of, and the only way back out was the panel.
+                // Never narrower than the gesture that made it can pick up
+                // again. Dragging an edge through the other one used to shut the
+                // filter to its 100 Hz floor, which at any normal zoom is a
+                // fraction of a pixel — the two lines then sat on top of each
+                // other with nothing left to take hold of, and the only way back
+                // out was the panel.
+                //
+                // It is the *same* threshold, so this floor came down with it:
+                // on a phone at full zoom a filter can now be narrowed to about
+                // 800 Hz rather than 1.7 kHz, which is the difference between
+                // reaching a CW width by dragging and not.
                 const minHz = (g.edge.minPx || EDGE_MIN_PX) * (cfg.span / r.width);
                 const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t, minHz);
                 if (low !== t.bandwidthLow || high !== t.bandwidthHigh) {
@@ -1407,9 +1445,13 @@ export default function SpectrumView() {
                     grabbing the edge. */}
                 <canvas
                     ref={scaleRef}
-                    className={`spectrum__pane spectrum__pane--scale${viewMode === 'split' ? ' spectrum__pane--split' : ''}`}
+                    className={'spectrum__pane spectrum__pane--scale'
+                        + (viewMode === 'split' ? ' spectrum__pane--split' : '')
+                        + (canSplitDrag ? ' spectrum__pane--grab' : '')}
                     title={viewMode === 'split'
-                        ? 'Drag up or down to share the height between the spectrum and the waterfall — double-click to reset'
+                        ? (canSplitDrag
+                            ? 'Drag up or down to share the height between the spectrum and the waterfall — double-click to reset'
+                            : 'Double-click to reset the split — dragging is switched off in the Display panel')
                         : undefined}
                     onPointerDown={onSplitDown}
                     onPointerMove={onSplitMove}
@@ -1495,7 +1537,7 @@ export default function SpectrumView() {
 // recalculation, so calling it inside the draw loop would cost more than the
 // rendering itself.
 const THEME_VARS = [
-    '--spec-bg', '--spec-grid', '--spec-band', '--spec-vfo',
+    '--spec-bg', '--spec-grid', '--spec-band',
     '--scale-bg', '--scale-text', '--scale-tick', '--accent',
 ];
 let themeCache = null;
@@ -1740,39 +1782,73 @@ function drawFrame(g, d, ctx) {
     const ceil = d.autoRange ? (g.clampedCeil != null ? g.clampedCeil : g.autoCeil) : d.ceilDb;
     const range = Math.max(1, ceil - floor);
 
-    // Soft enough to read as context beside the dial line; v1's colour name.
-    const colEdge = bandwidthColor(d.server.bandwidthColorName, 0.38);
-    const colVfoLine = colors()['--spec-vfo'] || '#ffd166';
+    const { dial: colVfoLine, edge: colEdge } = markColors(d);
 
     drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
-    drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colEdge);
-    drawScale(g, d, scale, pxW, cfg, tuning, width);
+    drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
+    drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
+}
+
+
+// A vertical marker, outlined.
+//
+// The outline is the whole trick. Over the spectrum there is a dark background
+// to sit on and a thin coloured line is enough; over the waterfall there is no
+// background at all — the palette runs from near-black to near-white and the
+// line crosses every value of it on the way down, so any single colour is
+// invisible somewhere. Stroking the same path twice, dark and wide underneath,
+// gives every mark its own contrast to stand against wherever it lands. It is
+// what a map label does over aerial photography, for the same reason.
+const MARK_HALO = 'rgba(0, 0, 0, 0.72)';
+
+// A CSS pixel of dark either side, so the outline is the same thickness to the
+// eye on a phone as on a desk monitor. A flat number of device pixels here would
+// be a third of that on a 3× screen — which is exactly the class of display the
+// marks were hardest to see on.
+const MARK_HALO_PX = 1;
+
+// `width` and the dash are in CSS px; everything below works in device px.
+function markLine(c, x, H, dpr, colour, dashOn, dashOff, width) {
+    const xr = Math.round(x) + 0.5;
+    c.beginPath();
+    c.moveTo(xr, 0);
+    c.lineTo(xr, H);
+    c.setLineDash([dashOn * dpr, dashOff * dpr]);
+    c.lineCap = 'butt';
+    c.lineWidth = (width + 2 * MARK_HALO_PX) * dpr;
+    c.strokeStyle = MARK_HALO;
+    c.stroke();
+    c.lineWidth = width * dpr;
+    c.strokeStyle = colour;
+    c.stroke();
+    c.setLineDash([]);
 }
 
 // The tuned frequency and the edges of what is being demodulated, drawn on
 // both panes so the waterfall shows what you are listening to rather than
 // leaving you to line it up against the spectrum above.
 //
-// The dial line is the loud one — dashed, in the VFO colour. The passband edges
-// are deliberately quieter: they are context, not the thing you are aiming
-// with, and two more bright lines either side of the dial just adds noise.
-// Their colour is the operator's bandwidth_indicator_color, as in v1.
-function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, edgeColor) {
+// The dial stays the loud one and the edges stay quieter — they are context,
+// not the thing you are aiming with — but the difference is now carried by the
+// dash and the weight rather than by fading the edges out. They were drawn at
+// 0.38 alpha with a 2-on/4-off dash, so a third of a faint line: legible on the
+// spectrum's flat background and effectively gone over a busy waterfall, which
+// is where they matter most, since the waterfall is what you read a signal's
+// width off.
+function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
 
     for (const edge of [tuning.frequency + tuning.bandwidthLow, tuning.frequency + tuning.bandwidthHigh]) {
         const x = hzToX(edge);
         if (x < 0 || x > pxW) continue;
-        c.strokeStyle = edgeColor;
-        c.lineWidth = dpr;
-        c.setLineDash([2 * dpr, 4 * dpr]);
-        c.beginPath();
-        c.moveTo(Math.round(x) + 0.5, 0);
-        c.lineTo(Math.round(x) + 0.5, H);
-        c.stroke();
-        c.setLineDash([]);
+        markLine(c, x, H, dpr, edgeColor, 4, 4, 1.4);
     }
+
+    // Last, so where the passband collapses to nothing the dial is what is left
+    // on top — it is the line you tune by.
+    const x = hzToX(tuning.frequency);
+    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, 6, 3, 1.6);
 }
 
 function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {
@@ -1891,23 +1967,10 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         c.lineTo(hx, H);
         c.stroke();
     }
-    drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colEdge);
-    if (cfg.span) {
-        const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
-        if (x >= 0 && x <= pxW) {
-            c.strokeStyle = colVfo;
-            c.lineWidth = g.dpr;
-            c.setLineDash([4 * g.dpr, 3 * g.dpr]);
-            c.beginPath();
-            c.moveTo(x, 0);
-            c.lineTo(x, H);
-            c.stroke();
-            c.setLineDash([]);
-        }
-    }
+    drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colVfo, colEdge);
 }
 
-function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW, colEdge) {
+function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW, colVfo, colEdge) {
     if (!spec || specH <= 0) return;
     const c = spec.getContext('2d', { alpha: false });
     const H = Math.max(1, Math.round(specH * g.dpr));
@@ -1917,7 +1980,6 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     const colBg = col['--spec-bg'] || '#0a0d14';
     const colGrid = col['--spec-grid'] || 'rgba(255,255,255,0.06)';
     const colBand = col['--spec-band'] || 'rgba(124,108,247,0.20)';
-    const colVfo = col['--spec-vfo'] || '#ffd166';
 
     // Gradients depend only on palette, contrast and height — not on the live
     // dB range — so they survive auto-levelling and are rebuilt rarely. Keyed on
@@ -2051,22 +2113,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.stroke();
     }
 
-    drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colEdge);
-
-    // VFO marker.
-    if (cfg.span) {
-        const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
-        if (x >= 0 && x <= pxW) {
-            c.strokeStyle = colVfo;
-            c.lineWidth = dpr;
-            c.setLineDash([4 * dpr, 3 * dpr]);
-            c.beginPath();
-            c.moveTo(x, 0);
-            c.lineTo(x, H);
-            c.stroke();
-            c.setLineDash([]);
-        }
-    }
+    drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge);
 
     // Hover crosshair. Drawn whenever the pointer is anywhere over the view,
     // not only when it is over this pane: the two panes share one frequency
@@ -2161,7 +2208,7 @@ function drawStationId(g, c, pxW, dpr) {
     c.restore();
 }
 
-function drawScale(g, d, scale, pxW, cfg, tuning, cssW) {
+function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
     if (!scale) return;
     const c = scale.getContext('2d', { alpha: false });
     const dpr = g.dpr;
@@ -2220,7 +2267,7 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW) {
     // Tuned-frequency pip: a downward triangle hanging from the top edge.
     const x = ((tuning.frequency - lo) / cfg.span) * pxW;
     if (x >= 0 && x <= pxW) {
-        c.fillStyle = col['--spec-vfo'] || '#ffd166';
+        c.fillStyle = colVfo;
         c.beginPath();
         c.moveTo(x - 5 * dpr, 0);
         c.lineTo(x + 5 * dpr, 0);

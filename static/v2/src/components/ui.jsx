@@ -155,6 +155,47 @@ export function Switch({ checked, onChange, label, disabled, title }) {
     );
 }
 
+/**
+ * A colour swatch that opens the platform's own picker.
+ *
+ * `<input type="color">` rather than a wheel of our own: every OS and browser
+ * already ships a good one, it is the picker the user has used before, and on a
+ * phone it is a full-screen native sheet instead of a gradient square being
+ * aimed at with a fingertip. All this does is hide the default chrome so the
+ * control reads as a swatch.
+ *
+ * `onClear` makes the swatch clearable — a second button that puts the value
+ * back to whatever it was inheriting. `inherited` says it is on that already, so
+ * the button can be disabled rather than looking like it does nothing.
+ */
+export function ColorPicker({
+    value, onChange, onClear, inherited, clearLabel = 'Auto', title, ariaLabel,
+}) {
+    return (
+        <span className="colorpick">
+            <input
+                className="colorpick__input"
+                type="color"
+                value={value}
+                title={title}
+                aria-label={ariaLabel}
+                onChange={(e) => onChange(e.target.value)}
+            />
+            {onClear && (
+                <button
+                    type="button"
+                    className="colorpick__clear"
+                    onClick={onClear}
+                    disabled={inherited}
+                    title={inherited ? 'Already following the default' : 'Back to the default'}
+                >
+                    {clearLabel}
+                </button>
+            )}
+        </span>
+    );
+}
+
 // `tone` picks one of the themed colours; `color` overrides it outright, for
 // values that carry a continuous scale of their own (the SNR ramp).
 export function Readout({ label, value, unit, tone, color }) {

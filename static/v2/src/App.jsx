@@ -9,6 +9,7 @@ import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
+import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
@@ -122,6 +123,10 @@ export default function App() {
                                 <PageTitle />
                                 <AudioDefaults />
                                 <IdleWatch />
+                                {/* Beside IdleWatch and not part of it: one is
+                                    about an operator who is here and idle, the
+                                    other about a tab nobody is looking at. */}
+                                <VisibilityWatch />
                                 <AnnounceWatch />
                                 <ShortcutWatch />
                                 {/* One delegated listener gives every button

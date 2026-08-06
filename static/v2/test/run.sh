@@ -22,6 +22,8 @@ esbuild ../src/lib/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/dsp.cjs --log-level=warning
 esbuild ../src/display/uiConfig.js --bundle --format=cjs --platform=node \
     --outfile=.build/uiconfig.cjs --log-level=warning
+esbuild ../src/lib/palettes.js --bundle --format=cjs --platform=node \
+    --outfile=.build/palettes.cjs --log-level=warning
 esbuild ../src/lib/format.js --bundle --format=cjs --platform=node \
     --outfile=.build/format.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
@@ -140,10 +142,16 @@ esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrel.cjs --log-level=warning
+esbuild ../src/lib/sheetGesture.js --bundle --format=cjs --platform=node \
+    --outfile=.build/sheetgesture.cjs --log-level=warning
+esbuild ../src/lib/visibilityPause.js --bundle --format=cjs --platform=node \
+    --outfile=.build/visibilitypause.cjs --log-level=warning
 esbuild ../src/lib/bandConditions.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandconditions.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
+esbuild layout.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/layout.cjs --log-level=warning
 esbuild ../src/lib/weather.js --bundle --format=cjs --platform=node \
     --outfile=.build/weather.cjs --log-level=warning
 esbuild ../src/lib/audioWaterfall.js --bundle --format=cjs --platform=node \
@@ -220,8 +228,11 @@ node edgehit.test.js
 node haptics.test.js
 node appheight.test.js
 node barrel.test.js
+node sheetgesture.test.js
+node visibilitypause.test.js
 node bandconditions.test.js
 node dispatch.test.js
+node layout.test.js
 node weather.test.js
 node radiosync.test.js
 node audiowaterfall.test.js

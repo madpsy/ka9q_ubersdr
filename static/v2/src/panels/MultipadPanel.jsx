@@ -148,7 +148,7 @@ function FreqWheel() {
                         <span className="pad-wheel__unit">Hz</span>
                     </button>
                 )}
-                {/* Native select on purpose: a phone gives it a full-height
+                {/* Native selects on purpose: a phone gives them a full-height
                     picker, which beats anything a 30 px chip could offer. */}
                 <select
                     className="pad-wheel__step"
@@ -158,6 +158,27 @@ function FreqWheel() {
                     onChange={(e) => display.set({ tuneStep: Number(e.target.value) })}
                 >
                     {TUNING_STEPS.map((s) => <option key={s} value={s}>{stepLabel(s)}</option>)}
+                </select>
+                {/* Mode, here as well as in the row of buttons below.
+                    Deliberately not instead of them: eight buttons are one tap
+                    and are worth the room where there is room. This is the
+                    minimal view's copy, where there is not — and mode is the one
+                    thing you cannot do without on a pad whose whole claim is
+                    that it is the panel you were going to open anyway. Tuning
+                    across a band edge without it means opening the Receiver
+                    panel to turn LSB into USB.
+
+                    A select rather than more buttons because the head is a row
+                    that already holds a 27 px frequency readout: two more chips
+                    would either wrap it or squeeze the readout to nothing. */}
+                <select
+                    className="pad-wheel__step pad-wheel__mode"
+                    value={tuning.mode}
+                    aria-label="Mode"
+                    title="Demodulation mode"
+                    onChange={(e) => actions.setMode(e.target.value)}
+                >
+                    {MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </select>
             </div>
             <Barrel

@@ -31,6 +31,14 @@
 //                hidden or closed the panel their layout says so and this is
 //                not consulted again. There is deliberately no minimal
 //                override: every panel starts cut down on a phone.
+//   touch        first-run defaults for a machine that has a touchscreen but is
+//                not a handset — a convertible laptop, a tablet in a dock, a
+//                touch monitor in a shack: { hidden, minimal, float }. Same
+//                status as `mobile`: defaults for a layout being built, never
+//                consulted again once one is stored. `float` opens the panel as
+//                a window instead of putting it in a dock, and takes
+//                { w, h, anchor }, the anchor being resolved against the
+//                floating layer once it has measured — see FloatingLayer.
 //   requires     optional (serverInfo, env) => bool; false hides the panel
 //                entirely — see usePanelApplies() at the foot of this file
 //   Component    the panel body
@@ -86,9 +94,18 @@ export const PANELS = [
     // alone takes in the Receiver panel. Everything else on a handset is
     // something you go and get; this is already there.
     //
-    // Hidden on a desktop, where there is room for the real panels and the pad
-    // would only be a smaller copy of them. Still listed in the layout manager,
-    // so anyone who wants it on a touchscreen laptop can have it.
+    // Hidden on a mouse-only desktop, where there is room for the real panels
+    // and the pad would only be a smaller copy of them.
+    //
+    // Present on a *touchscreen* desktop, though, because there the argument
+    // that put it on a phone applies again and the screen size never did: a
+    // barrel exists because a fingertip cannot hit a 16 px arrow, and a
+    // convertible laptop folded flat or a touch monitor in a shack has exactly
+    // the same fingertip. Floating rather than docked, minimal, in the bottom
+    // left — the pad is a thing you reach for with a hand that is already off
+    // the keyboard, so it wants to be near the near edge and out of the way of
+    // the spectrum, not occupying a column of the left dock. The size is the two
+    // barrels and the frequency readout with nothing to scroll.
     //
     // Minimal: the two barrels alone — the controls that exist here because
     // they have no good small form anywhere else. Like every panel it opens cut
@@ -102,6 +119,14 @@ export const PANELS = [
         defaultHidden: true,
         minimal: true,
         mobile: { hidden: false, open: true },
+        touch: {
+            hidden: false,
+            minimal: true,
+            // Wide enough for the head row whole: a ten-digit readout at 27 px
+            // plus the step and mode pickers beside it. The height is the two
+            // barrels and that row, with nothing to scroll.
+            float: { w: 390, h: 188, anchor: 'bottom-left' },
+        },
         Component: MultipadPanel,
     },
     // Minimal: the dial, the mode buttons and the filter width — what you tune

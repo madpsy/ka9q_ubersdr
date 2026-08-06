@@ -137,6 +137,48 @@ export default function Dock({ side }) {
 
     useEffect(() => clearPeekTimer, []);
 
+    // ---- where the dock was scrolled to ---------------------------------
+    //
+    // A peek is a fresh mount every time: the overlay only exists while the
+    // pointer is on the rail, so the body it renders is a new element with a new
+    // scrollTop of zero. On a dock whose panels run past its height — which is
+    // most of them, since side docks size panels to their content and let the
+    // dock scroll — that means every glance opens at the top and the panel you
+    // were actually looking at is somewhere below the fold.
+    //
+    // So the offset is kept here, on the Dock itself, which survives peeks
+    // opening and closing because only its inner branch changes. Both axes: the
+    // bottom dock lays panels out in a row and scrolls sideways.
+    //
+    // Restored in a callback ref rather than an effect, so it is set in the same
+    // commit the body is attached in and the dock never paints at the top before
+    // jumping. React attaches children first, so there is content to restore
+    // into by the time this runs.
+    const scrollAt = useRef({ top: 0, left: 0 });
+    // What the restore below actually achieved, which is not always what it
+    // asked for: a panel still fetching its list is short, and the browser
+    // clamps a scrollTop the content cannot reach. That write fires a scroll
+    // event like any other, and recording it would throw the real position away
+    // the moment it was restored — so the echo of our own write is ignored, and
+    // the offset survives until the operator scrolls somewhere themselves.
+    const echo = useRef(null);
+
+    const bodyRef = useCallback((el) => {
+        if (!el) return;
+        el.scrollTop = scrollAt.current.top;
+        el.scrollLeft = scrollAt.current.left;
+        echo.current = { top: el.scrollTop, left: el.scrollLeft };
+    }, []);
+
+    const onBodyScroll = useCallback((e) => {
+        const top = e.currentTarget.scrollTop;
+        const left = e.currentTarget.scrollLeft;
+        const was = echo.current;
+        if (was && was.top === top && was.left === left) return;
+        echo.current = null;
+        scrollAt.current = { top, left };
+    }, []);
+
     // Covers a cancelled drag (Escape), where no drop fires at all. It cannot
     // cover a completed drop: moving the panel unmounts the drag source, so its
     // dragend no longer bubbles to the window — the drop itself clears that,
@@ -211,6 +253,8 @@ export default function Dock({ side }) {
 
             <div
                 className={`dock__body${dropping ? ' is-dropping' : ''}`}
+                ref={bodyRef}
+                onScroll={onBodyScroll}
                 onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes('text/ubersdr-panel')) return;
                     e.preventDefault();

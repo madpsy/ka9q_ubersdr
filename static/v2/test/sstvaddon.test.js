@@ -11,7 +11,7 @@ const assert = require('assert');
 const {
     AGE_TICK_MS, DEFAULT_IMAGES, MAX_IMAGES, MODE_NAMES, POLL_MS, clampCount,
     detailRows, downloadName, formatAge, formatFreq, formatSNR, formatTime,
-    imageUrl, imagesUrl, modeName, records, sstvAvailable,
+    ADDON_NAME, addonUrl, imageUrl, imagesUrl, modeName, records, sstvAvailable,
 } = require('./.build/sstvaddon.cjs');
 
 let pass = 0;
@@ -74,6 +74,13 @@ t('the count is held between one and the maximum, whatever it is given', () => {
 
 t('images are served from the addon, by filename', () => {
     assert.strictEqual(imageUrl('a.png'), '/addon/sstv/images/a.png');
+});
+
+t('the panel links out to the same route the Addons panel uses', () => {
+    // Trailing slash and all: that is the route the server publishes, and the
+    // two panels offering the same addon at two different URLs is the kind of
+    // thing nobody notices until one of them 404s.
+    assert.strictEqual(addonUrl(), `/addon/${ADDON_NAME}/`);
 });
 
 t('a response is an array, and anything else is no pictures rather than a crash', () => {

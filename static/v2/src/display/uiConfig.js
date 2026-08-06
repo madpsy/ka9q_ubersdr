@@ -19,6 +19,8 @@
 // parsed and validated onto the top level, so the draw path never re-parses a
 // string, but nothing is dropped.
 
+import { paletteMarks } from '../lib/palettes.js';
+
 export const UI_CONFIG_DEFAULTS = {
     loaded: false,
     config: {},
@@ -27,7 +29,11 @@ export const UI_CONFIG_DEFAULTS = {
     stationIdOverlay: true,     // absent key means show, as in v1
     stationIdColor: '#ffffff',
     autoMinSpan: 30,            // operator's default minimum dynamic range, dB
-    bandwidthColor: 'rgba(0, 255, 0, 1)',   // passband edges, v1's default green
+    // The operator's passband-edge colour name, empty when they have not set
+    // one. Named to match what parseUiConfig produces — a `bandwidthColor` key
+    // here was never populated by the parser, so the defaults and a parsed
+    // config disagreed about what the field was even called.
+    bandwidthColorName: '',
     // The operator's default audio buffer ceiling, seconds. Sent as a string of
     // milliseconds ("200"). null when the server did not say, which is not the
     // same as 0 — see the AudioDefaults bridge in App.jsx.
@@ -49,6 +55,38 @@ const BANDWIDTH_COLORS = {
 export function bandwidthColor(name, alpha) {
     const rgb = BANDWIDTH_COLORS[String(name || '').toLowerCase()] || BANDWIDTH_COLORS.green;
     return `rgba(${rgb}, ${alpha})`;
+}
+
+/**
+ * What colour the dial line and the passband edges are drawn in.
+ *
+ * Three sources, most specific first:
+ *
+ *   this browser   `markOverrides[palette]` from the Display panel. Absent
+ *                  unless somebody picked one, and the only way to override the
+ *                  two below.
+ *   the operator   `bandwidth_indicator_color` from /api/ui-config, which v1
+ *                  also honours — so a receiver that has chosen a house colour
+ *                  for the passband keeps it, and the two frontends agree. It
+ *                  applies to the passband only; there is no dial equivalent.
+ *   the palette    paletteMarks(), the default: hues the chosen colour map does
+ *                  not itself contain.
+ *
+ * Takes the whole display state so both callers pass the same thing: the
+ * spectrum draws from it, and the Display panel's pickers have to *open* on it —
+ * a picker that opened on black when nothing had been chosen would start every
+ * first drag from the wrong end of the colour space.
+ */
+export function markColors(d) {
+    const marks = paletteMarks(d.palette);
+    const mine = (d.markOverrides && d.markOverrides[d.palette]) || {};
+    const operatorEdge = d.server && d.server.bandwidthColorName
+        ? bandwidthColor(d.server.bandwidthColorName, 1)
+        : '';
+    return {
+        dial: mine.dial || marks.vfo,
+        edge: mine.edge || operatorEdge || marks.edge,
+    };
 }
 
 export function parseUiConfig(cfg) {
@@ -74,8 +112,12 @@ export function parseUiConfig(cfg) {
             : UI_CONFIG_DEFAULTS.bgOpacity,
         stationIdOverlay: cfg.station_id_overlay !== false,
         stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : UI_CONFIG_DEFAULTS.stationIdColor,
+        // Empty when the operator did not set one, which is not the same as
+        // their having chosen v1's default: absent has to fall through to the
+        // palette's own colour (see markColors), and 'green' would pin every
+        // palette to green whether it suits the colour map or not.
         bandwidthColorName: typeof cfg.bandwidth_indicator_color === 'string'
-            ? cfg.bandwidth_indicator_color : 'green',
+            ? cfg.bandwidth_indicator_color.trim() : '',
         autoMinSpan: Number.isFinite(minSpan)
             ? Math.max(0, Math.min(60, minSpan))
             : UI_CONFIG_DEFAULTS.autoMinSpan,

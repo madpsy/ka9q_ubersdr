@@ -29,12 +29,62 @@ export const CONFIRM_MS = 30000;
 export const PING_EVERY_MS = 10000;
 export const BACK_AFTER_MS = 30000;
 
-// Spectrum rate throttle while idle. Mobile idles sooner: the saving is the
-// same but the connection is likelier to be metered.
-export const THROTTLE_MS_MOBILE = 150000;    // 2.5 minutes
-export const THROTTLE_MS_DESKTOP = 300000;   // 5 minutes
+// Spectrum rate throttle while idle.
 export const THROTTLE_DIVISOR = 2;           // half rate; v1 uses 2 as well
 export const FULL_DIVISOR = 1;
+
+// How long a hidden tab keeps its spectrum socket open — v1's figure, from
+// spectrum-display.js setupVisibilityDisconnect.
+//
+// Halving the rate is what a *present* operator who has stopped doing anything
+// gets. A tab nobody is looking at gets nothing at all: the socket is closed and
+// the server stops producing for it. The grace period is what makes that safe to
+// do — switching tabs to check something and coming straight back is the common
+// case, and it must not cost a reconnect. Five seconds is long enough to cover
+// it and short enough that a tab left in the background is not still streaming
+// a waterfall into a canvas nobody can see.
+//
+// The audio socket is deliberately untouched: listening with the tab in the
+// background is the point of the media controls.
+export const HIDDEN_SUSPEND_MS = 5000;
+
+// How long to wait, in minutes, offered as a list. 0 is never.
+//
+// A list rather than a slider because there is no meaning between the rungs:
+// this is "how long am I prepared to be counted as away", and the difference
+// between 5 and 6 minutes is not a thought anybody has. The span is wide because
+// the two ends are genuinely different uses — somebody working a pile-up wants
+// it never, somebody monitoring a channel on a phone wants it soon.
+export const THROTTLE_CHOICES = [0, 2, 5, 10, 30];
+
+// Mobile idles sooner: the saving is the same but the connection is likelier to
+// be metered and the battery smaller.
+export const THROTTLE_MIN_MOBILE = 2;
+export const THROTTLE_MIN_DESKTOP = 5;
+
+/**
+ * The delay in force, in minutes, for a stored setting that may be absent.
+ *
+ * null or anything unrecognised means "not chosen", and gets this device's
+ * default — the same shape as the display's other per-device settings, and the
+ * reason the two defaults can differ without a phone and a desktop having to
+ * disagree about what the stored value means. 0 is a choice like any other and
+ * survives: it is the operator saying never.
+ */
+export function throttleMinutes(setting, isMobile) {
+    // A number and nothing else, deliberately: Number(null) is 0, and 0 is
+    // "never" — so coercing would read an unset setting as the operator having
+    // asked for the throttle to be off. Everything that stores one writes a
+    // number, and everything that does not is absent.
+    if (typeof setting === 'number' && THROTTLE_CHOICES.includes(setting)) return setting;
+    return isMobile ? THROTTLE_MIN_MOBILE : THROTTLE_MIN_DESKTOP;
+}
+
+/** The same as a delay in ms, or null for never — which arms no timer at all. */
+export function throttleAfterMs(setting, isMobile) {
+    const mins = throttleMinutes(setting, isMobile);
+    return mins > 0 ? mins * 60000 : null;
+}
 
 // What to assume when /connection did not tell us — v1's fallback. Guessing a
 // timeout costs a dialog nobody needed; guessing there is none costs a session
@@ -60,10 +110,6 @@ export function warnAfterMs(sessionTimeoutSec) {
 /** v1's rule, both halves of it. */
 export function shouldPing(now, lastPingAt, lastActivityAt) {
     return (now - lastPingAt) >= PING_EVERY_MS || (now - lastActivityAt) >= BACK_AFTER_MS;
-}
-
-export function throttleAfterMs(isMobile) {
-    return isMobile ? THROTTLE_MS_MOBILE : THROTTLE_MS_DESKTOP;
 }
 
 /** "2 minutes and 5 seconds", as the dialog says it. */

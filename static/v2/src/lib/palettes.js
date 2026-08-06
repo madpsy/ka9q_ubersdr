@@ -53,6 +53,49 @@ const STOPS = {
     ],
 };
 
+// The dial line and the passband edges, per palette.
+//
+// A waterfall shows the *whole* colour map at once, so a marker colour cannot be
+// chosen against a background — there isn't one. What it can do is pick a hue
+// the palette never reaches: every one of these maps sweeps a limited arc of the
+// hue circle, and a line from outside that arc stays legible wherever it lands.
+// (The dark outline every mark is drawn with, in SpectrumView's markLine, is the
+// other half of it and does the work on lightness.)
+//
+// So each entry names two hues the map below it does not contain, the louder one
+// for the dial:
+//
+//   turbo    sweeps purple → blue → cyan → green → yellow → red, i.e. nearly all
+//            of it. What it never reaches is magenta, so both marks come from
+//            there and are told apart by lightness instead.
+//   viridis  purple → teal → yellow: no red, and no magenta.
+//   inferno  black → purple → red → orange → pale yellow: no cyan, no green.
+//   magma    the same arc as inferno, a little pinker.
+//   classic  black → blue → cyan → yellow → white: no green, no magenta.
+//   mono     no hue at all, so anything saturated reads; amber and cyan are the
+//            two the rest of the UI already uses.
+//   ice      one cool hue up to white: the warm half of the circle is free.
+//   radar    one green hue up to white: likewise, plus magenta.
+const MARKS = {
+    turbo: { vfo: '#ff2ec4', edge: '#ff9ad5' },
+    viridis: { vfo: '#ff4d4d', edge: '#ff2ec4' },
+    inferno: { vfo: '#34e5ff', edge: '#5cff8f' },
+    magma: { vfo: '#34e5ff', edge: '#7dff5c' },
+    classic: { vfo: '#ff2ec4', edge: '#5cff8f' },
+    mono: { vfo: '#ffd166', edge: '#34e5ff' },
+    ice: { vfo: '#ffb020', edge: '#ff2ec4' },
+    radar: { vfo: '#ffd166', edge: '#ff2ec4' },
+};
+
+// Fallback for a palette name that is not one of ours — the amber the theme has
+// always used for the dial, and v1's green for the passband.
+const MARKS_FALLBACK = { vfo: '#ffd166', edge: '#00ff00' };
+
+/** { vfo, edge } — marker colours that contrast with this palette. */
+export function paletteMarks(name) {
+    return MARKS[name] || MARKS_FALLBACK;
+}
+
 function buildLUT(stops) {
     const lut = new Uint8ClampedArray(256 * 3);
     let seg = 0;

@@ -7,8 +7,9 @@
 
 const assert = require('assert');
 const {
-    CONFIRM_MS, DEFAULT_IDLE_SEC, PING_EVERY_MS, THROTTLE_MS_MOBILE, THROTTLE_MS_DESKTOP,
-    idlePhrase, shouldPing, throttleAfterMs, warnAfterMs,
+    CONFIRM_MS, DEFAULT_IDLE_SEC, PING_EVERY_MS,
+    THROTTLE_CHOICES, THROTTLE_MIN_MOBILE, THROTTLE_MIN_DESKTOP,
+    idlePhrase, shouldPing, throttleAfterMs, throttleMinutes, warnAfterMs,
 } = require('./.build/idle.cjs');
 
 let pass = 0;
@@ -58,10 +59,50 @@ t('coming back after a spell away pings immediately', () => {
     assert.strictEqual(shouldPing(now, now - 1000, now - 60000), true);
 });
 
-t('mobile throttles the spectrum sooner than desktop', () => {
-    assert.strictEqual(throttleAfterMs(true), THROTTLE_MS_MOBILE);
-    assert.strictEqual(throttleAfterMs(false), THROTTLE_MS_DESKTOP);
-    assert.ok(THROTTLE_MS_MOBILE < THROTTLE_MS_DESKTOP);
+t('an unset throttle takes this device\'s default, sooner on mobile', () => {
+    // The stored value has to mean the right thing on a phone and on a desktop
+    // without the two disagreeing, so "not chosen" is a value of its own.
+    assert.strictEqual(throttleMinutes(null, true), THROTTLE_MIN_MOBILE);
+    assert.strictEqual(throttleMinutes(null, false), THROTTLE_MIN_DESKTOP);
+    assert.strictEqual(throttleMinutes(undefined, false), THROTTLE_MIN_DESKTOP);
+    assert.ok(THROTTLE_MIN_MOBILE < THROTTLE_MIN_DESKTOP);
+    // ...and both defaults are on the list, or the control could not show them.
+    assert.ok(THROTTLE_CHOICES.includes(THROTTLE_MIN_MOBILE));
+    assert.ok(THROTTLE_CHOICES.includes(THROTTLE_MIN_DESKTOP));
+});
+
+t('a chosen delay is the same on either device', () => {
+    for (const m of THROTTLE_CHOICES) {
+        assert.strictEqual(throttleMinutes(m, true), m);
+        assert.strictEqual(throttleMinutes(m, false), m);
+    }
+});
+
+t('never is a choice, not an absence', () => {
+    // 0 has to survive the "not chosen" test, or turning the throttle off would
+    // silently be read as never having been asked and put back to the default.
+    assert.strictEqual(throttleMinutes(0, true), 0);
+    assert.strictEqual(throttleAfterMs(0, true), null, 'null arms no timer at all');
+    assert.strictEqual(throttleAfterMs(0, false), null);
+});
+
+t('a delay off the list is not honoured', () => {
+    // A stored value from a build with different rungs, or a hand-edited one:
+    // the control could not show it, so it must not be what is running.
+    assert.strictEqual(throttleMinutes(7, false), THROTTLE_MIN_DESKTOP);
+    assert.strictEqual(throttleMinutes(-1, false), THROTTLE_MIN_DESKTOP);
+    assert.strictEqual(throttleMinutes('soon', false), THROTTLE_MIN_DESKTOP);
+    // The trap this exists for: Number(null) is 0, which is itself a valid
+    // choice meaning never — so an unset setting must not be coerced on the way
+    // in, or it would read as the operator having switched the throttle off.
+    assert.strictEqual(throttleMinutes('0', false), THROTTLE_MIN_DESKTOP);
+    assert.strictEqual(throttleMinutes(false, false), THROTTLE_MIN_DESKTOP);
+});
+
+t('the delay reaches the timer in milliseconds', () => {
+    assert.strictEqual(throttleAfterMs(2, false), 120000);
+    assert.strictEqual(throttleAfterMs(30, false), 1800000);
+    assert.strictEqual(throttleAfterMs(null, true), THROTTLE_MIN_MOBILE * 60000);
 });
 
 t('the dialog says how long it has been, in words', () => {

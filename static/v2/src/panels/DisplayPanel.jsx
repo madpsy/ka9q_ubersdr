@@ -2,17 +2,22 @@ import React from '../react.js';
 import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
-import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { markColors } from '../display/uiConfig.js';
+import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import {
+    THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP, THROTTLE_MIN_MOBILE, throttleMinutes,
+} from '../radio/idle.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
-    // Only to say when the idle throttle will fire: it waits half as long on a
-    // small screen, and a hint that named the wrong figure would be worse than
-    // none. Same query IdleWatch uses to decide.
+    // Two settings resolve per device — the zoom anchor and the idle throttle —
+    // and both have to show what is actually in force, not what is stored. The
+    // same query IdleWatch and the spectrum use to decide, so the control and
+    // the behaviour cannot disagree.
     const mobile = useMediaQuery(MOBILE_QUERY);
     // No vibrator, no setting: a switch that provably cannot do anything is
     // worse than none, and every desktop would carry it. See hapticsSupported.
@@ -80,9 +85,21 @@ export default function DisplayPanel() {
             </Field>
 
             {viewMode === 'split' && (
-                <Field label="Split" hint={`${Math.round(d.split * 100)} % spectrum`}>
-                    <Slider value={Math.round(d.split * 100)} min={10} max={85} onChange={(v) => d.set({ split: v / 100 })} />
-                </Field>
+                <>
+                    <Field label="Split" hint={`${Math.round(d.split * 100)} % spectrum`}>
+                        <Slider value={Math.round(d.split * 100)} min={10} max={85} onChange={(v) => d.set({ split: v / 100 })} />
+                    </Field>
+                    {/* The same setting from the other end: the slider is where
+                        you set the share deliberately, this is whether the join
+                        between the panes can be grabbed to do it by hand. */}
+                    <Field label="Drag to adjust" inline>
+                        <Switch
+                            checked={d.splitDrag !== false}
+                            onChange={(v) => d.set({ splitDrag: v })}
+                            title="Drag the frequency scale up or down to re-share the height between the two panes. Turn this off if you keep moving it by accident when reaching for the scale — the slider above and the double-click reset still work"
+                        />
+                    </Field>
+                </>
             )}
 
             <Field label="Scroll wheel" hint={d.wheelAction === 'tune' ? `steps ${d.tuneStep || 500} Hz` : undefined}>
@@ -210,6 +227,12 @@ export default function DisplayPanel() {
                 </div>
             </Field>
 
+            {/* Directly under the palette because that is what they answer to:
+                the marks have to contrast with the colour map, and each palette
+                remembers its own pair. Changing palette therefore changes what
+                these two show, which is the point. */}
+            <MarkColors />
+
             <Field label="Contrast" hint={d.contrast.toFixed(2)}>
                 <Slider value={d.contrast} min={0.4} max={2.5} step={0.05} onChange={(v) => d.set({ contrast: v })} />
             </Field>
@@ -274,19 +297,16 @@ export default function DisplayPanel() {
                 </>
             )}
 
+            {/* No note under this one: the label says what it does. The tooltip
+                carries the part that is not obvious — that it is a collapsed
+                dock's rail, and that clicking still opens the dock for good. */}
             <Field label="Show panels on hover" inline>
                 <Switch
                     checked={d.hoverPanels !== false}
                     onChange={(v) => d.set({ hoverPanels: v })}
-                    title="Slides a collapsed dock out over the receiver while the pointer rests on its rail"
+                    title="Resting the pointer on a collapsed dock's rail slides it out over the receiver, and moving away puts it back. Clicking the rail still opens or closes the dock for good"
                 />
             </Field>
-            <div className="note note--tight">
-                Resting the pointer on a collapsed dock's rail slides it out over the
-                receiver, and moving away puts it back — nothing is resized either way.
-                Clicking the rail is unchanged: that is what opens or closes a dock for
-                good, and a hover never overrides it.
-            </div>
 
             {/* Touch only, so the whole section is absent where there is
                 nothing to vibrate — see hapticsSupported. */}
@@ -353,26 +373,82 @@ export default function DisplayPanel() {
                 own — is something you notice here first. The Status panel's
                 "Poll rate" says what it is doing at any moment. */}
             <div className="section-label"><span>Data</span></div>
+            {/* A list, not a switch: "how long am I prepared to be counted as
+                away" is the actual question, and the old switch answered it with
+                a number the panel could only describe. `null` is not an option
+                of its own — it resolves to this device's default and shows as
+                that, so the control always reads as the delay in force. */}
             <Field
                 label="Slow down when idle"
-                hint={`after ${mobile ? '2.5' : '5'} min`}
+                hint={d.idleThrottleMin == null ? 'default for this device' : undefined}
                 inline
             >
-                <Switch
-                    checked={d.idleThrottle !== false}
-                    onChange={(v) => d.set({ idleThrottle: v })}
-                    title="Asks the server to poll the receiver half as often once nothing has happened for a few minutes, and restores the full rate on your first click, keypress or scroll"
+                <Segmented
+                    size="sm"
+                    minItemWidth={34}
+                    value={String(throttleMinutes(d.idleThrottleMin, mobile))}
+                    onChange={(v) => d.set({ idleThrottleMin: Number(v) })}
+                    options={THROTTLE_CHOICES.map((m) => ({
+                        value: String(m),
+                        label: m === 0 ? 'Never' : `${m}m`,
+                        title: m === 0
+                            ? 'Always poll at the full rate'
+                            : `Halve the spectrum rate after ${m} minutes of no input`,
+                    }))}
                 />
             </Field>
             <div className="note note--tight">
-                Halves the spectrum data after a few minutes of no input and restores it the
-                moment you touch anything — saves bandwidth and battery while nobody is
-                watching. Turn it off if you leave the waterfall running to watch a band.
+                Asks the server to poll the spectrum at half rate after this long with no
+                input, and restores it on the first move, key or tap. Defaults
+                to {THROTTLE_MIN_DESKTOP} minutes, {THROTTLE_MIN_MOBILE} on a phone.
             </div>
 
             <div className="row-end">
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>
             </div>
         </div>
+    );
+}
+
+// The dial line and the passband edges, for the palette in force.
+//
+// Two pickers rather than one, because the two lines answer different questions
+// and want to be told apart on sight: the dial is where you are listening and
+// the edges are how wide. Both open on the colour actually being drawn — the
+// palette's own choice until somebody overrides it — so a first drag starts from
+// something sensible rather than from black.
+function MarkColors() {
+    const d = useDisplay();
+    const { dial, edge } = markColors(d);
+    const mine = (d.markOverrides && d.markOverrides[d.palette]) || {};
+    const hint = mine.dial || mine.edge ? `custom for ${d.palette}` : `chosen for ${d.palette}`;
+
+    return (
+        <Field label="Marker colours" hint={hint}>
+            <div className="markcolors">
+                <label className="markcolors__row">
+                    <span className="markcolors__name">Dial</span>
+                    <ColorPicker
+                        value={dial}
+                        ariaLabel="Dial line colour"
+                        title="The line on the frequency you are tuned to"
+                        onChange={(v) => d.setMarkColor(d.palette, 'dial', v)}
+                        onClear={() => d.setMarkColor(d.palette, 'dial', '')}
+                        inherited={!mine.dial}
+                    />
+                </label>
+                <label className="markcolors__row">
+                    <span className="markcolors__name">Passband</span>
+                    <ColorPicker
+                        value={edge}
+                        ariaLabel="Passband edge colour"
+                        title="The two lines showing what is being demodulated"
+                        onChange={(v) => d.setMarkColor(d.palette, 'edge', v)}
+                        onClear={() => d.setMarkColor(d.palette, 'edge', '')}
+                        inherited={!mine.edge}
+                    />
+                </label>
+            </div>
+        </Field>
     );
 }

@@ -161,7 +161,9 @@
     /* The spectrum trace and fill are coloured from the active waterfall
        palette, not from tokens — see paletteGradients() in SpectrumView.jsx. */
     --spec-band: rgba(139, 124, 248, 0.22);
-    --spec-vfo: #ffd166;
+    /* The dial line and the passband edges are not tokens either: they have to
+       contrast with the waterfall palette rather than with the theme, so they
+       come from paletteMarks() and the Display panel's per-palette overrides. */
     --scale-bg: #0d121b;
     --scale-text: #8b96a9;
     /* The ruler's minor ticks. Majors take --scale-text, so this only has to be
@@ -1320,8 +1322,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
    cursor is the affordance — the strip is drawn by a canvas, so there is
    nothing to restyle inside it — with its edges picking up the accent on hover
    so it reads as a handle rather than as a label that happens to move. */
-.spectrum__pane--split { cursor: ns-resize; touch-action: none; user-select: none; }
-.spectrum__pane--split:hover { border-block-color: var(--accent-line); }
+/* In split view the scale swallows presses whether or not it can be dragged —
+   see onSplitDown — so it takes the gesture off the browser either way. */
+.spectrum__pane--split { touch-action: none; user-select: none; }
+/* Draggable. Separate from the above because the drag is switchable and the
+   affordance has to go with it: a resize cursor over a strip that will not
+   resize is a worse lie than no cursor at all. */
+.spectrum__pane--grab { cursor: ns-resize; }
+.spectrum__pane--grab:hover { border-block-color: var(--accent-line); }
 
 /* The waterfall is two stacked canvases in a clipping box. The lower one is
    taller than the box and is translated between rows so the history scrolls
@@ -1994,7 +2002,10 @@ a.btn { text-decoration: none; }
     background: transparent;
     color: var(--text);
     font-family: var(--mono);
-    font-size: clamp(20px, 6vw, 27px);
+    /* The floor is for a 320 px handset, where the head also carries the
+       step and mode pickers and a 20 px readout no longer leaves room
+       for them. Anything wider is unaffected: 6vw passes 20 px at 334. */
+    font-size: clamp(18px, 6vw, 27px);
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
@@ -2032,6 +2043,11 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .pad-wheel__step:focus { border-color: var(--accent); outline: none; }
+/* The mode carries the accent because it is the one setting in this row that
+   changes what you are listening to rather than how the drum behaves — and in
+   the minimal view it is the only place mode appears at all, so it has to be
+   findable rather than merely present. */
+.pad-wheel__mode { color: var(--accent); font-weight: 650; }
 
 /* Label, control, reading — the same three columns for the filter width and the
    squelch, so the pair scans as one block rather than as two settings. */
@@ -2970,6 +2986,48 @@ a.btn { text-decoration: none; }
 .palette:hover { transform: translateY(-1px); }
 .palette.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 
+/* The dial and passband colour pickers, under the palette grid. Two rows rather
+   than a line, because each needs a name: two bare swatches side by side say
+   nothing about which line is which. */
+.markcolors { display: flex; flex-direction: column; gap: 6px; }
+.markcolors__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.markcolors__name { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+
+.colorpick { display: inline-flex; align-items: center; gap: 6px; }
+/* A swatch, not a form control: the native input carries its own inset border
+   and padding, and every engine draws them differently. */
+.colorpick__input {
+    width: 40px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+.colorpick__input::-webkit-color-swatch-wrapper { padding: 0; }
+.colorpick__input::-webkit-color-swatch { border: none; border-radius: 5px; }
+.colorpick__input::-moz-color-swatch { border: none; border-radius: 5px; }
+.colorpick__input:hover { border-color: var(--accent); }
+.colorpick__clear {
+    font-size: calc(10px * var(--ui-scale));
+    padding: 3px 7px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.colorpick__clear:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.colorpick__clear:disabled { opacity: 0.4; cursor: default; }
+
 .layout-list { display: flex; flex-direction: column; gap: 9px; }
 .layout-row {
     display: flex;
@@ -3711,6 +3769,18 @@ a.btn { text-decoration: none; }
     border-bottom: 1px solid var(--border);
     position: relative;
 }
+/* The bar is a drag surface where the sheet has two states to be in, so the
+   browser must not take a vertical swipe on it for a scroll — nothing here
+   scrolls, and the gesture is the control. `user-select` because a drag that
+   highlights the panel's own title looks like something went wrong. */
+.sheet__head--grab {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+}
+.sheet__head--grab:active { cursor: grabbing; }
+
 .sheet__grip {
     position: absolute;
     top: 5px;
@@ -3720,6 +3790,13 @@ a.btn { text-decoration: none; }
     height: 3px;
     border-radius: 99px;
     background: var(--border-strong);
+    transition: background var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+/* The pill has drawn a picture of a drag handle since the sheet existed and,
+   until now, was decoration. Where it is real it says so under the finger. */
+.sheet__head--grab:active .sheet__grip {
+    background: var(--accent);
+    width: 44px;
 }
 .sheet__title { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: calc(13px * var(--ui-scale)); }
 .sheet__icon { display: grid; place-items: center; color: var(--accent); }

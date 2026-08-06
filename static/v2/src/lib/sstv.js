@@ -16,6 +16,12 @@ export const BASE = '/addon/sstv';
 
 export const ADDON_NAME = 'sstv';
 
+// The addon's own page, as the Addons panel links to it — trailing slash and
+// all, since that is the route the server publishes. Here rather than written
+// out in the panel so the one place that knows where this addon lives stays the
+// one place.
+export const addonUrl = (base = BASE) => `${base}/`;
+
 /** Is the addon on this receiver? Same test the widget makes. */
 export function sstvAvailable(serverInfo) {
     const addons = serverInfo && serverInfo.addons;

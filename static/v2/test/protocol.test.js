@@ -15,7 +15,8 @@ const ab = require('./.build/audioband.cjs');
 const af = require('./.build/audiofilters.cjs');
 const eql = require('./.build/eqlevels.cjs');
 const mn = require('./.build/mentions.cjs');
-const { UI_CONFIG_DEFAULTS, parseUiConfig } = require('./.build/uiconfig.cjs');
+const { UI_CONFIG_DEFAULTS, markColors, parseUiConfig } = require('./.build/uiconfig.cjs');
+const { PALETTE_NAMES, paletteMarks } = require('./.build/palettes.cjs');
 const {
     dbfsToSUnits, formatRate, freqInRange, freqToKHz, parseFreqInput,
     sMeterColour, sMeterColourAt, snrColour, snrColourAt,
@@ -919,6 +920,61 @@ t("the operator's default audio buffer is read from the same reply", () => {
     assert.strictEqual(parseUiConfig({ default_buffer: '0' }).bufferSec, null);
     // Out of range is clamped rather than refused.
     assert.strictEqual(parseUiConfig({ default_buffer: '9000' }).bufferSec, 2);
+});
+
+// --- marker colours --------------------------------------------------------
+
+t('every palette names a dial and a passband colour', () => {
+    // The marks have to contrast with the colour map, so a palette added
+    // without a pair silently falls back to a fixed one that may sit right in
+    // the middle of it.
+    for (const name of PALETTE_NAMES) {
+        const m = paletteMarks(name);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(m.vfo), `${name} dial: ${m.vfo}`);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(m.edge), `${name} passband: ${m.edge}`);
+        assert.notStrictEqual(m.vfo.toLowerCase(), m.edge.toLowerCase(),
+            `${name}: the dial and the passband must be told apart`);
+    }
+});
+
+t('marker colours resolve browser over operator over palette', () => {
+    const marks = paletteMarks('classic');
+    const base = { palette: 'classic', server: {} };
+
+    // Nothing chosen anywhere: the palette's own pair.
+    assert.deepStrictEqual(markColors(base), { dial: marks.vfo, edge: marks.edge });
+
+    // The operator's v1 setting takes the passband, and only the passband —
+    // there is no dial equivalent in /api/ui-config.
+    const withOp = { ...base, server: { bandwidthColorName: 'cyan' } };
+    assert.deepStrictEqual(markColors(withOp),
+        { dial: marks.vfo, edge: 'rgba(0, 255, 255, 1)' });
+
+    // This browser wins over both.
+    assert.deepStrictEqual(
+        markColors({ ...withOp, markOverrides: { classic: { dial: '#123456', edge: '#abcdef' } } }),
+        { dial: '#123456', edge: '#abcdef' },
+    );
+});
+
+t('an override belongs to the palette it was picked for', () => {
+    const over = { markOverrides: { classic: { dial: '#123456' } }, server: {} };
+    assert.strictEqual(markColors({ ...over, palette: 'classic' }).dial, '#123456');
+    // Switching palette brings back that palette's own choice, not the one
+    // picked to stand out against a different colour map.
+    assert.strictEqual(markColors({ ...over, palette: 'magma' }).dial, paletteMarks('magma').vfo);
+});
+
+t('an operator who set no passband colour falls through to the palette', () => {
+    // Parsed as empty rather than as v1's default green: "not set" has to be
+    // distinguishable from "chose green", or green would be pinned onto every
+    // palette whether it suits the colour map or not.
+    assert.strictEqual(parseUiConfig({}).bandwidthColorName, '');
+    assert.strictEqual(parseUiConfig(UI_SAMPLE).bandwidthColorName, 'green');
+    assert.strictEqual(
+        markColors({ palette: 'inferno', server: parseUiConfig({}) }).edge,
+        paletteMarks('inferno').edge,
+    );
 });
 
 t('opacity is clamped and survives odd values', () => {

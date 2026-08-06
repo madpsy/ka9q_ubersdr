@@ -8,10 +8,22 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
-import { MOBILE_QUERY } from '../lib/useMediaQuery.js';
+import { MOBILE_QUERY, TOUCH_QUERY } from '../lib/useMediaQuery.js';
 
 const STORAGE_KEY = 'ubersdr.v2.layout';
 const VERSION = 1;
+
+// One-shot additions to a layout that is otherwise kept as it is.
+//
+// VERSION is all-or-nothing — a mismatch throws the stored layout away — which
+// is right for a shape change and far too blunt for "this panel should now
+// appear on machines it never appeared on". Every returning visitor has a stored
+// layout, so a first-run default alone reaches nobody who is already here.
+//
+// So: a revision the migrations below key off, applied once and then recorded.
+// Each one must be conservative enough that it cannot undo an arrangement
+// somebody made — see migrateRev.
+const REV = 1;
 
 export const DOCKS = ['left', 'right', 'bottom'];
 // A panel is in exactly one place: one of the docks, or floating free.
@@ -43,16 +55,46 @@ function onPhone() {
     try { return window.matchMedia(MOBILE_QUERY).matches; } catch (e) { return false; }
 }
 
-// The panel's first-run state, honouring its `mobile` block on a handset. Two
-// machines can want opposite answers for the same panel — the Multipad is off
-// on a desktop and is the first thing a phone shows — and the registry is where
-// that is said, so it is read here rather than being decided per shell.
-function firstRun(p, phone) {
-    const m = (phone && p.mobile) || {};
+// A touchscreen on something that is not a handset: a convertible laptop, a
+// tablet in a dock, a touch monitor. Read the same way and for the same reason.
+function onTouchDesktop() {
+    try {
+        return !onPhone() && window.matchMedia(TOUCH_QUERY).matches;
+    } catch (e) {
+        return false;
+    }
+}
+
+// The two answers together, read once per layout build.
+//
+// Passed down rather than queried inside every helper so the whole first-run and
+// migration story is a pure function of (stored layout, machine) — which is what
+// makes it testable without a DOM, and there are enough interacting rules here
+// now to want that.
+function machine() {
+    return { phone: onPhone(), touch: onTouchDesktop() };
+}
+
+// Which registry block gives this machine's first-run answers, if any. A phone
+// is a phone first — it has a touchscreen too, and `mobile` is the more specific
+// statement about it.
+function firstRunBlock(p, phone, touch) {
+    if (phone) return p.mobile || null;
+    if (touch) return p.touch || null;
+    return null;
+}
+
+// The panel's first-run state, honouring whichever block applies. Different
+// machines can want opposite answers for the same panel — the Multipad is off on
+// a mouse-only desktop, floating on a touchscreen one, and the first thing a
+// phone shows — and the registry is where that is said, so it is read here
+// rather than being decided per shell.
+function firstRun(p, phone, touch) {
+    const m = firstRunBlock(p, phone, touch) || {};
     return {
         open: p.defaultOpen !== false,
         hidden: m.hidden != null ? !!m.hidden : !!p.defaultHidden,
-        minimal: false,
+        minimal: !!p.minimal && !!m.minimal,
         // On a phone every panel starts cut down, this one included. A sheet
         // over the spectrum has a fraction of a dock's room, and the minimal
         // view is the part of a panel worth having in that space — see
@@ -63,23 +105,58 @@ function firstRun(p, phone) {
     };
 }
 
-function defaultLayout() {
+// The geometry a `touch.float` block asks for. `x`/`y` are placeholders: the
+// anchor is what says where it goes, and only the floating layer knows how big
+// it is — see resolveAnchor there.
+function seedFloat(spec) {
+    return {
+        x: 0,
+        y: 0,
+        w: Math.max(FLOAT_MIN.w, Number(spec.w) || FLOAT_DEFAULT.w),
+        h: Math.max(FLOAT_MIN.h, Number(spec.h) || FLOAT_DEFAULT.h),
+        min: false,
+        anchor: spec.anchor || 'bottom-left',
+    };
+}
+
+export function defaultLayout(env = machine()) {
+    const { phone, touch } = env;
     const docks = {};
     for (const dock of DOCKS) {
         docks[dock] = { ...DOCK_DEFAULTS[dock], panels: [] };
     }
-    const phone = onPhone();
     const sections = {};
+    const floats = {};
+    const floatOrder = [];
     for (const p of PANELS) {
-        docks[p.dock].panels.push(p.id);
-        sections[p.id] = firstRun(p, phone);
+        sections[p.id] = firstRun(p, phone, touch);
+        // A panel this machine opens as a window belongs to no dock, the same
+        // rule reconcile() applies to a stored one.
+        const spec = (firstRunBlock(p, phone, touch) || {}).float;
+        if (spec) {
+            floats[p.id] = seedFloat(spec);
+            floatOrder.push(p.id);
+        } else {
+            docks[p.dock].panels.push(p.id);
+        }
     }
-    return { version: VERSION, docks, sections, floats: {}, floatOrder: [], weights: {}, heights: {} };
+    return {
+        version: VERSION,
+        // A layout built on a machine the rev-N additions do not apply to has
+        // not really been offered them — see migrateRev.
+        rev: touch ? REV : 0,
+        docks,
+        sections,
+        floats,
+        floatOrder,
+        weights: {},
+        heights: {},
+    };
 }
 
 // Merges a stored layout with the current panel registry.
-function reconcile(stored) {
-    const base = defaultLayout();
+export function reconcile(stored, env = machine()) {
+    const base = defaultLayout(env);
     if (!stored || stored.version !== VERSION) return base;
 
     // Floating panels belong to no dock, so they are resolved first and then
@@ -98,6 +175,10 @@ function reconcile(stored) {
             // the bottom of the centre area rather than as a window. The
             // geometry is kept so restoring puts it back where it was.
             min: !!g.min,
+            // Normally absent. A seeded window carries one until the floating
+            // layer has measured itself and can turn it into a position, which
+            // may be a reload later if the panel was never on screen.
+            ...(g.anchor ? { anchor: String(g.anchor) } : null),
         };
         floatOrder.push(id);
     }
@@ -159,25 +240,70 @@ function reconcile(stored) {
         base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);
     }
     base.sections = {};
-    const phone = onPhone();
+    const { phone, touch } = env;
     for (const p of PANELS) {
         const s = stored.sections?.[p.id];
         // A panel registered since this layout was stored has no entry at all,
-        // so it gets its first-run state — including the phone's answer where
+        // so it gets its first-run state — including this machine's answer where
         // the registry gives one.
-        const d = firstRun(p, phone);
+        const d = firstRun(p, phone, touch);
         base.sections[p.id] = {
             open: s?.open ?? d.open,
             hidden: s?.hidden ?? d.hidden,
             // Only panels that declare a minimal view can be in one, so a
             // stored flag on a panel that has since dropped it is discarded
             // rather than leaving the panel stuck showing nothing extra.
-            minimal: !!p.minimal && !!s?.minimal,
+            // `?? d.minimal` for the same reason as minimalMobile below: a panel
+            // with no stored entry is new here, and takes the default.
+            minimal: !!p.minimal && (s?.minimal ?? d.minimal),
             // `?? d.minimalMobile` rather than `!!`: absent means a layout
             // stored before this existed, and those should get the default like
             // everybody else, not be pinned to full because the key was missing.
             minimalMobile: !!p.minimal && (s?.minimalMobile ?? d.minimalMobile),
         };
+    }
+    return migrateRev(base, stored, phone, touch);
+}
+
+/**
+ * One-shot changes to a layout that already exists.
+ *
+ * The rule every migration here has to obey: only add what this machine has
+ * never had an opinion about. A layout is somebody's arrangement, and a
+ * migration that moved a panel they had placed, or brought back one they had
+ * hidden, would be worse than the feature it is delivering.
+ *
+ * rev 1 — a panel with a `touch` block, on a touchscreen desktop, for a layout
+ *         stored before those existed. Guarded twice over: the panel must not be
+ *         floating already, and it must still be sitting at the default the
+ *         registry gives a mouse-only machine. Anyone who had gone and found the
+ *         Multipad in the layout manager keeps it exactly where they put it.
+ */
+function migrateRev(base, stored, phone, touch) {
+    if ((Number(stored.rev) || 0) >= REV) return base;
+    // Not this machine — but leave the layout eligible rather than recording the
+    // revision as done. The same browser profile meets a touchscreen later often
+    // enough to matter: a laptop docked to one, tablet mode switched on, a
+    // profile synced to a second machine.
+    if (phone || !touch) {
+        base.rev = Number(stored.rev) || 0;
+        return base;
+    }
+
+    for (const p of PANELS) {
+        const spec = (p.touch || {}).float;
+        if (!spec || base.floats[p.id]) continue;
+        const s = stored.sections?.[p.id];
+        // Untouched means: no stored entry at all, or one still holding the
+        // mouse-only default.
+        if (s && !!s.hidden !== !!p.defaultHidden) continue;
+
+        base.floats = { ...base.floats, [p.id]: seedFloat(spec) };
+        base.floatOrder = [...base.floatOrder, p.id];
+        for (const dock of DOCKS) {
+            base.docks[dock].panels = base.docks[dock].panels.filter((id) => id !== p.id);
+        }
+        base.sections[p.id] = { ...base.sections[p.id], ...firstRun(p, phone, touch) };
     }
     return base;
 }
@@ -322,6 +448,10 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // Any geometry change settles a seeded window's anchor: the anchor exists
+    // only to say where it should first appear, and once it has a real position
+    // — placed by the layer or dragged by hand — keeping it would move the
+    // window back to the corner on the next resize.
     const setFloat = useCallback((id, geom) => {
         setLayout((l) => {
             const cur = l.floats[id];
@@ -333,7 +463,9 @@ export function LayoutProvider({ children }) {
                 w: Math.round(Math.max(FLOAT_MIN.w, geom.w ?? cur.w)),
                 h: Math.round(Math.max(FLOAT_MIN.h, geom.h ?? cur.h)),
             };
-            if (next.x === cur.x && next.y === cur.y && next.w === cur.w && next.h === cur.h) return l;
+            delete next.anchor;
+            if (!cur.anchor && next.x === cur.x && next.y === cur.y
+                && next.w === cur.w && next.h === cur.h) return l;
             return { ...l, floats: { ...l.floats, [id]: next } };
         });
     }, []);

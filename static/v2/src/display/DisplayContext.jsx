@@ -46,6 +46,15 @@ export const DEFAULTS = {
     viewMode: 'split',      // 'split' | 'spectrum' | 'waterfall'
     split: 0.25,            // fraction of the centre area used by the spectrum
                             // (only consulted in 'split' mode)
+    // Whether the frequency scale doubles as a splitter that can be dragged.
+    //
+    // On by default, because grabbing the join is how you would expect to move
+    // it and the slider is two panels away. Off for the operator who keeps
+    // catching it: the scale is also the strip you point at to read a frequency
+    // off, and on a touchscreen a finger that meant to do that and moved four
+    // pixels has re-shared the display instead. Only the drag goes — the slider
+    // and the double-click reset both still work, so nothing becomes unreachable.
+    splitDrag: true,
     // Resting opacity of floating panel windows, 0.5..1 from the Layout panel.
     // 1 is solid, i.e. the effect off.
     floatOpacity: 0.8,
@@ -80,7 +89,13 @@ export const DEFAULTS = {
     // A peek never becomes the stored state — see Dock — so this changes what
     // hovering does and nothing about what a click means.
     hoverPanels: true,
-    idleThrottle: true,
+    // Minutes of nothing happening before the spectrum drops to half rate, one
+    // of THROTTLE_CHOICES in radio/idle.js. 0 is never.
+    //
+    // null means "not chosen" and resolves per device — sooner on a phone, where
+    // the connection is likelier to be metered — which is the only way one
+    // stored value can mean the right thing on both. See throttleMinutes.
+    idleThrottleMin: null,
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
@@ -109,6 +124,24 @@ export const DEFAULTS = {
     // without the other is a normal preference, not an edge case.
     hapticButtons: true,
     hapticSpectrum: true,
+    // Overrides for the dial line and the passband edges, *per palette*:
+    //
+    //     { classic: { dial: '#ff2ec4', edge: '#5cff8f' }, … }
+    //
+    // Absent means "follow the palette", which is what almost everyone should
+    // leave them on: a marker has to contrast with a colour map that covers a
+    // whole hue arc, and paletteMarks() in lib/palettes.js picks hues each map
+    // never reaches. But colour vision and screens vary in exactly the way a
+    // fixed pair of hues cannot accommodate, which is why this is a setting and
+    // not just a better default.
+    //
+    // Keyed by palette rather than held as one pair, because the question the
+    // setting answers is "what shows up against *this* colour map" — a magenta
+    // dial chosen to beat the classic waterfall's blues is the worst possible
+    // choice over magma, so one global override would have to be re-picked on
+    // every palette change. Switching palettes now brings back whatever was
+    // chosen for it last time.
+    markOverrides: {},
 };
 
 // Text-size range and step for the top bar's zoom buttons.
@@ -120,7 +153,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 function migrate(saved) {
     // v2: zoomAnchor gained 'auto', which is tuned on a phone.
@@ -131,6 +164,18 @@ function migrate(saved) {
     // was nothing to choose between. Dropping it lets 'auto' apply. An explicit
     // 'tuned' is left alone: that one could only have been set on purpose.
     if (!(saved.v >= 2) && saved.zoomAnchor === 'cursor') delete saved.zoomAnchor;
+
+    // v3: the idle throttle became a delay rather than a switch.
+    //
+    // Off is the one thing the old switch could say that the new list still
+    // says, so it carries over as "never" — and it is the only value worth
+    // carrying: `true` was the default written out on first load and says
+    // nothing about how long anybody wanted to wait, which is the question the
+    // list asks. Those become null and take the device's default.
+    if (!(saved.v >= 3)) {
+        if (saved.idleThrottle === false) saved.idleThrottleMin = 0;
+        delete saved.idleThrottle;
+    }
     return saved;
 }
 
@@ -195,7 +240,22 @@ export function DisplayProvider({ children }) {
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
     const reset = useCallback(() => setState({ ...DEFAULTS, v: SETTINGS_VERSION }), []);
 
-    const value = useMemo(() => ({ ...state, server, set, reset }), [state, server, set, reset]);
+    // One marker colour for one palette. `hex` empty puts that mark back on the
+    // palette's own choice, and a palette left with neither override drops out
+    // of the map entirely rather than sitting there as an empty object.
+    const setMarkColor = useCallback((palette, which, hex) => setState((s) => {
+        const all = s.markOverrides || {};
+        const one = { ...(all[palette] || {}) };
+        if (hex) one[which] = hex; else delete one[which];
+        const next = { ...all };
+        if (Object.keys(one).length) next[palette] = one; else delete next[palette];
+        return { ...s, markOverrides: next };
+    }), []);
+
+    const value = useMemo(
+        () => ({ ...state, server, set, reset, setMarkColor }),
+        [state, server, set, reset, setMarkColor],
+    );
     return <DisplayContext.Provider value={value}>{children}</DisplayContext.Provider>;
 }
 

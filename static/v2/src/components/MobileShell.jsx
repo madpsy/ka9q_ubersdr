@@ -28,14 +28,61 @@
 // rather than one — close, then open the next — which is the trade a phone is
 // worth making and a desktop is not.
 
-import React, { useState } from '../react.js';
+import React, { useCallback, useRef, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { LANDSCAPE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { sheetIntent, sheetWants } from '../lib/sheetGesture.js';
+import { haptic } from '../lib/haptics.js';
 import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
+
+/**
+ * Tap or drag the title bar to cut a sheet down or open it out.
+ *
+ * `minimal` is the state now and `toggle` flips it — neither context has a
+ * setter, and neither needs one: the gesture says which state it wants (see
+ * sheetWants) and this only calls the toggle when that differs from what is
+ * showing, so dragging down twice is one change and not two.
+ *
+ * Returns props for the header, or null when the sheet has only one state to be
+ * in — a panel with no minimal view has nothing for this to do, and a bar that
+ * responds to a drag on one panel and ignores it on the next is worse than one
+ * that never responds at all.
+ */
+function useHeadGesture(enabled, minimal, toggle) {
+    const at = useRef(null);
+
+    const onPointerDown = useCallback((e) => {
+        // The buttons on the bar are their own gesture. Without this a tap on
+        // Close would land here too and toggle the panel on its way out.
+        if (e.target.closest && e.target.closest('button')) return;
+        at.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        // Captured so a drag that leaves the bar — which a downward one does
+        // almost immediately — still ends here rather than being lost.
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    }, []);
+
+    const onPointerUp = useCallback((e) => {
+        const start = at.current;
+        at.current = null;
+        if (!start || start.id !== e.pointerId) return;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        const want = sheetWants(sheetIntent(e.clientX - start.x, e.clientY - start.y), minimal);
+        if (want == null || want === minimal) return;
+        toggle();
+        // The sheet resizing is the feedback for a tap; a drag needs its own,
+        // because the finger is somewhere other than the thing that moved.
+        haptic('toggle');
+    }, [minimal, toggle]);
+
+    const onPointerCancel = useCallback(() => { at.current = null; }, []);
+
+    if (!enabled) return null;
+    return { onPointerDown, onPointerUp, onPointerCancel };
+}
 
 export default function MobileShell() {
     const { sections, toggleSectionMinimal } = useLayout();
@@ -75,6 +122,19 @@ export default function MobileShell() {
     // desktop that had room for it all along.
     const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimalMobile;
 
+    // Both unconditionally, as hooks have to be — each returns null when its
+    // sheet has no second state to be in.
+    const panelHead = useHeadGesture(
+        !!panel?.minimal,
+        panelMinimal,
+        useCallback(() => panel && toggleSectionMinimal(panel.id, true), [panel, toggleSectionMinimal]),
+    );
+    const extHead = useHeadGesture(
+        !!extension?.minimal,
+        extMinimal,
+        useCallback(() => extension && toggleExtMinimal(extension.id), [extension, toggleExtMinimal]),
+    );
+
     return (
         <div className={`shell shell--mobile${landscape ? ' shell--landscape' : ''}`}>
             {/* Not in landscape. A handset on its side has about 390 px of
@@ -99,7 +159,15 @@ export default function MobileShell() {
                         role="region"
                         aria-label={panel.title}
                     >
-                        <div className="sheet__head">
+                        {/* The bar is the sheet's own control: tap it, or drag
+                            it up and down — see useHeadGesture. The button below
+                            stays, because a gesture is not reachable from a
+                            keyboard and says nothing to a screen reader. */}
+                        <div
+                            className={`sheet__head${panelHead ? ' sheet__head--grab' : ''}`}
+                            title={panelHead ? 'Tap or drag to show more or less' : undefined}
+                            {...panelHead}
+                        >
                             <span className="sheet__grip" />
                             <span className="sheet__title">
                                 <span className="sheet__icon">{panel.icon}</span>
@@ -132,7 +200,11 @@ export default function MobileShell() {
 
                 {extension && (
                     <div className="sheet sheet--ext" role="region" aria-label={extension.title}>
-                        <div className="sheet__head">
+                        <div
+                            className={`sheet__head${extHead ? ' sheet__head--grab' : ''}`}
+                            title={extHead ? 'Tap or drag to show more or less' : undefined}
+                            {...extHead}
+                        >
                             <span className="sheet__grip" />
                             <span className="sheet__title">
                                 <span className="sheet__icon">{extension.icon}</span>

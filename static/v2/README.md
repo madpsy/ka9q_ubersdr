@@ -162,24 +162,65 @@ appear under everything else for anyone who had used the app before.
 
 ### Panels a phone should treat differently
 
-One registry entry, two machines: `mobile: { hidden, open }` gives a panel
-first-run defaults for a handset where the same answer does not suit both. The
-Multipad is the case it exists for — hidden on a desktop, which has room for the
-real panels, and on a phone the first tab, with its sheet already open. There is
-deliberately no minimal override: every panel opens cut down on a phone,
-including this one.
+One registry entry, three machines: `mobile: { hidden, open }` gives a panel
+first-run defaults for a handset, and `touch: { hidden, minimal, float }` for a
+machine with a touchscreen that is *not* a handset. The Multipad is the case both
+exist for — on a phone the first tab, with its sheet already open; on a
+mouse-only desktop hidden, which has room for the real panels; and on a
+touchscreen desktop back again, because the argument that put it on a phone was
+never about screen size. A barrel exists because a fingertip cannot hit a 16 px
+arrow, and a convertible laptop folded flat has exactly the same fingertip. The
+test is `TOUCH_QUERY`, `(any-pointer: coarse)` — `any-`, because on a convertible
+the *primary* pointer is still the mouse. A phone is a phone first: it matches
+both, and `mobile` is the more specific statement about it.
 
-Both are *defaults*, read only when a layout is built for the first time or
-when a panel joins a layout stored before it existed (`firstRun()` in
+There is deliberately no `mobile` minimal override: every panel opens cut down on
+a phone. `touch.minimal` is a real setting because a floating window is not a
+sheet, and `touch.float: { w, h, anchor }` opens the panel as a window instead of
+docking it. The anchor is a corner, not a position — only `FloatingLayer` knows
+how big the centre area is, and a collapsed bottom dock and an open one give
+very different answers — so it is resolved there on the first measurement and
+dropped, by `setFloat`, the moment anything places the window for real.
+
+All of these are *defaults*, read only when a layout is built for the first time
+or when a panel joins a layout stored before it existed (`firstRun()` in
 `layout/LayoutContext.jsx`). Nothing rearranges itself afterwards: once someone
 has hidden, expanded or closed a panel, their layout says so and the registry is
-not consulted again — which is also why the phone test is a `matchMedia` read at
-that moment rather than a subscription. Dragging a desktop window narrow must
+not consulted again — which is also why the machine test is a `matchMedia` read
+at that moment rather than a subscription. Dragging a desktop window narrow must
 not undo an arrangement its owner made.
+
+**Reaching a layout somebody already has** is what `REV` and `migrateRev()` are
+for. `VERSION` is all-or-nothing — a mismatch discards the stored layout — which
+is right for a shape change and far too blunt for "this panel should now appear
+on machines it never appeared on"; and since every returning visitor has a stored
+layout, a first-run default alone reaches nobody who is already here. So a
+migration adds, once, and only what this machine has never had an opinion about:
+the rev-1 rule refuses to touch a Multipad that is already floating or that has
+been unhidden by hand. It also declines to *record* itself on a machine it does
+not apply to, because the same browser profile meets a touchscreen later often
+enough — a laptop docked to one, tablet mode switched on — that stamping the
+revision on a mouse-only load would cost that machine the panel for ever. The
+rules are a pure function of (stored layout, machine), which is what
+`test/layout.test.js` exercises.
 
 `open` is not layout state at all: it says which sheet `MobileShell` starts with,
 and it is deliberately not remembered between visits — the open sheet is where
 you *are*, and closing it is one tap.
+
+**A sheet's title bar is its own control.** Tap it to swap between the cut-down
+view and the whole panel, or drag it — up for the whole thing, down for the
+cut-down one. It is the biggest target a sheet has and it did nothing at all,
+while the control it should have been was a 30 px icon in the corner; the grip
+pill has meanwhile been drawing a picture of a drag handle since the sheet
+existed. The decision is `lib/sheetGesture.js` and it is two functions, both
+tested: `sheetIntent` turns travel into `tap | expand | minimise | null` (null
+being a mostly-sideways drag, a finger crossing the bar on its way somewhere
+else), and `sheetWants` turns that into the state being asked for. A drag names
+its state rather than asking for a flip, so dragging down twice is one change and
+not two — which is why neither context needed a setter adding. Gestures starting
+on a button are left to the button, and the explicit toggle stays, because a
+gesture is unreachable from a keyboard and says nothing to a screen reader.
 
 **In landscape**, everything above the marker bar goes: the top bar and the
 spectrum toolbar are not rendered, so the spectrum starts at the markers. A
@@ -210,6 +251,19 @@ filter width and squelch, plus the ten HF bands, in roughly the height the
 Receiver panel's dial takes on its own. It exists because those are one activity
 and were four sheets. Its minimal view is the two barrels alone, which — like
 every panel on a phone — is what it opens as; the header's toggle gives the rest.
+
+Above the frequency drum is its head row: the readout, which taps to type, and
+two native selects for the tuning step and the mode. Native because a phone gives
+those a full-height picker, which beats anything a 30 px chip could offer. The
+mode is there **as well as** in the row of buttons below — eight buttons are one
+tap and worth the room where there is room, but this is the copy the minimal view
+gets, and mode is the one thing a pad claiming to be "the panel you were going to
+open anyway" cannot do without: tuning across a band edge otherwise means opening
+the Receiver panel to turn LSB into USB. A select rather than more buttons
+because that row already carries a 27 px readout, and two more chips would either
+wrap it or squeeze it to nothing. It is also what sets the floating window's
+default width on a touchscreen desktop — see `touch.float` in the registry, and
+the arithmetic pinned in `test/layout.test.js`.
 
 Under the zoom drum is the view row: split, spectrum alone, waterfall alone, an
 icon and a word each. It sits with the zoom because it answers the same question
@@ -374,6 +428,24 @@ band is part guesswork, and which part matters.
 
 * **Audio requires a gesture.** The AudioContext is created inside the *Listen*
   click; browsers block it otherwise.
+* **Marker colours come from the palette, not the theme.** The dial line and the
+  two passband edges have to contrast with the waterfall, and a waterfall shows
+  its entire colour map at once — so there is no background to choose a colour
+  against. Two things answer that. Every mark is stroked twice, dark and a CSS
+  pixel wider underneath (`markLine`), which is what a map label does over aerial
+  photography and is what carries it across the lightness range. And the hue
+  comes from `paletteMarks()` in `lib/palettes.js`, which for each map names two
+  hues that map never reaches — magenta against turbo, cyan against inferno,
+  amber against ice. The edges used to be one fixed green at 0.38 alpha behind a
+  2-on/4-off dash, which read on the spectrum's flat background and disappeared
+  over a busy waterfall; they are now full strength and the hierarchy against the
+  dial is carried by dash and weight instead. `markColors()` in
+  `display/uiConfig.js` resolves the three sources — this browser's override,
+  then the operator's `bandwidth_indicator_color` (which v1 honours too, so the
+  frontends agree), then the palette. The Display panel's pickers sit directly
+  under the palette grid and **save per palette**: a magenta dial picked to beat
+  classic's blues is the worst possible choice over magma, so one global override
+  would have to be re-picked on every palette change.
 * **Haptics are delegated, not wired up per control.** `HapticWatch` puts one
   capture-phase `pointerdown` listener on the document and asks
   `lib/haptics.js: hapticKindFor` what the element under the finger is worth — a
@@ -596,6 +668,34 @@ band is part guesswork, and which part matters.
   fast the spectrum happened to be arriving — slow on a busy server, fast on an
   idle one. `peakDecay` is dB/s and 0 holds indefinitely. The peak line is drawn
   *above* the trace fill; underneath it the fill washed it out.
+* **A hidden tab loses its spectrum socket.** Five seconds after
+  `document.hidden` goes true the socket is closed, and it comes back at the view
+  it left when the tab is looked at again — v1's behaviour, from
+  `spectrum-display.js: setupVisibilityDisconnect`, and on both machines for the
+  same reason: a backgrounded tab is a receiver slot producing a waterfall for a
+  canvas nobody can see. The delay is what makes it safe, since glancing at
+  another tab and coming straight back must not cost a reconnect. This is a
+  different question from the idle throttle — that one is about an operator who
+  is *present* and has stopped doing anything, where the display still has to be
+  right when they look back at it. The audio socket is untouched: listening with
+  the tab in the background is the point of the media controls. The close goes
+  through `disconnect()` rather than a bare `close()`, because that is what sets
+  `closedByUser` and stops `_onClose` starting the exponential backoff —
+  otherwise the socket returns a second later and the whole thing is a reconnect
+  loop behind a hidden tab. Rules in `lib/visibilityPause.js` with the clock
+  injected, since every case here happens off screen and none of them is worth
+  finding five seconds at a time.
+* **The frequency scale doubles as the splitter.** It sits exactly on the join
+  between the two panes, so grabbing it is grabbing the edge, and it is already
+  the one strip that is neither spectrum nor waterfall. Drag it to re-share the
+  height, double-click to reset. It is switchable — *Drag to adjust*, under the
+  Split slider — because the scale is also the strip you point at to read a
+  frequency off, and a few pixels of travel is all it takes to tell those two
+  apart. With the drag off the press is still swallowed, so the scale goes inert
+  rather than falling through to tap-to-tune: the operator turning this off is
+  the one who keeps catching it, and retuning the receiver instead would be the
+  worse accident. The resize cursor goes with the drag, since a cursor over a
+  strip that will not resize is a worse lie than no cursor.
 * **One colour mapping for both panes.** The Display panel's View control picks
   split / spectrum-only / waterfall-only. The palette drives both: the spectrum's
   trace and fill are painted with a vertical gradient built from the same LUT and

@@ -149,6 +149,14 @@ export class SpectrumConnection extends Emitter {
             // side, ping included, so a timer here would make the session
             // immortal and the operator's slot unreclaimable. The idle watch
             // pings on activity instead — see radio/idle.js.
+            //
+            // The poll rate belongs to the socket that just went away, so a new
+            // one starts at full rate whatever was asked for. Re-sent here or
+            // the idle throttle lapses on every reconnect — silently, since
+            // nothing reports the rate back and IdleWatch still believes it is
+            // throttled. Only when it is not already 1: a fresh session is at
+            // full rate anyway and the message would be noise.
+            if (this.rateDivisor > 1) this.send({ type: 'set_rate', divisor: this.rateDivisor });
             if (this.pendingView) {
                 const p = this.pendingView;
                 this.pendingView = null;

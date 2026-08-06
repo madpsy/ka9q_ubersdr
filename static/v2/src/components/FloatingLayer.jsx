@@ -51,6 +51,24 @@ function MinimisedBar({ chips }) {
     );
 }
 
+// Where a corner puts a window, given how big the layer turned out to be.
+//
+// The gap is the same all round and small: these are windows a layout seeded on
+// purpose, so they should look placed rather than dropped, and a margin wide
+// enough to read as deliberate is also wide enough to waste the corner. A window
+// too tall for the layer is pinned to the top rather than pushed off it — the
+// title bar is the part you need to reach to move or resize it.
+const ANCHOR_GAP = 12;
+
+function resolveAnchor(g, b) {
+    const bottom = String(g.anchor).includes('bottom');
+    const right = String(g.anchor).includes('right');
+    return {
+        x: right ? Math.max(ANCHOR_GAP, b.width - g.w - ANCHOR_GAP) : ANCHOR_GAP,
+        y: bottom ? Math.max(ANCHOR_GAP, b.height - g.h - ANCHOR_GAP) : ANCHOR_GAP,
+    };
+}
+
 export default function FloatingLayer() {
     const { floats, floatOrder, sections, setFloat, setFloatMin, movePanel } = useLayout();
     const ext = useExtensions();
@@ -79,6 +97,16 @@ export default function FloatingLayer() {
         // corner — and persist it.
         if (!b || b.width < 120 || b.height < 120) return;
         for (const [id, g] of Object.entries(floats)) {
+            // A window the layout seeded rather than a person placed carries a
+            // corner instead of a position, because only this layer knows how
+            // much room there is. Resolving it here also means it lands right
+            // whatever the docks around it are doing — a collapsed bottom dock
+            // and an open one give the centre area very different heights.
+            // setFloat drops the anchor, so this happens exactly once.
+            if (g.anchor) {
+                setFloat(id, resolveAnchor(g, b));
+                continue;
+            }
             const x = Math.max(60 - g.w, Math.min(b.width - 60, g.x));
             const y = Math.max(0, Math.min(b.height - 28, g.y));
             if (x !== g.x || y !== g.y) setFloat(id, { x, y });

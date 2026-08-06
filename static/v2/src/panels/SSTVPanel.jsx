@@ -10,13 +10,13 @@
 // How many is yours to choose, up to six, and it is remembered.
 //
 // `minimal` is the pictures and nothing else — no ages, no labels, no details,
-// no download, no picker. It is a panel you have shrunk to glance at, and a
-// decoded picture says what it is by being one.
+// no download, no picker, and no link out to the addon. It is a panel you have
+// shrunk to glance at, and a decoded picture says what it is by being one.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Button, Empty, Field, Modal, Segmented } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Modal, Segmented } from '../components/ui.jsx';
 import {
-    AGE_TICK_MS, MAX_IMAGES, POLL_MS, detailRows, downloadName, formatAge,
+    AGE_TICK_MS, MAX_IMAGES, POLL_MS, addonUrl, detailRows, downloadName, formatAge,
     imageUrl, imagesUrl, records, saveCount, savedCount, sstvAvailable,
 } from '../lib/sstv.js';
 
@@ -141,6 +141,27 @@ export default function SSTVPanel({ minimal }) {
                         </div>
                         );
                     })}
+                </div>
+            )}
+
+            {/* The addon's own page, which is where everything this panel does
+                not show lives — the live decode, the settings, the full history.
+                Same route and same new tab as the Addons panel: these are
+                separate applications with their own UI.
+
+                Not in the minimal view, which is the pictures and nothing else.
+                A row of chrome under them would be the first thing cut. */}
+            {!minimal && (
+                <div className="row-end">
+                    <a
+                        className="btn btn--ghost btn--sm"
+                        href={addonUrl()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Open SSTV
+                        <Icon.External size={13} />
+                    </a>
                 </div>
             )}
 

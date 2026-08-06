@@ -21,6 +21,14 @@
 //     or contrast recolours the whole history rather than only what arrives
 //     next, which is what makes those controls usable on a display that takes
 //     ten minutes to fill.
+//
+// `minimal` keeps the band, the transport and the waterfall, and drops the
+// settings row and the readouts under it. What is worth keeping is decided by how
+// this one is used: a grabber is started once and left for hours, so the span,
+// the resolution and the palette are what you set at the beginning and the band
+// is what you keep coming back to — which is why the Tune to… dropdown stays and
+// sits in the transport row rather than with the settings. See the registry's
+// `minimal`.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -564,85 +572,96 @@ export default function QrssExtension({ minimal }) {
                 <Button size="sm" variant="ghost" onClick={clear} disabled={!status.columns} icon={<Icon.Trash size={13} />} title="Clear the waterfall" />
             </div>
 
-            <div className="tp__config">
-                <label className="tp__field" title="Displayed bandwidth. QRSS activity sits inside 100 Hz, so the narrow spans are where you end up; the wide ones are for finding it">
-                    <span className="tp__field-label">Span</span>
-                    <select className="select" value={config.span} onChange={(e) => set({ span: Number(e.target.value) })}>
-                        {SPANS.map((v) => <option key={v} value={v}>{v >= 1000 ? `${v / 1000} kHz` : `${v} Hz`}</option>)}
-                    </select>
-                </label>
-                <label className="tp__field" title="Frequency resolution. Finer takes longer to fill before the first column appears — narrowing the Span buys detail without the wait">
-                    <span className="tp__field-label">Res</span>
-                    <select className="select" value={config.fftSize} onChange={(e) => set({ fftSize: Number(e.target.value) })}>
-                        {RESOLUTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                    </select>
-                </label>
-                <label className="tp__field" title="Time per pixel column. Match it to the beacon's dot length — QRSS-30 means thirty-second dots">
-                    <span className="tp__field-label">Speed</span>
-                    <select
-                        className="select"
-                        value={config.secPerPixel}
-                        disabled={config.windowSec > 0}
-                        onChange={(e) => set({ secPerPixel: Number(e.target.value) })}
-                    >
-                        {SPEEDS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                </label>
-                <label className="tp__field" title="Lock the total time on screen. Holds the sweep across a window resize, which Speed alone cannot">
-                    <span className="tp__field-label">Window</span>
-                    <select className="select" value={config.windowSec} onChange={(e) => set({ windowSec: Number(e.target.value) })}>
-                        {WINDOWS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-                    </select>
-                </label>
-                <label className="tp__field" title="Colour palette. Grey reads faint streaks best; the others separate levels more strongly">
-                    <span className="tp__field-label">Palette</span>
-                    <select className="select" value={config.colormap} onChange={(e) => set({ colormap: e.target.value })}>
-                        {PALETTES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
-                </label>
+            {/* Span, resolution, speed, palette, contrast — the setting up. It
+                goes in the minimal view and the Tune to… dropdown above does not,
+                which is the split the whole panel turns on: a grabber is left
+                running for hours on one band, so the thing you keep reaching for
+                is the band, and the rest is what you did once when you started it.
 
-                <Switch
-                    label="Auto"
-                    title="Track the noise floor and put the black point on it, so the display stays readable as conditions change"
-                    checked={config.autoContrast}
-                    onChange={(v) => set({ autoContrast: v })}
-                />
-                {config.autoContrast
-                    ? (
-                        <label className="tp__field" title="How much range above the noise floor to spread the palette over. High makes a weak signal pop; Low is gentler on a busy band">
-                            <span className="tp__field-label">Level</span>
-                            <select className="select" value={config.autoLevel} onChange={(e) => set({ autoLevel: e.target.value })}>
-                                {AUTO_LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-                            </select>
-                        </label>
-                    )
-                    : (
-                        <>
-                            <label className="tp__field" title="Black point">
-                                <span className="tp__field-label">Min dB</span>
-                                <input
-                                    className="input tp__num"
-                                    type="range"
-                                    min="-160"
-                                    max="0"
-                                    value={config.dbMin}
-                                    onChange={(e) => set({ dbMin: Number(e.target.value) })}
-                                />
+                Deliberately not the transport row's business, either — Start,
+                Freeze and the two file buttons stay, because a display you cannot
+                stop or save is not a smaller panel, it is a broken one. */}
+            {!minimal && (
+                <div className="tp__config">
+                    <label className="tp__field" title="Displayed bandwidth. QRSS activity sits inside 100 Hz, so the narrow spans are where you end up; the wide ones are for finding it">
+                        <span className="tp__field-label">Span</span>
+                        <select className="select" value={config.span} onChange={(e) => set({ span: Number(e.target.value) })}>
+                            {SPANS.map((v) => <option key={v} value={v}>{v >= 1000 ? `${v / 1000} kHz` : `${v} Hz`}</option>)}
+                        </select>
+                    </label>
+                    <label className="tp__field" title="Frequency resolution. Finer takes longer to fill before the first column appears — narrowing the Span buys detail without the wait">
+                        <span className="tp__field-label">Res</span>
+                        <select className="select" value={config.fftSize} onChange={(e) => set({ fftSize: Number(e.target.value) })}>
+                            {RESOLUTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                    </label>
+                    <label className="tp__field" title="Time per pixel column. Match it to the beacon's dot length — QRSS-30 means thirty-second dots">
+                        <span className="tp__field-label">Speed</span>
+                        <select
+                            className="select"
+                            value={config.secPerPixel}
+                            disabled={config.windowSec > 0}
+                            onChange={(e) => set({ secPerPixel: Number(e.target.value) })}
+                        >
+                            {SPEEDS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                    </label>
+                    <label className="tp__field" title="Lock the total time on screen. Holds the sweep across a window resize, which Speed alone cannot">
+                        <span className="tp__field-label">Window</span>
+                        <select className="select" value={config.windowSec} onChange={(e) => set({ windowSec: Number(e.target.value) })}>
+                            {WINDOWS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                        </select>
+                    </label>
+                    <label className="tp__field" title="Colour palette. Grey reads faint streaks best; the others separate levels more strongly">
+                        <span className="tp__field-label">Palette</span>
+                        <select className="select" value={config.colormap} onChange={(e) => set({ colormap: e.target.value })}>
+                            {PALETTES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                        </select>
+                    </label>
+
+                    <Switch
+                        label="Auto"
+                        title="Track the noise floor and put the black point on it, so the display stays readable as conditions change"
+                        checked={config.autoContrast}
+                        onChange={(v) => set({ autoContrast: v })}
+                    />
+                    {config.autoContrast
+                        ? (
+                            <label className="tp__field" title="How much range above the noise floor to spread the palette over. High makes a weak signal pop; Low is gentler on a busy band">
+                                <span className="tp__field-label">Level</span>
+                                <select className="select" value={config.autoLevel} onChange={(e) => set({ autoLevel: e.target.value })}>
+                                    {AUTO_LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                                </select>
                             </label>
-                            <label className="tp__field" title="Peak colour">
-                                <span className="tp__field-label">Max dB</span>
-                                <input
-                                    className="input tp__num"
-                                    type="range"
-                                    min="-160"
-                                    max="0"
-                                    value={config.dbMax}
-                                    onChange={(e) => set({ dbMax: Number(e.target.value) })}
-                                />
-                            </label>
-                        </>
-                    )}
-            </div>
+                        )
+                        : (
+                            <>
+                                <label className="tp__field" title="Black point">
+                                    <span className="tp__field-label">Min dB</span>
+                                    <input
+                                        className="input tp__num"
+                                        type="range"
+                                        min="-160"
+                                        max="0"
+                                        value={config.dbMin}
+                                        onChange={(e) => set({ dbMin: Number(e.target.value) })}
+                                    />
+                                </label>
+                                <label className="tp__field" title="Peak colour">
+                                    <span className="tp__field-label">Max dB</span>
+                                    <input
+                                        className="input tp__num"
+                                        type="range"
+                                        min="-160"
+                                        max="0"
+                                        value={config.dbMax}
+                                        onChange={(e) => set({ dbMax: Number(e.target.value) })}
+                                    />
+                                </label>
+                            </>
+                        )}
+                </div>
+            )}
 
             {!minimal && !running && <div className="note note--tight">Start the receiver to capture.</div>}
             {!minimal && running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}

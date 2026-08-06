@@ -18,6 +18,13 @@
 // live canvases for every image in a grid, which meant an evening on 14.230
 // held a hundred of them; and its auto-save existed because there was no other
 // way to keep one. Auto-save is still offered and still defaults to off.
+//
+// `minimal` keeps the frequency, the transport and the pictures, and drops the
+// four decoder switches and the status row. This decoder is the one that needs
+// setting up least of any of them — the mode is read from the VIS code, so there
+// is nothing to choose and no shift or baud rate to find — which makes a cut-down
+// SSTV window a picture and a Start button, and the switches the first thing that
+// can go. They are a tap on the header away. See the registry's `minimal`.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -353,38 +360,48 @@ export default function SstvExtension({ minimal }) {
                 <Button size="sm" variant="ghost" onClick={clear} disabled={!current && !gallery.length} icon={<Icon.Trash size={13} />} title="Clear the picture and everything kept" />
             </div>
 
-            <div className="tp__config">
-                <Switch
-                    label="Auto-sync"
-                    title="Measure the sync pulses and re-send the picture with the slant corrected. Almost always wanted — without it a picture leans"
-                    checked={!!config.auto_sync}
-                    onChange={(v) => setCfg({ auto_sync: v })}
-                />
-                <Switch
-                    label="FSK ident"
-                    title="Decode the callsign some stations send as FSK after the picture"
-                    checked={!!config.decode_fsk_id}
-                    onChange={(v) => setCfg({ decode_fsk_id: v })}
-                />
-                <Switch
-                    label="Adaptive"
-                    title="Size the demodulator's window from the signal-to-noise ratio — wider when the signal is weak, sharper when it is strong. Almost always wanted"
-                    checked={!!config.adaptive}
-                    onChange={(v) => setCfg({ adaptive: v })}
-                />
-                <Switch
-                    label="Auto-save"
-                    title={`Save each finished picture to disk as well as keeping it here. Off by default — the last ${KEEP_IMAGES} are kept either way, so nothing is lost without it`}
-                    checked={opts.autoSave}
-                    onChange={(v) => set({ autoSave: v })}
-                />
-                <span className="tp__bar-gap" />
-                {decoding && (
-                    <span className="sstv__tone" title="The tone the VIS detector is hearing. It settles on 1200 Hz when a header is being read">
-                        {tone ? `${tone.toFixed(1)} Hz` : '— Hz'}
-                    </span>
-                )}
-            </div>
+            {/* The four switches and the tone, in one box that goes as a box: it
+                is bordered and padded, so keeping a corner of it — the tone
+                readout on its own — would leave a panel with one number in it
+                costing the same room the whole row did.
+
+                Nothing here has to be set to get a picture, which is what makes
+                this the right thing to drop: the mode comes from the VIS code,
+                and the two switches worth having on are on already. */}
+            {!minimal && (
+                <div className="tp__config">
+                    <Switch
+                        label="Auto-sync"
+                        title="Measure the sync pulses and re-send the picture with the slant corrected. Almost always wanted — without it a picture leans"
+                        checked={!!config.auto_sync}
+                        onChange={(v) => setCfg({ auto_sync: v })}
+                    />
+                    <Switch
+                        label="FSK ident"
+                        title="Decode the callsign some stations send as FSK after the picture"
+                        checked={!!config.decode_fsk_id}
+                        onChange={(v) => setCfg({ decode_fsk_id: v })}
+                    />
+                    <Switch
+                        label="Adaptive"
+                        title="Size the demodulator's window from the signal-to-noise ratio — wider when the signal is weak, sharper when it is strong. Almost always wanted"
+                        checked={!!config.adaptive}
+                        onChange={(v) => setCfg({ adaptive: v })}
+                    />
+                    <Switch
+                        label="Auto-save"
+                        title={`Save each finished picture to disk as well as keeping it here. Off by default — the last ${KEEP_IMAGES} are kept either way, so nothing is lost without it`}
+                        checked={opts.autoSave}
+                        onChange={(v) => set({ autoSave: v })}
+                    />
+                    <span className="tp__bar-gap" />
+                    {decoding && (
+                        <span className="sstv__tone" title="The tone the VIS detector is hearing. It settles on 1200 Hz when a header is being read">
+                            {tone ? `${tone.toFixed(1)} Hz` : '— Hz'}
+                        </span>
+                    )}
+                </div>
+            )}
 
             {!minimal && !running && <div className="note note--tight">Start the receiver to decode.</div>}
             {!minimal && running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}

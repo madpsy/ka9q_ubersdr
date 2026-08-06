@@ -30,7 +30,19 @@ export const NAV_LABELS = {
     'bookmark-local': 'Local',
 };
 
-export const DEFAULT_NAV_TYPES = NAV_TYPES;
+// Everything except CW, which is offered but not on to begin with.
+//
+// The skimmer decodes every carrier it can hear, so a busy band carries hundreds
+// of CW spots a few hundred hertz apart. Stepping between them is a legitimate
+// thing to want — it is how you work a contest — but as a default it makes
+// prev/next mean "the next thing along", not "the next thing worth hearing", and
+// the two neighbours either side of the dial would be CW spots on almost every
+// band whatever else was on. The other four are sparse enough that a step lands
+// somewhere different from where you were.
+//
+// Derived from NAV_TYPES rather than listed out, so a kind added there is on by
+// default unless it is deliberately named here.
+export const DEFAULT_NAV_TYPES = NAV_TYPES.filter((t) => t !== 'cw');
 
 const clean = (list) => (Array.isArray(list) ? list.filter((t) => NAV_TYPES.includes(t)) : []);
 

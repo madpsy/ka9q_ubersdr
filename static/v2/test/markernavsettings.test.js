@@ -47,9 +47,29 @@ t('every kind the finder knows about has a label', () => {
     }
 });
 
-t('nothing saved means every kind', () => {
+t('nothing saved means the default kinds', () => {
     install();
     assert.deepStrictEqual(savedNavTypes(), DEFAULT_NAV_TYPES);
+});
+
+t('CW is offered but not on to begin with', () => {
+    // The skimmer spots every carrier it hears, so on by default it would make
+    // both neighbours a CW spot on almost every band — see the module. Offered
+    // all the same: stepping between them is how a contest is worked.
+    assert.ok(!DEFAULT_NAV_TYPES.includes('cw'), 'not a default');
+    assert.ok(NAV_TYPES.includes('cw'), 'still steppable');
+    assert.ok(NAV_LABELS.cw, 'still in the picker');
+    // And everything else is, so this is a considered exception rather than a
+    // list that has drifted from the vocabulary.
+    assert.deepStrictEqual(
+        [...DEFAULT_NAV_TYPES].sort(),
+        NAV_TYPES.filter((t) => t !== 'cw').sort(),
+    );
+});
+
+t('a saved selection can still turn CW on, and it survives', () => {
+    install({ [KEY]: JSON.stringify(['cw']) });
+    assert.deepStrictEqual(savedNavTypes(), ['cw']);
 });
 
 t('a saved selection comes back', () => {

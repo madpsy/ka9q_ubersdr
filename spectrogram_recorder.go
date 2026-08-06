@@ -32,6 +32,9 @@ const (
 	spectrogramDefaultDBMax   = float32(-60)  // fallback signal peak when insufficient data
 	spectrogramDefaultPalette = "jet"         // default colour palette
 
+	spectrogramThumbW = 300 // thumbnail width in pixels
+	spectrogramThumbH = 168 // thumbnail height in pixels
+
 	// rollingCacheIdleTTL is how long the in-memory rolling 24-hour window is
 	// kept (and refreshed each minute) after the last request for it. Once
 	// nobody has asked for the rolling view for this long the cache is released
@@ -46,6 +49,10 @@ const (
 	// rollingPNGCacheMax is the number of distinct rolling renders (palette /
 	// dB range / frequency crop combinations) held per recorder.
 	rollingPNGCacheMax = 3
+
+	// rollingThumbCacheMax is the same, for rolling thumbnails. Thumbnails are
+	// a few tens of kB each, so more variants can be kept than full renders.
+	rollingThumbCacheMax = 6
 )
 
 // noDataSentinel marks bins with no data (rendered as black).
@@ -428,7 +435,7 @@ func generateThumbnail(pngBytes []byte) []byte {
 		return nil
 	}
 
-	const thumbW, thumbH = 300, 168
+	const thumbW, thumbH = spectrogramThumbW, spectrogramThumbH
 
 	dst := image.NewNRGBA(image.Rect(0, 0, thumbW, thumbH))
 
@@ -1316,6 +1323,88 @@ func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32
 	return buf.Bytes()
 }
 
+// renderRowsAsThumbnail renders rows straight to a spectrogramThumbW ×
+// spectrogramThumbH PNG, box-filtering in dB space rather than rendering the
+// full-size image and downsampling the pixels. Roughly an order of magnitude
+// cheaper than render-then-generateThumbnail, which matters for the rolling
+// 24-hour thumbnail: it is regenerated every minute and never stored on disk.
+// startBin and endBin define the column slice to render (0, 0 = full width).
+func renderRowsAsThumbnail(rows [][]float32, palette string, dbMin, dbMax float32, binCount, startBin, endBin int) []byte {
+	srcH := len(rows)
+	if srcH == 0 {
+		return nil
+	}
+	// Normalise bin bounds
+	if startBin < 0 {
+		startBin = 0
+	}
+	if endBin <= 0 || endBin > binCount {
+		endBin = binCount
+	}
+	if startBin >= endBin {
+		startBin = 0
+		endBin = binCount
+	}
+	srcW := endBin - startBin
+	if srcW <= 0 {
+		return nil
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, spectrogramThumbW, spectrogramThumbH))
+	black := color.NRGBA{0, 0, 0, 255}
+	scaleX := float64(srcW) / float64(spectrogramThumbW)
+	scaleY := float64(srcH) / float64(spectrogramThumbH)
+
+	for dy := 0; dy < spectrogramThumbH; dy++ {
+		iy0 := int(float64(dy) * scaleY)
+		iy1 := int(float64(dy+1) * scaleY)
+		if iy1 > srcH {
+			iy1 = srcH
+		}
+		if iy1 <= iy0 {
+			iy1 = iy0 + 1
+		}
+		for dx := 0; dx < spectrogramThumbW; dx++ {
+			ix0 := startBin + int(float64(dx)*scaleX)
+			ix1 := startBin + int(float64(dx+1)*scaleX)
+			if ix1 > endBin {
+				ix1 = endBin
+			}
+			if ix1 <= ix0 {
+				ix1 = ix0 + 1
+			}
+			// Average the source bins that map to this pixel, skipping no-data
+			// samples so a partial minute does not drag the colour to black.
+			var sum float64
+			var count int
+			for sy := iy0; sy < iy1 && sy < srcH; sy++ {
+				row := rows[sy]
+				if len(row) < ix1 {
+					continue // skip malformed rows
+				}
+				for _, v := range row[ix0:ix1] {
+					if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
+						continue
+					}
+					sum += float64(v)
+					count++
+				}
+			}
+			if count == 0 {
+				img.SetNRGBA(dx, dy, black)
+				continue
+			}
+			img.SetNRGBA(dx, dy, paletteColour(palette, float32(sum/float64(count)), dbMin, dbMax))
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 // ── Rolling 24-hour view ─────────────────────────────────────────────────────
 
 // rollingResult holds the data for a rolling 24-hour spectrogram.
@@ -1339,6 +1428,7 @@ type rollingPNGEntry struct {
 	palette          string
 	dbMin, dbMax     float32
 	autoRange        bool // recompute dbMin/dbMax from the data on every render
+	thumbnail        bool // render at thumbnail size instead of full size
 	startBin, endBin int
 	png              []byte // nil = stale, re-render on next request
 	lastAccess       time.Time
@@ -1378,13 +1468,16 @@ type rollingCache struct {
 	tPeak   []float32
 	tPeakOK []bool
 
-	// The assembled snapshot and everything derived from it. auto and pngs are
-	// only valid while result is the current snapshot.
+	// The assembled snapshot and everything derived from it. auto, pngs and
+	// thumbs are only valid while result is the current snapshot. Rolling
+	// thumbnails live here and nowhere else — unlike archived days they are
+	// never written to disk.
 	result      *rollingResult
 	builtMinute int64 // unix minute the snapshot was assembled for
 	builtRows   int   // recorder rowCount at assembly time
 	auto        map[string][2]float32
 	pngs        []*rollingPNGEntry
+	thumbs      []*rollingPNGEntry
 
 	lastAccess time.Time
 }
@@ -1403,6 +1496,7 @@ func (c *rollingCache) releaseLocked() {
 	c.builtRows = 0
 	c.auto = nil
 	c.pngs = nil
+	c.thumbs = nil
 }
 
 // getRolling24hRows returns the rolling 24-hour dataset spanning the past 24 hours.
@@ -1449,9 +1543,20 @@ func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time, rerender bool
 	c.builtMinute = now.Unix() / 60
 	c.builtRows = rowCount
 	c.auto = nil
+	c.pngs = sr.refreshRendersLocked(c.pngs, result, now, rerender)
+	c.thumbs = sr.refreshRendersLocked(c.thumbs, result, now, rerender)
 
-	kept := c.pngs[:0]
-	for _, e := range c.pngs {
+	return result
+}
+
+// refreshRendersLocked drops the renders nobody is looking at any more and
+// either re-renders or invalidates the rest against the new snapshot.
+// Caller must hold c.mu.
+func (sr *SpectrogramRecorder) refreshRendersLocked(list []*rollingPNGEntry, result *rollingResult,
+	now time.Time, rerender bool) []*rollingPNGEntry {
+
+	kept := list[:0]
+	for _, e := range list {
 		if now.Sub(e.lastAccess) > rollingCacheIdleTTL {
 			continue // nobody is looking at this view any more
 		}
@@ -1462,9 +1567,7 @@ func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time, rerender bool
 		}
 		kept = append(kept, e)
 	}
-	c.pngs = kept
-
-	return result
+	return kept
 }
 
 // buildRolling24hRowsLocked assembles the rolling window from the cached
@@ -1706,11 +1809,28 @@ func (sr *SpectrogramRecorder) rollingAutoRangeLocked(rr *rollingResult, startBi
 	return dbMin, dbMax
 }
 
-// rollingPNG renders the rolling 24-hour window, reusing the cached render when
-// the same view has already been produced from this snapshot. When explicit is
-// false the dB range is auto-computed from the data.
+// rollingPNG renders the rolling 24-hour window at full size, reusing the
+// cached render when the same view has already been produced from this
+// snapshot. When explicit is false the dB range is auto-computed from the data.
 func (sr *SpectrogramRecorder) rollingPNG(rr *rollingResult, palette string, dbMin, dbMax float32, explicit bool,
 	startBin, endBin int) []byte {
+	return sr.rollingRender(rr, false, palette, dbMin, dbMax, explicit, startBin, endBin)
+}
+
+// rollingThumb renders the rolling 24-hour window as a thumbnail. Unlike the
+// archived per-day thumbnails there is no file on disk for it — it only ever
+// exists in the cache, regenerated from the snapshot as the window moves.
+func (sr *SpectrogramRecorder) rollingThumb(rr *rollingResult, palette string, dbMin, dbMax float32, explicit bool,
+	startBin, endBin int) []byte {
+	return sr.rollingRender(rr, true, palette, dbMin, dbMax, explicit, startBin, endBin)
+}
+
+// rollingRender serves a render of the snapshot from the cache, producing it if
+// this view has not been rendered from the current snapshot yet. Full-size
+// renders and thumbnails are cached separately so a thumbnail request can never
+// evict the image everyone is looking at.
+func (sr *SpectrogramRecorder) rollingRender(rr *rollingResult, thumbnail bool, palette string,
+	dbMin, dbMax float32, explicit bool, startBin, endBin int) []byte {
 
 	c := &sr.rolling
 	c.mu.Lock()
@@ -1719,6 +1839,7 @@ func (sr *SpectrogramRecorder) rollingPNG(rr *rollingResult, palette string, dbM
 	entry := &rollingPNGEntry{
 		palette:   palette,
 		autoRange: !explicit,
+		thumbnail: thumbnail,
 		startBin:  startBin,
 		endBin:    endBin,
 	}
@@ -1738,8 +1859,13 @@ func (sr *SpectrogramRecorder) rollingPNG(rr *rollingResult, palette string, dbM
 		return sr.renderRollingLocked(rr, entry)
 	}
 
+	list, limit := c.pngs, rollingPNGCacheMax
+	if thumbnail {
+		list, limit = c.thumbs, rollingThumbCacheMax
+	}
+
 	now := time.Now().UTC()
-	for _, e := range c.pngs {
+	for _, e := range list {
 		if e.key != entry.key {
 			continue
 		}
@@ -1752,16 +1878,21 @@ func (sr *SpectrogramRecorder) rollingPNG(rr *rollingResult, palette string, dbM
 
 	entry.lastAccess = now
 	entry.png = sr.renderRollingLocked(rr, entry)
-	if len(c.pngs) >= rollingPNGCacheMax {
+	if len(list) >= limit {
 		lru := 0
-		for i, e := range c.pngs {
-			if e.lastAccess.Before(c.pngs[lru].lastAccess) {
+		for i, e := range list {
+			if e.lastAccess.Before(list[lru].lastAccess) {
 				lru = i
 			}
 		}
-		c.pngs = append(c.pngs[:lru], c.pngs[lru+1:]...)
+		list = append(list[:lru], list[lru+1:]...)
 	}
-	c.pngs = append(c.pngs, entry)
+	list = append(list, entry)
+	if thumbnail {
+		c.thumbs = list
+	} else {
+		c.pngs = list
+	}
 	return entry.png
 }
 
@@ -1770,6 +1901,9 @@ func (sr *SpectrogramRecorder) renderRollingLocked(rr *rollingResult, e *rolling
 	dbMin, dbMax := e.dbMin, e.dbMax
 	if e.autoRange {
 		dbMin, dbMax = sr.rollingAutoRangeLocked(rr, e.startBin, e.endBin)
+	}
+	if e.thumbnail {
+		return renderRowsAsThumbnail(rr.rows, e.palette, dbMin, dbMax, rr.binCount, e.startBin, e.endBin)
 	}
 	return renderRowsAsPNGSlice(rr.rows, e.palette, dbMin, dbMax, rr.binCount, e.startBin, e.endBin)
 }
@@ -1814,6 +1948,9 @@ func (sr *SpectrogramRecorder) invalidateRollingCache() {
 //	GET /api/spectrogram?date=...&palette=jet               → archived PNG re-rendered with Jet palette
 //	GET /api/spectrogram?date=...&db_min=...&db_max=...     → archived PNG with explicit dB range
 //	GET /api/spectrogram/latest                             → 302 → most recent complete day's PNG
+//	GET /api/spectrogram?rolling=1                          → rolling 24-hour PNG (served from memory)
+//	GET /api/spectrogram/thumb?date=YYYY-MM-DD              → archived day's thumbnail (file on disk)
+//	GET /api/spectrogram/thumb?rolling=1                    → rolling 24-hour thumbnail (memory only)
 //
 // Metadata endpoints (JSON):
 //
@@ -1831,6 +1968,10 @@ func (sr *SpectrogramRecorder) invalidateRollingCache() {
 //	/meta/latest redirect:Cache-Control: max-age=3600,  ETag: "<YYYY-MM-DD>-meta"
 //	Today's meta:         Cache-Control: max-age=60
 //	Archived meta:        Cache-Control: max-age=3600
+//
+// Server-side, the rolling 24-hour window (?rolling=1) is assembled once per
+// minute and held in memory — data, auto dB ranges and rendered PNGs — so every
+// endpoint that serves it responds without touching the disk. See rollingCache.
 //
 // When db_min/db_max are absent the range is auto-computed from the actual data
 // (P5 noise floor → P95 signal peak) so the full palette is always utilised.
@@ -2583,12 +2724,49 @@ type SpectrogramThumbEntry struct {
 // handleSpectrogramThumbnail serves a single thumbnail PNG.
 //
 //	GET /api/spectrogram/thumb?date=YYYY-MM-DD[&band=80m]
+//	GET /api/spectrogram/thumb?rolling=1[&band=80m][&palette=][&db_min=&db_max=]
+//
+// Archived thumbnails are files on disk, written once at midnight rollover.
+// The rolling 24-hour thumbnail has no file behind it — it is rendered from the
+// in-memory window and cached there, changing once a minute.
 func handleSpectrogramThumbnail(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
 	if recorder == nil {
 		http.Error(w, "spectrogram not enabled", http.StatusServiceUnavailable)
 		return
 	}
 	q := r.URL.Query()
+
+	// ── Rolling 24-hour thumbnail (memory only) ───────────────────────────────
+	if q.Get("rolling") == "1" {
+		requestedPalette := q.Get("palette")
+		if requestedPalette == "" {
+			requestedPalette = spectrogramDefaultPalette
+		}
+		dbMin, dbMax, dbRangeExplicit := parseAndValidateDBRange(q)
+
+		// Same frequency-crop semantics as the image endpoint: wideband-hf is a
+		// virtual band served by the wideband recorder, cropped to 1.8–30 MHz.
+		freqMinHz := parseOptionalFreqHz(q.Get("freq_min"))
+		freqMaxHz := parseOptionalFreqHz(q.Get("freq_max"))
+		if q.Get("band") == "wideband-hf" && freqMinHz < 1_800_000 {
+			freqMinHz = 1_800_000
+		}
+
+		rr := recorder.getRolling24hRows()
+		sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
+		thumbBytes := recorder.rollingThumb(rr, requestedPalette, dbMin, dbMax, dbRangeExplicit, sb, eb)
+		if len(thumbBytes) == 0 {
+			http.Error(w, "rolling 24h thumbnail not yet available", http.StatusServiceUnavailable)
+			return
+		}
+
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Disposition", `inline; filename="spectrogram_rolling24h_thumb.png"`)
+		w.Write(thumbBytes)
+		return
+	}
+
 	dateStr := q.Get("date")
 	if dateStr == "" {
 		http.Error(w, "date parameter required", http.StatusBadRequest)

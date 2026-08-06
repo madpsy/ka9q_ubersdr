@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"image/png"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,7 +57,7 @@ func newTestRollingRecorder(t *testing.T, now time.Time, todayRows int) *Spectro
 }
 
 // writeTestDay writes a .bin + .jsonl pair for one complete UTC day.
-func writeTestDay(t *testing.T, dir, date string, midnight time.Time, rowCount, binCount int, value func(m int) float32) {
+func writeTestDay(t testing.TB, dir, date string, midnight time.Time, rowCount, binCount int, value func(m int) float32) {
 	t.Helper()
 
 	buf := make([]byte, 24+rowCount*binCount*4)
@@ -206,6 +211,130 @@ func TestRollingPNGCached(t *testing.T) {
 	}
 }
 
+// TestRollingThumbnail checks the memory-only rolling thumbnail: correct size,
+// cached per view, and kept in its own cache so it cannot evict the full render.
+func TestRollingThumbnail(t *testing.T) {
+	now := time.Now().UTC()
+	cutoff := now.Hour()*60 + now.Minute()
+	if cutoff == 0 {
+		t.Skip("running exactly at UTC midnight — no rows for today")
+	}
+
+	sr := newTestRollingRecorder(t, now, cutoff)
+	rr := sr.getRolling24hRows()
+
+	a := sr.rollingThumb(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0)
+	if len(a) == 0 {
+		t.Fatal("rollingThumb returned no data")
+	}
+	img, err := png.Decode(bytes.NewReader(a))
+	if err != nil {
+		t.Fatalf("decode thumbnail: %v", err)
+	}
+	if got := img.Bounds(); got.Dx() != spectrogramThumbW || got.Dy() != spectrogramThumbH {
+		t.Errorf("thumbnail is %dx%d, want %dx%d", got.Dx(), got.Dy(), spectrogramThumbW, spectrogramThumbH)
+	}
+	// The window is full of data, so the thumbnail must not be all black.
+	lit := 0
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			if r, g, b, _ := img.At(x, y).RGBA(); r|g|b != 0 {
+				lit++
+			}
+		}
+	}
+	if lit == 0 {
+		t.Error("thumbnail is entirely black")
+	}
+
+	if b := sr.rollingThumb(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0); &a[0] != &b[0] {
+		t.Error("identical thumbnail was re-rendered instead of served from the cache")
+	}
+
+	// Thumbnails and full renders are cached separately.
+	full := sr.rollingPNG(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0)
+	if len(full) == 0 {
+		t.Fatal("rollingPNG returned no data")
+	}
+	if len(sr.rolling.thumbs) != 1 || len(sr.rolling.pngs) != 1 {
+		t.Errorf("cache holds %d thumbs / %d renders, want 1 / 1", len(sr.rolling.thumbs), len(sr.rolling.pngs))
+	}
+
+	// A new row invalidates the thumbnail along with everything else.
+	sr.mu.Lock()
+	sr.rowCount++
+	sr.mu.Unlock()
+	rr2 := sr.getRolling24hRows()
+	if c := sr.rollingThumb(rr2, spectrogramDefaultPalette, 0, 0, false, 0, 0); len(c) > 0 && &a[0] == &c[0] {
+		t.Error("stale thumbnail served after the window moved")
+	}
+}
+
+// TestRollingConcurrentAccess exercises the sharing contract: published
+// snapshots alias the ring buffer, so readers must never see a row change while
+// the recorder keeps appending. Run with -race.
+func TestRollingConcurrentAccess(t *testing.T) {
+	now := time.Now().UTC()
+	cutoff := now.Hour()*60 + now.Minute()
+	if cutoff == 0 {
+		t.Skip("running exactly at UTC midnight — no rows for today")
+	}
+
+	sr := newTestRollingRecorder(t, now, cutoff)
+	today := now.Format("2006-01-02")
+	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	done := make(chan struct{})
+	// Writer: append rows the way tick() does, then refresh the cache.
+	go func() {
+		defer close(done)
+		for i := 0; i < 20; i++ {
+			sr.mu.Lock()
+			if sr.rowCount < spectrogramMaxRows {
+				row := sr.rows[sr.rowCount]
+				for j := range row {
+					row[j] = float32(2000 + sr.rowCount)
+				}
+				sr.rowCount++
+			}
+			idx := sr.rowCount - 1
+			sr.mu.Unlock()
+			sr.appendRowToJSONL(today, idx, todayMidnight.Add(time.Duration(idx)*time.Minute), -100)
+			sr.refreshRollingCache()
+		}
+	}()
+
+	readers := make(chan struct{}, 4)
+	for r := 0; r < 4; r++ {
+		go func() {
+			defer func() { readers <- struct{}{} }()
+			for i := 0; i < 20; i++ {
+				rr := sr.getRolling24hRows()
+				// Every row must stay readable and self-consistent.
+				for _, row := range rr.rows {
+					if len(row) != rr.binCount {
+						t.Errorf("row width = %d, want %d", len(row), rr.binCount)
+						return
+					}
+					v := row[0]
+					for _, x := range row {
+						if x != v {
+							t.Errorf("row changed under the reader: %v vs %v", v, x)
+							return
+						}
+					}
+				}
+				sr.rollingAutoRange(rr, 0, 0)
+				sr.rollingPNG(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0)
+			}
+		}()
+	}
+	for r := 0; r < 4; r++ {
+		<-readers
+	}
+	<-done
+}
+
 // TestRollingSnapshotSurvivesRollover checks that a snapshot handed to a
 // request is not corrupted when the recorder rolls over to a new UTC day.
 func TestRollingSnapshotSurvivesRollover(t *testing.T) {
@@ -236,5 +365,51 @@ func TestRollingSnapshotSurvivesRollover(t *testing.T) {
 	}
 	if sr.rolling.result != nil {
 		t.Error("rolling cache was not invalidated at rollover")
+	}
+}
+
+// TestRollingThumbnailEndpoint checks the ?rolling=1 parameter on
+// /api/spectrogram/thumb: no date required, and no file on disk behind it.
+func TestRollingThumbnailEndpoint(t *testing.T) {
+	now := time.Now().UTC()
+	cutoff := now.Hour()*60 + now.Minute()
+	if cutoff == 0 {
+		t.Skip("running exactly at UTC midnight — no rows for today")
+	}
+
+	sr := newTestRollingRecorder(t, now, cutoff)
+
+	rec := httptest.NewRecorder()
+	handleSpectrogramThumbnail(rec, httptest.NewRequest("GET", "/api/spectrogram/thumb?rolling=1", nil), sr)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", got)
+	}
+	img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != spectrogramThumbW || b.Dy() != spectrogramThumbH {
+		t.Errorf("thumbnail is %dx%d, want %dx%d", b.Dx(), b.Dy(), spectrogramThumbW, spectrogramThumbH)
+	}
+
+	// Nothing was written to disk for it.
+	entries, err := os.ReadDir(sr.config.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "thumb") {
+			t.Errorf("rolling thumbnail was persisted to disk as %s", e.Name())
+		}
+	}
+
+	// A date-based request still requires the file to exist.
+	rec = httptest.NewRecorder()
+	handleSpectrogramThumbnail(rec, httptest.NewRequest("GET", "/api/spectrogram/thumb?date="+now.Format("2006-01-02"), nil), sr)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("archived thumb status = %d, want 404", rec.Code)
 	}
 }

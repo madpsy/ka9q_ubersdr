@@ -24,7 +24,7 @@ import { Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import {
-    POLL_MS, bandForView, bandLabel, freqTicks, fullUrl, listUrl, metaUrl,
+    POLL_MS, bandForView, bandLabel, formatTzTag, freqTicks, fullUrl, listUrl, metaUrl,
     pointReadout, readoutClearsOn, spectrogramEnabled, thumbUrl, timeTicks, tipPlacement,
 } from '../lib/spectrogram.js';
 
@@ -61,6 +61,9 @@ export default function SpectrogramPanel({ minimal }) {
     }, []);
 
     const range = bandLabel(band, ranges);
+    // The times on the picture are the receiver's wall clock, not the browser's
+    // — it is that receiver's sky. Same figure the top bar's Local clock uses.
+    const tzOffset = serverInfo?.receiver?.timezone_offset;
 
     // The window advances one row a minute; so does the picture. The interval
     // dies with the panel, so a closed panel asks for nothing.
@@ -111,7 +114,13 @@ export default function SpectrogramPanel({ minimal }) {
             )}
 
             {zoomed && (
-                <SpectrogramModal band={band} range={range} minute={minute} onClose={() => setZoomed(false)} />
+                <SpectrogramModal
+                    band={band}
+                    range={range}
+                    minute={minute}
+                    tzOffset={tzOffset}
+                    onClose={() => setZoomed(false)}
+                />
             )}
         </div>
     );
@@ -129,7 +138,7 @@ export default function SpectrogramPanel({ minimal }) {
 // how many frequency labels fit. A 20m recorder ticks every 25 kHz, which is
 // fourteen labels across a band that has room for four, and the unmeasured
 // version printed them on top of each other.
-function SpectrogramModal({ band, range, minute, onClose }) {
+function SpectrogramModal({ band, range, minute, tzOffset, onClose }) {
     const [meta, setMeta] = useState(null);
     const [state, setState] = useState('loading');  // loading | ok | error
     const [width, setWidth] = useState(0);
@@ -165,9 +174,10 @@ function SpectrogramModal({ band, range, minute, onClose }) {
         [meta, width],
     );
     const tTicks = useMemo(
-        () => (meta ? timeTicks(meta.rows, meta.row_count) : []),
-        [meta],
+        () => (meta ? timeTicks(meta.rows, meta.row_count, tzOffset) : []),
+        [meta, tzOffset],
     );
+    const tzTag = formatTzTag(tzOffset);
 
     // Pointer rather than mouse, so one handler serves a mouse, a stylus and a
     // finger. On touch the tap is what asks the question — pointerdown puts the
@@ -181,12 +191,12 @@ function SpectrogramModal({ band, range, minute, onClose }) {
         if (!r.width || !r.height) return;
         const xFrac = (e.clientX - r.left) / r.width;
         const yFrac = (e.clientY - r.top) / r.height;
-        const point = pointReadout(meta, xFrac, yFrac);
+        const point = pointReadout(meta, xFrac, yFrac, tzOffset);
         if (!point) return;
         const xPct = Math.min(100, Math.max(0, xFrac * 100));
         const yPct = Math.min(100, Math.max(0, yFrac * 100));
         setAt({ ...point, xPct, yPct, ...tipPlacement(e.pointerType, xPct, yPct) });
-    }, [meta]);
+    }, [meta, tzOffset]);
 
     // A mouse leaving has stopped asking; a finger lifting has not.
     const onLeave = useCallback((e) => {
@@ -199,7 +209,7 @@ function SpectrogramModal({ band, range, minute, onClose }) {
                 <div className="sgram-zoom__head">
                     <strong>{band === 'wideband-hf' ? 'Wideband HF' : band}</strong>
                     {range && <span>{range}</span>}
-                    <span>rolling 24 hours, one row per minute, UTC</span>
+                    <span>rolling 24 hours, one row per minute, {tzTag}</span>
                     {/* The readout at a fixed place, so it can be read without
                         following the pointer around.
 
@@ -210,10 +220,12 @@ function SpectrogramModal({ band, range, minute, onClose }) {
                         pointer that was pointing at it. The space is reserved
                         whether or not there is anything to put in it.
 
-                        Frequency and time only, not the age: those two are a
-                        constant width for a given view (the decimals are fixed
-                        by the bin size), where "23 h 59 min ago" against "now"
-                        is not. The age is on the tip by the cursor, which is
+                        Frequency and time only, not the age and not the zone
+                        tag: those two are a constant width for a given view (the
+                        decimals are fixed by the bin size), where "23 h 59 min
+                        ago" against "now" is not, and "UTC+5:30" against "UTC"
+                        is not either. The zone is stated one span to the left,
+                        and the age is on the tip by the cursor — which is
                         absolutely positioned and can grow as it likes. */}
                     <span className="sgram-zoom__read">
                         {at ? `${at.freq} · ${at.time}` : ''}
@@ -268,7 +280,7 @@ function SpectrogramModal({ band, range, minute, onClose }) {
                                 >
                                     <span className="sgram-tip__row">
                                         <b>{at.freq}</b>
-                                        <span>{at.time}</span>
+                                        <span className="sgram-tip__time">{at.time} {at.tz}</span>
                                     </span>
                                     <span className="sgram-tip__ago">{at.ago}</span>
                                 </span>

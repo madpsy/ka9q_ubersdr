@@ -3424,7 +3424,11 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
     white-space: nowrap;
 }
+/* The two answers read as a pair: same colour, the frequency carrying the
+   weight. The age below stays faint — it is a gloss on the time, not a third
+   thing of equal standing. */
 .sgram-tip b { color: var(--text); font-weight: 600; }
+.sgram-tip__time { color: var(--text); }
 .sgram-tip__row { display: flex; align-items: baseline; gap: 6px; }
 .sgram-tip__ago { color: var(--text-faint); }
 /* Flipped rather than clamped: the tip stays attached to the cursor, which is

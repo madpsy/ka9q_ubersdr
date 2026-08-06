@@ -81,6 +81,34 @@ export function formatRange(startHz, endHz) {
     return `${(startHz / 1e6).toFixed(dp)}–${(endHz / 1e6).toFixed(dp)} MHz`;
 }
 
+// ── Time, in the receiver's zone ─────────────────────────────────────────────
+//
+// The picture is of one receiver's sky, so the times on it are that receiver's
+// wall clock rather than the browser's — an operator in another country reading
+// "the band opened at 06:00" wants the hour it happened where the antenna is.
+//
+// `tzOffsetMin` is serverInfo.receiver.timezone_offset: the server's own
+// DST-adjusted offset in minutes, the same figure the top bar's Local clock
+// runs on. Shifting the epoch by it and reading the UTC fields back is how that
+// clock does it, and doing the same here keeps the two agreeing.
+
+// "UTC", "UTC+2", "UTC-5:30" — the tag that says which clock a time is on.
+export function formatTzTag(tzOffsetMin) {
+    const off = Math.round(tzOffsetMin || 0);
+    if (!off) return 'UTC';
+    const sign = off > 0 ? '+' : '-';
+    const abs = Math.abs(off);
+    const h = Math.floor(abs / 60);
+    const m = abs % 60;
+    return `UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
+}
+
+// HH:MM on the receiver's clock, from a unix timestamp.
+export function formatClock(unix, tzOffsetMin) {
+    const d = new Date((unix + (tzOffsetMin || 0) * 60) * 1000);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 // ── Axes ─────────────────────────────────────────────────────────────────────
 //
 // Both are the same shape as spectrogram.html's, minus the zoom: this image is
@@ -182,14 +210,18 @@ export function timeTickStepMinutes(rowCount) {
 // Ticks down the time axis: { pct, label } with pct 0–100 top to bottom, top
 // being the oldest row. One row is one minute, so a tick is snapped to a clean
 // clock boundary in minute-of-day space and converted back to a row.
-export function timeTicks(rows, rowCount) {
+//
+// Snapped in the receiver's zone, not in UTC and then relabelled: a half-hour
+// zone would otherwise put every label on the half hour.
+export function timeTicks(rows, rowCount, tzOffsetMin) {
     const n = rowCount || (rows ? rows.length : 0);
     if (!n) return [];
     const step = timeTickStepMinutes(n);
     const firstUnix = rows && rows[0] && rows[0].unix;
     if (!firstUnix) return [];
 
-    const mod0 = Math.floor(firstUnix / 60) % 1440; // minute-of-day of row 0
+    const local0 = Math.floor(firstUnix / 60) + Math.round(tzOffsetMin || 0);
+    const mod0 = ((local0 % 1440) + 1440) % 1440;    // minute-of-day of row 0
     const ticks = [];
     for (let mod = Math.ceil(mod0 / step) * step; mod < mod0 + n; mod += step) {
         const row = mod - mod0;
@@ -213,7 +245,7 @@ export function timeTicks(rows, rowCount) {
 // bin is 7.3 kHz and three decimals is already more than it can tell you, while
 // a per-band recorder at 100 Hz deserves four. Constant for a given view, so
 // the readout does not change width as the pointer moves.
-export function pointReadout(meta, xFrac, yFrac) {
+export function pointReadout(meta, xFrac, yFrac, tzOffsetMin) {
     if (!meta) return null;
     const start = meta.start_freq_hz || 0;
     const span = (meta.end_freq_hz || 0) - start;
@@ -234,19 +266,14 @@ export function pointReadout(meta, xFrac, yFrac) {
         unix = first ? first + row * 60 : 0;
     }
 
-    let time = (meta0 && meta0.utc_time) || '';
-    if (unix) {
-        const d = new Date(unix * 1000);
-        time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-    }
-
     return {
         hz,
         row,
         freq: `${(hz / 1e6).toFixed(dp)} MHz`,
-        // Which day it is matters on a rolling window: the top of the image is
-        // yesterday.
-        time: time ? `${time} UTC` : '',
+        // Time and zone apart, so a caller with the zone already stated beside
+        // it does not have to print it twice.
+        time: unix ? formatClock(unix, tzOffsetMin) : '',
+        tz: formatTzTag(tzOffsetMin),
         ago: agoLabel(rows - 1 - row),
     };
 }

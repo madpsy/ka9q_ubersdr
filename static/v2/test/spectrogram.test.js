@@ -4,7 +4,7 @@
 const assert = require('assert');
 const {
     DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, bandLabel, formatRange,
-    formatTickHz, freqLabelEvery,
+    formatClock, formatTickHz, formatTzTag, freqLabelEvery,
     freqTickStep, freqTicks, pointReadout, readoutClearsOn, timeTickStepMinutes,
     timeTicks, tipPlacement,
 } = require('./.build/spectrogram.cjs');
@@ -125,6 +125,17 @@ t('a full 24-hour window gets hourly ticks it can fit', () => {
     assert.strictEqual(timeTickStepMinutes(600), 60);
 });
 
+t('time ticks are on the receiver\'s clock, and snap to it', () => {
+    // The axis and the readout have to agree, so both are in the receiver's
+    // zone — and the snapping is done there too. Snapping in UTC and relabelling
+    // would put every tick on the half hour in a half-hour zone.
+    const start = Date.UTC(2026, 7, 5, 9, 37) / 1000;
+    const rows = Array.from({ length: 1440 }, (_, i) => ({ unix: start + i * 60 }));
+    assert.strictEqual(timeTicks(rows, 1440, 120)[0].label, '12:00');
+    assert.strictEqual(timeTicks(rows, 1440, 330)[0].label, '16:00');
+    assert.strictEqual(timeTicks(rows, 1440, -300)[0].label, '06:00');
+});
+
 t('time ticks snap to the clock, not to row zero', () => {
     // A window that starts at 09:37 UTC: the first tick must be 10:00, not 09:37.
     const start = Date.UTC(2026, 7, 5, 9, 37) / 1000;
@@ -220,11 +231,40 @@ t('decimals follow the bin width, not the number', () => {
     assert.strictEqual(pointReadout(META, 0.5, 0).freq, '7.1000 MHz');
 });
 
-t('the readout says the UTC time of the row under the pointer', () => {
-    // Row 0 is 09:37, and the window runs forward from there.
-    assert.strictEqual(pointReadout(META, 0, 0).time, '09:37 UTC');
-    assert.strictEqual(pointReadout(META, 0, 0.5).time, '21:37 UTC');
-    assert.strictEqual(pointReadout(META, 0, 1).time, '09:36 UTC');
+t('the readout says the time of the row under the pointer', () => {
+    // Row 0 is 09:37 UTC, and the window runs forward from there.
+    assert.strictEqual(pointReadout(META, 0, 0).time, '09:37');
+    assert.strictEqual(pointReadout(META, 0, 0.5).time, '21:37');
+    assert.strictEqual(pointReadout(META, 0, 1).time, '09:36');
+    assert.strictEqual(pointReadout(META, 0, 0).tz, 'UTC');
+});
+
+t('the readout is on the receiver\'s clock, not the browser\'s or UTC', () => {
+    // The picture is of one receiver's sky: "the band opened at 06:00" means
+    // the hour it happened where the antenna is.
+    assert.strictEqual(pointReadout(META, 0, 0, 120).time, '11:37');
+    assert.strictEqual(pointReadout(META, 0, 0, 120).tz, 'UTC+2');
+    assert.strictEqual(pointReadout(META, 0, 0, -300).time, '04:37');
+    assert.strictEqual(pointReadout(META, 0, 0, -300).tz, 'UTC-5');
+    // Half-hour zones are real places, not an edge case: Kolkata, Adelaide.
+    assert.strictEqual(pointReadout(META, 0, 0, 330).time, '15:07');
+    assert.strictEqual(pointReadout(META, 0, 0, 330).tz, 'UTC+5:30');
+});
+
+t('a time that crosses midnight in the receiver\'s zone still reads as a clock', () => {
+    // 09:37 UTC with a -11 h offset is the previous day, 22:37.
+    assert.strictEqual(pointReadout(META, 0, 0, -660).time, '22:37');
+    assert.strictEqual(formatClock(Date.UTC(2026, 7, 5, 23, 30) / 1000, 60), '00:30');
+    assert.strictEqual(formatClock(Date.UTC(2026, 7, 5, 0, 30) / 1000, -60), '23:30');
+});
+
+t('the zone tag says which clock the times are on', () => {
+    assert.strictEqual(formatTzTag(0), 'UTC');
+    assert.strictEqual(formatTzTag(undefined), 'UTC');
+    assert.strictEqual(formatTzTag(60), 'UTC+1');
+    assert.strictEqual(formatTzTag(-480), 'UTC-8');
+    assert.strictEqual(formatTzTag(345), 'UTC+5:45');    // Kathmandu
+    assert.strictEqual(formatTzTag(-210), 'UTC-3:30');   // St John's
 });
 
 t('the newest row is the bottom of the image', () => {

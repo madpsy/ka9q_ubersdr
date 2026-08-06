@@ -440,6 +440,20 @@ function SquelchRow() {
                 markerTone={squelch.enabled && !m.squelchOpen ? 'closed' : 'open'}
                 markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
             />
+            {/* The Signal panel's Auto, on the same line for the same reason it
+                is on the same line there: it sets the number the slider sets,
+                so it belongs beside it rather than under it. Disabled until
+                there is an SNR to place it against — a threshold set from no
+                measurement is a guess. */}
+            <button
+                type="button"
+                className="chip chip--button pad-row__act"
+                title="Set the threshold just above the recent noise level"
+                disabled={snr == null}
+                onClick={actions.autoSquelch}
+            >
+                Auto
+            </button>
         </PadRow>
     );
 }

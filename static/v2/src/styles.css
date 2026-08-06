@@ -2081,6 +2081,10 @@ a.btn { text-decoration: none; }
 }
 /* The zoom drum and the NR dropdown on one line. The drum takes what is left,
    and keeps its own height — the select sits centred against it. */
+/* A button on a pad row, after the control it acts on. Never shrinks: the
+   slider gives up the width instead, which is what has width to give. */
+.pad-row__act { flex: none; padding: 2px 6px; }
+
 .pad__zoomrow { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
 .pad__zoomrow > .barrel { flex: 1; min-width: 0; }
 .pad__nr {

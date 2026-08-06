@@ -1816,6 +1816,25 @@ const MARK_HALO = 'rgba(0, 0, 0, 0.72)';
 // marks were hardest to see on.
 const MARK_HALO_PX = 1;
 
+// How much clear space a passband edge needs from the dial before it is worth
+// drawing, in CSS px between the two centres.
+//
+// The dial is 1.6 px of colour plus a halo either side, an edge 1.4 plus the
+// same: nearly 4 px of ink each. Zoomed out, the passband is a fraction of a
+// pixel wide — an SSB filter is 3 kHz and a 30 MHz view is ~30 kHz per pixel —
+// so both edges land on the dial and the three marks smear into one fat,
+// lopsided smudge with the dashes of each beating against the others. Worse,
+// the smudge is not centred on the dial, so the line you tune by stops looking
+// like it is where it is.
+//
+// 5 px is the point either side of which the answer is unambiguous: below it
+// the halos are touching, above it there is background visible between them and
+// three separate marks is what you see. Nothing is lost by dropping an edge
+// there, because at that width it was never telling you anything you could read
+// off it — the passband shading is still drawn, and is what shows the filter at
+// wide spans.
+const MARK_MIN_GAP_PX = 5;
+
 // `width` and the dash are in CSS px; everything below works in device px.
 function markLine(c, x, H, dpr, colour, dashOn, dashOff, width) {
     const xr = Math.round(x) + 0.5;
@@ -1848,9 +1867,21 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
 
+    // Where the dial is, whether or not it is on screen: an edge just off the
+    // left of the view is still crowding a dial just off it too.
+    const dial = hzToX(tuning.frequency);
+    const gap = MARK_MIN_GAP_PX * dpr;
+
     for (const edge of [tuning.frequency + tuning.bandwidthLow, tuning.frequency + tuning.bandwidthHigh]) {
         const x = hzToX(edge);
         if (x < 0 || x > pxW) continue;
+        // Each edge is judged on its own, so the near one goes first — an SSB
+        // passband is lopsided about the dial and its 50 Hz side is on top of it
+        // long before the 3 kHz side is. Zoom out further and the far one
+        // reaches the same test and goes too, which is right: two marks a pixel
+        // apart are not a passband, they are a thicker dial. Zooming back in
+        // brings them back one at a time, in the order they became readable.
+        if (Math.abs(x - dial) < gap) continue;
         markLine(c, x, H, dpr, edgeColor, 4, 4, 1.4);
     }
 

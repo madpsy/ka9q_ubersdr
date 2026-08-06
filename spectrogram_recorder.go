@@ -31,6 +31,21 @@ const (
 	spectrogramDefaultDBMin   = float32(-130) // fallback noise floor when insufficient data
 	spectrogramDefaultDBMax   = float32(-60)  // fallback signal peak when insufficient data
 	spectrogramDefaultPalette = "jet"         // default colour palette
+
+	// rollingCacheIdleTTL is how long the in-memory rolling 24-hour window is
+	// kept (and refreshed each minute) after the last request for it. Once
+	// nobody has asked for the rolling view for this long the cache is released
+	// so idle recorders cost nothing.
+	rollingCacheIdleTTL = 2 * time.Hour
+
+	// rollingWarmTTL is how recently a rendered rolling PNG must have been
+	// requested for it to be re-rendered in the background each minute. Renders
+	// outside this window are kept but marked stale and re-rendered on demand.
+	rollingWarmTTL = 5 * time.Minute
+
+	// rollingPNGCacheMax is the number of distinct rolling renders (palette /
+	// dB range / frequency crop combinations) held per recorder.
+	rollingPNGCacheMax = 3
 )
 
 // noDataSentinel marks bins with no data (rendered as black).
@@ -67,6 +82,10 @@ type SpectrogramRecorder struct {
 	// latestComplete caches the most recent archived date string ("YYYY-MM-DD").
 	// Updated at startup and after each midnight rollover. Zero value = no complete day yet.
 	latestComplete atomic.Value // stores string
+
+	// rolling holds the in-memory rolling 24-hour window and everything derived
+	// from it (auto dB ranges, rendered PNGs). See rollingCache.
+	rolling rollingCache
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -287,6 +306,10 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 	// Render PNG and persist to disk (outside lock — CPU-bound work)
 	sr.renderAndCache()
 	sr.persistToDisk(today)
+
+	// Refresh the in-memory rolling 24-hour window so requests for it are
+	// served straight from memory (no-op unless it is being watched).
+	sr.refreshRollingCache()
 }
 
 // rollover archives the completed day and resets state for the new day.
@@ -354,16 +377,26 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 	// Update the cached latest-complete date (used by /api/spectrogram/latest)
 	sr.latestComplete.Store(oldDate)
 
-	// Reset state for new day (re-use existing row slices — just zero them)
+	// Reset state for the new day. Fresh row slices are allocated rather than
+	// zeroing the existing ones in place: a cached rolling 24-hour snapshot may
+	// still be referencing yesterday's rows, and those must stay immutable for
+	// as long as any request holds them.
+	fresh := make([][]float32, spectrogramMaxRows)
+	for i := range fresh {
+		row := make([]float32, sr.binCount)
+		for j := range row {
+			row[j] = noDataSentinel
+		}
+		fresh[i] = row
+	}
 	sr.mu.Lock()
 	sr.rowCount = 0
 	sr.lastRow = time.Time{}
-	for i := range sr.rows {
-		for j := range sr.rows[i] {
-			sr.rows[i][j] = noDataSentinel
-		}
-	}
+	copy(sr.rows[:], fresh)
 	sr.mu.Unlock()
+
+	// The completed day is now "yesterday" — rebuild the rolling window from scratch.
+	sr.invalidateRollingCache()
 }
 
 // ThumbPath returns the filesystem path for a given date's thumbnail PNG.
@@ -1286,13 +1319,93 @@ func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32
 // ── Rolling 24-hour view ─────────────────────────────────────────────────────
 
 // rollingResult holds the data for a rolling 24-hour spectrogram.
+//
+// A published result is immutable and shared by every request served from the
+// cache, so callers must treat rows and metaRows as read-only. Minutes with no
+// data all point at the same shared sentinel row, and today's rows alias the
+// recorder's ring buffer (each ring row is written exactly once per UTC day,
+// and rollover replaces the slices rather than overwriting them in place).
 type rollingResult struct {
 	rows     [][]float32          // data rows (trimmed to last non-sentinel row), oldest first
 	metaRows []SpectrogramRowMeta // one entry per row with real unix timestamps
 	binCount int
 }
 
-// getRolling24hRows assembles a 1440-row dataset spanning the past 24 hours.
+// rollingPNGEntry is one cached render of a rolling snapshot. The key is built
+// from the request parameters (not the resulting dB range) so an auto-ranged
+// view keeps the same key as the data underneath it changes.
+type rollingPNGEntry struct {
+	key              string
+	palette          string
+	dbMin, dbMax     float32
+	autoRange        bool // recompute dbMin/dbMax from the data on every render
+	startBin, endBin int
+	png              []byte // nil = stale, re-render on next request
+	lastAccess       time.Time
+}
+
+// rollingCache keeps the rolling 24-hour window in memory so it can be served
+// instantly instead of being reassembled from disk on every request.
+//
+// Three things are held:
+//
+//	yesterday's decoded rows — immutable, read from the .bin once per UTC day
+//	today's per-row P95       — computed once per ring row, not per request
+//	the assembled snapshot    — plus its auto dB ranges and rendered PNGs
+//
+// The snapshot itself is cheap to rebuild once the above are warm: its rows are
+// pointers into the two stores, so a rebuild copies ~1440 pointers rather than
+// ~24 MB of samples. It is refreshed once a minute by the recorder's tick (so
+// the first request in a new minute is served from memory too) and released
+// after rollingCacheIdleTTL with no requests.
+type rollingCache struct {
+	mu sync.Mutex
+
+	// emptyRow is the shared read-only sentinel row used for every minute that
+	// has no data. Never written to after construction.
+	emptyRow []float32
+
+	// Yesterday's decoded rows, indexed by minute-of-day (0..1439). Only the
+	// minutes still inside the rolling window are held — entries are released
+	// as the window slides forward through the day.
+	yDate   string
+	yRows   [][]float32          // nil entry = no data for that minute
+	yMeta   []SpectrogramRowMeta // PeakDB pre-computed
+	yMetaOK []bool               // true where yMeta came from the .jsonl
+
+	// Per-row P95 for today's rows, indexed by ring-buffer row index.
+	tDate   string
+	tPeak   []float32
+	tPeakOK []bool
+
+	// The assembled snapshot and everything derived from it. auto and pngs are
+	// only valid while result is the current snapshot.
+	result      *rollingResult
+	builtMinute int64 // unix minute the snapshot was assembled for
+	builtRows   int   // recorder rowCount at assembly time
+	auto        map[string][2]float32
+	pngs        []*rollingPNGEntry
+
+	lastAccess time.Time
+}
+
+// releaseLocked drops everything the cache holds. Caller must hold c.mu.
+func (c *rollingCache) releaseLocked() {
+	c.yDate = ""
+	c.yRows = nil
+	c.yMeta = nil
+	c.yMetaOK = nil
+	c.tDate = ""
+	c.tPeak = nil
+	c.tPeakOK = nil
+	c.result = nil
+	c.builtMinute = 0
+	c.builtRows = 0
+	c.auto = nil
+	c.pngs = nil
+}
+
+// getRolling24hRows returns the rolling 24-hour dataset spanning the past 24 hours.
 //
 // Layout (oldest → newest, top → bottom of image):
 //
@@ -1301,8 +1414,65 @@ type rollingResult struct {
 //
 // Missing data (no .bin file, bin count mismatch, service was down) is filled
 // with noDataSentinel so the image renders black for those periods.
+//
+// The result is served from memory when it is still current — the data only
+// changes when a new row is appended, once a minute. The returned value is
+// shared with other requests and must not be modified.
 func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
+	c := &sr.rolling
 	now := time.Now().UTC()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastAccess = now
+
+	sr.mu.Lock()
+	rowCount := sr.rowCount
+	sr.mu.Unlock()
+
+	if c.result != nil && c.builtMinute == now.Unix()/60 && c.builtRows == rowCount {
+		return c.result
+	}
+	return sr.rebuildRollingLocked(now, false)
+}
+
+// rebuildRollingLocked reassembles the snapshot and invalidates everything
+// derived from the previous one. When rerender is true the PNGs that are still
+// being actively viewed are re-rendered immediately (used by the background
+// tick); otherwise they are marked stale and re-rendered on demand.
+// Caller must hold c.mu.
+func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time, rerender bool) *rollingResult {
+	c := &sr.rolling
+
+	result, rowCount := sr.buildRolling24hRowsLocked(now)
+	c.result = result
+	c.builtMinute = now.Unix() / 60
+	c.builtRows = rowCount
+	c.auto = nil
+
+	kept := c.pngs[:0]
+	for _, e := range c.pngs {
+		if now.Sub(e.lastAccess) > rollingCacheIdleTTL {
+			continue // nobody is looking at this view any more
+		}
+		if rerender && now.Sub(e.lastAccess) <= rollingWarmTTL {
+			e.png = sr.renderRollingLocked(result, e)
+		} else {
+			e.png = nil // stale — rendered on the next request for it
+		}
+		kept = append(kept, e)
+	}
+	c.pngs = kept
+
+	return result
+}
+
+// buildRolling24hRowsLocked assembles the rolling window from the cached
+// yesterday rows and the live ring buffer. Returns the snapshot and the
+// recorder rowCount it was built from. Caller must hold c.mu.
+func (sr *SpectrogramRecorder) buildRolling24hRowsLocked(now time.Time) (*rollingResult, int) {
+	c := &sr.rolling
+
 	today := now.Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
@@ -1312,71 +1482,40 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 
 	binCount := sr.binCount
 
-	// Allocate result — all rows start as noDataSentinel
+	if len(c.emptyRow) != binCount {
+		row := make([]float32, binCount)
+		for i := range row {
+			row[i] = noDataSentinel
+		}
+		c.emptyRow = row
+	}
+
+	sr.loadYesterdayLocked(yesterday, cutoff, binCount)
+
 	result := &rollingResult{
 		rows:     make([][]float32, spectrogramMaxRows),
 		metaRows: make([]SpectrogramRowMeta, spectrogramMaxRows),
 		binCount: binCount,
 	}
-	for i := range result.rows {
-		row := make([]float32, binCount)
-		for j := range row {
-			row[j] = noDataSentinel
-		}
-		result.rows[i] = row
-	}
+	// hasData marks the rows that carry a real sample row (as opposed to the
+	// shared sentinel row) — used to skip empty rows when trimming below.
+	hasData := make([]bool, spectrogramMaxRows)
 
 	// ── Yesterday's tail (minutes cutoff..1439 → result rows 0..tailLen-1) ───
 	yesterdayDate, _ := time.Parse("2006-01-02", yesterday)
 	yesterdayMidnight := time.Date(yesterdayDate.Year(), yesterdayDate.Month(), yesterdayDate.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Build JSONL map for yesterday keyed by minute-of-day (derived from unix
-	// timestamp) rather than by the sequential bin-row index stored in Row.
-	// The bin row index (Row field) is 0-based from the first row the service
-	// wrote that day — it does NOT equal the minute-of-day if the service
-	// started after midnight. Using unix timestamps gives the correct mapping.
-	yesterdayJSONL := make(map[int]SpectrogramRowMeta) // key = minute-of-day
-	yesterdayBinRow := make(map[int]int)               // minute-of-day → bin row index
-	for _, r := range sr.readJSONL(yesterday) {
-		if r.Unix > 0 {
-			mod := int((r.Unix / 60) % 1440)
-			yesterdayJSONL[mod] = r
-			yesterdayBinRow[mod] = r.Row
-		}
-	}
-
-	// Try to load yesterday's .bin and copy the needed minutes into the result.
-	yesterdayBin := filepath.Join(sr.config.DataDir, "spectrogram_"+yesterday+".bin")
-	if binData, err := os.ReadFile(yesterdayBin); err == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
-		fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-		fileRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-		if fileBinCount == binCount {
-			// For each minute-of-day we need (cutoff..1439), look up the bin
-			// row index from the JSONL map and read from the correct offset.
-			for minuteOfDay := cutoff; minuteOfDay < spectrogramMaxRows; minuteOfDay++ {
-				binRow, ok := yesterdayBinRow[minuteOfDay]
-				if !ok || binRow < 0 || binRow >= fileRowCount {
-					continue // no data for this minute — leave as sentinel
-				}
-				dstRow := minuteOfDay - cutoff
-				offset := 24 + binRow*binCount*4
-				if offset+binCount*4 > len(binData) {
-					continue
-				}
-				for j := 0; j < binCount; j++ {
-					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-					result.rows[dstRow][j] = math.Float32frombits(bits)
-					offset += 4
-				}
-			}
-		}
-	}
-	// Fill yesterday meta rows — use JSONL entry if available, else synthetic.
-	// Also compute P95 (PeakDB) from the assembled result rows.
 	for dstRow := 0; dstRow < tailLen; dstRow++ {
 		minuteOfDay := cutoff + dstRow
-		if m, ok := yesterdayJSONL[minuteOfDay]; ok {
-			result.metaRows[dstRow] = m
+		if row := c.yRows[minuteOfDay]; row != nil {
+			result.rows[dstRow] = row
+			hasData[dstRow] = true
+		} else {
+			result.rows[dstRow] = c.emptyRow
+		}
+		if c.yMetaOK[minuteOfDay] {
+			// PeakDB was computed when the row was decoded.
+			result.metaRows[dstRow] = c.yMeta[minuteOfDay]
 		} else {
 			t := yesterdayMidnight.Add(time.Duration(minuteOfDay) * time.Minute)
 			result.metaRows[dstRow] = SpectrogramRowMeta{
@@ -1385,14 +1524,17 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 				Unix:    t.Unix(),
 			}
 		}
-		result.metaRows[dstRow].PeakDB = rowP95(result.rows[dstRow])
 	}
 
 	// ── Today's head (minutes 0..cutoff-1 → result rows tailLen..1439) ───────
 	todayDate, _ := time.Parse("2006-01-02", today)
 	todayMidnight := time.Date(todayDate.Year(), todayDate.Month(), todayDate.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Build JSONL map for today keyed by minute-of-day (same approach as yesterday).
+	// Build JSONL maps for today keyed by minute-of-day (derived from the unix
+	// timestamp) rather than by the sequential ring-buffer row index stored in
+	// Row. The row index is 0-based from the first row the service wrote that
+	// day — it does NOT equal the minute-of-day if the service started after
+	// midnight. Using unix timestamps gives the correct mapping.
 	todayJSONL := make(map[int]SpectrogramRowMeta) // key = minute-of-day
 	todayBinRow := make(map[int]int)               // minute-of-day → ring buffer row index
 	for _, r := range sr.readJSONL(today) {
@@ -1403,25 +1545,34 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 		}
 	}
 
-	// Copy today's ring buffer rows into result[tailLen..1439], using the
-	// JSONL minute-of-day → ring-buffer-index map so the correct row is placed
-	// at the correct minute position regardless of when the service started.
+	// Snapshot the ring buffer's row pointers (not the samples — a written row
+	// is never modified again, so it is safe to share).
 	sr.mu.Lock()
 	todayRowCount := sr.rowCount
-	for minuteOfDay := 0; minuteOfDay < cutoff; minuteOfDay++ {
-		bufRow, ok := todayBinRow[minuteOfDay]
-		if !ok || bufRow < 0 || bufRow >= todayRowCount {
-			continue // no data for this minute — leave as sentinel
-		}
-		dstRow := tailLen + minuteOfDay
-		copy(result.rows[dstRow], sr.rows[bufRow])
-	}
+	ringRows := make([][]float32, todayRowCount)
+	copy(ringRows, sr.rows[:todayRowCount])
 	sr.mu.Unlock()
 
-	// Fill today meta rows — use JSONL entry if available, else synthetic.
-	// Also compute P95 (PeakDB) from the assembled result rows.
+	if c.tDate != today || len(c.tPeak) != spectrogramMaxRows {
+		c.tDate = today
+		c.tPeak = make([]float32, spectrogramMaxRows)
+		c.tPeakOK = make([]bool, spectrogramMaxRows)
+	}
+
 	for minuteOfDay := 0; minuteOfDay < cutoff; minuteOfDay++ {
 		dstRow := tailLen + minuteOfDay
+		bufRow, ok := todayBinRow[minuteOfDay]
+		if !ok || bufRow < 0 || bufRow >= todayRowCount {
+			result.rows[dstRow] = c.emptyRow // no data for this minute
+		} else {
+			row := ringRows[bufRow]
+			result.rows[dstRow] = row
+			hasData[dstRow] = true
+			if !c.tPeakOK[bufRow] {
+				c.tPeak[bufRow] = rowP95(row)
+				c.tPeakOK[bufRow] = true
+			}
+		}
 		if m, ok := todayJSONL[minuteOfDay]; ok {
 			result.metaRows[dstRow] = m
 		} else {
@@ -1432,22 +1583,25 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 				Unix:    t.Unix(),
 			}
 		}
-		result.metaRows[dstRow].PeakDB = rowP95(result.rows[dstRow])
+		if hasData[dstRow] {
+			result.metaRows[dstRow].PeakDB = c.tPeak[bufRow]
+		}
 	}
 
 	// Trim trailing all-sentinel rows so the image height matches actual data.
 	// This prevents black "future" rows appearing at the bottom of the image.
 	lastDataRow := -1
 	for i := len(result.rows) - 1; i >= 0; i-- {
-		hasData := false
+		if !hasData[i] {
+			continue // shared sentinel row — never has data
+		}
 		for _, v := range result.rows[i] {
 			if !math.IsInf(float64(v), -1) && !math.IsNaN(float64(v)) {
-				hasData = true
+				lastDataRow = i
 				break
 			}
 		}
-		if hasData {
-			lastDataRow = i
+		if lastDataRow >= 0 {
 			break
 		}
 	}
@@ -1456,7 +1610,197 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 		result.metaRows = result.metaRows[:lastDataRow+1]
 	}
 
-	return result
+	return result, todayRowCount
+}
+
+// loadYesterdayLocked makes sure yesterday's rows for the minutes still inside
+// the rolling window (>= cutoff) are decoded in memory, reading the .bin and
+// .jsonl at most once per UTC day. Rows that have dropped out of the window are
+// released. Caller must hold c.mu.
+func (sr *SpectrogramRecorder) loadYesterdayLocked(date string, cutoff, binCount int) {
+	c := &sr.rolling
+
+	if c.yDate == date && c.yRows != nil {
+		// Already loaded — release the minutes that have aged out of the window.
+		for i := 0; i < cutoff; i++ {
+			c.yRows[i] = nil
+		}
+		return
+	}
+
+	c.yDate = date
+	c.yRows = make([][]float32, spectrogramMaxRows)
+	c.yMeta = make([]SpectrogramRowMeta, spectrogramMaxRows)
+	c.yMetaOK = make([]bool, spectrogramMaxRows)
+
+	// Map minute-of-day → row index within the .bin, via the JSONL timestamps.
+	binRowByMinute := make(map[int]int)
+	for _, r := range sr.readJSONL(date) {
+		if r.Unix > 0 {
+			mod := int((r.Unix / 60) % 1440)
+			c.yMeta[mod] = r
+			c.yMetaOK[mod] = true
+			binRowByMinute[mod] = r.Row
+		}
+	}
+
+	binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+date+".bin")
+	binData, err := os.ReadFile(binPath)
+	if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+		return // no data for yesterday — the window renders black for that period
+	}
+	fileRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+	fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
+	if fileBinCount != binCount {
+		return
+	}
+
+	for minuteOfDay := cutoff; minuteOfDay < spectrogramMaxRows; minuteOfDay++ {
+		binRow, ok := binRowByMinute[minuteOfDay]
+		if !ok || binRow < 0 || binRow >= fileRowCount {
+			continue // no data for this minute
+		}
+		offset := 24 + binRow*binCount*4
+		if offset+binCount*4 > len(binData) {
+			continue
+		}
+		row := make([]float32, binCount)
+		for j := range row {
+			row[j] = math.Float32frombits(binary.LittleEndian.Uint32(binData[offset : offset+4]))
+			offset += 4
+		}
+		c.yRows[minuteOfDay] = row
+		if c.yMetaOK[minuteOfDay] {
+			m := c.yMeta[minuteOfDay]
+			m.PeakDB = rowP95(row)
+			c.yMeta[minuteOfDay] = m
+		}
+	}
+}
+
+// rollingAutoRange returns the auto-computed dB range for a bin slice of a
+// rolling snapshot, memoised for as long as that snapshot is current.
+func (sr *SpectrogramRecorder) rollingAutoRange(rr *rollingResult, startBin, endBin int) (float32, float32) {
+	sr.rolling.mu.Lock()
+	defer sr.rolling.mu.Unlock()
+	return sr.rollingAutoRangeLocked(rr, startBin, endBin)
+}
+
+// rollingAutoRangeLocked is rollingAutoRange with c.mu already held.
+func (sr *SpectrogramRecorder) rollingAutoRangeLocked(rr *rollingResult, startBin, endBin int) (float32, float32) {
+	c := &sr.rolling
+	current := c.result == rr
+	key := strconv.Itoa(startBin) + ":" + strconv.Itoa(endBin)
+	if current {
+		if v, ok := c.auto[key]; ok {
+			return v[0], v[1]
+		}
+	}
+	dbMin, dbMax := autoRangeRowsSlice(rr.rows, startBin, endBin, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+	if current {
+		if c.auto == nil {
+			c.auto = make(map[string][2]float32)
+		}
+		c.auto[key] = [2]float32{dbMin, dbMax}
+	}
+	return dbMin, dbMax
+}
+
+// rollingPNG renders the rolling 24-hour window, reusing the cached render when
+// the same view has already been produced from this snapshot. When explicit is
+// false the dB range is auto-computed from the data.
+func (sr *SpectrogramRecorder) rollingPNG(rr *rollingResult, palette string, dbMin, dbMax float32, explicit bool,
+	startBin, endBin int) []byte {
+
+	c := &sr.rolling
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry := &rollingPNGEntry{
+		palette:   palette,
+		autoRange: !explicit,
+		startBin:  startBin,
+		endBin:    endBin,
+	}
+	if explicit {
+		entry.dbMin, entry.dbMax = dbMin, dbMax
+	}
+	// Key on the request parameters, not the resulting range, so an auto-ranged
+	// view keeps its identity as the data underneath it changes.
+	entry.key = palette + "|" + strconv.FormatFloat(float64(entry.dbMin), 'f', 1, 32) +
+		"|" + strconv.FormatFloat(float64(entry.dbMax), 'f', 1, 32) +
+		"|" + strconv.FormatBool(explicit) +
+		"|" + strconv.Itoa(startBin) + ":" + strconv.Itoa(endBin)
+
+	// A rebuild raced us — render directly rather than caching against a
+	// snapshot that is no longer current.
+	if c.result != rr {
+		return sr.renderRollingLocked(rr, entry)
+	}
+
+	now := time.Now().UTC()
+	for _, e := range c.pngs {
+		if e.key != entry.key {
+			continue
+		}
+		e.lastAccess = now
+		if e.png == nil {
+			e.png = sr.renderRollingLocked(rr, e)
+		}
+		return e.png
+	}
+
+	entry.lastAccess = now
+	entry.png = sr.renderRollingLocked(rr, entry)
+	if len(c.pngs) >= rollingPNGCacheMax {
+		lru := 0
+		for i, e := range c.pngs {
+			if e.lastAccess.Before(c.pngs[lru].lastAccess) {
+				lru = i
+			}
+		}
+		c.pngs = append(c.pngs[:lru], c.pngs[lru+1:]...)
+	}
+	c.pngs = append(c.pngs, entry)
+	return entry.png
+}
+
+// renderRollingLocked renders one cache entry from a snapshot. Caller must hold c.mu.
+func (sr *SpectrogramRecorder) renderRollingLocked(rr *rollingResult, e *rollingPNGEntry) []byte {
+	dbMin, dbMax := e.dbMin, e.dbMax
+	if e.autoRange {
+		dbMin, dbMax = sr.rollingAutoRangeLocked(rr, e.startBin, e.endBin)
+	}
+	return renderRowsAsPNGSlice(rr.rows, e.palette, dbMin, dbMax, rr.binCount, e.startBin, e.endBin)
+}
+
+// refreshRollingCache is called once a minute after a new row is appended. It
+// reassembles the rolling window (and re-renders the views being actively
+// watched) so requests never have to build it themselves, and releases the
+// cache once nobody has asked for the rolling view for rollingCacheIdleTTL.
+func (sr *SpectrogramRecorder) refreshRollingCache() {
+	c := &sr.rolling
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.result == nil && c.yRows == nil {
+		return // never requested — nothing to keep warm
+	}
+	now := time.Now().UTC()
+	if now.Sub(c.lastAccess) > rollingCacheIdleTTL {
+		c.releaseLocked()
+		return
+	}
+	sr.rebuildRollingLocked(now, true)
+}
+
+// invalidateRollingCache drops the cached window. Called at UTC midnight
+// rollover, after which yesterday's rows are the day that just completed.
+func (sr *SpectrogramRecorder) invalidateRollingCache() {
+	c := &sr.rolling
+	c.mu.Lock()
+	c.releaseLocked()
+	c.mu.Unlock()
 }
 
 // ── Spectrogram HTTP API ─────────────────────────────────────────────────────
@@ -1553,12 +1897,10 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	// ── Rolling 24-hour mode ──────────────────────────────────────────────────
 	if rolling {
 		rr := recorder.getRolling24hRows()
-		if !dbRangeExplicit {
-			sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
-			dbMin, dbMax = autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
-		}
 		rsb, reb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
-		pngBytes := renderRowsAsPNGSlice(rr.rows, requestedPalette, dbMin, dbMax, rr.binCount, rsb, reb)
+		// Served from the in-memory render cache when this view has already
+		// been produced from the current snapshot.
+		pngBytes := recorder.rollingPNG(rr, requestedPalette, dbMin, dbMax, dbRangeExplicit, rsb, reb)
 		if len(pngBytes) == 0 {
 			http.Error(w, "rolling 24h spectrogram not yet available", http.StatusServiceUnavailable)
 			return
@@ -1946,7 +2288,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	if rolling {
 		rr := recorder.getRolling24hRows()
 		sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
-		autoMin, autoMax := autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+		autoMin, autoMax := recorder.rollingAutoRange(rr, sb, eb)
 
 		// Use the band name from the request, not recorder.bandName.
 		// wideband-hf is a virtual band served by the wideband recorder, so

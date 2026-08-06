@@ -353,19 +353,52 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     // and the same anchor rule as the wheel.
     const pinch = useRef(new Map()).current;
     const pinchRef = useRef(null);
+    // A drag in progress, once it has travelled far enough to be one.
+    const drag = useRef(null);
 
     const onPointerDown = useCallback((e) => {
         pinch.set(e.pointerId, e.clientX);
         if (pinch.size === 2) {
             const xs = [...pinch.values()];
             pinchRef.current = { dist: Math.abs(xs[0] - xs[1]) };
+            drag.current = null;             // two fingers is a pinch, not a drag
+            return;
         }
-    }, [pinch]);
+        // Zoomed, and not a press on one of the buttons sitting over the chart.
+        if (!zoomed || (e.target.closest && e.target.closest('button'))) return;
+        drag.current = { id: e.pointerId, x: e.clientX, moved: false };
+        if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
+    }, [pinch, zoomed]);
 
     const onPointerUp = useCallback((e) => {
         pinch.delete(e.pointerId);
         if (pinch.size < 2) pinchRef.current = null;
+        if (drag.current && drag.current.id === e.pointerId) drag.current = null;
+        if (wrapRef.current) wrapRef.current.style.cursor = '';
     }, [pinch]);
+
+    // Drag the band under the window. Returns true when the move was a pan, so
+    // the readout knows to stay out of the way — dragging is a gesture about
+    // where you are looking, not a question about a pixel.
+    const onDragMove = useCallback((e) => {
+        const d = drag.current;
+        if (!d || d.id !== e.pointerId) return false;
+        // A mouse with no button down is a hover that happens to follow a click.
+        if (e.pointerType === 'mouse' && !e.buttons) { drag.current = null; return false; }
+
+        const dx = e.clientX - d.x;
+        if (!d.moved && Math.abs(dx) < 3) return false;   // still a click, not a drag
+        const wrap = wrapRef.current;
+        const r = wrap ? wrap.getBoundingClientRect() : null;
+        if (!r || !r.width) return false;
+
+        d.moved = true;
+        d.x = e.clientX;
+        if (wrap) wrap.style.cursor = 'grabbing';
+        // Dragging right moves the band right, which is moving the window left.
+        setZoom((z) => panByFraction(z, -(dx / r.width)));
+        return true;
+    }, []);
 
     const onPinchMove = useCallback((e) => {
         if (!pinch.has(e.pointerId)) return false;
@@ -443,14 +476,15 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     }, [meta, st]);
 
     const read = useCallback((e) => {
-        // A second finger is a pinch, not a reading.
-        if (onPinchMove(e)) { st.ptr = null; setAt(null); return; }
+        // A second finger is a pinch, and a held button is a pan. Neither is a
+        // reading, and both leave the tip behind if it is not cleared.
+        if (onPinchMove(e) || onDragMove(e)) { st.ptr = null; setAt(null); return; }
         // Kept so the readout can be recomputed against the next frame without
         // the pointer having to move.
         st.ptr = { x: e.clientX, y: e.clientY, type: e.pointerType };
         const v = compute(st.ptr);
         if (v) setAt(v);
-    }, [compute, onPinchMove, st]);
+    }, [compute, onDragMove, onPinchMove, st]);
 
     const leave = useCallback((e) => {
         if (!readoutClearsOn(e.pointerType)) return;
@@ -523,7 +557,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
 
     return (
         <div
-            className="bsp__chart"
+            className={`bsp__chart${zoomed ? ' bsp__chart--zoomed' : ''}`}
             ref={wrapRef}
             onPointerDown={(e) => { onPointerDown(e); read(e); }}
             onPointerMove={read}

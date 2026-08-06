@@ -3336,6 +3336,9 @@ a.btn { text-decoration: none; }
 /* Vertical page scrolling still works with a finger on the chart; a pinch and a
    horizontal drag belong to the zoom. */
 .bsp__chart { touch-action: pan-y; }
+/* Zoomed in, the chart can be dragged — say so before it is tried. The grabbing
+   state is set on the element while a drag is live. */
+.bsp__chart--zoomed { cursor: grab; }
 
 /* Hover readout. The line spans both canvases, because a frequency is a
    frequency whether you are reading it off the trace or off the waterfall. */

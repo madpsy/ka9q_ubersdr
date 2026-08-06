@@ -25,10 +25,18 @@
 // Clicking either kind does what v1's setBand() does: tune to the middle of the
 // band, take the band's mode (LSB below 10 MHz, USB above, unless the band
 // declares one) and zoom the spectrum to the band's width.
+//
+// The colouring is a switch at the foot of the panel. It is worth having off: ten
+// keys painted green through red is the loudest thing in the interface, and an
+// operator working one band, or reading the conditions off the space weather
+// table, is being shouted at by a summary they are not using. Switched off, the
+// amateur keys are exactly the quick-tune keys below them — the panel becomes two
+// rows of plain keys, and only the tuned one is marked.
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Segmented } from '../components/ui.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
+import { Segmented, Switch } from '../components/ui.jsx';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
     bandTip, bandTone, getBandConditions, subscribeBandConditions,
@@ -50,12 +58,22 @@ const CUSTOM_MIN_PX = 66;
 // bands. See the registry's `minimal`.
 export default function QuickBandsPanel({ minimal }) {
     const { tuning, actions, serverInfo, catalog } = useRadio();
+    const display = useDisplay();
     // Shared with the Multipad's band row — see lib/bandConditions.js for why
     // the poll is not this panel's own.
     const [states, setStates] = useState(getBandConditions);
 
-    const conditions = !!(serverInfo && serverInfo.noise_floor);
+    // Whether this receiver measures conditions at all, and whether the operator
+    // wants the keys painted with them. Both have to hold: the second is a
+    // preference, the first is whether there is anything to prefer.
+    const measured = !!(serverInfo && serverInfo.noise_floor);
+    const painted = display.bandColours !== false;
+    const conditions = measured && painted;
 
+    // No subscription while nothing is being painted with it: the poll is a
+    // request a minute for an answer the panel has stopped showing. The store is
+    // shared and reference-counted, so the Multipad's row keeps its own if it is
+    // open — see lib/bandConditions.js.
     useEffect(
         () => (conditions ? subscribeBandConditions(setStates) : undefined),
         [conditions],
@@ -117,6 +135,26 @@ export default function QuickBandsPanel({ minimal }) {
                             ].filter(Boolean).join('\n'),
                             className: 'band-key band-key--none',
                         }))}
+                    />
+                </>
+            )}
+
+            {/* At the foot, under both rows: it is a setting about them, and a
+                switch between them read as a divider with a control in it.
+
+                Only where the receiver measures conditions — with no noise-floor
+                monitor there is nothing to colour by, the keys are already plain,
+                and this would be a switch that does nothing. Gone in the minimal
+                view with the rest of the panel's furniture; the setting itself
+                stays whatever it was. */}
+            {!minimal && measured && (
+                <>
+                    <div className="divider" />
+                    <Switch
+                        label="Colour by conditions"
+                        title="Paint the amateur band keys with the average FT8 signal-to-noise over the last ten minutes — green excellent through red poor. Off leaves them plain, like the quick-tune keys below"
+                        checked={painted}
+                        onChange={(v) => display.set({ bandColours: v })}
                     />
                 </>
             )}

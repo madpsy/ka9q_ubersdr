@@ -121,6 +121,17 @@ export const DEFAULTS = {
     // waits to be asked, because a socket reopening because somebody walked past
     // the desk is the saving thrown away.
     idlePauseMin: null,
+    // Whether the Quick bands panel paints its amateur band keys with the FT8
+    // conditions (see bandTone). On, because that colouring is most of why the
+    // panel is worth a glance — but a receiver used for one band, or an operator
+    // who reads the conditions from the space weather table and finds a wall of
+    // green and amber noisy, can have the keys plain.
+    //
+    // The Multipad's band row keeps its colours either way: the toggle is in the
+    // Quick bands panel, and a switch in one panel silently restyling another is
+    // worse than the two disagreeing. On a phone the colour is also the whole
+    // reason that row is there.
+    bandColours: true,
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope

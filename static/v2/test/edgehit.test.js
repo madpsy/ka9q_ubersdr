@@ -15,9 +15,13 @@ const t = (name, fn) => {
     catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
 };
 
-// The constants SpectrumView uses.
-const MOUSE = { grab: 6, minPx: 15 };
-const TOUCH = { grab: 22, minPx: 30 };
+// The constants SpectrumView uses. Both thresholds are three times the smallest
+// zone still worth aiming at — 3 px for a pointer, 7 px for a fingertip — which
+// is all this gate decides: the zones-never-meet invariant is the third-cap's
+// job, not this number's, and pinning that separation is what the last test here
+// is for.
+const MOUSE = { grab: 6, minPx: 9 };
+const TOUCH = { grab: 22, minPx: 21 };
 
 const W = 800;               // row width, CSS px
 const CENTRE = 14100000;     // Hz at the middle of the row
@@ -73,13 +77,41 @@ t('a finger gets a zone it can actually hit', () => {
 });
 
 t('touch waits for a wider passband than the mouse does', () => {
-    // 20 px of passband: a 6 px pointer zone still fits inside a third of it,
-    // a fingertip has nothing worth offering, so touch declines and the whole
-    // thing stays a tap.
-    const span = spanFor(USB, 20);
+    // Between the two thresholds: a pointer-sized zone fits inside a third of
+    // this, a fingertip has nothing worth offering, so touch declines and the
+    // whole thing stays a tap. Derived from the constants rather than written out,
+    // so loosening one threshold cannot quietly make this case vacuous.
+    const span = spanFor(USB, TOUCH.minPx - 2);
     const lowX = xOf(span, USB, USB.bandwidthLow);
     assert.strictEqual(hit(lowX, span, MOUSE), 'low');
     assert.strictEqual(hit(lowX, span, TOUCH), null);
+});
+
+t('a passband with clear space between its edges can be grabbed', () => {
+    // What the thresholds were loosened for. 12 px of passband is two lines with
+    // daylight between them: a 4 px handle either side and 4 px of middle. It is
+    // small, and it is plainly there — the display refusing to let go of either
+    // edge at that size was the complaint.
+    const span = spanFor(USB, 12);
+    const lowX = xOf(span, USB, USB.bandwidthLow);
+    const highX = xOf(span, USB, USB.bandwidthHigh);
+    assert.strictEqual(hit(lowX, span, MOUSE), 'low');
+    assert.strictEqual(hit(highX, span, MOUSE), 'high');
+    assert.strictEqual(hit((lowX + highX) / 2, span, MOUSE), null, 'and the middle is still nobody\'s');
+});
+
+t('the handle never grows past a third, however lenient the threshold', () => {
+    // The one thing the loosening must not have bought: a zone that reaches
+    // further than a third of the passband, at the sizes it now allows.
+    for (const z of [MOUSE, TOUCH]) {
+        for (const px of [z.minPx, z.minPx + 1, z.minPx * 2, 60]) {
+            const span = spanFor(USB, px);
+            const lowX = xOf(span, USB, USB.bandwidthLow);
+            const reach = Math.min(z.grab, px / 3);
+            assert.strictEqual(hit(lowX + reach - 0.01, span, z), 'low', `${px}px, grab ${z.grab}`);
+            assert.strictEqual(hit(lowX + reach + 0.01, span, z), null, `${px}px, grab ${z.grab}`);
+        }
+    }
 });
 
 t('the zone shrinks with the passband rather than the threshold holding it off', () => {

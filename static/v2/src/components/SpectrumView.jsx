@@ -52,26 +52,38 @@ import { fetchWeather, windKmh } from '../lib/weather.js';
 // three times the zone above: edgeHit() shrinks the zone to a third of the
 // passband as that narrows, so the two can never meet whatever this is set to,
 // and what it has to decide is only "is the handle big enough to hit".
+//
+// Three pixels is enough of one for a mouse. A pointer lands where it is pointed,
+// the cursor turns to col-resize before the press to say the edge is there, and a
+// miss costs a click that tunes — so the honest answer to "can this be aimed at"
+// is close to the smallest thing that can be seen. The threshold used to be a
+// 5 px zone, which refused the gesture on a 12 px passband where a 4 px handle
+// was perfectly hittable: the operator could see two lines with clear space
+// between them and the display would not let go of either.
+const EDGE_ZONE_MIN_PX = 3;
 const EDGE_GRAB_PX = 6;
-const EDGE_MIN_PX = 15;         // a 5 px zone at the threshold
+const EDGE_MIN_PX = 3 * EDGE_ZONE_MIN_PX;
 
 // The same, for a finger. Six pixels is not a touch target — a fingertip is
 // nearer forty across and the contact point is not where you think it is — so
 // touch gets a zone it can actually hit wherever the passband has room for one.
 //
-// 10 px is small for a fingertip and deliberately so: it is the worst case, at
-// the narrowest passband the gesture is offered on at all, and nothing is lost
-// by missing it. A touch near an edge is a tap until it has travelled
+// Seven pixels is small for a fingertip and deliberately so: it is the worst
+// case, at the narrowest passband the gesture is offered on at all, and nothing
+// is lost by missing it. A touch near an edge is a tap until it has travelled
 // TOUCH_SLOP_PX (see below), so a miss tunes rather than resizing, and a grab
-// that took the wrong edge is undone by dragging back.
+// that took the wrong edge is undone by dragging back. That asymmetry — a miss
+// costs nothing, a refusal costs the gesture entirely — is the argument for
+// erring towards offering it.
 //
 // The old threshold was 3 × the full 22 px zone. A 66 px passband is 2.7 kHz of
 // SSB across about a 15 kHz view, so on a phone the filter could only be
 // dragged at the very last rung of the zoom ladder — and, because the same
 // number is the narrowest a drag may leave it (see minHz in onPointerMove),
 // only ever widened from there.
+const TOUCH_ZONE_MIN_PX = 7;
 const TOUCH_GRAB_PX = 22;
-const TOUCH_EDGE_MIN_PX = 30;   // a 10 px zone at the threshold
+const TOUCH_EDGE_MIN_PX = 3 * TOUCH_ZONE_MIN_PX;
 
 // How far a finger must travel before a touch near an edge is a resize rather
 // than a tap. The whole reason touch can have a grab zone this size: nothing is

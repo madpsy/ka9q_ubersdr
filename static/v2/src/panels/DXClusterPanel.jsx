@@ -7,10 +7,18 @@
 // widget works it out.
 //
 // The socket is not opened until Connect, and is closed when the panel is
-// unmounted — which in this interface means when it is collapsed or hidden. A
-// login on a shared cluster is not something to hold open because a panel
-// happens to be on screen. A remembered callsign connects on its own, as the
-// widget does, because opening the panel is the asking.
+// unmounted — which in this interface means when it is collapsed, hidden, or
+// dragged between docks. A login on a shared cluster is not something to hold
+// open because a panel happens to be on screen. A remembered callsign connects on
+// its own, as the widget does, because opening the panel is the asking.
+//
+// Minimising a floating window is deliberately *not* one of those: it stays
+// mounted and only stops being painted (see FloatingPanel), so putting the
+// terminal on the strip for a minute keeps the login and the transcript. The two
+// gestures mean different things — collapsing a section is putting a tool away,
+// minimising a window is getting it out of the light — and this panel is where
+// the difference is most obvious, because the cost of the wrong one is a cluster
+// login and everything that had scrolled past.
 //
 // `minimal` keeps the transcript and the command line, and drops the quick
 // commands, the links and the connected/disconnect row — once you are in,

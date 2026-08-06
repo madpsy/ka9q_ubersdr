@@ -3,6 +3,15 @@
 //
 // The panel body is unchanged — same component as in a dock. Only the chrome
 // differs, which is the whole point of the registry: placement is data.
+//
+// `minimised` is a window put away on the strip along the bottom, and it is drawn
+// rather than dropped: the panel stays mounted at its full size and is only made
+// invisible. That is the difference between minimising and collapsing, and it is
+// a real one — collapsing a dock section unmounts the panel, which is how the DX
+// cluster panel drops its login and how a decoder stops decoding, and minimising
+// must not do that. Somebody putting a window out of the way for a minute has not
+// asked to be logged out of a cluster. Same treatment ExtensionWindow gives a
+// minimised extension, for the same reason.
 
 import React from '../react.js';
 import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
@@ -11,7 +20,7 @@ import { Icon, Menu, MenuItem } from './ui.jsx';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
-export default function FloatingPanel({ panel, geom, z, bounds }) {
+export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     const {
         sections, setFloat, setFloatMin, raiseFloat, movePanel, setSectionHidden, toggleSectionMinimal,
     } = useLayout();
@@ -29,8 +38,12 @@ export default function FloatingPanel({ panel, geom, z, bounds }) {
 
     return (
         <section
-            className="floatwin"
+            className={`floatwin${minimised ? ' floatwin--min' : ''}`}
             style={{ left: geom.x, top: geom.y, width: geom.w, height: geom.h, zIndex: 10 + z }}
+            /* Hidden, not merely transparent: visibility takes it out of the
+               accessibility tree and out of the tab order too, so a window on the
+               strip cannot be tabbed into or read out from where it is not. */
+            aria-hidden={minimised || undefined}
             onPointerDown={() => raiseFloat(panel.id)}
         >
             <header

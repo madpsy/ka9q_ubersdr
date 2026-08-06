@@ -142,12 +142,19 @@ export default function FloatingLayer() {
 
     return (
         <div className="floatlayer" ref={ref}>
-            {visible.filter((id) => !floats[id]?.min).map((id, i) => (
+            {/* Minimised windows are rendered too, and hidden by FloatingPanel.
+                Dropping them from the tree is what a *collapse* means — and it
+                logs the DX cluster panel out and stops a decoder decoding, which
+                is not what putting a window on the strip for a minute asks for.
+                They keep their place in floatOrder, so nothing shuffles when one
+                comes back, and their z is irrelevant while they are invisible. */}
+            {visible.map((id, i) => (
                 <FloatingPanel
                     key={id}
                     panel={PANEL_BY_ID[id]}
                     geom={floats[id]}
                     z={i}
+                    minimised={!!floats[id]?.min}
                     bounds={bounds}
                 />
             ))}

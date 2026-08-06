@@ -215,6 +215,25 @@ t('dropping a panel on itself leaves the order alone', () => {
     assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'b', 'b', 'after'), ['a', 'b', 'c']);
 });
 
+t('the panel is never lost, whatever it is dropped on', () => {
+    // The bug this pins: with the id stripped from the dock before insertNear
+    // ran, a drop anchored on the panel itself removed it and then failed to
+    // find an anchor — so the panel disappeared from the layout entirely and
+    // only a page reload brought it back.
+    const dock = ['a', 'b', 'c'];
+    for (const id of dock) {
+        for (const anchor of [...dock, 'gone']) {
+            for (const edge of ['before', 'after']) {
+                const out = insertNear(dock, id, anchor, edge);
+                assert.strictEqual(out.filter((p) => p === id).length, 1,
+                    `${id} on ${anchor} ${edge}: ${out.join(',')}`);
+                assert.strictEqual(out.length, dock.length,
+                    `${id} on ${anchor} ${edge} changed the count`);
+            }
+        }
+    }
+});
+
 t('a panel arriving from another dock takes the place it was dropped at', () => {
     assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'a', 'after'), ['a', 'z', 'b']);
     assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'a', 'before'), ['z', 'a', 'b']);

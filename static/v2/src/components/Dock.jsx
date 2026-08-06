@@ -9,6 +9,7 @@ import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
+import { draggingPanel } from '../lib/panelDrag.js';
 
 // A panel's share of the bottom dock's width: what the operator dragged it to,
 // otherwise what the panel asks for, otherwise an equal share. Reading the
@@ -95,6 +96,12 @@ export default function Dock({ side }) {
     const applies = usePanelApplies();
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
+    // Where the panel would land: { id, edge }, the gap next to a section. Held
+    // here rather than in each section because half the gaps are not over a
+    // section at all — the space between two of them, the padding, the room
+    // under the last one — and a marker that only appears over a panel is a
+    // marker you have to hunt for.
+    const [dropAt, setDropAt] = useState(null);
     const resizeRef = useRef(null);
 
     // ---- hover to peek --------------------------------------------------
@@ -191,8 +198,11 @@ export default function Dock({ side }) {
     // cover a completed drop: moving the panel unmounts the drag source, so its
     // dragend no longer bubbles to the window — the drop itself clears that,
     // which is why Section lets the event through instead of stopping it.
-    const clearDropping = useCallback(() => setDropping(false), []);
-    useDragEndReset(dropping, clearDropping);
+    const clearDropping = useCallback(() => {
+        setDropping(false);
+        setDropAt(null);
+    }, []);
+    useDragEndReset(dropping || dropAt !== null, clearDropping);
 
     const visible = dock.panels.filter((id) => {
         const p = PANEL_BY_ID[id];
@@ -234,9 +244,15 @@ export default function Dock({ side }) {
         if (!body) return null;
         const vertical = side !== 'bottom';
         const pos = vertical ? clientY : clientX;
+        // The panel being dragged is not one of the candidates: the gaps either
+        // side of where it already is are not places to put it, and offering
+        // them is what left the marker hidden while the pointer was over the
+        // panel in hand.
+        const moving = draggingPanel();
         let best = null;
         let bestDist = Infinity;
         for (const el of body.querySelectorAll('[data-panel]')) {
+            if (el.dataset.panel === moving) continue;
             const r = el.getBoundingClientRect();
             const mid = vertical ? r.top + r.height / 2 : r.left + r.width / 2;
             const d = Math.abs(pos - mid);
@@ -288,24 +304,33 @@ export default function Dock({ side }) {
                 onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes('text/ubersdr-panel')) return;
                     e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
                     setDropping(true);
+                    // Every move, everywhere in the body: the marker follows the
+                    // pointer to the nearest gap instead of appearing only when
+                    // it happens to be over a panel.
+                    setDropAt(nearestSection(e.clientX, e.clientY));
                 }}
-                onDragLeave={() => setDropping(false)}
+                onDragLeave={(e) => {
+                    // dragleave also fires crossing between children, and
+                    // clearing then makes the marker flicker off and on.
+                    if (e.currentTarget.contains(e.relatedTarget)) return;
+                    setDropping(false);
+                    setDropAt(null);
+                }}
                 onDrop={(e) => {
                     setDropping(false);
-                    // A section inside this dock may have placed it already.
-                    if (e.panelDropHandled) return;
+                    const at = dropAt;
+                    setDropAt(null);
+                    e.preventDefault();
                     const id = e.dataTransfer.getData('text/ubersdr-panel');
                     if (!id) return;
-                    // Everything between the sections is dock body too: the gaps,
-                    // the padding, and the space under the last panel. Appending
-                    // for all of it meant a drop that missed a section by three
-                    // pixels went to the bottom instead of where it was aimed, so
-                    // the nearest section decides — and only an empty dock, or a
-                    // drop below every panel in it, actually appends.
-                    const near = nearestSection(e.clientX, e.clientY);
-                    if (near) movePanelNear(id, side, near.id, near.edge);
-                    else movePanel(id, side, null);
+                    // Wherever the marker was is where it goes — the same answer
+                    // the operator was looking at when they let go.
+                    if (at) { movePanelNear(id, side, at.id, at.edge); return; }
+                    // No marker means no other panel to sit beside: an empty
+                    // dock, or one holding only the panel being dragged.
+                    movePanel(id, side, null);
                 }}
             >
                 {visible.map((id, i) => (
@@ -331,6 +356,7 @@ export default function Dock({ side }) {
                             // can appear to move this one past.
                             prev={visible[i - 1]}
                             next={visible[i + 1]}
+                            dropEdge={dropAt && dropAt.id === id ? dropAt.edge : null}
                             weight={side === 'bottom' ? shareOf(weights, id) : undefined}
                             height={side === 'bottom' ? heights[id] : undefined}
                         />

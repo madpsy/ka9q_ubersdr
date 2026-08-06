@@ -452,10 +452,20 @@ export function LayoutProvider({ children }) {
     // See insertNear for why this takes the neighbour rather than an index.
     const movePanelNear = useCallback((id, dock, anchorId, edge) => {
         setLayout((l) => {
-            if (!id || !DOCKS.includes(dock)) return l;
+            // Dropped on itself: nothing to do, and nothing to write. This is
+            // also the guard that stops the panel being lost — see below.
+            if (!id || id === anchorId || !DOCKS.includes(dock)) return l;
             const docks = {};
             for (const d of DOCKS) {
-                docks[d] = { ...l.docks[d], panels: l.docks[d].panels.filter((p) => p !== id) };
+                // Every dock but the target loses the panel here. The target
+                // keeps it and insertNear does the removal, so the list it works
+                // on is the one it documents: remove, then find the anchor. If
+                // the id were stripped here too, a call anchored on the panel
+                // itself would return a list without it — and the panel would
+                // vanish from the layout altogether.
+                docks[d] = d === dock
+                    ? { ...l.docks[d] }
+                    : { ...l.docks[d], panels: l.docks[d].panels.filter((p) => p !== id) };
             }
             const floats = { ...l.floats };
             delete floats[id];

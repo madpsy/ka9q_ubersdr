@@ -5,10 +5,10 @@
 // the native HTML5 API so no pointer bookkeeping is needed and the browser
 // supplies the drag image for free.
 
-import React, { useCallback, useRef, useState } from '../react.js';
+import React, { useRef } from '../react.js';
 import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
-import { useDragEndReset } from '../lib/useDragEnd.js';
+import { setDraggingPanel } from '../lib/panelDrag.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -17,58 +17,27 @@ const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom doc
 const SNAP = 8;
 const snap = (v) => Math.round(v / SNAP) * SNAP;
 
-export default function Section({ panel, dock, index, weight, height, prev, next }) {
+export default function Section({ panel, dock, index, weight, height, prev, next, dropEdge }) {
     const {
-        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
-        swapPanels,
+        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, swapPanels,
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
-    const [dropEdge, setDropEdge] = useState(null);   // 'before' | 'after' | null
-
-    // Same reason as the dock: a drop landing elsewhere must still clear this
-    // section's insertion marker.
-    const clearEdge = useCallback(() => setDropEdge(null), []);
-    useDragEndReset(dropEdge !== null, clearEdge);
     const state = sections[panel.id] || { open: true };
     const minimal = !!panel.minimal && !!state.minimal;
     // The bottom dock is a row; the side docks are columns.
     const row = dock === 'bottom';
 
+    // The drag itself. Where it may land is worked out by the dock, which is
+    // the only element that sees the gaps between sections as well as the
+    // sections: a drop is aimed at a gap, and half the gaps are not over any
+    // panel at all. `dropEdge` arrives as a prop from there, and the dock does
+    // the placing on drop.
     const onDragStart = (e) => {
         e.dataTransfer.setData('text/ubersdr-panel', panel.id);
         e.dataTransfer.effectAllowed = 'move';
-    };
-
-    const onDragOver = (e) => {
-        if (!e.dataTransfer.types.includes('text/ubersdr-panel')) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        const r = e.currentTarget.getBoundingClientRect();
-        const vertical = dock !== 'bottom';
-        const mid = vertical ? r.top + r.height / 2 : r.left + r.width / 2;
-        const pos = vertical ? e.clientY : e.clientX;
-        setDropEdge(pos < mid ? 'before' : 'after');
-    };
-
-    const onDrop = (e) => {
-        const id = e.dataTransfer.getData('text/ubersdr-panel');
-        setDropEdge(null);
-        if (!id) return;
-        e.preventDefault();
-        // Deliberately not stopPropagation: the dock needs to see the drop to
-        // clear its own hover tint. Marking the event tells it the placement is
-        // already decided. (React reuses one synthetic event along the path, so
-        // the flag survives the bubble.)
-        //
-        // Marked even when the panel was dropped on itself, which is a no-op and
-        // not a request to go anywhere. Without the flag that drop fell through
-        // to the dock, which appends — so letting go over the panel you had just
-        // picked up sent it to the bottom, which is most of what made this hard
-        // to aim.
-        e.panelDropHandled = true;
-        if (id === panel.id) return;
-        movePanelNear(id, dock, panel.id, dropEdge === 'after' ? 'after' : 'before');
+        // Read by the dock during dragover, where dataTransfer will not say.
+        setDraggingPanel(panel.id);
     };
 
     const cls = [
@@ -131,15 +100,12 @@ export default function Section({ panel, dock, index, weight, height, prev, next
             className={cls}
             style={style}
             data-panel={panel.id}
-            onDragOver={onDragOver}
-            onDragLeave={() => setDropEdge(null)}
-            onDrop={onDrop}
         >
             <header
                 className="section__head"
                 draggable
                 onDragStart={onDragStart}
-                onDragEnd={() => setDropEdge(null)}
+                onDragEnd={() => setDraggingPanel(null)}
             >
                 <button
                     type="button"

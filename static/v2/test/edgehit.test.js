@@ -21,7 +21,12 @@ const t = (name, fn) => {
 // job, not this number's, and pinning that separation is what the last test here
 // is for.
 const MOUSE = { grab: 6, minPx: 9 };
-const TOUCH = { grab: 22, minPx: 21 };
+// Touch is offered the gesture at the same width as a pointer and only differs in
+// how big a handle it gets where there is room.
+const TOUCH = { grab: 22, minPx: 9 };
+// SpectrumView's EDGE_FLOOR_PX: the narrowest a drag may leave the passband.
+// Deliberately wider than either threshold — see the round-trip test below.
+const FLOOR_PX = 13;
 
 const W = 800;               // row width, CSS px
 const CENTRE = 14100000;     // Hz at the middle of the row
@@ -76,15 +81,36 @@ t('a finger gets a zone it can actually hit', () => {
     assert.strictEqual(hit(lowX + 14, span, TOUCH), 'low');
 });
 
-t('touch waits for a wider passband than the mouse does', () => {
-    // Between the two thresholds: a pointer-sized zone fits inside a third of
-    // this, a fingertip has nothing worth offering, so touch declines and the
-    // whole thing stays a tap. Derived from the constants rather than written out,
-    // so loosening one threshold cannot quietly make this case vacuous.
-    const span = spanFor(USB, TOUCH.minPx - 2);
+t('touch is offered the gesture wherever the mouse is', () => {
+    // It used to wait for a passband three times as wide. On touch a miss is free
+    // — nothing is decided until the finger moves — so being the stricter of the
+    // two was withholding the resize without protecting anything.
+    assert.strictEqual(TOUCH.minPx, MOUSE.minPx);
+    const span = spanFor(USB, MOUSE.minPx);
     const lowX = xOf(span, USB, USB.bandwidthLow);
     assert.strictEqual(hit(lowX, span, MOUSE), 'low');
-    assert.strictEqual(hit(lowX, span, TOUCH), null);
+    assert.strictEqual(hit(lowX, span, TOUCH), 'low');
+});
+
+t('a filter narrowed as far as a drag allows can still be widened again', () => {
+    // The one-way door, and the reason the floor is its own number. A drag used to
+    // stop exactly on the grab threshold, where the passband is grabbable only
+    // while nothing rounds it down — and the width snap, the receiver's own grain
+    // and a float division by the span all do. The edge then stopped answering and
+    // the filter could only be recovered from the panel.
+    //
+    // So the floor has to clear the threshold by enough to survive all three. A
+    // pixel of slop stands in for them here.
+    for (const z of [MOUSE, TOUCH]) {
+        assert.ok(FLOOR_PX > z.minPx, `the floor must not sit on the threshold (grab ${z.grab})`);
+        for (const px of [FLOOR_PX, FLOOR_PX - 1]) {
+            const span = spanFor(USB, px);
+            const lowX = xOf(span, USB, USB.bandwidthLow);
+            const highX = xOf(span, USB, USB.bandwidthHigh);
+            assert.strictEqual(hit(lowX, span, z), 'low', `${px}px, grab ${z.grab}`);
+            assert.strictEqual(hit(highX, span, z), 'high', `${px}px, grab ${z.grab}`);
+        }
+    }
 });
 
 t('a passband with clear space between its edges can be grabbed', () => {

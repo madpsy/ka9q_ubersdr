@@ -64,26 +64,51 @@ const EDGE_ZONE_MIN_PX = 3;
 const EDGE_GRAB_PX = 6;
 const EDGE_MIN_PX = 3 * EDGE_ZONE_MIN_PX;
 
+// The narrowest a drag may leave the passband, in px — wider than the threshold
+// for grabbing one, and that gap is the whole point of it being its own number.
+//
+// A drag used to stop exactly on the threshold, which sounds like the tightest
+// correct answer and is in fact a one-way door: at equality the passband is
+// grabbable only while nothing rounds it down, and several things do. The width
+// is snapped to FILTER_WIDTH_STEP, the receiver applies its own grain and reports
+// back what it actually did, the pixels come from a float division by the span.
+// Any one of those costs a fraction of a pixel, the edge stops answering, and the
+// filter is stuck narrow with the panel as the only way back out — you can close
+// it and not reopen it, which is exactly what it felt like.
+//
+// So the floor keeps four pixels in hand. Zooming out still puts a filter beyond
+// reach, as it must — at some span everything is a pixel wide — but that undoes
+// itself by zooming back in, and it is not something a gesture did to you.
+const EDGE_FLOOR_PX = EDGE_MIN_PX + 4;
+
 // The same, for a finger. Six pixels is not a touch target — a fingertip is
 // nearer forty across and the contact point is not where you think it is — so
-// touch gets a zone it can actually hit wherever the passband has room for one.
+// touch gets a *zone* it can actually hit wherever the passband has room for one.
 //
-// Seven pixels is small for a fingertip and deliberately so: it is the worst
-// case, at the narrowest passband the gesture is offered on at all, and nothing
-// is lost by missing it. A touch near an edge is a tap until it has travelled
-// TOUCH_SLOP_PX (see below), so a miss tunes rather than resizing, and a grab
-// that took the wrong edge is undone by dragging back. That asymmetry — a miss
-// costs nothing, a refusal costs the gesture entirely — is the argument for
-// erring towards offering it.
+// The threshold, though, is the mouse's: touch is offered the gesture at exactly
+// the same width, and has no business being the stricter of the two.
 //
-// The old threshold was 3 × the full 22 px zone. A 66 px passband is 2.7 kHz of
-// SSB across about a 15 kHz view, so on a phone the filter could only be
-// dragged at the very last rung of the zoom ladder — and, because the same
-// number is the narrowest a drag may leave it (see minHz in onPointerMove),
-// only ever widened from there.
-const TOUCH_ZONE_MIN_PX = 7;
+// Three reasons, and the last is the one that settles it:
+//
+//   * A miss is free here in a way it is not with a pointer. A touch near an edge
+//     is a tap until it has travelled TOUCH_SLOP_PX, so missing tunes — which is
+//     what the finger was going to do anyway — and taking the wrong edge is
+//     undone by dragging back.
+//   * A refusal is not free. It is the display declining to let go of a line the
+//     operator can see perfectly well, and on a phone there is no fallback with
+//     the immediacy of dragging the edge itself: the width lives behind a panel.
+//   * A lower threshold does not make an accidental grab more likely. The zone is
+//     capped at a third of the passband either way, so at the widths this newly
+//     allows the handle is a few pixels — less of the display given to resizing
+//     than at any width already permitted, not more. The old threshold was not
+//     protecting the pan; it was only withholding the resize.
+//
+// It also unblocks narrowing. The same number is the narrowest a drag may leave
+// the filter (see minHz in onPointerMove), so at 30 px a phone could only ever
+// widen: 2.7 kHz of SSB reached 30 px late on the zoom ladder, and by then the
+// floor was most of the filter.
 const TOUCH_GRAB_PX = 22;
-const TOUCH_EDGE_MIN_PX = 3 * TOUCH_ZONE_MIN_PX;
+const TOUCH_EDGE_MIN_PX = EDGE_MIN_PX;
 
 // How far a finger must travel before a touch near an edge is a resize rather
 // than a tap. The whole reason touch can have a grab zone this size: nothing is
@@ -1054,15 +1079,10 @@ export default function SpectrumView() {
         const touch = e.pointerType === 'touch';
         const edge = edgeAtX(e.clientX, touch);
         if (edge) {
-            g.edge = {
-                which: edge,
-                pending: touch,
-                startX: e.clientX,
-                // What counts as too narrow to grab depends on which zone this
-                // gesture is using, so the clamp below cannot shut a filter to a
-                // width the same gesture could not pick up again.
-                minPx: touch ? TOUCH_EDGE_MIN_PX : EDGE_MIN_PX,
-            };
+            // No zone size is carried: the floor a drag clamps to is the same for
+            // a finger and a pointer, because the width at which an edge can be
+            // grabbed now is (see TOUCH_EDGE_MIN_PX).
+            g.edge = { which: edge, pending: touch, startX: e.clientX };
             g.drag = null;
             return;
         }
@@ -1178,18 +1198,14 @@ export default function SpectrumView() {
                 // dragged filter reads as a round number rather than as
                 // whatever pixel the pointer stopped on.
                 const offset = Math.round(raw / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
-                // Never narrower than the gesture that made it can pick up
-                // again. Dragging an edge through the other one used to shut the
-                // filter to its 100 Hz floor, which at any normal zoom is a
-                // fraction of a pixel — the two lines then sat on top of each
-                // other with nothing left to take hold of, and the only way back
-                // out was the panel.
-                //
-                // It is the *same* threshold, so this floor came down with it:
-                // on a phone at full zoom a filter can now be narrowed to about
-                // 800 Hz rather than 1.7 kHz, which is the difference between
-                // reaching a CW width by dragging and not.
-                const minHz = (g.edge.minPx || EDGE_MIN_PX) * (cfg.span / r.width);
+                // Never narrower than the same gesture can comfortably pick up
+                // again — comfortably being the operative word, and EDGE_FLOOR_PX
+                // is where the margin is argued. Dragging an edge through the
+                // other one would otherwise shut the filter to its 100 Hz floor,
+                // which at any normal zoom is a fraction of a pixel: the two lines
+                // sit on top of each other with nothing left to take hold of, and
+                // the only way back out is the panel.
+                const minHz = EDGE_FLOOR_PX * (cfg.span / r.width);
                 const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, t, minHz);
                 if (low !== t.bandwidthLow || high !== t.bandwidthHigh) {
                     actions.setBandwidth(low, high);

@@ -1812,85 +1812,50 @@ a.btn { text-decoration: none; }
 .chip--button:disabled { opacity: 0.45; cursor: not-allowed; }
 .chip--button.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
-/* Band buttons — the Quick bands panel.
+/* Band keys — the Quick bands panel.
+ *
+ * The Receiver panel's mode control, painted. Same Segmented track, same keys,
+ * same active marking; all that is added is the colour each key carries. They were
+ * pills before, which read as stickers on the panel rather than as part of the
+ * receiver — and the Multipad's band row (.pad-bands, below) had been the segmented
+ * treatment all along, so this is also the two rows of bands in the app agreeing
+ * with each other.
  *
  * The condition colours are v1's exactly, so the two frontends read the same at a
- * glance and so a "Good" here is the same amber as one in the space weather
- * table and on the Multipad's band row: green excellent, amber good, orange fair,
- * red poor. Nothing about the hues or the bucketing is this rule's business.
+ * glance and a "Good" here is the same amber as a Good in the space weather table:
+ * green excellent, amber good, orange fair, red poor. Nothing about the hues or
+ * the bucketing is this rule's business.
  *
- * What is its business is the finish, and these used to be pills: a 99 px radius,
- * a flat poster-paint fill and a white halo round the tuned one. Read as stickers
- * rather than as part of an instrument, and they are the most colourful thing in
- * the interface, so they set the tone for it whether they mean to or not.
- *
- * So: the same corner as every other button in the app (--radius-sm), a border a
- * shade darker than the fill instead of the fill's own colour, and a top-lit
- * gradient over it. That last is the whole difference — a face with a light side
- * and a shadow side reads as a key you press, where the same colour laid on flat
- * reads as a label stuck on top. It is the treatment .barrel already uses for the
- * drum, at the strength these can carry.
- *
- * Their own class rather than .chip--button: the pill is right for a row of
- * settings chips, which is what that is for elsewhere. This is a keypad. */
-.band-btn {
-    padding: 6px 11px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-3);
-    color: var(--text-dim);
-    font-family: var(--font);
-    font-size: calc(11.5px * var(--ui-scale));
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: filter var(--dur) var(--ease), background var(--dur) var(--ease),
-                border-color var(--dur) var(--ease);
-}
+ * Every rule is scoped to the container, and that is not tidiness: .segmented__item
+ * and its :hover carry a class and a pseudo-class, so an unscoped .band-key--good
+ * would lose to the track's own hover colour and a hovered key would go grey. The
+ * scope buys the specificity to beat it. */
+.band-keys .band-key { color: #fff; font-weight: 650; }
+.band-keys .band-key--excellent { background: #22c55e; }
+.band-keys .band-key--good { background: #fbbf24; color: #14202e; }
+.band-keys .band-key--fair { background: #ff9800; color: #14202e; }
+.band-keys .band-key--poor { background: #ef4444; }
+/* Nothing has been said about this band: the operator's own quick-tune entries,
+   and every band on a receiver with no noise-floor monitor. The track's own
+   unselected key, rather than a colour that would imply a reading. */
+.band-keys .band-key--none { background: var(--surface-hover); color: var(--text-dim); }
+.band-keys .band-key:hover { filter: brightness(1.1); }
+.band-keys .band-key--none:hover { filter: none; color: var(--text); }
 
-/* The lit face, over whatever colour the tone sets. Light from the top, as
-   everything else in this interface is. */
-.band-btn:not(.band-btn--none) {
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.14));
-    /* Darker than the fill, not the same as it: a chip bounded by its own colour
-       has no edge, which is most of why the old ones looked printed on. */
-    border-color: rgba(0, 0, 0, 0.32);
-}
-/* Ink per tone, and not one rule for the coloured ones with two exceptions after
-   it: `:not()` counts towards specificity, so a blanket white here would have
-   beaten the dark ink amber and orange need however far below it sat. Which ink
-   goes with which fill is v1's answer, unchanged — dark on the two light hues. */
-.band-btn--excellent { background-color: #22c55e; color: #fff; }
-.band-btn--good { background-color: #fbbf24; color: #14202e; }
-.band-btn--fair { background-color: #ff9800; color: #14202e; }
-.band-btn--poor { background-color: #ef4444; color: #fff; }
-/* No conditions for this band — the operator's own quick-tune entries, and every
-   band on a receiver with no noise-floor monitor. Neutral rather than painted
-   green: nothing has said anything about it. */
-.band-btn--none { background-color: var(--surface-3); }
-
-.band-btn:hover:not(.band-btn--none) { filter: brightness(1.08); }
-/* Not while it is the tuned one: that state has taken the accent, and lifting the
-   ink to plain text on hover would be the highlight undoing the marking. */
-.band-btn--none:hover:not(.is-current) { color: var(--text); border-color: var(--border-strong); }
-.band-btn:active { transform: translateY(1px); }
-
-/* The band the dial is in. Ringed rather than recoloured, as v1 does and for the
-   same reason: the colour is already saying something else. Inset, so the ring is
-   part of the key's face and does not push its neighbours around — and no glow,
-   which was the last of the sticker look. */
-.band-btn.is-current {
+/* The band the dial is in. Ringed rather than recoloured — v1's rule, and the
+   right one: the fill is already saying what the conditions are. Inset, so it is
+   part of the key's face and moves nothing around it, and the same marking the
+   Multipad's band row uses. */
+.band-keys .band-key.is-active {
     box-shadow: inset 0 0 0 2px var(--text);
     font-weight: 750;
 }
-/* On a neutral one there is no colour for a ring to sit inside, so the accent
-   does the work — the same way a selected chip is marked everywhere else. */
-.band-btn--none.is-current {
-    box-shadow: none;
-    background-color: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
+/* On an uncoloured key there is nothing for a ring to sit inside, so it takes the
+   accent — which is exactly what a selected mode button looks like. */
+.band-keys .band-key--none.is-active {
+    background: var(--accent);
+    color: var(--accent-ink);
+    box-shadow: var(--shadow-sm);
 }
 
 /* =========================================================================
@@ -3090,7 +3055,7 @@ a.btn { text-decoration: none; }
 }
 .sw-bands__row.is-current .sw-bands__band { color: var(--text); font-weight: 650; }
 
-/* Condition colours are the band buttons' (see .band-btn above), so a "Good"
+/* Condition colours are the band keys' (see .band-keys above), so a "Good"
    here is the same amber a Good band button is. */
 .sw-grade {
     padding: 2px 4px;

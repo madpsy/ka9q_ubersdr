@@ -26,7 +26,7 @@ export const POLL_MS = 60000;
 // conditions and the overall propagation quality use this scale.
 export const GRADES = ['Poor', 'Fair', 'Good', 'Excellent'];
 
-// CSS suffix for a grade — what .band-chip--* and .sw-grade--* are keyed on.
+// CSS suffix for a grade — what .band-key--* and .sw-grade--* are keyed on.
 // Anything unrecognised (including a band the server did not grade) is 'none',
 // which is styled as absent rather than as a fifth grade.
 export function gradeClass(q) {

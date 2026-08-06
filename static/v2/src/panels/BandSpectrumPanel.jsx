@@ -29,7 +29,8 @@ import { bandForFrequency } from '../lib/bands.js';
 import { getPalette } from '../lib/palettes.js';
 import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
-    FULL_ZOOM, ZOOM_FACTOR, createAutoRange, dbFromByte, decodeFrame, dialWindow, formatAgeSec,
+    AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
+    decodeFrame, dialWindow, formatAgeSec,
     formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, rowAt, savePrefs,
     savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
     zoomHz,
@@ -76,8 +77,10 @@ export default function BandSpectrumPanel({ minimal }) {
 
     useEffect(() => () => { aliveRef.current = false; }, []);
 
-    const band = bandForFrequency(tuning.frequency);
+    // Which band the panel is on: the pinned one, or the one the dial is in.
+    const band = chosenBand(prefs.band, bands, bandForFrequency(tuning.frequency));
     const meta = bands && band ? bands[band] : null;
+    const following = !bands || !prefs.band || prefs.band === AUTO_BAND || !bands[prefs.band];
 
     // Which bands have a dedicated FFT. Fetched on open — the panel is not
     // mounted until then, so a collapsed panel does not ask for this either.
@@ -110,10 +113,15 @@ export default function BandSpectrumPanel({ minimal }) {
 
     if (bands === null) return <Empty>Loading…</Empty>;
     if (!meta) {
+        // Only reachable while following the dial: a pinned band is one the
+        // receiver records, or the pin has already fallen back to following.
         return (
-            <Empty>
-                {band ? `No dedicated spectrum for ${band}.` : 'Tune into a band to see its spectrum.'}
-            </Empty>
+            <div className="stack">
+                <Empty>
+                    {band ? `No dedicated spectrum for ${band}.` : 'Tune into a band to see its spectrum.'}
+                </Empty>
+                {!minimal && <BandPicker bands={bands} value={prefs.band} onChange={setPref} />}
+            </div>
         );
     }
 
@@ -138,6 +146,7 @@ export default function BandSpectrumPanel({ minimal }) {
                 <>
                     <div className="bsp__foot">
                         <span className="bsp__band">{band}</span>
+                        {!following && <span className="bsp__pinned" title="Pinned — not following the dial">pinned</span>}
                         <span className="bsp__range">{formatSpanMHz(meta)}</span>
                         <span
                             className={`bsp__state${rate ? ' is-live' : ''}`}
@@ -148,6 +157,7 @@ export default function BandSpectrumPanel({ minimal }) {
                     </div>
 
                     <div className="bsp__ctl">
+                        <BandPicker bands={bands} value={prefs.band} onChange={setPref} live={band} />
                         <Switch
                             checked={prefs.auto}
                             onChange={(v) => setPref({ auto: v })}
@@ -187,6 +197,31 @@ export default function BandSpectrumPanel({ minimal }) {
                 </>
             )}
         </div>
+    );
+}
+
+// Which band to show. Auto is the panel as it was: it follows the dial, and
+// switching band on the receiver switches the picture. Pinning one is for
+// watching a band you are not listening to — 20m while you work 40m — and it
+// survives a reload, because a pin you have to set again every session is not
+// a pin.
+function BandPicker({ bands, value, onChange, live }) {
+    const choice = value || AUTO_BAND;
+    return (
+        <select
+            className="select bsp__band-pick"
+            value={bands[choice] ? choice : AUTO_BAND}
+            onChange={(e) => onChange({ band: e.target.value })}
+            title="Which band this panel shows"
+            aria-label="Band"
+        >
+            {/* Auto says what it resolved to, so the row does not have to be
+                read twice to find out which band is on screen. */}
+            <option value={AUTO_BAND}>{live && choice === AUTO_BAND ? `Auto — ${live}` : 'Auto'}</option>
+            {bandList(bands).map((b) => (
+                <option key={b.name} value={b.name}>{b.name}</option>
+            ))}
+        </select>
     );
 }
 

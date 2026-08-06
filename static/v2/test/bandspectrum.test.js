@@ -15,10 +15,11 @@ const {
     AUTO_DEADBAND, AUTO_MIN_INTERVAL, AUTO_RESEED_DB, AUTO_SPAN_DEFAULT, AUTO_STEP,
     FT8_SPAN_HZ, applyFrame, bandsFromConfig, binAt, clampDb, createAutoRange, dbFromByte,
     decodeFrame, formatAgeSec, formatDb, formatMHz, fracOfHz, ft8Window, hzAt, rangeOf,
-    rowAt, savedPrefs, scaleDecimals, scaleTickCount, scaleTicks, updateAutoRange,
+    rowAt, savePrefs, savedPrefs, scaleDecimals, scaleTickCount, scaleTicks, updateAutoRange,
     validValues, SCALE_LABEL_PX, SCALE_MAX_TICKS,
     FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, dialWindow, isZoomed, panByFraction,
     viewFrac, zoomAt, zoomBins, zoomHz,
+    AUTO_BAND, bandList, chosenBand,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 
@@ -524,6 +525,49 @@ t('no tuning, no marker', () => {
     near(d.at, 0.5);
     near(d.start, 0.5);
     near(d.end, 0.5);
+});
+
+// ── Which band the panel shows ───────────────────────────────────────────────
+
+const BANDS = {
+    '40m': { name: '40m', start: 7000000, end: 7200000 },
+    '20m': { name: '20m', start: 14000000, end: 14350000 },
+    '160m': { name: '160m', start: 1800000, end: 2000000 },
+};
+
+t('auto follows the dial', () => {
+    assert.strictEqual(chosenBand(AUTO_BAND, BANDS, '40m'), '40m');
+    assert.strictEqual(chosenBand(undefined, BANDS, '20m'), '20m');
+    // Off band, and nothing to show — the panel says so rather than picking one.
+    assert.strictEqual(chosenBand(AUTO_BAND, BANDS, null), null);
+});
+
+t('a pinned band is shown wherever the dial is', () => {
+    // The point of pinning: watching 20m while you work 40m.
+    assert.strictEqual(chosenBand('20m', BANDS, '40m'), '20m');
+    assert.strictEqual(chosenBand('20m', BANDS, null), '20m');
+});
+
+t('a pin the receiver no longer records falls back to the dial', () => {
+    // A band dropped from the config since the choice was saved. Better to
+    // follow the dial than to show an empty panel for a band that is not there.
+    assert.strictEqual(chosenBand('6m', BANDS, '40m'), '40m');
+    assert.strictEqual(chosenBand('40m', {}, '40m'), '40m');
+    assert.strictEqual(chosenBand('40m', null, '20m'), '20m');
+});
+
+t('the picker offers the bands up the spectrum', () => {
+    assert.deepStrictEqual(bandList(BANDS).map((b) => b.name), ['160m', '40m', '20m']);
+    assert.deepStrictEqual(bandList(null), []);
+    assert.deepStrictEqual(bandList({ x: null }), []);
+});
+
+t('the choice is remembered, and a rubbish one is not', () => {
+    const p = savedPrefs();
+    assert.strictEqual(p.band, AUTO_BAND, 'nowhere to store it, so auto');
+    // savePrefs normalises rather than writing whatever it is handed.
+    assert.doesNotThrow(() => savePrefs({ auto: true, min: -120, max: -60, band: 7 }));
+    assert.doesNotThrow(() => savePrefs({ auto: true, min: -120, max: -60 }));
 });
 
 console.log(`\n${pass} passed`);

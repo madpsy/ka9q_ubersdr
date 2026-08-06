@@ -3394,6 +3394,13 @@ a.btn { text-decoration: none; }
 .bsp__state.is-live { color: var(--ok, var(--accent)); }
 
 .bsp__ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.bsp__band-pick { width: auto; flex: none; padding: 2px 6px; font-size: calc(11px * var(--ui-scale)); }
+.bsp__pinned {
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: calc(10px * var(--ui-scale));
+}
 .bsp__manual { display: flex; align-items: center; gap: 6px; }
 .bsp__manual label { display: flex; align-items: center; gap: 4px; }
 .bsp__manual span { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }

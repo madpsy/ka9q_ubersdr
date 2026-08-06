@@ -29,6 +29,25 @@ export function streamUrl(band) {
     return `/api/noisefloor/spectrum/stream?band=${encodeURIComponent(band)}`;
 }
 
+// The band to show: whichever one has been pinned, or the one the dial is in.
+//
+// A pin the receiver no longer records — a band dropped from its config since
+// the choice was saved — falls back to following the dial rather than showing
+// an empty panel for a band that is not there.
+export const AUTO_BAND = 'auto';
+
+export function chosenBand(choice, bands, dialBand) {
+    if (choice && choice !== AUTO_BAND && bands && bands[choice]) return choice;
+    return dialBand || null;
+}
+
+// The bands a picker should offer, up the spectrum — the order they are read in.
+export function bandList(bands) {
+    return Object.values(bands || {})
+        .filter((b) => b && b.name)
+        .sort((a, b) => (a.start || 0) - (b.start || 0));
+}
+
 // The bands the receiver runs a dedicated FFT for, from /api/noisefloor/config.
 // Keyed by name, which is what bandForFrequency() gives.
 export function bandsFromConfig(cfg) {
@@ -248,7 +267,7 @@ export function validValues(bins) {
 const KEY = 'ubersdr.v2.bandspectrum';
 
 export function savedPrefs() {
-    const d = { auto: true, min: MANUAL_DEFAULT.min, max: MANUAL_DEFAULT.max };
+    const d = { auto: true, min: MANUAL_DEFAULT.min, max: MANUAL_DEFAULT.max, band: AUTO_BAND };
     try {
         const raw = JSON.parse(localStorage.getItem(KEY));
         if (!raw || typeof raw !== 'object') return d;
@@ -256,6 +275,7 @@ export function savedPrefs() {
             auto: raw.auto !== false,
             min: Number.isFinite(raw.min) ? clampDb(raw.min) : d.min,
             max: Number.isFinite(raw.max) ? clampDb(raw.max) : d.max,
+            band: typeof raw.band === 'string' && raw.band ? raw.band : d.band,
         };
     } catch (e) {
         return d;
@@ -265,7 +285,10 @@ export function savedPrefs() {
 export function savePrefs(p) {
     try {
         localStorage.setItem(KEY, JSON.stringify({
-            auto: !!p.auto, min: clampDb(p.min), max: clampDb(p.max),
+            auto: !!p.auto,
+            min: clampDb(p.min),
+            max: clampDb(p.max),
+            band: typeof p.band === 'string' && p.band ? p.band : AUTO_BAND,
         }));
     } catch (e) { /* private mode */ }
 }

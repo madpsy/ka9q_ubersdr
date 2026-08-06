@@ -1327,6 +1327,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .spectrum__pane { display: block; flex: none; }
 .spectrum__pane--scale { border-block: 1px solid rgba(255, 255, 255, 0.06); }
+/* The ruler under the waterfall: a line above it only, so it reads as the foot
+   of the waterfall rather than as a strip of its own. */
+.spectrum__pane--wfscale { border-top: 1px solid rgba(255, 255, 255, 0.06); }
 
 /* In split view the scale is also the splitter between the two panes. The
    cursor is the affordance — the strip is drawn by a canvas, so there is

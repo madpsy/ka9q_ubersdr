@@ -83,3 +83,32 @@ export function binsToPixels(bins, width, out) {
     return out;
 }
 
+
+// Tick positions for a frequency ruler: minors every fifth of a step, majors on
+// the step itself, chosen for about one label per 110 CSS px.
+//
+// Shared by the two rulers, so the notches under the waterfall land on the same
+// frequencies as the ones above it however the view is zoomed or panned — two
+// scales that disagreed by a pixel would be worse than one.
+export function frequencyTicks(cfg, cssW) {
+    // A zero or missing span divides through to a zero step, and a loop stepping
+    // by zero never ends — it hangs the tab rather than drawing a bad ruler.
+    // Both callers guard already; a shared function should not need them to.
+    if (!cfg || !(cfg.span > 0) || !(cssW > 0)) return { ticks: [], step: 0 };
+    const lo = cfg.centerFreq - cfg.span / 2;
+    const hi = cfg.centerFreq + cfg.span / 2;
+    const targetTicks = Math.max(2, Math.floor(cssW / 110));
+    const rough = cfg.span / targetTicks;
+    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    const mult = [1, 2, 2.5, 5, 10].find((m) => pow * m >= rough) || 10;
+    const step = pow * mult;
+
+    const minor = step / 5;
+    const out = [];
+    for (let i = Math.ceil(lo / minor); i <= Math.floor(hi / minor); i++) {
+        const f = i * minor;
+        out.push({ hz: f, frac: (f - lo) / cfg.span, major: i % 5 === 0 });
+    }
+    return { ticks: out, step };
+}
+

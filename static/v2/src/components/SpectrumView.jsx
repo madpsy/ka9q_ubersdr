@@ -32,7 +32,9 @@ import { useRoomFor } from '../lib/useRoomFor.js';
 import {
     RING_BG, RING_PAD, panTransform, ringKeepsHistory, ringSlices, smoothInterval,
 } from '../lib/waterfallRing.js';
-import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
+import {
+    TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
+} from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
@@ -78,6 +80,13 @@ const TOUCH_EDGE_MIN_PX = 30;   // a 10 px zone at the threshold
 const TOUCH_SLOP_PX = 8;
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
+// A second, thinner ruler under the waterfall. The one above it is the scale
+// you tune against — it carries the dial pip and doubles as the splitter — and
+// this is the one you read a signal's frequency off without looking away from
+// the waterfall, which is where a signal actually is. The audio scope panel has
+// had one under its waterfall from the start; this is the same idea on the RF
+// pane.
+const WF_SCALE_H = 14;
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
 // short of the cap height of the label under it, which is what makes the two
 // read as one mark rather than as a line and a number that happen to line up.
@@ -488,6 +497,7 @@ export default function SpectrumView() {
     // for a scroll that does not move them.
     const wfMarksRef = useRef(null);
     const scaleRef = useRef(null);
+    const wfScaleRef = useRef(null);
 
     // Everything the draw loop needs, kept out of React state.
     const gfx = useRef({
@@ -557,7 +567,9 @@ export default function SpectrumView() {
         return () => ro.disconnect();
     }, []);
 
-    const avail = Math.max(0, sizes.h - SCALE_H);
+    // The bottom ruler only exists where there is a waterfall to put it under.
+    const wfScaleH = viewMode === 'spectrum' ? 0 : WF_SCALE_H;
+    const avail = Math.max(0, sizes.h - SCALE_H - wfScaleH);
     let specH;
     if (viewMode === 'spectrum') {
         specH = avail;
@@ -586,7 +598,9 @@ export default function SpectrumView() {
         g.marksKey = '';
 
         // Everything except the waterfall is sized to exactly what it shows.
-        for (const [ref, h] of [[specRef, specH], [scaleRef, SCALE_H], [wfMarksRef, wfH]]) {
+        for (const [ref, h] of [
+            [specRef, specH], [scaleRef, SCALE_H], [wfMarksRef, wfH], [wfScaleRef, wfScaleH],
+        ]) {
             const c = ref.current;
             if (!c) continue;
             c.width = w;
@@ -645,7 +659,7 @@ export default function SpectrumView() {
             if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
-    }, [sizes.w, sizes.h, specH, wfH]);
+    }, [sizes.w, sizes.h, specH, wfH, wfScaleH]);
 
     // ---- data -----------------------------------------------------------
 
@@ -697,6 +711,7 @@ export default function SpectrumView() {
                 wf: wfRef.current,
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
+                wfScale: wfScaleRef.current,
                 cfg: cfgRef.current,
                 tuning: tuneRef.current,
                 width: sizes.w,
@@ -1511,6 +1526,13 @@ export default function SpectrumView() {
                         <canvas ref={wfMarksRef} className="spectrum__wf-marks" />
                     </div>
                 )}
+                {/* Notches under the waterfall, on the same frequencies as the
+                    scale above it. Not a splitter and not a drag target — just
+                    somewhere to read a signal's frequency without looking away
+                    from the waterfall it is in. */}
+                {wfScaleH > 0 && (
+                    <canvas ref={wfScaleRef} className="spectrum__pane spectrum__pane--wfscale" />
+                )}
             </div>
 
             {menu && (
@@ -1717,7 +1739,9 @@ function autoRange(px, trace, g, k) {
 }
 
 function drawFrame(g, d, ctx) {
-    const { spec, wf, wfMarks, scale, cfg, tuning, width, specH, wfH, commitRow, dt } = ctx;
+    const {
+        spec, wf, wfMarks, scale, wfScale, cfg, tuning, width, specH, wfH, commitRow, dt,
+    } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
 
@@ -1766,6 +1790,7 @@ function drawFrame(g, d, ctx) {
     drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
+    drawWaterfallScale(g, wfScale, pxW, cfg, width);
 }
 
 
@@ -2317,6 +2342,37 @@ function drawStationId(g, c, pxW, dpr) {
     c.restore();
 }
 
+// The ruler under the waterfall: notches and their frequencies, nothing else.
+// No dial pip and no splitter — those belong to the scale above, and repeating
+// them here would be two of each on one view.
+function drawWaterfallScale(g, scale, pxW, cfg, cssW) {
+    if (!scale) return;
+    const c = scale.getContext('2d', { alpha: false });
+    const dpr = g.dpr;
+    const H = Math.round(WF_SCALE_H * dpr);
+    const col = colors();
+    c.fillStyle = col['--scale-bg'] || '#0e131c';
+    c.fillRect(0, 0, pxW, H);
+    if (!cfg.span) return;
+
+    const textCol = col['--scale-text'] || '#8a95a8';
+    const tickCol = col['--scale-tick'] || 'rgba(255,255,255,0.3)';
+    const w = Math.max(1, Math.round(dpr));
+
+    c.font = `${9 * dpr}px ui-monospace, SFMono-Regular, monospace`;
+    c.textBaseline = 'middle';
+    c.textAlign = 'center';
+
+    for (const t of frequencyTicks(cfg, cssW).ticks) {
+        const cx = t.frac * pxW;
+        c.fillStyle = t.major ? textCol : tickCol;
+        // Notches hang from the top edge, so they meet the waterfall they
+        // belong to rather than the panel below.
+        c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((t.major ? 4 : 2.5) * dpr));
+        if (t.major) c.fillText(formatFreqShort(t.hz, cfg.span), Math.round(cx), H * 0.72);
+    }
+}
+
 function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
     if (!scale) return;
     const c = scale.getContext('2d', { alpha: false });
@@ -2329,13 +2385,6 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
     if (!cfg.span) return;
     const lo = cfg.centerFreq - cfg.span / 2;
     const hi = cfg.centerFreq + cfg.span / 2;
-
-    // Choose a tick step giving roughly one label per 110 CSS px.
-    const targetTicks = Math.max(2, Math.floor(cssW / 110));
-    const rough = cfg.span / targetTicks;
-    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
-    const mult = [1, 2, 2.5, 5, 10].find((m) => pow * m >= rough) || 10;
-    const step = pow * mult;
 
     const textCol = col['--scale-text'] || '#8a95a8';
     const tickCol = col['--scale-tick'] || 'rgba(255,255,255,0.3)';
@@ -2359,18 +2408,13 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
     // wrong — swept across the whole dial at every span and width it never once
     // disagreed with this — but it left the label positions resting on a
     // tolerance that nothing states a bound for, and an index does not.
-    const minor = step / 5;
-    const first = Math.ceil(lo / minor);
-    const last = Math.floor(hi / minor);
-    for (let i = first; i <= last; i++) {
-        const f = i * minor;
-        const isMajor = i % 5 === 0;
-        const cx = ((f - lo) / cfg.span) * pxW;
+    for (const t of frequencyTicks(cfg, cssW).ticks) {
+        const cx = t.frac * pxW;
         // Majors take the label's own colour: a tick and the number under it
         // are one mark, and the minors between them are the subdivision.
-        c.fillStyle = isMajor ? textCol : tickCol;
-        c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((isMajor ? TICK_MAJOR : TICK_MINOR) * dpr));
-        if (isMajor) c.fillText(formatFreqShort(f, cfg.span), Math.round(cx), H * 0.65);
+        c.fillStyle = t.major ? textCol : tickCol;
+        c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((t.major ? TICK_MAJOR : TICK_MINOR) * dpr));
+        if (t.major) c.fillText(formatFreqShort(t.hz, cfg.span), Math.round(cx), H * 0.65);
     }
 
     // Tuned-frequency pip: a downward triangle hanging from the top edge.

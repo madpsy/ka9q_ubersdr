@@ -6,7 +6,9 @@
 // for a per-band FFT.
 
 const assert = require('assert');
-const { TRACE_FLOOR, TRACE_WIDTH, binsToPixels } = require('./.build/spectrumtrace.cjs');
+const {
+    TRACE_FLOOR, TRACE_WIDTH, binsToPixels, frequencyTicks,
+} = require('./.build/spectrumtrace.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -56,6 +58,67 @@ t('the trace never uses the black end of the palette', () => {
     // the palette's own floor would make them invisible.
     assert.ok(TRACE_FLOOR > 0.2 && TRACE_FLOOR < 0.5);
     assert.ok(TRACE_WIDTH >= 1);
+});
+
+// ── The frequency rulers ─────────────────────────────────────────────────────
+//
+// Two of them now — the scale between the panes, and the notches under the
+// waterfall — and they share this so they cannot disagree about where a
+// frequency is by a pixel.
+
+const view = (centre, span) => ({ centerFreq: centre, span });
+
+t('ticks land inside the view, at a round step', () => {
+    for (const [centre, span, w] of [
+        [15e6, 30e6, 1200], [7.1e6, 200e3, 800], [14.074e6, 20e3, 400], [10.1e6, 2e3, 300],
+    ]) {
+        const { ticks, step } = frequencyTicks(view(centre, span), w);
+        assert.ok(ticks.length > 0, `${span} Hz in ${w}px gave no ticks`);
+        // 1, 2, 2.5 or 5 times a power of ten — the steps a scale is read in.
+        const mant = step / (10 ** Math.floor(Math.log10(step)));
+        assert.ok([1, 2, 2.5, 5, 10].some((m) => Math.abs(mant - m) < 1e-9), `step ${step}`);
+        for (const k of ticks) {
+            assert.ok(k.frac >= -1e-9 && k.frac <= 1 + 1e-9, `${k.hz} at ${k.frac}`);
+            assert.ok(Number.isFinite(k.hz));
+        }
+    }
+});
+
+t('a major tick every fifth one, and the labels are on those', () => {
+    const { ticks, step } = frequencyTicks(view(7.1e6, 200e3), 800);
+    const majors = ticks.filter((k) => k.major);
+    assert.ok(majors.length >= 2);
+    for (const m of majors) {
+        // A major sits on the step itself, which is what carries a number.
+        assert.ok(Math.abs(m.hz / step - Math.round(m.hz / step)) < 1e-6, `${m.hz} is not on ${step}`);
+    }
+    // Every fifth tick, so the four between two labels are the subdivision.
+    for (let i = 1; i < ticks.length; i++) {
+        if (ticks[i].major) assert.ok(!ticks[i - 1].major, 'two majors in a row');
+    }
+});
+
+t('a narrower pane asks for fewer labels, not smaller ones', () => {
+    const wide = frequencyTicks(view(15e6, 30e6), 1600);
+    const narrow = frequencyTicks(view(15e6, 30e6), 320);
+    assert.ok(narrow.step >= wide.step, `${narrow.step} vs ${wide.step}`);
+    assert.ok(narrow.ticks.length <= wide.ticks.length);
+});
+
+t('the ruler follows the view, so a pan moves every tick with it', () => {
+    const a = frequencyTicks(view(7.1e6, 200e3), 800);
+    const b = frequencyTicks(view(7.15e6, 200e3), 800);
+    assert.strictEqual(a.step, b.step, 'panning does not change the step');
+    // A tick 50 kHz up the band is a quarter of a 200 kHz view to the left.
+    const shared = a.ticks.find((k) => b.ticks.some((k2) => k2.hz === k.hz));
+    const same = b.ticks.find((k) => k.hz === shared.hz);
+    assert.ok(Math.abs((shared.frac - same.frac) - 0.25) < 1e-9,
+        `${shared.frac} vs ${same.frac}`);
+});
+
+t('a zero span gives nothing rather than dividing by it', () => {
+    const { ticks } = frequencyTicks(view(7.1e6, 0), 800);
+    assert.ok(ticks.every((k) => Number.isFinite(k.frac)) || ticks.length === 0);
 });
 
 console.log(`\n${pass} passed`);

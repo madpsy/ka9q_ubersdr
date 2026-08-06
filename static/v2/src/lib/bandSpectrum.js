@@ -462,3 +462,27 @@ export function viewFrac(z, frac) {
     const span = z.end - z.start;
     return span > 0 ? (frac - z.start) / span : 0;
 }
+
+// Where the receiver is listening, in fractions of the band: the dial and the
+// passband either side of it. null when the dial is outside this band — the
+// panel follows the dial, so that only happens in the moment between tuning
+// away and the panel switching to the new band.
+//
+// The passband is taken as it comes rather than assumed to straddle the dial:
+// an SSB filter is entirely on one side of it and LSB's is negative, so the two
+// edges are sorted rather than added and subtracted.
+export function dialWindow(meta, tuning) {
+    if (!meta || !tuning) return null;
+    const hz = Number(tuning.frequency);
+    const start = meta.start || 0;
+    const end = meta.end || 0;
+    if (!Number.isFinite(hz) || !(end > start) || hz < start || hz > end) return null;
+
+    const lo = Number(tuning.bandwidthLow) || 0;
+    const hi = Number(tuning.bandwidthHigh) || 0;
+    return {
+        at: fracOfHz(meta, hz),
+        start: fracOfHz(meta, hz + Math.min(lo, hi)),
+        end: fracOfHz(meta, hz + Math.max(lo, hi)),
+    };
+}

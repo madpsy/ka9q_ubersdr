@@ -43,6 +43,14 @@ export function metaUrl(band) {
     return `/api/spectrogram/meta?rolling=1${bandParam(band)}`;
 }
 
+// The full spectrogram page, on the band the panel is showing. It opens on the
+// rolling window by default — no `date` means rolling-24h there, same as here —
+// so the page starts on the picture you were looking at, with the zoom, the
+// playback and the time-travel view the panel does not have room for.
+export function pageUrl(band) {
+    return `/spectrogram.html${band && band !== 'wideband' ? `?band=${encodeURIComponent(band)}` : ''}`;
+}
+
 // Which recorder to show: the band the dial is in if the server records it,
 // otherwise the wideband HF view. `available` is the list from /api/spectrogram/list.
 export function bandForView(available, dialBand) {

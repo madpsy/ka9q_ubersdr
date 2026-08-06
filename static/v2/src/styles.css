@@ -3443,6 +3443,9 @@ a.btn { text-decoration: none; }
 .sgram__band { color: var(--text-dim); font-weight: 600; }
 .sgram__range { font-family: var(--mono); }
 .sgram__note { margin-left: auto; }
+/* Pushed to the end of the row, and small: it is a way out of the panel, not
+   the thing the panel is for. */
+.sgram__open { flex: none; padding: 2px 6px; }
 
 .sgram-zoom {
     display: flex;

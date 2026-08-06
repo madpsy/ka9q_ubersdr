@@ -20,12 +20,12 @@
 // being one.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { Empty, Modal } from '../components/ui.jsx';
+import { Empty, Icon, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import {
     POLL_MS, bandForView, bandLabel, formatTzTag, freqTicks, fullUrl, listUrl, metaUrl,
-    pointReadout, spectrogramEnabled, thumbUrl, timeTicks,
+    pageUrl, pointReadout, spectrogramEnabled, thumbUrl, timeTicks,
 } from '../lib/spectrogram.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 
@@ -111,6 +111,20 @@ export default function SpectrogramPanel({ minimal }) {
                         not already say. */}
                     {range && <span className="sgram__range">{range}</span>}
                     <span className="sgram__note">last 24 h</span>
+                    {/* The whole page, on the band being shown: zoom, playback,
+                        a day at a time and the time-travel view, none of which
+                        fits in a dock. Not in the minimal view, which is the
+                        picture and nothing else. */}
+                    <a
+                        className="btn btn--ghost btn--sm sgram__open"
+                        href={pageUrl(band)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open the full spectrogram page for this band"
+                    >
+                        Open
+                        <Icon.External size={13} />
+                    </a>
                 </div>
             )}
 

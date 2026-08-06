@@ -4,7 +4,7 @@
 const assert = require('assert');
 const {
     DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, bandLabel, formatRange,
-    formatClock, formatTickHz, formatTzTag, freqLabelEvery,
+    formatClock, formatTickHz, formatTzTag, freqLabelEvery, pageUrl,
     freqTickStep, freqTicks, pointReadout, timeTickStepMinutes, timeTicks,
 } = require('./.build/spectrogram.cjs');
 const { readoutClearsOn, tipPlacement } = require('./.build/hovertip.cjs');
@@ -324,6 +324,16 @@ t('the readout flips away from the edges rather than being clipped', () => {
     // Bottom right corner: both ways at once.
     const corner = tipPlacement('touch', 95, 95);
     assert.deepStrictEqual(corner, { left: true, above: true });
+});
+
+t('the way out of the panel lands on the band it was showing', () => {
+    // The page opens on the rolling window by default — no `date` there means
+    // rolling-24h, the same picture the panel shows.
+    assert.strictEqual(pageUrl('40m'), '/spectrogram.html?band=40m');
+    assert.strictEqual(pageUrl('wideband-hf'), '/spectrogram.html?band=wideband-hf');
+    // Wideband is the page's own default, so it needs no parameter.
+    assert.strictEqual(pageUrl('wideband'), '/spectrogram.html');
+    assert.strictEqual(pageUrl(''), '/spectrogram.html');
 });
 
 console.log(`\n${pass} passed`);

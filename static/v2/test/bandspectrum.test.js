@@ -17,8 +17,8 @@ const {
     decodeFrame, formatAgeSec, formatDb, formatMHz, fracOfHz, ft8Window, hzAt, rangeOf,
     rowAt, savedPrefs, scaleDecimals, scaleTickCount, scaleTicks, updateAutoRange,
     validValues, SCALE_LABEL_PX, SCALE_MAX_TICKS,
-    FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, isZoomed, panByFraction, viewFrac,
-    zoomAt, zoomBins, zoomHz,
+    FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, dialWindow, isZoomed, panByFraction,
+    viewFrac, zoomAt, zoomBins, zoomHz,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 
@@ -474,6 +474,56 @@ t('view and band fractions are each other\'s inverse', () => {
     // edge — that is what keeps the FT8 marker off screen when it should be.
     assert.ok(viewFrac(z, 0) < 0 || z.start === 0);
     assert.ok(viewFrac(z, 1) > 1 || z.end === 1);
+});
+
+// ── Where the receiver is listening ──────────────────────────────────────────
+
+t('the dial and its passband are placed across the band', () => {
+    // 7.100 MHz USB, 50–2800 Hz, on a 7.0–7.2 recorder: halfway across, with
+    // the passband entirely above the dial.
+    const d = dialWindow(META40, { frequency: 7.1e6, bandwidthLow: 50, bandwidthHigh: 2800 });
+    near(d.at, 0.5);
+    near(d.start, (7.10005e6 - 7e6) / 200e3);
+    near(d.end, (7.1028e6 - 7e6) / 200e3);
+    assert.ok(d.start > d.at && d.end > d.start, 'USB sits above the dial');
+});
+
+t('a lower-sideband passband is below the dial, not around it', () => {
+    // The bug this avoids: adding and subtracting half a width puts an LSB
+    // filter on both sides of the dial, which is not where it is.
+    const d = dialWindow(META40, { frequency: 7.1e6, bandwidthLow: -2800, bandwidthHigh: -50 });
+    assert.ok(d.end < d.at, 'LSB sits below the dial');
+    near(d.at - d.start, 2800 / 200e3);
+});
+
+t('a passband that straddles the dial still comes out in order', () => {
+    // AM, and whichever way round the two edges arrive.
+    const am = dialWindow(META40, { frequency: 7.1e6, bandwidthLow: -4000, bandwidthHigh: 4000 });
+    assert.ok(am.start < am.at && am.end > am.at);
+    const swapped = dialWindow(META40, { frequency: 7.1e6, bandwidthLow: 2800, bandwidthHigh: 50 });
+    assert.ok(swapped.start < swapped.end, 'edges are sorted, not assumed');
+});
+
+t('a dial outside the band has no marker', () => {
+    // The panel follows the dial, so this is the moment between tuning away and
+    // the panel switching bands — better nothing than a line clamped to an edge.
+    const pb = { bandwidthLow: 50, bandwidthHigh: 2800 };
+    assert.strictEqual(dialWindow(META40, { frequency: 14.074e6, ...pb }), null);
+    assert.strictEqual(dialWindow(META40, { frequency: 6.999e6, ...pb }), null);
+    // The edges themselves are inside it.
+    assert.ok(dialWindow(META40, { frequency: 7e6, ...pb }));
+    assert.ok(dialWindow(META40, { frequency: 7.2e6, ...pb }));
+});
+
+t('no tuning, no marker', () => {
+    assert.strictEqual(dialWindow(META40, null), null);
+    assert.strictEqual(dialWindow(null, { frequency: 7.1e6 }), null);
+    assert.strictEqual(dialWindow(META40, { frequency: NaN }), null);
+    // A mode with no passband yet is still a dial worth marking.
+    const d = dialWindow(META40, { frequency: 7.1e6 });
+    near(d.at, 0.5);
+    near(d.start, 0.5);
+    near(d.end, 0.5);
 });
 
 console.log(`\n${pass} passed`);

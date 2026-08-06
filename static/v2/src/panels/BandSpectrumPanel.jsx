@@ -29,12 +29,14 @@ import { bandForFrequency } from '../lib/bands.js';
 import { getPalette } from '../lib/palettes.js';
 import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
-    FULL_ZOOM, ZOOM_FACTOR, createAutoRange, dbFromByte, decodeFrame, formatAgeSec, formatDb,
-    formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, rowAt, savePrefs, savedPrefs,
-    scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins, zoomHz,
+    FULL_ZOOM, ZOOM_FACTOR, createAutoRange, dbFromByte, decodeFrame, dialWindow, formatAgeSec,
+    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, rowAt, savePrefs,
+    savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
+    zoomHz,
 } from '../lib/bandSpectrum.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { haptic } from '../lib/haptics.js';
+import { getVfos, onVfosChanged } from '../lib/vfos.js';
 import { formatRate } from '../lib/format.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
@@ -66,6 +68,10 @@ export default function BandSpectrumPanel({ minimal }) {
     // anything is arriving, and what it costs — a busy band's deltas are bigger
     // than a quiet one's, and a stall reads as 0 rather than as a still picture.
     const [rate, setRate] = useState(null);
+    // Which VFO the dial belongs to, for the label on its marker. From the same
+    // store the Receiver panel's buttons and the marker bar read.
+    const [vfoId, setVfoId] = useState(() => getVfos().active);
+    useEffect(() => onVfosChanged((v) => setVfoId(v.active)), []);
     const aliveRef = useRef(true);
 
     useEffect(() => () => { aliveRef.current = false; }, []);
@@ -122,6 +128,8 @@ export default function BandSpectrumPanel({ minimal }) {
                 meta={meta}
                 prefs={prefs}
                 display={display}
+                tuning={tuning}
+                vfoId={vfoId}
                 onTune={tune}
                 onRate={setRate}
             />
@@ -194,7 +202,7 @@ function formatSpanMHz(meta) {
 // Keyed on the band by its caller, so tuning to another band remounts it — a
 // new stream, a new bin count and an empty history, which is what changing band
 // means. Nothing here has to unpick the old band's state.
-function BandChart({ band, meta, prefs, display, onTune, onRate }) {
+function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }) {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
@@ -256,6 +264,8 @@ function BandChart({ band, meta, prefs, display, onTune, onRate }) {
 
     st.prefs = prefs;
     st.ft8 = ft8Window(meta);
+    st.dial = dialWindow(meta, tuning);
+    st.vfoId = vfoId;
     // The Display panel's settings, read on every render: this pane honours the
     // same ones the main spectrum and waterfall do, so one switch governs both
     // and neither drifts away from the other.
@@ -340,6 +350,9 @@ function BandChart({ band, meta, prefs, display, onTune, onRate }) {
     }, [band, meta.bin_count, st, onRate]);
 
     useEffect(() => { st.dirty = true; }, [zoom, st]);
+    useEffect(() => {
+        st.dirty = true;
+    }, [tuning.frequency, tuning.bandwidthLow, tuning.bandwidthHigh, vfoId, st]);
 
     // ── Zoom and pan ─────────────────────────────────────────────────────────
     //
@@ -911,6 +924,45 @@ function drawSpectrum(st, canvas) {
             c.fillStyle = 'rgba(190,240,190,0.9)';
             const tw = c.measureText('FT8').width;
             c.fillText('FT8', x1 + tw + 6 > w ? Math.max(0, x1 - tw - 4) : x1 + 4, 3);
+        }
+    }
+
+    // ── Where the receiver is listening ──────────────────────────────────────
+    // The same form as the FT8 window — shaded passband, a line at the dial and
+    // a label — because it is the same kind of thing: a region of the band that
+    // means something, drawn under the trace so it never competes with it. The
+    // colour is the marker bar's VFO crimson, so "the VFO" is one colour
+    // wherever it appears.
+    //
+    // The label goes at the foot rather than the top, where the FT8 one is:
+    // 7.074 is inside most FT8 windows and the two would print over each other.
+    if (st.dial) {
+        const dx = viewFrac(st.zoom, st.dial.at) * w;
+        if (dx >= 0 && dx <= w) {
+            const x1 = Math.max(0, viewFrac(st.zoom, st.dial.start) * w);
+            const x2 = Math.min(w, viewFrac(st.zoom, st.dial.end) * w);
+            if (x2 > x1) {
+                c.fillStyle = 'rgba(233, 30, 99, 0.14)';
+                c.fillRect(x1, 0, Math.max(x2 - x1, 1), h);
+            }
+
+            c.strokeStyle = 'rgba(233, 30, 99, 0.75)';
+            c.lineWidth = 1;
+            c.setLineDash([3, 3]);
+            c.beginPath();
+            c.moveTo(Math.round(dx) + 0.5, 0);
+            c.lineTo(Math.round(dx) + 0.5, h);
+            c.stroke();
+            c.setLineDash([]);
+
+            const size = Math.max(9, Math.round(h / 9));
+            c.font = `${size}px ui-monospace, monospace`;
+            c.textBaseline = 'bottom';
+            c.textAlign = 'left';
+            c.fillStyle = 'rgba(255, 190, 215, 0.95)';
+            const label = `VFO ${st.vfoId || 'A'}`;
+            const tw = c.measureText(label).width;
+            c.fillText(label, dx + tw + 6 > w ? Math.max(0, dx - tw - 4) : dx + 4, h - 3);
         }
     }
 

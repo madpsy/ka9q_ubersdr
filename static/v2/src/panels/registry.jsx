@@ -214,6 +214,12 @@ export const PANELS = [
         title: 'Spectrogram',
         icon: <Icon.ViewWaterfall />,
         dock: 'left',
+        // Ships collapsed, and collapsed means silent: Section mounts a panel's
+        // body only while its section is open, so a closed one has no image
+        // request and no timer. A 24-hour picture is something you go and look
+        // at, not something worth a request a minute from every session that
+        // never opens it.
+        defaultOpen: false,
         minimal: true,
         Component: SpectrogramPanel,
         // Nothing is recorded, so nothing to show.

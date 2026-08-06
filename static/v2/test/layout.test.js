@@ -153,4 +153,18 @@ t('a stored anchor survives until something places the window', () => {
     assert.strictEqual(reconcile(stored, TOUCH).floats[PAD].anchor, 'bottom-left');
 });
 
+// The spectrogram panel fetches an image a minute while it is open, so where it
+// starts is a bandwidth decision, not only a layout one. Section mounts a
+// panel's body only while its section is open — that is what makes "collapsed"
+// mean "asks the server for nothing" — so this pins the half of the promise the
+// registry is responsible for.
+t('the spectrogram panel ships collapsed, on the left, on every machine', () => {
+    for (const env of [MOUSE, TOUCH, PHONE]) {
+        const l = defaultLayout(env);
+        assert.strictEqual(l.sections.spectrogram.open, false, 'must not start open');
+    }
+    assert.strictEqual(PANEL_BY_ID.spectrogram.dock, 'left');
+    assert.ok(inAnyDock(defaultLayout(MOUSE), 'spectrogram'), 'docked, not floating');
+});
+
 console.log(`\n${pass} ok`);

@@ -2417,13 +2417,43 @@ func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *Spe
 		bands[i] = e.name
 	}
 
+	// What each band's picture actually covers. A client showing a band's
+	// spectrogram has no other cheap way to say what it is looking at: the meta
+	// endpoint carries the frequency range but also 1440 rows of per-minute
+	// metadata, which is a fifth of a megabyte to answer "where does 40m start".
+	//
+	// The recorded range is not the band plan's — a 40m recorder configured for
+	// 7.0–7.2 MHz does not cover 7.2–7.3 — so this is the recorder's own, and
+	// the only correct source for it.
+	ranges := make(map[string]interface{}, len(entries))
+	for _, e := range entries {
+		rec := recorder
+		if e.name != "wideband" && e.name != "wideband-hf" {
+			rec = bandRecorders[e.name]
+		}
+		if rec == nil {
+			continue
+		}
+		startHz := float64(rec.startFreqHz)
+		// wideband-hf is the wideband recorder cropped to HF, which is what the
+		// image handler draws for it.
+		if e.name == "wideband-hf" && startHz < 1_800_000 {
+			startHz = 1_800_000
+		}
+		ranges[e.name] = map[string]float64{
+			"start_freq_hz": startHz,
+			"end_freq_hz":   float64(rec.endFreqHz),
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=60")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"enabled":   true,
-		"today":     time.Now().UTC().Format("2006-01-02"),
-		"available": dates,
-		"bands":     bands,
+		"enabled":     true,
+		"today":       time.Now().UTC().Format("2006-01-02"),
+		"available":   dates,
+		"bands":       bands,
+		"band_ranges": ranges,
 	})
 }
 

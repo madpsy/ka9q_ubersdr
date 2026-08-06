@@ -471,3 +471,50 @@ func TestRollingThumbnailEndpoint(t *testing.T) {
 		t.Errorf("archived thumb status = %d, want 404", rec.Code)
 	}
 }
+
+// TestSpectrogramListBandRanges checks that the band list says what each band's
+// picture covers — without it a client showing a band's spectrogram has to
+// fetch a fifth of a megabyte of row metadata to caption it.
+func TestSpectrogramListBandRanges(t *testing.T) {
+	cfg := SpectrogramConfig{DataDir: t.TempDir()}
+	wide := newSpectrogramRecorderForBand(nil, cfg, "wideband", 0, 30_000_000, 4, func() *BandFFT { return nil })
+	forty := newSpectrogramRecorderForBand(nil, cfg, "40m", 7_000_000, 7_200_000, 4, func() *BandFFT { return nil })
+
+	rec := httptest.NewRecorder()
+	handleSpectrogramList(rec, httptest.NewRequest("GET", "/api/spectrogram/list", nil),
+		wide, map[string]*SpectrogramRecorder{"40m": forty})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var out struct {
+		Bands  []string `json:"bands"`
+		Ranges map[string]struct {
+			Start float64 `json:"start_freq_hz"`
+			End   float64 `json:"end_freq_hz"`
+		} `json:"band_ranges"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Every band listed has a range, or a client is left guessing for that one.
+	for _, b := range out.Bands {
+		if _, ok := out.Ranges[b]; !ok {
+			t.Errorf("band %q has no range", b)
+		}
+	}
+	// The recorder's own span, not the band plan's — this 40m recorder stops at
+	// 7.2 MHz and the caption has to say so.
+	if got := out.Ranges["40m"]; got.Start != 7_000_000 || got.End != 7_200_000 {
+		t.Errorf("40m range = %v–%v, want 7000000–7200000", got.Start, got.End)
+	}
+	if got := out.Ranges["wideband"]; got.Start != 0 || got.End != 30_000_000 {
+		t.Errorf("wideband range = %v–%v, want 0–30000000", got.Start, got.End)
+	}
+	// wideband-hf is the wideband recorder cropped to HF, which is what its
+	// image shows, so that is what its range must say.
+	if got := out.Ranges["wideband-hf"]; got.Start != 1_800_000 || got.End != 30_000_000 {
+		t.Errorf("wideband-hf range = %v–%v, want 1800000–30000000", got.Start, got.End)
+	}
+}

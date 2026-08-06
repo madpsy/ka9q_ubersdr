@@ -3,7 +3,8 @@
 
 const assert = require('assert');
 const {
-    DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, formatTickHz, freqLabelEvery,
+    DEFAULT_BAND, FREQ_LABEL_PX, agoLabel, bandForView, bandLabel, formatRange,
+    formatTickHz, freqLabelEvery,
     freqTickStep, freqTicks, pointReadout, readoutClearsOn, timeTickStepMinutes,
     timeTicks, tipPlacement,
 } = require('./.build/spectrogram.cjs');
@@ -29,6 +30,52 @@ t('a band the server does not record falls back to wideband HF', () => {
 t('off-band, and before the band list has arrived, is wideband HF', () => {
     assert.strictEqual(bandForView(BANDS, null), DEFAULT_BAND);
     assert.strictEqual(bandForView(null, '40m'), DEFAULT_BAND);
+});
+
+// ── What the picture covers ──────────────────────────────────────────────────
+
+const RANGES = {
+    wideband: { start_freq_hz: 0, end_freq_hz: 30e6 },
+    'wideband-hf': { start_freq_hz: 1.8e6, end_freq_hz: 30e6 },
+    '40m': { start_freq_hz: 7e6, end_freq_hz: 7.2e6 },
+    '20m': { start_freq_hz: 14e6, end_freq_hz: 14.35e6 },
+};
+
+t('a band is captioned with the span it covers, not with its own name again', () => {
+    // The bug: bandLabel returned the name, so the footer read "40m  40m".
+    assert.strictEqual(bandLabel('40m', RANGES), '7.0–7.2 MHz');
+    assert.strictEqual(bandLabel('20m', RANGES), '14.000–14.350 MHz');
+    assert.notStrictEqual(bandLabel('40m', RANGES), '40m');
+});
+
+t('the span is the recorder\'s, not the band plan\'s', () => {
+    // 40m runs to 7.3 MHz; this receiver records to 7.2. Saying 7.3 would be a
+    // caption that disagrees with the picture under it.
+    assert.ok(bandLabel('40m', RANGES).endsWith('7.2 MHz'));
+});
+
+t('the wideband views read at a precision that suits them', () => {
+    assert.strictEqual(bandLabel('wideband', RANGES), '0–30 MHz');
+    assert.strictEqual(bandLabel('wideband-hf', RANGES), '1.8–30.0 MHz');
+});
+
+t('an older server, with no ranges to give, still captions the wideband views', () => {
+    assert.strictEqual(bandLabel('wideband'), '0–30 MHz');
+    assert.strictEqual(bandLabel('wideband-hf'), '1.8–30 MHz');
+    // ...and says nothing at all rather than repeating the name.
+    assert.strictEqual(bandLabel('40m'), '');
+    assert.strictEqual(bandLabel('40m', {}), '');
+    assert.strictEqual(bandLabel('40m', { '40m': { start_freq_hz: 7e6, end_freq_hz: 7e6 } }), '');
+});
+
+t('both ends of a span are printed at the same precision', () => {
+    assert.strictEqual(formatRange(7e6, 7.2e6), '7.0–7.2 MHz');
+    assert.strictEqual(formatRange(0, 30e6), '0–30 MHz');
+    // Both ends need a decimal to be true: 1.8 is not 2, and printing "2–30"
+    // is a caption that says the picture starts somewhere it does not.
+    assert.strictEqual(formatRange(1.8e6, 30e6), '1.8–30.0 MHz');
+    // 30m: the top end is on a 50 kHz boundary, so both ends go to three.
+    assert.strictEqual(formatRange(10.1e6, 10.15e6), '10.100–10.150 MHz');
 });
 
 t('frequency tick spacing follows the span, as the spectrogram page does', () => {
@@ -220,6 +267,14 @@ t('on touch the readout sits above the point, clear of the fingertip', () => {
     assert.strictEqual(tipPlacement('pen', 20, 20).above, true);
     // A mouse pointer is small enough to sit above what it is describing.
     assert.strictEqual(tipPlacement('mouse', 20, 20).above, false);
+});
+
+t('at the top of the picture the readout goes below, with nowhere above to go', () => {
+    // Flipping up there hangs the tip off the image and scrolls the modal to
+    // reach it, which resizes the thing being pointed at.
+    assert.strictEqual(tipPlacement('touch', 20, 0).above, false);
+    assert.strictEqual(tipPlacement('touch', 20, 5).above, false);
+    assert.strictEqual(tipPlacement('touch', 20, 30).above, true);
 });
 
 t('the readout flips away from the edges rather than being clipped', () => {

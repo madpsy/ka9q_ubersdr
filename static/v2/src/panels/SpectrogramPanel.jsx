@@ -33,6 +33,7 @@ export { spectrogramEnabled };
 export default function SpectrogramPanel({ minimal }) {
     const { tuning, serverInfo } = useRadio();
     const [bands, setBands] = useState(null);       // names the server records
+    const [ranges, setRanges] = useState(null);     // and what each one covers
     const [tick, setTick] = useState(() => Date.now());
     const [failed, setFailed] = useState(false);
     const [zoomed, setZoomed] = useState(false);
@@ -54,9 +55,12 @@ export default function SpectrogramPanel({ minimal }) {
             .then((info) => {
                 if (!aliveRef.current || !info) return;
                 setBands(Array.isArray(info.bands) ? info.bands : []);
+                setRanges(info.band_ranges || null);
             })
             .catch(() => { /* the image request will report the trouble */ });
     }, []);
+
+    const range = bandLabel(band, ranges);
 
     // The window advances one row a minute; so does the picture. The interval
     // dies with the panel, so a closed panel asks for nothing.
@@ -81,7 +85,7 @@ export default function SpectrogramPanel({ minimal }) {
                 type="button"
                 className="sgram__thumb"
                 onClick={open}
-                title={`Last 24 hours — ${bandLabel(band)}. Click for full resolution.`}
+                title={`Last 24 hours — ${band}${range ? `, ${range}` : ''}. Click for full resolution.`}
             >
                 {failed
                     ? <span className="sgram__pending">No spectrogram yet</span>
@@ -89,7 +93,7 @@ export default function SpectrogramPanel({ minimal }) {
                         <img
                             className="sgram__img"
                             src={thumb}
-                            alt={`Rolling 24-hour spectrogram, ${bandLabel(band)}`}
+                            alt={`Rolling 24-hour spectrogram, ${band}`}
                             onError={() => setFailed(true)}
                             onLoad={() => setFailed(false)}
                         />
@@ -99,13 +103,15 @@ export default function SpectrogramPanel({ minimal }) {
             {!minimal && (
                 <div className="sgram__foot">
                     <span className="sgram__band">{band === 'wideband-hf' ? 'Wideband HF' : band}</span>
-                    <span className="sgram__range">{bandLabel(band)}</span>
+                    {/* The span it covers, when that is something the name does
+                        not already say. */}
+                    {range && <span className="sgram__range">{range}</span>}
                     <span className="sgram__note">last 24 h</span>
                 </div>
             )}
 
             {zoomed && (
-                <SpectrogramModal band={band} minute={minute} onClose={() => setZoomed(false)} />
+                <SpectrogramModal band={band} range={range} minute={minute} onClose={() => setZoomed(false)} />
             )}
         </div>
     );
@@ -123,7 +129,7 @@ export default function SpectrogramPanel({ minimal }) {
 // how many frequency labels fit. A 20m recorder ticks every 25 kHz, which is
 // fourteen labels across a band that has room for four, and the unmeasured
 // version printed them on top of each other.
-function SpectrogramModal({ band, minute, onClose }) {
+function SpectrogramModal({ band, range, minute, onClose }) {
     const [meta, setMeta] = useState(null);
     const [state, setState] = useState('loading');  // loading | ok | error
     const [width, setWidth] = useState(0);
@@ -192,11 +198,26 @@ function SpectrogramModal({ band, minute, onClose }) {
             <div className="sgram-zoom">
                 <div className="sgram-zoom__head">
                     <strong>{band === 'wideband-hf' ? 'Wideband HF' : band}</strong>
-                    <span>{bandLabel(band)}</span>
+                    {range && <span>{range}</span>}
                     <span>rolling 24 hours, one row per minute, UTC</span>
-                    {/* The readout also lives here, at a fixed place, so it can
-                        be read without following the pointer around. */}
-                    {at && <span className="sgram-zoom__read">{at.freq} · {at.time} · {at.ago}</span>}
+                    {/* The readout at a fixed place, so it can be read without
+                        following the pointer around.
+
+                        Always rendered, empty when nothing is under the pointer,
+                        and holding its width in the CSS: a nowrap string that
+                        *arrives* in a flex header widens the header's content,
+                        which widens the modal — the picture resizing under the
+                        pointer that was pointing at it. The space is reserved
+                        whether or not there is anything to put in it.
+
+                        Frequency and time only, not the age: those two are a
+                        constant width for a given view (the decimals are fixed
+                        by the bin size), where "23 h 59 min ago" against "now"
+                        is not. The age is on the tip by the cursor, which is
+                        absolutely positioned and can grow as it likes. */}
+                    <span className="sgram-zoom__read">
+                        {at ? `${at.freq} · ${at.time}` : ''}
+                    </span>
                 </div>
 
                 <div className="sgram-zoom__plot">
@@ -220,7 +241,7 @@ function SpectrogramModal({ band, minute, onClose }) {
                         <img
                             className="sgram-zoom__img"
                             src={fullUrl(band, minute)}
-                            alt={`Rolling 24-hour spectrogram, ${bandLabel(band)}`}
+                            alt={`Rolling 24-hour spectrogram, ${band}`}
                             onLoad={() => setState('ok')}
                             onError={() => setState('error')}
                         />

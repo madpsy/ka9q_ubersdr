@@ -50,10 +50,35 @@ export function bandForView(available, dialBand) {
     return DEFAULT_BAND;
 }
 
-export function bandLabel(band) {
+// What a band's picture covers, for the line under it: "7.000–7.200 MHz".
+//
+// `ranges` is band_ranges from /api/spectrogram/list — the recorder's own span,
+// which is not the band plan's: a 40m recorder configured for 7.0–7.2 MHz does
+// not cover the top 100 kHz of the band, and saying it does would be a caption
+// that disagrees with the picture under it.
+//
+// Empty string when the range is not known, never the band's own name. Printing
+// the name here put "40m 40m" under every band's thumbnail — the caller is
+// already showing the name beside this.
+export function bandLabel(band, ranges) {
+    const r = ranges && ranges[band];
+    if (r && r.end_freq_hz > r.start_freq_hz) return formatRange(r.start_freq_hz, r.end_freq_hz);
+    // Fallbacks for a server that predates band_ranges. The two wideband views
+    // are fixed by what the recorder is.
     if (band === 'wideband') return '0–30 MHz';
     if (band === DEFAULT_BAND) return '1.8–30 MHz';
-    return band;
+    return '';
+}
+
+// A span as two numbers and one unit. Both ends at the same precision, so they
+// read as a pair rather than as two unrelated figures — and at whatever
+// precision the ends themselves need, not one chosen from how wide the span is.
+// wideband-hf starts at 1.8 MHz across a 28 MHz span: picking the precision
+// from the span printed it as "2–30 MHz", which is not where it starts.
+export function formatRange(startHz, endHz) {
+    const needs = (hz) => (hz % 1e6 === 0 ? 0 : hz % 100e3 === 0 ? 1 : 3);
+    const dp = Math.max(needs(startHz), needs(endHz));
+    return `${(startHz / 1e6).toFixed(dp)}–${(endHz / 1e6).toFixed(dp)} MHz`;
 }
 
 // ── Axes ─────────────────────────────────────────────────────────────────────
@@ -242,11 +267,16 @@ export function agoLabel(minutesAgo) {
 // tip always goes above, where it can be read while the finger is still down.
 // Near the right or bottom edge it flips the other way rather than being
 // clamped, so it stays attached to the point it is describing.
+// Near the top there is nowhere above to go: a tip flipped up there hangs off
+// the picture, and the modal scrolls to reach it — another size change under a
+// pointer that was pointing at something.
+const TIP_TOP_PCT = 12;
+
 export function tipPlacement(pointerType, xPct, yPct) {
     const touch = pointerType !== 'mouse';
     return {
         left: xPct > 60,
-        above: touch || yPct > 80,
+        above: (touch || yPct > 80) && yPct > TIP_TOP_PCT,
     };
 }
 

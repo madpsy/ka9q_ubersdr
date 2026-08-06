@@ -319,26 +319,6 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         };
     }, [band, meta.bin_count, st, onRate]);
 
-    // ── Drawing ──────────────────────────────────────────────────────────────
-    useEffect(() => {
-        let raf = 0;
-        const loop = () => {
-            if (st.dirty) {
-                st.dirty = false;
-                draw(st, specRef.current, wfRef.current);
-                // A frame has landed: whatever the pointer is resting on now
-                // says something different from what it said before.
-                if (st.ptr) {
-                    const v = compute(st.ptr);
-                    if (v) setAt(v);
-                }
-            }
-            raf = requestAnimationFrame(loop);
-        };
-        raf = requestAnimationFrame(loop);
-        return () => cancelAnimationFrame(raf);
-    }, [compute, st]);
-
     // ── Hover readout ────────────────────────────────────────────────────────
     //
     // Frequency from the band's own edges, level from the nearest bin — over the
@@ -405,6 +385,26 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         st.ptr = null;
         setAt(null);
     }, [st]);
+
+    // ── Drawing ──────────────────────────────────────────────────────────────
+    useEffect(() => {
+        let raf = 0;
+        const loop = () => {
+            if (st.dirty) {
+                st.dirty = false;
+                draw(st, specRef.current, wfRef.current);
+                // A frame has landed: whatever the pointer is resting on now
+                // says something different from what it said before.
+                if (st.ptr) {
+                    const v = compute(st.ptr);
+                    if (v) setAt(v);
+                }
+            }
+            raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+        return () => cancelAnimationFrame(raf);
+    }, [compute, st]);
 
     // Canvas pixels follow the box and the display density, so the trace is a
     // hairline on a phone as on a monitor.

@@ -255,3 +255,4 @@ node bridgeclient.test.js
 node spectrogram.test.js
 node bandspectrum.test.js
 node spectrumtrace.test.js
+node hookorder.test.js

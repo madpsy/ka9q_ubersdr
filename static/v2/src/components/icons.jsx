@@ -25,6 +25,7 @@ function Svg({ children, size = 16, ...rest }) {
 export const Icon = {
     Power: (p) => <Svg {...p}><path d="M12 3v9" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></Svg>,
     Chevron: (p) => <Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>,
+    ChevronUp: (p) => <Svg {...p}><path d="m6 15 6-6 6 6" /></Svg>,
     ChevronLeft: (p) => <Svg {...p}><path d="m15 18-6-6 6-6" /></Svg>,
     ChevronRight: (p) => <Svg {...p}><path d="m9 18 6-6-6-6" /></Svg>,
     Volume: (p) => <Svg {...p}><path d="M11 5 6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></Svg>,

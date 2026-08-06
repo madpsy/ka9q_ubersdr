@@ -17,9 +17,9 @@ const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom doc
 const SNAP = 8;
 const snap = (v) => Math.round(v / SNAP) * SNAP;
 
-export default function Section({ panel, dock, index, weight, height }) {
+export default function Section({ panel, dock, index, weight, height, prev, next }) {
     const {
-        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
+        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, swapPanels,
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
@@ -31,6 +31,8 @@ export default function Section({ panel, dock, index, weight, height }) {
     useDragEndReset(dropEdge !== null, clearEdge);
     const state = sections[panel.id] || { open: true };
     const minimal = !!panel.minimal && !!state.minimal;
+    // The bottom dock is a row; the side docks are columns.
+    const row = dock === 'bottom';
 
     const onDragStart = (e) => {
         e.dataTransfer.setData('text/ubersdr-panel', panel.id);
@@ -142,6 +144,38 @@ export default function Section({ panel, dock, index, weight, height }) {
                     <span className="section__title">{panel.title}</span>
                     {panel.Badge && <panel.Badge />}
                 </button>
+
+                {/* Reordering without a drag. Dragging the header does the same
+                    job and is the quicker way over a long distance, but it is
+                    fiddly in a 220px dock and there is nothing about a header
+                    that says it can be dragged — an arrow says it plainly. The
+                    bottom dock lays its panels out in a row, so there the two
+                    steps are left and right rather than up and down.
+
+                    Docked only: a floating window has no order to step through,
+                    and this header is never drawn for one. */}
+                {(prev || next) && (
+                    <span className="section__order">
+                        <button
+                            type="button"
+                            className="section__grip section__arrow"
+                            disabled={!prev}
+                            title={row ? 'Move panel left' : 'Move panel up'}
+                            onClick={() => swapPanels(panel.id, prev)}
+                        >
+                            {row ? <Icon.ChevronLeft size={13} /> : <Icon.ChevronUp size={13} />}
+                        </button>
+                        <button
+                            type="button"
+                            className="section__grip section__arrow"
+                            disabled={!next}
+                            title={row ? 'Move panel right' : 'Move panel down'}
+                            onClick={() => swapPanels(panel.id, next)}
+                        >
+                            {row ? <Icon.ChevronRight size={13} /> : <Icon.Chevron size={13} />}
+                        </button>
+                    </span>
+                )}
 
                 {/* Only for panels that declare one, and only while open —
                     there is nothing to cut down in a collapsed section. */}

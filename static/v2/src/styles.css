@@ -978,6 +978,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .section__grip[aria-pressed="true"],
 .floatwin__btn[aria-pressed="true"] { color: var(--accent); }
 
+/* The reorder arrows. Narrower than the other header buttons and with no gap
+   between them — a dock can be 220px wide and the panel's title has the first
+   claim on it — and drawn as one pair rather than two loose controls. */
+.section__order { display: flex; align-items: center; }
+.section__arrow { width: 17px; }
+/* At the end of the dock: kept in place rather than removed, so the pair does
+   not change width and shuffle the title as panels move past each other. */
+.section__arrow:disabled { opacity: 0.28; cursor: default; }
+.section__arrow:disabled:hover { background: transparent; color: var(--text-faint); }
+
 .section__body {
     padding: 2px 10px 9px;
     border-top: 1px solid var(--border);

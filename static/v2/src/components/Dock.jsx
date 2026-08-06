@@ -286,6 +286,12 @@ export default function Dock({ side }) {
                             panel={PANEL_BY_ID[id]}
                             dock={side}
                             index={i}
+                            // The neighbours the header's reorder arrows step
+                            // to. Visible ones: a panel that is hidden, or that
+                            // does not apply here, is not somewhere the arrow
+                            // can appear to move this one past.
+                            prev={visible[i - 1]}
+                            next={visible[i + 1]}
                             weight={side === 'bottom' ? shareOf(weights, id) : undefined}
                             height={side === 'bottom' ? heights[id] : undefined}
                         />

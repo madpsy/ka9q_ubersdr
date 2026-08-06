@@ -422,6 +422,28 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // Swaps two panels that share a dock — the arrows in a docked panel's
+    // header, moving it one place along the order.
+    //
+    // Takes the neighbour's id rather than an index because the header only
+    // knows what is on screen: a dock's list may also hold panels that are
+    // hidden, or that do not apply to this server, and stepping past one of
+    // those would look like an arrow that did nothing. Swapping two visible
+    // panels leaves whatever sits between them where it is.
+    const swapPanels = useCallback((a, b) => {
+        setLayout((l) => {
+            if (!a || !b || a === b) return l;
+            const dock = DOCKS.find((d) => l.docks[d].panels.includes(a));
+            if (!dock || !l.docks[dock].panels.includes(b)) return l;
+            const panels = [...l.docks[dock].panels];
+            const i = panels.indexOf(a);
+            const j = panels.indexOf(b);
+            panels[i] = b;
+            panels[j] = a;
+            return { ...l, docks: { ...l.docks, [dock]: { ...l.docks[dock], panels } } };
+        });
+    }, []);
+
     // "Show me that panel", from somewhere outside the docks — the top bar's
     // space weather summary is the first caller. Whatever is in the way is
     // undone: the panel is un-hidden, its section opened, and the dock it lives
@@ -548,10 +570,11 @@ export function LayoutProvider({ children }) {
         toggleSectionMinimal,
         setSectionHidden,
         movePanel,
+        swapPanels,
         revealPanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
-        revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
+        swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

@@ -266,8 +266,10 @@ function SpectrogramModal({ band, range, minute, onClose }) {
                                     className={`sgram-tip${at.left ? ' sgram-tip--left' : ''}${at.above ? ' sgram-tip--above' : ''}`}
                                     style={{ left: `${at.xPct}%`, top: `${at.yPct}%` }}
                                 >
-                                    <b>{at.freq}</b>
-                                    <span>{at.time}</span>
+                                    <span className="sgram-tip__row">
+                                        <b>{at.freq}</b>
+                                        <span>{at.time}</span>
+                                    </span>
                                     <span className="sgram-tip__ago">{at.ago}</span>
                                 </span>
                             </>

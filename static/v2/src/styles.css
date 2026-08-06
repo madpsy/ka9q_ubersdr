@@ -3397,14 +3397,22 @@ a.btn { text-decoration: none; }
     position: absolute;
     pointer-events: none;
     z-index: 2;
-    display: flex;
     /* Frequency and time on one line, the age under them: the first two are
        what the pixel *is* and the third is a gloss on the time, so they read as
-       two facts and a note rather than three things of equal standing. Wrapped
-       rather than a column, so the two on the top line stay on one baseline. */
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 1px 6px;
+       two facts and a note rather than three things of equal standing.
+       Two rows in a column, not one wrapping row. A wrapping flex container's
+       preferred width is every item laid out on a single line, so the box was
+       sized for "14.0740 MHz  09:37 UTC  2 h 14 min ago" and then wrapped
+       inside it — a tip with an empty half. It only looked right flipped left,
+       where the box happened to be squeezed by the room left to the image's
+       edge, which is not a width anybody chose. */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    /* And sized to the longer of the two lines whatever the room to the edge,
+       so the tip is the same shape wherever it is on the picture. */
+    width: max-content;
+    gap: 1px;
     margin: 10px 0 0 10px;
     padding: 3px 6px;
     background: var(--surface);
@@ -3417,8 +3425,8 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 .sgram-tip b { color: var(--text); font-weight: 600; }
-/* Its own line, always — a full-width flex item breaks the row before it. */
-.sgram-tip__ago { flex: 0 0 100%; color: var(--text-faint); }
+.sgram-tip__row { display: flex; align-items: baseline; gap: 6px; }
+.sgram-tip__ago { color: var(--text-faint); }
 /* Flipped rather than clamped: the tip stays attached to the cursor, which is
    what says which pixel it is describing. */
 .sgram-tip--left { transform: translateX(-100%); margin-left: -10px; }

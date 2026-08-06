@@ -3260,6 +3260,118 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
+/* Rolling 24-hour spectrogram: a thumbnail in the panel, the full-resolution
+   image with its scales in a modal. */
+.sgram__thumb {
+    display: block;
+    width: 100%;
+    padding: 0;
+    line-height: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    cursor: zoom-in;
+    overflow: hidden;
+}
+.sgram__thumb:hover { border-color: var(--accent); }
+.sgram__img {
+    display: block;
+    width: 100%;
+    height: auto;
+    /* The picture is 300x168 but 1440 rows tall in what it means, so let the
+       browser smooth it rather than showing the box filter's own edges. */
+    border-radius: calc(var(--radius-sm) - 1px);
+}
+.sgram__pending {
+    display: block;
+    padding: 24px 8px;
+    color: var(--text-faint);
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.4;
+    text-align: center;
+}
+.sgram__foot {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sgram__band { color: var(--text-dim); font-weight: 600; }
+.sgram__range { font-family: var(--mono); }
+.sgram__note { margin-left: auto; }
+
+.sgram-zoom {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 92vw;
+    max-height: 88vh;
+    overflow: auto;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.sgram-zoom__head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.sgram-zoom__head strong { color: var(--text); font-size: calc(12px * var(--ui-scale)); }
+
+/* The plot proper: time gutter, then the image. The frequency axis below is a
+   sibling with the same left inset, so the two axes meet at the image corner. */
+.sgram-zoom__plot { display: flex; gap: 4px; }
+.sgram-zoom__imgwrap { position: relative; flex: 1; min-width: 0; line-height: 0; }
+.sgram-zoom__img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: none;
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+}
+.sgram-zoom__wait {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.4;
+}
+
+.sgram-axis {
+    position: relative;
+    font-size: calc(10px * var(--ui-scale));
+    font-family: var(--mono);
+    color: var(--text-faint);
+}
+.sgram-axis--time { width: 40px; flex: none; }
+.sgram-axis--freq { height: 18px; margin-left: 44px; }
+.sgram-axis__t {
+    position: absolute;
+    right: 4px;
+    transform: translateY(-50%);
+    white-space: nowrap;
+}
+.sgram-axis__f {
+    position: absolute;
+    top: 3px;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+/* Tick lines over the picture — faint, so they place a label without hiding a
+   signal underneath. */
+.sgram-grid { position: absolute; pointer-events: none; background: rgba(255, 255, 255, 0.22); }
+.sgram-grid--v { top: 0; bottom: 0; width: 1px; }
+.sgram-grid--h { left: 0; right: 0; height: 1px; }
+
 /* Markers: what the dial is on, and what is either side. */
 .mnav { display: flex; gap: 6px; }
 .mnav__step {

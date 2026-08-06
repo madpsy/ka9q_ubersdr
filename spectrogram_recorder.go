@@ -53,6 +53,13 @@ const (
 	// rollingThumbCacheMax is the same, for rolling thumbnails. Thumbnails are
 	// a few tens of kB each, so more variants can be kept than full renders.
 	rollingThumbCacheMax = 6
+
+	// rollingMaxStaleMinutes is how many minutes out of date a cached render may
+	// be before a request renders it synchronously instead of being answered
+	// with it. Views that are actively watched are re-rendered every minute by
+	// the background tick, so this only bites on views nobody has asked about
+	// for a while.
+	rollingMaxStaleMinutes = 2
 )
 
 // noDataSentinel marks bins with no data (rendered as black).
@@ -1423,6 +1430,11 @@ type rollingResult struct {
 // rollingPNGEntry is one cached render of a rolling snapshot. The key is built
 // from the request parameters (not the resulting dB range) so an auto-ranged
 // view keeps the same key as the data underneath it changes.
+//
+// png holds the last good render — it is never cleared when the window moves on,
+// so a request during a re-render is answered with the previous minute's image
+// rather than waiting. builtMinute records which minute those bytes came from,
+// bounding how stale an answer can be.
 type rollingPNGEntry struct {
 	key              string
 	palette          string
@@ -1430,7 +1442,8 @@ type rollingPNGEntry struct {
 	autoRange        bool // recompute dbMin/dbMax from the data on every render
 	thumbnail        bool // render at thumbnail size instead of full size
 	startBin, endBin int
-	png              []byte // nil = stale, re-render on next request
+	png              []byte
+	builtMinute      int64 // unix minute of the snapshot png was rendered from
 	lastAccess       time.Time
 }
 
@@ -1527,15 +1540,14 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 	if c.result != nil && c.builtMinute == now.Unix()/60 && c.builtRows == rowCount {
 		return c.result
 	}
-	return sr.rebuildRollingLocked(now, false)
+	return sr.rebuildRollingLocked(now)
 }
 
-// rebuildRollingLocked reassembles the snapshot and invalidates everything
-// derived from the previous one. When rerender is true the PNGs that are still
-// being actively viewed are re-rendered immediately (used by the background
-// tick); otherwise they are marked stale and re-rendered on demand.
-// Caller must hold c.mu.
-func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time, rerender bool) *rollingResult {
+// rebuildRollingLocked reassembles the snapshot and drops the memoised dB
+// ranges that came from the previous one. Cached renders are left in place —
+// they are stale, not wrong, and serving last minute's image beats blocking a
+// request behind a re-render. Caller must hold c.mu.
+func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time) *rollingResult {
 	c := &sr.rolling
 
 	result, rowCount := sr.buildRolling24hRowsLocked(now)
@@ -1543,27 +1555,18 @@ func (sr *SpectrogramRecorder) rebuildRollingLocked(now time.Time, rerender bool
 	c.builtMinute = now.Unix() / 60
 	c.builtRows = rowCount
 	c.auto = nil
-	c.pngs = sr.refreshRendersLocked(c.pngs, result, now, rerender)
-	c.thumbs = sr.refreshRendersLocked(c.thumbs, result, now, rerender)
+	c.pngs = pruneRollingRenders(c.pngs, now)
+	c.thumbs = pruneRollingRenders(c.thumbs, now)
 
 	return result
 }
 
-// refreshRendersLocked drops the renders nobody is looking at any more and
-// either re-renders or invalidates the rest against the new snapshot.
-// Caller must hold c.mu.
-func (sr *SpectrogramRecorder) refreshRendersLocked(list []*rollingPNGEntry, result *rollingResult,
-	now time.Time, rerender bool) []*rollingPNGEntry {
-
+// pruneRollingRenders drops the renders nobody is looking at any more.
+func pruneRollingRenders(list []*rollingPNGEntry, now time.Time) []*rollingPNGEntry {
 	kept := list[:0]
 	for _, e := range list {
 		if now.Sub(e.lastAccess) > rollingCacheIdleTTL {
 			continue // nobody is looking at this view any more
-		}
-		if rerender && now.Sub(e.lastAccess) <= rollingWarmTTL {
-			e.png = sr.renderRollingLocked(result, e)
-		} else {
-			e.png = nil // stale — rendered on the next request for it
 		}
 		kept = append(kept, e)
 	}
@@ -1782,31 +1785,44 @@ func (sr *SpectrogramRecorder) loadYesterdayLocked(date string, cutoff, binCount
 }
 
 // rollingAutoRange returns the auto-computed dB range for a bin slice of a
-// rolling snapshot, memoised for as long as that snapshot is current.
+// rolling snapshot, memoised for as long as that snapshot is current. The scan
+// itself runs without the cache lock held.
 func (sr *SpectrogramRecorder) rollingAutoRange(rr *rollingResult, startBin, endBin int) (float32, float32) {
-	sr.rolling.mu.Lock()
-	defer sr.rolling.mu.Unlock()
-	return sr.rollingAutoRangeLocked(rr, startBin, endBin)
-}
-
-// rollingAutoRangeLocked is rollingAutoRange with c.mu already held.
-func (sr *SpectrogramRecorder) rollingAutoRangeLocked(rr *rollingResult, startBin, endBin int) (float32, float32) {
 	c := &sr.rolling
-	current := c.result == rr
 	key := strconv.Itoa(startBin) + ":" + strconv.Itoa(endBin)
-	if current {
-		if v, ok := c.auto[key]; ok {
-			return v[0], v[1]
-		}
+	if dbMin, dbMax, ok := c.rollingAutoRangeCached(rr, key); ok {
+		return dbMin, dbMax
 	}
 	dbMin, dbMax := autoRangeRowsSlice(rr.rows, startBin, endBin, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
-	if current {
-		if c.auto == nil {
-			c.auto = make(map[string][2]float32)
-		}
-		c.auto[key] = [2]float32{dbMin, dbMax}
-	}
+	c.rollingAutoRangeStore(rr, key, dbMin, dbMax)
 	return dbMin, dbMax
+}
+
+// rollingAutoRangeCached returns a memoised range for the current snapshot.
+func (c *rollingCache) rollingAutoRangeCached(rr *rollingResult, key string) (float32, float32, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.result != rr {
+		return 0, 0, false
+	}
+	v, ok := c.auto[key]
+	if !ok {
+		return 0, 0, false
+	}
+	return v[0], v[1], true
+}
+
+// rollingAutoRangeStore memoises a range against the current snapshot.
+func (c *rollingCache) rollingAutoRangeStore(rr *rollingResult, key string, dbMin, dbMax float32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.result != rr {
+		return // snapshot moved on — the value belongs to a window that is gone
+	}
+	if c.auto == nil {
+		c.auto = make(map[string][2]float32)
+	}
+	c.auto[key] = [2]float32{dbMin, dbMax}
 }
 
 // rollingPNG renders the rolling 24-hour window at full size, reusing the
@@ -1825,16 +1841,17 @@ func (sr *SpectrogramRecorder) rollingThumb(rr *rollingResult, palette string, d
 	return sr.rollingRender(rr, true, palette, dbMin, dbMax, explicit, startBin, endBin)
 }
 
-// rollingRender serves a render of the snapshot from the cache, producing it if
-// this view has not been rendered from the current snapshot yet. Full-size
-// renders and thumbnails are cached separately so a thumbnail request can never
-// evict the image everyone is looking at.
+// rollingRender serves a render of the snapshot from the cache. A cached render
+// is returned immediately even if the window has moved on since it was produced
+// (up to rollingMaxStaleMinutes), because a rolling 24-hour image one minute out
+// of date is indistinguishable — and waiting seconds for a re-render is not.
+// Rendering never happens with the cache lock held. Full-size renders and
+// thumbnails are cached separately so a thumbnail request can never evict the
+// image everyone is looking at.
 func (sr *SpectrogramRecorder) rollingRender(rr *rollingResult, thumbnail bool, palette string,
 	dbMin, dbMax float32, explicit bool, startBin, endBin int) []byte {
 
 	c := &sr.rolling
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	entry := &rollingPNGEntry{
 		palette:   palette,
@@ -1853,54 +1870,75 @@ func (sr *SpectrogramRecorder) rollingRender(rr *rollingResult, thumbnail bool, 
 		"|" + strconv.FormatBool(explicit) +
 		"|" + strconv.Itoa(startBin) + ":" + strconv.Itoa(endBin)
 
+	now := time.Now().UTC()
+
+	c.mu.Lock()
 	// A rebuild raced us — render directly rather than caching against a
 	// snapshot that is no longer current.
 	if c.result != rr {
-		return sr.renderRollingLocked(rr, entry)
+		c.mu.Unlock()
+		return sr.renderRolling(rr, entry)
 	}
+	snapshotMinute := c.builtMinute
 
 	list, limit := c.pngs, rollingPNGCacheMax
 	if thumbnail {
 		list, limit = c.thumbs, rollingThumbCacheMax
 	}
 
-	now := time.Now().UTC()
+	target := entry
+	found := false
 	for _, e := range list {
-		if e.key != entry.key {
-			continue
+		if e.key == entry.key {
+			target, found = e, true
+			break
 		}
-		e.lastAccess = now
-		if e.png == nil {
-			e.png = sr.renderRollingLocked(rr, e)
-		}
-		return e.png
 	}
-
-	entry.lastAccess = now
-	entry.png = sr.renderRollingLocked(rr, entry)
-	if len(list) >= limit {
-		lru := 0
-		for i, e := range list {
-			if e.lastAccess.Before(list[lru].lastAccess) {
-				lru = i
+	target.lastAccess = now
+	if found && target.png != nil && snapshotMinute-target.builtMinute <= rollingMaxStaleMinutes {
+		png := target.png
+		c.mu.Unlock()
+		return png
+	}
+	if !found {
+		// Insert before rendering so the background refresh starts keeping this
+		// view warm from the next tick onwards.
+		if len(list) >= limit {
+			lru := 0
+			for i, e := range list {
+				if e.lastAccess.Before(list[lru].lastAccess) {
+					lru = i
+				}
 			}
+			list = append(list[:lru], list[lru+1:]...)
 		}
-		list = append(list[:lru], list[lru+1:]...)
+		list = append(list, target)
+		if thumbnail {
+			c.thumbs = list
+		} else {
+			c.pngs = list
+		}
 	}
-	list = append(list, entry)
-	if thumbnail {
-		c.thumbs = list
-	} else {
-		c.pngs = list
+	c.mu.Unlock()
+
+	png := sr.renderRolling(rr, target)
+
+	c.mu.Lock()
+	if c.result == rr && len(png) > 0 {
+		target.png = png
+		target.builtMinute = snapshotMinute
 	}
-	return entry.png
+	c.mu.Unlock()
+	return png
 }
 
-// renderRollingLocked renders one cache entry from a snapshot. Caller must hold c.mu.
-func (sr *SpectrogramRecorder) renderRollingLocked(rr *rollingResult, e *rollingPNGEntry) []byte {
+// renderRolling renders one cache entry from a snapshot. It must NOT be called
+// with c.mu held — a full-size wideband render takes seconds, and everything
+// else asking for the rolling window would queue behind it.
+func (sr *SpectrogramRecorder) renderRolling(rr *rollingResult, e *rollingPNGEntry) []byte {
 	dbMin, dbMax := e.dbMin, e.dbMax
 	if e.autoRange {
-		dbMin, dbMax = sr.rollingAutoRangeLocked(rr, e.startBin, e.endBin)
+		dbMin, dbMax = sr.rollingAutoRange(rr, e.startBin, e.endBin)
 	}
 	if e.thumbnail {
 		return renderRowsAsThumbnail(rr.rows, e.palette, dbMin, dbMax, rr.binCount, e.startBin, e.endBin)
@@ -1914,18 +1952,48 @@ func (sr *SpectrogramRecorder) renderRollingLocked(rr *rollingResult, e *rolling
 // cache once nobody has asked for the rolling view for rollingCacheIdleTTL.
 func (sr *SpectrogramRecorder) refreshRollingCache() {
 	c := &sr.rolling
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	now := time.Now().UTC()
 
+	c.mu.Lock()
 	if c.result == nil && c.yRows == nil {
+		c.mu.Unlock()
 		return // never requested — nothing to keep warm
 	}
-	now := time.Now().UTC()
 	if now.Sub(c.lastAccess) > rollingCacheIdleTTL {
 		c.releaseLocked()
+		c.mu.Unlock()
 		return
 	}
-	sr.rebuildRollingLocked(now, true)
+	result := sr.rebuildRollingLocked(now)
+	minute := c.builtMinute
+	// Collect the views worth keeping warm. The renders themselves happen below
+	// with the lock released, so requests arriving mid-refresh are answered from
+	// the previous minute's bytes instead of blocking.
+	var jobs []*rollingPNGEntry
+	for _, e := range c.pngs {
+		if now.Sub(e.lastAccess) <= rollingWarmTTL {
+			jobs = append(jobs, e)
+		}
+	}
+	for _, e := range c.thumbs {
+		if now.Sub(e.lastAccess) <= rollingWarmTTL {
+			jobs = append(jobs, e)
+		}
+	}
+	c.mu.Unlock()
+
+	for _, e := range jobs {
+		png := sr.renderRolling(result, e)
+		if len(png) == 0 {
+			continue
+		}
+		c.mu.Lock()
+		if c.result == result {
+			e.png = png
+			e.builtMinute = minute
+		}
+		c.mu.Unlock()
+	}
 }
 
 // invalidateRollingCache drops the cached window. Called at UTC midnight

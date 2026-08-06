@@ -86,6 +86,7 @@ import NewsPanel from './NewsPanel.jsx';
 import ClocksPanel from './ClocksPanel.jsx';
 import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
+import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 
 export const PANELS = [
     // First, and first is the point: on a phone this is the panel that opens
@@ -195,6 +196,28 @@ export const PANELS = [
         // The addon decodes the pictures; without it there is nothing to show
         // and every request would 404.
         requires: (serverInfo) => sstvAvailable(serverInfo),
+    },
+    // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
+    // because it belongs to the same kind of panel: something you glance at
+    // while listening, not something you work.
+    //
+    // The panel follows the dial — the band you are in if the server records
+    // it, otherwise the wideband HF view — and only asks the server for
+    // anything while it is open, because Section unmounts a closed panel's
+    // body. The full-resolution image is a click away in a modal, with the
+    // frequency and time scales; the panel itself shows the thumbnail, which
+    // is tens of kB against the full image's megabytes.
+    //
+    // Minimal: the picture alone.
+    {
+        id: 'spectrogram',
+        title: 'Spectrogram',
+        icon: <Icon.ViewWaterfall />,
+        dock: 'left',
+        minimal: true,
+        Component: SpectrogramPanel,
+        // Nothing is recorded, so nothing to show.
+        requires: (serverInfo) => spectrogramEnabled(serverInfo),
     },
     {
         id: 'addons',

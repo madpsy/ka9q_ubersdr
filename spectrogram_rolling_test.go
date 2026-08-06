@@ -260,14 +260,72 @@ func TestRollingThumbnail(t *testing.T) {
 		t.Errorf("cache holds %d thumbs / %d renders, want 1 / 1", len(sr.rolling.thumbs), len(sr.rolling.pngs))
 	}
 
-	// A new row invalidates the thumbnail along with everything else.
+	// When the window moves on, a recent render is still served immediately
+	// (stale by at most rollingMaxStaleMinutes) rather than blocking the caller,
+	// and the background refresh brings it up to date.
 	sr.mu.Lock()
 	sr.rowCount++
 	sr.mu.Unlock()
 	rr2 := sr.getRolling24hRows()
-	if c := sr.rollingThumb(rr2, spectrogramDefaultPalette, 0, 0, false, 0, 0); len(c) > 0 && &a[0] == &c[0] {
-		t.Error("stale thumbnail served after the window moved")
+	if rr2 == rr {
+		t.Fatal("snapshot was not rebuilt after a new row")
 	}
+	if c := sr.rollingThumb(rr2, spectrogramDefaultPalette, 0, 0, false, 0, 0); len(c) == 0 {
+		t.Error("no thumbnail served while the render was stale")
+	}
+
+	sr.refreshRollingCache()
+	sr.rolling.mu.Lock()
+	entry := sr.rolling.thumbs[0]
+	fresh := entry.builtMinute == sr.rolling.builtMinute && entry.png != nil
+	sr.rolling.mu.Unlock()
+	if !fresh {
+		t.Error("background refresh did not re-render the thumbnail against the new snapshot")
+	}
+}
+
+// TestRollingRenderDoesNotBlockOnLock is the regression test for the live
+// finding that a request could wait seconds behind the per-minute re-render:
+// rendering must never happen with the cache lock held.
+func TestRollingRenderDoesNotBlockOnLock(t *testing.T) {
+	now := time.Now().UTC()
+	cutoff := now.Hour()*60 + now.Minute()
+	if cutoff == 0 {
+		t.Skip("running exactly at UTC midnight — no rows for today")
+	}
+
+	sr := newTestRollingRecorder(t, now, cutoff)
+	rr := sr.getRolling24hRows()
+	// Warm both views so the refresh below has real work to do.
+	sr.rollingPNG(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0)
+	sr.rollingThumb(rr, spectrogramDefaultPalette, 0, 0, false, 0, 0)
+
+	sr.mu.Lock()
+	sr.rowCount++
+	sr.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sr.refreshRollingCache()
+	}()
+
+	// While the refresh runs, requests must still be answered.
+	deadline := time.Now().Add(5 * time.Second)
+	for i := 0; i < 50; i++ {
+		start := time.Now()
+		snap := sr.getRolling24hRows()
+		if b := sr.rollingThumb(snap, spectrogramDefaultPalette, 0, 0, false, 0, 0); len(b) == 0 {
+			t.Fatal("request served no thumbnail during a background refresh")
+		}
+		if time.Since(start) > time.Second {
+			t.Fatalf("request took %v during a background refresh — it blocked on the render", time.Since(start))
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+	<-done
 }
 
 // TestRollingConcurrentAccess exercises the sharing contract: published

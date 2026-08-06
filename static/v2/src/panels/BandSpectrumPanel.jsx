@@ -34,6 +34,7 @@ import {
     scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins, zoomHz,
 } from '../lib/bandSpectrum.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
+import { haptic } from '../lib/haptics.js';
 import { formatRate } from '../lib/format.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
@@ -56,7 +57,7 @@ const THEME_VARS = ['--spec-bg', '--spec-grid'];
 const HISTORY_ROWS = 400;
 
 export default function BandSpectrumPanel({ minimal }) {
-    const { tuning } = useRadio();
+    const { tuning, actions } = useRadio();
     const display = useDisplay();
     const [bands, setBands] = useState(null);       // name → config, or null while loading
     const [prefs, setPrefs] = useState(savedPrefs);
@@ -80,6 +81,18 @@ export default function BandSpectrumPanel({ minimal }) {
             .then((cfg) => { if (aliveRef.current && cfg) setBands(bandsFromConfig(cfg)); })
             .catch(() => { if (aliveRef.current) setBands({}); });
     }, []);
+
+    // Clicking the chart tunes there, the same way clicking the main spectrum
+    // does: the current mode is kept — you are inside a band you are already
+    // listening to — and the frequency is snapped to the Receiver panel's step,
+    // so the chart and the +/- buttons agree about where the channels are.
+    const tune = useCallback((hz) => {
+        const step = display.tuneStep || 1;
+        actions.setFrequency(step > 1 ? Math.round(hz / step) * step : hz);
+        // The receiver moved, and on a phone the finger is over the place it
+        // moved to. This is the confirmation.
+        haptic('tune', 'spectrum');
+    }, [actions, display.tuneStep]);
 
     const setPref = useCallback((patch) => {
         setPrefs((p) => {
@@ -109,6 +122,7 @@ export default function BandSpectrumPanel({ minimal }) {
                 meta={meta}
                 prefs={prefs}
                 display={display}
+                onTune={tune}
                 onRate={setRate}
             />
 
@@ -180,7 +194,7 @@ function formatSpanMHz(meta) {
 // Keyed on the band by its caller, so tuning to another band remounts it — a
 // new stream, a new bin count and an empty history, which is what changing band
 // means. Nothing here has to unpick the old band's state.
-function BandChart({ band, meta, prefs, display, onRate }) {
+function BandChart({ band, meta, prefs, display, onTune, onRate }) {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
@@ -230,6 +244,8 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         bytes: 0,
         // Where the pointer is resting, so the readout can follow the data.
         ptr: null,
+        // Whether this pointer sequence moved: a drag or a pinch, not a click.
+        moved: false,
         // The trace, in pixels rather than bins — the main pane's arrangement,
         // so the same smoothing and peak hold work on it.
         px: null, smoothed: null, peak: null, peakAt: 0,
@@ -362,13 +378,15 @@ function BandChart({ band, meta, prefs, display, onRate }) {
             const xs = [...pinch.values()];
             pinchRef.current = { dist: Math.abs(xs[0] - xs[1]) };
             drag.current = null;             // two fingers is a pinch, not a drag
+            st.moved = true;                 // and never a click
             return;
         }
+        st.moved = false;
         // Zoomed, and not a press on one of the buttons sitting over the chart.
         if (!zoomed || (e.target.closest && e.target.closest('button'))) return;
         drag.current = { id: e.pointerId, x: e.clientX, moved: false };
         if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
-    }, [pinch, zoomed]);
+    }, [pinch, st, zoomed]);
 
     const onPointerUp = useCallback((e) => {
         pinch.delete(e.pointerId);
@@ -393,6 +411,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         if (!r || !r.width) return false;
 
         d.moved = true;
+        st.moved = true;                    // ...so the release is not a click
         d.x = e.clientX;
         if (wrap) wrap.style.cursor = 'grabbing';
         // Dragging right moves the band right, which is moving the window left.
@@ -486,6 +505,20 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         if (v) setAt(v);
     }, [compute, onDragMove, onPinchMove, st]);
 
+    // A press that neither panned nor pinched, and did not land on one of the
+    // buttons over the chart, is a tune. Read from the same window arithmetic
+    // the tooltip uses, so it tunes to the frequency it was showing.
+    const onClick = useCallback((e) => {
+        if (st.moved) { st.moved = false; return; }
+        if (e.target.closest && e.target.closest('button')) return;
+        const wrap = wrapRef.current;
+        const r = wrap ? wrap.getBoundingClientRect() : null;
+        if (!r || !r.width) return;
+        const at = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+        const win = zoomHz(meta, st.zoom);
+        onTune(Math.round(win.start + at * (win.end - win.start)));
+    }, [meta, onTune, st]);
+
     const leave = useCallback((e) => {
         if (!readoutClearsOn(e.pointerType)) return;
         st.ptr = null;
@@ -563,6 +596,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
             onPointerMove={read}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onClick={onClick}
             onPointerLeave={(e) => { onPointerUp(e); leave(e); }}
         >
             <canvas className="bsp__spec" ref={specRef} />

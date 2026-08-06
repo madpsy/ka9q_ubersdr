@@ -29,7 +29,9 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
-import { RING_BG, RING_PAD, ringKeepsHistory, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
+import {
+    RING_BG, RING_PAD, panTransform, ringKeepsHistory, ringSlices, smoothInterval,
+} from '../lib/waterfallRing.js';
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
@@ -528,6 +530,9 @@ export default function SpectrumView() {
     // in spectrum-only it ends up along the bottom and in waterfall-only along
     // the top — both the conventional placement — with no special casing.
     const viewMode = display.viewMode || 'split';
+    // Whether the waterfall's history is dragged onto the new axis when the view
+    // moves, or left where it was painted. See alignRingToView.
+    const panFollows = display.waterfallPan === 'follow';
 
     // Station ID overlay: split view only, and only if the operator left it on.
     // The lines go into the gfx ref because the draw loop, not React, paints
@@ -635,6 +640,9 @@ export default function SpectrumView() {
             g.ringWidth = w;
             g.ringHeight = h;
             g.ringHead = 0;
+            // A kept history is still in the view it was painted in; a dropped
+            // one has no view, and the next draw records the current one.
+            if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
     }, [sizes.w, sizes.h, specH, wfH]);
@@ -1402,6 +1410,32 @@ export default function SpectrumView() {
                                 onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
                             />
                         )}
+                        {/* What the waterfall's history does when the view moves
+                            under it, mirroring the Display panel's setting.
+
+                            Here rather than only in the panel because it is a
+                            thing you change *while* panning — you drag, you see
+                            the trail step sideways, and the answer to that
+                            should be one press away from the drag that raised
+                            it. Highlighted when the history follows, so the
+                            toolbar reads as state; the plain state is the one
+                            this display has always had.
+
+                            Only with a waterfall on screen: there is no history
+                            to move in spectrum-only view. */}
+                        {viewMode !== 'spectrum' && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={panFollows}
+                                icon={<Icon.Anchor />}
+                                title={panFollows
+                                    ? 'Waterfall history is held to the frequency scale: it moves with the view and new ground comes in black — click to leave it where it was drawn'
+                                    : 'Waterfall history stays where it was drawn, so after a pan it no longer lines up with the frequency scale — click to move it with the view'}
+                                aria-label="Waterfall history when panning"
+                                onClick={() => display.set({ waterfallPan: panFollows ? 'hold' : 'follow' })}
+                            />
+                        )}
                         <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                         <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
                     </div>
@@ -1854,6 +1888,11 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
     const H = g.ringHeight;
     const rowH = Math.max(1, Math.round(d.rowHeight * g.dpr));
 
+    // Bring the history onto the axis it is about to be drawn against, if that
+    // is the mode. Before the new row is written, so the row lands in the
+    // column its frequency belongs to.
+    alignRingToView(g, d, cfg);
+
     if (commitRow) {
         const lut = getPalette(d.palette);
         const img = rctx.createImageData(pxW, 1);
@@ -1901,6 +1940,80 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
     if (commitRow) scrollRow(g, wf, d.smoothScroll === false ? 0 : rowH / g.dpr, g.rowDt);
 
     drawWaterfallMarks(g, wfMarks, wfH, pxW, cfg, tuning, colVfo, colEdge);
+}
+
+/**
+ * Move the waterfall's history to match the view it is drawn against.
+ *
+ * The ring's pixels were painted against whatever centre and span were current
+ * when each row arrived, and a pan or a zoom changes what a column means. Two
+ * answers, and which is right depends on what you are doing:
+ *
+ *   'hold'   — leave them. The trail keeps exactly the shape it had, and a
+ *              carrier's history sits at the frequency it *was* drawn at, which
+ *              after a pan is not the frequency the axis now says. Nothing is
+ *              ever lost, and this is what the display has always done.
+ *   'follow' — shift the whole bitmap by the same distance the axis moved, so
+ *              a carrier stays in its column and the history keeps meaning one
+ *              scale. What comes in from the edge is background: there is no
+ *              history for a part of the band that was not on screen.
+ *
+ * A pure pan is rounded to a whole pixel and copied — no resampling, so dragging
+ * across the band does not smear the history a little more with every frame. The
+ * rounding error is carried in the recorded centre rather than dropped, so it
+ * cannot accumulate either. A zoom has to resample, and does it once.
+ */
+function alignRingToView(g, d, cfg) {
+    if (!g.ring || !cfg || !cfg.span) return;
+
+    // Nothing recorded yet — a fresh ring is by definition in the current view.
+    if (!g.ringSpan) {
+        g.ringCentre = cfg.centerFreq;
+        g.ringSpan = cfg.span;
+        return;
+    }
+    // In hold mode the pixels stay put, so the recorded view follows the live
+    // one without touching them: switching to follow later then starts from
+    // where the picture actually is rather than replaying every past pan.
+    if (d.waterfallPan !== 'follow') {
+        g.ringCentre = cfg.centerFreq;
+        g.ringSpan = cfg.span;
+        return;
+    }
+
+    const t = panTransform(
+        { centre: g.ringCentre, span: g.ringSpan },
+        { centre: cfg.centerFreq, span: cfg.span },
+        g.ringWidth,
+    );
+    if (!t) return;
+
+    g.ringCentre = t.centre;
+    g.ringSpan = t.span;
+    if (t.still) return;
+
+    const W = g.ringWidth;
+    const H = g.ringHeight;
+    const c = g.ringCtx;
+
+    if (t.drop) {
+        c.fillStyle = RING_BG;
+        c.fillRect(0, 0, W, H);
+        return;
+    }
+
+    if (!g.ringTmp || g.ringTmp.width !== W || g.ringTmp.height !== H) {
+        g.ringTmp = document.createElement('canvas');
+        g.ringTmp.width = W;
+        g.ringTmp.height = H;
+        g.ringTmpCtx = g.ringTmp.getContext('2d', { alpha: false });
+    }
+    g.ringTmpCtx.drawImage(g.ring, 0, 0);
+
+    c.imageSmoothingEnabled = false;
+    c.fillStyle = RING_BG;
+    c.fillRect(0, 0, W, H);
+    c.drawImage(g.ringTmp, 0, 0, W, H, t.offset, 0, W * t.scale, H);
 }
 
 /**

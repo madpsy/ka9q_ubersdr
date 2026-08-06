@@ -33,6 +33,21 @@ export const DEFAULTS = {
     // row — but it is a switch because the browser resamples the picture while
     // it is in flight, which is very slightly soft on a non-HiDPI screen.
     smoothScroll: true,
+    // What the waterfall's history does when the view moves under it.
+    //
+    //   'hold'   — the rows stay where they were painted. A signal's trail
+    //              keeps the shape it had, and after a pan the old rows no
+    //              longer line up with the frequency axis: a carrier steps
+    //              sideways at the moment of the pan and its history reads at
+    //              the wrong frequency. This is what every waterfall of this
+    //              kind has always done, and it is the default because nothing
+    //              is ever thrown away.
+    //   'follow' — the history is shifted with the axis, so a signal stays in
+    //              its own column and the whole picture keeps meaning one
+    //              frequency scale. What moves in from the edge is black,
+    //              because there is no history for a part of the band that was
+    //              not on screen.
+    waterfallPan: 'hold',
     markerBands: true,      // band allocations in the marker bar
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser

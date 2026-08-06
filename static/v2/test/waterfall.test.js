@@ -19,7 +19,7 @@ const assert = require('assert');
 
 const {
     RING_BG, RING_PAD, SCROLL_MAX_MS, SCROLL_MIN_MS,
-    ringKeepsHistory, ringSlices, smoothInterval,
+    panTransform, ringKeepsHistory, ringSlices, smoothInterval,
 } = require('./.build/waterfallring.cjs');
 
 let pass = 0;
@@ -317,6 +317,101 @@ t('the overhang covers the tallest row the display panel can ask for', () => {
     const maxDpr = 2;         // SpectrumView clamps devicePixelRatio to this
     assert.ok(RING_PAD >= maxRowHeight * maxDpr,
         `RING_PAD ${RING_PAD} must cover ${maxRowHeight * maxDpr} device px`);
+});
+
+
+// ── Panning the history with the view ────────────────────────────────────────
+//
+// The second of the two answers to "what should the history do when the view
+// moves": shift it, so a carrier keeps its column, and let black come in from
+// the edge where there is no history. The arithmetic is one blit's worth of
+// numbers and every one of them has a sign that is easy to get backwards.
+
+const W = 1000;
+const view = (centre, span) => ({ centre, span });
+
+t('no move, no transform', () => {
+    assert.strictEqual(panTransform(view(7.1e6, 200e3), view(7.1e6, 200e3), W), null);
+});
+
+t('panning up the band moves the history down the screen', () => {
+    // Tuning 20 kHz higher across a 200 kHz view: everything already drawn
+    // belongs 100 px to the left of where it is.
+    const t1 = panTransform(view(7.10e6, 200e3), view(7.12e6, 200e3), W);
+    assert.strictEqual(t1.offset, -100);
+    assert.strictEqual(t1.scale, 1);
+    assert.strictEqual(t1.pureShift, true);
+    assert.strictEqual(t1.drop, false);
+
+    // ...and the other way is the mirror of it.
+    assert.strictEqual(panTransform(view(7.10e6, 200e3), view(7.08e6, 200e3), W).offset, 100);
+});
+
+t('a pan is a whole number of pixels, so dragging cannot smear the history', () => {
+    // 37 Hz of a 200 kHz view is a fifth of a pixel: the bitmap is left alone
+    // and the remainder is carried in the recorded centre, so the next frame of
+    // the same drag can still move it.
+    const t1 = panTransform(view(7.1e6, 200e3), view(7.1e6 + 37, 200e3), W);
+    assert.strictEqual(t1.still, true);
+    assert.strictEqual(t1.offset, 0);
+    assert.strictEqual(t1.centre, 7.1e6, 'the debt is left standing, not zeroed');
+
+    // Enough of those add up to a pixel, and the pixel gets moved: the bug this
+    // pins is recording the live centre on a sub-pixel step, which zeroes the
+    // debt every frame so a slow drag never moves the history at all.
+    let ring = view(7.1e6, 200e3);
+    let moved = 0;
+    for (let i = 1; i <= 10; i++) {
+        const r = panTransform(ring, view(7.1e6 + i * 37, 200e3), W);
+        if (!r) continue;
+        moved += r.offset;
+        ring = { centre: r.centre, span: r.span };
+    }
+    const wanted = -((370) / 200e3) * W;
+    assert.ok(moved !== 0, 'a slow drag never moved the history');
+    assert.ok(Math.abs(moved - wanted) <= 0.5, `${moved} px for 370 Hz, wanted ${wanted}`);
+});
+
+t('the rounding error cannot accumulate over a long drag', () => {
+    // Every step records where the pixels actually are, so after a thousand
+    // sub-pixel steps the history is still within half a pixel of the axis.
+    let ring = view(7.1e6, 200e3);
+    let px = 0;
+    const step = 61;                       // Hz per frame: 0.305 px
+    for (let i = 1; i <= 1000; i++) {
+        const r = panTransform(ring, view(7.1e6 + i * step, 200e3), W);
+        if (!r) continue;                  // landed exactly where it already was
+        px += r.offset;
+        ring = { centre: r.centre, span: r.span };
+    }
+    const wanted = -((1000 * step) / 200e3) * W;
+    assert.ok(Math.abs(px - wanted) <= 0.5, `drifted ${Math.abs(px - wanted).toFixed(2)} px`);
+});
+
+t('a zoom rescales once, and says so', () => {
+    const t1 = panTransform(view(7.1e6, 200e3), view(7.1e6, 100e3), W);
+    assert.strictEqual(t1.pureShift, false);
+    assert.strictEqual(t1.scale, 2, 'the old span is twice the new one');
+    assert.strictEqual(t1.offset, -500, 'and its left edge is off screen');
+    assert.strictEqual(t1.centre, 7.1e6);
+    assert.strictEqual(t1.span, 100e3, 'after a resample the pixels are in the new view');
+});
+
+t('a jump to another band drops the history rather than dragging it', () => {
+    for (const to of [view(14.1e6, 200e3), view(3.6e6, 200e3)]) {
+        assert.strictEqual(panTransform(view(7.1e6, 200e3), to, W).drop, true);
+    }
+    // The edge case either side: one pixel of overlap is worth keeping.
+    assert.strictEqual(panTransform(view(7.1e6, 200e3), view(7.1e6 + 199.8e3, 200e3), W).drop, false);
+    assert.strictEqual(panTransform(view(7.1e6, 200e3), view(7.1e6 + 200e3, 200e3), W).drop, true);
+});
+
+t('nonsense in, nothing out', () => {
+    assert.strictEqual(panTransform(null, view(7e6, 1e3), W), null);
+    assert.strictEqual(panTransform(view(7e6, 1e3), null, W), null);
+    assert.strictEqual(panTransform(view(7e6, 0), view(7e6, 1e3), W), null);
+    assert.strictEqual(panTransform(view(7e6, 1e3), view(7e6, 0), W), null);
+    assert.strictEqual(panTransform(view(7e6, 1e3), view(7.1e6, 1e3), 0), null);
 });
 
 console.log(`\n${pass} passed`);

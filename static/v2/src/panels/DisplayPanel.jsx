@@ -247,6 +247,30 @@ export default function DisplayPanel() {
                         <Slider value={d.rowHeight} min={1} max={4} onChange={(v) => d.set({ rowHeight: v })} />
                     </Field>
 
+                    <Field
+                        label="History when panning"
+                        hint={d.waterfallPan === 'follow'
+                            ? 'moves with the axis; new ground is black'
+                            : 'stays where it was drawn'}
+                    >
+                        <Segmented
+                            value={d.waterfallPan || 'hold'}
+                            onChange={(v) => d.set({ waterfallPan: v })}
+                            options={[
+                                {
+                                    value: 'hold',
+                                    label: 'Hold',
+                                    title: 'Rows stay where they were painted. Nothing is lost, but after a pan the old rows no longer line up with the frequency scale',
+                                },
+                                {
+                                    value: 'follow',
+                                    label: 'Follow',
+                                    title: 'History moves with the frequency scale, so a signal keeps its column. Parts of the band that were off screen have no history and come in black',
+                                },
+                            ]}
+                        />
+                    </Field>
+
                     <Field label="Smooth scrolling" inline>
                         <Switch
                             checked={d.smoothScroll !== false}

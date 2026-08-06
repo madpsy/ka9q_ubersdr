@@ -124,3 +124,65 @@ export function ringSlices(head, height, rows) {
 export function ringKeepsHistory(prev, width) {
     return !!(prev && prev.ring && prev.height > 0 && prev.width === width);
 }
+
+/**
+ * Where the history has to move to when the view moves under it.
+ *
+ * The ring's pixels were painted against `ring` (the centre and span current
+ * when they arrived); the axis now says `view`. This is the horizontal transform
+ * that brings one onto the other, as a source-to-destination blit:
+ *
+ *   drawImage(ring, 0, 0, W, H, offset, 0, W * scale, H)
+ *
+ * `pureShift` is a pan — same span, so the copy is a translation and rounding it
+ * to a whole pixel makes it lossless. That matters because a drag produces one
+ * of these per frame, and resampling the same bitmap sixty times a second turns
+ * a week of history into porridge. The rounding error comes back as `centre`,
+ * the frequency the pixels are *actually* on afterwards, so the next call
+ * carries it rather than dropping it and the picture cannot drift.
+ *
+ * `drop` means the two views do not overlap at all — a band change rather than a
+ * pan — and there is nothing worth carrying over.
+ */
+export function panTransform(ring, view, width) {
+    if (!ring || !view || !(view.span > 0) || !(ring.span > 0) || !(width > 0)) return null;
+    if (ring.centre === view.centre && ring.span === view.span) return null;
+
+    const scale = ring.span / view.span;
+    const oldStart = ring.centre - ring.span / 2;
+    const newStart = view.centre - view.span / 2;
+    const pureShift = Math.abs(scale - 1) < 1e-9;
+
+    let offset = ((oldStart - newStart) / view.span) * width;
+    if (pureShift) {
+        offset = Math.round(offset);
+        // Less than half a pixel: leave the bitmap alone *and* leave the
+        // recorded view where it is, so the debt goes on growing and the next
+        // frame of the same drag can settle it. Recording the live centre here
+        // instead would zero the debt every frame, and a slow drag would move
+        // the history not by a pixel at a time but never at all.
+        if (offset === 0) {
+            return {
+                offset: 0, scale: 1, pureShift: true, drop: false, still: true,
+                centre: ring.centre, span: ring.span,
+            };
+        }
+    }
+
+    const kept = width * scale;
+    if (offset >= width || offset + kept <= 0) {
+        return { offset, scale, pureShift, drop: true, still: false, centre: view.centre, span: view.span };
+    }
+
+    return {
+        offset,
+        scale,
+        pureShift,
+        drop: false,
+        still: false,
+        // Where the pixels end up, which for a pan is the rounded offset rather
+        // than where they were asked to go.
+        centre: pureShift ? (oldStart - (offset * view.span) / width) + view.span / 2 : view.centre,
+        span: pureShift ? ring.span : view.span,
+    };
+}

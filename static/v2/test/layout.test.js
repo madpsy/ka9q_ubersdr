@@ -167,4 +167,15 @@ t('the spectrogram panel ships collapsed, on the left, on every machine', () => 
     assert.ok(inAnyDock(defaultLayout(MOUSE), 'spectrogram'), 'docked, not floating');
 });
 
+// Same promise as the spectrogram's, and a heavier one to break: this panel
+// holds an EventSource while it is mounted, so shipping it open would put a live
+// per-band stream on every session that never opens it.
+t('the band spectrum panel ships collapsed, on the left, on every machine', () => {
+    for (const env of [MOUSE, TOUCH, PHONE]) {
+        assert.strictEqual(defaultLayout(env).sections.bandspectrum.open, false);
+    }
+    assert.strictEqual(PANEL_BY_ID.bandspectrum.dock, 'left');
+    assert.ok(inAnyDock(defaultLayout(MOUSE), 'bandspectrum'), 'docked, not floating');
+});
+
 console.log(`\n${pass} ok`);

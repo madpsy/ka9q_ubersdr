@@ -3260,6 +3260,40 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
+/* Band spectrum: the per-band trace over its own waterfall, both in the main
+   waterfall's palette. */
+.bsp__chart {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #000;
+    overflow: hidden;
+    line-height: 0;
+}
+.bsp__spec, .bsp__wf { display: block; width: 100%; }
+
+.bsp__foot {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.bsp__band { color: var(--text-dim); font-weight: 600; }
+.bsp__range { font-family: var(--mono); }
+/* Says whether the stream is running, because a still picture and a stalled one
+   look the same. */
+.bsp__state { margin-left: auto; }
+.bsp__state.is-live { color: var(--ok, var(--accent)); }
+
+.bsp__ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.bsp__manual { display: flex; align-items: center; gap: 6px; }
+.bsp__manual label { display: flex; align-items: center; gap: 4px; }
+.bsp__manual span { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+.bsp__num { width: 5.5ch; padding: 2px 4px; font-family: var(--mono); text-align: right; }
+.bsp__unit { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+
 /* Rolling 24-hour spectrogram: a thumbnail in the panel, the full-resolution
    image with its scales in a modal. */
 .sgram__thumb {

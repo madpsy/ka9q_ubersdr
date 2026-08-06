@@ -87,6 +87,7 @@ import ClocksPanel from './ClocksPanel.jsx';
 import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
+import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
 export const PANELS = [
     // First, and first is the point: on a phone this is the panel that opens
@@ -209,6 +210,27 @@ export const PANELS = [
     // is tens of kB against the full image's megabytes.
     //
     // Minimal: the picture alone.
+    // The band the dial is in, at the resolution the receiver records it — the
+    // per-band card from band_activity.html, for one band. Next to the
+    // spectrogram because the two are the same kind of thing: a picture of the
+    // band that is not the main waterfall.
+    //
+    // Collapsed by default, and collapsed means disconnected: the panel holds an
+    // EventSource while it is mounted, and Section only mounts an open one.
+    //
+    // Minimal: the chart alone, without the range controls.
+    {
+        id: 'bandspectrum',
+        title: 'Band Spectrum',
+        icon: <Icon.ViewSpectrum />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: BandSpectrumPanel,
+        // The per-band FFTs are the noise floor monitor's; without it there is
+        // no stream to subscribe to.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
+    },
     {
         id: 'spectrogram',
         title: 'Spectrogram',

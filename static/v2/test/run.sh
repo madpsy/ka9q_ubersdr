@@ -28,6 +28,8 @@ esbuild ../src/lib/format.js --bundle --format=cjs --platform=node \
     --outfile=.build/format.cjs --log-level=warning
 esbuild ../src/lib/spectrogram.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrogram.cjs --log-level=warning
+esbuild ../src/lib/bandSpectrum.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bandspectrum.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
@@ -247,3 +249,4 @@ node bridge.test.js
 node bridgecommands.test.js
 node bridgeclient.test.js
 node spectrogram.test.js
+node bandspectrum.test.js

@@ -15,20 +15,18 @@ export default function NavTypes({ label = 'Skip between' }) {
     const [types, choose] = useNavTypes();
 
     return (
-        <Field label={label}>
+        /* Every chip can come off, all the way to none — which is how stepping is
+           turned off altogether: the drum's ends give their room back to the
+           scale and the panel's buttons say what happened. So the state needs
+           saying in words, because "no chips lit" and "no feeds running" look
+           identical from here. */
+        <Field label={label} hint={types.length ? undefined : 'off'}>
             <div className="chip-row chip-row--wrap">
                 {Object.entries(NAV_LABELS).map(([t, text]) => (
                     <button
                         key={t}
                         type="button"
                         className={`chip chip--button${types.includes(t) ? ' is-active' : ''}`}
-                        /* The last one on cannot be turned off — see
-                           saveNavTypes, which refuses an empty selection. Said
-                           here as well, because a chip that ignores a press
-                           without saying why is the worse half of that rule. */
-                        title={types.length === 1 && types.includes(t)
-                            ? 'The last kind selected — something has to be steppable'
-                            : undefined}
                         onClick={() => choose(
                             types.includes(t) ? types.filter((x) => x !== t) : [...types, t],
                         )}

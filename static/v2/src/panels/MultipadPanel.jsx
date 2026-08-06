@@ -28,6 +28,7 @@ import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
 import { clamp, countryFlag, formatFreqShort, formatHz, snrColour, snrFraction } from '../lib/format.js';
+import { isTap } from '../lib/barrel.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
     bandTip, bandTone, getBandConditions, subscribeBandConditions,
@@ -113,10 +114,65 @@ function SnrWash() {
 // Its own component, and not for tidiness: the spot feeds land every few seconds
 // and re-rendering the drum's thirty detent cells for a marker two kilohertz away
 // would be the same waste SnrWash exists to avoid.
+//
+// These sit *on* the drum and take none of it away: a press on an end starts a
+// spin exactly as a press on the middle does, and only a press that goes nowhere
+// steps to the marker. See isTap in lib/barrel.js for the distinction and the
+// press handling below for why it is done with window listeners.
 function MarkerEdges() {
     const radio = useRadio();
     const [types] = useNavTypes();
     const markers = useMarkerNav(radio, types);
+
+    // A press in progress: which pointer, where it started, how far it has
+    // strayed since, and what to do if it turns out to have been a tap.
+    //
+    // Watched on the window rather than on the button, because by then the button
+    // cannot see it: the press is deliberately left to bubble to the barrel, which
+    // captures the pointer, and every move and release from that moment is
+    // delivered to the barrel and not to us. It still passes the window on its way
+    // up, which is the one place both halves of the gesture can be seen.
+    //
+    // The action is stored with the press rather than looked up on release, so
+    // these listeners never need re-binding as the markers change — the marker a
+    // tap steps to is the one that was under the thumb when it landed.
+    const press = useRef(null);
+    useEffect(() => {
+        const stray = (e) => {
+            const p = press.current;
+            if (!p || e.pointerId !== p.id) return;
+            p.dev = Math.max(p.dev, Math.abs(e.clientX - p.x), Math.abs(e.clientY - p.y));
+        };
+        const release = (e) => {
+            const p = press.current;
+            if (!p || e.pointerId !== p.id) return;
+            press.current = null;
+            if (isTap(p.dev, (e.timeStamp || performance.now()) - p.t)) p.act();
+        };
+        const drop = (e) => {
+            const p = press.current;
+            if (p && e.pointerId === p.id) press.current = null;
+        };
+        window.addEventListener('pointermove', stray);
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', drop);
+        return () => {
+            window.removeEventListener('pointermove', stray);
+            window.removeEventListener('pointerup', release);
+            window.removeEventListener('pointercancel', drop);
+        };
+    }, []);
+
+    // Nothing selected means no stepping, and no stepping means no buttons: the
+    // ends of the drum go back to being drum, which is the point — they are also
+    // where a spin can be started from, so an operator who does not want to skip
+    // between markers gets the whole scale to throw. Two disabled chevrons would
+    // be the worst of both, holding the room without doing anything with it.
+    //
+    // Only for an empty selection, and not for "prev happens to be null": that
+    // comes and goes as the dial moves, and buttons that appeared and vanished
+    // under a thumb would be unusable.
+    if (!types.length) return null;
 
     const edge = (m, side) => {
         const flag = countryOf(m);
@@ -124,27 +180,47 @@ function MarkerEdges() {
         const chevron = side === 'prev'
             ? <Icon.ChevronLeft size={12} />
             : <Icon.ChevronRight size={12} />;
+        const act = () => stepToMarker(radio.actions, m);
         return (
             <button
                 type="button"
                 className={`barrel__edge barrel__edge--${side}`}
                 data-type={m ? m.type : undefined}
-                disabled={!m}
+                /* aria-disabled, not `disabled`: browsers disagree about whether
+                   a disabled button dispatches pointer events at all, and one
+                   that swallowed the press would give the drum back a dead third
+                   at exactly the moment there is nothing that way to step to.
+                   Drawn as unavailable, ignored by both handlers below, and the
+                   delegated haptics already read this attribute (hapticKindFor),
+                   so it does not buzz either. */
+                aria-disabled={m ? undefined : 'true'}
                 title={m
                     ? `${m.name || 'Marker'} — ${formatFreqShort(m.freq)}`
                     : `Nothing ${side === 'prev' ? 'below' : 'above'} the dial`}
                 aria-label={m
                     ? `${side === 'prev' ? 'Previous' : 'Next'} marker: ${m.name || formatFreqShort(m.freq)}`
                     : undefined}
-                /* The drum must not turn as well: a press here is a jump, and a
-                   barrel that also took the gesture would tune two ways at once.
-                   What that costs is the ends of the drum as somewhere to *begin*
-                   a spin — a spin already under way is unaffected, because the
-                   barrel captures the pointer and keeps it wherever the finger
-                   goes — and the ends are the part the strip's mask has faded to
-                   nothing anyway. */
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => stepToMarker(radio.actions, m)}
+                /* Deliberately not stopped: the drum is meant to take this press
+                   as well, so the full width of the scale is still somewhere to
+                   spin from. What happens next is decided on release — a gesture
+                   that went nowhere was a tap and steps to the marker; one that
+                   moved was a spin, and the drum has already been tuning as it
+                   moved. */
+                onPointerDown={(e) => {
+                    if (!m) return;
+                    press.current = {
+                        id: e.pointerId, x: e.clientX, y: e.clientY, dev: 0,
+                        t: e.timeStamp || performance.now(), act,
+                    };
+                }}
+                /* Keyboard only. A pointer's click is ignored here because the
+                   press above has already dealt with it — and browsers disagree
+                   about whether a click even arrives at a button whose pointer was
+                   captured by an ancestor mid-gesture, so relying on it would make
+                   the tap work on some and not others. `detail === 0` is the
+                   keyboard's signature: Enter and Space on a focused button carry
+                   no click count, a mouse or finger always does. */
+                onClick={(e) => { if (m && e.detail === 0) act(); }}
             >
                 {side === 'prev' && chevron}
                 {/* Between the label and the middle of the drum, as in the

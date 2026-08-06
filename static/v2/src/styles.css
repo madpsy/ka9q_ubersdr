@@ -1991,6 +1991,10 @@ a.btn { text-decoration: none; }
  * width, capped at a third, so a five-letter callsign takes a callsign's worth of
  * the drum and only a long bookmark name takes the cap.
  *
+ * They cost the drum no width at all: a press on one still reaches the barrel and
+ * still spins it, and only a press that goes nowhere counts as aiming at the
+ * button (MarkerEdges, and isTap in lib/barrel.js).
+ *
  * The zone is washed in the drum's own colour, fading out towards the middle:
  * that is what puts the label over a clear background instead of over the ticks,
  * without fencing it off with a border. A border here would be a vertical line
@@ -2023,7 +2027,10 @@ a.btn { text-decoration: none; }
     font-size: calc(10px * var(--ui-scale));
     font-weight: 650;
     cursor: pointer;
-    touch-action: manipulation;
+    /* The drum's, not `manipulation`: a press here is left to reach the barrel so
+       the scale can be spun from its ends, and that only works while sideways
+       still belongs to us and only vertical is the sheet's to scroll with. */
+    touch-action: pan-y;
 }
 .barrel__edge--prev {
     left: 0;
@@ -2039,11 +2046,12 @@ a.btn { text-decoration: none; }
    which feed this marker came from and a highlight that flattened it back to
    plain text would cost more than it gave. The press does take the accent, as
    every other button here does. */
-.barrel__edge:hover:not(:disabled) { --edge-wash: var(--surface-hover); }
-.barrel__edge:active:not(:disabled) { --edge-ink: var(--accent); }
+.barrel__edge:not([aria-disabled]):hover { --edge-wash: var(--surface-hover); }
+.barrel__edge:not([aria-disabled]):active { --edge-ink: var(--accent); }
 /* Nothing that way: the chevron stays, faded, so the end of the drum does not
-   become a dead area that used to have a button in it. */
-.barrel__edge:disabled { opacity: 0.3; cursor: default; }
+   become a dead area that used to have a button in it. Still draggable, which is
+   why this is aria-disabled and not :disabled — see MarkerEdges. */
+.barrel__edge[aria-disabled] { opacity: 0.3; cursor: grab; }
 /* The label is the only part that gives ground: a chevron squashed to fit a long
    bookmark name would stop reading as a direction. */
 .barrel__edge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

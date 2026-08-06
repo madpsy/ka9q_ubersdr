@@ -36,10 +36,24 @@ const clean = (list) => (Array.isArray(list) ? list.filter((t) => NAV_TYPES.incl
 
 const listeners = new Set();
 
+// Nothing selected is a selection, and the one thing this has to get right is
+// telling it apart from nothing *stored*. An empty array is "stepping off" — the
+// drum's ends go away and the panel's buttons say why. No key at all is a browser
+// that has never been told, which is every kind.
+//
+// A stored selection that this build recognises none of is neither: it was a real
+// choice, made against a vocabulary that has since changed, and honouring it as
+// "off" would silently turn kinds nobody switched off into a control that has
+// vanished. That falls back to everything, as it always did.
 export function savedNavTypes() {
     try {
-        const saved = clean(JSON.parse(localStorage.getItem(KEY)));
-        return saved.length ? saved : DEFAULT_NAV_TYPES;
+        const raw = localStorage.getItem(KEY);
+        if (raw == null) return DEFAULT_NAV_TYPES;
+        const saved = JSON.parse(raw);
+        if (!Array.isArray(saved)) return DEFAULT_NAV_TYPES;
+        if (!saved.length) return [];
+        const kept = clean(saved);
+        return kept.length ? kept : DEFAULT_NAV_TYPES;
     } catch (e) {
         return DEFAULT_NAV_TYPES;
     }
@@ -53,10 +67,14 @@ export function savedNavTypes() {
 // mistake waiting to be made in the file that has both. (test/unresolved.js
 // refuses the collision outright.)
 export function saveNavTypes(list) {
+    if (!Array.isArray(list)) return;
     const next = clean(list);
-    // Never all-off: with nothing selected there is nothing to step to, and both
-    // controls would go permanently dead with nothing on screen to say why.
-    if (!next.length) return;
+    // All off is allowed and means it: the controls take themselves away rather
+    // than going dead, so there is nothing to protect the operator from here.
+    // What is refused is a request made *entirely* of kinds this build does not
+    // have — that is a caller bug, and storing it as "off" would turn a typo into
+    // a setting.
+    if (list.length && !next.length) return;
     try { localStorage.setItem(KEY, JSON.stringify(next)); } catch (e) { /* private mode */ }
     // The same array to every listener, so the two pickers hold one identity and
     // a useMemo keyed on it does not re-run once per subscriber.

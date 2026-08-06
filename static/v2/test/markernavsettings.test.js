@@ -1,8 +1,11 @@
 // Which marker kinds the on-screen prev/next controls step between.
 //
-// Small, but it decides what the prev/next buttons can reach — and an empty
-// selection would leave them permanently dead with nothing on screen to
-// explain why.
+// Small, but it decides what the prev/next buttons can reach — including whether
+// there are any, since deselecting everything is how stepping is turned off and
+// the Multipad's barrel edges take themselves off the drum when it is. So the
+// interesting cases are at the empty end: an empty selection has to survive a
+// reload, and has to stay distinguishable from a browser that has never been
+// told and from a selection this build cannot read.
 //
 // One selection serves two controls — the Markers panel's step buttons and the
 // Multipad's barrel edges — and both draw a picker for it, so the other thing
@@ -59,11 +62,20 @@ t('a type this build no longer has is dropped, not carried', () => {
     assert.deepStrictEqual(savedNavTypes(), ['dx', 'cw']);
 });
 
-t('a selection that survives nothing falls back to everything', () => {
-    // Otherwise prev/next would be dead with nothing on screen to say why.
+t('a selection this build cannot read falls back to everything', () => {
+    // It was a real choice made against a vocabulary that has since changed.
+    // Reading it as "off" would take kinds nobody switched off and turn them into
+    // controls that have disappeared.
     install({ [KEY]: JSON.stringify(['gone', 'also-gone']) });
     assert.deepStrictEqual(savedNavTypes(), DEFAULT_NAV_TYPES);
+});
+
+t('nothing selected survives a reload, and is not read as never told', () => {
+    // The whole point of allowing it: an operator who turned stepping off does
+    // not want it back tomorrow. Only a missing key means "every kind".
     install({ [KEY]: JSON.stringify([]) });
+    assert.deepStrictEqual(savedNavTypes(), []);
+    install();
     assert.deepStrictEqual(savedNavTypes(), DEFAULT_NAV_TYPES);
 });
 
@@ -74,12 +86,25 @@ t('a corrupt setting reads as the default rather than throwing', () => {
     assert.deepStrictEqual(savedNavTypes(), DEFAULT_NAV_TYPES);
 });
 
-t('an empty selection is refused rather than stored', () => {
+t('turning the last kind off is stored, and announced', () => {
     const s = install({ [KEY]: JSON.stringify(['dx']) });
+    const seen = [];
+    const off = onNavTypes((list) => seen.push(list));
     saveNavTypes([]);
-    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['dx'], 'the old selection should stand');
+    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), []);
+    // The pad's barrel edges unmount on this, so it has to reach them.
+    assert.deepStrictEqual(seen, [[]]);
+    off();
+});
+
+t('a request made only of kinds that do not exist is refused', () => {
+    // Not the same as an empty one: nobody asked for "off" here, and storing it
+    // as such would turn a caller's typo into a setting.
+    const s = install({ [KEY]: JSON.stringify(['dx']) });
     saveNavTypes(['nonsense']);
-    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['dx']);
+    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['dx'], 'the old selection should stand');
+    saveNavTypes('dx');
+    assert.deepStrictEqual(JSON.parse(s.getItem(KEY)), ['dx'], 'not an array at all');
 });
 
 t('a save keeps only the kinds that exist', () => {
@@ -118,13 +143,13 @@ t('a change reaches everybody watching, with the cleaned list', () => {
 });
 
 t('a refused change is not announced either', () => {
-    // A picker that redrew from an empty selection it was not given would light
-    // no chips at all until something else changed it.
+    // A picker that redrew from a selection it was not given would light no chips
+    // at all until something else changed it.
     install({ [KEY]: JSON.stringify(['dx']) });
     const seen = [];
     const off = onNavTypes((list) => seen.push(list));
-    saveNavTypes([]);
     saveNavTypes(['nonsense']);
+    saveNavTypes(null);
     assert.deepStrictEqual(seen, []);
     off();
 });

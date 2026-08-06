@@ -107,3 +107,30 @@ export function settleOffset(rest, dt, rate = SETTLE_RATE) {
 export function spinDistance(v0, friction = FRICTION) {
     return v0 / friction;
 }
+
+// Was that a tap or the start of a spin?
+//
+// The drum's ends carry the prev/next marker buttons, and they sit *on* the drum
+// rather than beside it: a press there has to be able to mean either "take me to
+// that marker" or "spin from here", or the buttons would cost the scale a third
+// of its width to start a gesture in. Nothing else can tell the two apart — by
+// the time the drum has moved a whole detent it has already tuned, and a thumb
+// that lands and lifts without moving has produced no other evidence at all.
+//
+// Deviation, not net displacement: a swipe out and back would end where it
+// started, and that is emphatically not a tap.
+
+// Farthest a finger may wander and still have been a tap, px. Generous, because
+// this is a thumb on glass and a press that moves nothing at all is rare — but
+// far below a detent (46 px on the frequency drum), so anything that has actually
+// tuned is a spin by definition.
+export const TAP_SLOP_PX = 12;
+
+// Longest a tap may last, ms. A press held longer than this was a hold — most
+// likely a finger parked on the drum to stop a spin, which is a gesture in its
+// own right and must not also jump to a marker.
+export const TAP_MS = 500;
+
+export function isTap(deviationPx, elapsedMs) {
+    return deviationPx <= TAP_SLOP_PX && elapsedMs >= 0 && elapsedMs <= TAP_MS;
+}

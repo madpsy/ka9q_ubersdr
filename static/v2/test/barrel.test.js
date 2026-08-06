@@ -7,8 +7,8 @@
 
 const assert = require('assert');
 const {
-    clampSpeed, decayVelocity, flingVelocity, settleOffset, spinDistance, takeDetents,
-    FLING_WINDOW_MS, FRICTION, MAX_DT, MAX_SPEED, STOP_SPEED,
+    clampSpeed, decayVelocity, flingVelocity, isTap, settleOffset, spinDistance, takeDetents,
+    FLING_WINDOW_MS, FRICTION, MAX_DT, MAX_SPEED, STOP_SPEED, TAP_MS, TAP_SLOP_PX,
 } = require('./.build/barrel.cjs');
 
 let pass = 0;
@@ -156,6 +156,42 @@ t('settling never crosses a detent of its own', () => {
         assert.ok(next * rest >= 0, 'must not overshoot past zero');
         rest = next;
     }
+});
+
+// --- tap or spin -------------------------------------------------------------
+//
+// The prev/next marker buttons sit on the ends of the drum and take none of its
+// width, so every press there is both a possible jump and a possible spin until
+// it is released. Getting this wrong is a control that either tunes when you
+// meant to skip or skips when you meant to tune.
+
+t('a press that goes nowhere is a tap', () => {
+    assert.ok(isTap(0, 40));
+    // A thumb on glass is never quite still, and a press that had to be perfect
+    // would fail for half the people using it.
+    assert.ok(isTap(4, 120));
+});
+
+t('a spin is not a tap, however short', () => {
+    assert.ok(!isTap(TAP_SLOP_PX + 1, 30));
+    assert.ok(!isTap(200, 60), 'a flick');
+});
+
+t('the slop is well inside a detent, so anything that tuned is a spin', () => {
+    // The frequency drum's detent is 46 px (FREQ_DETENT). A gesture that has
+    // crossed one has already tuned, and must never also step to a marker.
+    assert.ok(TAP_SLOP_PX < 46 / 2, `slop ${TAP_SLOP_PX} is too close to a detent`);
+});
+
+t('a hold is not a tap — it is how a spinning drum is caught', () => {
+    assert.ok(!isTap(0, TAP_MS + 1));
+    assert.ok(!isTap(2, 4000), 'a finger parked on the drum');
+});
+
+t('a clock that ran backwards is not a tap either', () => {
+    // Belt and braces: timeStamp origins have been known to disagree between the
+    // event and performance.now(), and a negative elapsed must not read as fast.
+    assert.ok(!isTap(0, -5));
 });
 
 console.log(`\n${pass} passed`);

@@ -66,6 +66,17 @@ export default function MarkerNavPanel({ minimal }) {
 
     const step = (m) => stepToMarker(radio.actions, m);
 
+    // Why a step button is dead, which is two different reasons. Deselecting
+    // every kind turns stepping off — the Multipad's barrel edges take
+    // themselves away at that point, because there they were occupying the drum;
+    // here the row stays, because a panel whose top half came and went with a
+    // setting reads as broken, and two dashes with a tooltip do not.
+    const why = (m, below) => {
+        if (m) return `${m.name || 'Marker'} — ${formatFreqShort(m.freq)}`;
+        if (!types.length) return 'No marker kinds selected to step between';
+        return below ? 'Nothing below the dial' : 'Nothing above the dial';
+    };
+
     return (
         <div className="stack">
             <div className="mnav">
@@ -73,9 +84,7 @@ export default function MarkerNavPanel({ minimal }) {
                     type="button"
                     className="mnav__step"
                     disabled={!markers.prev}
-                    title={markers.prev
-                        ? `${markers.prev.name || 'Marker'} — ${formatFreqShort(markers.prev.freq)}`
-                        : 'Nothing below the dial'}
+                    title={why(markers.prev, true)}
                     onClick={() => step(markers.prev)}
                 >
                     <Icon.ChevronLeft size={14} />
@@ -95,9 +104,7 @@ export default function MarkerNavPanel({ minimal }) {
                     type="button"
                     className="mnav__step mnav__step--next"
                     disabled={!markers.next}
-                    title={markers.next
-                        ? `${markers.next.name || 'Marker'} — ${formatFreqShort(markers.next.freq)}`
-                        : 'Nothing above the dial'}
+                    title={why(markers.next, false)}
                     onClick={() => step(markers.next)}
                 >
                     {countryOf(markers.next) && (
@@ -143,7 +150,10 @@ export default function MarkerNavPanel({ minimal }) {
                     )}
                 </div>
             ) : (
-                <Empty>Nothing on this frequency</Empty>
+                /* With every kind deselected nothing is being collected, so this
+                   line cannot claim the frequency is bare — there may well be a
+                   spot on it, and the panel has simply been told not to look. */
+                <Empty>{types.length ? 'Nothing on this frequency' : 'No marker kinds selected'}</Empty>
             )}
 
             {/* Who they are and where — the country is not repeated here,

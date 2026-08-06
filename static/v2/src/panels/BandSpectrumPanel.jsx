@@ -184,6 +184,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
+    const clipRef = useRef(null);
     // What the pointer is over, or null. State rather than a ref: it is drawn as
     // DOM, and it changes at pointer speed rather than frame speed.
     const [at, setAt] = useState(null);
@@ -224,6 +225,8 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         period: 250, lastAt: 0,
         // Bytes since the throughput was last read.
         bytes: 0,
+        // Where the pointer is resting, so the readout can follow the data.
+        ptr: null,
         // The trace, in pixels rather than bins — the main pane's arrangement,
         // so the same smoothing and peak hold work on it.
         px: null, smoothed: null, peak: null, peakAt: 0,
@@ -323,12 +326,18 @@ function BandChart({ band, meta, prefs, display, onRate }) {
             if (st.dirty) {
                 st.dirty = false;
                 draw(st, specRef.current, wfRef.current);
+                // A frame has landed: whatever the pointer is resting on now
+                // says something different from what it said before.
+                if (st.ptr) {
+                    const v = compute(st.ptr);
+                    if (v) setAt(v);
+                }
             }
             raf = requestAnimationFrame(loop);
         };
         raf = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(raf);
-    }, [st]);
+    }, [compute, st]);
 
     // ── Hover readout ────────────────────────────────────────────────────────
     //
@@ -336,30 +345,36 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     // trace that is the live frame, over the waterfall it is the stored row
     // under the pointer, which is a measurement from a minute ago rather than
     // one reconstructed from a colour.
-    const read = useCallback((e) => {
+    // The readout for a point on screen. Separate from the pointer handler
+    // because it is wanted twice: when the pointer moves, and when a frame
+    // arrives under a pointer that has not — a spectrum whose numbers are from
+    // whenever you last twitched the mouse is not a live readout.
+    const compute = useCallback((pt) => {
         const wrap = wrapRef.current;
         const spec = specRef.current;
-        if (!wrap || !spec || !st.bins) return;
+        if (!wrap || !spec || !st.bins || !pt) return null;
         const r = wrap.getBoundingClientRect();
-        if (!r.width || !r.height) return;
+        if (!r.width || !r.height) return null;
 
-        const xFrac = (e.clientX - r.left) / r.width;
+        const xFrac = (pt.x - r.left) / r.width;
         const xPct = Math.min(100, Math.max(0, xFrac * 100));
-        const yPct = Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100));
+        const yPct = Math.min(100, Math.max(0, ((pt.y - r.top) / r.height) * 100));
 
         const hz = hzAt(meta, xFrac);
         const bin = binAt(st.bins.length, xFrac);
 
-        // Which canvas the pointer is on, by its own box rather than by the
+        // Which pane the pointer is on, by its own box rather than by the
         // fraction — the two are not the same height.
-        const specBox = spec.getBoundingClientRect();
-        const overWf = e.clientY > specBox.bottom;
+        const overWf = pt.y > spec.getBoundingClientRect().bottom;
 
         let db = dbFromByte(st.bins[bin]);
         let age = null;
         if (overWf) {
-            const wfBox = wfRef.current ? wfRef.current.getBoundingClientRect() : null;
-            const yf = wfBox && wfBox.height ? (e.clientY - wfBox.top) / wfBox.height : 0;
+            // The clip box, not the canvas: the canvas is sliding within it,
+            // and measuring against a moving box would step the reading a row
+            // back and forth as the scroll animates.
+            const clip = clipRef.current ? clipRef.current.getBoundingClientRect() : null;
+            const yf = clip && clip.height ? (pt.y - clip.top) / clip.height : 0;
             const idx = rowAt(st.rows.length, yf, Math.floor(st.ringH / st.rowH) || 1);
             if (idx >= 0 && st.rows[idx] && bin < st.rows[idx].length) {
                 db = st.rows[idx][bin];
@@ -367,19 +382,29 @@ function BandChart({ band, meta, prefs, display, onRate }) {
             }
         }
 
-        setAt({
+        return {
             freq: formatMHz(hz),
             db: formatDb(db),
             age: age === null ? null : formatAgeSec(age / 1000),
             xPct,
             yPct,
-            ...tipPlacement(e.pointerType, xPct, yPct),
-        });
+            ...tipPlacement(pt.type, xPct, yPct),
+        };
     }, [meta, st]);
 
+    const read = useCallback((e) => {
+        // Kept so the readout can be recomputed against the next frame without
+        // the pointer having to move.
+        st.ptr = { x: e.clientX, y: e.clientY, type: e.pointerType };
+        const v = compute(st.ptr);
+        if (v) setAt(v);
+    }, [compute, st]);
+
     const leave = useCallback((e) => {
-        if (readoutClearsOn(e.pointerType)) setAt(null);
-    }, []);
+        if (!readoutClearsOn(e.pointerType)) return;
+        st.ptr = null;
+        setAt(null);
+    }, [st]);
 
     // Canvas pixels follow the box and the display density, so the trace is a
     // hairline on a phone as on a monitor.
@@ -456,7 +481,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
 
             {/* The clip for the waterfall's overhang — the canvas is taller
                 than this box and slides within it. */}
-            <div className="bsp__wfclip" style={{ height: `${wfCss}px` }}>
+            <div className="bsp__wfclip" ref={clipRef} style={{ height: `${wfCss}px` }}>
                 <canvas className="bsp__wf" ref={wfRef} />
             </div>
             {at && (

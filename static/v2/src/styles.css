@@ -2079,9 +2079,17 @@ a.btn { text-decoration: none; }
     font-size: calc(11px * var(--ui-scale));
     color: var(--text-dim);
 }
-/* A select in a pad row takes the space a slider would, so the rows line up
-   whatever control is in them. */
-.pad-row__select { flex: 1; min-width: 0; padding: 3px 6px; }
+/* The zoom drum and the NR dropdown on one line. The drum takes what is left,
+   and keeps its own height — the select sits centred against it. */
+.pad__zoomrow { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.pad__zoomrow > .barrel { flex: 1; min-width: 0; }
+.pad__nr {
+    flex: none;
+    width: auto;
+    padding: 2px 6px;
+    font-size: calc(11px * var(--ui-scale));
+    font-family: var(--mono);
+}
 .pad-row .slider, .pad-row .slider-wrap { flex: 1; min-width: 0; }
 
 /* Eight modes on one row, down to a 320 px handset. The room comes out of the

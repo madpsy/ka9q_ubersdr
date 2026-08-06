@@ -280,43 +280,46 @@ function ZoomWheel() {
 //
 // The Audio panel has the whole of it — the switch, the filter chips and each
 // filter's parameters — and this is not a second copy. It is the one question
-// worth a row on a pad: NR is the thing you reach for the moment a signal gets
+// worth a place on a pad: NR is the thing you reach for the moment a signal gets
 // hard to hear, which is the same moment you are working the dial, and going to
 // another panel for it means taking your hand off the barrel.
 //
-// Off is an option in the list rather than a switch beside it, because "which
-// filter" and "any filter at all" are one choice from where you are sitting.
-// Turning it off keeps the filter that was chosen, so turning it back on
-// returns to it — that is what setDsp(dsp.filter, false) does.
+// Beside the zoom drum rather than on a line of its own, because a line costs
+// as much height here as a barrel and this is one dropdown. It is in the
+// minimal view for the same reason the barrels are: at the size a pad gets cut
+// down to, this is still a control with nowhere better to be.
+//
+// Off is an option in the list rather than a switch beside it — "which filter"
+// and "any filter at all" are one choice from where you are sitting — and it
+// reads "NR Off", so the closed dropdown says what it is without a label taking
+// a third of the row. Turning it off keeps the filter that was chosen, so
+// turning it back on returns to it.
 //
 // Absent entirely when the receiver has no filters to offer, rather than a
-// disabled row promising something that is not there.
-function NoiseRow() {
+// disabled control promising something that is not there.
+function NoiseSelect() {
     const { dsp, actions, running } = useRadio();
     if (!running || !dsp.schemas || dsp.schemas.length === 0) return null;
 
-    const value = dsp.enabled ? dsp.filter : 'off';
     return (
-        <PadRow label="NR" value={dsp.enabled ? 'on' : 'off'}>
-            <select
-                className="select pad-row__select"
-                value={value}
-                onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === 'off') actions.setDsp(dsp.filter, false);
-                    else actions.setDsp(v, true);
-                }}
-                title="Noise reduction filter"
-                aria-label="Noise reduction"
-            >
-                <option value="off">Off</option>
-                {dsp.schemas.map((f) => (
-                    <option key={f.name} value={f.name} title={f.description || f.name}>
-                        {f.name.toUpperCase()}
-                    </option>
-                ))}
-            </select>
-        </PadRow>
+        <select
+            className="select pad__nr"
+            value={dsp.enabled ? dsp.filter : 'off'}
+            onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'off') actions.setDsp(dsp.filter, false);
+                else actions.setDsp(v, true);
+            }}
+            title="Noise reduction"
+            aria-label="Noise reduction"
+        >
+            <option value="off">NR Off</option>
+            {dsp.schemas.map((f) => (
+                <option key={f.name} value={f.name} title={f.description || f.name}>
+                    {f.name.toUpperCase()}
+                </option>
+            ))}
+        </select>
     );
 }
 
@@ -453,13 +456,17 @@ export default function MultipadPanel({ minimal }) {
     return (
         <div className="stack stack--tight pad">
             <FreqWheel />
-            <ZoomWheel />
+
+            {/* The zoom drum and the NR dropdown share a line: the drum takes
+                what is left after the dropdown, which is as wide as its widest
+                filter name. */}
+            <div className="pad__zoomrow">
+                <ZoomWheel />
+                <NoiseSelect />
+            </div>
 
             {!minimal && (
                 <>
-                    {/* Straight after the barrels: the hand is already here. */}
-                    <NoiseRow />
-
                     <ViewRow />
 
                     {/* The Receiver panel's own mode control, not a second one

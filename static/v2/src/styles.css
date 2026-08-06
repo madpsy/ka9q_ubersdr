@@ -3322,20 +3322,6 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 .sgram-zoom__head strong { color: var(--text); font-size: calc(12px * var(--ui-scale)); }
-/* Pushed to the end, monospaced, and a fixed width whether or not it has
-   anything in it. Monospaced because it updates as the pointer moves and a
-   proportional font would shuffle the row along with every digit; fixed width
-   because appearing and disappearing content in this row resizes the modal.
-   26ch covers "14.0740 MHz · 09:37 UTC" with slack — small enough that it is
-   never what decides how wide the modal is. */
-.sgram-zoom__read {
-    margin-left: auto;
-    min-width: 26ch;
-    text-align: right;
-    font-family: var(--mono);
-    color: var(--text-dim);
-    white-space: nowrap;
-}
 
 /* The plot proper: time gutter, then the image. The frequency axis below is a
    sibling with the same left inset, so the two axes meet at the image corner. */

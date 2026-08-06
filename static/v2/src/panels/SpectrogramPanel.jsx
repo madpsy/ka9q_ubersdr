@@ -210,26 +210,13 @@ function SpectrogramModal({ band, range, minute, tzOffset, onClose }) {
                     <strong>{band === 'wideband-hf' ? 'Wideband HF' : band}</strong>
                     {range && <span>{range}</span>}
                     <span>rolling 24 hours, one row per minute, {tzTag}</span>
-                    {/* The readout at a fixed place, so it can be read without
-                        following the pointer around.
-
-                        Always rendered, empty when nothing is under the pointer,
-                        and holding its width in the CSS: a nowrap string that
-                        *arrives* in a flex header widens the header's content,
-                        which widens the modal — the picture resizing under the
-                        pointer that was pointing at it. The space is reserved
-                        whether or not there is anything to put in it.
-
-                        Frequency and time only, not the age and not the zone
-                        tag: those two are a constant width for a given view (the
-                        decimals are fixed by the bin size), where "23 h 59 min
-                        ago" against "now" is not, and "UTC+5:30" against "UTC"
-                        is not either. The zone is stated one span to the left,
-                        and the age is on the tip by the cursor — which is
-                        absolutely positioned and can grow as it likes. */}
-                    <span className="sgram-zoom__read">
-                        {at ? `${at.freq} · ${at.time}` : ''}
-                    </span>
+                    {/* Nothing that follows the pointer belongs in this row.
+                        The readout lived here for a while and was wrong twice
+                        over: appearing on hover it widened the modal, and with
+                        its width reserved it threw the rest of the row out of
+                        alignment. It is on the tip by the cursor, which is
+                        absolutely positioned and answers where you are looking
+                        rather than where there happened to be room. */}
                 </div>
 
                 <div className="sgram-zoom__plot">

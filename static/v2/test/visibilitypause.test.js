@@ -167,4 +167,48 @@ t('switching away and back repeatedly settles either way, never half way', () =>
     assert.strictEqual(r.state.open, true, 'never left closed');
 });
 
+// --- the default clock ------------------------------------------------------
+
+t('the default clock is called the way the host expects', () => {
+    // Every test above injects a clock, so none of them touches the default —
+    // and the default is where this broke. `{ set: setTimeout }` called as
+    // `timers.set(...)` passes the holder object as `this`, and window.setTimeout
+    // is a Window method: Chrome throws "Illegal invocation", out through the
+    // visibilitychange handler, and nothing is ever scheduled. Node's setTimeout
+    // ignores `this` entirely, so the suite stayed green while the feature did
+    // not work in a single browser.
+    //
+    // So: make Node care. A plain call is `this === undefined` under a module's
+    // strict mode, which is what the browser accepts; anything else is what it
+    // does not.
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const guard = (name, real) => function guarded(...args) {
+        if (this !== undefined && this !== globalThis) {
+            throw new TypeError(`Illegal invocation: ${name} called on ${typeof this}`);
+        }
+        return real.apply(globalThis, args);
+    };
+
+    globalThis.setTimeout = guard('setTimeout', realSet);
+    globalThis.clearTimeout = guard('clearTimeout', realClear);
+    try {
+        let hidden = true;
+        const p = visibilityPause({
+            delayMs: 60000,             // long: this must not actually fire
+            isHidden: () => hidden,
+            isOpen: () => true,
+            suspend: () => {},
+            resume: () => {},
+        });
+        p.changed();                    // schedules — the throwing call
+        hidden = false;
+        p.changed();                    // cancels — the other one
+        p.stop();
+    } finally {
+        globalThis.setTimeout = realSet;
+        globalThis.clearTimeout = realClear;
+    }
+});
+
 console.log(`\n${pass} ok`);

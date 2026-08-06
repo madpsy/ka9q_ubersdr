@@ -57,8 +57,26 @@ function useHeadGesture(enabled, minimal, toggle) {
 
     const onPointerDown = useCallback((e) => {
         // The buttons on the bar are their own gesture. Without this a tap on
-        // Close would land here too and toggle the panel on its way out.
+        // Close would land here too and toggle the panel on its way out — and
+        // the preventDefault below would stop the button ever seeing its click.
         if (e.target.closest && e.target.closest('button')) return;
+        // No compatibility mouse events for this touch.
+        //
+        // A touch produces a delayed mousedown/mouseup/click after it ends, and
+        // those are hit-tested against the DOM *as it is then* rather than
+        // retargeted the way the pointer events are — pointer capture does not
+        // cover them. This gesture's whole job is to resize the sheet, so by the
+        // time that click is dispatched the bar has moved and something else is
+        // under the finger: expanding the Multipad grew the sheet upwards until
+        // the view row sat where the title bar had been, and a tap in the middle
+        // of the bar came back as a tap on "Spectrum". Shrinking is worse — the
+        // sheet moves down, the click lands on the spectrum behind it and
+        // retunes the receiver.
+        //
+        // Cancelling the pointerdown suppresses the whole compatibility
+        // sequence, which is exactly the sequence that has nowhere valid to
+        // land. The bar has no click behaviour of its own to lose.
+        e.preventDefault();
         at.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
         // Captured so a drag that leaves the bar — which a downward one does
         // almost immediately — still ends here rather than being lost.

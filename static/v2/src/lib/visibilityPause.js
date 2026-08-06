@@ -31,7 +31,14 @@
  */
 export function visibilityPause({
     delayMs, isHidden, isOpen, suspend, resume,
-    timers = { set: setTimeout, clear: clearTimeout },
+    // Wrapped, not `{ set: setTimeout }`. Storing the browser's setTimeout as a
+    // property and calling it as `timers.set(…)` passes this object as `this`,
+    // and window.setTimeout is a Window method: Chrome answers that with
+    // "Illegal invocation" and throws out of the visibilitychange handler, so
+    // nothing is ever scheduled and the socket runs on untouched. Node's
+    // setTimeout does not care about `this` at all, which is why the tests were
+    // green the whole time it was broken in every browser.
+    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) },
 }) {
     let timer = 0;
     let held = false;

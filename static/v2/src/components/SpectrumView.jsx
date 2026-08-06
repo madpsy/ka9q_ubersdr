@@ -1353,6 +1353,17 @@ export default function SpectrumView() {
                         <ClipTag />
                     </div>
                     <div className="spectrum__tools">
+                        {/* Zoom first, and first because it is the pair that
+                            gets pressed: everything after it is a setting about
+                            how zooming behaves, or a one-off. Putting the two
+                            that are used constantly at the near end of the row
+                            also keeps them from moving — the wheel and anchor
+                            buttons come and go with the mobile breakpoint and
+                            with the wheel's own mode, which shifted the zoom
+                            pair sideways underneath a pointer that was already
+                            aiming at it. */}
+                        <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
+                        <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
                         {/* What the wheel does over the spectrum, mirroring the
                             Display panel's setting. Not on mobile: there is no
                             wheel there, and the row has no space to spare for a
@@ -1391,8 +1402,6 @@ export default function SpectrumView() {
                                 onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
                             />
                         )}
-                        <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
-                        <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
                         <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                         <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
                     </div>

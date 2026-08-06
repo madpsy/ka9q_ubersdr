@@ -377,25 +377,27 @@ export default function DisplayPanel() {
                 away" is the actual question, and the old switch answered it with
                 a number the panel could only describe. `null` is not an option
                 of its own — it resolves to this device's default and shows as
-                that, so the control always reads as the delay in force. */}
+                that, so the control always reads as the delay in force.
+
+                A dropdown rather than a row of chips: five options is more than
+                a segmented control holds at this width without abbreviating them
+                to "2m", and a delay is a thing you set once and forget rather
+                than something worth a permanent row. */}
             <Field
                 label="Slow down when idle"
                 hint={d.idleThrottleMin == null ? 'default for this device' : undefined}
-                inline
             >
-                <Segmented
-                    size="sm"
-                    minItemWidth={34}
+                <select
+                    className="select"
                     value={String(throttleMinutes(d.idleThrottleMin, mobile))}
-                    onChange={(v) => d.set({ idleThrottleMin: Number(v) })}
-                    options={THROTTLE_CHOICES.map((m) => ({
-                        value: String(m),
-                        label: m === 0 ? 'Never' : `${m}m`,
-                        title: m === 0
-                            ? 'Always poll at the full rate'
-                            : `Halve the spectrum rate after ${m} minutes of no input`,
-                    }))}
-                />
+                    onChange={(e) => d.set({ idleThrottleMin: Number(e.target.value) })}
+                >
+                    {THROTTLE_CHOICES.map((m) => (
+                        <option key={m} value={String(m)}>
+                            {m === 0 ? 'Never' : `After ${m} minutes`}
+                        </option>
+                    ))}
+                </select>
             </Field>
             <div className="note note--tight">
                 Asks the server to poll the spectrum at half rate after this long with no

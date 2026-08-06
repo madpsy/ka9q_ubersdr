@@ -937,23 +937,21 @@ t('every palette names a dial and a passband colour', () => {
     }
 });
 
-t('marker colours resolve browser over operator over palette', () => {
+t('marker colours resolve browser over palette', () => {
     const marks = paletteMarks('classic');
     const base = { palette: 'classic', server: {} };
 
-    // Nothing chosen anywhere: the palette's own pair.
+    // Nothing chosen: the palette's own pair.
     assert.deepStrictEqual(markColors(base), { dial: marks.vfo, edge: marks.edge });
 
-    // The operator's v1 setting takes the passband, and only the passband —
-    // there is no dial equivalent in /api/ui-config.
-    const withOp = { ...base, server: { bandwidthColorName: 'cyan' } };
-    assert.deepStrictEqual(markColors(withOp),
-        { dial: marks.vfo, edge: 'rgba(0, 255, 255, 1)' });
-
-    // This browser wins over both.
+    // This browser's picker wins, per mark.
     assert.deepStrictEqual(
-        markColors({ ...withOp, markOverrides: { classic: { dial: '#123456', edge: '#abcdef' } } }),
+        markColors({ ...base, markOverrides: { classic: { dial: '#123456', edge: '#abcdef' } } }),
         { dial: '#123456', edge: '#abcdef' },
+    );
+    assert.deepStrictEqual(
+        markColors({ ...base, markOverrides: { classic: { edge: '#abcdef' } } }),
+        { dial: marks.vfo, edge: '#abcdef' },
     );
 });
 
@@ -965,16 +963,26 @@ t('an override belongs to the palette it was picked for', () => {
     assert.strictEqual(markColors({ ...over, palette: 'magma' }).dial, paletteMarks('magma').vfo);
 });
 
-t('an operator who set no passband colour falls through to the palette', () => {
-    // Parsed as empty rather than as v1's default green: "not set" has to be
-    // distinguishable from "chose green", or green would be pinned onto every
-    // palette whether it suits the colour map or not.
-    assert.strictEqual(parseUiConfig({}).bandwidthColorName, '');
-    assert.strictEqual(parseUiConfig(UI_SAMPLE).bandwidthColorName, 'green');
-    assert.strictEqual(
-        markColors({ palette: 'inferno', server: parseUiConfig({}) }).edge,
-        paletteMarks('inferno').edge,
-    );
+t("the operator's v1 bandwidth colour does not override the palette", () => {
+    // The regression this exists for: /api/ui-config always carries
+    // bandwidth_indicator_color, because the server substitutes "green" when the
+    // operator set nothing. Treated as a source it therefore won every time, and
+    // every palette drew green passband edges — radar included, where green is
+    // the one hue the colour map is made of.
+    //
+    // It is v1's first-run seed for a per-user setting, not a mandate, and v2's
+    // equivalent of that setting is the per-palette picker.
+    for (const name of PALETTE_NAMES) {
+        const d = { palette: name, server: parseUiConfig(UI_SAMPLE) };
+        assert.strictEqual(UI_SAMPLE.bandwidth_indicator_color, 'green', 'the sample still says green');
+        assert.deepStrictEqual(markColors(d), {
+            dial: paletteMarks(name).vfo,
+            edge: paletteMarks(name).edge,
+        }, name);
+    }
+    // And most palettes do not answer green, which is the whole point.
+    const greens = PALETTE_NAMES.filter((n) => paletteMarks(n).edge.toLowerCase() === '#00ff00');
+    assert.strictEqual(greens.length, 0, `still fixed on green: ${greens}`);
 });
 
 t('opacity is clamped and survives odd values', () => {

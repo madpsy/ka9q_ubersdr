@@ -440,12 +440,21 @@ band is part guesswork, and which part matters.
   2-on/4-off dash, which read on the spectrum's flat background and disappeared
   over a busy waterfall; they are now full strength and the hierarchy against the
   dial is carried by dash and weight instead. `markColors()` in
-  `display/uiConfig.js` resolves the three sources — this browser's override,
-  then the operator's `bandwidth_indicator_color` (which v1 honours too, so the
-  frontends agree), then the palette. The Display panel's pickers sit directly
-  under the palette grid and **save per palette**: a magenta dial picked to beat
-  classic's blues is the worst possible choice over magma, so one global override
-  would have to be re-picked on every palette change.
+  `display/uiConfig.js` resolves two sources — this browser's override, then the
+  palette. The Display panel's pickers sit directly under the palette grid and
+  **save per palette**: a magenta dial picked to beat classic's blues is the
+  worst possible choice over magma, so one global override would have to be
+  re-picked on every palette change.
+
+  `bandwidth_indicator_color` from `/api/ui-config` is deliberately *not* a third
+  source, though it looks like one. The server substitutes `"green"` when the
+  operator has set nothing (`ui_config_api.go`), so "not chosen" and "chose
+  green" arrive identically — treated as a source it wins every time, and every
+  palette drew green edges, radar included, where green is the one hue the map is
+  made of. It is not a mandate either: v1 reads it once to seed localStorage on
+  first run (`ui-config.js`), after which its own colour menu writes over it. It
+  is the first-run default for a per-user setting, and v2's version of that
+  setting is the per-palette picker.
 * **Haptics are delegated, not wired up per control.** `HapticWatch` puts one
   capture-phase `pointerdown` listener on the document and asks
   `lib/haptics.js: hapticKindFor` what the element under the finger is worth — a

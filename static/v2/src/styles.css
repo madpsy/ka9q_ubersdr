@@ -3306,6 +3306,37 @@ a.btn { text-decoration: none; }
 .bsp__tick--end { right: 3px; }
 .bsp__tick--center { transform: translateX(-50%); }
 
+/* On-chart controls, only while zoomed. Ghosted until the pointer is over the
+   chart: they sit on the picture, and three buttons at full strength over a
+   small waterfall read as chrome rather than as controls you reach for. */
+.bsp__nav, .bsp__reset {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.55);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.45;
+    transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.bsp__chart:hover .bsp__nav,
+.bsp__chart:hover .bsp__reset { opacity: 1; }
+.bsp__nav:hover, .bsp__reset:hover { color: var(--text); border-color: var(--accent); }
+/* Big enough for a fingertip, and clear of the frequency strip in the middle. */
+.bsp__nav { top: 26%; width: 26px; height: 34px; }
+.bsp__nav--left { left: 4px; }
+.bsp__nav--right { right: 4px; }
+.bsp__reset { top: 4px; right: 4px; width: 24px; height: 24px; }
+
+/* Vertical page scrolling still works with a finger on the chart; a pinch and a
+   horizontal drag belong to the zoom. */
+.bsp__chart { touch-action: pan-y; }
+
 /* Hover readout. The line spans both canvases, because a frequency is a
    frequency whether you are reading it off the trace or off the waterfall. */
 .bsp__chart { position: relative; }

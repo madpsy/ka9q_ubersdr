@@ -391,3 +391,74 @@ export function scaleTicks(meta, widthPx) {
         align: i === 0 ? 'start' : i === n - 1 ? 'end' : 'center',
     }));
 }
+
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+//
+// The window on the band, as a pair of fractions of it. band_activity.html's
+// numbers: a wheel notch is 1.4×, and the tightest window is a hundredth of the
+// band — 2 kHz of 40m, four bins of a 400-bin recorder, which is as far in as
+// there is anything to see.
+
+export const ZOOM_FACTOR = 1.4;
+export const ZOOM_MIN_SPAN = 0.01;
+export const FULL_ZOOM = { start: 0, end: 1 };
+
+export function isZoomed(z) {
+    return !!z && (z.end - z.start) < 0.999;
+}
+
+// Clamp a window to the band, keeping its width — a pan that runs off the end
+// stops there rather than shrinking.
+function settle(start, end) {
+    let s = start;
+    let e = end;
+    if (s < 0) { e -= s; s = 0; }
+    if (e > 1) { s -= (e - 1); e = 1; }
+    return { start: Math.max(0, s), end: Math.min(1, e) };
+}
+
+// Zoom about a point, `at` being where it is in the *current* window (0–1). The
+// frequency under that point does not move, which is what makes a wheel over a
+// signal feel like it is pulling that signal closer rather than scrolling past.
+export function zoomAt(z, at, factor) {
+    const span = z.end - z.start;
+    const next = Math.min(1, Math.max(ZOOM_MIN_SPAN, span / factor));
+    const a = Math.min(1, Math.max(0, at));
+    const anchor = z.start + a * span;      // the frequency that must not move
+    const start = anchor - a * next;
+    return settle(start, start + next);
+}
+
+// Shift the window by a fraction of *its own* width, so a step moves the same
+// distance on screen however far in you are.
+export function panByFraction(z, byWidths) {
+    const span = z.end - z.start;
+    const d = byWidths * span;
+    return settle(z.start + d, z.end + d);
+}
+
+// Where the window sits in the band, in Hz.
+export function zoomHz(meta, z) {
+    const start = (meta && meta.start) || 0;
+    const span = ((meta && meta.end) || 0) - start;
+    return { start: start + z.start * span, end: start + z.end * span };
+}
+
+// The bins the window covers, as an inclusive range.
+export function zoomBins(binCount, z) {
+    if (!binCount) return { first: 0, last: 0, count: 0 };
+    const first = Math.max(0, Math.min(binCount - 1, Math.round(z.start * (binCount - 1))));
+    const last = Math.max(first + 1, Math.min(binCount - 1, Math.round(z.end * (binCount - 1))));
+    return { first, last, count: last - first + 1 };
+}
+
+// A point in the window, back to a fraction of the whole band — and the reverse,
+// for placing something whose position is known in band terms (the FT8 window).
+export function bandFrac(z, viewFrac) {
+    return z.start + viewFrac * (z.end - z.start);
+}
+
+export function viewFrac(z, frac) {
+    const span = z.end - z.start;
+    return span > 0 ? (frac - z.start) / span : 0;
+}

@@ -17,6 +17,8 @@ const {
     decodeFrame, formatAgeSec, formatDb, formatMHz, fracOfHz, ft8Window, hzAt, rangeOf,
     rowAt, savedPrefs, scaleDecimals, scaleTickCount, scaleTicks, updateAutoRange,
     validValues, SCALE_LABEL_PX, SCALE_MAX_TICKS,
+    FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, isZoomed, panByFraction, viewFrac,
+    zoomAt, zoomBins, zoomHz,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 
@@ -382,6 +384,96 @@ t('a band with no span at all gets no strip', () => {
     assert.deepStrictEqual(scaleTicks({ start: 7e6, end: 7e6 }, 300), []);
     assert.deepStrictEqual(scaleTicks(null, 300), []);
     assert.strictEqual(scaleDecimals([7e6, 7e6]), 5);
+});
+
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+
+const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
+
+t('the whole band is not a zoom', () => {
+    assert.strictEqual(isZoomed(FULL_ZOOM), false);
+    assert.strictEqual(isZoomed(zoomAt(FULL_ZOOM, 0.5, ZOOM_FACTOR)), true);
+    assert.strictEqual(isZoomed(null), false);
+});
+
+t('the frequency under the pointer does not move', () => {
+    // The whole point of zooming about a point: rolling the wheel over a signal
+    // pulls that signal closer instead of scrolling the band past it.
+    const meta = { start: 7000000, end: 7200000 };
+    for (const at of [0.1, 0.25, 0.5, 0.9]) {
+        let z = FULL_ZOOM;
+        const before = zoomHz(meta, z);
+        const hz = before.start + at * (before.end - before.start);
+        for (let i = 0; i < 3; i++) {
+            z = zoomAt(z, at, ZOOM_FACTOR);
+            const w = zoomHz(meta, z);
+            near(w.start + at * (w.end - w.start), hz, 1e-6);
+        }
+    }
+});
+
+t('zooming at an edge stays inside the band', () => {
+    let z = FULL_ZOOM;
+    for (let i = 0; i < 20; i++) z = zoomAt(z, 0, ZOOM_FACTOR);
+    assert.ok(z.start >= 0 && z.end <= 1, `${z.start}-${z.end}`);
+    assert.strictEqual(z.start, 0, 'zooming at the left edge stays pinned to it');
+
+    let y = FULL_ZOOM;
+    for (let i = 0; i < 20; i++) y = zoomAt(y, 1, ZOOM_FACTOR);
+    assert.strictEqual(y.end, 1);
+});
+
+t('there is a limit to how far in it goes, and back out is the whole band', () => {
+    let z = FULL_ZOOM;
+    for (let i = 0; i < 50; i++) z = zoomAt(z, 0.5, ZOOM_FACTOR);
+    near(z.end - z.start, ZOOM_MIN_SPAN);
+    for (let i = 0; i < 50; i++) z = zoomAt(z, 0.5, 1 / ZOOM_FACTOR);
+    assert.deepStrictEqual(z, { start: 0, end: 1 });
+});
+
+t('a pan moves by the same distance on screen however far in you are', () => {
+    // Zoomed enough that a quarter-width step has room either side of it — a
+    // window that is already against an edge is the next test's business.
+    for (const factor of [ZOOM_FACTOR ** 2, ZOOM_FACTOR ** 3]) {
+        const z = zoomAt(FULL_ZOOM, 0.5, factor);
+        const span = z.end - z.start;
+        const p = panByFraction(z, 0.25);
+        near(p.start - z.start, span * 0.25);
+        near(p.end - p.start, span, 1e-12);       // and keeps its width
+    }
+});
+
+t('a pan that runs off the end stops there rather than shrinking', () => {
+    let z = zoomAt(FULL_ZOOM, 0.5, ZOOM_FACTOR);
+    const span = z.end - z.start;
+    for (let i = 0; i < 20; i++) z = panByFraction(z, 0.25);
+    assert.strictEqual(z.end, 1);
+    near(z.end - z.start, span, 1e-12);
+    for (let i = 0; i < 40; i++) z = panByFraction(z, -0.25);
+    assert.strictEqual(z.start, 0);
+    near(z.end - z.start, span, 1e-12);
+});
+
+t('the window names its own bins, and never fewer than two', () => {
+    const b = zoomBins(400, { start: 0.25, end: 0.5 });
+    assert.strictEqual(b.first, 100);
+    assert.strictEqual(b.last, 200);
+    assert.strictEqual(b.count, 101);
+    // The tightest zoom on a coarse band must still be a range, not a point.
+    const tight = zoomBins(400, { start: 0.5, end: 0.5 + ZOOM_MIN_SPAN });
+    assert.ok(tight.count >= 2, `${tight.count} bins`);
+    assert.deepStrictEqual(zoomBins(0, FULL_ZOOM), { first: 0, last: 0, count: 0 });
+});
+
+t('view and band fractions are each other\'s inverse', () => {
+    const z = panByFraction(zoomAt(FULL_ZOOM, 0.3, ZOOM_FACTOR ** 2), 0.1);
+    for (const f of [0, 0.25, 0.5, 1]) {
+        near(viewFrac(z, bandFrac(z, f)), f);
+    }
+    // A signal outside the window is outside the picture, not clamped onto its
+    // edge — that is what keeps the FT8 marker off screen when it should be.
+    assert.ok(viewFrac(z, 0) < 0 || z.start === 0);
+    assert.ok(viewFrac(z, 1) > 1 || z.end === 1);
 });
 
 console.log(`\n${pass} passed`);

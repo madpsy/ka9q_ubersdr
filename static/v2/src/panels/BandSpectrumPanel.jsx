@@ -22,16 +22,16 @@
 // when a panel has been shrunk to glance at.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Empty, Switch } from '../components/ui.jsx';
+import { Empty, Icon, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { bandForFrequency } from '../lib/bands.js';
 import { getPalette } from '../lib/palettes.js';
 import {
-    AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, binAt, clampDb, configUrl,
-    createAutoRange, dbFromByte, decodeFrame, formatAgeSec, formatDb, formatMHz, ft8Window,
-    hzAt, rangeOf, rowAt, savePrefs, savedPrefs, scaleTicks, streamUrl, updateAutoRange,
-    validValues,
+    AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
+    FULL_ZOOM, ZOOM_FACTOR, createAutoRange, dbFromByte, decodeFrame, formatAgeSec, formatDb,
+    formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, rowAt, savePrefs, savedPrefs,
+    scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins, zoomHz,
 } from '../lib/bandSpectrum.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { formatRate } from '../lib/format.js';
@@ -192,6 +192,9 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     // the waterfall's clip box gets.
     const [width, setWidth] = useState(0);
     const [wfCss, setWfCss] = useState(0);
+    // The window on the band, as fractions of it. Full band by default.
+    const [zoom, setZoom] = useState(FULL_ZOOM);
+    const zoomed = isZoomed(zoom);
 
     // Everything the draw path touches lives in one ref: React state per frame
     // at 4 Hz would re-render the panel forty times a minute for a picture that
@@ -241,6 +244,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     // same ones the main spectrum and waterfall do, so one switch governs both
     // and neither drifts away from the other.
     st.d = display;
+    st.zoom = zoom;
     st.rowH = Math.max(1, Math.round(display.rowHeight || 2));
     st.smooth = display.smoothScroll !== false;
 
@@ -319,6 +323,69 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         };
     }, [band, meta.bin_count, st, onRate]);
 
+    useEffect(() => { st.dirty = true; }, [zoom, st]);
+
+    // ── Zoom and pan ─────────────────────────────────────────────────────────
+    //
+    // A wheel notch zooms about the pointer, so rolling over a signal pulls that
+    // signal closer instead of scrolling the band past it. Two fingers do the
+    // same thing about the point between them.
+    //
+    // The wheel listener is attached by hand rather than with onWheel: React
+    // registers that one passively, and a passive listener cannot stop the page
+    // scrolling underneath the zoom.
+    useEffect(() => {
+        const wrap = wrapRef.current;
+        if (!wrap) return undefined;
+        const onWheel = (e) => {
+            e.preventDefault();
+            const r = wrap.getBoundingClientRect();
+            if (!r.width) return;
+            const at = (e.clientX - r.left) / r.width;
+            setZoom((z) => zoomAt(z, at, e.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR));
+        };
+        wrap.addEventListener('wheel', onWheel, { passive: false });
+        return () => wrap.removeEventListener('wheel', onWheel);
+    }, []);
+
+    // Pinch. Two pointers down and the distance between them is the zoom, the
+    // point between them is what it zooms about — the same gesture as a photo,
+    // and the same anchor rule as the wheel.
+    const pinch = useRef(new Map()).current;
+    const pinchRef = useRef(null);
+
+    const onPointerDown = useCallback((e) => {
+        pinch.set(e.pointerId, e.clientX);
+        if (pinch.size === 2) {
+            const xs = [...pinch.values()];
+            pinchRef.current = { dist: Math.abs(xs[0] - xs[1]) };
+        }
+    }, [pinch]);
+
+    const onPointerUp = useCallback((e) => {
+        pinch.delete(e.pointerId);
+        if (pinch.size < 2) pinchRef.current = null;
+    }, [pinch]);
+
+    const onPinchMove = useCallback((e) => {
+        if (!pinch.has(e.pointerId)) return false;
+        pinch.set(e.pointerId, e.clientX);
+        if (pinch.size !== 2 || !pinchRef.current) return false;
+
+        const wrap = wrapRef.current;
+        const r = wrap ? wrap.getBoundingClientRect() : null;
+        if (!r || !r.width) return true;
+        const xs = [...pinch.values()];
+        const dist = Math.abs(xs[0] - xs[1]);
+        const prev = pinchRef.current.dist;
+        if (dist > 4 && prev > 4) {
+            const at = ((xs[0] + xs[1]) / 2 - r.left) / r.width;
+            setZoom((z) => zoomAt(z, at, dist / prev));
+        }
+        pinchRef.current.dist = dist;
+        return true;                        // a pinch is not a hover
+    }, [pinch]);
+
     // ── Hover readout ────────────────────────────────────────────────────────
     //
     // Frequency from the band's own edges, level from the nearest bin — over the
@@ -340,8 +407,11 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         const xPct = Math.min(100, Math.max(0, xFrac * 100));
         const yPct = Math.min(100, Math.max(0, ((pt.y - r.top) / r.height) * 100));
 
-        const hz = hzAt(meta, xFrac);
-        const bin = binAt(st.bins.length, xFrac);
+        // Frequency across the *visible* window, and the bin under it.
+        const win = zoomHz(meta, st.zoom);
+        const hz = Math.round(win.start + Math.min(1, Math.max(0, xFrac)) * (win.end - win.start));
+        const b = zoomBins(st.bins.length, st.zoom);
+        const bin = Math.min(b.last, b.first + Math.round(Math.min(1, Math.max(0, xFrac)) * (b.count - 1)));
 
         // Which pane the pointer is on, by its own box rather than by the
         // fraction — the two are not the same height.
@@ -373,12 +443,14 @@ function BandChart({ band, meta, prefs, display, onRate }) {
     }, [meta, st]);
 
     const read = useCallback((e) => {
+        // A second finger is a pinch, not a reading.
+        if (onPinchMove(e)) { st.ptr = null; setAt(null); return; }
         // Kept so the readout can be recomputed against the next frame without
         // the pointer having to move.
         st.ptr = { x: e.clientX, y: e.clientY, type: e.pointerType };
         const v = compute(st.ptr);
         if (v) setAt(v);
-    }, [compute, st]);
+    }, [compute, onPinchMove, st]);
 
     const leave = useCallback((e) => {
         if (!readoutClearsOn(e.pointerType)) return;
@@ -453,9 +525,11 @@ function BandChart({ band, meta, prefs, display, onRate }) {
         <div
             className="bsp__chart"
             ref={wrapRef}
-            onPointerDown={read}
+            onPointerDown={(e) => { onPointerDown(e); read(e); }}
             onPointerMove={read}
-            onPointerLeave={leave}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onPointerLeave={(e) => { onPointerUp(e); leave(e); }}
         >
             <canvas className="bsp__spec" ref={specRef} />
 
@@ -463,7 +537,7 @@ function BandChart({ band, meta, prefs, display, onRate }) {
                 equally. No unit: the strip is 14 px tall and "MHz" three times
                 over says nothing the band name has not already. */}
             <div className="bsp__scale">
-                {scaleTicks(meta, width).map((k) => (
+                {scaleTicks(zoomHz(meta, zoom), width).map((k) => (
                     <React.Fragment key={k.hz}>
                         <span
                             className="bsp__notch"
@@ -484,6 +558,41 @@ function BandChart({ band, meta, prefs, display, onRate }) {
             <div className="bsp__wfclip" ref={clipRef} style={{ height: `${wfCss}px` }}>
                 <canvas className="bsp__wf" ref={wfRef} />
             </div>
+            {/* Only while zoomed: at full span there is nowhere to pan and
+                nothing to reset, and three buttons over a small chart would be
+                three things covering the picture for no reason. */}
+            {zoomed && (
+                <>
+                    <button
+                        type="button"
+                        className="bsp__nav bsp__nav--left"
+                        title="Pan left"
+                        aria-label="Pan left"
+                        onClick={() => setZoom((z) => panByFraction(z, -0.25))}
+                    >
+                        <Icon.ChevronLeft size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        className="bsp__nav bsp__nav--right"
+                        title="Pan right"
+                        aria-label="Pan right"
+                        onClick={() => setZoom((z) => panByFraction(z, 0.25))}
+                    >
+                        <Icon.ChevronRight size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        className="bsp__reset"
+                        title="Show the whole band"
+                        aria-label="Reset zoom"
+                        onClick={() => setZoom(FULL_ZOOM)}
+                    >
+                        <Icon.Reset size={13} />
+                    </button>
+                </>
+            )}
+
             {at && (
                 <>
                     <span className="bsp__cross" style={{ left: `${at.xPct}%` }} />
@@ -667,7 +776,11 @@ function drawSpectrum(st, canvas) {
     }
     const dbRow = st.rows.length ? st.rows[st.rows.length - 1] : null;
     if (!dbRow) return;
-    binsToPixels(dbRow, w, st.px);
+    // Only the bins in the window: zooming is not a canvas transform, it is a
+    // smaller slice of the band drawn across the same pixels, so a carrier gets
+    // more of them rather than being magnified.
+    const zb = zoomBins(dbRow.length, st.zoom);
+    binsToPixels(dbRow.subarray(zb.first, zb.last + 1), w, st.px);
 
     // Seconds since the last draw, so the smoothing and the peak decay settle in
     // the same time however often frames arrive.
@@ -710,8 +823,8 @@ function drawSpectrum(st, canvas) {
     // trace, so it reads as a region of the band rather than as data. The main
     // pane has no equivalent: it does not know which band it is looking at.
     if (st.ft8) {
-        const x1 = Math.max(0, st.ft8.start * w);
-        const x2 = Math.min(w, st.ft8.end * w);
+        const x1 = Math.max(0, viewFrac(st.zoom, st.ft8.start) * w);
+        const x2 = Math.min(w, viewFrac(st.zoom, st.ft8.end) * w);
         if (x2 > x1) {
             c.fillStyle = 'rgba(76,175,80,0.12)';
             c.fillRect(x1, 0, Math.max(x2 - x1, 1), h);
@@ -790,8 +903,13 @@ function drawWaterfall(st, canvas) {
     // Newest row sits at the head; time runs downward through increasing
     // indices, wrapping once — so the whole ring is one or two contiguous runs.
     // Shared with the main waterfall; see lib/waterfallRing.js.
+    // The window's columns, stretched across the canvas — the same slice the
+    // trace above is drawn from, so the two stay in step.
+    const rw = st.ring.width;
+    const sx = st.zoom.start * rw;
+    const sw = Math.max(1, (st.zoom.end - st.zoom.start) * rw);
     for (const s2 of ringSlices(st.head, st.ringH, st.ringH)) {
-        c.drawImage(st.ring, 0, s2.sy, st.ring.width, s2.sh, 0, s2.dy, w, s2.sh);
+        c.drawImage(st.ring, sx, s2.sy, sw, s2.sh, 0, s2.dy, w, s2.sh);
     }
 
     // The picture has just moved down a row within the canvas, so putting the

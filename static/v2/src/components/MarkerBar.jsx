@@ -12,6 +12,7 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
+import { getVfos, markableVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { subscribeSpots } from '../lib/spotStore.js';
@@ -56,6 +57,14 @@ const LOCAL_INK = '#ffffff';
 const VOICE_PILL = 'rgba(155, 89, 182, 0.95)';
 const VOICE_INK = '#ffffff';
 
+// The parked VFOs: a colour nothing else in the bar uses, because they are the
+// one marker that is neither something the receiver told us about nor something
+// somebody published — they are places *you* put down and can pick up again.
+// Crimson against the purple of voice activity, which is the nearest hue here.
+const VFO_FILL = 'rgba(233, 30, 99, 0.95)';
+const VFO_INK = '#ffffff';
+const VFO_R = 7;             // radius, a shade over half the pill height
+
 // Spot colours are v1's, so a green pill means the same thing in both
 // frontends: green for DX cluster spots (dx-cluster drawDXSpotsOnSpectrum),
 // cyan for the CW skimmer's (cw-spots drawCWSpotsOnSpectrum). Both take white
@@ -66,7 +75,8 @@ const SPOT_STYLE = {
 };
 
 export default function MarkerBar({ width }) {
-    const { view, actions, catalog, tuning, serverInfo } = useRadio();
+    const radio = useRadio();
+    const { view, actions, catalog, tuning, serverInfo } = radio;
     const display = useDisplay();
     const canvasRef = useRef(null);
     const hitsRef = useRef({ bookmarks: [], bands: [] });
@@ -80,6 +90,7 @@ export default function MarkerBar({ width }) {
     // Off unless the receiver runs the detector at all — the toggle would
     // otherwise promise markers that can never appear.
     const showVoice = display.markerVoice !== false && !!(serverInfo && serverInfo.noise_floor);
+    const showVfos = display.markerVfos !== false;
     // Spot markers, each gated on its own feed existing. The streams themselves
     // are held open for the session by <SpotStreams> in App.jsx — both are
     // low-rate — so a toggle here decides only what is drawn, and turning one on
@@ -96,6 +107,11 @@ export default function MarkerBar({ width }) {
         if (!showVoice) { setVoice([]); return undefined; }
         return subscribeVoiceActivity((state) => setVoice(state.activities || []));
     }, [showVoice]);
+
+    // The VFO slots, from the same store the Receiver panel's buttons use, so a
+    // marker appears the moment a VFO is stored and goes when it is switched to.
+    const [vfos, setVfoState] = useState(getVfos);
+    useEffect(() => onVfosChanged(setVfoState), []);
 
     // Read from the same store the Spots panel reads — see lib/spotStore.js.
     // Subscribing here only registers for updates; the stream is already up.
@@ -163,7 +179,7 @@ export default function MarkerBar({ width }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, width, MARKER_BAR_H);
 
-        hitsRef.current = { bookmarks: [], bands: [], voice: [], spots: [] };
+        hitsRef.current = { bookmarks: [], bands: [], voice: [], spots: [], vfos: [] };
         if (!span) return;
 
         const startFreq = centerFreq - span / 2;
@@ -376,8 +392,47 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
+        // ---- VFOs ----------------------------------------------------------
+        // Last, and round rather than a pill: these are the only marks in the
+        // bar that are not a label for something, so a letter in a circle says
+        // "a place, and which one" in the width of a full stop. Drawn over
+        // everything else because a VFO is the one mark you go looking for.
+        if (showVfos) {
+            const parked = markableVfos(vfos, tuning.frequency);
+            for (const v of parked) {
+                if (v.frequency < startFreq || v.frequency > endFreq) continue;
+                const x = ((v.frequency - startFreq) / span) * width;
+                const y = BAND_H + 2 + PILL_H / 2;
+
+                c.strokeStyle = 'rgba(233, 30, 99, 0.55)';
+                c.lineWidth = 1;
+                c.beginPath();
+                c.moveTo(Math.round(x) + 0.5, y + VFO_R);
+                c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+                c.stroke();
+
+                c.beginPath();
+                c.arc(x, y, VFO_R, 0, Math.PI * 2);
+                c.fillStyle = VFO_FILL;
+                c.fill();
+                c.strokeStyle = 'rgba(255,255,255,0.65)';
+                c.stroke();
+
+                c.font = '700 9px ui-sans-serif, system-ui, sans-serif';
+                c.textBaseline = 'middle';
+                c.textAlign = 'center';
+                c.fillStyle = VFO_INK;
+                c.fillText(v.id, x, y + 0.5);
+
+                hitsRef.current.vfos.push({
+                    x, y: y - VFO_R, w: VFO_R * 2, h: VFO_R * 2, vfo: v,
+                });
+            }
+        }
+
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
-        showVoice, voice, showDx, showCw, dxSpots, cwSpots, ageTick]);
+        showVoice, voice, showDx, showCw, dxSpots, cwSpots, ageTick,
+        showVfos, vfos, tuning.frequency]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -385,6 +440,10 @@ export default function MarkerBar({ width }) {
         const r = canvas.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
+        const vfo = hitsRef.current.vfos.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (vfo) return { kind: 'vfo', ...vfo };
         const hit = hitsRef.current.bookmarks.find(
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
@@ -413,7 +472,9 @@ export default function MarkerBar({ width }) {
         const r = canvasRef.current.getBoundingClientRect();
         setTip({
             x: e.clientX - r.left,
-            text: hit.kind === 'bookmark'
+            text: hit.kind === 'vfo'
+                ? `VFO ${hit.vfo.id} · ${formatFreqShort(hit.vfo.frequency)}${hit.vfo.mode ? ' · ' + hit.vfo.mode.toUpperCase() : ''}`
+                : hit.kind === 'bookmark'
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
                 : hit.kind === 'voice'
                     ? voiceTip(hit.activity)
@@ -430,7 +491,15 @@ export default function MarkerBar({ width }) {
         // the tap found something, and no pulse says it did not.
         if (!hit) return;
         haptic('tune', 'spectrum');
-        if (hit.kind === 'voice') {
+        if (hit.kind === 'vfo') {
+            // Go to that VFO rather than merely tuning its frequency: the mark
+            // says "B is parked here", and arriving on A at B's frequency would
+            // be a different thing than the one that was clicked. selectVfo
+            // stores what is live into the slot being left, exactly as the
+            // Receiver panel's buttons do.
+            selectVfo(radio, hit.vfo.id);
+            actions.ensureVisible(hit.vfo.frequency);
+        } else if (hit.kind === 'voice') {
             const freq = dialFreq(hit.activity);
             actions.tuneTo({ frequency: freq, mode: (hit.activity.mode || 'lsb').toLowerCase() });
             actions.ensureVisible(freq);
@@ -460,9 +529,11 @@ export default function MarkerBar({ width }) {
             actions.setFrequency(centre);
             actions.setSpectrumCenter(centre);
         }
-    }, [locate, actions, lookups]);
+    }, [locate, actions, lookups, radio]);
 
-    if (!showBands && !showServer && !showLocal && !showVoice && !showDx && !showCw) return null;
+    if (!showBands && !showServer && !showLocal && !showVoice && !showDx && !showCw && !showVfos) {
+        return null;
+    }
 
     return (
         <div className="markerbar" style={{ height: MARKER_BAR_H }}>

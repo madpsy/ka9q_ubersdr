@@ -150,6 +150,11 @@ export default function DisplayPanel() {
             <Field label="Local bookmarks" inline>
                 <Switch checked={d.markerLocalBookmarks !== false} onChange={(v) => d.set({ markerLocalBookmarks: v })} />
             </Field>
+            {/* Where the other VFOs are parked. Never the one you are on — that
+                is the dial, and the spectrum marks it already. */}
+            <Field label="VFOs" inline>
+                <Switch checked={d.markerVfos !== false} onChange={(v) => d.set({ markerVfos: v })} />
+            </Field>
             {/* Only where the receiver runs the detector: with no noise floor
                 monitor there is nothing behind this switch. */}
             {serverInfo?.noise_floor && (

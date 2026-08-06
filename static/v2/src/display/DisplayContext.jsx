@@ -52,6 +52,9 @@ export const DEFAULTS = {
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser
     markerVoice: true,           // detected voice activity (only where the receiver has it)
+    // The other VFOs — where A, B, C and D are parked. Not the one you are on:
+    // that is the dial, and the spectrum already marks it.
+    markerVfos: true,
     // Spot markers, per feed and only where the instance has it. Digital spots
     // are deliberately absent: a decoder band puts every station on one
     // frequency, so they would stack into a single illegible pile rather than

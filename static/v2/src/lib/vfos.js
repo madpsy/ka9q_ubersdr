@@ -192,3 +192,28 @@ export function stepVfo(radio, dir) {
     const next = VFO_IDS[(i + dir + VFO_IDS.length) % VFO_IDS.length];
     return selectVfo(radio, next);
 }
+
+/**
+ * The VFOs worth marking on the spectrum: the parked ones.
+ *
+ * Never the active slot — that is the dial, and the spectrum draws it as the
+ * dial. Never one sitting on the frequency you are already on either, whichever
+ * slot it is: two marks on one pixel is not two places to go, and the second
+ * would sit under the dial line saying nothing the dial does not.
+ *
+ * `liveHz` is the tuned frequency, which is not necessarily the active slot's
+ * stored one — the stored copy is only written when you switch away.
+ */
+export function markableVfos(state, liveHz) {
+    const out = [];
+    if (!state || !state.slots) return out;
+    const live = Number(liveHz);
+    for (const id of VFO_IDS) {
+        if (id === state.active) continue;
+        const slot = state.slots[id];
+        if (!slot || !(slot.frequency > 0)) continue;
+        if (Number.isFinite(live) && slot.frequency === live) continue;
+        out.push({ id, ...slot });
+    }
+    return out;
+}

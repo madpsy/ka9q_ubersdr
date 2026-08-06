@@ -6,7 +6,7 @@
 
 const assert = require('assert');
 const {
-    VFO_IDS, cleanSlot, selectVfo, setVfos, storeInto, switchTo, vfoSnapshot,
+    VFO_IDS, cleanSlot, markableVfos, selectVfo, setVfos, storeInto, switchTo, vfoSnapshot,
 } = require('./.build/vfos.cjs');
 
 let pass = 0;
@@ -190,6 +190,67 @@ t('a VFO with no stored zoom leaves the view alone', () => {
     );
     selectVfo(radio, 'B');
     assert.deepStrictEqual(radio.calls.map((c) => c[0]), ['tuneTo']);
+});
+
+
+// ── Which VFOs get a marker ──────────────────────────────────────────────────
+//
+// The marker bar draws the parked ones. Two exclusions, and both are about not
+// drawing a mark that says nothing: the VFO you are on is the dial, and a VFO
+// on the frequency you are already on would sit under the dial line.
+
+// `slot` above is the recall tests' two-argument one; markers care about the
+// frequency and the mode, so this one names them.
+const parkedAt = (frequency, mode = 'usb') => ({
+    frequency, mode, bandwidthLow: 50, bandwidthHigh: 2800, binBandwidth: null,
+});
+
+t('the parked VFOs are marked', () => {
+    const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: parkedAt(7.074e6), C: parkedAt(14.2e6), D: null } };
+    const ids = markableVfos(state, 7.1e6).map((v) => v.id);
+    assert.deepStrictEqual(ids, ['B', 'C']);
+});
+
+t('the VFO you are on never gets one', () => {
+    // It is the dial. The spectrum draws that already, and a second mark on it
+    // would be a mark you cannot go to.
+    const state = { active: 'C', slots: { A: parkedAt(7.1e6), B: parkedAt(7.2e6), C: parkedAt(14.2e6), D: null } };
+    assert.ok(!markableVfos(state, 14.2e6).some((v) => v.id === 'C'));
+    // ...even when the dial has been moved off the slot's stored frequency,
+    // which is the normal state of affairs: the active slot is only written
+    // when you switch away from it.
+    assert.ok(!markableVfos(state, 14.25e6).some((v) => v.id === 'C'));
+});
+
+t('a VFO parked where you already are gets no mark either', () => {
+    const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: parkedAt(7.1e6), C: parkedAt(7.2e6), D: null } };
+    const ids = markableVfos(state, 7.1e6).map((v) => v.id);
+    assert.deepStrictEqual(ids, ['C'], 'B is under the dial line');
+    // Move off it and B is somewhere to go again.
+    assert.deepStrictEqual(markableVfos(state, 7.15e6).map((v) => v.id), ['B', 'C']);
+});
+
+t('an empty or unusable slot is not a place', () => {
+    const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: null, C: { frequency: 0 }, D: undefined } };
+    assert.deepStrictEqual(markableVfos(state, 7.1e6), []);
+    assert.deepStrictEqual(markableVfos(null, 7.1e6), []);
+    assert.deepStrictEqual(markableVfos({}, 7.1e6), []);
+});
+
+t('a marker carries what it needs to be a tooltip', () => {
+    const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: parkedAt(14.074e6, 'usb'), C: null, D: null } };
+    const [b] = markableVfos(state, 7.1e6);
+    assert.strictEqual(b.id, 'B');
+    assert.strictEqual(b.frequency, 14.074e6);
+    assert.strictEqual(b.mode, 'usb');
+});
+
+t('no dial frequency yet is not a reason to hide them', () => {
+    // Before the receiver is running there is nothing to compare against, and
+    // the marks are still where the VFOs are.
+    const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: parkedAt(7.2e6), C: null, D: null } };
+    assert.deepStrictEqual(markableVfos(state, null).map((v) => v.id), ['B']);
+    assert.deepStrictEqual(markableVfos(state, undefined).map((v) => v.id), ['B']);
 });
 
 console.log(`\n${pass} VFO checks passed`);

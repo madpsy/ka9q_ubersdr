@@ -119,6 +119,32 @@ function seedFloat(spec) {
     };
 }
 
+/**
+ * Where a dragged panel goes, relative to the panel it was dropped on.
+ *
+ * `panels` must already have the dragged id removed. That ordering is the whole
+ * point: dropping a panel below one of its own neighbours used to insert at the
+ * index the anchor had *before* the removal, which is one slot too early — so
+ * dragging a panel down by one place did nothing at all, and dragging it
+ * further landed it short of where it was let go.
+ *
+ * Anchored on the neighbour's id rather than on a number for the same reason
+ * swapPanels is: a dock's list also holds panels that are hidden, or that do not
+ * apply to this receiver, so the third panel you can see is not the third in the
+ * array. An index taken from the screen puts the panel somewhere else entirely.
+ */
+export function insertNear(panels, id, anchorId, edge) {
+    // Dropped on itself: a no-op, not a request to go anywhere. Falling through
+    // would remove it, fail to find the anchor, and append — which is the drop
+    // that sent panels to the bottom of the dock.
+    if (!id || id === anchorId) return panels.slice();
+    const rest = panels.filter((p) => p !== id);
+    let at = rest.indexOf(anchorId);
+    if (at === -1) at = rest.length;            // anchor gone: the end will do
+    else if (edge === 'after') at += 1;
+    return [...rest.slice(0, at), id, ...rest.slice(at)];
+}
+
 export function defaultLayout(env = machine()) {
     const { phone, touch } = env;
     const docks = {};
@@ -422,6 +448,32 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // Drops a panel next to another one, which is what a drag within a dock is.
+    // See insertNear for why this takes the neighbour rather than an index.
+    const movePanelNear = useCallback((id, dock, anchorId, edge) => {
+        setLayout((l) => {
+            if (!id || !DOCKS.includes(dock)) return l;
+            const docks = {};
+            for (const d of DOCKS) {
+                docks[d] = { ...l.docks[d], panels: l.docks[d].panels.filter((p) => p !== id) };
+            }
+            const floats = { ...l.floats };
+            delete floats[id];
+            docks[dock] = {
+                ...docks[dock],
+                panels: insertNear(docks[dock].panels, id, anchorId, edge),
+                collapsed: false,
+            };
+            return {
+                ...l,
+                docks,
+                floats,
+                floatOrder: l.floatOrder.filter((f) => f !== id),
+                sections: { ...l.sections, [id]: { ...l.sections[id], hidden: false } },
+            };
+        });
+    }, []);
+
     // Swaps two panels that share a dock — the arrows in a docked panel's
     // header, moving it one place along the order.
     //
@@ -570,10 +622,11 @@ export function LayoutProvider({ children }) {
         toggleSectionMinimal,
         setSectionHidden,
         movePanel,
+        movePanelNear,
         swapPanels,
         revealPanel,
         resetLayout,
-    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel,
+    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
         swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;

@@ -7,7 +7,7 @@
 // migration must only ever add what this machine has never had an opinion about.
 
 const assert = require('assert');
-const { DOCKS, PANEL_BY_ID, defaultLayout, reconcile } = require('./.build/layout.cjs');
+const { DOCKS, PANEL_BY_ID, defaultLayout, insertNear, reconcile } = require('./.build/layout.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -176,6 +176,54 @@ t('the band spectrum panel ships collapsed, on the left, on every machine', () =
     }
     assert.strictEqual(PANEL_BY_ID.bandspectrum.dock, 'left');
     assert.ok(inAnyDock(defaultLayout(MOUSE), 'bandspectrum'), 'docked, not floating');
+});
+
+// ── Dragging a panel within its dock ─────────────────────────────────────────
+//
+// Two things made this hard to aim, and both are here rather than in the
+// pointer handling: the panel is removed before it is re-inserted, and the
+// anchor is a neighbour's id rather than a position on screen.
+
+t('a panel dropped below its neighbour lands below it', () => {
+    // The off-by-one this fixes: with the id removed first, the anchor's index
+    // has already shifted, so inserting at the index it had before put the
+    // panel one slot too early — dragging down by one did nothing at all.
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'a', 'b', 'after'), ['b', 'a', 'c']);
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'a', 'c', 'after'), ['b', 'c', 'a']);
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'a', 'c', 'before'), ['b', 'a', 'c']);
+});
+
+t('a panel dropped above its neighbour lands above it', () => {
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'c', 'a', 'before'), ['c', 'a', 'b']);
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'c', 'b', 'before'), ['a', 'c', 'b']);
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'b', 'a', 'before'), ['b', 'a', 'c']);
+});
+
+t('a hidden panel between two visible ones does not move the target', () => {
+    // A dock's list holds panels that are hidden, or that this receiver has no
+    // use for. Dropping "after the second one you can see" is not the same as
+    // inserting at index 2, which is what an index taken from the screen means.
+    const dock = ['a', 'hidden1', 'b', 'hidden2', 'c'];
+    assert.deepStrictEqual(insertNear(dock, 'c', 'a', 'after'),
+        ['a', 'c', 'hidden1', 'b', 'hidden2']);
+    assert.deepStrictEqual(insertNear(dock, 'a', 'b', 'after'),
+        ['hidden1', 'b', 'a', 'hidden2', 'c']);
+});
+
+t('dropping a panel on itself leaves the order alone', () => {
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'b', 'b', 'before'), ['a', 'b', 'c']);
+    assert.deepStrictEqual(insertNear(['a', 'b', 'c'], 'b', 'b', 'after'), ['a', 'b', 'c']);
+});
+
+t('a panel arriving from another dock takes the place it was dropped at', () => {
+    assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'a', 'after'), ['a', 'z', 'b']);
+    assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'a', 'before'), ['z', 'a', 'b']);
+    assert.deepStrictEqual(insertNear([], 'z', 'nothing', 'before'), ['z']);
+});
+
+t('an anchor that is no longer there puts the panel at the end', () => {
+    // The layout can change under a drag — another tab, a reset.
+    assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'gone', 'before'), ['a', 'b', 'z']);
 });
 
 console.log(`\n${pass} ok`);

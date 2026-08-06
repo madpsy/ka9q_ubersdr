@@ -88,7 +88,10 @@ const PEEK_OPEN_MS = 260;
 const PEEK_CLOSE_MS = 320;
 
 export default function Dock({ side }) {
-    const { docks, sections, toggleDock, setDockSize, movePanel, weights, setWeights, heights } = useLayout();
+    const {
+        docks, sections, toggleDock, setDockSize, movePanel, movePanelNear, weights, setWeights,
+        heights,
+    } = useLayout();
     const applies = usePanelApplies();
     const dock = docks[side];
     const [dropping, setDropping] = useState(false);
@@ -163,7 +166,12 @@ export default function Dock({ side }) {
     // the offset survives until the operator scrolls somewhere themselves.
     const echo = useRef(null);
 
+    // The body element itself, for the drop geometry below — bodyRef is a
+    // callback ref and has no `.current` of its own.
+    const bodyEl = useRef(null);
+
     const bodyRef = useCallback((el) => {
+        bodyEl.current = el;
         if (!el) return;
         el.scrollTop = scrollAt.current.top;
         el.scrollLeft = scrollAt.current.left;
@@ -218,6 +226,28 @@ export default function Dock({ side }) {
         try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     }, []);
 
+    // Which section a pointer is nearest, and which side of it — for a drop that
+    // landed in the dock but not on a panel. Measured from the DOM rather than
+    // from the layout, because it is answering a question about pixels.
+    const nearestSection = useCallback((clientX, clientY) => {
+        const body = bodyEl.current;
+        if (!body) return null;
+        const vertical = side !== 'bottom';
+        const pos = vertical ? clientY : clientX;
+        let best = null;
+        let bestDist = Infinity;
+        for (const el of body.querySelectorAll('[data-panel]')) {
+            const r = el.getBoundingClientRect();
+            const mid = vertical ? r.top + r.height / 2 : r.left + r.width / 2;
+            const d = Math.abs(pos - mid);
+            if (d < bestDist) {
+                bestDist = d;
+                best = { id: el.dataset.panel, edge: pos < mid ? 'before' : 'after' };
+            }
+        }
+        return best;
+    }, [side]);
+
     // Computed even while collapsed: the peek overlay is the same markup and
     // needs the same size, and the collapsed rail does not use it.
     const style = side === 'bottom' ? { height: dock.size } : { width: dock.size };
@@ -266,7 +296,16 @@ export default function Dock({ side }) {
                     // A section inside this dock may have placed it already.
                     if (e.panelDropHandled) return;
                     const id = e.dataTransfer.getData('text/ubersdr-panel');
-                    if (id) movePanel(id, side, null);
+                    if (!id) return;
+                    // Everything between the sections is dock body too: the gaps,
+                    // the padding, and the space under the last panel. Appending
+                    // for all of it meant a drop that missed a section by three
+                    // pixels went to the bottom instead of where it was aimed, so
+                    // the nearest section decides — and only an empty dock, or a
+                    // drop below every panel in it, actually appends.
+                    const near = nearestSection(e.clientX, e.clientY);
+                    if (near) movePanelNear(id, side, near.id, near.edge);
+                    else movePanel(id, side, null);
                 }}
             >
                 {visible.map((id, i) => (

@@ -19,7 +19,8 @@ const snap = (v) => Math.round(v / SNAP) * SNAP;
 
 export default function Section({ panel, dock, index, weight, height, prev, next }) {
     const {
-        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, swapPanels,
+        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
+        swapPanels,
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
@@ -53,14 +54,21 @@ export default function Section({ panel, dock, index, weight, height, prev, next
     const onDrop = (e) => {
         const id = e.dataTransfer.getData('text/ubersdr-panel');
         setDropEdge(null);
-        if (!id || id === panel.id) return;
+        if (!id) return;
         e.preventDefault();
         // Deliberately not stopPropagation: the dock needs to see the drop to
         // clear its own hover tint. Marking the event tells it the placement is
         // already decided. (React reuses one synthetic event along the path, so
         // the flag survives the bubble.)
+        //
+        // Marked even when the panel was dropped on itself, which is a no-op and
+        // not a request to go anywhere. Without the flag that drop fell through
+        // to the dock, which appends — so letting go over the panel you had just
+        // picked up sent it to the bottom, which is most of what made this hard
+        // to aim.
         e.panelDropHandled = true;
-        movePanel(id, dock, dropEdge === 'after' ? index + 1 : index);
+        if (id === panel.id) return;
+        movePanelNear(id, dock, panel.id, dropEdge === 'after' ? 'after' : 'before');
     };
 
     const cls = [

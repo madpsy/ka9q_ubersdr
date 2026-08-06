@@ -898,6 +898,25 @@ function drawSpectrum(st, canvas) {
         }
     }
 
+    // Both labels live at the top of the trace, and on most bands they are
+    // within a few kHz of each other — 7.074 is inside 40m's FT8 window. So the
+    // VFO's box is worked out first and the FT8 label steps down a line when it
+    // would land on it: the dial is the one you are reading, and it keeps the
+    // top line.
+    const labelSize = Math.max(9, Math.round(h / 9));
+    const labelY = 3;
+    c.font = `${labelSize}px ui-monospace, monospace`;
+    let dialLabel = null;
+    if (st.dial) {
+        const dx = viewFrac(st.zoom, st.dial.at) * w;
+        if (dx >= 0 && dx <= w) {
+            const text = `VFO ${st.vfoId || 'A'}`;
+            const tw = c.measureText(text).width;
+            const x = dx + tw + 6 > w ? Math.max(0, dx - tw - 4) : dx + 4;
+            dialLabel = { text, x, w: tw, dx };
+        }
+    }
+
     // ── The FT8 window ───────────────────────────────────────────────────────
     // The band's configured dial frequency and the 3 kHz of USB above it, which
     // is where the traffic that makes a band look busy actually is. Under the
@@ -918,12 +937,15 @@ function drawSpectrum(st, canvas) {
             c.stroke();
             c.setLineDash([]);
 
-            const size = Math.max(9, Math.round(h / 9));
-            c.font = `${size}px ui-monospace, monospace`;
+            c.font = `${labelSize}px ui-monospace, monospace`;
             c.textBaseline = 'top';
+            c.textAlign = 'left';
             c.fillStyle = 'rgba(190,240,190,0.9)';
             const tw = c.measureText('FT8').width;
-            c.fillText('FT8', x1 + tw + 6 > w ? Math.max(0, x1 - tw - 4) : x1 + 4, 3);
+            const lx = x1 + tw + 6 > w ? Math.max(0, x1 - tw - 4) : x1 + 4;
+            const clash = dialLabel
+                && lx < dialLabel.x + dialLabel.w + 4 && lx + tw + 4 > dialLabel.x;
+            c.fillText('FT8', lx, clash ? labelY + labelSize + 2 : labelY);
         }
     }
 
@@ -933,9 +955,6 @@ function drawSpectrum(st, canvas) {
     // means something, drawn under the trace so it never competes with it. The
     // colour is the marker bar's VFO crimson, so "the VFO" is one colour
     // wherever it appears.
-    //
-    // The label goes at the foot rather than the top, where the FT8 one is:
-    // 7.074 is inside most FT8 windows and the two would print over each other.
     if (st.dial) {
         const dx = viewFrac(st.zoom, st.dial.at) * w;
         if (dx >= 0 && dx <= w) {
@@ -955,14 +974,13 @@ function drawSpectrum(st, canvas) {
             c.stroke();
             c.setLineDash([]);
 
-            const size = Math.max(9, Math.round(h / 9));
-            c.font = `${size}px ui-monospace, monospace`;
-            c.textBaseline = 'bottom';
-            c.textAlign = 'left';
-            c.fillStyle = 'rgba(255, 190, 215, 0.95)';
-            const label = `VFO ${st.vfoId || 'A'}`;
-            const tw = c.measureText(label).width;
-            c.fillText(label, dx + tw + 6 > w ? Math.max(0, dx - tw - 4) : dx + 4, h - 3);
+            if (dialLabel) {
+                c.font = `${labelSize}px ui-monospace, monospace`;
+                c.textBaseline = 'top';
+                c.textAlign = 'left';
+                c.fillStyle = 'rgba(255, 190, 215, 0.95)';
+                c.fillText(dialLabel.text, dialLabel.x, labelY);
+            }
         }
     }
 

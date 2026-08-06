@@ -9,7 +9,9 @@ const assert = require('assert');
 const {
     CONFIRM_MS, DEFAULT_IDLE_SEC, PING_EVERY_MS,
     THROTTLE_CHOICES, THROTTLE_MIN_MOBILE, THROTTLE_MIN_DESKTOP,
-    idlePhrase, shouldPing, throttleAfterMs, throttleMinutes, warnAfterMs,
+    PAUSE_CHOICES, PAUSE_MIN_MOBILE, PAUSE_MIN_DESKTOP,
+    idlePhrase, pauseAfterMs, pauseMinutes, shouldPing, throttleAfterMs, throttleMinutes,
+    warnAfterMs,
 } = require('./.build/idle.cjs');
 
 let pass = 0;
@@ -103,6 +105,66 @@ t('the delay reaches the timer in milliseconds', () => {
     assert.strictEqual(throttleAfterMs(2, false), 120000);
     assert.strictEqual(throttleAfterMs(30, false), 1800000);
     assert.strictEqual(throttleAfterMs(null, true), THROTTLE_MIN_MOBILE * 60000);
+});
+
+// --- pausing the spectrum altogether ----------------------------------------
+//
+// A heavier thing than the throttle, and the reason it is a separate setting: it
+// leaves the display not live until somebody asks for it back. So the defaults
+// matter more than the mechanism, and they are what these pin.
+
+t('a desktop never pauses unless it is asked to', () => {
+    // The failure to avoid is a monitoring receiver whose spectrum quietly
+    // stopped an hour ago. Nothing on a desktop is metered enough to be worth
+    // risking that by default.
+    assert.strictEqual(PAUSE_MIN_DESKTOP, 0);
+    assert.strictEqual(pauseMinutes(null, false), 0);
+    assert.strictEqual(pauseAfterMs(null, false), null, 'and no timer is armed');
+});
+
+t('a phone pauses after half an hour', () => {
+    assert.strictEqual(PAUSE_MIN_MOBILE, 30);
+    assert.strictEqual(pauseMinutes(null, true), 30);
+    assert.strictEqual(pauseAfterMs(null, true), 30 * 60000);
+});
+
+t('the pause waits far longer than the throttle does', () => {
+    // They answer different questions — "have you stopped doing anything" and
+    // "have you gone" — and a pause that arrived as soon as the throttle would
+    // make the throttle pointless.
+    assert.ok(PAUSE_MIN_MOBILE > THROTTLE_MIN_MOBILE);
+    for (const m of PAUSE_CHOICES) {
+        assert.ok(m === 0 || m >= 5, `${m} is too soon to be a pause`);
+    }
+});
+
+t('never and every offered delay survive being stored', () => {
+    assert.strictEqual(pauseMinutes(0, true), 0, 'a phone can be told never');
+    assert.strictEqual(pauseAfterMs(0, true), null);
+    for (const m of PAUSE_CHOICES) {
+        assert.strictEqual(pauseMinutes(m, true), m);
+        assert.strictEqual(pauseMinutes(m, false), m);
+    }
+    // Both defaults have to be offered, or the control could not show what is
+    // running.
+    assert.ok(PAUSE_CHOICES.includes(PAUSE_MIN_MOBILE));
+    assert.ok(PAUSE_CHOICES.includes(PAUSE_MIN_DESKTOP));
+});
+
+t('a pause delay off the list is not honoured, and null is not a zero', () => {
+    assert.strictEqual(pauseMinutes(7, true), PAUSE_MIN_MOBILE);
+    assert.strictEqual(pauseMinutes('30', true), PAUSE_MIN_MOBILE, 'a string is not a choice');
+    assert.strictEqual(pauseMinutes(false, true), PAUSE_MIN_MOBILE);
+    // The trap the throttle has too: on a phone, reading an unset setting as 0
+    // would switch the pause off for everybody who never touched it.
+    assert.strictEqual(pauseMinutes(undefined, true), PAUSE_MIN_MOBILE);
+});
+
+t('the two settings are independent lists', () => {
+    // They share a resolver and must not share a vocabulary: 2 minutes is a
+    // sensible throttle and an absurd pause.
+    assert.strictEqual(pauseMinutes(2, true), PAUSE_MIN_MOBILE, '2 is not a pause choice');
+    assert.strictEqual(throttleMinutes(60, true), THROTTLE_MIN_MOBILE, '60 is not a throttle choice');
 });
 
 t('the dialog says how long it has been, in words', () => {

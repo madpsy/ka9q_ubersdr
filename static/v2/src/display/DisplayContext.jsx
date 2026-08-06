@@ -114,6 +114,13 @@ export const DEFAULTS = {
     // the connection is likelier to be metered — which is the only way one
     // stored value can mean the right thing on both. See throttleMinutes.
     idleThrottleMin: null,
+    // Minutes of nothing happening before the spectrum socket is closed
+    // altogether, one of PAUSE_CHOICES. 0 is never, and on a desktop that is what
+    // "not chosen" resolves to — see pauseMinutes. Unlike the throttle this does
+    // not undo itself on the next mousemove: the display says it is paused and
+    // waits to be asked, because a socket reopening because somebody walked past
+    // the desk is the saving thrown away.
+    idlePauseMin: null,
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope

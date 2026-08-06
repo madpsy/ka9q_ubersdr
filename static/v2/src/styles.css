@@ -1337,6 +1337,61 @@ button, input, select, textarea { font: inherit; color: inherit; }
    of the waterfall rather than as a strip of its own. */
 .spectrum__pane--wfscale { border-top: 1px solid rgba(255, 255, 255, 0.06); }
 
+/* Paused: the spectrum socket has been closed after a long idle spell and the
+ * last frame is still on the canvas.
+ *
+ * Dimmed rather than cleared, because the last frame is worth keeping — it is
+ * where you were, and what you come back to. The veil is what says it is not
+ * live: a canvas that has simply stopped updating looks like a dead band.
+ *
+ * It covers the canvas box and only that. The toolbar above stays usable (zoom,
+ * view mode, the menu), and nothing floating or docked is behind it — the panels
+ * are outside this box or, in the floating layer's case, painted above it. */
+.spectrum__paused {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    /* Deliberately not opaque: the trace and the waterfall have to stay legible
+       through it, or this is a blank panel with a button on it. */
+    background: rgba(6, 9, 14, 0.55);
+    backdrop-filter: saturate(0.6);
+    cursor: default;
+}
+[data-theme="light"] .spectrum__paused { background: rgba(226, 233, 242, 0.62); }
+
+.spectrum__resume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: var(--accent);
+    font-family: var(--font);
+    font-size: calc(13.5px * var(--ui-scale));
+    font-weight: 650;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+}
+.spectrum__resume:hover { background: var(--accent-soft); }
+.spectrum__resume:active { transform: translateY(1px); }
+
+/* What happened, in one line under the button. Without it the overlay says only
+   that something can be resumed, not that it was a setting doing its job. */
+.spectrum__paused-note {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+    font-size: calc(11.5px * var(--ui-scale));
+}
+
 /* In split view the scale is also the splitter between the two panes. The
    cursor is the affordance — the strip is drawn by a canvas, so there is
    nothing to restyle inside it — with its edges picking up the accent on hover

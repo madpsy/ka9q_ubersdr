@@ -6,7 +6,8 @@ import { markColors } from '../display/uiConfig.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
-    THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP, THROTTLE_MIN_MOBILE, throttleMinutes,
+    PAUSE_CHOICES, PAUSE_MIN_MOBILE, THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP,
+    THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
 } from '../radio/idle.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
@@ -432,6 +433,33 @@ export default function DisplayPanel() {
                 Asks the server to poll the spectrum at half rate after this long with no
                 input, and restores it on the first move, key or tap. Defaults
                 to {THROTTLE_MIN_DESKTOP} minutes, {THROTTLE_MIN_MOBILE} on a phone.
+            </div>
+
+            {/* The bigger version of the same idea, and a separate setting
+                because it is a separate bargain: this one stops the display being
+                live. Under the throttle, in the order they happen. */}
+            <Field
+                label="Pause when idle"
+                hint={d.idlePauseMin == null ? 'default for this device' : undefined}
+            >
+                <select
+                    className="select"
+                    value={String(pauseMinutes(d.idlePauseMin, mobile))}
+                    onChange={(e) => d.set({ idlePauseMin: Number(e.target.value) })}
+                >
+                    {PAUSE_CHOICES.map((m) => (
+                        <option key={m} value={String(m)}>
+                            {m === 0 ? 'Never' : `After ${m} minutes`}
+                        </option>
+                    ))}
+                </select>
+            </Field>
+            <div className="note note--tight">
+                Closes the spectrum connection altogether after this long with no input,
+                leaving the last frame on screen with a Resume button over it. Nothing
+                else stops — the audio carries on, and the receiver keeps its slot. Never
+                on a desktop; {PAUSE_MIN_MOBILE} minutes on a phone, where the data and
+                the battery are worth more than a waterfall nobody is watching.
             </div>
 
             <div className="row-end">

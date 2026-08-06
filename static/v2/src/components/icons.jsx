@@ -74,6 +74,11 @@ export const Icon = {
     // else, and an outline reads as "off".
     Record: (p) => <Svg {...p}><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none" /></Svg>,
     Stop: (p) => <Svg {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></Svg>,
+    // Filled, like Record and Stop: these are transport glyphs and read as a
+    // state rather than as an outline of one. Play is the *action* on the paused
+    // spectrum's Resume button; Pause says what the display is doing.
+    Play: (p) => <Svg {...p}><path d="M8.5 6.2 18 12l-9.5 5.8z" fill="currentColor" stroke="none" /></Svg>,
+    Pause: (p) => <Svg {...p}><rect x="7.5" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /><rect x="13.3" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /></Svg>,
     Download: (p) => <Svg {...p}><path d="M12 3v11" /><path d="m7.5 10 4.5 4 4.5-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Search: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></Svg>,
     Mic: (p) => <Svg {...p}><rect x="9" y="3" width="6" height="10" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></Svg>,

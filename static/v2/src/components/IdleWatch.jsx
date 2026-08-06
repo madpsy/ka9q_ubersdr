@@ -10,6 +10,10 @@
 //               anyone is still there, and stop the receiver if nobody answers.
 //   throttle    halve the spectrum rate after a few minutes of nothing, and
 //               restore it on the first sign of life.
+//   pause       close the spectrum socket after a longer spell of nothing, and
+//               leave it closed until the operator asks for it back. Off by
+//               default on a desktop; see PAUSE_CHOICES and SpectrumView's
+//               overlay, which is the asking.
 //
 // Renders the dialog and nothing else. It runs only while the receiver is
 // running: there is no session to lose otherwise, and no sockets to ping.
@@ -21,8 +25,11 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { Button, Modal } from './ui.jsx';
 import {
     CONFIRM_MS, FULL_DIVISOR, THROTTLE_DIVISOR,
-    idlePhrase, onExternalActivity, shouldPing, throttleAfterMs, warnAfterMs,
+    idlePhrase, onExternalActivity, pauseAfterMs, shouldPing, throttleAfterMs, warnAfterMs,
 } from '../radio/idle.js';
+import {
+    onSpectrumPaused, setSpectrumPaused, spectrumPaused, suspendSpectrum,
+} from '../lib/spectrumPause.js';
 
 // What counts as being there. v1's list, and capture-phase like v1's, so a
 // click on something that stops propagation still counts as activity.
@@ -40,7 +47,12 @@ export default function IdleWatch() {
     //
     // The keepalive and the warning are not optional: those are about not losing
     // the session, and are the receiver's rules rather than a preference.
-    const throttleMs = throttleAfterMs(useDisplay().idleThrottleMin, mobile);
+    const d = useDisplay();
+    const throttleMs = throttleAfterMs(d.idleThrottleMin, mobile);
+    // And how long before it stops altogether. A different bargain from the
+    // throttle — the display is not live afterwards — so a different delay, and
+    // never by default anywhere but a phone.
+    const pauseMs = pauseAfterMs(d.idlePauseMin, mobile);
 
     // 'watching' — nothing to see. 'asking' — the dialog is up. 'out' — the
     // receiver has been stopped and the operator has to say so to come back.
@@ -56,7 +68,7 @@ export default function IdleWatch() {
     // Everything the listeners touch lives in refs: they are installed once and
     // must not be re-bound on every tick.
     const at = useRef({ activity: Date.now(), ping: 0 });
-    const timers = useRef({ warn: null, count: null, throttle: null });
+    const timers = useRef({ warn: null, count: null, throttle: null, pause: null });
     const throttled = useRef(false);
     const api = useRef(null);
     api.current = { actions, audioConn, spectrumConn };
@@ -69,6 +81,10 @@ export default function IdleWatch() {
         // through would close the dialog the moment it opened.
         if (!running) {
             setPhase((p) => (p === 'out' ? p : 'watching'));
+            // Nothing paused, either: the socket is closed because the receiver
+            // is off, and an overlay offering to resume it would be offering to
+            // hold a slot that was just given up.
+            setSpectrumPaused(false);
             return undefined;
         }
 
@@ -77,9 +93,11 @@ export default function IdleWatch() {
             clearTimeout(t.warn);
             clearInterval(t.count);
             clearTimeout(t.throttle);
+            clearTimeout(t.pause);
             t.warn = null;
             t.count = null;
             t.throttle = null;
+            t.pause = null;
         };
 
         // --- spectrum rate ---------------------------------------------------
@@ -95,6 +113,20 @@ export default function IdleWatch() {
             if (!throttled.current) return;
             throttled.current = false;
             if (sc) sc.setRate(FULL_DIVISOR);
+        };
+
+        // --- the spectrum socket ---------------------------------------------
+        //
+        // Only when there is something to close. A tab that has been in the
+        // background long enough for VisibilityWatch to have closed it already
+        // must not be marked paused: that suspend resumes itself when the tab
+        // comes back, and the flag would then be an overlay over a live
+        // spectrum, waiting to be found the moment anyone looked.
+        const pause = () => {
+            const { spectrumConn: sc } = api.current;
+            if (!sc || !sc.connected || spectrumPaused()) return;
+            suspendSpectrum(sc);
+            setSpectrumPaused(true);
         };
 
         // --- the countdown ---------------------------------------------------
@@ -132,6 +164,12 @@ export default function IdleWatch() {
             // Never: nothing is armed, and the effect's cleanup has already
             // restored the full rate on the way in here.
             if (throttleMs != null) t.throttle = setTimeout(throttle, throttleMs);
+            clearTimeout(t.pause);
+            // Not while it is already paused: activity does not bring the socket
+            // back — only the button does — so re-arming here would be a timer
+            // waiting to close something that is already closed. Resuming arms
+            // it again through the subscription below.
+            if (pauseMs != null && !spectrumPaused()) t.pause = setTimeout(pause, pauseMs);
         };
 
         // --- activity --------------------------------------------------------
@@ -168,6 +206,21 @@ export default function IdleWatch() {
             arm();
         };
 
+        // The overlay's Resume button, which is the only thing that ends a pause.
+        //
+        // Watched rather than left to the click that did it. That click has
+        // already been through onActivity — the activity listener is capture
+        // phase and runs before React's handler — so at that moment the flag was
+        // still set and arm() deliberately skipped the pause timer. And calling
+        // onActivity() from here would not help either: it is inside its own
+        // BURST_MS window by now and would return before re-arming anything.
+        // Without this, resuming and then walking away would never pause again.
+        const offPause = onSpectrumPaused((now) => {
+            if (now) return;
+            at.current.activity = Date.now();
+            arm();
+        });
+
         // Coming back to the tab is activity: v1 treats it as such, and
         // otherwise a tab left in the background for the whole timeout would be
         // asking the question the moment it was looked at again.
@@ -184,18 +237,24 @@ export default function IdleWatch() {
             for (const ev of ACTIVITY) document.removeEventListener(ev, onActivity, true);
             document.removeEventListener('visibilitychange', onVisible);
             offExternal();
+            offPause();
             clearAll();
             // Leaving the spectrum at half rate because the panel unmounted
             // would be invisible and permanent.
             unthrottle();
         };
+        // `throttleMs` and `pauseMs` are in the list so changing either delay
+        // tears this down and rebuilds it. A pause already in force is left
+        // alone: unlike the throttle it is on screen and undone by a button, so
+        // there is nothing invisible to put right.
+        //
         // `throttleMs` is in the list so changing the delay tears this down and
         // rebuilds it: the cleanup restores the full rate on the way out, which
         // is what makes a new choice take effect at once — and take effect
         // *from now*, rather than leaving a timer armed against the old one.
         // Re-binding the listeners is the cost, and it happens only when the
         // setting is touched.
-    }, [running, warnMs, throttleMs]);
+    }, [running, warnMs, throttleMs, pauseMs]);
 
     // The one place the phase is answered by a click rather than by movement:
     // the button. Any activity at all already dismisses it.

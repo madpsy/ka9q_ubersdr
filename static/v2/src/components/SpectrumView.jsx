@@ -42,6 +42,9 @@ import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
 import { edgeHit } from '../lib/edgeHit.js';
+import {
+    onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused, suspendSpectrum,
+} from '../lib/spectrumPause.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 
@@ -527,6 +530,22 @@ export default function SpectrumView() {
     const radio = useRadio();
     const display = useDisplay();
     const { spectrumConn, tuning, actions, view } = radio;
+
+    // The spectrum socket has been closed after a long spell of nothing (see
+    // IdleWatch, and PAUSE_CHOICES for why that is a setting and not a rule).
+    // Mirrored into state here because it changes what this draws: the last frame
+    // stays on the canvas, dimmed, with the only way back in the middle of it.
+    const [paused, setPaused] = useState(spectrumPaused);
+    useEffect(() => onSpectrumPaused(setPaused), []);
+
+    // Stopping and starting it by hand, which is the toolbar's toggle and the
+    // overlay's button. The same state either way: there is one paused spectrum,
+    // whether the timer closed it or somebody did, and it comes back the same way.
+    const togglePause = () => {
+        if (paused) resumeSpectrum(spectrumConn);
+        else suspendSpectrum(spectrumConn);
+        setSpectrumPaused(!paused);
+    };
 
     const wrapRef = useRef(null);
     const specRef = useRef(null);
@@ -1485,6 +1504,25 @@ export default function SpectrumView() {
                         )}
                         <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                         <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
+                        {/* Pause by hand, next to the other things you do to the
+                            whole display. Exactly what the idle pause does, so
+                            the button reads as the switch for a thing the setting
+                            can also do on its own — and shows as active while it
+                            is off, because a display that is not live has to be
+                            legible as such from the toolbar as well as from the
+                            overlay over it. Nothing to close if the receiver is
+                            not running. */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            active={paused}
+                            disabled={!spectrumConn}
+                            icon={paused ? <Icon.Play /> : <Icon.Pause />}
+                            title={paused
+                                ? 'Resume the spectrum'
+                                : 'Pause the spectrum — closes the connection and stops the server producing for it, until you resume'}
+                            onClick={togglePause}
+                        />
                     </div>
                 </div>
             )}
@@ -1501,6 +1539,44 @@ export default function SpectrumView() {
                 onPointerCancel={onPointerCancel}
                 onPointerLeave={onPointerLeave}
             >
+                {/* Paused: the display is not live, and says so over the middle
+                    of itself. Inside the canvas box on purpose — it dims the
+                    spectrum and the waterfall and nothing else, so the toolbar
+                    above it still works and no panel is covered by it, floating
+                    or docked.
+
+                    It takes the presses over that area rather than letting them
+                    through. Clicking a waterfall to tune to a signal that was
+                    there twenty minutes ago is the one thing a stale display must
+                    not offer, and the gesture it would otherwise start belongs to
+                    the wrapper this sits inside — hence the stopPropagation. */}
+                {paused && (
+                    <div
+                        className="spectrum__paused"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onPointerUp={(e) => e.stopPropagation()}
+                        onContextMenu={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            className="spectrum__resume"
+                            title="Reopen the spectrum socket and carry on where it left off"
+                            onClick={togglePause}
+                        >
+                            <Icon.Play size={15} />
+                            <span>Resume</span>
+                        </button>
+                        {/* Says what is stopped, and by implication what is not:
+                            the audio, the decoders and the session all carry on,
+                            and this is the one thing that has gone quiet. Neutral
+                            about how it got here, because the toolbar's toggle and
+                            the idle setting arrive at the same state. */}
+                        <span className="spectrum__paused-note">
+                            <Icon.Pause size={11} />
+                            Spectrum paused — the audio carries on
+                        </span>
+                    </div>
+                )}
                 {hoverInfo && hoverInfo.db != null && (
                     <div
                         className="spec-tip"

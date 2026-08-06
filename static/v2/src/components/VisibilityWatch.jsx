@@ -20,12 +20,16 @@
 // is the only part of this that nobody can see.
 //
 // The rules are in lib/visibilityPause.js, where they can be tested without
-// waiting five seconds for each one; this is the wiring.
+// waiting five seconds for each one; this is the wiring. What it actually does to
+// the socket is lib/spectrumPause.js, shared with the idle pause so the two close
+// and reopen it the same way — the pair has two traps in it and neither is
+// visible when you get it wrong.
 
 import { useEffect } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { HIDDEN_SUSPEND_MS } from '../radio/idle.js';
 import { visibilityPause } from '../lib/visibilityPause.js';
+import { resumeSpectrum, suspendSpectrum } from '../lib/spectrumPause.js';
 
 export default function VisibilityWatch() {
     const { running, spectrumConn } = useRadio();
@@ -39,20 +43,16 @@ export default function VisibilityWatch() {
             delayMs: HIDDEN_SUSPEND_MS,
             isHidden: () => document.hidden,
             isOpen: () => spectrumConn.connected,
-            // disconnect(), not a bare close: it is the one that sets
-            // closedByUser, which is what stops _onClose scheduling the
-            // exponential-backoff reconnect. Without it the socket would come
-            // straight back a second later and this would be a reconnect loop
-            // behind a hidden tab.
-            suspend: () => spectrumConn.disconnect(),
-            // Back at the view it left rather than the default span: the server
-            // keeps nothing for a session that has gone, so this is the only
-            // thing that says where the operator was. Anything asked for while
-            // the tab was hidden is waiting in pendingView and goes out on open.
-            resume: () => spectrumConn.connect({
-                frequency: spectrumConn.centerFreq,
-                binBandwidth: spectrumConn.binBandwidth,
-            }),
+            // Both of these are lib/spectrumPause.js: a disconnect rather than a
+            // bare close, and a reopen that names the view it left. Why, in both
+            // cases, is documented there.
+            //
+            // Not marked as paused, though — that flag is the idle pause's, and
+            // it puts an overlay on the display. A hidden tab is nobody's to look
+            // at and brings itself back, so marking it would only leave an
+            // overlay over a live spectrum for the operator to find.
+            suspend: () => suspendSpectrum(spectrumConn),
+            resume: () => resumeSpectrum(spectrumConn),
         });
 
         document.addEventListener('visibilitychange', pause.changed);

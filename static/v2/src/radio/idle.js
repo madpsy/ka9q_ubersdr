@@ -62,6 +62,37 @@ export const THROTTLE_CHOICES = [0, 2, 5, 10, 30];
 export const THROTTLE_MIN_MOBILE = 2;
 export const THROTTLE_MIN_DESKTOP = 5;
 
+// Stopping the spectrum altogether after a longer spell of nothing.
+//
+// The throttle halves the rate and undoes itself the moment anything happens, so
+// it costs the operator nothing and needs no consent. This does not: the socket
+// is closed, the display stops being live, and it stays that way until it is
+// asked to come back. That is a different bargain, so it is a different setting
+// with its own delays — longer ones, because the question is not "have you
+// stopped doing anything" but "have you gone".
+//
+// Never on a desktop. A spectrum that had quietly stopped an hour ago is the
+// worst thing a monitoring receiver can do, and nothing on a desktop is metered
+// enough to be worth that risk by default. On a phone it is 30 minutes: a
+// waterfall left running in a pocket is a real bill and a real battery, and the
+// resume button is right there in the middle of the display.
+export const PAUSE_CHOICES = [0, 5, 15, 30, 60];
+export const PAUSE_MIN_MOBILE = 30;
+export const PAUSE_MIN_DESKTOP = 0;
+
+// Resolves one of these "minutes, or never" settings against a device default.
+//
+// A number and nothing else, deliberately: Number(null) is 0, and 0 is "never" —
+// so coercing would read an unset setting as the operator having asked for the
+// feature to be off. Everything that stores one writes a number, and everything
+// that does not is absent. A value that is not on the list is from a build with
+// different rungs or a hand-edited store: the control could not show it, so it
+// must not be what is running.
+function resolveMinutes(setting, choices, fallback) {
+    if (typeof setting === 'number' && choices.includes(setting)) return setting;
+    return fallback;
+}
+
 /**
  * The delay in force, in minutes, for a stored setting that may be absent.
  *
@@ -72,17 +103,29 @@ export const THROTTLE_MIN_DESKTOP = 5;
  * survives: it is the operator saying never.
  */
 export function throttleMinutes(setting, isMobile) {
-    // A number and nothing else, deliberately: Number(null) is 0, and 0 is
-    // "never" — so coercing would read an unset setting as the operator having
-    // asked for the throttle to be off. Everything that stores one writes a
-    // number, and everything that does not is absent.
-    if (typeof setting === 'number' && THROTTLE_CHOICES.includes(setting)) return setting;
-    return isMobile ? THROTTLE_MIN_MOBILE : THROTTLE_MIN_DESKTOP;
+    return resolveMinutes(
+        setting, THROTTLE_CHOICES,
+        isMobile ? THROTTLE_MIN_MOBILE : THROTTLE_MIN_DESKTOP,
+    );
 }
 
 /** The same as a delay in ms, or null for never — which arms no timer at all. */
 export function throttleAfterMs(setting, isMobile) {
     const mins = throttleMinutes(setting, isMobile);
+    return mins > 0 ? mins * 60000 : null;
+}
+
+/** How long before the spectrum socket is closed altogether. See PAUSE_CHOICES. */
+export function pauseMinutes(setting, isMobile) {
+    return resolveMinutes(
+        setting, PAUSE_CHOICES,
+        isMobile ? PAUSE_MIN_MOBILE : PAUSE_MIN_DESKTOP,
+    );
+}
+
+/** The same in ms, or null for never — on a desktop that is the default. */
+export function pauseAfterMs(setting, isMobile) {
+    const mins = pauseMinutes(setting, isMobile);
     return mins > 0 ? mins * 60000 : null;
 }
 

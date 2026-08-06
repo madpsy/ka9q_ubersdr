@@ -3291,7 +3291,10 @@ a.btn { text-decoration: none; }
 .bsp__manual { display: flex; align-items: center; gap: 6px; }
 .bsp__manual label { display: flex; align-items: center; gap: 4px; }
 .bsp__manual span { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
-.bsp__num { width: 5.5ch; padding: 2px 4px; font-family: var(--mono); text-align: right; }
+/* Wide enough for "-160" *and* the number input's own spinner, which eats
+   ~2ch inside the box: sized in ch rather than px so it holds up when the UI
+   text size is turned up. */
+.bsp__num { width: 9ch; padding: 2px 4px; font-family: var(--mono); text-align: right; }
 .bsp__unit { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
 
 /* Rolling 24-hour spectrogram: a thumbnail in the panel, the full-resolution

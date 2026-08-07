@@ -230,7 +230,14 @@ export default function CallsignQuiz() {
             statusLines={2}
         >
             <div className="cq">
-                <div className="cq__call">{question ? question.callsign : '…'}</div>
+                {/* A rule rather than nothing while the next callsign is being
+                    found. The box is a fixed height either way, so an empty one
+                    reads as a fault — something that should be there and is not —
+                    where a dashed placeholder reads as waiting. It is dim, too,
+                    so it is plainly not a callsign anybody has to squint at. */}
+                <div className={`cq__call${question ? '' : ' is-waiting'}`}>
+                    {question ? question.callsign : '———'}
+                </div>
                 {/* Always five rows, even with nothing to put in them.
                     Between questions this list is empty for as long as a lookup
                     takes, and a panel in a dock that loses a hundred and thirty

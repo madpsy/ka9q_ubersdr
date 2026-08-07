@@ -6724,6 +6724,7 @@ a.btn { text-decoration: none; }
     overflow: hidden;
     color: var(--accent);
 }
+.cq__call.is-waiting { color: var(--text-faint); letter-spacing: 0.08em; }
 .cq__options, .co__options { display: flex; flex-direction: column; gap: 4px; }
 .cq__opt {
     /* One line, always. "South Georgia and the South Sandwich Islands" wraps in a

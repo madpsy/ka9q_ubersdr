@@ -5,9 +5,17 @@
 import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 import Icon from './icons.jsx';
 
-export function Button({ children, variant = 'default', size = 'md', active, icon, ...rest }) {
-    const cls = ['btn', `btn--${variant}`, `btn--${size}`, active ? 'is-active' : '', icon && !children ? 'btn--icon' : '']
-        .filter(Boolean).join(' ');
+// `className` is pulled out and merged rather than left in `rest`: spread after
+// className={cls} it would replace the lot — btn, the variant, the size and is-active
+// — and the button would come out unstyled while looking like a perfectly ordinary
+// call. That is a silent failure, so it is a merge.
+export function Button({ children, variant = 'default', size = 'md', active, icon, className, ...rest }) {
+    const cls = [
+        'btn', `btn--${variant}`, `btn--${size}`,
+        active ? 'is-active' : '',
+        icon && !children ? 'btn--icon' : '',
+        className,
+    ].filter(Boolean).join(' ');
     return (
         <button type="button" className={cls} {...rest}>
             {icon}

@@ -2829,14 +2829,18 @@ a.btn { text-decoration: none; }
    so the name is what gives way and the rate beside it keeps its width. */
 .cs-cw__voice { flex: 1 1 auto; min-width: 0; }
 .cs-cw__rate { flex: none; width: auto; }
-/* The announcer's three-state button. A fixed width, because its label changes with
-   its state and the controls either side of it must not shuffle when it does. */
+/* The announcer's three-state glyph. Sized and boxed like the 16px icons it sits
+   among — a fixed width, because the glyph changes with the state and the buttons
+   either side of it must not shuffle when it does. */
 .cs-form__cw {
-    flex: none;
-    min-width: calc(30px * var(--ui-scale));
-    justify-content: center;
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
     font-family: var(--mono);
-    letter-spacing: 0.04em;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1;
+    letter-spacing: -0.02em;
 }
 .cs-form__input { flex: 1; min-width: 0; text-transform: uppercase; font-family: var(--mono); }
 

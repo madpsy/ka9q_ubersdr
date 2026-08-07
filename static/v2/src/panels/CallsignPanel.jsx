@@ -413,16 +413,23 @@ export default function CallsignPanel({ minimal }) {
                         In the form row rather than on one of its own because there is
                         room for it — a callsign is six characters and the box beside
                         it is sized for a search field. */}
+                    {/* Passed as `icon` rather than as a label, though it is text: an
+                        icon-only Button gets btn--icon and so the same square geometry
+                        as the picture and external ones beside it. As a child it would
+                        be a text button in a row of icons, half a pixel taller and
+                        wider than its neighbours. */}
                     <Button
                         size="sm"
                         variant="ghost"
-                        className="cs-form__cw"
                         active={cw.mode !== CALL_OFF}
+                        icon={(
+                            <span className="cs-form__cw">
+                                {cw.mode === CALL_TTS ? '🗣' : '·–'}
+                            </span>
+                        )}
                         title={`${ANNOUNCE_SAID[cw.mode]} — click to ${ANNOUNCE_NEXT[cw.mode]}`}
                         onClick={() => setCallAnnounce({ mode: nextAnnounce() })}
-                    >
-                        {cw.mode === CALL_TTS ? '🗣' : '·–'}
-                    </Button>
+                    />
                     {/* The v1 page, which carries the bio, the map and the QSL
                         details this panel does not. Whatever is in the box goes
                         with it. Icon only — it sits next to the primary action

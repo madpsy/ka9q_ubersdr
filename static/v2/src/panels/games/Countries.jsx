@@ -168,9 +168,20 @@ export default function Countries() {
                 c.font = `${FLAG_PX}px 'Twemoji Flags', 'Noto Color Emoji', sans-serif`;
                 // A plate behind it, because a flag is a rectangle of arbitrary
                 // colour and coastlines run right under it.
-                c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+                //
+                // Opaque, and the panel's own surface rather than a wash of black:
+                // a translucent plate let the coastline through around the glyph's
+                // edges, which read as a faded flag rather than as a map behind one.
+                // Bordered for the same reason the marker bar borders its labels —
+                // it is a card lying on the map, and on the light theme a plate the
+                // colour of the panel needs an edge to be a plate at all.
+                const css = getComputedStyle(document.documentElement);
                 plate(c, x - FLAG_PX * 0.62, y - FLAG_PX * 0.46, FLAG_PX * 1.24, FLAG_PX * 0.92, 3);
+                c.fillStyle = css.getPropertyValue('--surface-3').trim() || '#1a2130';
                 c.fill();
+                c.lineWidth = 1;
+                c.strokeStyle = css.getPropertyValue('--border-strong').trim() || '#2b3446';
+                c.stroke();
                 c.fillText(flag, x, y);
                 c.restore();
                 return;

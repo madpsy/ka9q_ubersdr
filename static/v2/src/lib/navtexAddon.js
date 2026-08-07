@@ -41,6 +41,42 @@ export const latestUrl = (base = BASE) => `${base}/api/latest`;
 
 export const POLL_MS = 60000;
 
+// ── Which frequencies exist ─────────────────────────────────────────────────
+//
+// The addon has no endpoint for its configuration. The channel labels it was started
+// with are baked into the HTML it serves, as a JavaScript array, and nothing publishes
+// them as JSON — so the honest answer to "which frequencies is this receiver watching"
+// is that the API cannot say.
+//
+// What it can say is which frequencies have produced messages. Two sources, both
+// imperfect and complementary:
+//
+//   /api/latest is what is in memory, so it lists a frequency only if that frequency
+//   has completed a message since the addon started. A receiver restarted an hour ago
+//   knows about neither of its channels.
+//
+//   /api/metrics counts messages per frequency over the last 24 hours and 30 days, from
+//   the names of the log directories — so it remembers a frequency that has been quiet
+//   all day. It returns nothing at all when file logging is switched off, which is why
+//   it cannot be the only source.
+//
+// Together they cover every frequency that has ever said anything, which is as close to
+// "configured" as this addon can be asked. A channel configured today that has never
+// decoded a message appears in neither, and there is nothing here that could know about
+// it — the panel would need the addon to publish its configuration.
+export const metricsUrl = (base = BASE) => `${base}/api/metrics`;
+
+// Read once on mount and rarely after: log directories appear when a frequency first
+// decodes something, which is not an every-minute event.
+export const METRICS_POLL_MS = 15 * 60 * 1000;
+
+/** The frequency labels /api/metrics knows about, in the addon's own spelling. */
+export function metricsFreqs(payload) {
+    const list = payload && payload.freqs;
+    if (!Array.isArray(list)) return [];
+    return list.map((f) => String(f || '').trim()).filter(Boolean);
+}
+
 // Where the choice of what to show is kept. Per browser rather than per session: an
 // operator who cares about 490 kHz cares about it tomorrow as well.
 export const PICK_KEY = 'ubersdr.v2.navtex.pick';
@@ -112,40 +148,57 @@ export function latestPerFreq(rows) {
 }
 
 /**
- * What the picker offers: "Latest", then one entry per frequency.
+ * What the picker offers: "Latest", then one chip per frequency.
  *
- * Built from what has actually been received rather than from a list of NAVTEX
- * frequencies, because the operator configures which ones the addon watches and a
- * receiver on one frequency should not be offered a chip for the other. Frequencies are
- * ordered by number so the chips do not reshuffle themselves as messages arrive — the
- * newest-first ordering is right for choosing what to *show* and wrong for a control
- * somebody is aiming at.
+ * Both sources go in — what is in memory now, and what the logs remember — so a
+ * frequency that has been silent since the addon started is still something you can ask
+ * for. See the note above metricsUrl for why that takes two endpoints and still is not
+ * quite "configured".
+ *
+ * Ordered by frequency, not by recency: the newest-first ordering is right for choosing
+ * what to *show* and wrong for a control somebody is aiming at, because chips that
+ * reshuffle when a message lands are chips you press by mistake.
  */
-export function pickOptions(list) {
-    const freqs = [...list].sort((a, b) => (Number(a.short) || 0) - (Number(b.short) || 0));
+export function pickOptions(list, known = []) {
+    const seen = new Map();
+    for (const m of list) seen.set(m.freq, shortFreq(m.freq));
+    for (const f of known) if (!seen.has(f)) seen.set(f, shortFreq(f));
+    const freqs = [...seen.entries()]
+        .sort((a, b) => (Number(a[1]) || 0) - (Number(b[1]) || 0));
     return [
         { value: PICK_LATEST, label: 'Latest' },
-        ...freqs.map((m) => ({ value: m.freq, label: m.short })),
+        ...freqs.map(([value, label]) => ({ value, label })),
     ];
 }
+
+/** "518 kHz" as a chip wears it. The unit is the same on every one of them. */
+export const shortFreq = (freq) => String(freq || '').replace(/\s*kHz\s*$/i, '').trim();
 
 /**
  * The message to show, given the choice.
  *
- * A frequency that has been chosen and then stops being received — the addon
- * reconfigured, or a receiver restarted with one channel — falls back to the newest
- * anything rather than showing an empty panel about a frequency that is no longer
- * there. The picker will have dropped the chip by then, so the fallback is also what
- * the control on screen says.
+ * Three cases, and the middle one is the reason this takes the frequency list as well:
+ *
+ *   The chosen frequency has a message — show it, however old, even if the other
+ *   frequency spoke a minute ago. That is what choosing it meant.
+ *
+ *   The chosen frequency is one the panel knows about but has nothing yet — show
+ *   nothing, and let the panel say so by name. Falling back here would put another
+ *   frequency's message under a chip reading 490, which is worse than an empty panel:
+ *   a NAVTEX message is only meaningful with its frequency attached.
+ *
+ *   The chosen frequency is not in the list at all — the addon reconfigured, or a saved
+ *   choice from another receiver — fall back to the newest anything. The picker will
+ *   have dropped that chip already, so the fallback is also what the control says.
  */
-export function chosenMessage(list, pick) {
-    if (!list.length) return null;
+export function chosenMessage(list, pick, known = null) {
     if (pick && pick !== PICK_LATEST) {
         const hit = list.find((m) => m.freq === pick);
         if (hit) return hit;
+        if (known && known.includes(pick)) return null;
     }
     // The list is newest first.
-    return list[0];
+    return list[0] || null;
 }
 
 /**

@@ -107,6 +107,26 @@ t('the picker offers Latest and the frequencies actually being received', () => 
     assert.deepStrictEqual(nx.pickOptions(list).map((o) => o.label), ['Latest', '518']);
 });
 
+t('a frequency that has been quiet all day is still offered', () => {
+    // The addon has no endpoint for its configuration, so the logs are the only thing
+    // that remembers a channel which has said nothing since the addon restarted.
+    const list = nx.latestPerFreq([row({ freq: '518 kHz' })]);
+    const opts = nx.pickOptions(list, ['490 kHz', '518 kHz']);
+    assert.deepStrictEqual(opts.map((o) => o.label), ['Latest', '490', '518']);
+});
+
+t('a frequency in both sources is one chip, not two', () => {
+    const list = nx.latestPerFreq([row({ freq: '518 kHz' })]);
+    assert.strictEqual(nx.pickOptions(list, ['518 kHz']).length, 2);
+});
+
+t('the metrics payload is read for its frequencies and nothing else', () => {
+    assert.deepStrictEqual(nx.metricsFreqs({ freqs: ['518 kHz', ' 490 kHz '] }), ['518 kHz', '490 kHz']);
+    // Logging switched off answers with an empty object, which is not an error.
+    assert.deepStrictEqual(nx.metricsFreqs({}), []);
+    assert.deepStrictEqual(nx.metricsFreqs(null), []);
+});
+
 t('the chips are in frequency order, whatever order the messages arrived in', () => {
     // The newest-first ordering is right for choosing what to show and wrong for a
     // control somebody is aiming at: chips that reshuffle when a message lands are
@@ -135,11 +155,19 @@ t('a chosen frequency is shown even when the other one is newer', () => {
     assert.strictEqual(nx.chosenMessage(list, '518 kHz').short, '518');
 });
 
-t('a frequency that has stopped being received falls back to the newest', () => {
-    // The addon reconfigured, or a receiver restarted with one channel: better the
-    // newest anything than an empty panel about a frequency that is no longer there.
+t('a frequency that is not offered at all falls back to the newest', () => {
+    // The addon reconfigured, or a choice saved against a different receiver: better
+    // the newest anything than an empty panel about a frequency nothing knows about.
     const list = nx.latestPerFreq([row({ freq: '518 kHz' })]);
-    assert.strictEqual(nx.chosenMessage(list, '490 kHz').short, '518');
+    assert.strictEqual(nx.chosenMessage(list, '490 kHz', ['518 kHz']).short, '518');
+});
+
+t('a chosen frequency with nothing on it yet shows nothing, not somebody else\'s message', () => {
+    // The case the frequency list is passed in for. Falling back here would put a
+    // 518 kHz warning under a chip reading 490, and a NAVTEX message without its own
+    // frequency attached is not a NAVTEX message.
+    const list = nx.latestPerFreq([row({ freq: '518 kHz' })]);
+    assert.strictEqual(nx.chosenMessage(list, '490 kHz', ['490 kHz', '518 kHz']), null);
 });
 
 t('nothing at all is nothing to show', () => {

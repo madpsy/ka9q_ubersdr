@@ -8,17 +8,23 @@
 // The picker is built from the frequencies actually being received, so a receiver
 // watching one is not offered a chip for the other. See pickOptions.
 //
+// Clicking the message opens it full size, where it scrolls. The panel's own copy is
+// clamped instead: two scrollbars a few millimetres apart is a wheel that scrolls the
+// wrong thing half the time.
+//
 // `minimal` drops the picker and keeps the message. The choice is remembered, so what
 // shows in the minimal view is whatever was last chosen in the full one — which makes
-// the minimal view a way of pinning 518 kHz to the dock and leaving it there.
+// the minimal view a way of pinning 518 kHz to the dock and leaving it there. The modal
+// still opens from there, and carries the link out to the addon for the same reason.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Empty, Icon, Segmented } from '../components/ui.jsx';
+import { Button, Empty, Icon, Modal, Segmented } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import { subjectOf } from '../lib/navtexCodes.js';
 import {
-    POLL_MS, addonUrl, chosenMessage, latestPerFreq, latestUrl, messageBody,
-    navtexAvailable, pickOptions, savePick, savedPick,
+    METRICS_POLL_MS, POLL_MS, addonUrl, chosenMessage, latestPerFreq, latestUrl,
+    messageBody, metricsFreqs, metricsUrl, navtexAvailable, pickOptions, savePick,
+    savedPick, shortFreq,
 } from '../lib/navtexAddon.js';
 
 export { navtexAvailable };
@@ -32,6 +38,18 @@ export default function NavtexPanel({ minimal }) {
     const [pick, setPick] = useState(savedPick);
     const [state, setState] = useState('loading');   // loading | ok | error
     const [now, setNow] = useState(() => Date.now());
+    // Frequencies the addon has logged at some point, so a channel that has been quiet
+    // since it started is still something you can ask for — see metricsUrl.
+    const [known, setKnown] = useState([]);
+    // The message opened full size, if any. The message itself rather than a flag: a
+    // poll can replace what is on screen while the modal is open, and a warning that
+    // changed under the reader mid-sentence would be worse than a stale one.
+    const [reading, setReading] = useState(null);
+    // Whether the preview is showing all of it, which decides the "read all"
+    // affordance. Measured rather than guessed from the length: five short lines fit
+    // where one long paragraph does not.
+    const [clipped, setClipped] = useState(false);
+    const textRef = useRef(null);
     const alive = useRef(true);
 
     useEffect(() => () => { alive.current = false; }, []);
@@ -68,13 +86,36 @@ export default function NavtexPanel({ minimal }) {
         return () => clearInterval(id);
     }, [poll]);
 
+    // Rarely, and never fatally: with file logging off this answers with nothing, and
+    // the picker falls back to the frequencies that have spoken since the addon
+    // started, which is what it would have offered anyway.
+    useEffect(() => {
+        const load = () => {
+            fetch(metricsUrl())
+                .then((r) => (r.ok ? r.json() : null))
+                .then((j) => { if (alive.current && j) setKnown(metricsFreqs(j)); })
+                .catch(() => {});
+        };
+        load();
+        const id = setInterval(load, METRICS_POLL_MS);
+        return () => clearInterval(id);
+    }, []);
+
+    // After every render that could have changed the text: the panel is resizable and
+    // the message changes on its own, so this is not a mount-time question.
+    useEffect(() => {
+        const el = textRef.current;
+        setClipped(!!el && el.scrollHeight - el.clientHeight > 2);
+    });
+
     const choose = (value) => {
         setPick(value);
         savePick(value);
     };
 
-    const msg = chosenMessage(list, pick);
-    const options = pickOptions(list);
+    const options = pickOptions(list, known);
+    const freqs = options.slice(1).map((o) => o.value);
+    const msg = chosenMessage(list, pick, freqs);
     // What the picker should read as selected. A chosen frequency that has stopped
     // being received leaves the control pointing at a chip that is no longer there, so
     // it falls back to what is actually being shown — see chosenMessage.
@@ -96,7 +137,12 @@ export default function NavtexPanel({ minimal }) {
                 <Empty>
                     {state === 'error'
                         ? 'The NAVTEX addon is not answering.'
-                        : 'No complete message received yet.'}
+                        : shownPick !== options[0].value
+                            // Named, because the alternative — quietly showing the other
+                            // frequency's message — would put it under a chip that says
+                            // 490, and a NAVTEX message without its frequency is not one.
+                            ? `Nothing on ${shortFreq(shownPick)} kHz yet.`
+                            : 'No complete message received yet.'}
                 </Empty>
             ) : (
                 <div className="nx__msg">
@@ -122,12 +168,24 @@ export default function NavtexPanel({ minimal }) {
                         {msg.snr != null && <span className="nx__snr">{msg.snr.toFixed(1)} dB</span>}
                     </div>
 
-                    {/* The message. Monospace because NAVTEX is written for it — position
-                        lists and times line up in columns that fall apart in a
-                        proportional face — and scrolling rather than clamped, because a
-                        navigational warning cut off at four lines is a warning you have
-                        not read. */}
-                    <pre className="nx__text">{messageBody(msg.text)}</pre>
+                    {/* The message, clamped, and one click from all of it. Monospace
+                        because NAVTEX is written for it: position lists and times line
+                        up in columns that fall apart in a proportional face.
+
+                        Clamped rather than scrolled. A scrolling box inside a panel that
+                        also scrolls is two scrollbars a few millimetres apart, and the
+                        wheel picks the wrong one about half the time — so the panel
+                        shows the top of the message and reading it happens in the
+                        modal, which has room for it. */}
+                    <button
+                        type="button"
+                        className={`nx__read${clipped ? ' is-more' : ''}`}
+                        onClick={() => setReading(msg)}
+                        title="Read the whole message"
+                    >
+                        <pre className="nx__text" ref={textRef}>{messageBody(msg.text)}</pre>
+                        {clipped && <span className="nx__more">Read all</span>}
+                    </button>
                 </div>
             )}
 
@@ -148,6 +206,55 @@ export default function NavtexPanel({ minimal }) {
                         </button>
                     ))}
                 </div>
+            )}
+
+            {/* Full size, with the same header: a message read on its own still has to
+                say which frequency carried it and when. The text scrolls here, where a
+                scrollbar has somewhere to be.
+
+                Everything below reads `reading` and never `msg` — the snapshot taken
+                when it was opened, not whatever the panel is showing now. A poll landing
+                mid-read must not rewrite the warning under the reader, and a message
+                that has been replaced is still the one they asked to see. Closing and
+                opening again is how you get the current one. */}
+            {reading && (
+                <Modal onClose={() => setReading(null)} label={`NAVTEX ${reading.id}`}>
+                    <div className="nx__full">
+                        <div className="nx__head">
+                            <span className="nx__id">{reading.id}</span>
+                            <span className="nx__freq">{reading.short} kHz</span>
+                            <span className="nx__age">
+                                {reading.at
+                                    ? `${new Date(reading.at).toISOString().replace('T', ' ').slice(0, 19)} UTC`
+                                    : '—'}
+                            </span>
+                        </div>
+                        <div className={`nx__subject${(subjectOf(reading.subject) || {}).vital ? ' is-vital' : ''}`}>
+                            {(subjectOf(reading.subject) || {}).label || `Subject ${reading.subject || '?'}`}
+                            {reading.snr != null && <span className="nx__snr">{reading.snr.toFixed(1)} dB</span>}
+                        </div>
+                        <pre className="nx__fulltext">{messageBody(reading.text)}</pre>
+                        {/* The way out to the addon, here as well as in the panel: the
+                            modal covers the panel, and "where did this come from, and
+                            what else has it had" is the question a full-size read
+                            prompts. Available in the minimal view through this, which
+                            has no row of its own to put it in. */}
+                        <div className="row-end">
+                            <a
+                                className="btn btn--ghost btn--sm"
+                                href={addonUrl()}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                Open NAVTEX
+                                <Icon.External size={13} />
+                            </a>
+                            <Button size="sm" variant="ghost" onClick={() => setReading(null)}>
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
             )}
 
             {!minimal && (

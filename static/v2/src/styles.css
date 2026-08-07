@@ -7436,20 +7436,72 @@ a.btn { text-decoration: none; }
 .nx__subject.is-vital { color: var(--warn); font-weight: 650; }
 .nx__snr { margin-left: auto; color: var(--text-faint); font-family: var(--mono); }
 
-/* The message itself. Monospace because NAVTEX is written for it — position lists and
-   times line up in columns that fall apart in a proportional face — and scrolling
-   rather than clamped, because a navigational warning cut off at four lines is a
-   warning you have not read. */
-.nx__text {
-    margin: 0;
-    max-height: calc(200px * var(--ui-scale));
-    overflow-y: auto;
-    padding: 4px 5px;
+/* The message as the panel shows it: the top of it, and a click from the rest.
+   Clamped rather than scrolled, because a scrolling box inside a panel that also
+   scrolls is two scrollbars a few millimetres apart and the wheel picks the wrong one
+   about half the time. */
+.nx__read {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
     border-radius: 3px;
     background: var(--surface);
+    text-align: left;
+    cursor: pointer;
+}
+.nx__read:hover { outline: 1px solid var(--accent); }
+.nx__text {
+    margin: 0;
+    max-height: calc(120px * var(--ui-scale));
+    overflow: hidden;
+    padding: 4px 5px;
     font-family: var(--mono);
     font-size: calc(10.5px * var(--ui-scale));
     line-height: 1.35;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+/* Only when there is more, and measured rather than guessed — see the effect in
+   NavtexPanel. The fade says the message continues; the label says a click will show
+   it, because a fade on its own reads as a rendering artefact. */
+.nx__read.is-more::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(28px * var(--ui-scale));
+    border-radius: 0 0 3px 3px;
+    background: linear-gradient(to bottom, transparent, var(--surface));
+    pointer-events: none;
+}
+.nx__more {
+    position: absolute;
+    right: 5px;
+    bottom: 3px;
+    z-index: 1;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+
+/* Full size, in the modal: the room a two-hundred-word warning needs, and the one place
+   a scrollbar has somewhere to be. */
+.nx__full { display: flex; flex-direction: column; gap: 6px; min-width: min(78vw, 620px); }
+.nx__fulltext {
+    margin: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    line-height: 1.45;
     color: var(--text);
     white-space: pre-wrap;
     word-break: break-word;

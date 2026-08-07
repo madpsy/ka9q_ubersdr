@@ -64,6 +64,7 @@ import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
 import ListenersPanel from './ListenersPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
+import GamesPanel from './GamesPanel.jsx';
 import ScopePanel from './ScopePanel.jsx';
 import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
@@ -503,6 +504,21 @@ export const PANELS = [
         defaultOpen: false,
         minimal: true,
         Component: StatusPanel,
+    },
+    // Ten games, one at a time — the widget of the same name, native. On the
+    // right dock with the other things you are not operating the receiver with,
+    // and closed by default: it is for the hours between signals, not the
+    // signals. See GamesPanel for what the port kept and what it threw away.
+    //
+    // Minimal: the game without its picker.
+    {
+        id: 'games',
+        title: 'Mini Games',
+        icon: <Icon.Dice />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: GamesPanel,
     },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
     // Beside Layout, because it is the same kind of housekeeping and because

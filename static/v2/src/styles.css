@@ -6443,3 +6443,316 @@ a.btn { text-decoration: none; }
 }
 
 .ms-neighbours { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+
+/* =========================================================================
+   Mini games
+   ========================================================================= */
+
+/* Ported from widgets/games.widget.html, which carried 663 lines of its own
+ * colours. These take the interface's instead — surfaces, borders, the accent —
+ * so a game follows the colour scheme like everything else. The exceptions are
+ * the places where a colour *is* the game: Minesweeper's numbers, Mastermind's
+ * code pegs, Connect 4's discs and a lit square in Lights Out all have to stay
+ * told apart by hue, and are the widget's own values kept deliberately.
+ *
+ * Every board is a square grid that fills the panel's width, so all of them work
+ * in a dock column, a floating window and a phone sheet without a media query. */
+
+.game { display: flex; flex-direction: column; gap: 6px; }
+.game__info,
+.game__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.game__status {
+    min-height: calc(16px * var(--ui-scale));
+    text-align: center;
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--text);
+}
+.game__score { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); }
+.game__note {
+    margin: 0;
+    padding: 8px 2px;
+    text-align: center;
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.game__body { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Noughts and crosses ─────────────────────────────────────────────────── */
+.ttt { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ttt__cell {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-size: calc(26px * var(--ui-scale));
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+}
+.ttt__cell:hover:not(.is-taken) { border-color: var(--accent); background: var(--accent-soft); }
+.ttt__cell.is-win { border-color: var(--good); background: rgba(69, 214, 154, 0.16); }
+
+/* ── Minesweeper ─────────────────────────────────────────────────────────── */
+.ms { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.ms__cell {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-3);
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    /* A long press is a flag, so the browser must not take it for a text
+       selection or a callout menu first. */
+    touch-action: manipulation;
+    user-select: none;
+}
+.ms__cell:hover:not(.is-open) { border-color: var(--accent); }
+.ms__cell.is-open { background: var(--surface); border-color: var(--border); cursor: default; }
+.ms__cell.is-flag { background: var(--accent-soft); }
+.ms__cell.is-hit { background: rgba(242, 100, 106, 0.35); border-color: var(--bad); }
+/* The classic number colours. Kept because they are load-bearing: the count is
+   read by hue as much as by shape when the board is this small. */
+.ms__cell--1 { color: #60a5fa; }
+.ms__cell--2 { color: #5dade2; }
+.ms__cell--3 { color: #f87171; }
+.ms__cell--4 { color: #818cf8; }
+.ms__cell--5 { color: #fb923c; }
+.ms__cell--6 { color: #22d3ee; }
+.ms__cell--7 { color: #e879f9; }
+.ms__cell--8 { color: #94a3b8; }
+
+/* ── 15-puzzle ───────────────────────────────────────────────────────────── */
+.p15 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.p15__cell {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: calc(14px * var(--ui-scale));
+    font-weight: 650;
+    cursor: pointer;
+}
+.p15__cell:hover:not(.is-blank) { border-color: var(--accent); }
+.p15__cell.is-blank { background: transparent; border-color: transparent; cursor: default; }
+.p15__cell.is-solved { border-color: var(--good); color: var(--good); }
+
+/* ── Memory ──────────────────────────────────────────────────────────────── */
+.mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.mem__card {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-3);
+    font-size: calc(20px * var(--ui-scale));
+    line-height: 1;
+    cursor: pointer;
+}
+.mem__card.is-up { background: var(--accent-soft); border-color: var(--accent); }
+.mem__card.is-done { background: rgba(69, 214, 154, 0.14); border-color: var(--good); cursor: default; }
+
+/* ── Connect 4 ───────────────────────────────────────────────────────────── */
+.c4 { display: flex; flex-direction: column; gap: 3px; }
+.c4__cols, .c4__board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.c4__drop {
+    padding: 1px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--text-dim);
+    font-size: calc(10px * var(--ui-scale));
+    cursor: pointer;
+}
+.c4__drop:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.c4__drop:disabled { opacity: 0.35; cursor: default; }
+.c4__cell {
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--surface);
+    cursor: pointer;
+}
+/* Red and yellow, because that is what the game is. */
+.c4__cell.is-p1 { background: #e74c3c; border-color: #c0392b; }
+.c4__cell.is-p2 { background: #f1c40f; border-color: #d4ac0d; }
+.c4__cell.is-win { box-shadow: 0 0 0 2px var(--text); }
+
+/* ── Sudoku ──────────────────────────────────────────────────────────────── */
+.su { display: flex; flex-direction: column; gap: 6px; }
+.su__grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; }
+.su__cell {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--surface-3);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: calc(13px * var(--ui-scale));
+    font-weight: 650;
+    cursor: pointer;
+}
+/* The 2×3 boxes, as heavier rules on the cells that start one. */
+.su__cell--vrule { border-left-color: var(--text-faint); }
+.su__cell--hrule { border-top-color: var(--text-faint); }
+.su__cell.is-given { color: var(--text); background: var(--surface); cursor: default; }
+.su__cell.is-sel { border-color: var(--accent); background: var(--accent-soft); }
+.su__cell.is-bad { color: var(--bad); }
+.su__pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.su__key {
+    padding: 4px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    cursor: pointer;
+}
+.su__key:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.su__key:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Lights Out ──────────────────────────────────────────────────────────── */
+.lo { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.lo__cell {
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-3);
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.lo__cell:hover { border-color: var(--accent); }
+/* Lit is a lamp, so it glows: the widget's yellow, which is doing a job no
+   theme colour would do better. */
+.lo__cell.is-on {
+    background: #f1c40f;
+    border-color: #d4ac0d;
+    box-shadow: 0 0 6px 1px rgba(241, 196, 15, 0.55);
+}
+
+/* ── Mastermind ──────────────────────────────────────────────────────────── */
+.mm { display: flex; flex-direction: column; gap: 5px; }
+.mm__board { display: flex; flex-direction: column; gap: 3px; }
+.mm__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 5px;
+}
+.mm__row.is-active { background: var(--surface-3); }
+.mm__row.is-reveal { background: var(--accent-soft); }
+.mm__pegs { display: flex; gap: 4px; }
+.mm__peg {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+}
+/* The six code colours: six hues that stay apart from each other, which is the
+   only requirement a code peg has. */
+.mm__peg--0 { background: #e74c3c; border-color: #c0392b; }
+.mm__peg--1 { background: #3498db; border-color: #2980b9; }
+.mm__peg--2 { background: #2ecc71; border-color: #27ae60; }
+.mm__peg--3 { background: #f1c40f; border-color: #d4ac0d; }
+.mm__peg--4 { background: #e67e22; border-color: #ca6f1e; }
+.mm__peg--5 { background: #9b59b6; border-color: #884ea0; }
+/* Black for right colour and place, white for right colour wrong place. */
+.mm__fb { display: grid; grid-template-columns: repeat(2, 6px); gap: 2px; }
+.mm__fb > i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+}
+.mm__fb > i.is-black { background: #111; border-color: #000; }
+.mm__fb > i.is-white { background: #fff; border-color: #999; }
+.mm__palette { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.mm__sw {
+    aspect-ratio: 1;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+}
+.mm__sw:disabled { opacity: 0.4; cursor: default; }
+.mm__controls { display: flex; gap: 5px; justify-content: center; }
+
+/* ── The two quizzes ─────────────────────────────────────────────────────── */
+.cq { display: flex; flex-direction: column; gap: 6px; }
+.cq__call {
+    text-align: center;
+    font-family: var(--mono);
+    font-size: calc(21px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+.cq__options, .co__options { display: flex; flex-direction: column; gap: 4px; }
+.cq__opt {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: calc(11.5px * var(--ui-scale));
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.cq__opt:hover:not(.is-done) { border-color: var(--accent); background: var(--accent-soft); }
+.cq__opt.is-done { cursor: default; opacity: 0.7; }
+/* The right answer is always shown, whichever was picked: being told you are
+   wrong without being told the answer teaches nothing. */
+.cq__opt.is-right { border-color: var(--good); background: rgba(69, 214, 154, 0.16); opacity: 1; }
+.cq__opt.is-wrong { border-color: var(--bad); background: rgba(242, 100, 106, 0.16); opacity: 1; }
+.cq__detail {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.co { display: flex; flex-direction: column; gap: 6px; }
+.co__map {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    cursor: grab;
+    /* The wheel zooms and a drag pans, so neither may reach the dock behind. */
+    touch-action: none;
+}
+.co__map:active { cursor: grabbing; }

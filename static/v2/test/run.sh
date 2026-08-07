@@ -40,6 +40,24 @@ esbuild ../src/lib/share.js --bundle --format=cjs --platform=node \
     --outfile=.build/share.cjs --log-level=warning
 esbuild ../src/lib/uiColors.js --bundle --format=cjs --platform=node \
     --outfile=.build/uicolors.cjs --log-level=warning
+esbuild ../src/lib/games/ttt.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-ttt.cjs --log-level=warning
+esbuild ../src/lib/games/minesweeper.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-minesweeper.cjs --log-level=warning
+esbuild ../src/lib/games/puzzle15.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-puzzle15.cjs --log-level=warning
+esbuild ../src/lib/games/memory.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-memory.cjs --log-level=warning
+esbuild ../src/lib/games/connect4.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-connect4.cjs --log-level=warning
+esbuild ../src/lib/games/sudoku.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-sudoku.cjs --log-level=warning
+esbuild ../src/lib/games/lightsout.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-lightsout.cjs --log-level=warning
+esbuild ../src/lib/games/mastermind.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-mastermind.cjs --log-level=warning
+esbuild ../src/lib/games/quiz.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-quiz.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
@@ -237,6 +255,7 @@ node radiosettings.test.js
 node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
+node games.test.js
 node uicolors.test.js
 node share.test.js
 node spectrumstats.test.js

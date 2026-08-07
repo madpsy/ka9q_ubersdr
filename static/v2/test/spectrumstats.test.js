@@ -62,12 +62,15 @@ t('the two streams and their total share one unit', () => {
 t('the parts always add up to the total shown', () => {
     // The one thing a reader will check, and the thing rounding each part
     // independently would break.
-    for (const [spec, audio] of [[1000, 24], [40000, 6000], [3e6, 12000], [0, 5000]]) {
-        const out = formatThroughput(spec, audio);
+    for (const streams of [
+        [1000, 24], [40000, 6000], [3e6, 12000], [0, 5000], [40000, 6000, 3000],
+    ]) {
+        const out = formatThroughput(...streams);
         const nums = out.match(/[\d.]+/g).map(Number);
-        assert.strictEqual(nums.length, 3, out);
-        // To the precision printed: 42 + 6.2 = 48.2 shows as 48.
-        assert.ok(Math.abs((nums[0] + nums[1]) - nums[2]) <= 1, out);
+        const total = nums.pop();
+        assert.strictEqual(nums.length, streams.length, out);
+        // To the precision printed: 39 + 5.9 + 2.9 shows as 48.
+        assert.ok(Math.abs(nums.reduce((a, b) => a + b, 0) - total) <= 1, out);
     }
 });
 
@@ -79,6 +82,19 @@ t('a small stream beside a large one still reads as a number', () => {
     const audio = out.match(/[\d.]+/g)[1];
     assert.strictEqual(audio, '6.0', out);
     assert.notStrictEqual(Number(audio), 0);
+});
+
+t('a third stream joins the line when the band panel is open', () => {
+    // It comes and goes: that stream exists only while the panel is, and the
+    // panel is unmounted whenever its section is collapsed.
+    assert.strictEqual(
+        formatThroughput(41 * 1024, 6.2 * 1024, 3.1 * 1024),
+        '41 + 6.2 + 3.1 = 50 kB/s',
+    );
+    // Absent, it is left out rather than added as a zero — "+ 0" reads as a
+    // stream that has stalled, which is a different and more alarming thing.
+    assert.strictEqual(formatThroughput(41 * 1024, 6.2 * 1024, null), '41 + 6.2 = 47 kB/s');
+    assert.strictEqual(formatThroughput(41 * 1024, 6.2 * 1024), '41 + 6.2 = 47 kB/s');
 });
 
 t('the unit follows the total', () => {
@@ -109,7 +125,6 @@ t('a full sample produces the whole readout', () => {
     const lines = statLines({
         fps: 59.4,
         framesIn: 12.4,
-        rows: 12.4,
         bytesIn: 42 * 1024,
         audioBytes: 6 * 1024,
         binCount: 1024,
@@ -125,9 +140,7 @@ t('a full sample produces the whole readout', () => {
     // Whole frames per second above ten, as with the FPS above it: the decimal on
     // a feed rate changes every tick and says nothing the integer does not.
     assert.strictEqual(value(lines, 'feed'), '12/s');
-    // Rows keeping up with the feed: nothing is holding the picture back, so the
-    // line would be the feed rate written out twice.
-    assert.strictEqual(find(lines, 'rows'), undefined);
+    assert.strictEqual(find(lines, 'rows'), undefined, 'no rows line exists any more');
     assert.strictEqual(value(lines, 'fft'), '1024 bins  7.3 Hz');
     assert.strictEqual(value(lines, 'net'), '42 + 6.0 = 48 kB/s');
     // Queue plus hardware: 180 + 20. Reporting only the half this client controls
@@ -139,19 +152,47 @@ t('a full sample produces the whole readout', () => {
     }
 });
 
-t('rows are shown only when something is holding them back', () => {
-    // The complaint that produced this rule: FPS, FEED and ROWS all reading the
-    // same number, which is three lines saying one thing. Rows are committed as
-    // frames arrive unless the Display panel's waterfall rate is set below the
-    // feed — a deliberately slow scroll — and that is the only case worth a line.
-    assert.strictEqual(find(statLines({ framesIn: 14, rows: 14 }), 'rows'), undefined);
-    // Sampling noise between two counters read a moment apart is not a cap.
-    assert.strictEqual(find(statLines({ framesIn: 14, rows: 13.5 }), 'rows'), undefined);
-    // Held at 5 rows a second against a 14/s feed: two thirds of the frames
-    // arriving are never shown, which is worth knowing.
-    assert.strictEqual(value(statLines({ framesIn: 14, rows: 5 }), 'rows'), '5.0/s');
-    // No feed to compare against — between reconnects — claims nothing either way.
-    assert.strictEqual(find(statLines({ rows: 5 }), 'rows'), undefined);
+t('there is no committed-rows line, whatever it is told', () => {
+    // Tried, and taken out. Rows are committed as frames arrive, so it read as the
+    // feed rate twice; shown only when it fell below the feed, it blinked in and
+    // out on every zoom — a view change brings a catch-up burst that outruns the
+    // waterfall rate for exactly one sample.
+    for (const rows of [0, 5, 14, 40]) {
+        assert.strictEqual(find(statLines({ framesIn: 14, fps: 60, rows }), 'rows'), undefined);
+    }
+});
+
+t('the listener count is shown when there is one, and only then', () => {
+    // Yours is always in the list, so nought is a poll that has not landed rather
+    // than an empty receiver — and "USERS 0" on a display you are looking at is a
+    // statement that cannot be true.
+    assert.strictEqual(value(statLines({ listeners: 7 }), 'users'), '7');
+    assert.strictEqual(value(statLines({ listeners: 1 }), 'users'), '1');
+    // How many of them are in chat, in brackets.
+    assert.strictEqual(value(statLines({ listeners: 7, chatUsers: 3 }), 'users'), '7 (3)');
+    // No bracket for nought, because two different things produce it — an empty
+    // room, and no chat socket at all, which is what a hidden Chat panel means.
+    // A bracket that appeared when that panel was opened would be reporting the
+    // panel rather than the receiver.
+    assert.strictEqual(value(statLines({ listeners: 7, chatUsers: 0 }), 'users'), '7');
+    assert.strictEqual(value(statLines({ listeners: 7 }), 'users'), '7');
+    // And chat without a listener count is not a line of its own: the bracket
+    // qualifies a number that has to be there first.
+    assert.strictEqual(find(statLines({ chatUsers: 3 }), 'users'), undefined);
+    assert.strictEqual(find(statLines({ listeners: 0 }), 'users'), undefined);
+    assert.strictEqual(find(statLines({ listeners: null }), 'users'), undefined);
+    assert.strictEqual(find(statLines({ fps: 60 }), 'users'), undefined);
+});
+
+t('the address is shown when it is known, and nothing stands in for it', () => {
+    assert.strictEqual(value(statLines({ ip: '90.155.46.44' }), 'ip'), '90.155.46.44');
+    assert.strictEqual(value(statLines({ ip: '2a00:23c6::1f' }), 'ip'), '2a00:23c6::1f');
+    // The lookup is optional and can fail. An empty line, a dash or the word
+    // "unknown" in a corner of the waterfall says less than no line at all.
+    assert.strictEqual(find(statLines({ ip: '' }), 'ip'), undefined);
+    assert.strictEqual(find(statLines({ ip: null }), 'ip'), undefined);
+    assert.strictEqual(find(statLines({ ip: {} }), 'ip'), undefined);
+    assert.strictEqual(find(statLines({ fps: 60 }), 'ip'), undefined);
 });
 
 t('the poll divisor is shown only when it is not 1', () => {

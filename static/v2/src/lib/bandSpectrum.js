@@ -29,6 +29,25 @@ export function streamUrl(band) {
     return `/api/noisefloor/spectrum/stream?band=${encodeURIComponent(band)}`;
 }
 
+// What the band stream is costing, bytes per second, or null when it is not
+// running.
+//
+// A module-level reading rather than something passed around: the panel already
+// measures it for its own readout, and the spectrum's stats overlay wants to add
+// it to the session total — and those two are in different corners of the tree
+// with no relationship worth inventing one for. Null when the panel is closed,
+// which is also when the stream is closed: this panel is unmounted whenever its
+// section is collapsed or hidden, so there is nothing to report.
+let liveRate = null;
+
+export function reportBandRate(bps) {
+    liveRate = Number.isFinite(bps) && bps >= 0 ? bps : null;
+}
+
+export function bandRate() {
+    return liveRate;
+}
+
 // How long to wait before reopening a stream that failed, ms.
 //
 // EventSource has a reconnect of its own, and it is not enough. It covers the

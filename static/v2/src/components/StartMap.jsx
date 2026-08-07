@@ -13,7 +13,7 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
-import { greeting, hasPosition, myipPosition } from '../lib/myip.js';
+import { fetchMyIp, greeting, hasPosition, myipPosition } from '../lib/myip.js';
 
 const LEAFLET_JS = '/leaflet.js';
 const LEAFLET_CSS = '/leaflet.css';
@@ -94,11 +94,10 @@ export default function StartMap({ receiver, mobile }) {
             // Where the listener is. Only ever an approximation from GeoIP, so
             // it is not labelled with a place — the line and the distance are
             // the point.
-            let myip = null;
-            try {
-                const r = await fetch('/api/myip');
-                if (r.ok) myip = await r.json();
-            } catch (e) { /* the receiver's own pin is still worth showing */ }
+            // Shared and fetched once a page — the spectrum's stats readout wants
+            // the same answer, and it never changes under an open session. Never
+            // throws: the receiver's own pin is still worth showing without it.
+            const myip = await fetchMyIp();
             if (cancelled) return;
 
             setGreet(greeting(myip, mobile));

@@ -36,7 +36,8 @@ import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
     AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
     decodeFrame, dialWindow, formatAgeSec,
-    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, retryDelay, rowAt, savePrefs,
+    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, reportBandRate, retryDelay,
+    rowAt, savePrefs,
     savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
     zoomHz,
 } from '../lib/bandSpectrum.js';
@@ -419,7 +420,14 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             last = now;
             const bytes = st.bytes;
             st.bytes = 0;
-            if (elapsed > 0 && (seen || bytes)) onRate((bytes * 1000) / elapsed);
+            if (elapsed > 0 && (seen || bytes)) {
+                const bps = (bytes * 1000) / elapsed;
+                onRate(bps);
+                // And into the shared reading, so the spectrum's stats overlay
+                // can count this stream in the session total — it is the third
+                // thing on the wire and the only one with a panel of its own.
+                reportBandRate(bps);
+            }
         }, 1000);
 
         return () => {
@@ -428,6 +436,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             clearInterval(rateTimer);
             if (es) es.close();
             onRate(null);
+            reportBandRate(null);
         };
     }, [band, meta.bin_count, st, onRate]);
 

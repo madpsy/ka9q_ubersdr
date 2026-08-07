@@ -46,6 +46,10 @@ import {
     onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused, suspendSpectrum,
 } from '../lib/spectrumPause.js';
 import { perSecond, statLines, statsPlace } from '../lib/spectrumStats.js';
+import { bandRate } from '../lib/bandSpectrum.js';
+import { subscribeListeners } from '../lib/listeners.js';
+import { useChat } from '../chat/ChatContext.jsx';
+import { fetchMyIp, peekMyIp } from '../lib/myip.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 
@@ -551,6 +555,42 @@ function SpectrumStats({ place, bottom, gfx }) {
     const [lines, setLines] = useState([]);
     const prev = useRef(null);
 
+    // How many people are on the receiver, from the poll the Listeners panel
+    // uses. Shared and reference-counted (lib/listeners.js), so this joins the
+    // existing loop when that panel is open and starts one of its own — a request
+    // every ten seconds — when it is not. Held in a ref and read by the tick
+    // below rather than kept in state: it changes on its own schedule and there
+    // is no reason for it to redraw the readout off-beat.
+    // And how many of them are in the chat room. Whatever the Chat panel has —
+    // there is no second socket to open here, and none to open at all while that
+    // panel is hidden, which is when this reads zero and the bracket is dropped.
+    //
+    // Mirrored into a ref on every render rather than closed over: a chat message
+    // arriving must not rebuild the interval below, and the tick wants the latest
+    // value rather than the one from when it was scheduled.
+    const chatUsers = useChat().users.length;
+    const chatRef = useRef(0);
+    chatRef.current = chatUsers;
+
+    // The address the receiver sees this page on. Asked for once a page and
+    // shared with the start map, which asks for the same thing to say hello with —
+    // see lib/myip.js. Whichever of the two gets there first pays for it.
+    const ip = useRef((peekMyIp() || {}).ip || '');
+    useEffect(() => {
+        let alive = true;
+        fetchMyIp().then((d) => { if (alive && d && d.ip) ip.current = d.ip; });
+        return () => { alive = false; };
+    }, []);
+
+    const listeners = useRef(null);
+    useEffect(() => subscribeListeners((state) => {
+        const n = ((state && state.channels) || []).length;
+        // Zero is not a reading — the list always contains this session, so an
+        // empty one is a poll that has not landed or has failed. Leaving the last
+        // count is better than blinking to a number that cannot be true.
+        if (n > 0) listeners.current = n;
+    }), []);
+
     useEffect(() => {
         prev.current = null;
         const tick = () => {
@@ -562,7 +602,6 @@ function SpectrumStats({ place, bottom, gfx }) {
                 audio: (audioConn && audioConn.bytesIn) || 0,
                 frames: spectrumConn.framesIn || 0,
                 ticks: g.ticks || 0,
-                rows: g.rows || 0,
             };
             const was = prev.current;
             prev.current = at;
@@ -575,15 +614,20 @@ function SpectrumStats({ place, bottom, gfx }) {
             setLines(statLines({
                 fps: perSecond(at.ticks - was.ticks, ms),
                 framesIn: perSecond(at.frames - was.frames, ms),
-                rows: perSecond(at.rows - was.rows, ms),
                 bytesIn: perSecond(at.bytes - was.bytes, ms),
                 audioBytes: perSecond(at.audio - was.audio, ms),
+                // Already a rate, measured by the panel that owns that stream —
+                // null whenever it is closed, which is whenever the stream is.
+                bandBytes: bandRate(),
                 binCount: spectrumConn.binCount,
                 binHz: spectrumConn.binBandwidth,
                 divisor: spectrumConn.rateDivisor,
                 queuedSec: m.queuedSec,
                 outLatSec: m.outLatencySec,
                 underruns: m.underruns,
+                listeners: listeners.current,
+                chatUsers: chatRef.current,
+                ip: ip.current,
             }));
         };
         tick();
@@ -672,7 +716,6 @@ export default function SpectrumView() {
         // The rate the browser is managing is a different fact, and the only one
         // of the two this counter can tell you.
         ticks: 0,            // animation frames, i.e. what the browser is managing
-        rows: 0,             // waterfall rows committed
         autoFloor: -110,
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px
@@ -865,7 +908,6 @@ export default function SpectrumView() {
                 }
                 lastRow = now;
                 g.rowsPending = 0;
-                g.rows++;               // for the stats readout; see SpectrumStats
             }
 
             drawFrame(g, d, {

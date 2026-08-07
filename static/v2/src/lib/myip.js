@@ -7,6 +7,49 @@
 
 import { countryFlag } from './format.js';
 
+export const MYIP_URL = '/api/myip';
+
+// The answer, fetched once and kept.
+//
+// Two things want it now — the start map's greeting and the spectrum's stats
+// readout — and they come and go at different times, so neither can own the
+// request. It is also the same answer every time: a GeoIP lookup of the address
+// this page connected from, which does not change under a session that is already
+// open. So: one request per page, whoever asks first, and everybody after that
+// gets what it said.
+//
+// A failure is not cached. The lookup is optional everywhere it is used — the map
+// draws the receiver's pin without it — so a connection that was briefly down
+// should not cost the whole session its greeting.
+let cached = null;
+let inFlight = null;
+
+export function fetchMyIp() {
+    if (cached) return Promise.resolve(cached);
+    if (!inFlight) {
+        inFlight = fetch(MYIP_URL)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+                cached = d && typeof d === 'object' ? d : null;
+                inFlight = null;
+                return cached;
+            })
+            .catch(() => { inFlight = null; return null; });
+    }
+    return inFlight;
+}
+
+/** What is already known, without asking — null until the first fetch lands. */
+export function peekMyIp() {
+    return cached;
+}
+
+// Test seam.
+export function _resetMyIp() {
+    cached = null;
+    inFlight = null;
+}
+
 // 0,0 is the config default rather than a position, which is why it cannot just
 // be a null check — v1 tests the same way before drawing anything.
 export function hasPosition(gps) {

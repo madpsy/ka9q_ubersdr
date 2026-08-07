@@ -427,10 +427,11 @@ export default function DisplayPanel() {
                 </select>
             </Field>
             <div className="note note--tight">
-                Prints repaint rate, frames arriving, bin count and resolution,
-                throughput (spectrum + audio = total) and audio latency over the
-                waterfall. Bottom left is also where minimised windows sit, so the
-                right is the quieter corner on a busy layout.
+                Prints frame rate, frames arriving, bin count and resolution,
+                throughput (spectrum + audio = total), audio latency and how many
+                people are on the receiver, over the waterfall. Bottom left is also
+                where minimised windows sit, so the right is the quieter corner on a
+                busy layout.
             </div>
             {/* A list, not a switch: "how long am I prepared to be counted as
                 away" is the actual question, and the old switch answered it with

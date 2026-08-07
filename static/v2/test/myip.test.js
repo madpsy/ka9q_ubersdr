@@ -5,13 +5,77 @@
 // map is the first thing anyone sees, so neither may render as "undefined".
 
 const assert = require('assert');
-const { greeting, hasPosition, myipPosition } = require('./.build/myip.cjs');
+const {
+    _resetMyIp, fetchMyIp, greeting, hasPosition, myipPosition, peekMyIp,
+} = require('./.build/myip.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
     try { fn(); console.log('ok    ' + name); pass++; }
     catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
 };
+
+// --- one lookup a page --------------------------------------------------------
+//
+// Two things want this answer now — the start map's greeting and the spectrum's
+// stats readout — and they mount at different moments. The cache is what stops
+// that being two requests, and the failure path is what stops one bad moment
+// costing the session its greeting for good.
+
+const asyncT = [];
+const at = (name, fn) => asyncT.push([name, fn]);
+
+function stubFetch(reply) {
+    let calls = 0;
+    globalThis.fetch = () => {
+        calls++;
+        return typeof reply === 'function' ? reply() : Promise.resolve(reply);
+    };
+    return () => calls;
+}
+
+const okOnce = (body) => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+
+at('the answer is fetched once and shared', async () => {
+    _resetMyIp();
+    const calls = stubFetch(() => okOnce({ ip: '90.155.46.44', city: 'Camden' }));
+    const [a, b] = await Promise.all([fetchMyIp(), fetchMyIp()]);
+    assert.strictEqual(a.ip, '90.155.46.44');
+    assert.strictEqual(b, a, 'both callers get the same object');
+    await fetchMyIp();
+    assert.strictEqual(calls(), 1, 'one request for three askings');
+    assert.strictEqual(peekMyIp().ip, '90.155.46.44', 'and it can be read without asking');
+});
+
+at('nothing is known until it lands', async () => {
+    _resetMyIp();
+    assert.strictEqual(peekMyIp(), null);
+    stubFetch(() => okOnce({ ip: '1.2.3.4' }));
+    await fetchMyIp();
+    assert.strictEqual(peekMyIp().ip, '1.2.3.4');
+});
+
+at('a failed lookup is not cached, so the next asking retries', async () => {
+    // It is optional everywhere it is used, and a connection that was briefly
+    // down must not cost the whole session its greeting.
+    _resetMyIp();
+    let fail = true;
+    const calls = stubFetch(() => (fail
+        ? Promise.reject(new Error('offline'))
+        : okOnce({ ip: '5.6.7.8' })));
+    assert.strictEqual(await fetchMyIp(), null, 'a failure answers null rather than throwing');
+    fail = false;
+    const second = await fetchMyIp();
+    assert.strictEqual(second.ip, '5.6.7.8');
+    assert.strictEqual(calls(), 2);
+});
+
+at('a refusal is an answer, not a cache entry', async () => {
+    _resetMyIp();
+    stubFetch(() => Promise.resolve({ ok: false, status: 503 }));
+    assert.strictEqual(await fetchMyIp(), null);
+    assert.strictEqual(peekMyIp(), null);
+});
 
 t('0,0 is the config default, not a position', () => {
     // Drawing it would put every unconfigured receiver in the Gulf of Guinea.
@@ -54,4 +118,10 @@ t('a lookup without coordinates puts no pin on the map', () => {
     assert.deepStrictEqual(myipPosition({ latitude: 52.5, longitude: 13.4 }), [52.5, 13.4]);
 });
 
-console.log(`\n${pass} myip checks passed`);
+(async () => {
+    for (const [name, fn] of asyncT) {
+        try { await fn(); console.log('ok    ' + name); pass++; }
+        catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1; }
+    }
+    console.log(`\n${pass} myip checks passed`);
+})();

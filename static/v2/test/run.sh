@@ -36,6 +36,8 @@ esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumtrace.cjs --log-level=warning
 esbuild ../src/lib/spectrumStats.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumstats.cjs --log-level=warning
+esbuild ../src/lib/spectrumPeaks.js --bundle --format=cjs --platform=node \
+    --outfile=.build/spectrumpeaks.cjs --log-level=warning
 esbuild ../src/lib/share.js --bundle --format=cjs --platform=node \
     --outfile=.build/share.cjs --log-level=warning
 esbuild ../src/lib/uiColors.js --bundle --format=cjs --platform=node \
@@ -266,6 +268,7 @@ node games.test.js
 node uicolors.test.js
 node share.test.js
 node spectrumstats.test.js
+node spectrumpeaks.test.js
 node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js

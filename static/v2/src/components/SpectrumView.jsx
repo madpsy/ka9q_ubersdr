@@ -36,6 +36,10 @@ import {
     TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
 } from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
+import {
+    PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
+    peakCount, peakSnr,
+} from '../lib/spectrumPeaks.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
@@ -1018,6 +1022,13 @@ export default function SpectrumView() {
     // chosen resolves per device — see statsPlace — which is why it is worked out
     // here rather than higher up: it needs `mobile`.
     const statsAt = statsPlace(display.spectrumStats, mobile);
+    // Peak markers resolve per device too. The answer goes on the gfx ref rather than
+    // being read from the settings inside the draw, as bgOpacity and the station colour
+    // do: the canvas code has no idea what kind of screen it is on, and telling it would
+    // be a second copy of this decision.
+    const peaksWanted = peakCount(display.peakMarks, mobile);
+    gfx.current.peaksWanted = peaksWanted;
+    gfx.current.peaksSnr = peakSnr(display.peakMinSnr);
 
     // A handset on its side gives the whole toolbar up, tags and all. With the
     // top bar gone too (see MobileShell) the spectrum starts at the marker bar,
@@ -2185,6 +2196,113 @@ const HOVER_BAND_ALPHA = 0.5;
  */
 const hoverBandPx = (g, dpr) => (g.hover && !g.drag && !g.edge ? g.hover.x * dpr : null);
 
+// Peak markers: a caret above each of the strongest signals, and its frequency.
+//
+// Deliberately drawn *at the signal* rather than as ticks along the top edge. A column
+// marker says "something is at this frequency", which the trace under it already said;
+// a caret sitting on the peak says "this one, this tall", and the eye follows it down
+// to the shape it belongs to. It is also how every bench analyser does it, so it needs
+// no explaining.
+const PEAK_CARET_PX = 5;        // half-width of the caret; its height is the same
+const PEAK_LABEL_GAP_PX = 4;    // caret tip to text
+const PEAK_TOP_PAD_PX = 11;     // never above this, so a strong signal keeps its label
+
+/**
+ * The averaged trace, updated every frame, and the peaks re-found four times a second.
+ *
+ * Two different rates on purpose. The average has to see every frame or it is not an
+ * average of anything — it is one multiply-add per pixel, which is nothing next to the
+ * drawing. Finding peaks is a sort and a walk, and doing it per frame would buy nothing:
+ * what the markers point at changes on the timescale of the averaging, not the frame.
+ *
+ * Both live on the gfx ref rather than in state. The ranking of two similar signals
+ * changes several times a second even after averaging, and a React render per change
+ * would be expensive *and* unreadable.
+ *
+ * A moved view resets the average outright. Levels measured against the old span belong
+ * to other frequencies, and sweeping from them to the new ones would drag every marker
+ * across the screen for a second after each zoom.
+ */
+function refreshPeaks(g, trace, count, snr, cfg, pxW, now) {
+    const key = `${cfg.centerFreq}|${cfg.span}|${pxW}|${count}|${snr}`;
+    if (g.peaksKey !== key || !g.peakAvg || g.peakAvg.length !== pxW) {
+        g.peaksKey = key;
+        g.peakAvg = new Float32Array(pxW);
+        g.peakAvgAt = 0;
+        g.peaks = [];
+        g.peaksAt = 0;
+    }
+    averageTrace(g.peakAvg, trace, now - g.peakAvgAt, PEAK_TAU_MS, !g.peakAvgAt);
+    g.peakAvgAt = now;
+
+    if (now - g.peaksAt >= PEAK_REFRESH_MS) {
+        g.peaksAt = now;
+        // The previous answer goes in, for the membership hysteresis: without it two
+        // signals a decibel apart hand the last marker back and forth.
+        g.peaks = findPeaks(g.peakAvg, {
+            count, minAbove: snr, gap: PEAK_GAP_PX * g.dpr, prev: g.peaks,
+        });
+    }
+    return g.peaks;
+}
+
+function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk) {
+    if (!peaks.length || !cfg.span) return;
+    const hz0 = cfg.centerFreq - cfg.span / 2;
+
+    c.save();
+    c.font = `${10 * dpr}px ui-monospace, monospace`;
+    c.textBaseline = 'bottom';
+    c.textAlign = 'left';
+
+    // Measured before anything is drawn, because which labels fit is decided for the
+    // whole set at once — see layoutPeakLabels.
+    const texts = peaks.map((p) => {
+        const hz = hz0 + (p.x / pxW) * cfg.span;
+        // The level as an SNR rather than as an absolute figure: it is the same
+        // quantity the threshold is set in, and "18 dB out of the noise" says whether a
+        // signal is worth tuning to in a way that a raw dBFS number does not. The sign
+        // is what distinguishes it from the axis labels down the left.
+        return `${formatFreqShort(hz, cfg.span)}  +${Math.round(p.snr)}`;
+    });
+    const placed = layoutPeakLabels(
+        peaks,
+        texts.map((t) => c.measureText(t).width),
+        pxW,
+        { pad: PEAK_LABEL_GAP_PX * dpr },
+    );
+
+    const caret = PEAK_CARET_PX * dpr;
+    for (let i = 0; i < placed.length; i++) {
+        const p = placed[i];
+        const x = p.x;
+        // Positioned by the *averaged* level, which is what was measured: the live
+        // trace flickers a decibel either side of it, so a caret pinned to the live
+        // sample would twitch while the thing it points at does not.
+        const tip = Math.max(caret + 1, yOf(p.db) - 2 * dpr);
+        c.fillStyle = colInk;
+        c.beginPath();
+        c.moveTo(x, tip);
+        c.lineTo(x - caret, tip - caret);
+        c.lineTo(x + caret, tip - caret);
+        c.closePath();
+        c.fill();
+
+        if (!p.label) continue;
+        // Above the caret, or pinned under the top edge for a signal that reaches it:
+        // a label drawn off the top of the canvas is a label nobody reads.
+        const y = Math.max(PEAK_TOP_PAD_PX * dpr, tip - caret - PEAK_LABEL_GAP_PX * dpr);
+        // Shadowed rather than plated, as the dB labels are: the palette behind this
+        // can be anything from near-black to bright yellow, and a shadow is what makes
+        // one ink legible over all of them without a box that hides the trace.
+        c.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        c.shadowBlur = 3 * dpr;
+        c.fillText(texts[i], p.left, y);
+        c.shadowBlur = 0;
+    }
+    c.restore();
+}
+
 function drawHoverBand(c, pxW, H, cfg, tuning, hoverPx, colBand) {
     if (hoverPx == null || !cfg.span) return;
     const hz0 = cfg.centerFreq - cfg.span / 2;
@@ -2593,6 +2711,17 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     }
 
     drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge);
+
+    // Peak markers, over the trace they point at. Spectrum only: in waterfall-only
+    // view there is no trace for a caret to sit on, and a row of frequencies floating
+    // over the history would be pointing at whichever row happened to be at the top.
+    if (g.peaksWanted) {
+        drawPeakMarks(
+            c, g,
+            refreshPeaks(g, trace, g.peaksWanted, g.peaksSnr, cfg, pxW, performance.now()),
+            pxW, H, dpr, cfg, yOf, colors()['--accent'] || '#08a2fb',
+        );
+    }
 
     // Hover crosshair. Drawn whenever the pointer is anywhere over the view,
     // not only when it is over this pane: the two panes share one frequency

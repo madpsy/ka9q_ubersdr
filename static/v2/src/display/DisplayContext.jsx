@@ -144,6 +144,21 @@ export const DEFAULTS = {
     //
     // See statsPlace, and lib/spectrumStats.js for what it shows.
     spectrumStats: null,
+    // How many peak markers to point at the strongest signals in the view.
+    //
+    // null is "not chosen" and resolves per device, the same shape as the stats overlay
+    // and the idle delays: three on a desktop, one on a phone, where the trace is a
+    // couple of hundred pixels wide and two labels would collide more often than not.
+    // 0 is a choice of its own and means off. Spectrum pane only — see peakCount in
+    // lib/spectrumPeaks.js and drawPeakMarks in SpectrumView.
+    peakMarks: null,
+    // How far above the noise floor a signal has to be, in dB, to earn one of those
+    // markers — named to differ from the peakSnr clamp it is passed through, since a
+    // bare key here reads exactly like a use of that function. The count above is
+    // therefore a ceiling and not a quota: on a quiet band
+    // this is what leaves the spectrum clear instead of filling it with markers on
+    // noise. Ten decibels is a signal you can hear. See lib/spectrumPeaks.js.
+    peakMinSnr: 10,
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator

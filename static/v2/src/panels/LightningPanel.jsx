@@ -16,9 +16,9 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import { retryDelay } from '../lib/backoff.js';
 import {
-    LIST_MAX, WINDOW_S, activityBuckets, addStrike, addonUrl, hourStats, lightningAvailable,
-    normaliseStrike, shortClock, sinceLabel, snrBand, strikeRate, strikesUrl, streamUrl,
-    trimStrikes,
+    LIST_MAX, WINDOW_S, activityBuckets, addStrike, addonUrl, flashStrength, hourStats,
+    lightningAvailable, normaliseStrike, shortClock, sinceLabel, snrBand, strikeRate,
+    strikesUrl, streamUrl, trimStrikes,
 } from '../lib/lightning.js';
 
 export { lightningAvailable };
@@ -87,9 +87,12 @@ export default function LightningPanel({ minimal }) {
     const [state, setState] = useState('loading');   // loading | ok | error
     // Redrawn on the clock as well as on strikes — see TICK_MS.
     const [now, setNow] = useState(() => Date.now());
-    // The newest strike flashes once as it lands. Its id rather than a boolean, so a
-    // second strike during the flash restarts it instead of being missed.
-    const [flash, setFlash] = useState('');
+    // The newest strike flashes the panel as it lands, as the addon's own page flashes
+    // the window. Held as the strike itself rather than a boolean: the id keys the
+    // element, so a second strike during the flash remounts it and starts the animation
+    // again instead of being swallowed by the one already running, and the SNR decides
+    // how bright it goes.
+    const [flash, setFlash] = useState(null);
     const alive = useRef(true);
 
     useEffect(() => () => { alive.current = false; }, []);
@@ -111,7 +114,9 @@ export default function LightningPanel({ minimal }) {
         const s = normaliseStrike(raw, arrivedAt);
         if (!s) return;
         setStrikes((list) => addStrike(list, s));
-        if (arrivedAt != null) setFlash(s.id);
+        // Live strikes only. The hour of backfill arrives in one lump on open, and a
+        // panel that flashed sixty times on opening would be a fault, not a feature.
+        if (arrivedAt != null) setFlash(s);
     }, []);
 
     // The hour of history behind the strip and the headline figures. One request, on
@@ -200,6 +205,22 @@ export default function LightningPanel({ minimal }) {
 
     return (
         <div className="stack lx">
+            {/* The strike itself. Over the panel and keyed by the strike, so each one
+                restarts the animation; pointer-events are off, so it never eats a click
+                on anything underneath. It fades to nothing on its own and is left in
+                place afterwards — at zero opacity it costs nothing, and taking it away
+                on a timer would be a second thing to get wrong.
+
+                Anyone who has asked for reduced motion gets none of it: the global rule
+                in styles.css cuts every animation to a hundredth of a millisecond. */}
+            {flash && (
+                <span
+                    key={flash.id}
+                    className={`lx__flash is-${snrBand(flash.snr)}`}
+                    style={{ '--lx-flash': flashStrength(flash.snr) }}
+                    aria-hidden="true"
+                />
+            )}
             <div className="lx__stats">
                 <Stat label="Rate" value={rate.toFixed(1)} sub="/min" />
                 <Stat
@@ -240,7 +261,7 @@ export default function LightningPanel({ minimal }) {
                         {strikes.slice(0, LIST_MAX).map((s) => (
                             <li
                                 key={s.id}
-                                className={`lx__row is-${snrBand(s.snr)}${s.id === flash ? ' is-new' : ''}`}
+                                className={`lx__row is-${snrBand(s.snr)}${flash && s.id === flash.id ? ' is-new' : ''}`}
                             >
                                 <span className="lx__t">{shortClock(s.time)}</span>
                                 {/* The bar is the reading and the number is the detail:

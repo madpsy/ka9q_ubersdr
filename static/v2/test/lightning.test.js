@@ -201,5 +201,26 @@ t('a clock that is somehow ahead of us reads as now, not as negative', () => {
     assert.strictEqual(lx.sinceLabel(NOW + 5000, NOW), '0s');
 });
 
+// --- the flash ---------------------------------------------------------------
+
+t('a harder strike flashes brighter, up to a ceiling', () => {
+    // A fixed flash would make a distant sferic look like a strike overhead; an
+    // unbounded one would strobe on a storm.
+    assert.ok(lx.flashStrength(5) < lx.flashStrength(15));
+    assert.ok(lx.flashStrength(15) < lx.flashStrength(29));
+    assert.strictEqual(lx.flashStrength(lx.FLASH_FULL_DB), lx.FLASH_MAX);
+    assert.strictEqual(lx.flashStrength(120), lx.FLASH_MAX, 'a very close strike is not brighter still');
+});
+
+t('even the faintest strike is visible, and nonsense does not go dark', () => {
+    // Below the floor a real strike would go unnoticed, which is the one thing the
+    // flash exists to prevent.
+    assert.strictEqual(lx.flashStrength(0.1), lx.FLASH_MIN + (lx.FLASH_MAX - lx.FLASH_MIN) * (0.1 / lx.FLASH_FULL_DB));
+    assert.strictEqual(lx.flashStrength(0), lx.FLASH_MIN);
+    assert.strictEqual(lx.flashStrength(-4), lx.FLASH_MIN);
+    assert.strictEqual(lx.flashStrength(undefined), lx.FLASH_MIN);
+    assert.ok(lx.FLASH_MIN > 0);
+});
+
 if (process.exitCode) console.log('\nlightning tests FAILED');
 else console.log(`\nall ${pass} lightning tests passed`);

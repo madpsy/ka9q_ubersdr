@@ -178,6 +178,28 @@ export function activityBuckets(list, now = Date.now(), windowS = WINDOW_S) {
     return out;
 }
 
+// The flash, when a strike lands: how bright, from how hard it was.
+//
+// The addon's own page flashes the whole window white-to-orange on every strike, and it
+// is the best thing about it — you look up because the room changed, not because a
+// number did. The panel version is the same idea at panel size.
+//
+// Brightness scales with SNR rather than being fixed, because a fixed flash makes a
+// distant sferic look like a strike overhead. Floor and ceiling both matter: below the
+// floor a real strike would go unnoticed, and above the ceiling a busy storm is a
+// strobe. FLASH_FULL_DB is where it reaches full brightness — 30 dB is a close strike,
+// and everything harder than that is close enough.
+export const FLASH_MIN = 0.22;
+export const FLASH_MAX = 0.58;
+export const FLASH_FULL_DB = 30;
+
+export function flashStrength(db) {
+    const v = Number(db);
+    if (!Number.isFinite(v) || v <= 0) return FLASH_MIN;
+    const frac = Math.min(1, v / FLASH_FULL_DB);
+    return FLASH_MIN + (FLASH_MAX - FLASH_MIN) * frac;
+}
+
 /**
  * How long ago, for the "last strike" readout.
  *

@@ -88,6 +88,7 @@ import ClocksPanel from './ClocksPanel.jsx';
 import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
+import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -217,6 +218,22 @@ export const PANELS = [
         // The addon detects the strikes; without it there is no stream to open and
         // every request would 404.
         requires: (serverInfo) => lightningAvailable(serverInfo),
+    },
+    // The AX.25 frames the packet addon is decoding. Beside the other two addon
+    // panels, and the same bargain: the headline here, the whole application a click
+    // away. Not the audio preview it also serves — a receiver that plays a second
+    // stream over the one you are listening to has misjudged what a dock is for.
+    //
+    // Minimal: the frames alone. A decoded frame says what it is by being one.
+    {
+        id: 'packet',
+        title: 'Packet',
+        icon: <Icon.Packet />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: PacketPanel,
+        requires: (serverInfo) => packetAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

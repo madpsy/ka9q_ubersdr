@@ -34,6 +34,8 @@ esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
     --outfile=.build/backoff.cjs --log-level=warning
 esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
+esbuild ../src/lib/packet.js --bundle --format=cjs --platform=node \
+    --outfile=.build/packet.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -301,5 +303,6 @@ node bridgeclient.test.js
 node spectrogram.test.js
 node bandspectrum.test.js
 node lightning.test.js
+node packet.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

@@ -7054,6 +7054,42 @@ a.btn { text-decoration: none; }
    Lightning addon panel
    ========================================================================= */
 
+/* The panel is the flash's frame, so it has to be the positioning context. */
+.lx { position: relative; }
+/* A strike, seen rather than read.
+ *
+ * The addon's own page flashes the whole window on every strike and it is the best
+ * thing about it: you look up because the room changed, not because a number did. Same
+ * gradient — a white-hot core falling away to the strike's own colour — and inset past
+ * the panel's padding so the whole card lights rather than a rectangle inside it.
+ *
+ * The peak opacity comes from the strike: see flashStrength. */
+.lx__flash {
+    position: absolute;
+    inset: -6px;
+    z-index: 3;
+    pointer-events: none;
+    border-radius: var(--radius-sm);
+    opacity: 0;
+    animation: lx-strike 480ms ease-out;
+}
+.lx__flash.is-lo {
+    background: radial-gradient(ellipse at 50% 20%, #fffbe0 0%, var(--accent) 32%, transparent 72%);
+}
+.lx__flash.is-med {
+    background: radial-gradient(ellipse at 50% 20%, #fffbe0 0%, var(--warn) 32%, transparent 72%);
+}
+.lx__flash.is-hi {
+    background: radial-gradient(ellipse at 50% 20%, #ffffff 0%, var(--bad) 34%, transparent 74%);
+}
+/* Fast up and slow down — the shape of the thing it stands for. */
+@keyframes lx-strike {
+    0% { opacity: var(--lx-flash, 0.4); }
+    22% { opacity: calc(var(--lx-flash, 0.4) * 0.55); }
+    60% { opacity: calc(var(--lx-flash, 0.4) * 0.18); }
+    100% { opacity: 0; }
+}
+
 .lx__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 /* Each figure is a label, a number and its unit, stacked and centred. Fixed rows
    rather than flowing text: the numbers change every second, and a column that
@@ -7133,3 +7169,126 @@ a.btn { text-decoration: none; }
 .lx__row.is-hi .lx__bar i { background: var(--bad); }
 .lx__db { min-width: 2.2em; text-align: right; color: var(--text); }
 .lx__ms { min-width: 3em; text-align: right; color: var(--text-faint); }
+
+/* =========================================================================
+   Packet addon panel
+   ========================================================================= */
+
+/* The same four-figure header the lightning panel has, and deliberately so: two addon
+   panels in one dock that summarise themselves differently are two things to learn. */
+.pk__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.pk__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 4px 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    min-width: 0;
+}
+.pk__stat-k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.pk__stat-v {
+    font-family: var(--mono);
+    font-size: calc(15px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--text);
+}
+.pk__stat-s { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+
+/* Who is being heard most. Wraps rather than scrolls: three callsigns fit a dock at
+   any width worth having one at. */
+.pk__top { display: flex; flex-wrap: wrap; gap: 4px; }
+.pk__top-call {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text);
+}
+.pk__top-call i { font-style: normal; color: var(--text-faint); }
+
+.pk__list { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.pk__frame {
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--border-strong);
+    border-radius: 3px;
+    background: var(--surface-2);
+}
+/* A frame arriving, marked the way the lightning panel marks a strike: briefly, and
+   without moving anything. */
+.pk__frame.is-new { animation: pk-new 1200ms ease-out; }
+@keyframes pk-new {
+    from { border-left-color: var(--accent); background: var(--accent-soft); }
+    to { border-left-color: var(--border-strong); background: var(--surface-2); }
+}
+
+/* One line: time, who, to whom, what kind, how strong. The callsigns are the only
+   parts allowed to give way — the rest are two or three characters each, and
+   truncating those loses the whole field. */
+.pk__head {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    white-space: nowrap;
+}
+.pk__t { color: var(--text-faint); }
+.pk__call { color: var(--text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.pk__arrow { color: var(--text-faint); }
+.pk__to { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pk__via { color: var(--text-faint); }
+.pk__kind {
+    margin-left: auto;
+    padding: 0 3px;
+    border-radius: 2px;
+    font-size: calc(8.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    background: var(--surface-3);
+}
+/* APRS is the one people are looking for, so it is the one with a colour. */
+.pk__kind.is-aprs { color: var(--accent); background: var(--accent-soft); }
+.pk__snr { color: var(--text-dim); }
+
+/* The payload. Two lines at most: long enough for a status or a position, short enough
+   that one telemetry frame cannot take the panel over. */
+.pk__info {
+    margin-top: 1px;
+    font-size: calc(10.5px * var(--ui-scale));
+    line-height: 1.3;
+    color: var(--text-dim);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+}
+
+/* What is being listened to, as frequencies. Faint: it is a caption on the panel, not
+   a control — channels are added and removed on the addon's own page. */
+.pk__chans { display: flex; flex-wrap: wrap; gap: 4px; }
+.pk__chan {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.pk__chan.is-up { color: var(--text-dim); border-color: var(--border-strong); }

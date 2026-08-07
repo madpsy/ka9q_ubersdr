@@ -489,12 +489,18 @@ export default function TopBar({ compact }) {
 
             {!compact && <VolumeSlider />}
 
+            {/* On a phone the icon says it on its own — a power symbol is the most
+                universally read control there is, and the two buttons either side of it
+                are icons too, so the word was the odd one out as well as the widest
+                thing in the row. The width it gives back is what the theme menu needs
+                to be here at all; the label is still in the tooltip either way. */}
             <Button
                 variant={running ? 'danger' : 'primary'}
                 icon={<Icon.Power />}
+                title={running ? 'Stop listening' : 'Start listening'}
                 onClick={() => (running ? actions.powerOff() : actions.powerOn())}
             >
-                {running ? 'Stop' : 'Listen'}
+                {compact ? undefined : (running ? 'Stop' : 'Listen')}
             </Button>
 
             {/* Not on mobile. The Status panel says the same thing in words,
@@ -527,15 +533,16 @@ export default function TopBar({ compact }) {
                 />
             )}
 
-            {/* Also not on mobile — the Display panel carries all of this there.
-                A setting changed once and then left alone is a poor use of a bar
-                that has to hold the frequency, the mode, the filter width and
-                Listen.
+            {/* On a phone too, now that Listen is an icon and has the width to spare.
+                It earns it: dark or light is the setting somebody changes because of the
+                room they are in, which on a handset changes several times a day — a
+                train, a shack, outside at night — and it is two taps away in the Display
+                panel instead of one here.
 
-                A menu rather than the toggle this was: dark or light is still one
-                of the questions, but the colour schemes are the other, and a
-                button cannot cycle nine of anything. */}
-            {!compact && <ThemeMenu />}
+                A menu rather than the toggle this was: dark or light is still one of the
+                questions, but the colour schemes are the other, and a button cannot
+                cycle nine of anything. */}
+            <ThemeMenu />
 
             {!compact && (
                 <div className="topbar__docks">

@@ -158,6 +158,12 @@
 
     --spec-bg: #0a0e15;
     --spec-grid: rgba(255, 255, 255, 0.055);
+    /* Text drawn *over* the canvas — the stats overlay. Light in both themes,
+       because the canvas is dark in both: --spec-bg barely lightens on the light
+       theme, since a light waterfall is unreadable. A chosen text colour replaces
+       this when it is legible against that (see specInk), and does not when it is
+       not — obeying the setting into invisibility is not obedience. */
+    --spec-ink: #e8edf5;
     /* The spectrum trace and fill are coloured from the active waterfall
        palette, not from tokens — see paletteGradients() in SpectrumView.jsx. */
     --spec-band: rgba(139, 124, 248, 0.22);
@@ -1341,14 +1347,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
  * one. See lib/spectrumStats.js for what is in it.
  *
  * Deliberately a debug overlay and not a panel: mono, tabular figures, two
- * columns, white on a plate dark enough to survive whatever the waterfall is
- * doing underneath. Nothing here is styled with the app's surfaces or text
- * colours, because this is not part of the interface — it is an instrument
- * switched on over the top of one, and it should look switched on.
+ * columns, on a plate dark enough to survive whatever the waterfall is doing
+ * underneath. It takes none of the app's surfaces, because this is not part of
+ * the interface — it is an instrument switched on over the top of one, and it
+ * should look switched on.
  *
- * White in both themes for the same reason: what is behind it is a waterfall,
- * which is dark whatever the theme is, and a readout that followed the theme
- * would be black text on a black picture half the time.
+ * Its ink is the one thing it does share, through --spec-ink: light in both
+ * themes, because what is behind it is a waterfall and that is dark in both, but
+ * following a chosen text colour where that colour is legible against the canvas.
+ * A white readout in the corner of an amber interface reads as somebody else's.
  *
  * `bottom` is set inline — the strip it has to clear is a different height in
  * each view mode. See SpectrumStats. */
@@ -1376,7 +1383,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-size: calc(9.5px * var(--ui-scale));
     line-height: 1.45;
     font-variant-numeric: tabular-nums;
-    color: #fff;
+    /* Not plain white any more: with the text colour settable, a white readout in
+       the corner of an amber interface reads as something else's. It follows the
+       chosen colour where that stays legible over the waterfall, and falls back
+       to this near-white where it would not. */
+    color: var(--spec-ink);
     /* The plate is translucent, so the glyphs still need an edge of their own
        over a bright trace. */
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);

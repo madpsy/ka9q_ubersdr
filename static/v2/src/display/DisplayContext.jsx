@@ -27,6 +27,15 @@ export const DEFAULTS = {
     peakHold: false,
     peakDecay: 6,           // dB per second; 0 = hold indefinitely
     grid: false,
+    // The receiver's name, location and conditions, drawn in the top right of the
+    // spectrum — see drawStationId. On, because it is what says whose receiver
+    // this is, and a screenshot without it is a waterfall from nowhere.
+    //
+    // The operator can switch it off for everybody (station_id_overlay in the
+    // server's ui-config); this is the listener's half of the same question, for
+    // somebody who would rather have those pixels of spectrum back. Neither
+    // overrides the other — off at either end is off.
+    stationInfo: true,
     waterfallRate: 20,      // committed rows per second
     rowHeight: 2,           // device px per row
     // Slide each new row into view over the gap until the next one, instead of

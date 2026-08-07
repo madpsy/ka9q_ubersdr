@@ -10,7 +10,7 @@ const {
     ACCENT_DEFAULT, CONTRAST_MIN, CONTRAST_MIN_FAINT, TEXT_DEFAULT, TEXT_DIM_DEFAULT,
     TEXT_FAINT_DEFAULT, contrastMin,
     UI_COLOR_VARS, accentVars, contrastRatio, effectiveColors, inkFor, luminance, pageContrast,
-    UI_THEMES, matchUiTheme, parseHex, textVars, themeSwatch, uiColorVars,
+    SPEC_BG, UI_THEMES, matchUiTheme, parseHex, specInk, textVars, themeSwatch, uiColorVars,
 } = require('./.build/uicolors.cjs');
 
 let pass = 0;
@@ -195,6 +195,44 @@ t('every property the group can set is in the list that clears them', () => {
         assert.ok(UI_COLOR_VARS.includes(name), `${name} missing from UI_COLOR_VARS`);
     }
     assert.strictEqual(Object.keys(all).length, UI_COLOR_VARS.length);
+});
+
+// --- ink over the canvas --------------------------------------------------
+
+t('the readouts over the waterfall follow a light text colour', () => {
+    // A white readout in the corner of an amber interface reads as somebody
+    // else's — but the canvas is dark in both themes, so following the text
+    // blindly would put black on black half the time.
+    assert.strictEqual(specInk('#f3d9a8', 'dark'), '#f3d9a8', 'amber is legible there');
+    assert.strictEqual(specInk('#ffffff', 'light'), '#ffffff');
+});
+
+t('...and refuse a text colour that would vanish into it', () => {
+    // The light theme's own near-black text is the case this exists for: the
+    // waterfall stays dark on the light theme, because a light one is unreadable.
+    assert.strictEqual(specInk('#16202e', 'light'), null);
+    assert.strictEqual(specInk('#222222', 'dark'), null);
+    // Null, not a substitute: the stylesheet's own light ink stays in place, and
+    // obeying a setting into invisibility is not obedience.
+    assert.strictEqual(specInk(null, 'dark'), null);
+    assert.strictEqual(specInk('nonsense', 'dark'), null);
+});
+
+t('the canvas is dark on both themes, which is why this check exists', () => {
+    for (const theme of ['dark', 'light']) {
+        assert.ok(luminance(parseHex(SPEC_BG[theme])) < 0.02, theme);
+    }
+});
+
+t('every preset produces a readable readout over the waterfall', () => {
+    // Either by following its own text colour or by leaving the stylesheet's.
+    for (const preset of UI_THEMES) {
+        const theme = preset.theme || 'dark';
+        const ink = uiColorVars(preset.colors, theme)['--spec-ink'];
+        if (!ink) continue;                     // falls back to the stock light ink
+        const ratio = contrastRatio(parseHex(ink), parseHex(SPEC_BG[theme]));
+        assert.ok(ratio >= CONTRAST_MIN, `${preset.id}: ${ratio.toFixed(1)}:1 on the canvas`);
+    }
 });
 
 // --- the presets ------------------------------------------------------------

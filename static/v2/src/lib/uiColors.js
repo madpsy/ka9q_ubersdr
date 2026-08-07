@@ -35,6 +35,16 @@ export const TEXT_FAINT_DEFAULT = { dark: '#5c6779', light: '#8996a8' };
 // check and the derived greys are measured against it.
 export const PAGE_BG = { dark: '#090c12', light: '#e9edf3' };
 
+// The spectrum canvas, which is dark in *both* themes: a light waterfall is
+// unreadable, so the stylesheet keeps --spec-bg near black even on the light one.
+// Anything drawn over it therefore cannot use the page's text colour without
+// being checked first — see specInk.
+export const SPEC_BG = { dark: '#0a0e15', light: '#0d1219' };
+
+// The ink for text over the canvas — the stats overlay, and anything else that
+// ends up there. Light in both themes, because the canvas is.
+export const SPEC_INK_DEFAULT = '#e8edf5';
+
 // How far from the background toward the text colour the two quieter greys sit.
 //
 // Measured off the stylesheet's own values rather than invented, and the finding
@@ -183,33 +193,8 @@ export function textVars({ text, dim, faint } = {}, theme) {
 export const UI_COLOR_VARS = [
     '--accent', '--accent-ink', '--accent-soft', '--accent-line',
     '--text', '--text-dim', '--text-faint',
+    '--spec-ink',
 ];
-
-/** Everything to set on the root, from the whole settings group. */
-export function uiColorVars(colors = {}, theme) {
-    return {
-        ...(accentVars(colors.accent, theme) || {}),
-        ...(textVars(colors, theme) || {}),
-    };
-}
-
-/**
- * The colour each picker should open on: what is actually in force.
- *
- * A picker showing black for "unset" is a picker that lies about what the screen
- * looks like, and a first drag from black is a first drag from nowhere near where
- * you were.
- */
-export function effectiveColors(colors = {}, theme) {
-    const vars = uiColorVars(colors, theme);
-    const t = key(theme);
-    return {
-        accent: vars['--accent'] || ACCENT_DEFAULT[t],
-        text: vars['--text'] || TEXT_DEFAULT[t],
-        dim: vars['--text-dim'] || TEXT_DIM_DEFAULT[t],
-        faint: vars['--text-faint'] || TEXT_FAINT_DEFAULT[t],
-    };
-}
 
 // How readable the interface will be with a colour, so the panel can say so
 // before the operator finds out by trying to read a button.
@@ -239,6 +224,56 @@ export function pageContrast(hex, theme) {
     const rgb = parseHex(hex);
     if (!rgb) return null;
     return contrastRatio(rgb, parseHex(PAGE_BG[key(theme)]));
+}
+
+/**
+ * The ink for text drawn over the spectrum canvas, given the chosen text colour.
+ *
+ * The overlay used to be plain white, which was right when there was one text
+ * colour and it was near-white. With the colour settable it looks foreign — amber
+ * everywhere and a white readout in the corner — so it follows the text where it
+ * can, and the check is whether it can: the canvas stays dark in both themes, so
+ * a light theme's near-black text, or anybody's dark choice, would be a readout
+ * that has disappeared into the waterfall.
+ *
+ * Null when the chosen colour will not do, which leaves the stylesheet's own
+ * light ink in place. That is the honest fallback — the alternative is obeying
+ * the setting into illegibility.
+ */
+export function specInk(hex, theme) {
+    const rgb = parseHex(hex);
+    if (!rgb) return null;
+    const bg = parseHex(SPEC_BG[key(theme)]);
+    return contrastRatio(rgb, bg) >= CONTRAST_MIN ? norm(hex) : null;
+}
+
+/** Everything to set on the root, from the whole settings group. */
+export function uiColorVars(colors = {}, theme) {
+    const out = {
+        ...(accentVars(colors.accent, theme) || {}),
+        ...(textVars(colors, theme) || {}),
+    };
+    const ink = specInk(colors.text, theme);
+    if (ink) out['--spec-ink'] = ink;
+    return out;
+}
+
+/**
+ * The colour each picker should open on: what is actually in force.
+ *
+ * A picker showing black for "unset" is a picker that lies about what the screen
+ * looks like, and a first drag from black is a first drag from nowhere near where
+ * you were.
+ */
+export function effectiveColors(colors = {}, theme) {
+    const vars = uiColorVars(colors, theme);
+    const t = key(theme);
+    return {
+        accent: vars['--accent'] || ACCENT_DEFAULT[t],
+        text: vars['--text'] || TEXT_DEFAULT[t],
+        dim: vars['--text-dim'] || TEXT_DIM_DEFAULT[t],
+        faint: vars['--text-faint'] || TEXT_FAINT_DEFAULT[t],
+    };
 }
 
 // ── Presets ──────────────────────────────────────────────────────────────────

@@ -321,6 +321,24 @@ export default function DisplayPanel() {
                         </Field>
                     )}
 
+                    {/* Only where the operator has not already switched it off
+                        for everybody: with station_id_overlay unset in the
+                        receiver's ui-config there is nothing to show, and a
+                        switch that changes nothing is worse than no switch.
+
+                        In the split-view block because that is the only view it
+                        is drawn in — the overlay sits in the spectrum pane, and
+                        the other two modes do not have one. */}
+                    {d.server.stationIdOverlay && (
+                        <Field label="Receiver info" inline>
+                            <Switch
+                                checked={d.stationInfo !== false}
+                                onChange={(v) => d.set({ stationInfo: v })}
+                                title="The receiver's name, location and conditions in the top right of the spectrum. Off gives those pixels back to the waterfall"
+                            />
+                        </Field>
+                    )}
+
                     {/* Lines only. The dB numbers down the left edge are the
                         vertical axis and are always drawn — see drawSpectrum. */}
                     <Field label="Grid lines" inline>

@@ -748,7 +748,14 @@ export default function SpectrumView() {
     // Station ID overlay: split view only, and only if the operator left it on.
     // The lines go into the gfx ref because the draw loop, not React, paints
     // them — they change every few minutes at most.
-    const station = useStationOverlay(viewMode === 'split' && display.server.stationIdOverlay);
+    // Split view only — it goes in the spectrum pane, and there is not one in the
+    // other two — and only while both ends want it: the operator's ui-config and
+    // the listener's own switch in the Display panel.
+    const station = useStationOverlay(
+        viewMode === 'split'
+        && display.server.stationIdOverlay
+        && display.stationInfo !== false,
+    );
     useEffect(() => {
         gfx.current.station = station;
         gfx.current.stationColor = display.server.stationIdColor;
@@ -1872,6 +1879,10 @@ export default function SpectrumView() {
 const THEME_VARS = [
     '--spec-bg', '--spec-grid', '--spec-band',
     '--scale-bg', '--scale-text', '--scale-tick', '--accent',
+    // The ink for anything drawn *over* the canvas. Light in both themes, and
+    // following a chosen text colour where that stays legible on a waterfall —
+    // see specInk in lib/uiColors.js.
+    '--spec-ink',
 ];
 const colors = () => themeColors(THEME_VARS);
 
@@ -2575,7 +2586,11 @@ function drawStationId(g, c, pxW, dpr) {
 
     const rightX = pxW - 6 * dpr;
     let y = 6 * dpr;
-    const col = g.stationColor || '#ffffff';
+    // The operator's colour if they set one — that is their receiver's name in
+    // their receiver's colour, and a listener's scheme has no business
+    // overruling it. Otherwise the interface's own ink over the canvas, so an
+    // amber or green scheme does not have one white block in the corner of it.
+    const col = g.stationColor || colors()['--spec-ink'] || '#ffffff';
 
     c.save();
     // Placed by measurement rather than by textAlign: an operator's name or

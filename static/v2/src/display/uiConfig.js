@@ -28,7 +28,12 @@ export const UI_CONFIG_DEFAULTS = {
     bgImage: '',
     bgOpacity: 0.3,
     stationIdOverlay: true,     // absent key means show, as in v1
-    stationIdColor: '#ffffff',
+    // null when the operator has not chosen one, which is not the same as white:
+    // an unset colour follows the interface's own ink over the canvas (see
+    // --spec-ink), and a set one is the operator's decision and is obeyed. Keeping
+    // the two apart is what lets a receiver's own branding survive a listener's
+    // colour scheme while an untouched default follows it.
+    stationIdColor: null,
     autoMinSpan: 30,            // operator's default minimum dynamic range, dB
     // The operator's default audio buffer ceiling, seconds. Sent as a string of
     // milliseconds ("200"). null when the server did not say, which is not the
@@ -96,7 +101,7 @@ export function parseUiConfig(cfg) {
             ? Math.max(0, Math.min(1, o))
             : UI_CONFIG_DEFAULTS.bgOpacity,
         stationIdOverlay: cfg.station_id_overlay !== false,
-        stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : UI_CONFIG_DEFAULTS.stationIdColor,
+        stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : null,
         autoMinSpan: Number.isFinite(minSpan)
             ? Math.max(0, Math.min(60, minSpan))
             : UI_CONFIG_DEFAULTS.autoMinSpan,

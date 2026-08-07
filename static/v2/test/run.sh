@@ -46,6 +46,10 @@ esbuild ../src/lib/navtexCodes.js --bundle --format=cjs --platform=node \
     --outfile=.build/navtexcodes.cjs --log-level=warning
 esbuild ../src/lib/navtexAddon.js --bundle --format=cjs --platform=node \
     --outfile=.build/navtexaddon.cjs --log-level=warning
+# wefaxaddon, not wefax: the WEFAX decoder extension's image.js already builds to
+# .build/wefax.cjs, and one of the two would have silently overwritten the other.
+esbuild ../src/lib/wefax.js --bundle --format=cjs --platform=node \
+    --outfile=.build/wefaxaddon.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -317,5 +321,6 @@ node packet.test.js
 node doppler.test.js
 node freqref.test.js
 node navtexaddon.test.js
+node wefaxaddon.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

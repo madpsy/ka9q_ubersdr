@@ -7522,3 +7522,81 @@ a.btn { text-decoration: none; }
 }
 .nx__other:hover { border-color: var(--accent); color: var(--text); }
 .nx__other i { font-style: normal; color: var(--text-faint); }
+
+/* =========================================================================
+   WEFAX addon panel
+   ========================================================================= */
+
+.wx__page { display: flex; flex-direction: column; gap: 3px; }
+.wx__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.wx__khz { color: var(--text); font-weight: 650; }
+.wx__age { margin-left: auto; }
+
+/* The thumbnail the addon made, at whatever width the dock is. A fax page is tall, so
+   the tile is capped in height and the top of the chart is what shows — the whole of it
+   is one click away, the same bargain the NAVTEX panel makes with its text. */
+.wx__thumb {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-height: calc(180px * var(--ui-scale));
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    cursor: pointer;
+}
+.wx__thumb img { display: block; width: 100%; height: auto; }
+.wx__thumb:hover { border-color: var(--accent); }
+/* Over the bottom of the tile, on a gradient rather than a plate: a fax page is white
+   paper, and a solid chip on it reads as part of the chart. */
+.wx__open {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 10px 6px 3px;
+    background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.75));
+    color: #fff;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-align: right;
+}
+
+/* Full size in the modal. */
+.wx__full { display: flex; flex-direction: column; gap: 6px; min-width: min(86vw, 900px); }
+/* Fitted to the width and scrolling downwards: a chart shrunk to fit a screen is a grey
+   rectangle, and these run to several thousand lines. */
+.wx__paper {
+    max-height: 68vh;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #fff;
+}
+.wx__paper img { display: block; width: 100%; height: auto; }
+/* 1:1, for reading the isobars. Scrolls both ways, because at actual size a fax page is
+   wider than the modal as well as taller. */
+.wx__paper.is-full img { width: auto; max-width: none; }
+
+.wx__others { display: flex; flex-wrap: wrap; gap: 4px; }
+.wx__other {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: none;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.wx__other:hover { border-color: var(--accent); color: var(--text); }
+.wx__other i { font-style: normal; color: var(--text-faint); }

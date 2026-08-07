@@ -91,6 +91,7 @@ import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
 import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
 import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
 import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
+import WefaxPanel, { wefaxAvailable } from './WefaxPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -267,6 +268,22 @@ export const PANELS = [
         minimal: true,
         Component: NavtexPanel,
         requires: (serverInfo) => navtexAvailable(serverInfo),
+    },
+    // The last weather fax page each frequency produced, from the WEFAX addon. Next to
+    // NAVTEX because they are the same panel doing the same job for the same kind of
+    // broadcast — one long thing at a time, of which a dock column shows the top.
+    //
+    // Minimal: the page without the picker, which pins one frequency's latest chart to
+    // the dock. The modal still opens from there.
+    {
+        id: 'wefax',
+        title: 'Weather fax',
+        icon: <Icon.Fax />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: WefaxPanel,
+        requires: (serverInfo) => wefaxAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

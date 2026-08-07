@@ -46,17 +46,18 @@ function Column({ title, rows, count, now, onPick }) {
                         + `${s.mode ? ` ${s.mode.toUpperCase()}` : ''}`
                         + `${s.snr != null ? ` · ${Math.round(s.snr)} dB` : ''} — click to tune`}
                 >
+                    {/* The age sits with the callsign rather than on a line of its
+                        own: it is three characters, and a row of its own for it made
+                        each entry half again as tall for no more information. */}
                     <span className="vs__call">
                         {s.cc && <span className="vs__flag">{countryFlag(s.cc)}</span>}
-                        {s.callsign}
+                        <span className="vs__sign">{s.callsign}</span>
+                        <span className="vs__age">{sinceLabel(s.spottedAt || s.at, now)}</span>
                     </span>
                     <span className="vs__where">
                         <span className="vs__band">{s.band}</span>
                         {freqLabel(s.hz)}
                         {s.mode && <span className="vs__mode">{s.mode.toUpperCase()}</span>}
-                    </span>
-                    <span className="vs__age">
-                        {sinceLabel(s.spottedAt || s.at, now)}
                     </span>
                 </button>
             ))}

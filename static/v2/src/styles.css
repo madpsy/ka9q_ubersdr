@@ -7647,11 +7647,13 @@ a.btn { text-decoration: none; }
     font-size: calc(11px * var(--ui-scale));
     font-weight: 650;
     color: var(--text);
-    overflow: hidden;
     white-space: nowrap;
-    text-overflow: ellipsis;
+    min-width: 0;
 }
-.vs__flag { font-size: calc(10px * var(--ui-scale)); }
+/* The callsign is what gives way in a narrow dock — the flag is one glyph and the age
+   is three characters, and truncating either of those loses the whole field. */
+.vs__sign { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vs__flag { flex: none; font-size: calc(10px * var(--ui-scale)); }
 /* Band, frequency and mode on the second line: the callsign is what you are looking
    for and the rest is what you get once you have found it. */
 .vs__where {
@@ -7666,4 +7668,13 @@ a.btn { text-decoration: none; }
 }
 .vs__band { color: var(--accent); }
 .vs__mode { color: var(--text-faint); }
-.vs__age { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+/* Pushed to the right of the callsign line, so the ages line up down the column and
+   can be read as one thing rather than hunted for row by row. */
+.vs__age {
+    flex: none;
+    margin-left: auto;
+    padding-left: 4px;
+    font-size: calc(9px * var(--ui-scale));
+    font-weight: 400;
+    color: var(--text-faint);
+}

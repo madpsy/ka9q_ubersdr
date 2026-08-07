@@ -16,9 +16,9 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Button, Empty, Icon, Modal, Segmented } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import {
-    POLL_MS, addonUrl, channelList, chosenImage, imageUrl, imagesUrl, isTall,
-    latestPerChannel, pickOptions, savePick, savedPick, sizeLabel, statusUrl, tookLabel,
-    totalImages, wefaxAvailable,
+    POLL_MS, addonUrl, channelImagesUrl, channelList, chosenImage, imageUrl, isTall,
+    newestImage, pickOptions, savePick, savedPick, sizeLabel, sortNewest, statusUrl,
+    tookLabel, totalImages, wefaxAvailable,
 } from '../lib/wefax.js';
 
 export { wefaxAvailable };
@@ -51,15 +51,23 @@ export default function WefaxPanel({ minimal }) {
         return () => clearInterval(id);
     }, []);
 
-    const loadImages = useCallback(() => {
-        fetch(imagesUrl())
-            .then((r) => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then((payload) => {
+    // One request per channel, in parallel. Not one request for the newest few overall:
+    // the frequencies do not produce pages at the same rate, so a busy one fills any
+    // window and a quiet one drops out of it — see channelImagesUrl for the live case
+    // that showed it.
+    const loadImages = useCallback((list) => {
+        const chans = list.filter((c) => c.label);
+        if (!chans.length) return;
+        Promise.all(chans.map((c) => fetch(channelImagesUrl(c.label))
+            .then((r) => (r.ok ? r.json() : null))
+            .then((payload) => newestImage(payload))
+            // One channel failing leaves the others: a missing page is better than an
+            // empty panel.
+            .catch(() => null)))
+            .then((found) => {
                 if (!alive.current) return;
-                setImages(latestPerChannel(payload));
+                if (found.every((f) => f === null)) throw new Error('nothing answered');
+                setImages(sortNewest(found));
                 setState('ok');
             })
             .catch(() => {
@@ -80,13 +88,16 @@ export default function WefaxPanel({ minimal }) {
                 })
                 .then((status) => {
                     if (!alive.current) return;
-                    setChannels(channelList(status));
+                    const chans = channelList(status);
+                    setChannels(chans);
                     setState((s) => (s === 'loading' ? 'ok' : s));
                     const total = totalImages(status);
                     // First time, or something has been decoded since the last look.
+                    // The channels come from the same reply, so the fetch below always
+                    // asks about the configuration as it stands now.
                     if (total == null || total !== seenTotal.current) {
                         seenTotal.current = total;
-                        loadImages();
+                        loadImages(chans);
                     }
                 })
                 .catch(() => {

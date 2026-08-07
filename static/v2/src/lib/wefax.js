@@ -36,12 +36,22 @@ export function wefaxAvailable(serverInfo) {
 
 export const statusUrl = (base = BASE) => `${base}/api/status`;
 
-// How many records to ask for when something has changed. Enough that a channel which
-// has just produced two pages in a row cannot push another channel's latest off the
-// end, and small enough to keep the one expensive request from getting worse.
-export const IMAGE_LIMIT = 8;
-export const imagesUrl = (base = BASE, limit = IMAGE_LIMIT) =>
-    `${base}/api/images?limit=${Math.max(1, Math.round(limit) || IMAGE_LIMIT)}`;
+/**
+ * The newest page on one channel. One request per channel, and it has to be.
+ *
+ * Asking for the newest N overall and sorting them out afterwards looks cheaper and is
+ * wrong: the frequencies do not produce pages at the same rate. On a live receiver the
+ * eight most recent pages were all from 7880 kHz, and 4610 kHz — which had decoded a
+ * 3600-line chart that morning — was nowhere in the window, so the panel said nothing
+ * had been received on it. Any fixed limit has that failure; it just needs one busy
+ * frequency and one quiet one, which is the normal case.
+ *
+ * So each channel is asked for its own latest. It costs a request per channel, but only
+ * when something new has been decoded — see the note at the top — and the answer cannot
+ * be wrong.
+ */
+export const channelImagesUrl = (label, base = BASE) =>
+    `${base}/api/images?label=${encodeURIComponent(label)}&limit=1`;
 
 /** Where the PNGs live. The full page and its thumbnail are the same route. */
 export const imageUrl = (file, base = BASE) => `${base}/images/${encodeURIComponent(file)}`;
@@ -133,17 +143,26 @@ export function normaliseImage(raw) {
     };
 }
 
-/** The newest page on each channel, newest channel first. */
-export function latestPerChannel(payload) {
+/**
+ * The newest page in one channel's reply.
+ *
+ * Still a reduction rather than `images[0]`: the addon returns newest first, but a
+ * panel that trusted the order would show the wrong page the day that changed, and
+ * picking the maximum costs nothing.
+ */
+export function newestImage(payload) {
     const rows = (payload && payload.images) || [];
-    const best = new Map();
+    let best = null;
     for (const raw of rows) {
         const img = normaliseImage(raw);
-        if (!img) continue;
-        const had = best.get(img.label);
-        if (!had || img.at > had.at) best.set(img.label, img);
+        if (img && (!best || img.at > best.at)) best = img;
     }
-    return [...best.values()].sort((a, b) => b.at - a.at);
+    return best;
+}
+
+/** The channels' latest pages, newest first — the order the panel shows them in. */
+export function sortNewest(images) {
+    return [...images].filter(Boolean).sort((a, b) => b.at - a.at);
 }
 
 /**

@@ -55,7 +55,18 @@ t('the addon is found in the list by name, whatever its case', () => {
 t('the pages are served from the addon, and the name is escaped into the path', () => {
     assert.strictEqual(wx.imageUrl('a b.png'), '/addon/wefax/images/a%20b.png');
     assert.strictEqual(wx.addonUrl(), '/addon/wefax/');
-    assert.ok(wx.imagesUrl().includes(`limit=${wx.IMAGE_LIMIT}`));
+});
+
+t('each channel is asked for its own latest, by label', () => {
+    // Not the newest few overall: on a live receiver the eight most recent pages were
+    // all from 7880 kHz, and 4610 kHz — which had decoded a 3600-line chart that
+    // morning — was outside the window, so the panel said nothing had been received on
+    // it. Any fixed limit has that failure; one busy frequency and one quiet one is the
+    // normal case.
+    const url = wx.channelImagesUrl('7880000_usb');
+    assert.ok(url.includes('label=7880000_usb'));
+    assert.ok(url.includes('limit=1'));
+    assert.ok(wx.channelImagesUrl('a b').includes('label=a%20b'), 'and the label is escaped');
 });
 
 // --- the cheap question ---------------------------------------------------------
@@ -130,26 +141,29 @@ t('a fax page is tall, and that is what decides how the modal shows it', () => {
 
 // --- the newest per channel --------------------------------------------------------
 
-t('several pages from one channel come down to the newest', () => {
-    const list = wx.latestPerChannel({ images: [
+t('the newest page in a reply is picked, not the first one in it', () => {
+    // The addon returns newest first, but a panel that trusted the order would show the
+    // wrong page the day that changed, and taking the maximum costs nothing.
+    const img = wx.newestImage({ images: [
         rec({ id: 'a', saved_at: iso(NOW - 3600000) }),
         rec({ id: 'b', saved_at: iso(NOW) }),
     ] });
-    assert.strictEqual(list.length, 1);
-    assert.strictEqual(list[0].id, 'b');
+    assert.strictEqual(img.id, 'b');
 });
 
-t('each channel keeps its own latest, newest channel first', () => {
-    const list = wx.latestPerChannel({ images: [
-        rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) }),
-        rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' }),
-    ] });
+t('a channel that has decoded nothing answers with nothing', () => {
+    assert.strictEqual(wx.newestImage({ images: [] }), null);
+    assert.strictEqual(wx.newestImage(null), null);
+    assert.strictEqual(wx.newestImage({ images: [null, {}] }), null);
+});
+
+t('the channels are shown newest first, and a channel with no page drops out', () => {
+    const list = wx.sortNewest([
+        wx.normaliseImage(rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) })),
+        null,
+        wx.normaliseImage(rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' })),
+    ]);
     assert.deepStrictEqual(list.map((i) => i.khz), ['4610', '7880']);
-});
-
-t('nothing decoded is an empty list rather than a crash', () => {
-    assert.deepStrictEqual(wx.latestPerChannel(null), []);
-    assert.deepStrictEqual(wx.latestPerChannel({ images: [null, {}] }), []);
 });
 
 // --- choosing what to show -----------------------------------------------------------
@@ -162,38 +176,38 @@ t('the picker offers Latest and every configured channel', () => {
 
 t('a page from a channel that has been removed is still reachable', () => {
     // Otherwise the panel would be holding something it could not show.
-    const gone = wx.latestPerChannel({ images: [rec({ label: '2618000_usb', freq_hz: 2618000 })] });
+    const gone = [wx.normaliseImage(rec({ label: '2618000_usb', freq_hz: 2618000 }))];
     const opts = wx.pickOptions(wx.channelList(status()), gone);
     assert.ok(opts.some((o) => o.label === '2618'));
 });
 
 t('Latest is whichever channel finished a page most recently', () => {
-    const list = wx.latestPerChannel({ images: [
-        rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) }),
-        rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' }),
-    ] });
+    const list = wx.sortNewest([
+        wx.normaliseImage(rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) })),
+        wx.normaliseImage(rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' })),
+    ]);
     assert.strictEqual(wx.chosenImage(list, wx.PICK_LATEST).khz, '4610');
     assert.strictEqual(wx.chosenImage(list, null).khz, '4610', 'and it is the default');
 });
 
 t('a chosen channel is shown even when the other one is newer', () => {
-    const list = wx.latestPerChannel({ images: [
-        rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) }),
-        rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' }),
-    ] });
+    const list = wx.sortNewest([
+        wx.normaliseImage(rec({ label: '7880000_usb', saved_at: iso(NOW - 3600000) })),
+        wx.normaliseImage(rec({ label: '4610000_usb', freq_hz: 4610000, saved_at: iso(NOW), id: 'c' })),
+    ]);
     assert.strictEqual(wx.chosenImage(list, '7880000_usb').khz, '7880');
 });
 
 t("a configured channel with nothing on it shows nothing, not another frequency's chart", () => {
     // A synoptic chart under a chip reading 4610 when it came in on 7880 is worse than
     // an empty panel: the frequency is half of what a fax page is.
-    const list = wx.latestPerChannel({ images: [rec()] });
+    const list = wx.sortNewest([wx.normaliseImage(rec())]);
     const known = ['7880000_usb', '4610000_usb'];
     assert.strictEqual(wx.chosenImage(list, '4610000_usb', known), null);
 });
 
 t('a choice nothing knows about falls back to the newest', () => {
-    const list = wx.latestPerChannel({ images: [rec()] });
+    const list = wx.sortNewest([wx.normaliseImage(rec())]);
     assert.strictEqual(wx.chosenImage(list, 'gone', ['7880000_usb']).khz, '7880');
     assert.strictEqual(wx.chosenImage([], 'gone'), null, 'and nothing at all is nothing');
 });

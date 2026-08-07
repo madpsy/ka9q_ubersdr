@@ -87,6 +87,7 @@ import NewsPanel from './NewsPanel.jsx';
 import ClocksPanel from './ClocksPanel.jsx';
 import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
+import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -198,6 +199,24 @@ export const PANELS = [
         // The addon decodes the pictures; without it there is nothing to show
         // and every request would 404.
         requires: (serverInfo) => sstvAvailable(serverInfo),
+    },
+    // What the VLF sferic addon is hearing. Beside SSTV because it is the same kind
+    // of panel — an addon's headline, glanced at while listening to something else,
+    // with its own page a click away for the detail.
+    //
+    // Minimal: the four figures and the minute of activity, without the list of
+    // strikes or the link out. "Is it striking, and how hard", from across the room.
+    {
+        id: 'lightning',
+        title: 'Lightning',
+        icon: <Icon.Bolt />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: LightningPanel,
+        // The addon detects the strikes; without it there is no stream to open and
+        // every request would 404.
+        requires: (serverInfo) => lightningAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

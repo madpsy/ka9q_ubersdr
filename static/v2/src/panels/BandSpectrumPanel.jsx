@@ -36,11 +36,12 @@ import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
     AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
     decodeFrame, dialWindow, formatAgeSec,
-    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, reportBandRate, retryDelay,
+    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, reportBandRate,
     rowAt, savePrefs,
     savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
     zoomHz,
 } from '../lib/bandSpectrum.js';
+import { retryDelay } from '../lib/backoff.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { haptic } from '../lib/haptics.js';
 import { getVfos, onVfosChanged } from '../lib/vfos.js';

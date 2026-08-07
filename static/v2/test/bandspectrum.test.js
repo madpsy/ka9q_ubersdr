@@ -11,6 +11,9 @@
 // what does not happen.
 
 const assert = require('assert');
+// The reconnect curve moved to lib/backoff.js when the lightning panel became its
+// second caller; the cases stay here, where the argument for them is written down.
+const { RETRY_BASE_MS, RETRY_MAX_MS, retryDelay } = require('./.build/backoff.cjs');
 const {
     AUTO_DEADBAND, AUTO_MIN_INTERVAL, AUTO_RESEED_DB, AUTO_SPAN_DEFAULT, AUTO_STEP,
     FT8_SPAN_HZ, applyFrame, bandsFromConfig, binAt, clampDb, createAutoRange, dbFromByte,
@@ -20,7 +23,6 @@ const {
     FULL_ZOOM, ZOOM_FACTOR, ZOOM_MIN_SPAN, bandFrac, dialWindow, isZoomed, panByFraction,
     viewFrac, zoomAt, zoomBins, zoomHz,
     AUTO_BAND, bandList, chosenBand,
-    RETRY_BASE_MS, RETRY_MAX_MS, retryDelay,
 } = require('./.build/bandspectrum.cjs');
 const SAMPLE = require('./bandspectrum.sample.json');
 

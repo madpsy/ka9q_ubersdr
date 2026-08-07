@@ -100,6 +100,9 @@ export const Icon = {
     Packet: (p) => <Svg {...p}><rect x="2.5" y="9" width="6" height="6" rx="1" /><rect x="15.5" y="9" width="6" height="6" rx="1" /><path d="M9 12h2M13 12h2" /><path d="M5.5 6.5V4M18.5 6.5V4" /></Svg>,
     // A picture in a frame: what SSTV produces.
     Picture: (p) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="1.5" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="m4 17 4.5-4.5 3 3L15 11l5 5" /></Svg>,
+    // A bolt: the lightning addon. Drawn as an outline rather than the solid glyph,
+    // so it sits in a row of stroked icons rather than reading as a filled badge.
+    Bolt: (p) => <Svg {...p}><path d="M13 2.5 4.5 13.5H10l-1 8 9.5-11.5H13z" /></Svg>,
     // A snail: QRSS is the slow one, and v1's extension used the same emoji.
     Snail: (p) => <Svg {...p}><circle cx="13" cy="13" r="5.5" /><path d="M13 13a2 2 0 0 1 2.6 3" /><path d="M7.5 18.5h9" /><path d="M7.5 18.5a3 3 0 0 1-1-5" /><path d="M5.5 12V8M8.5 12V9" /></Svg>,
     // A fax page: a sheet with a chart drawn on it.

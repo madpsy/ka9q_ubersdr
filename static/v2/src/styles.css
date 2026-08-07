@@ -7049,3 +7049,87 @@ a.btn { text-decoration: none; }
     touch-action: none;
 }
 .co__map:active { cursor: grabbing; }
+
+/* =========================================================================
+   Lightning addon panel
+   ========================================================================= */
+
+.lx__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+/* Each figure is a label, a number and its unit, stacked and centred. Fixed rows
+   rather than flowing text: the numbers change every second, and a column that
+   resized itself with them would jitter the whole dock. */
+.lx__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 4px 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    min-width: 0;
+}
+.lx__stat-k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.lx__stat-v {
+    font-family: var(--mono);
+    font-size: calc(15px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--text);
+}
+/* The same three bands the strip and the list use, and the addon's own thresholds:
+   a hard strike is the one that is red on its page too. */
+.lx__stat-v.is-hi { color: var(--bad); }
+.lx__stat-v.is-med { color: var(--warn); }
+.lx__stat-v.is-lo { color: var(--accent); }
+.lx__stat-s { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+
+.lx__strip {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+}
+.lx__axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+/* Whether the stream is up. Not a red banner when it is not: the addon reconnects on
+   its own and a dropped stream is usually a receiver being restarted. */
+.lx__live { color: var(--text-faint); }
+.lx__live.is-on { color: var(--good); }
+
+.lx__list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+/* Time, bar, level, length — one row per strike, on a grid so the columns line up
+   down the list rather than each row being laid out on its own. */
+.lx__row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.lx__row.is-new { animation: lx-flash 900ms ease-out; }
+@keyframes lx-flash {
+    from { background: var(--accent-soft); }
+    to { background: transparent; }
+}
+.lx__t { color: var(--text); }
+.lx__bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.lx__bar i { display: block; height: 100%; background: var(--accent); }
+.lx__row.is-med .lx__bar i { background: var(--warn); }
+.lx__row.is-hi .lx__bar i { background: var(--bad); }
+.lx__db { min-width: 2.2em; text-align: right; color: var(--text); }
+.lx__ms { min-width: 3em; text-align: right; color: var(--text-faint); }

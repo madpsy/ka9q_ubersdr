@@ -30,6 +30,10 @@ esbuild ../src/lib/spectrogram.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrogram.cjs --log-level=warning
 esbuild ../src/lib/bandSpectrum.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandspectrum.cjs --log-level=warning
+esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
+    --outfile=.build/backoff.cjs --log-level=warning
+esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
+    --outfile=.build/lightning.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -296,5 +300,6 @@ node bridgecommands.test.js
 node bridgeclient.test.js
 node spectrogram.test.js
 node bandspectrum.test.js
+node lightning.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

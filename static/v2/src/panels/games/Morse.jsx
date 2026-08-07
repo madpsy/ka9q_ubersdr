@@ -44,6 +44,14 @@ export const gameHelp = (
             is the skill. Pick a level directly if you already know some.
         </p>
         <p>
+            <b>⌨</b> in Copy swaps the five keys for a box you type the character
+            into — no menu to choose from, which is harder and is what copying
+            actually is. The receiver&rsquo;s own keyboard shortcuts stand down while
+            that box has the keyboard, so <b>U</b> is an answer rather than USB; click
+            it again if you have clicked away, and the shortcuts come back the moment
+            you do.
+        </p>
+        <p>
             <b>Speed</b> is real words per minute, and characters are sent at full
             speed from the start on purpose: learning them slowly builds a habit of
             counting dits that has to be unlearned. If it is too fast, the answer is
@@ -55,9 +63,16 @@ export const gameHelp = (
             playing it.
         </p>
         <p>
+            A wrong answer is not the end of it: the character is sent again and you
+            can have another go, with what you ruled out still on screen. It
+            costs the streak and earns no credit towards the next unlock — but the
+            character you could not hear is the one worth hearing twice, which is
+            why it is not simply revealed.
+        </p>
+        <p>
             Sending is judged as you go: a wrong element is wrong the moment it is
             keyed rather than at the end of the character, which is how a fist feels
-            its own mistake.
+            its own mistake. <b>Reveal</b> gives up and shows the answer.
         </p>
     </>
 );
@@ -96,9 +111,10 @@ function load() {
             pitch: PITCHES.includes(saved.pitch) ? saved.pitch : 600,
             wpm: SPEEDS.includes(saved.wpm) ? saved.wpm : 15,
             mode: saved.mode === 'send' ? 'send' : 'copy',
+            typed: saved.typed === true,
         };
     } catch (e) {
-        return { level: KOCH_MIN, best: 0, sound: true, pitch: 600, wpm: 15, mode: 'copy' };
+        return { level: KOCH_MIN, best: 0, sound: true, pitch: 600, wpm: 15, mode: 'copy', typed: false };
     }
 }
 
@@ -106,9 +122,24 @@ export default function Morse() {
     const [prefs, setPrefs] = useState(load);
     const [target, setTarget] = useState('');
     const [options, setOptions] = useState([]);
-    const [picked, setPicked] = useState('');       // copy mode: the answer given
+    // Copy: the answers already ruled out this round. Plural, because a wrong one
+    // does not end the round — see `missed`.
+    const [wrong, setWrong] = useState([]);
     const [keyed, setKeyed] = useState('');         // send mode: what has been keyed
     const [verdict, setVerdict] = useState('');     // '' | 'right' | 'wrong'
+    // Whether anything has been got wrong this round. A character reached on the
+    // second attempt has still been learned, and is still worth hearing again —
+    // but it does not count towards the streak or the next unlock, or the level
+    // would climb on guesswork.
+    const [missed, setMissed] = useState(false);
+    // Copy: how many elements of the pattern the hint has given away. Never all of
+    // them — see hint().
+    const [hinted, setHinted] = useState(0);
+    // Typing mode: the character in the box, which is the last key pressed rather
+    // than an accumulating string — one answer per round, and seeing it land is the
+    // only feedback a typed guess gets.
+    const [typed, setTyped] = useState('');
+    const [armed, setArmed] = useState(false);      // the box holds the keyboard
     const [run, setRun] = useState(0);              // correct in a row, towards the next unlock
     const [streak, setStreak] = useState(0);
     const [status, setStatus] = useState('Listen');
@@ -121,6 +152,11 @@ export default function Morse() {
     // could stop the audio it is playing. Created on the first press rather than on
     // mount, because a context made without a user gesture starts suspended.
     const audio = useRef({ ctx: null, osc: null, gain: null });
+    const typeRef = useRef(null);
+    const focusType = useCallback(() => {
+        const el = typeRef.current;
+        if (el) el.focus();
+    }, []);
 
     const save = useCallback((next) => {
         setPrefs(next);
@@ -195,9 +231,12 @@ export default function Morse() {
 
     const nextRound = useCallback((prefsNow = prefs) => {
         clearTimeout(timer.current);
-        setPicked('');
+        setWrong([]);
         setKeyed('');
         setVerdict('');
+        setMissed(false);
+        setHinted(0);
+        setTyped('');
         const set = kochSet(prefsNow.level);
         const ch = pickChar(prefsNow.level, recent.current);
         recent.current = [...recent.current, ch].slice(-6);
@@ -217,17 +256,13 @@ export default function Morse() {
 
     useEffect(() => { nextRound(); }, []);
 
-    // Right, wrong, and what that does to the score — shared by both modes so the
-    // progression cannot drift between them.
-    const settle = useCallback((correct, ch, prefsNow) => {
-        setVerdict(correct ? 'right' : 'wrong');
-        if (!correct) {
-            setStreak(0);
-            setRun(0);
-            setStatus(`✗ that was ${ch}`);
-            // Hear what it should have been: the point of getting it wrong.
-            sendChar(ch, prefsNow);
-            timer.current = setTimeout(() => { if (alive.current) nextRound(prefsNow); }, WRONG_MS);
+    // A round got right. `credit` is false when it took more than one go: shared by
+    // both modes, so the progression cannot drift between them.
+    const finish = useCallback((ch, credit, prefsNow) => {
+        setVerdict('right');
+        if (!credit) {
+            setStatus(`✓ ${ch} — second go, no credit`);
+            timer.current = setTimeout(() => { if (alive.current) nextRound(); }, NEXT_MS);
             return;
         }
         const now = streak + 1;
@@ -244,28 +279,122 @@ export default function Morse() {
             setStatus(`✓ ${ch}`);
         }
         timer.current = setTimeout(() => { if (alive.current) nextRound(); }, NEXT_MS);
-    }, [nextRound, run, save, sendChar, streak]);
+    }, [nextRound, run, save, streak]);
+
+    // Got wrong, but not over: the streak goes, the answer is *not* shown, and it
+    // is sent again to be listened to properly. Being told the answer the instant
+    // you guess is how a trainer stops teaching — the character you could not hear
+    // is exactly the one worth hearing twice.
+    const miss = useCallback((prefsNow) => {
+        setMissed(true);
+        setStreak(0);
+        setRun(0);
+        sendChar(target, prefsNow);
+        setStatus(prefsNow.mode === 'send' ? 'Not that — listen, and key it again' : 'Not that one — listen again');
+    }, [sendChar, target]);
+
+    /**
+     * A hint: the next element of the pattern, heard on its own and left on screen.
+     *
+     * Never the last one. A character with its final element missing is still a
+     * question — `-.` is N, but it is also the start of C, K, X and Y — so the hint
+     * can narrow the field without ever answering it. That also means E and T,
+     * being one element long, have no hint to give, and the button says so by being
+     * unavailable rather than by doing nothing.
+     *
+     * It costs the credit towards the next unlock, because a level climbed on hints
+     * is a level you cannot hear. It does not break the streak: only a wrong answer
+     * does that, and asking for help is not the same as getting it wrong.
+     */
+    const hint = useCallback(() => {
+        if (verdict || !target) return;
+        const code = codeFor(target);
+        if (hinted >= code.length - 1) return;
+        const n = hinted + 1;
+        setHinted(n);
+        setMissed(true);
+        sendElement(code[n - 1], prefs);
+    }, [hinted, prefs, sendElement, target, verdict]);
+
+    // Giving up. Its own path rather than a wrong answer, because it is the one
+    // case where showing the answer is the useful thing to do.
+    const giveUp = useCallback(() => {
+        if (verdict || !target) {
+            nextRound();
+            return;
+        }
+        setVerdict('wrong');
+        setStreak(0);
+        setRun(0);
+        setStatus(`✗ it was ${target}`);
+        sendChar(target, prefs);
+        // Reveal is a button and a button takes the focus with it, which in typing
+        // mode means the next keystroke reaches the radio instead of the game.
+        if (prefs.typed && prefs.mode === 'copy') focusType();
+        timer.current = setTimeout(() => { if (alive.current) nextRound(); }, WRONG_MS);
+    }, [focusType, nextRound, prefs, sendChar, target, verdict]);
 
     const answer = (ch) => {
-        if (verdict || !target) return;
-        setPicked(ch);
-        settle(ch === target, target, prefs);
+        if (verdict || !target || wrong.includes(ch)) return;
+        if (ch === target) {
+            finish(target, !missed, prefs);
+            return;
+        }
+        // Struck off and left on screen: it is a real answer, and knowing what it
+        // was not is part of telling two characters apart.
+        setWrong((w) => [...w, ch]);
+        miss(prefs);
+    };
+
+    /**
+     * A typed answer.
+     *
+     * Read from the value rather than from the keystroke: a phone's keyboard often
+     * reports `Unidentified` for the key and only the resulting text is reliable, so
+     * the box is the source of truth on every platform. Only the last character of
+     * it counts — the box holds one answer, not a word.
+     *
+     * A key that is not a Morse character at all is a slip and is ignored. One that
+     * is — including a character not yet in play — is a real answer and is wrong in
+     * the usual way, because "I heard something else" is the mistake being trained
+     * out, and the five-key version cannot express it at all.
+     */
+    const onTyped = (e) => {
+        const ch = String(e.target.value || '').slice(-1).toUpperCase();
+        setTyped(ch);
+        if (ch && codeFor(ch)) answer(ch);
     };
 
     // Send mode: one element at a time, judged as it goes.
     //
     // Wrong the moment it diverges rather than at the end of the character — that
     // is how a fist feels its own mistake, and waiting for four elements to say
-    // "no" teaches nothing about which one was wrong.
+    // "no" teaches nothing about which one was wrong. The buffer is then cleared
+    // and the character sent again, so the next attempt is made against the sound
+    // rather than against a guess.
     const keyEl = useCallback((el) => {
         if (verdict || !target) return;
         const code = codeFor(target);
         const next = keyed + el;
-        setKeyed(next);
         sendElement(el, prefs);
-        if (!code.startsWith(next)) settle(false, target, prefs);
-        else if (next === code) settle(true, target, prefs);
-    }, [keyed, prefs, sendElement, settle, target, verdict]);
+        if (!code.startsWith(next)) {
+            setKeyed('');
+            miss(prefs);
+            return;
+        }
+        setKeyed(next);
+        if (next === code) finish(target, !missed, prefs);
+    }, [finish, keyed, miss, missed, prefs, sendElement, target, verdict]);
+
+    // Turning typing on takes the keyboard there and then — inside the click, so a
+    // phone opens its keyboard rather than waiting to be tapped again. Not on mount,
+    // though: a panel restoring a saved preference has no business stealing the
+    // keyboard, or opening a keyboard over half the screen, before it is asked to.
+    const mounted = useRef(false);
+    useEffect(() => {
+        if (mounted.current && prefs.typed && prefs.mode === 'copy') focusType();
+        mounted.current = true;
+    }, [focusType, prefs.typed, prefs.mode]);
 
     // Two keys side by side, so it can be played like a paddle rather than typed:
     // `.` and `/` are neighbours with the dit on the left, which is the way round a
@@ -337,8 +466,8 @@ export default function Morse() {
             )}
             status={status}
             score={`Streak:${streak} Best:${prefs.best}`}
-            action={() => nextRound()}
-            actionLabel="Skip"
+            action={giveUp}
+            actionLabel="Reveal"
         >
             <div className="cw">
                 {prefs.mode === 'send' ? (
@@ -376,25 +505,78 @@ export default function Morse() {
                 ) : (
                     <>
                         <div className={`cw__code${showCode ? '' : ' is-hidden'}`}>
-                            {showCode ? glyphs(code) : '?'}
+                            {showCode ? glyphs(code)
+                                : (hinted ? `${glyphs(code.slice(0, hinted))}?` : '?')}
                         </div>
-                        <button
-                            type="button"
-                            className="chip chip--button cw__play"
-                            onClick={() => sendChar(target, prefs)}
-                            disabled={!prefs.sound}
-                            title={prefs.sound ? 'Send it again' : 'Sound is off'}
-                        >
-                            ▶ Again
-                        </button>
+                        <div className="cw__row">
+                            <button
+                                type="button"
+                                className="chip chip--button"
+                                onClick={() => sendChar(target, prefs)}
+                                onMouseDown={(e) => { if (prefs.typed) e.preventDefault(); }}
+                                disabled={!prefs.sound}
+                                title={prefs.sound ? 'Send the whole character again' : 'Sound is off'}
+                            >
+                                ▶ Again
+                            </button>
+                            <button
+                                type="button"
+                                className="chip chip--button"
+                                onClick={hint}
+                                onMouseDown={(e) => { if (prefs.typed) e.preventDefault(); }}
+                                disabled={!!verdict || hinted >= code.length - 1}
+                                title={code.length < 2
+                                    ? 'One element — there is nothing to give away'
+                                    : 'Play the next element. Never the last one, so it narrows the answer without giving it — and costs the credit towards the next unlock'}
+                            >
+                                Hint {hinted ? `${hinted}/${Math.max(code.length - 1, 0)}` : ''}
+                            </button>
+                        </div>
+                        {prefs.typed ? (
+                            <div className="cw__typerow">
+                                {/* A real input, and that is the whole trick: the
+                                    receiver's shortcut layer already stands down for
+                                    whatever is being typed into (see isTyping in
+                                    lib/shortcuts.js), so the letters are the game's
+                                    for as long as the box has the focus and nobody's
+                                    setting has been changed behind their back. A
+                                    toggle would have to be put back — on close, on
+                                    unmount, on a crash — and one that failed to
+                                    would leave the radio deaf to its own keys. */}
+                                <input
+                                    ref={typeRef}
+                                    className={`cw__type${armed ? ' is-armed' : ''} is-${verdict || 'open'}`}
+                                    value={typed}
+                                    /* Never disabled, not even while the verdict is
+                                       up: disabling an input takes the focus off it,
+                                       and doing that at the end of every round would
+                                       hand the next character to the radio. answer()
+                                       ignores a keystroke that arrives too late. */
+                                    onChange={onTyped}
+                                    onFocus={() => setArmed(true)}
+                                    onBlur={() => setArmed(false)}
+                                    aria-label="Type the character you heard"
+                                    placeholder={armed ? '' : 'tap to type'}
+                                    autoComplete="off"
+                                    autoCapitalize="characters"
+                                    spellCheck={false}
+                                />
+                                {/* What has been ruled out, which the five-key
+                                    version shows by striking the keys. Always here,
+                                    empty or not, so the panel keeps its height. */}
+                                <div className="cw__ruled">
+                                    {wrong.length ? `not ${wrong.join(' ')}` : '\u00a0'}
+                                </div>
+                            </div>
+                        ) : null}
                         {/* Five columns always, so the row is the same height and
                             the keys the same width at every level — but the ones in
                             play sit in the middle of it rather than packed left.
                             Early on there are only two characters to choose
                             between, and two keys against the left edge of an empty
                             row reads as something having failed to load. */}
-                        <div className="cw__options">
-                            {Array.from({ length: OPTIONS }, (_, i) => {
+                        <div className={`cw__options${prefs.typed ? ' is-off' : ''}`}>
+                            {prefs.typed ? null : Array.from({ length: OPTIONS }, (_, i) => {
                                 const ch = options[i - Math.floor((OPTIONS - options.length) / 2)];
                                 if (!ch) return <span className="cw__opt is-blank" key={`b${i}`} aria-hidden="true" />;
                                 return (
@@ -405,10 +587,10 @@ export default function Morse() {
                                             'cw__opt',
                                             verdict ? 'is-done' : '',
                                             verdict && ch === target ? 'is-right' : '',
-                                            picked === ch && ch !== target ? 'is-wrong' : '',
+                                            wrong.includes(ch) ? 'is-wrong' : '',
                                         ].filter(Boolean).join(' ')}
                                         onClick={() => answer(ch)}
-                                        disabled={!!verdict}
+                                        disabled={!!verdict || wrong.includes(ch)}
                                     >
                                         {ch}
                                     </button>
@@ -447,6 +629,19 @@ export default function Morse() {
                     >
                         {prefs.sound ? '🔊' : '🔇'}
                     </button>
+                    {prefs.mode === 'copy' ? (
+                        <button
+                            type="button"
+                            className={`chip chip--button${prefs.typed ? ' is-active' : ''}`}
+                            aria-pressed={prefs.typed}
+                            title={prefs.typed
+                                ? 'Typing — click for the five keys back'
+                                : 'Type the answer instead of picking it. The radio\u2019s keyboard shortcuts stand down while the box has the keyboard'}
+                            onClick={() => save({ ...prefs, typed: !prefs.typed })}
+                        >
+                            ⌨
+                        </button>
+                    ) : null}
                     <select
                         className="select cw__sel"
                         value={prefs.pitch}

@@ -394,6 +394,40 @@ t('an empty callsign is never dispatched', () => {
 // 401. Nothing about that is a fact about the callsign, but it was being cached
 // as one — leaving the operator's name blank for the rest of the page.
 
+// --- did the lookup actually find anybody? -----------------------------------
+//
+// The announcer acts on a result rather than merely showing it, so "the provider
+// replied" is not good enough: an empty record would have it sending a mistyped
+// callsign in Morse. See identified() and the announcer in CallsignPanel.
+
+t('a record with any identifying field is somebody', () => {
+    for (const data of [
+        { name: 'Nathan' },
+        { name_fmt: 'N. Somebody' },
+        { country: 'England' },
+        { cty: { country: 'Scotland' } },
+        { grid: 'IO87' },
+        { class: 'Full' },
+        { qth: 'Glasgow' },
+        { image: 'https://example.invalid/op.jpg' },
+    ]) {
+        assert.strictEqual(cs.identified(data), true, JSON.stringify(data));
+    }
+});
+
+t('an empty answer is not somebody, however it arrived', () => {
+    // A 200 carrying {} is the case that matters: the transport is happy, there is
+    // nothing in it, and nothing should be announced.
+    for (const data of [null, undefined, {}, '', 'G0RDH', 42, { callsign: 'G0RDH' }]) {
+        assert.strictEqual(cs.identified(data), false, JSON.stringify(data) || String(data));
+    }
+});
+
+t('a blank field is not a field', () => {
+    // Providers pad their answers: empty strings for what they do not know.
+    assert.strictEqual(cs.identified({ name: '', country: '', grid: '', cty: {} }), false);
+});
+
 t('only a 404 says anything about the callsign', () => {
     assert.strictEqual(cs.lookupRetryable(404), false, 'no such callsign is a fact');
     for (const status of [401, 429, 500, 502, 503]) {

@@ -13,7 +13,7 @@
 // apart is the whole skill. The level can also just be picked, for somebody who
 // already knows half of it and does not want to prove it again.
 //
-// The code and the timing are lib/games/morse.js, pinned by tests: the table is
+// The code and the timing are lib/morse.js, pinned by tests: the table is
 // ITU, and the rhythm is the PARIS definition to the millisecond.
 //
 // It starts on a press, and that is not ceremony. A collapsed dock peeked at by
@@ -32,9 +32,10 @@
 import React, { useCallback, useEffect, useRef, useState } from '../../react.js';
 import Frame from './Frame.jsx';
 import {
-    DAH, DIT, KOCH, KOCH_MIN, UNLOCK_RUN, codeFor, kochSet, pickChar, toneSlices, unitMs,
-} from '../../lib/games/morse.js';
+    KOCH, KOCH_MIN, UNLOCK_RUN, codeFor, kochSet, pickChar, unitMs,
+} from '../../lib/morse.js';
 import { claimKeys, isTyping } from '../../lib/shortcuts.js';
+import { TONE_PITCHES, TONE_SPEEDS, createSidetone } from '../../lib/morseTone.js';
 
 // How to play — shown by the ? beside the game picker. See GamesPanel.
 export const gameHelp = (
@@ -98,20 +99,12 @@ const OPTIONS = 5;
 // the most recently unlocked are the ones still being learned.
 const NEWEST = 4;
 
-// Sidetone choices, in hertz. The range CW operators actually use: much below 400
-// is muddy on a small speaker and much above 900 is tiring within a minute.
-const PITCHES = [400, 500, 600, 700, 800];
-// Character speeds. 20 wpm is where a fist stops sounding like counting; the
-// slower rungs are there to arrive at it rather than to stay on.
-const SPEEDS = [12, 15, 18, 20, 25];
+// The sidetone's own settings are lib/morseTone.js: the callsign announcer offers
+// the same two lists, and a trainer that taught at a pitch the rest of the interface
+// could not produce would be its own small lie.
+const PITCHES = TONE_PITCHES;
+const SPEEDS = TONE_SPEEDS;
 
-// The keying envelope, seconds. A tone switched on instantly clicks — the click is
-// a spray of harmonics, it is what a badly keyed transmitter sounds like on air,
-// and it makes a short dit hard to place. Real rigs shape the edges; five
-// milliseconds is the usual figure and is short enough not to soften a dit at
-// 25 wpm, where one is 48 ms.
-const RAMP = 0.005;
-const LEVEL = 0.18;
 
 function load() {
     try {
@@ -172,11 +165,10 @@ export default function Morse({ visible = true, covered = false }) {
     const timer = useRef(null);
     const alive = useRef(true);
 
-    // Its own audio context, not the receiver's. The player's belongs to the signal
-    // path — its sample rate, its output device, its gain — and a game borrowing it
-    // could stop the audio it is playing. Created on the first press rather than on
-    // mount, because a context made without a user gesture starts suspended.
-    const audio = useRef({ ctx: null, osc: null, gain: null });
+    // One sidetone for the life of the panel. Silent until something is sent, and its
+    // own audio context rather than the receiver's — see lib/morseTone.js.
+    const tone = useRef(null);
+    if (!tone.current) tone.current = createSidetone();
 
     const save = useCallback((next) => {
         setPrefs(next);
@@ -186,79 +178,22 @@ export default function Morse({ visible = true, covered = false }) {
     useEffect(() => () => {
         alive.current = false;
         clearTimeout(timer.current);
-        const a = audio.current;
-        if (a.ctx) a.ctx.close().catch(() => {});
+        tone.current.close();
     }, []);
 
-    /**
-     * Put a list of `{ on, ms }` slices on the sound card.
-     *
-     * Scheduled against the audio clock in one go rather than fired off by timers:
-     * setTimeout is accurate to a few milliseconds at best and worse under load,
-     * and at 20 wpm a dit is sixty. Morse whose rhythm wanders is Morse nobody can
-     * learn from, so the sound card keeps the time.
-     */
-    const schedule = useCallback((slices, prefsNow) => {
-        const { sound, pitch } = prefsNow;
-        if (!sound || !slices.length) return;
-        const a = audio.current;
-        if (!a.ctx) {
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            a.ctx = new Ctx();
-            a.gain = a.ctx.createGain();
-            a.gain.gain.value = 0;
-            a.gain.connect(a.ctx.destination);
-            // One oscillator for the life of the panel, gated by the gain. Starting
-            // and stopping one per dit is both more work and more clicks.
-            a.osc = a.ctx.createOscillator();
-            a.osc.type = 'sine';
-            a.osc.frequency.value = pitch;
-            a.osc.connect(a.gain);
-            a.osc.start();
-        }
-        if (a.ctx.state === 'suspended') a.ctx.resume().catch(() => {});
-        const now = a.ctx.currentTime;
-        a.osc.frequency.setValueAtTime(pitch, now);
-        try {
-            a.gain.gain.cancelScheduledValues(now);
-            a.gain.gain.setValueAtTime(0, now);
-        } catch (e) { /* a context torn down mid-play */ }
-
-        let at = now + 0.04;
-        for (const slice of slices) {
-            const secs = slice.ms / 1000;
-            if (slice.on) {
-                a.gain.gain.setValueAtTime(0, at);
-                a.gain.gain.linearRampToValueAtTime(LEVEL, at + RAMP);
-                a.gain.gain.setValueAtTime(LEVEL, at + Math.max(secs - RAMP, RAMP));
-                a.gain.gain.linearRampToValueAtTime(0, at + secs);
-            }
-            at += secs;
-        }
-    }, []);
-
-    /** Stop, mid-character if need be: everything queued is cancelled. */
-    const silence = useCallback(() => {
-        const a = audio.current;
-        if (!a.ctx || !a.gain) return;
-        try {
-            const now = a.ctx.currentTime;
-            a.gain.gain.cancelScheduledValues(now);
-            a.gain.gain.setValueAtTime(0, now);
-        } catch (e) { /* a context already torn down */ }
-    }, []);
-
+    // Nothing is sent with the sound off: in Copy that is the whole of the silent
+    // variant, where the pattern is shown instead, and in Send the keys still work.
     const sendChar = useCallback((ch, prefsNow) => {
-        if (ch) schedule(toneSlices(ch, prefsNow.wpm), prefsNow);
-    }, [schedule]);
+        if (ch && prefsNow.sound) tone.current.send(ch, prefsNow);
+    }, []);
 
     // One element, as it is keyed. The same tone and the same length it would have
     // inside a character — which is what makes keying it teach the rhythm.
     const sendElement = useCallback((el, prefsNow) => {
-        const units = el === '-' ? DAH : DIT;
-        schedule([{ on: true, ms: units * unitMs(prefsNow.wpm) }], prefsNow);
-    }, [schedule]);
+        if (prefsNow.sound) tone.current.element(el, prefsNow);
+    }, []);
+
+    const silence = useCallback(() => tone.current.stop(), []);
 
     const nextRound = useCallback((prefsNow = prefs) => {
         clearTimeout(timer.current);

@@ -17,7 +17,10 @@ const su = require('./.build/game-sudoku.cjs');
 const lo = require('./.build/game-lightsout.cjs');
 const mm = require('./.build/game-mastermind.cjs');
 const quiz = require('./.build/game-quiz.cjs');
-const cw = require('./.build/game-morse.cjs');
+// lib/morse.js rather than lib/games/: the announcer in the callsign panel shares
+// it. The Morse cases live on here because this is where they were written and the
+// trainer is still the fussiest caller.
+const cw = require('./.build/morsecode.cjs');
 
 let pass = 0;
 const t = (name, fn) => {

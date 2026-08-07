@@ -1,5 +1,12 @@
 // Morse: the code, and the timing that makes it readable.
 //
+// Shared, not the trainer's. It began in lib/games/ because the Morse trainer was
+// the only thing that needed it, and moved out the moment a second caller appeared —
+// the callsign announcer, which sends a call sign the same way the trainer sends a
+// character, off the same table and the same clock. There is nothing game-shaped in
+// here, and two copies of a Morse table is exactly the kind of thing that ends with
+// one of them being wrong.
+//
 // Two things here have to be exactly right, because a trainer that teaches the
 // wrong thing is worse than no trainer:
 //

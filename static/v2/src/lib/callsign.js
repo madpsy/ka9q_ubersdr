@@ -106,6 +106,26 @@ export function displayName(data) {
 }
 
 /**
+ * Whether a lookup answered with an actual station, rather than merely answering.
+ *
+ * The transport already rejects the obvious misses — a 404, a provider that says it
+ * has never heard of the call, an empty body — so this is about the record that comes
+ * back as `{}`, or as a bare echo of what was asked. A caller that only *displays* a
+ * lookup can ignore the distinction, because an empty result renders as nothing much
+ * either way; one that *acts* on it cannot. The announcer is the case: sending a
+ * callsign in Morse because a provider replied at all would announce every typo.
+ *
+ * One identifying field is enough, and any of them will do — plenty of records have a
+ * country and no name, or a grid and neither.
+ */
+export function identified(data) {
+    if (!data || typeof data !== 'object') return false;
+    const cty = data.cty || {};
+    return !!(displayName(data) || data.country || cty.country || data.grid
+        || data.class || data.qth || data.image);
+}
+
+/**
  * Whether a failure says anything about the callsign, or only about the moment.
  *
  * A 401 means the audio session is not registered *yet* — the Markers panel asks

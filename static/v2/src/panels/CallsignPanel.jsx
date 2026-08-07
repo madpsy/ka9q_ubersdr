@@ -14,6 +14,11 @@
 //     rate. Repeating a callsign is nearly free; a burst of new ones is not.
 //
 // Only mounted when /api/description reports lookup_service — see registry.jsx.
+//
+// The announcer is here rather than in the audio or display settings for the same
+// reason the photo toggle is: the thing you want to turn it off from is the callsign in
+// front of you. Its player, its settings and its "stop the last one" rule are
+// lib/callsignAnnounce.js, because this panel exists twice on a phone.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -22,10 +27,15 @@ import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
 import { onPhotoShown, photoShown, photoUrl, setPhotoShown } from '../lib/operatorPhoto.js';
 import {
-    displayName, distanceBearing, isValidCallsign, lookupCallsignData,
+    displayName, distanceBearing, identified, isValidCallsign, lookupCallsignData,
     normaliseCallsign, onLookupRequest, positionOf,
 } from '../lib/callsign.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
+import {
+    CALL_CW, CALL_OFF, CALL_TTS, announceCall, callAnnounceSettings, callTtsAvailable,
+    onCallAnnounce, setCallAnnounce, stopCallAnnounce,
+} from '../lib/callsignAnnounce.js';
+import { TONE_PITCHES, TONE_SPEEDS } from '../lib/morseTone.js';
 
 const ROTCTL_PW = 'rotctl_password';
 
@@ -216,6 +226,9 @@ function Result({ call, data, serverInfo, showPhoto }) {
 // See the registry's `minimal`.
 export default function CallsignPanel({ minimal }) {
     const [showPhoto, setShowPhoto] = useState(photoShown);
+    // As with the photo: shared, so the other copy of this panel agrees.
+    const [cw, setCw] = useState(callAnnounceSettings);
+    useEffect(() => onCallAnnounce(setCw), []);
     // Another copy of this panel — a floating one, or the mobile sheet — has
     // its own state, so the change has to reach it.
     useEffect(() => onPhotoShown(setShowPhoto), []);
@@ -249,6 +262,10 @@ export default function CallsignPanel({ minimal }) {
         const c = normaliseCallsign(raw);
         if (!auto) setEntry(c);
         if (!c) return;
+        // Whatever is being sent belongs to the last callsign, and a new lookup has
+        // just said that is not the one you are interested in. Before the request
+        // rather than after it: the answer may be a second away, or an error.
+        if (!auto) stopCallAnnounce();
         if (!isValidCallsign(c)) {
             if (auto) return;
             setError('That does not look like a callsign.');
@@ -261,7 +278,13 @@ export default function CallsignPanel({ minimal }) {
         // again — the answer is on screen and the server's copy is a day old
         // at worst. A failed lookup is not skipped: retrying that is the point
         // of pressing it twice.
-        if (c === live.current.call && live.current.data) return;
+        if (c === live.current.call && live.current.data) {
+            // ...though it is worth sending again. Asking for the same call a second
+            // time is the only gesture there is for "say that once more", and the
+            // announcer ignores it while the first one is still going out.
+            if (!auto && identified(live.current.data)) announceCall(c);
+            return;
+        }
 
         // /api/lookup needs an active audio session, not merely a registered
         // UUID. Said when a lookup is actually asked for rather than as a
@@ -290,6 +313,15 @@ export default function CallsignPanel({ minimal }) {
                 setEntry(c);
                 setData(d);
                 setError('');
+                // Only what somebody asked for, and only a station that exists.
+                //
+                // Automatic lookups are the Markers panel offering whatever the dial
+                // has landed on; tuning across a busy band would otherwise turn the
+                // receiver into an announcer nobody switched on. And a provider that
+                // answers a typo with an empty record has not found anybody — the
+                // panel can render that as nothing much, but announcing it would read
+                // out every mistyped call. See identified().
+                if (!auto && identified(d)) announceCall(c);
             })
             .catch((err) => {
                 if (mine !== seq.current || auto) return;
@@ -360,6 +392,66 @@ export default function CallsignPanel({ minimal }) {
                         })}
                     />
                 </form>
+            )}
+
+            {/* How a lookup is announced, and the settings for whichever way that is.
+                One control with three states rather than two switches: they are
+                mutually exclusive, and two switches would offer a fourth state that
+                does not exist.
+
+                Morse gets a pitch and a speed here, because they are its own. Speech
+                does not: the voice and the speaking rate belong to the receiver's
+                announcer in the Announcements panel, and a second place to choose
+                them would be a second answer to the same question. */}
+            {!minimal && (
+                <div className="cs-cw">
+                    <select
+                        className="select"
+                        value={cw.mode}
+                        aria-label="Announce a lookup"
+                        title="Say each lookup out loud"
+                        onChange={(e) => setCallAnnounce({ mode: e.target.value })}
+                    >
+                        <option value={CALL_OFF}>No announce</option>
+                        <option value={CALL_CW}>Morse</option>
+                        <option value={CALL_TTS} disabled={!callTtsAvailable()}>
+                            {callTtsAvailable() ? 'Speech' : 'Speech (n/a)'}
+                        </option>
+                    </select>
+                    {cw.mode === CALL_CW && (
+                        <>
+                            <select
+                                className="select"
+                                value={cw.pitch}
+                                aria-label="Announcer tone"
+                                title="Sidetone pitch"
+                                onChange={(e) => setCallAnnounce({ pitch: Number(e.target.value) })}
+                            >
+                                {TONE_PITCHES.map((hz) => <option key={hz} value={hz}>{hz} Hz</option>)}
+                            </select>
+                            <select
+                                className="select"
+                                value={cw.wpm}
+                                aria-label="Announcer speed"
+                                title="Words per minute"
+                                onChange={(e) => setCallAnnounce({ wpm: Number(e.target.value) })}
+                            >
+                                {TONE_SPEEDS.map((w) => <option key={w} value={w}>{w} wpm</option>)}
+                            </select>
+                        </>
+                    )}
+                    {cw.mode !== CALL_OFF && (
+                        <button
+                            type="button"
+                            className="chip chip--button"
+                            title="Announce the callsign on screen again"
+                            disabled={!data}
+                            onClick={() => { stopCallAnnounce(); announceCall(call); }}
+                        >
+                            ▶
+                        </button>
+                    )}
+                </div>
             )}
 
             {error && <div className="note note--warn">{error}</div>}

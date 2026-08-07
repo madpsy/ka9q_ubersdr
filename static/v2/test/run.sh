@@ -58,8 +58,12 @@ esbuild ../src/lib/games/mastermind.js --bundle --format=cjs --platform=node \
     --outfile=.build/game-mastermind.cjs --log-level=warning
 esbuild ../src/lib/games/quiz.js --bundle --format=cjs --platform=node \
     --outfile=.build/game-quiz.cjs --log-level=warning
-esbuild ../src/lib/games/morse.js --bundle --format=cjs --platform=node \
-    --outfile=.build/game-morse.cjs --log-level=warning
+# morsecode, not morse: the CW decoder extension's frames.js already builds to
+# .build/morse.cjs, and one of the two would have silently overwritten the other.
+esbuild ../src/lib/morse.js --bundle --format=cjs --platform=node \
+    --outfile=.build/morsecode.cjs --log-level=warning
+esbuild ../src/lib/callsignAnnounce.js --bundle --format=cjs --platform=node \
+    --outfile=.build/callannounce.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
@@ -241,6 +245,7 @@ node extensions.test.js
 node fsk.test.js
 node navtex.test.js
 node morse.test.js
+node callannounce.test.js
 node wefax.test.js
 node qrss.test.js
 node freedv.test.js

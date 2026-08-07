@@ -2822,6 +2822,11 @@ a.btn { text-decoration: none; }
 
 .cs { height: 100%; min-height: 0; }
 .cs-form { display: flex; gap: 6px; align-items: center; }
+/* The announcer's two pickers and its replay, on their own row under the form: the
+   form row is already four controls wide at a dock that can be dragged to 220px. */
+.cs-cw { display: flex; align-items: center; gap: 4px; }
+.cs-cw .select { flex: 1; min-width: 0; }
+.cs-cw .chip { flex: none; }
 .cs-form__input { flex: 1; min-width: 0; text-transform: uppercase; font-family: var(--mono); }
 
 /* Same arrangement as the voice panel: `fill` gives it the dock height and the

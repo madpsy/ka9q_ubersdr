@@ -42,6 +42,10 @@ esbuild ../src/lib/doppler.js --bundle --format=cjs --platform=node \
     --outfile=.build/doppler.cjs --log-level=warning
 esbuild ../src/lib/freqRef.js --bundle --format=cjs --platform=node \
     --outfile=.build/freqref.cjs --log-level=warning
+esbuild ../src/lib/navtexCodes.js --bundle --format=cjs --platform=node \
+    --outfile=.build/navtexcodes.cjs --log-level=warning
+esbuild ../src/lib/navtexAddon.js --bundle --format=cjs --platform=node \
+    --outfile=.build/navtexaddon.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -312,5 +316,6 @@ node lightning.test.js
 node packet.test.js
 node doppler.test.js
 node freqref.test.js
+node navtexaddon.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

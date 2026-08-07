@@ -7397,3 +7397,76 @@ a.btn { text-decoration: none; }
 .dp__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dp__live { font-size: calc(9.5px * var(--ui-scale)); color: var(--text-faint); }
 .dp__live.is-on { color: var(--good); }
+
+/* =========================================================================
+   NAVTEX addon panel
+   ========================================================================= */
+
+.nx__msg {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.nx__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+}
+/* B1B2B3B4, in the type an operator would write it down in. */
+.nx__id { color: var(--text); font-weight: 650; letter-spacing: 0.08em; }
+.nx__freq { color: var(--text-dim); }
+.nx__age { margin-left: auto; color: var(--text-faint); }
+
+.nx__subject {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+/* Navigational and meteorological warnings and search-and-rescue. The standard says a
+   receiver may not filter these out; showing them in the same grey as a pilot-service
+   notice would be the same mistake in a different form. */
+.nx__subject.is-vital { color: var(--warn); font-weight: 650; }
+.nx__snr { margin-left: auto; color: var(--text-faint); font-family: var(--mono); }
+
+/* The message itself. Monospace because NAVTEX is written for it — position lists and
+   times line up in columns that fall apart in a proportional face — and scrolling
+   rather than clamped, because a navigational warning cut off at four lines is a
+   warning you have not read. */
+.nx__text {
+    margin: 0;
+    max-height: calc(200px * var(--ui-scale));
+    overflow-y: auto;
+    padding: 4px 5px;
+    border-radius: 3px;
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    line-height: 1.35;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* The frequency that is not being shown, and when it last said something — so a panel
+   showing 518 does not hide a gale warning on 490. Clicking one switches to it. */
+.nx__others { display: flex; flex-wrap: wrap; gap: 4px; }
+.nx__other {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: none;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.nx__other:hover { border-color: var(--accent); color: var(--text); }
+.nx__other i { font-style: normal; color: var(--text-faint); }

@@ -30,7 +30,8 @@ import {
     LIMITS, appendText, attachParams, decodeFrame, formatTime, markSpace, sidebandSign, toText,
 } from '../teleprinter.js';
 import { MAX_AUDIO_HZ } from '../toneSpectrum.js';
-import { NAVTEX_CONFIG, NAVTEX_FREQUENCIES, parseMessages, subjectOf } from './messages.js';
+import { NAVTEX_CONFIG, NAVTEX_FREQUENCIES, parseMessages } from './messages.js';
+import { subjectOf } from '../../lib/navtexCodes.js';
 
 // NAVTEX is received in USB, and the passband is the span the spectrum draws so
 // click-to-tune can reach anything it shows.

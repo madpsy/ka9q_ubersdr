@@ -9,11 +9,13 @@
 // nothing while characters are visibly arriving.
 
 const assert = require('assert');
+// The subject table moved to lib/navtexCodes.js when the addon panel became its second
+// caller; the cases stay here, with the decoder they were written for.
+const { SUBJECTS, subjectOf } = require('./.build/navtexcodes.cjs');
 
 const { appendText } = require('./.build/teleprinter.cjs');
 const {
-    MAX_MESSAGES, SUBJECTS, NAVTEX_CONFIG, NAVTEX_FREQUENCIES,
-    parseMessages, subjectOf,
+    MAX_MESSAGES, NAVTEX_CONFIG, NAVTEX_FREQUENCIES, parseMessages,
 } = require('./.build/navtex.cjs');
 const { tunedOption } = require('./.build/extfreq.cjs');
 

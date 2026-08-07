@@ -90,6 +90,7 @@ import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
 import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
 import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
+import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -251,6 +252,21 @@ export const PANELS = [
         minimal: true,
         Component: DopplerPanel,
         requires: (serverInfo) => dopplerAvailable(serverInfo),
+    },
+    // The last maritime safety broadcast on each NAVTEX frequency, from the addon that
+    // watches both of them. With the other addon panels.
+    //
+    // Minimal: the message without the picker, which turns the panel into whichever
+    // frequency was last chosen, pinned to the dock.
+    {
+        id: 'navtex',
+        title: 'NAVTEX',
+        icon: <Icon.Anchor />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: NavtexPanel,
+        requires: (serverInfo) => navtexAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

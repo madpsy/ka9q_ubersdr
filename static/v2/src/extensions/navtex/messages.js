@@ -24,43 +24,9 @@
 // four hours, so this is more than a day of one station's traffic.
 export const MAX_MESSAGES = 200;
 
-// The IMO subject indicator characters (B2). A receiver may be told to ignore
-// most of these; A, B, D and L are the ones it may not, which is why they are
-// marked — a panel that quietly filtered a search-and-rescue message would be
-// doing the one thing the standard forbids.
-//
-// B1 is deliberately not decoded. Transmitter letters are assigned per NAVAREA
-// and the same letter means a different station in each, so a lookup table
-// would be wrong somewhere in the world and there would be no way to tell where.
-export const SUBJECTS = {
-    A: { label: 'Navigational warning', vital: true },
-    B: { label: 'Meteorological warning', vital: true },
-    C: { label: 'Ice report' },
-    D: { label: 'Search and rescue', vital: true },
-    E: { label: 'Meteorological forecast' },
-    F: { label: 'Pilot service' },
-    G: { label: 'AIS' },
-    H: { label: 'LORAN' },
-    I: { label: 'Not used' },
-    J: { label: 'SATNAV' },
-    K: { label: 'Other electronic navaid' },
-    L: { label: 'Navigational warning (additional)', vital: true },
-    V: { label: 'Notice to fishermen' },
-    W: { label: 'Environmental' },
-    X: { label: 'Special service' },
-    Y: { label: 'Special service' },
-    Z: { label: 'No messages on hand' },
-};
-
-/**
- * What a subject letter means, or null.
- *
- * Null for M to U, which the standard reserves and does not define: naming them
- * would be inventing a meaning, and the letter itself is still shown.
- */
-export function subjectOf(letter) {
-    return SUBJECTS[String(letter || '').toUpperCase()] || null;
-}
+// The subject letters live in lib/navtexCodes.js — the addon panel decodes the same
+// ones. Imported rather than re-exported: a module that passes something through is a
+// second place to look for where it came from.
 
 /**
  * The messages in a console's worth of decoded lines.

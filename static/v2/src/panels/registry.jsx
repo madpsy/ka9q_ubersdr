@@ -92,6 +92,7 @@ import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
 import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
 import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
 import WefaxPanel, { wefaxAvailable } from './WefaxPanel.jsx';
+import VoiceSkimmerPanel, { voiceSkimmerAvailable } from './VoiceSkimmerPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -284,6 +285,20 @@ export const PANELS = [
         minimal: true,
         Component: WefaxPanel,
         requires: (serverInfo) => wefaxAvailable(serverInfo),
+    },
+    // Callsigns the voice skimmer addon has heard spoken on SSB: what it confirmed,
+    // and what it was sure enough of to spot. With the other addon panels.
+    //
+    // Minimal: the two columns without the counts or the link, which is the panel.
+    {
+        id: 'voiceskimmer',
+        title: 'Voice skimmer',
+        icon: <Icon.Mic />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: VoiceSkimmerPanel,
+        requires: (serverInfo) => voiceSkimmerAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

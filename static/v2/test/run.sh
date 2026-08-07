@@ -50,6 +50,8 @@ esbuild ../src/lib/navtexAddon.js --bundle --format=cjs --platform=node \
 # .build/wefax.cjs, and one of the two would have silently overwritten the other.
 esbuild ../src/lib/wefax.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefaxaddon.cjs --log-level=warning
+esbuild ../src/lib/voiceSkimmer.js --bundle --format=cjs --platform=node \
+    --outfile=.build/voiceskimmer.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -322,5 +324,6 @@ node doppler.test.js
 node freqref.test.js
 node navtexaddon.test.js
 node wefaxaddon.test.js
+node voiceskimmer.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

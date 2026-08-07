@@ -7600,3 +7600,70 @@ a.btn { text-decoration: none; }
 }
 .wx__other:hover { border-color: var(--accent); color: var(--text); }
 .wx__other i { font-style: normal; color: var(--text-faint); }
+
+/* =========================================================================
+   Voice skimmer addon panel
+   ========================================================================= */
+
+/* Two columns of equal width. Equal because neither is the main one: the pair is the
+   point, and a wider "confirmed" would read as spotted being an afterthought. */
+.vs__cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.vs__col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vs__title {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    padding-bottom: 1px;
+    border-bottom: 1px solid var(--border);
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* How many the addon holds altogether, which is the context for five rows. */
+.vs__title i { margin-left: auto; font-style: normal; font-family: var(--mono); }
+.vs__none { padding: 4px 2px; font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
+
+/* A row is a button because it does something: clicking tunes the receiver. */
+.vs__row {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: 100%;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+.vs__row:hover { background: var(--surface-hover); }
+.vs__call {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--text);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.vs__flag { font-size: calc(10px * var(--ui-scale)); }
+/* Band, frequency and mode on the second line: the callsign is what you are looking
+   for and the rest is what you get once you have found it. */
+.vs__where {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-dim);
+    overflow: hidden;
+    white-space: nowrap;
+}
+.vs__band { color: var(--accent); }
+.vs__mode { color: var(--text-faint); }
+.vs__age { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }

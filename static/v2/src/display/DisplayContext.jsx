@@ -176,9 +176,13 @@ export const DEFAULTS = {
     // much as on the two it has. A chosen colour applies to both themes, because
     // somebody who picked amber picked amber, not amber-when-dark.
     //
-    // The greys follow the text unless chosen themselves. See lib/uiColors.js,
-    // which also derives what goes on top of an accent fill.
-    uiColors: { accent: null, text: null, dim: null, faint: null },
+    // The greys follow the text unless chosen themselves, and `station` — the
+    // receiver's name over the spectrum — follows the operator's own colour
+    // before either. See lib/uiColors.js, which also derives what goes on top of
+    // an accent fill.
+    uiColors: {
+        accent: null, text: null, dim: null, faint: null, station: null,
+    },
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
     // Vibration on touch: 'off' | 'light' | 'medium' | 'strong'. On by default,
     // because a phone's controls have no travel and nothing else says a tap

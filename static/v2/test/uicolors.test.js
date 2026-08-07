@@ -10,7 +10,8 @@ const {
     ACCENT_DEFAULT, CONTRAST_MIN, CONTRAST_MIN_FAINT, TEXT_DEFAULT, TEXT_DIM_DEFAULT,
     TEXT_FAINT_DEFAULT, contrastMin,
     UI_COLOR_VARS, accentVars, contrastRatio, effectiveColors, inkFor, luminance, pageContrast,
-    SPEC_BG, UI_THEMES, matchUiTheme, parseHex, specInk, textVars, themeSwatch, uiColorVars,
+    SPEC_BG, SPEC_INK_DEFAULT, UI_COLOR_KEYS, UI_THEMES, matchUiTheme, parseHex, specInk,
+    stationInk, textVars, themeSwatch, uiColorVars, uiColorsFrom,
 } = require('./.build/uicolors.cjs');
 
 let pass = 0;
@@ -39,8 +40,13 @@ t('the pickers open on what is really on screen', () => {
             text: TEXT_DEFAULT[theme],
             dim: TEXT_DIM_DEFAULT[theme],
             faint: TEXT_FAINT_DEFAULT[theme],
+            // Nothing chosen and no operator colour: the stock ink over the
+            // canvas, which is what the overlay is really drawn in.
+            station: SPEC_INK_DEFAULT,
         });
     }
+    // Told what the operator set, the row opens on that instead.
+    assert.strictEqual(effectiveColors({}, 'dark', '#ff8800').station, '#ff8800');
 });
 
 // --- the accent -------------------------------------------------------------
@@ -190,6 +196,7 @@ t('every property the group can set is in the list that clears them', () => {
     // colour that could be set and never unset.
     const all = uiColorVars({
         accent: '#ff0000', text: '#00ff00', dim: '#0000ff', faint: '#ffff00',
+        station: '#ff00ff',
     }, 'dark');
     for (const name of Object.keys(all)) {
         assert.ok(UI_COLOR_VARS.includes(name), `${name} missing from UI_COLOR_VARS`);
@@ -233,6 +240,66 @@ t('every preset produces a readable readout over the waterfall', () => {
         const ratio = contrastRatio(parseHex(ink), parseHex(SPEC_BG[theme]));
         assert.ok(ratio >= CONTRAST_MIN, `${preset.id}: ${ratio.toFixed(1)}:1 on the canvas`);
     }
+});
+
+// --- the receiver's name over the spectrum ------------------------------------
+
+t('a chosen colour for the receiver info beats everything else', () => {
+    // It is the listener's screen and they picked a colour for this specifically,
+    // which can only mean they want it.
+    assert.strictEqual(stationInk({ station: '#ff0000' }, 'dark', '#00ff00'), '#ff0000');
+    assert.strictEqual(uiColorVars({ station: '#ff0000' }, 'dark')['--station-ink'], '#ff0000');
+});
+
+t('...then the operator\'s, which a scheme nobody chose must not overrule', () => {
+    // Their receiver's name in their receiver's colour. A text colour the
+    // listener happens to have set does not get to repaint somebody's branding.
+    assert.strictEqual(stationInk({ text: '#c8f5d8' }, 'dark', '#00ff00'), '#00ff00');
+    assert.strictEqual(stationInk({}, 'dark', '#00ff00'), '#00ff00');
+});
+
+t('...then the ink the rest of the overlay uses, and failing that the stock one', () => {
+    assert.strictEqual(stationInk({ text: '#c8f5d8' }, 'dark', null), '#c8f5d8');
+    assert.strictEqual(stationInk({}, 'dark', null), SPEC_INK_DEFAULT);
+    // A text colour that would vanish into the waterfall does not get there
+    // either — the light theme's near-black is the case.
+    assert.strictEqual(stationInk({ text: '#16202e' }, 'light', null), SPEC_INK_DEFAULT);
+});
+
+t('the station colour is its own property, not folded into the overlay ink', () => {
+    // Because the two rank differently against the operator's colour: one
+    // overrules it and the other does not, so the draw path has to tell them
+    // apart.
+    const v = uiColorVars({ text: '#c8f5d8', station: '#ff0000' }, 'dark');
+    assert.strictEqual(v['--spec-ink'], '#c8f5d8');
+    assert.strictEqual(v['--station-ink'], '#ff0000');
+});
+
+// --- the shape a scheme is ------------------------------------------------------
+
+t('applying a preset clears every colour it does not set', () => {
+    // A scheme swapped in on top of another's leftovers is neither of them.
+    const amber = UI_THEMES.find((p) => p.id === 'amber');
+    const full = uiColorsFrom(amber);
+    assert.deepStrictEqual(Object.keys(full).sort(), [...UI_COLOR_KEYS].sort());
+    assert.strictEqual(full.accent, amber.colors.accent);
+    assert.strictEqual(full.dim, null, 'not carried over from whatever was there');
+    // And the default clears the lot.
+    assert.deepStrictEqual(
+        Object.values(uiColorsFrom(UI_THEMES[0])).filter(Boolean),
+        [],
+    );
+});
+
+t('a scheme can carry a receiver-info colour, and matching accounts for it', () => {
+    // The mechanism is open to the presets, whether or not one uses it today.
+    const scheme = { colors: { accent: '#ff0000', station: '#ff0000' } };
+    const full = uiColorsFrom(scheme);
+    assert.strictEqual(full.station, '#ff0000');
+    // Two sets differing only in that colour are not the same scheme.
+    const amber = UI_THEMES.find((p) => p.id === 'amber');
+    assert.strictEqual(matchUiTheme(uiColorsFrom(amber)), 'amber');
+    assert.strictEqual(matchUiTheme({ ...uiColorsFrom(amber), station: '#ff0000' }), null);
 });
 
 // --- the presets ------------------------------------------------------------

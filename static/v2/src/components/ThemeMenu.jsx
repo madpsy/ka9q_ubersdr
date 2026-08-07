@@ -15,7 +15,7 @@
 import React from '../react.js';
 import { Button, Icon, Menu, MenuItem } from './ui.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { UI_THEMES, matchUiTheme, themeSwatch } from '../lib/uiColors.js';
+import { UI_THEMES, matchUiTheme, themeSwatch, uiColorsFrom } from '../lib/uiColors.js';
 
 export default function ThemeMenu() {
     const d = useDisplay();
@@ -31,7 +31,7 @@ export default function ThemeMenu() {
     const setBase = (v) => d.set({ theme: v });
 
     const apply = (preset) => d.set({
-        uiColors: { accent: null, text: null, dim: null, faint: null, ...preset.colors },
+        uiColors: uiColorsFrom(preset),
         ...(preset.theme ? { theme: preset.theme } : {}),
     });
 

@@ -1882,7 +1882,7 @@ const THEME_VARS = [
     // The ink for anything drawn *over* the canvas. Light in both themes, and
     // following a chosen text colour where that stays legible on a waterfall —
     // see specInk in lib/uiColors.js.
-    '--spec-ink',
+    '--spec-ink', '--station-ink',
 ];
 const colors = () => themeColors(THEME_VARS);
 
@@ -2586,11 +2586,14 @@ function drawStationId(g, c, pxW, dpr) {
 
     const rightX = pxW - 6 * dpr;
     let y = 6 * dpr;
-    // The operator's colour if they set one — that is their receiver's name in
-    // their receiver's colour, and a listener's scheme has no business
-    // overruling it. Otherwise the interface's own ink over the canvas, so an
-    // amber or green scheme does not have one white block in the corner of it.
-    const col = g.stationColor || colors()['--spec-ink'] || '#ffffff';
+    // Three answers, asked in this order — the same order stationInk documents.
+    // A listener who picked a colour for *this* meant it, so that outranks even
+    // the operator's; the operator's is their receiver's name in their own
+    // colour, which a scheme nobody chose should not overrule; and failing both,
+    // the interface's ink over the canvas, so an amber or green scheme does not
+    // have one white block in the corner of it.
+    const theme = colors();
+    const col = theme['--station-ink'] || g.stationColor || theme['--spec-ink'] || '#ffffff';
 
     c.save();
     // Placed by measurement rather than by textAlign: an operator's name or

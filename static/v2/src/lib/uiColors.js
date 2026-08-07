@@ -193,7 +193,7 @@ export function textVars({ text, dim, faint } = {}, theme) {
 export const UI_COLOR_VARS = [
     '--accent', '--accent-ink', '--accent-soft', '--accent-line',
     '--text', '--text-dim', '--text-faint',
-    '--spec-ink',
+    '--spec-ink', '--station-ink',
 ];
 
 // How readable the interface will be with a colour, so the panel can say so
@@ -247,6 +247,29 @@ export function specInk(hex, theme) {
     return contrastRatio(rgb, bg) >= CONTRAST_MIN ? norm(hex) : null;
 }
 
+/** Contrast against the canvas rather than the page, for anything drawn on it. */
+export function canvasContrast(hex, theme) {
+    const rgb = parseHex(hex);
+    if (!rgb) return null;
+    return contrastRatio(rgb, parseHex(SPEC_BG[key(theme)]));
+}
+
+/**
+ * The colour the receiver's name and location are drawn in, and the order the
+ * three possible answers are asked in.
+ *
+ * A listener's own choice first: it is their screen, and choosing a colour for
+ * this specifically can only mean they want it. Then the operator's, from the
+ * server's ui-config — that is their receiver's name in their receiver's colour,
+ * and a scheme nobody chose should not overrule it. Then the interface's ink over
+ * the canvas, which is what an untouched overlay follows.
+ */
+export function stationInk(colors = {}, theme, serverColor) {
+    if (parseHex(colors.station)) return norm(colors.station);
+    if (parseHex(serverColor)) return norm(serverColor);
+    return specInk(colors.text, theme) || SPEC_INK_DEFAULT;
+}
+
 /** Everything to set on the root, from the whole settings group. */
 export function uiColorVars(colors = {}, theme) {
     const out = {
@@ -255,6 +278,10 @@ export function uiColorVars(colors = {}, theme) {
     };
     const ink = specInk(colors.text, theme);
     if (ink) out['--spec-ink'] = ink;
+    // Its own property rather than folded into --spec-ink: this one overrules the
+    // operator's colour and the other does not, so the draw path has to be able
+    // to tell them apart. See stationInk and drawStationId.
+    if (parseHex(colors.station)) out['--station-ink'] = norm(colors.station);
     return out;
 }
 
@@ -265,7 +292,7 @@ export function uiColorVars(colors = {}, theme) {
  * looks like, and a first drag from black is a first drag from nowhere near where
  * you were.
  */
-export function effectiveColors(colors = {}, theme) {
+export function effectiveColors(colors = {}, theme, serverStation) {
     const vars = uiColorVars(colors, theme);
     const t = key(theme);
     return {
@@ -273,6 +300,7 @@ export function effectiveColors(colors = {}, theme) {
         text: vars['--text'] || TEXT_DEFAULT[t],
         dim: vars['--text-dim'] || TEXT_DIM_DEFAULT[t],
         faint: vars['--text-faint'] || TEXT_FAINT_DEFAULT[t],
+        station: stationInk(colors, theme, serverStation),
     };
 }
 
@@ -391,6 +419,18 @@ export const UI_THEMES = [
     },
 ];
 
+// Every colour a scheme can carry, and the shape the pickers edit. Listed once so
+// applying a preset clears the ones it does not set — a scheme swapped in on top
+// of another's leftovers is neither of them.
+export const UI_COLOR_KEYS = ['accent', 'text', 'dim', 'faint', 'station'];
+
+/** A preset's colours as a full set, with everything it leaves out cleared. */
+export function uiColorsFrom(preset) {
+    const out = {};
+    for (const k of UI_COLOR_KEYS) out[k] = (preset && preset.colors && preset.colors[k]) || null;
+    return out;
+}
+
 const sameColor = (a, b) => (a ? norm(a) : null) === (b ? norm(b) : null);
 
 /**
@@ -404,14 +444,12 @@ const sameColor = (a, b) => (a ? norm(a) : null) === (b ? norm(b) : null);
  * unusual, but the operator's business, and un-naming it would only be confusing.
  */
 export function matchUiTheme(colors = {}) {
-    const has = (c) => ['accent', 'text', 'dim', 'faint'].some((k) => c[k]);
+    const has = (c) => UI_COLOR_KEYS.some((k) => c[k]);
     for (const preset of UI_THEMES) {
         const p = preset.colors;
         if (!has(p) && !has(colors)) return preset.id;
         if (!has(p) || !has(colors)) continue;
-        const same = ['accent', 'text', 'dim', 'faint']
-            .every((k) => sameColor(p[k], colors[k]));
-        if (same) return preset.id;
+        if (UI_COLOR_KEYS.every((k) => sameColor(p[k], colors[k]))) return preset.id;
     }
     return null;
 }

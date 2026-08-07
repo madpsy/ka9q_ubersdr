@@ -11,7 +11,8 @@ import {
 } from '../radio/idle.js';
 import { statsPlace } from '../lib/spectrumStats.js';
 import {
-    UI_THEMES, contrastMin, effectiveColors, matchUiTheme, pageContrast, themeSwatch,
+    UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
+    themeSwatch, uiColorsFrom,
 } from '../lib/uiColors.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
@@ -548,7 +549,9 @@ function UiColors() {
     const d = useDisplay();
     const theme = d.theme === 'light' ? 'light' : 'dark';
     const mine = d.uiColors || {};
-    const now = effectiveColors(mine, theme);
+    // The receiver info's row needs the operator's colour too: unset, that is
+    // what the overlay is actually drawn in.
+    const now = effectiveColors(mine, theme, d.server.stationIdColor);
     const on = matchUiTheme(mine);
 
     // A preset writes its colours into the same four settings the rows below
@@ -556,12 +559,17 @@ function UiColors() {
     // highlighter. The default carries no theme and leaves that alone: it is the
     // theme's own colours, whichever theme is in force.
     const apply = (preset) => d.set({
-        uiColors: { accent: null, text: null, dim: null, faint: null, ...preset.colors },
+        uiColors: uiColorsFrom(preset),
         ...(preset.theme ? { theme: preset.theme } : {}),
     });
 
     const row = (which, name, hint) => {
-        const ratio = pageContrast(now[which], theme);
+        // The receiver info is drawn on the waterfall, not on the page, and the
+        // waterfall is dark in both themes — measuring it against the page would
+        // pass a dark colour that is invisible where it actually goes.
+        const ratio = which === 'station'
+            ? canvasContrast(now[which], theme)
+            : pageContrast(now[which], theme);
         // Only about a colour somebody chose. The stock light-theme accent is
         // 3.97:1 against its own page, so measuring the defaults would open the
         // panel by warning about the receiver's own design.
@@ -628,6 +636,7 @@ function UiColors() {
                 {row('text', 'Text', 'The main text colour. The two greys below follow it unless they have been set themselves')}
                 {row('dim', 'Dim', 'Secondary text — field labels, units, the clocks')}
                 {row('faint', 'Faint', 'The quietest text: placeholders, disabled controls, empty panels')}
+                {row('station', 'Receiver info', 'The receiver\'s name and location over the spectrum. Unset it follows the operator\'s own colour, or the text colour where that reads on a waterfall')}
             </div>
             </Field>
         </>

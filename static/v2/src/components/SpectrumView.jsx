@@ -38,7 +38,7 @@ import {
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
-    peakCount, peakSnr,
+    peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
@@ -1029,6 +1029,7 @@ export default function SpectrumView() {
     const peaksWanted = peakCount(display.peakMarks, mobile);
     gfx.current.peaksWanted = peaksWanted;
     gfx.current.peaksSnr = peakSnr(display.peakMinSnr);
+    gfx.current.peaksPlace = peakPlace(display.peakMarksAt);
 
     // A handset on its side gives the whole toolbar up, tags and all. With the
     // top bar gone too (see MobileShell) the spectrum starts at the marker bar,
@@ -2246,7 +2247,12 @@ function refreshPeaks(g, trace, count, snr, cfg, pxW, now) {
     return g.peaks;
 }
 
-function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk) {
+// The hairline from a fixed mark down to the signal it belongs to. Faint: it is a
+// pointer, not a reading, and a dozen full-strength verticals over a trace would look
+// like a comb of signals that are not there.
+const PEAK_DROP_ALPHA = 0.3;
+
+function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, place) {
     if (!peaks.length || !cfg.span) return;
     const hz0 = cfg.centerFreq - cfg.span / 2;
 
@@ -2273,13 +2279,35 @@ function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk) {
     );
 
     const caret = PEAK_CARET_PX * dpr;
+    // In the fixed style every mark is at the same height, worked out once: the label
+    // row sits under the top edge and the carets hang below it, pointing down.
+    const rowLabelY = PEAK_TOP_PAD_PX * dpr;
+    const rowTip = rowLabelY + (PEAK_LABEL_GAP_PX * dpr) + caret;
+
     for (let i = 0; i < placed.length; i++) {
         const p = placed[i];
         const x = p.x;
-        // Positioned by the *averaged* level, which is what was measured: the live
-        // trace flickers a decibel either side of it, so a caret pinned to the live
-        // sample would twitch while the thing it points at does not.
-        const tip = Math.max(caret + 1, yOf(p.db) - 2 * dpr);
+        // On the signal, the caret's tip goes just clear of the trace — positioned by
+        // the *averaged* level, which is what was actually measured: the live trace
+        // flickers a decibel either side of it, so a caret pinned to the live sample
+        // would twitch while the thing it points at does not.
+        const onSignal = Math.max(caret + 1, yOf(p.db) - 2 * dpr);
+        const tip = place === 'signal' ? onSignal : rowTip;
+
+        // Fixed marks are joined to their signal, or a row of frequencies along the top
+        // is a row of frequencies belonging to nothing in particular.
+        if (place !== 'signal' && onSignal > tip + caret) {
+            c.save();
+            c.globalAlpha = PEAK_DROP_ALPHA;
+            c.strokeStyle = colInk;
+            c.lineWidth = 1;
+            c.beginPath();
+            c.moveTo(Math.round(x) + 0.5, tip + 1);
+            c.lineTo(Math.round(x) + 0.5, onSignal);
+            c.stroke();
+            c.restore();
+        }
+
         c.fillStyle = colInk;
         c.beginPath();
         c.moveTo(x, tip);
@@ -2291,7 +2319,9 @@ function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk) {
         if (!p.label) continue;
         // Above the caret, or pinned under the top edge for a signal that reaches it:
         // a label drawn off the top of the canvas is a label nobody reads.
-        const y = Math.max(PEAK_TOP_PAD_PX * dpr, tip - caret - PEAK_LABEL_GAP_PX * dpr);
+        const y = place === 'signal'
+            ? Math.max(PEAK_TOP_PAD_PX * dpr, tip - caret - PEAK_LABEL_GAP_PX * dpr)
+            : rowLabelY;
         // Shadowed rather than plated, as the dB labels are: the palette behind this
         // can be anything from near-black to bright yellow, and a shadow is what makes
         // one ink legible over all of them without a box that hides the trace.
@@ -2719,7 +2749,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         drawPeakMarks(
             c, g,
             refreshPeaks(g, trace, g.peaksWanted, g.peaksSnr, cfg, pxW, performance.now()),
-            pxW, H, dpr, cfg, yOf, colors()['--accent'] || '#08a2fb',
+            pxW, H, dpr, cfg, yOf, colors()['--accent'] || '#08a2fb', g.peaksPlace,
         );
     }
 

@@ -10,7 +10,9 @@ import {
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
 } from '../radio/idle.js';
 import { statsPlace } from '../lib/spectrumStats.js';
-import { PEAK_COUNTS, PEAK_SNR_CHOICES, peakCount, peakSnr } from '../lib/spectrumPeaks.js';
+import {
+    PEAK_COUNTS, PEAK_SNR_CHOICES, peakCount, peakPlace, peakSnr,
+} from '../lib/spectrumPeaks.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
     themeSwatch, uiColorsFrom,
@@ -487,6 +489,18 @@ export default function DisplayPanel() {
             </Field>
             {/* Only with markers on: a threshold for something that is not being drawn
                 is a control with nothing to do. */}
+            {peakCount(d.peakMarks, mobile) > 0 && (
+                <Field label="Peak marks" hint="where they sit">
+                    <select
+                        className="select"
+                        value={peakPlace(d.peakMarksAt)}
+                        onChange={(e) => d.set({ peakMarksAt: e.target.value })}
+                    >
+                        <option value="top">In a row at the top</option>
+                        <option value="signal">On the signal</option>
+                    </select>
+                </Field>
+            )}
             {peakCount(d.peakMarks, mobile) > 0 && (
                 <Field label="Peak threshold" hint="above the noise floor">
                     <select

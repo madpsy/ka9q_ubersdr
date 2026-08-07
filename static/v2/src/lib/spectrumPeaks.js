@@ -64,6 +64,21 @@ export function peakCount(n, isMobile = false) {
     return PEAK_COUNTS.includes(Number(n)) ? Number(n) : 0;
 }
 
+// Where the markers live.
+//
+//   'top' pins them in one row along the top of the pane, each with a hairline dropped
+//   to its signal. The labels then read as a list — left to right, in frequency order,
+//   all at the same height — which is much easier to scan than a scatter, and never
+//   covers a peak. That is why it is the default. The hairline is what earns it: a mark
+//   that has left its signal has to say which one it came from.
+//
+//   'signal' rides the trace instead: each caret sits on its own peak, so the mark is
+//   part of the shape it belongs to and nothing is needed to connect them. It is what a
+//   bench analyser does, and it is better on a quiet band with two or three signals —
+//   the cost is that the labels sit at whatever height their signals are.
+export const PEAK_PLACES = ['top', 'signal'];
+export const peakPlace = (v) => (PEAK_PLACES.includes(v) ? v : PEAK_PLACES[0]);
+
 // The averaging time constant, ms. Modest on purpose: long enough to sit still while
 // you read it, short enough that a station coming up on the band is marked within about
 // a second rather than fading in over five.

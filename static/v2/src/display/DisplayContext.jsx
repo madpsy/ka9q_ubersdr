@@ -159,6 +159,12 @@ export const DEFAULTS = {
     // this is what leaves the spectrum clear instead of filling it with markers on
     // noise. Ten decibels is a signal you can hear. See lib/spectrumPeaks.js.
     peakMinSnr: 10,
+    // Whether those markers sit in a row along the top of the pane with a hairline down
+    // to each signal ('top', the default, because a row of labels at one height reads as
+    // a list and never covers a peak) or ride the trace on their own peaks ('signal').
+    // See PEAK_PLACES; the key is named apart from the peakPlace clamp for the reason
+    // given above.
+    peakMarksAt: 'top',
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator

@@ -308,5 +308,14 @@ t('the threshold falls back to ten, which is a signal you can hear', () => {
     assert.strictEqual(pk.peakSnr('20'), 20);
 });
 
+t('the marks default to the fixed row, and an unknown place is that too', () => {
+    // Fixed is the default because a row of labels at one height reads as a list and
+    // never covers a peak; riding the trace is the choice for a quiet band.
+    assert.strictEqual(pk.PEAK_PLACES[0], 'top');
+    assert.strictEqual(pk.peakPlace(undefined), 'top');
+    assert.strictEqual(pk.peakPlace('somewhere'), 'top');
+    assert.strictEqual(pk.peakPlace('signal'), 'signal');
+});
+
 if (process.exitCode) console.log('\npeak marker tests FAILED');
 else console.log(`\nall ${pass} peak marker tests passed`);

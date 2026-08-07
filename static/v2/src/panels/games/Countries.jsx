@@ -24,6 +24,13 @@ export const gameHelp = (
     <>
         <p>A pin on the world; name the country it is in.</p>
         <p>
+            <b>🏳</b> asks it the other way about: the flag itself is the mark on the
+            map, and the answers are names alone until you have chosen one. Seeing both
+            the flags and the flag would be a matching exercise rather than a
+            question, which is why they go — they come back the moment you answer, so
+            you still see which flag belonged to which name.
+        </p>
+        <p>
             <b>Drag</b> the map to pan and <b>scroll</b> to zoom if the coastline is
             not enough to go on — the view starts framed on the answer, so zooming out
             shows you where in the world you are looking.
@@ -40,6 +47,7 @@ const NEXT_MS = 3000;
 // it, and the map is small enough that a 22 px mark reads as another pin.
 const FLAG_PX = 44;
 const BEST_KEY = 'ubersdr.v2.games.countries.best';
+const FLAG_KEY = 'ubersdr.v2.games.countries.flagpin';
 
 // One fetch each per page, shared by every mount of this panel — the arcs are a
 // hundred kilobytes and the list is rate limited to a request a second.
@@ -83,6 +91,11 @@ export default function Countries() {
     const [data, setData] = useState(null);
     const [question, setRound] = useState(null);
     const [picked, setPicked] = useState('');
+    // Flag-as-pin: the flag marks the spot from the start instead of the teardrop.
+    // Remembered, because it is a way of playing rather than a thing you do once.
+    const [flagPin, setFlagPin] = useState(() => {
+        try { return localStorage.getItem(FLAG_KEY) === '1'; } catch (e) { return false; }
+    });
     const [status, setStatus] = useState('Loading…');
     const [streak, setStreak] = useState(() => {
         let best = 0;
@@ -134,11 +147,15 @@ export default function Countries() {
         if (!question) return;
         const [x, y] = project(question.lon, question.lat, view.current, W, H);
 
-        // Answered: the pin becomes the country's flag. The mark has done its job
-        // of asking "here" by then, and a flag says what the answer was in a way
-        // the name in the list beneath cannot — it is the thing you will recognise
-        // next time the pin lands there.
-        if (picked) {
+        // The flag as the mark. Normally that happens once the answer is in — the
+        // teardrop has done its job of asking "here" by then, and a flag says what
+        // the answer was in a way the name in the list cannot, being the thing you
+        // will recognise next time the pin lands there.
+        //
+        // In flag-pin mode it is there from the start and is the question itself:
+        // this flag, at this place, which of these five. The options hide their own
+        // flags until an answer is in to keep that a question — see below.
+        if (picked || flagPin) {
             const flag = countryFlag(question.iso_a2);
             if (flag) {
                 c.save();
@@ -179,7 +196,7 @@ export default function Countries() {
         c.lineWidth = 1.2;
         c.strokeStyle = '#fff';
         c.stroke();
-    }, [data, question, picked]);
+    }, [data, flagPin, question, picked]);
 
     useEffect(() => { draw(); }, [draw]);
 
@@ -191,7 +208,10 @@ export default function Countries() {
         });
     }, []);
 
-    const nextRound = useCallback(() => {
+    // `pinFlag` is passed explicitly by the toggle: it deals the new question inside
+    // the same click that flips the mode, and the flagPin this closed over is still
+    // the old one at that point.
+    const nextRound = useCallback((pinFlag = flagPin) => {
         if (!data || !data.list.length) return;
         clearTimeout(timer.current);
         setPicked('');
@@ -203,8 +223,8 @@ export default function Countries() {
             options: buildOptions(c.country, data.list.map((x) => x.country)),
             codes: new Map(data.list.map((x) => [x.country, x.iso_a2])),
         });
-        setStatus('Where is this?');
-    }, [data]);
+        setStatus(pinFlag ? 'Whose flag is this?' : 'Where is this?');
+    }, [data, flagPin]);
 
     useEffect(() => {
         if (data && data.list.length && !question) nextRound();
@@ -277,11 +297,51 @@ export default function Countries() {
         timer.current = setTimeout(() => { if (alive.current) nextRound(); }, NEXT_MS);
     };
 
+    // Toggling deals a fresh question rather than redressing the one on screen:
+    // turning it on mid-round would put the answer's flag on the map of a question
+    // already asked, which is not a question any more.
+    const toggleFlagPin = () => {
+        const next = !flagPin;
+        setFlagPin(next);
+        try { localStorage.setItem(FLAG_KEY, next ? '1' : '0'); } catch (e) { /* private */ }
+        if (!picked) nextRound(next);
+    };
+
+    // Whether an option carries its flag: everything except the middle of a flag-pin
+    // round, where the flag is the question.
+    //
+    // Tied to the flag actually being *on the map* rather than to the mode. A handful
+    // of entries have no flag glyph and fall back to the pin (see draw), and there is
+    // nothing to match against on those — taking the options' flags away would only
+    // make an ordinary question harder for no reason.
+    const mapFlag = flagPin && question ? countryFlag(question.iso_a2) : '';
+    const showFlags = !!picked || !mapFlag;
+
     return (
         <Frame
+            info={(
+                <>
+                    <button
+                        type="button"
+                        className={`chip chip--button${flagPin ? ' is-active' : ''}`}
+                        aria-pressed={flagPin}
+                        title={flagPin
+                            ? 'Flag on the map — click for the pin back'
+                            : 'Put the flag on the map instead of the pin, and take the flags off the answers until one is chosen'}
+                        onClick={toggleFlagPin}
+                    >
+                        🏳
+                    </button>
+                    <span className="co__mode">
+                        {flagPin ? 'flag on the map' : 'pin on the map'}
+                    </span>
+                </>
+            )}
             status={status}
             score={`Streak:${streak.now} Best:${streak.best}`}
-            action={nextRound}
+            /* Wrapped: Frame hands its action the click event, and nextRound's first
+               argument is which way round the question is asked. */
+            action={() => nextRound()}
             actionLabel="Next"
             statusLines={2}
         >
@@ -319,12 +379,20 @@ export default function Countries() {
                                 disabled={!!picked}
                                 title={name}
                             >
-                                {/* Every option carries its own flag, from the
-                                    start. It gives nothing away — each answer
-                                    shows its own — and it is half the pleasure of
-                                    the game: recognising a flag you cannot place
-                                    is exactly the gap this is for. */}
-                                {countryFlag(question.codes.get(name) || '')} {name}
+                                {/* Normally every option carries its own flag from
+                                    the start: it gives nothing away, since each
+                                    answer shows its own, and it is half the pleasure
+                                    of the game — recognising a flag you cannot place
+                                    is exactly the gap this is for.
+
+                                    In flag-pin mode they wait. The flag on the map
+                                    is the question there, and a row of flags beside
+                                    it would answer it by matching two pictures. They
+                                    appear as soon as something is chosen, which is
+                                    when they teach rather than tell. */}
+                                {showFlags
+                                    ? `${countryFlag(question.codes.get(name) || '')} ${name}`
+                                    : name}
                             </button>
                         );
                     })}

@@ -7678,3 +7678,17 @@ a.btn { text-decoration: none; }
     font-weight: 400;
     color: var(--text-faint);
 }
+
+/* The DX cluster panel in a side dock: a signpost, not a terminal. See the note at the
+   top of DXClusterPanel for why it refuses to draw one in 220 pixels. */
+.dxc-move { gap: 6px; }
+.dxc-move__note {
+    margin: 0;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.4;
+    color: var(--text-dim);
+}
+/* Stacked and full width rather than side by side: at the width that makes this panel
+   unusable, two buttons in a row are two buttons nobody can read either. */
+.dxc-move__buttons { display: flex; flex-direction: column; gap: 4px; }
+.dxc-move__buttons .btn { width: 100%; justify-content: center; }

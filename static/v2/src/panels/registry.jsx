@@ -637,17 +637,21 @@ export const PANELS = [
     },
 
     // The cluster the dxcluster addon runs, as a terminal — the widget of the
-    // same name, native. Ships hidden: it is one addon among several, and it is
-    // a login on a shared cluster rather than something to have open by
-    // default.
+    // same name, native.
+    //
+    // Left, open, and deliberately not usable there: the panel needs eighty columns and
+    // a side dock has a third of that, so in one it shows two buttons that move it to
+    // the bottom dock or float it, and connects to nothing. The bottom dock is where it
+    // belongs and the wrong place to start — it is the busiest dock by default, and a
+    // receiver that opens with a terminal across the bottom has led with the wrong
+    // thing. See the note at the top of DXClusterPanel.
     //
     // Minimal: the transcript and the command line, without the quick commands.
     {
         id: 'dxcluster',
         title: 'DX cluster',
         icon: <Icon.Packet />,
-        dock: 'bottom',
-        defaultHidden: true,
+        dock: 'left',
         fill: true,
         minimal: true,
         Component: DXClusterPanel,

@@ -24,10 +24,28 @@
 // commands, the links and the connected/disconnect row — once you are in,
 // those are the two things you are actually using. The login row stays: a
 // minimal panel still has to be able to let you in.
+//
+// ── Why a side dock shows two buttons instead of a terminal ──────────────────
+//
+// A cluster line is eighty columns of fixed-pitch text: a callsign, a frequency, a
+// comment, a spotter and a time. A side dock is 220 to 560 pixels wide, which wraps
+// every line into three and makes the transcript unreadable — and the quick commands
+// and the login row are a grid that needs the same room.
+//
+// So in the left or right dock the panel does not pretend. It says where it belongs and
+// offers the two places it works, and it does not connect: a login on a shared cluster
+// held open behind a panel that cannot show you the output is the worst of both.
+//
+// It still *starts* in the left dock, open, because that is where somebody will find it.
+// The bottom dock is the right home for it and the wrong default — that dock is already
+// the busiest by default, and a receiver whose first impression is a terminal across the
+// bottom of the screen has led with the wrong thing.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { useLayout } from '../layout/LayoutContext.jsx';
+import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
     MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, openTerminal,
     parseSpotLine, saveLogin, savedLogin, trimLines, webUrl,
@@ -47,6 +65,18 @@ const STICK_PX = 40;
 
 export default function DXClusterPanel({ minimal }) {
     const { actions } = useRadio();
+    // Where this panel is living. A side dock cannot show a cluster — see above — so
+    // the panel becomes a signpost rather than a terminal, and none of the state below
+    // is reached: no socket, no login, nothing held open.
+    const { placementOf, movePanel } = useLayout();
+    const where = placementOf('dxcluster');
+    // Never on a phone. There are no docks there — every panel is a full-width sheet,
+    // which is as much room as the device has — so the signpost would be replacing a
+    // usable terminal with two buttons that lead nowhere. The panel keeps its dock for
+    // when the same layout is opened on a desktop, which is why `where` still says
+    // 'left' here and has to be ignored.
+    const mobile = useMediaQuery(MOBILE_QUERY);
+    const cramped = !mobile && (where === 'left' || where === 'right');
     const [login, setLogin] = useState(savedLogin);
     const [state, setState] = useState('closed');
     const [detail, setDetail] = useState('');
@@ -111,10 +141,22 @@ export default function DXClusterPanel({ minimal }) {
     // a disconnect is a decision, and reconnecting over it would be a fight.
     const tried = useRef(false);
     useEffect(() => {
-        if (tried.current) return;
+        // Not from a side dock, where the panel is a signpost: a remembered callsign
+        // would otherwise log in to a shared cluster to feed a terminal nobody can read.
+        if (tried.current || cramped) return;
         tried.current = true;
         if (savedLogin().callsign.trim()) connect();
-    }, [connect]);
+    }, [connect, cramped]);
+
+    // Dragged into a side dock while connected. The panel is not unmounted by a move
+    // within the layout, so without this the login would stay open behind the signpost.
+    useEffect(() => {
+        if (!cramped || !termRef.current) return;
+        termRef.current.close();
+        termRef.current = null;
+        tried.current = false;
+        setState('closed');
+    }, [cramped]);
 
     useEffect(() => {
         if (!stickRef.current) return;
@@ -153,6 +195,24 @@ export default function DXClusterPanel({ minimal }) {
         actions.ensureVisible(spot.hz);
         say(`Tuned ${spot.khz} ${spot.mode.toUpperCase()}`);
     };
+
+    if (cramped) {
+        return (
+            <div className="stack dxc-move">
+                <p className="dxc-move__note">
+                    A cluster line is eighty columns wide — too wide for a side dock.
+                </p>
+                <div className="dxc-move__buttons">
+                    <Button size="sm" variant="primary" onClick={() => movePanel('dxcluster', 'bottom', null)}>
+                        Dock at the bottom
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => movePanel('dxcluster', 'float', null)}>
+                        Float it
+                    </Button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="stack">

@@ -227,6 +227,7 @@ export default function CallsignQuiz() {
             score={`Streak:${streak.now} Best:${streak.best}`}
             action={() => { if (!busy.current) nextRound(); }}
             actionLabel="Next"
+            statusLines={2}
         >
             <div className="cq">
                 <div className="cq__call">{question ? question.callsign : '…'}</div>
@@ -253,6 +254,7 @@ export default function CallsignQuiz() {
                                 ].filter(Boolean).join(' ')}
                                 onClick={() => answer(o.name)}
                                 disabled={!!picked}
+                                title={o.name}
                             >
                                 {countryFlag(o.code)} {o.name}
                             </button>

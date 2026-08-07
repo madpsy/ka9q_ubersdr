@@ -6711,15 +6711,30 @@ a.btn { text-decoration: none; }
 /* ── The two quizzes ─────────────────────────────────────────────────────── */
 .cq { display: flex; flex-direction: column; gap: 6px; }
 .cq__call {
+    /* Fixed height and no wrapping: a portable callsign is VP2E/GM4ABC/P and the
+       one before it was G4ABC, and at this size the difference is a line. */
+    height: calc(1.2em + 2px);
     text-align: center;
     font-family: var(--mono);
     font-size: calc(21px * var(--ui-scale));
     font-weight: 700;
+    line-height: 1.2;
     letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
     color: var(--accent);
 }
 .cq__options, .co__options { display: flex; flex-direction: column; gap: 4px; }
 .cq__opt {
+    /* One line, always. "South Georgia and the South Sandwich Islands" wraps in a
+       dock column and "Chad" does not, so left to themselves these rows are a
+       different height every question — which is the panel jumping again, from
+       the other direction. The full name is in the title, and the flag and the
+       first words are enough to choose by. */
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: calc(1.25em + 12px);
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 5px;
@@ -6727,7 +6742,11 @@ a.btn { text-decoration: none; }
     color: var(--text);
     font-family: var(--font);
     font-size: calc(11.5px * var(--ui-scale));
+    line-height: 1.25;
     text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     cursor: pointer;
     transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
@@ -6736,13 +6755,7 @@ a.btn { text-decoration: none; }
 /* An option with nothing in it yet. Same box, no border, nothing to click: it is
    there to hold the row's height while the next question is being found, not to
    look like an answer that has gone missing. */
-.cq__opt.is-blank {
-    border-color: transparent;
-    background: none;
-    /* A button and a span differ by a line-height, and this has to match the
-       real thing to the pixel or the list still moves. */
-    min-height: calc(1.2em + 12px);
-}
+.cq__opt.is-blank { border-color: transparent; background: none; }
 /* The right answer is always shown, whichever was picked: being told you are
    wrong without being told the answer teaches nothing. */
 .cq__opt.is-right { border-color: var(--good); background: rgba(69, 214, 154, 0.16); opacity: 1; }

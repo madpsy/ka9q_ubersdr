@@ -220,6 +220,7 @@ export default function Countries() {
             score={`Streak:${streak.now} Best:${streak.best}`}
             action={nextRound}
             actionLabel="Next"
+            statusLines={2}
         >
             <div className="co">
                 <canvas
@@ -253,6 +254,7 @@ export default function Countries() {
                                 ].filter(Boolean).join(' ')}
                                 onClick={() => answer(name)}
                                 disabled={!!picked}
+                                title={name}
                             >
                                 {picked ? `${countryFlag(question.codes.get(name) || '')} ` : ''}{name}
                             </button>

@@ -20,10 +20,12 @@
 //
 // Named callAnnounce* rather than announce*: lib/announce.js is the *receiver's*
 // announcer, the one that reads out frequency and mode, and it already owns those
-// names. This borrows its voice and its speaking rate — there is one place to choose
-// how the receiver talks — but nothing else.
+// names. This borrows its speech plumbing — the voice list, and the Chromium quirk in
+// speak() — but keeps its own voice and rate: a callsign spelled out in phonetics and a
+// frequency read as a number are different jobs, and the speed that suits one is often
+// not the speed that suits the other.
 
-import { announceSettings, speak, speechAvailable, stopSpeaking } from './announce.js';
+import { speak, speechAvailable, stopSpeaking } from './announce.js';
 import { unitMs, unitsFor } from './morse.js';
 import { clampPitch, clampWpm, createSidetone } from './morseTone.js';
 
@@ -36,7 +38,23 @@ export const CALL_CW = 'cw';
 export const CALL_TTS = 'tts';
 export const CALL_MODES = [CALL_OFF, CALL_CW, CALL_TTS];
 
-const DEFAULTS = { mode: CALL_OFF, pitch: 600, wpm: 15 };
+// `voice: ''` means "whichever the automatic pick chooses" — a name is stored rather
+// than an index, because the list belongs to the browser and its order is not promised
+// to be the same twice. See currentVoice() in lib/announce.js.
+const DEFAULTS = { mode: CALL_OFF, pitch: 600, wpm: 15, voice: '', rate: 1 };
+
+// The speaking rates on offer, as a list rather than the Announcements panel's slider:
+// this one lives in a row beside a picker, where a slider would be a few pixels wide.
+// Same range, coarser steps — nobody needs 1.3× as well as 1.2× for five letters.
+export const TTS_RATES = [0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8];
+export const clampRate = (r) => {
+    const n = Number(r);
+    if (!Number.isFinite(n)) return 1;
+    // Nearest offered rate rather than a refusal: a value from the Announcements
+    // panel's slider is a perfectly sensible speed that simply is not on this list.
+    return TTS_RATES.reduce((best, cand) => (
+        Math.abs(cand - n) < Math.abs(best - n) ? cand : best), TTS_RATES[0]);
+};
 
 // The NATO alphabet, which is what a callsign is spoken as. "G0RDH" handed to a speech
 // engine as a word is noise; handed to it as letters it is a stream of "gee" and "dee"
@@ -75,6 +93,8 @@ function load() {
             mode: CALL_MODES.includes(saved.mode) ? saved.mode : CALL_OFF,
             pitch: clampPitch(saved.pitch),
             wpm: clampWpm(saved.wpm),
+            voice: typeof saved.voice === 'string' ? saved.voice : '',
+            rate: clampRate(saved.rate),
         };
     } catch (e) {
         return { ...DEFAULTS };
@@ -112,6 +132,10 @@ export function setCallAnnounce(patch) {
         mode: CALL_MODES.includes(wanted) ? wanted : CALL_OFF,
         pitch: clampPitch(patch.pitch === undefined ? settings.pitch : patch.pitch),
         wpm: clampWpm(patch.wpm === undefined ? settings.wpm : patch.wpm),
+        // A voice is whatever the browser called it, or '' for the automatic pick;
+        // there is nothing to validate against, since the list can change under us.
+        voice: patch.voice === undefined ? settings.voice : String(patch.voice || ''),
+        rate: clampRate(patch.rate === undefined ? settings.rate : patch.rate),
     };
     try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) { /* private mode */ }
     // Any change stops what is in the air — switching off obviously, but switching
@@ -153,8 +177,10 @@ export function announceCall(call) {
         if (!words) return 0;
         // A voice the browser has not got is silence, and silence is indistinguishable
         // from the feature being off — so nothing is recorded as being said.
-        if (!speak(words, { rate: announceSettings().rate })) return 0;
-        ms = words.split(' ').length * TTS_WORD_MS;
+        if (!speak(words, { rate: settings.rate, voiceName: settings.voice })) return 0;
+        // Faster speech is shorter speech, which the dedupe window has to follow or a
+        // repeat at 1.8× would be swallowed long after the voice had stopped.
+        ms = (words.split(' ').length * TTS_WORD_MS) / settings.rate;
     } else {
         ms = unitsFor(text) * unitMs(settings.wpm);
         if (!player) player = createSidetone();

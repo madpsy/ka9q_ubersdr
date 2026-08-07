@@ -231,6 +231,60 @@ ta('the request carries the callsign and the session UUID', () => withFetch(
     },
 ));
 
+// The channel the announcer listens on. What matters is that it fires for lookups
+// nobody in a panel asked for — a marker the dial landed on, the media session — and
+// that it stays quiet when the lookup did not find anybody.
+
+ta('an answered lookup is reported once, with what it found', () => withFetch(
+    () => Promise.resolve({
+        ok: true, status: 200, json: () => Promise.resolve({ call: 'M0ABC', name: 'Somebody' }),
+    }),
+    async () => {
+        const heard = [];
+        const off = cs.onLookupAnswer((call, data) => heard.push([call, data.name]));
+        await cs.lookupCallsignData('m0abc', 'sess-1');
+        off();
+        assert.deepStrictEqual(heard, [['M0ABC', 'Somebody']], 'normalised, and once');
+    },
+));
+
+ta('two callers sharing one request are one answer, not two', () => withFetch(
+    () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ name: 'Somebody' }) }),
+    async () => {
+        // The panel and the Markers panel asking together is the common case, and
+        // announcing the same callsign twice over itself is what the sharing prevents.
+        let n = 0;
+        const off = cs.onLookupAnswer(() => { n += 1; });
+        await Promise.all([
+            cs.lookupCallsignData('G0RDH', 'u'),
+            cs.lookupCallsignData('G0RDH', 'u'),
+        ]);
+        off();
+        assert.strictEqual(n, 1);
+    },
+));
+
+ta('a failed lookup is not an answer', () => withFetch(
+    () => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }),
+    async () => {
+        let n = 0;
+        const off = cs.onLookupAnswer(() => { n += 1; });
+        await cs.lookupCallsignData('QQ9ZZZ', 'u').catch(() => {});
+        off();
+        assert.strictEqual(n, 0);
+    },
+));
+
+ta('a listener that throws does not break the lookup', () => withFetch(
+    () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ name: 'Somebody' }) }),
+    async () => {
+        const off = cs.onLookupAnswer(() => { throw new Error('bad listener'); });
+        const d = await cs.lookupCallsignData('W1AW', 'u');
+        off();
+        assert.strictEqual(d.name, 'Somebody', 'the caller still gets its record');
+    },
+));
+
 ta('no session means no request at all', () => withFetch(
     () => { throw new Error('should not have been called'); },
     async () => {

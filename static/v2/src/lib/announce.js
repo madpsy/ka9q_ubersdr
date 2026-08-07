@@ -221,10 +221,21 @@ export function refreshVoice() {
  * The setTimeout is not a nicety. Chromium drops an utterance passed to speak()
  * in the same synchronous stack as a cancel(), silently — v1 found this the
  * hard way and the comment there is the only reason this one exists.
+ *
+ * `voiceName` is for a caller with its own voice preference — the callsign
+ * announcer, which picks a voice separately from the receiver's own
+ * announcements. A name that is not installed falls back to the automatic
+ * choice rather than to silence, for the same reason currentVoice() does: an
+ * utterance nobody hears is indistinguishable from the feature being off.
  */
-export function speak(text, { rate = 1 } = {}) {
+export function speak(text, { rate = 1, voiceName = '' } = {}) {
     if (!text || !speechAvailable()) return false;
-    const v = currentVoice();
+    let v = null;
+    if (voiceName) {
+        v = usableVoices(window.speechSynthesis.getVoices())
+            .find((cand) => cand.name === voiceName) || null;
+    }
+    if (!v) v = currentVoice();
     if (!v) return false;
     window.speechSynthesis.cancel();
     setTimeout(() => {

@@ -208,7 +208,34 @@ async function fetchLookup(callsign, uuid) {
         err.retryable = true;
         throw err;
     }
+    lookupAnswered(normaliseCallsign(callsign), body);
     return body;
+}
+
+// --- answers ------------------------------------------------------------------
+//
+// Every lookup in the app ends up here — the Callsign panel's search box, a click on
+// a spot, a marker the dial has landed on, the Media Session fetching artwork — so
+// this is the one place that knows a lookup has come back and what it said.
+//
+// It exists for the announcer, and the reason it is here rather than in the panel is
+// the reason AnnounceWatch is not in the Announcements panel: a collapsed dock section
+// is unmounted, and a receiver that stops announcing because a panel was closed is a
+// puzzle. Announcing from the panel also missed every lookup the panel did not make
+// itself, which is most of them.
+
+const answerListeners = new Set();
+
+/** Called with (callsign, data) each time a lookup comes back with a record. */
+export function onLookupAnswer(fn) {
+    answerListeners.add(fn);
+    return () => answerListeners.delete(fn);
+}
+
+function lookupAnswered(call, data) {
+    for (const fn of Array.from(answerListeners)) {
+        try { fn(call, data); } catch (e) { console.error('lookup answer listener threw', e); }
+    }
 }
 
 /** Test seam. */

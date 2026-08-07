@@ -2822,11 +2822,22 @@ a.btn { text-decoration: none; }
 
 .cs { height: 100%; min-height: 0; }
 .cs-form { display: flex; gap: 6px; align-items: center; }
-/* The announcer's two pickers and its replay, on their own row under the form: the
-   form row is already four controls wide at a dock that can be dragged to 220px. */
+/* The announcer's own settings, under the form and only while it is on. */
 .cs-cw { display: flex; align-items: center; gap: 4px; }
 .cs-cw .select { flex: 1; min-width: 0; }
-.cs-cw .chip { flex: none; }
+/* Voice names run to "Microsoft Sonia Online (Natural) - English (United Kingdom)",
+   so the name is what gives way and the rate beside it keeps its width. */
+.cs-cw__voice { flex: 1 1 auto; min-width: 0; }
+.cs-cw__rate { flex: none; width: auto; }
+/* The announcer's three-state button. A fixed width, because its label changes with
+   its state and the controls either side of it must not shuffle when it does. */
+.cs-form__cw {
+    flex: none;
+    min-width: calc(30px * var(--ui-scale));
+    justify-content: center;
+    font-family: var(--mono);
+    letter-spacing: 0.04em;
+}
 .cs-form__input { flex: 1; min-width: 0; text-transform: uppercase; font-family: var(--mono); }
 
 /* Same arrangement as the voice panel: `fill` gives it the dock height and the

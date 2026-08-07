@@ -11,6 +11,7 @@ import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
 import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
+import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
@@ -128,6 +129,11 @@ export default function App() {
                                     other about a tab nobody is looking at. */}
                                 <VisibilityWatch />
                                 <AnnounceWatch />
+                                {/* The other announcer: the receiver reads out its
+                                    own tuning, this one reads out who a lookup
+                                    found. Both here for the same reason — a panel
+                                    that is collapsed is unmounted. */}
+                                <CallsignAnnounceWatch />
                                 <ShortcutWatch />
                                 {/* One delegated listener gives every button
                                     in the app its haptic tap; the gestures on

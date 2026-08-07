@@ -100,9 +100,34 @@ t('turning it off stops what is in the air', () => {
 // --- the settings ------------------------------------------------------------
 
 t('a patch changes one setting and leaves the others', () => {
-    setCallAnnounce({ mode: CALL_CW, pitch: 800, wpm: 25 });
+    setCallAnnounce({ mode: CALL_CW, pitch: 800, wpm: 25, voice: 'Sonia', rate: 1.4 });
     setCallAnnounce({ wpm: 12 });
-    assert.deepStrictEqual(callAnnounceSettings(), { mode: CALL_CW, pitch: 800, wpm: 12 });
+    assert.deepStrictEqual(callAnnounceSettings(), {
+        mode: CALL_CW, pitch: 800, wpm: 12, voice: 'Sonia', rate: 1.4,
+    });
+});
+
+t('a voice is whatever the browser called it, and blank means automatic', () => {
+    // There is nothing to validate a name against: the list is the browser's and can
+    // change under us — a machine without that voice installed falls back at speaking
+    // time rather than having the choice refused here. See speak().
+    setCallAnnounce({ voice: 'Google UK English Female' });
+    assert.strictEqual(callAnnounceSettings().voice, 'Google UK English Female');
+    setCallAnnounce({ voice: '' });
+    assert.strictEqual(callAnnounceSettings().voice, '');
+});
+
+t('a speaking rate snaps to the nearest one offered', () => {
+    // The Announcements panel's slider produces 1.3 quite legitimately; this picker
+    // does not offer it, and the nearest speed is a better answer than a reset to 1×.
+    setCallAnnounce({ rate: 1.3 });
+    assert.ok([1.2, 1.4].includes(callAnnounceSettings().rate));
+    setCallAnnounce({ rate: 99 });
+    assert.strictEqual(callAnnounceSettings().rate, 1.8, 'clamped to the top of the range');
+    setCallAnnounce({ rate: 0 });
+    assert.strictEqual(callAnnounceSettings().rate, 0.6);
+    setCallAnnounce({ rate: 'fast' });
+    assert.strictEqual(callAnnounceSettings().rate, 1, 'nonsense is the default, not NaN');
 });
 
 t('a pitch or speed that is not on offer falls back rather than being used', () => {

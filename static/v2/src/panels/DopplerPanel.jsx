@@ -19,7 +19,7 @@ import { retryDelay } from '../lib/backoff.js';
 import {
     SPECTRUM_INTERVAL_S, STATIONS_POLL_MS, addonUrl, applyReading, baselineShift,
     clientToken, dopplerAvailable, dopplerSummary, formatShift, isLive, normaliseStation,
-    shiftBand, spectrumIntervalUrl, stationsUrl, streamUrl,
+    shiftBand, shiftSource, spectrumIntervalUrl, stationsUrl, streamUrl,
 } from '../lib/doppler.js';
 import { sinceLabel } from '../lib/format.js';
 
@@ -197,9 +197,7 @@ export default function DopplerPanel({ minimal }) {
                                         lib/doppler.js. */}
                                     <span
                                         className={`dp__shift is-${shiftBand(d) || 'none'}`}
-                                        title={d == null
-                                            ? 'No baseline yet — the addon needs a few minutes of readings'
-                                            : `${formatShift(s.doppler)} Hz against a baseline of ${formatShift(s.baseline)} Hz`}
+                                        title={shiftTitle(s, d)}
                                     >
                                         {d == null ? '—' : formatShift(d)}
                                     </span>
@@ -251,6 +249,30 @@ export default function DopplerPanel({ minimal }) {
             )}
         </div>
     );
+}
+
+/**
+ * What the figure in the big type means, said in a sentence.
+ *
+ * Three different claims wear the same number — see shiftSource — and the tooltip is
+ * where the difference lives, because the column itself has room for five characters.
+ */
+function shiftTitle(s, d) {
+    if (d == null) {
+        return 'No baseline yet — the addon needs a few minutes of readings before a'
+            + ' departure from one means anything, and the raw figure is an arbitrary'
+            + ' clock offset until then.';
+    }
+    const src = shiftSource(s);
+    if (src === 'reference') {
+        return `The reference station's own error: ${formatShift(s.doppler)} Hz from where it`
+            + ' should be. Zero is the receiver exactly on frequency.';
+    }
+    if (src === 'corrected') {
+        return `${formatShift(s.doppler)} Hz, corrected against the reference station — an`
+            + ' absolute figure, so zero is the carrier exactly where it belongs.';
+    }
+    return `${formatShift(s.doppler)} Hz against an hour's baseline of ${formatShift(s.baseline)} Hz.`;
 }
 
 // What the stream owns, and so what survives a station poll that is older than the last

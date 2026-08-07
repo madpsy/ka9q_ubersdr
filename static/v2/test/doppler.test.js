@@ -142,12 +142,42 @@ t('the shift is the reading against its own baseline', () => {
     assert.ok(Math.abs(dp.baselineShift(s) - 0.8) < 1e-9);
 });
 
-t('no baseline yet means no shift, rather than a shift from zero', () => {
-    // A departure from a mean of two samples is not a departure from anything, and
-    // "+12.40" against nothing would read as a flare.
+t('a plain reading with no baseline is unknown, not a shift of its own', () => {
+    // A departure from a mean of two samples is not a departure from anything, and the
+    // raw figure is an arbitrary clock offset — reporting "+12.40" as a shift would
+    // paint a receiver that is working perfectly in red.
     const s = dp.normaliseStation(station({}, {}, { baseline_mean_hz: null }));
     assert.strictEqual(dp.baselineShift(s), null);
+    assert.strictEqual(dp.shiftSource(s), null);
     assert.strictEqual(dp.baselineShift(null), null);
+});
+
+t('the reference station reports its own error, baseline or not', () => {
+    // The addon deliberately computes no baseline for it — it *is* the yardstick — and
+    // its raw reading is its error against truth, which is the same quantity the column
+    // shows for everything else. Without this the one station that is bang on frequency
+    // is the one showing a dash.
+    const s = dp.normaliseStation(station({ is_reference: true }, { doppler_hz: 0 }, {
+        baseline_mean_hz: null,
+    }));
+    assert.strictEqual(dp.baselineShift(s), 0);
+    assert.strictEqual(dp.shiftSource(s), 'reference');
+    assert.strictEqual(dp.shiftBand(dp.baselineShift(s)), 'calm', 'and zero reads as good');
+    assert.strictEqual(dp.formatShift(dp.baselineShift(s)), '0.00');
+});
+
+t('a corrected reading is already absolute, so it needs no baseline', () => {
+    const s = dp.normaliseStation(station({}, {}, {
+        corrected_doppler_hz: 0, baseline_mean_hz: null,
+    }));
+    assert.strictEqual(dp.baselineShift(s), 0);
+    assert.strictEqual(dp.shiftSource(s), 'corrected');
+});
+
+t('a baseline wins over both, because it is the closest measurement to hand', () => {
+    const s = dp.normaliseStation(station({ is_reference: false }, { doppler_hz: 12.9 }));
+    assert.strictEqual(dp.shiftSource(s), 'baseline');
+    assert.ok(Math.abs(dp.baselineShift(s) - 0.8) < 1e-9);
 });
 
 t('the colour bands are what the phenomena look like', () => {

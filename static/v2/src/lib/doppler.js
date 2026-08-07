@@ -149,16 +149,44 @@ export function applyReading(stations, msg, arrivedAt = Date.now()) {
 }
 
 /**
- * How far the carrier is from where it has been sitting — the ionospheric part.
+ * How far the carrier is from where it should be — the ionospheric part.
  *
- * This is the number worth reading on a receiver without a GPSDO, and it is why the
- * baseline is fetched at all. Null until the addon has enough minutes to have a
- * baseline, because a departure from a mean of two samples is not a departure from
- * anything.
+ * Three ways of knowing that, in the order they are trusted, and one way of not:
+ *
+ *   Against its own hour-long baseline. The number worth reading on a receiver without
+ *   a GPSDO, and why the baseline is fetched at all.
+ *
+ *   A corrected reading is already absolute — the reference station's drift has been
+ *   taken out of it — so it is its own departure from zero and needs no baseline.
+ *
+ *   The reference station itself has no baseline by design: the addon does not compute
+ *   one for it, because it *is* the yardstick. Its raw reading is its error against
+ *   truth, which is exactly the quantity this column shows for everything else.
+ *
+ * Only the last case is unknown: a plain reading with no baseline and no reference is
+ * an arbitrary clock offset, and reporting "+12.40" as a shift would paint a receiver
+ * that is working perfectly in red. That stays null and the panel shows a dash.
  */
 export function baselineShift(station) {
-    if (!station || station.doppler == null || station.baseline == null) return null;
-    return station.doppler - station.baseline;
+    if (!station || station.doppler == null) return null;
+    if (station.baseline != null) return station.doppler - station.baseline;
+    if (station.reference || station.corrected != null) return station.doppler;
+    return null;
+}
+
+/**
+ * What that figure was worked out from, for the tooltip.
+ *
+ * The three are not the same claim — one is a departure from an hour of this station's
+ * own history, one is an absolute measurement, one is the reference reporting its own
+ * error — and a reader who cares about a tenth of a hertz cares which.
+ */
+export function shiftSource(station) {
+    if (!station || station.doppler == null) return null;
+    if (station.baseline != null) return 'baseline';
+    if (station.reference) return 'reference';
+    if (station.corrected != null) return 'corrected';
+    return null;
 }
 
 /** Whether a station's last reading is recent enough to still mean anything. */

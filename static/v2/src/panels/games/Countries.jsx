@@ -12,8 +12,8 @@ import React, { useCallback, useEffect, useRef, useState } from '../../react.js'
 import Frame from './Frame.jsx';
 import { countryFlag } from '../../lib/format.js';
 import {
-    RECENT_MAX, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, arcVisible, buildOptions, clampView, decodeArcs,
-    pickCountry, project, unproject, viewFor,
+    OPTIONS, RECENT_MAX, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, arcVisible, buildOptions, clampView,
+    decodeArcs, pickCountry, project, unproject, viewFor,
 } from '../../lib/games/quiz.js';
 
 const W = 336;
@@ -232,23 +232,32 @@ export default function Countries() {
                     onPointerUp={onUp}
                     onPointerCancel={onUp}
                 />
+                {/* Five rows whether or not there are five names yet — see the
+                    callsign quiz, which had the panel jumping a hundred and
+                    thirty pixels between questions before this. */}
                 <div className="co__options">
-                    {(question ? question.options : []).map((name) => (
-                        <button
-                            key={name}
-                            type="button"
-                            className={[
-                                'cq__opt',
-                                picked ? 'is-done' : '',
-                                picked && name === question.country ? 'is-right' : '',
-                                picked === name && name !== question.country ? 'is-wrong' : '',
-                            ].filter(Boolean).join(' ')}
-                            onClick={() => answer(name)}
-                            disabled={!!picked}
-                        >
-                            {picked ? `${countryFlag(question.codes.get(name) || '')} ` : ''}{name}
-                        </button>
-                    ))}
+                    {Array.from({ length: OPTIONS }, (_, i) => {
+                        const name = question && question.options[i];
+                        if (!name) {
+                            return <span className="cq__opt is-blank" key={`blank${i}`} aria-hidden="true" />;
+                        }
+                        return (
+                            <button
+                                key={name}
+                                type="button"
+                                className={[
+                                    'cq__opt',
+                                    picked ? 'is-done' : '',
+                                    picked && name === question.country ? 'is-right' : '',
+                                    picked === name && name !== question.country ? 'is-wrong' : '',
+                                ].filter(Boolean).join(' ')}
+                                onClick={() => answer(name)}
+                                disabled={!!picked}
+                            >
+                                {picked ? `${countryFlag(question.codes.get(name) || '')} ` : ''}{name}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
         </Frame>

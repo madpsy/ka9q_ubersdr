@@ -26,8 +26,8 @@ import { getSessionId } from '../../radio/session.js';
 import { lookupCallsignData } from '../../lib/callsign.js';
 import { onPhotoShown, photoShown, photoUrl } from '../../lib/operatorPhoto.js';
 import {
-    MIN_CALLSIGNS, RECENT_MAX, addSeen, buildOptions, ctyDetail, loadSeen, orderCandidates,
-    saveSeen,
+    MIN_CALLSIGNS, OPTIONS, RECENT_MAX, addSeen, buildOptions, ctyDetail, loadSeen,
+    orderCandidates, saveSeen,
 } from '../../lib/games/quiz.js';
 
 // How long the answer stays up before the next round. Long enough to read the
@@ -220,6 +220,7 @@ export default function CallsignQuiz() {
     }
 
     const detail = picked && question ? ctyDetail(question.cty, question.callsign) : null;
+    const lookups = !!(serverInfo && serverInfo.lookup_service);
     return (
         <Frame
             status={status}
@@ -229,45 +230,63 @@ export default function CallsignQuiz() {
         >
             <div className="cq">
                 <div className="cq__call">{question ? question.callsign : '…'}</div>
+                {/* Always five rows, even with nothing to put in them.
+                    Between questions this list is empty for as long as a lookup
+                    takes, and a panel in a dock that loses a hundred and thirty
+                    pixels and gets them back shoves everything under it up and
+                    down the column each round. The placeholders hold the space. */}
                 <div className="cq__options">
-                    {(question ? question.options : []).map((o) => (
-                        <button
-                            key={o.name}
-                            type="button"
-                            className={[
-                                'cq__opt',
-                                picked ? 'is-done' : '',
-                                picked && o.name === question.country ? 'is-right' : '',
-                                picked === o.name && o.name !== question.country ? 'is-wrong' : '',
-                            ].filter(Boolean).join(' ')}
-                            onClick={() => answer(o.name)}
-                            disabled={!!picked}
-                        >
-                            {countryFlag(o.code)} {o.name}
-                        </button>
-                    ))}
+                    {Array.from({ length: OPTIONS }, (_, i) => {
+                        const o = question && question.options[i];
+                        if (!o) {
+                            return <span className="cq__opt is-blank" key={`blank${i}`} aria-hidden="true" />;
+                        }
+                        return (
+                            <button
+                                key={o.name}
+                                type="button"
+                                className={[
+                                    'cq__opt',
+                                    picked ? 'is-done' : '',
+                                    picked && o.name === question.country ? 'is-right' : '',
+                                    picked === o.name && o.name !== question.country ? 'is-wrong' : '',
+                                ].filter(Boolean).join(' ')}
+                                onClick={() => answer(o.name)}
+                                disabled={!!picked}
+                            >
+                                {countryFlag(o.code)} {o.name}
+                            </button>
+                        );
+                    })}
                 </div>
-                {detail && (detail.where || detail.zone) && (
-                    <div className="cq__detail">
-                        {detail.where && <span>{detail.where}</span>}
-                        {detail.zone && <span>{detail.zone}</span>}
-                    </div>
-                )}
-                {/* The operator card. Only for the callsign on screen — a lookup
-                    that lands after the next question has been dealt belongs to
-                    the station before it. */}
-                {op && op.call === question.callsign && (op.name || op.qth || op.image) && (
-                    <div className="cq__op">
-                        {showPhoto && op.image && (
-                            <img className="cq__photo" src={photoUrl(op.image)} alt="" />
-                        )}
-                        <div className="cq__who">
-                            {op.name && <span className="cq__name">{op.name}</span>}
-                            {op.qth && <span className="cq__qth">{op.qth}</span>}
-                            {op.grid && <span className="cq__grid">Grid {op.grid}</span>}
+                {/* The reveal, in a slot of its own that is there whether or not
+                    it has anything in it — the answer arriving must not push the
+                    panel taller and the next question must not pull it shorter.
+                    Only as tall as it can actually get: without a lookup service
+                    there is never a card, so the slot is one line. */}
+                <div className={`cq__reveal${lookups ? ' cq__reveal--card' : ''}`}>
+                    {detail && (detail.where || detail.zone) && (
+                        <div className="cq__detail">
+                            {detail.where && <span>{detail.where}</span>}
+                            {detail.zone && <span>{detail.zone}</span>}
                         </div>
-                    </div>
-                )}
+                    )}
+                    {/* Only for the callsign on screen — a lookup that lands after
+                        the next question has been dealt belongs to the station
+                        before it. */}
+                    {op && op.call === question.callsign && (op.name || op.qth || op.image) && (
+                        <div className="cq__op">
+                            {showPhoto && op.image && (
+                                <img className="cq__photo" src={photoUrl(op.image)} alt="" />
+                            )}
+                            <div className="cq__who">
+                                {op.name && <span className="cq__name">{op.name}</span>}
+                                {op.qth && <span className="cq__qth">{op.qth}</span>}
+                                {op.grid && <span className="cq__grid">Grid {op.grid}</span>}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </Frame>
     );

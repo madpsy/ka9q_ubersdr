@@ -6733,10 +6733,34 @@ a.btn { text-decoration: none; }
 }
 .cq__opt:hover:not(.is-done) { border-color: var(--accent); background: var(--accent-soft); }
 .cq__opt.is-done { cursor: default; opacity: 0.7; }
+/* An option with nothing in it yet. Same box, no border, nothing to click: it is
+   there to hold the row's height while the next question is being found, not to
+   look like an answer that has gone missing. */
+.cq__opt.is-blank {
+    border-color: transparent;
+    background: none;
+    /* A button and a span differ by a line-height, and this has to match the
+       real thing to the pixel or the list still moves. */
+    min-height: calc(1.2em + 12px);
+}
 /* The right answer is always shown, whichever was picked: being told you are
    wrong without being told the answer teaches nothing. */
 .cq__opt.is-right { border-color: var(--good); background: rgba(69, 214, 154, 0.16); opacity: 1; }
 .cq__opt.is-wrong { border-color: var(--bad); background: rgba(242, 100, 106, 0.16); opacity: 1; }
+/* The slot the answer appears in. Reserved rather than grown into: this panel
+   sits in a dock column, and a card that pushes everything below it down and then
+   lets it spring back — every three seconds, on a timer — is the sort of movement
+   that makes a whole layout feel unstable. Two heights, because without a lookup
+   service there is never a card and reserving room for one would be dead space. */
+.cq__reveal {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: calc(15px * var(--ui-scale));
+}
+.cq__reveal--card { min-height: 62px; }
+
 .cq__detail {
     display: flex;
     justify-content: center;

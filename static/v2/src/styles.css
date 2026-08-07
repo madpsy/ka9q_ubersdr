@@ -7296,3 +7296,100 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 .pk__chan.is-up { color: var(--text-dim); border-color: var(--border-strong); }
+
+/* =========================================================================
+   Doppler addon panel
+   ========================================================================= */
+
+/* Three figures rather than the four the other addon panels have: there are only three
+   questions here — is it hearing anything, is anything moving, and how well. */
+.dp__stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.dp__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 4px 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    min-width: 0;
+}
+.dp__stat-k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.dp__stat-v {
+    font-family: var(--mono);
+    font-size: calc(15px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--text);
+}
+.dp__stat-v.is-calm { color: var(--good); }
+.dp__stat-v.is-warn { color: var(--warn); }
+.dp__stat-v.is-big { color: var(--bad); }
+.dp__stat-s { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+
+.dp__list { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.dp__row {
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-2);
+}
+/* A station that has stopped being heard fades rather than disappearing: it is still
+   configured and still being listened to, and its last reading is still the last thing
+   heard on that frequency. */
+.dp__row.is-stale { opacity: 0.55; }
+
+.dp__head {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    white-space: nowrap;
+}
+.dp__name { color: var(--text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.dp__ref {
+    padding: 0 3px;
+    border-radius: 2px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: calc(8.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.dp__mhz { color: var(--text-faint); font-size: calc(9.5px * var(--ui-scale)); }
+/* The departure from the baseline: the reading that means something on a receiver
+   without a GPSDO, so it is the one in the larger type, on the right where a column of
+   them can be read down. */
+.dp__shift {
+    margin-left: auto;
+    font-size: calc(13px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--text);
+}
+.dp__shift.is-calm { color: var(--good); }
+.dp__shift.is-warn { color: var(--warn); }
+.dp__shift.is-big { color: var(--bad); }
+.dp__shift.is-none { color: var(--text-faint); }
+
+/* The raw figure and the signal quality, underneath and quieter. */
+.dp__sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.dp__age { margin-left: auto; }
+
+.dp__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dp__live { font-size: calc(9.5px * var(--ui-scale)); color: var(--text-faint); }
+.dp__live.is-on { color: var(--good); }

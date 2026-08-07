@@ -17,9 +17,10 @@ import { Empty, Icon } from '../components/ui.jsx';
 import { retryDelay } from '../lib/backoff.js';
 import {
     LIST_MAX, WINDOW_S, activityBuckets, addStrike, addonUrl, flashStrength, hourStats,
-    lightningAvailable, normaliseStrike, shortClock, sinceLabel, snrBand, strikeRate,
-    strikesUrl, streamUrl, trimStrikes,
+    lightningAvailable, normaliseStrike, shortClock, snrBand, strikeRate, strikesUrl,
+    streamUrl, trimStrikes,
 } from '../lib/lightning.js';
+import { sinceLabel } from '../lib/format.js';
 
 export { lightningAvailable };
 

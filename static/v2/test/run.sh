@@ -38,6 +38,8 @@ esbuild ../src/lib/packet.js --bundle --format=cjs --platform=node \
     --outfile=.build/packet.cjs --log-level=warning
 esbuild ../src/lib/packetMarkers.js --bundle --format=cjs --platform=node \
     --outfile=.build/packetmarkers.cjs --log-level=warning
+esbuild ../src/lib/doppler.js --bundle --format=cjs --platform=node \
+    --outfile=.build/doppler.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -306,5 +308,6 @@ node spectrogram.test.js
 node bandspectrum.test.js
 node lightning.test.js
 node packet.test.js
+node doppler.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

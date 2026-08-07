@@ -10,14 +10,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
-import { countryFlag, formatFreqShort } from '../lib/format.js';
+import { countryFlag, formatFreqShort, sinceLabel } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { getVfos, markableVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { subscribeSpots } from '../lib/spotStore.js';
 import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
-import { packetAvailable, sinceLabel } from '../lib/packet.js';
+import { packetAvailable } from '../lib/packet.js';
 import { subscribePacketMarkers } from '../lib/packetMarkers.js';
 import { haptic } from '../lib/haptics.js';
 

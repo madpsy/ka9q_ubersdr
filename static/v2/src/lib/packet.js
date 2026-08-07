@@ -259,20 +259,3 @@ export function markerLabel(pairs, mhz) {
     return `${calls[0]} +${calls.length - 1}`;
 }
 
-/** HH:MM:SS in UTC — the addon's page uses UTC and so does everything else here. */
-export function clockOf(ms) {
-    try {
-        return new Date(ms).toISOString().slice(11, 19);
-    } catch (e) {
-        return '';
-    }
-}
-
-/** How long ago, in the unit that fits: seconds, then minutes, then hours. */
-export function sinceLabel(at, now = Date.now()) {
-    if (!at) return '—';
-    const secs = Math.max(0, Math.round((now - at) / 1000));
-    if (secs < 60) return `${secs}s`;
-    if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-    return `${Math.floor(secs / 3600)}h`;
-}

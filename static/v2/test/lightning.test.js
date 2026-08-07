@@ -8,6 +8,10 @@
 const assert = require('assert');
 const lx = require('./.build/lightning.cjs');
 
+// clockOf and sinceLabel moved to lib/format.js when the third addon panel wanted them;
+// the cases stay here, where what they are for is written down.
+const { sinceLabel } = require('./.build/format.cjs');
+
 let pass = 0;
 const t = (name, fn) => {
     try { fn(); console.log('ok    ' + name); pass++; }
@@ -185,20 +189,20 @@ t('strikes outside the window are not in the strip at all', () => {
 // --- how long ago ---------------------------------------------------------------
 
 t('the age reads in the unit that fits it', () => {
-    assert.strictEqual(lx.sinceLabel(ago(4000), NOW), '4s');
-    assert.strictEqual(lx.sinceLabel(ago(59000), NOW), '59s');
-    assert.strictEqual(lx.sinceLabel(ago(60000), NOW), '1m');
-    assert.strictEqual(lx.sinceLabel(ago(45 * 60 * 1000), NOW), '45m');
-    assert.strictEqual(lx.sinceLabel(ago(2.5 * 3600 * 1000), NOW), '2h');
+    assert.strictEqual(sinceLabel(ago(4000), NOW), '4s');
+    assert.strictEqual(sinceLabel(ago(59000), NOW), '59s');
+    assert.strictEqual(sinceLabel(ago(60000), NOW), '1m');
+    assert.strictEqual(sinceLabel(ago(45 * 60 * 1000), NOW), '45m');
+    assert.strictEqual(sinceLabel(ago(2.5 * 3600 * 1000), NOW), '2h');
 });
 
 t('never is a dash, not zero seconds ago', () => {
-    assert.strictEqual(lx.sinceLabel(null, NOW), '—');
-    assert.strictEqual(lx.sinceLabel(0, NOW), '—');
+    assert.strictEqual(sinceLabel(null, NOW), '—');
+    assert.strictEqual(sinceLabel(0, NOW), '—');
 });
 
 t('a clock that is somehow ahead of us reads as now, not as negative', () => {
-    assert.strictEqual(lx.sinceLabel(NOW + 5000, NOW), '0s');
+    assert.strictEqual(sinceLabel(NOW + 5000, NOW), '0s');
 });
 
 // --- the flash ---------------------------------------------------------------

@@ -51,6 +51,40 @@ export function formatFreqShort(hz, spanHz) {
     return (hz / 1e3).toFixed(0) + ' kHz';
 }
 
+/**
+ * HH:MM:SS in UTC, from an epoch.
+ *
+ * UTC because everything it is used for is: an addon logging strikes, frames or
+ * carrier readings timestamps them in UTC, and a panel that quietly restated them in
+ * the browser's zone would disagree with the addon's own page beside it.
+ */
+export function clockOf(ms) {
+    try {
+        return new Date(ms).toISOString().slice(11, 19);
+    } catch (e) {
+        return '';
+    }
+}
+
+/**
+ * How long ago, in the unit that fits: seconds, then minutes, then hours.
+ *
+ * Shared by the addon panels, which all have a "last thing heard" to date. Deliberately
+ * not the same as ageLabel in lib/spots.js or formatAge in lib/sstv.js — those two are
+ * v1's wordings for a spot and a picture, kept identical to v1 on purpose, and folding
+ * three different agreed formats into one would break two of them to save a function.
+ *
+ * Nothing at all is a dash rather than "0s": a receiver that has heard nothing has not
+ * heard something a moment ago.
+ */
+export function sinceLabel(at, now = Date.now()) {
+    if (!at) return '—';
+    const secs = Math.max(0, Math.round((now - at) / 1000));
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+    return `${Math.floor(secs / 3600)}h`;
+}
+
 // A link rate from bytes per second. Bits, because that is what a link is
 // quoted in, and two significant-ish figures — this is a "is it working and
 // roughly how much" readout, not a measurement.

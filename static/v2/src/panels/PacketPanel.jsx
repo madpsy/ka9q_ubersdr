@@ -14,10 +14,10 @@
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import {
-    LIST_MAX, POLL_MS, addonUrl, channelSummary, channelsUrl, clockOf, frameKind, framesUrl,
-    mergeFrames, normaliseFrame, packetAvailable, packetStats, sinceLabel, topStations,
-    trimFrames,
+    LIST_MAX, POLL_MS, addonUrl, channelSummary, channelsUrl, frameKind, framesUrl,
+    mergeFrames, normaliseFrame, packetAvailable, packetStats, topStations, trimFrames,
 } from '../lib/packet.js';
+import { clockOf, sinceLabel } from '../lib/format.js';
 
 export { packetAvailable };
 

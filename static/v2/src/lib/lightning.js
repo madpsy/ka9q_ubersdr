@@ -25,6 +25,8 @@
 // here has to guess at a date or a time zone. The backfill from /api/strikes does carry
 // timestamp_ns and is used as given; see normaliseStrike.
 
+import { clockOf } from './format.js';
+
 export const BASE = '/addon/lightning';
 
 export const ADDON_NAME = 'lightning';
@@ -103,15 +105,6 @@ export function normaliseStrike(raw, arrivedAt = Date.now()) {
         peak: Number(raw.peak_amplitude) || 0,
         saturated: !!raw.saturated,
     };
-}
-
-/** HH:MM:SS in UTC, for a strike that arrived without the addon's own clock string. */
-export function clockOf(ms) {
-    try {
-        return new Date(ms).toISOString().slice(11, 19);
-    } catch (e) {
-        return '';
-    }
 }
 
 /** Just the seconds, for a display too narrow for the milliseconds the addon sends. */
@@ -200,16 +193,3 @@ export function flashStrength(db) {
     return FLASH_MIN + (FLASH_MAX - FLASH_MIN) * frac;
 }
 
-/**
- * How long ago, for the "last strike" readout.
- *
- * Seconds up to a minute, then minutes, then hours — and "—" for never, which is a
- * receiver that has not heard one rather than one that has heard one at time zero.
- */
-export function sinceLabel(at, now = Date.now()) {
-    if (!at) return '—';
-    const secs = Math.max(0, Math.round((now - at) / 1000));
-    if (secs < 60) return `${secs}s`;
-    if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-    return `${Math.floor(secs / 3600)}h`;
-}

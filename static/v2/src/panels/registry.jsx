@@ -89,6 +89,7 @@ import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
 import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
+import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -234,6 +235,22 @@ export const PANELS = [
         minimal: true,
         Component: PacketPanel,
         requires: (serverInfo) => packetAvailable(serverInfo),
+    },
+    // What the ionosphere is doing to the standard time stations, from the doppler
+    // addon. With the other addon panels, and the same bargain: the state of things
+    // here, the curves and the CSV on the addon's own page.
+    //
+    // Minimal: the stations alone, without the summary above them — which is a summary
+    // of those rows, and so the first thing to go when there is no room.
+    {
+        id: 'doppler',
+        title: 'Doppler',
+        icon: <Icon.Waves />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: DopplerPanel,
+        requires: (serverInfo) => dopplerAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

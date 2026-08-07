@@ -8,6 +8,10 @@ const assert = require('assert');
 const pk = require('./.build/packet.cjs');
 const { buildMarkers } = require('./.build/packetmarkers.cjs');
 
+// clockOf and sinceLabel moved to lib/format.js when the third addon panel wanted them;
+// the cases stay here, where what they are for is written down.
+const { clockOf, sinceLabel } = require('./.build/format.cjs');
+
 let pass = 0;
 const t = (name, fn) => {
     try { fn(); console.log('ok    ' + name); pass++; }
@@ -280,14 +284,14 @@ t('a quiet channel is still labelled, by its frequency', () => {
 // --- times -----------------------------------------------------------------------
 
 t('the clock is UTC, to the second', () => {
-    assert.strictEqual(pk.clockOf(NOW), '14:30:00');
+    assert.strictEqual(clockOf(NOW), '14:30:00');
 });
 
 t('the age reads in the unit that fits, and never is a dash', () => {
-    assert.strictEqual(pk.sinceLabel(NOW - 4000, NOW), '4s');
-    assert.strictEqual(pk.sinceLabel(NOW - 90000, NOW), '1m');
-    assert.strictEqual(pk.sinceLabel(NOW - 7200000, NOW), '2h');
-    assert.strictEqual(pk.sinceLabel(null, NOW), '—');
+    assert.strictEqual(sinceLabel(NOW - 4000, NOW), '4s');
+    assert.strictEqual(sinceLabel(NOW - 90000, NOW), '1m');
+    assert.strictEqual(sinceLabel(NOW - 7200000, NOW), '2h');
+    assert.strictEqual(sinceLabel(null, NOW), '—');
 });
 
 t('a marker is built per channel, in frequency order', () => {

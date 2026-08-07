@@ -6760,6 +6760,60 @@ a.btn { text-decoration: none; }
 .cw__code.is-hidden { color: var(--text-faint); letter-spacing: 0; }
 .cw__play { width: 100%; }
 
+/* Send mode. The character to key, at prompt size rather than answer size. */
+.cw__target {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: calc(46px * var(--ui-scale));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: calc(34px * var(--ui-scale));
+    font-weight: 700;
+    line-height: 1;
+}
+/* What has been keyed so far, and how it went. Dim until something is keyed, so
+   the prompt inside it reads as a prompt. */
+.cw__code--keyed.is-open { color: var(--text-faint); }
+.cw__code--keyed.is-right { color: var(--good); }
+.cw__code--keyed.is-wrong { color: var(--bad); }
+
+/* The paddle. Two keys, wide and side by side, because they are pressed in a
+   rhythm rather than aimed at — and in the order a paddle is wired, dit left. */
+.cw__paddle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
+.cw__key {
+    height: calc(38px * var(--ui-scale));
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: calc(24px * var(--ui-scale));
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    /* A paddle is held down and released, not double-tapped: no zoom delay, and no
+       text selection when it is worked quickly. */
+    touch-action: manipulation;
+    user-select: none;
+}
+.cw__key:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.cw__key:active:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+.cw__key:disabled { opacity: 0.4; cursor: default; }
+
+/* The keyboard pair, and afterwards what the answer was. */
+.cw__hint {
+    width: 100%;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
+
 .cw__options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: 100%; }
 .cw__opt {
     display: grid;
@@ -6781,14 +6835,27 @@ a.btn { text-decoration: none; }
 .cw__opt.is-wrong { border-color: var(--bad); background: rgba(242, 100, 106, 0.18); }
 
 .cw__controls { display: flex; gap: 4px; width: 100%; }
+.cw__mode { flex: none; min-width: calc(44px * var(--ui-scale)); }
+/* The level picker doubles as the readout — see the info row in Morse.jsx. */
+.cw__level { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cw__level .cw__sel { flex: none; width: auto; }
 .cw__sel { flex: 1; min-width: 0; padding: 3px 4px; font-size: calc(10.5px * var(--ui-scale)); }
-/* What is in play: a reminder, and a measure of how far you have got. */
-.cw__set {
+/* The characters in play, in the info row. Mono and spaced, and allowed to run to
+   an ellipsis: by level thirty this is a long line and the level number beside it
+   matters more than the tail of it. */
+.cw__inplay {
+    min-width: 0;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* What the next character is, and what it costs. */
+.cw__next {
     width: 100%;
     text-align: center;
-    font-family: var(--mono);
-    font-size: calc(10px * var(--ui-scale));
-    letter-spacing: 0.08em;
+    font-size: calc(10.5px * var(--ui-scale));
     color: var(--text-faint);
     overflow: hidden;
     text-overflow: ellipsis;

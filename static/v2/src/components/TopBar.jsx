@@ -5,6 +5,7 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import ShareMenu from './ShareMenu.jsx';
+import ThemeMenu from './ThemeMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
@@ -526,19 +527,15 @@ export default function TopBar({ compact }) {
                 />
             )}
 
-            {/* Also not on mobile — the Display panel carries the theme there.
+            {/* Also not on mobile — the Display panel carries all of this there.
                 A setting changed once and then left alone is a poor use of a bar
                 that has to hold the frequency, the mode, the filter width and
-                Listen. */}
-            {!compact && (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={display.theme === 'dark' ? <Icon.Sun /> : <Icon.Moon />}
-                    title="Toggle theme"
-                    onClick={() => display.set({ theme: display.theme === 'dark' ? 'light' : 'dark' })}
-                />
-            )}
+                Listen.
+
+                A menu rather than the toggle this was: dark or light is still one
+                of the questions, but the colour schemes are the other, and a
+                button cannot cycle nine of anything. */}
+            {!compact && <ThemeMenu />}
 
             {!compact && (
                 <div className="topbar__docks">

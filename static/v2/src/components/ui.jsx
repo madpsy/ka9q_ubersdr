@@ -350,9 +350,19 @@ export function Modal({ children, onClose, label }) {
     );
 }
 
-export function MenuItem({ children, onClick, disabled, icon }) {
+// `active` marks the one in force. Menus here are mostly lists of commands, where
+// nothing is "on" — but a menu that picks between things (a theme, a colour
+// scheme) has to say which is current, or it is a list of buttons that all look
+// equally unpressed.
+export function MenuItem({ children, onClick, disabled, icon, active }) {
     return (
-        <button type="button" className="menu__item" onClick={onClick} disabled={disabled}>
+        <button
+            type="button"
+            className={`menu__item${active ? ' is-active' : ''}`}
+            aria-pressed={active === undefined ? undefined : !!active}
+            onClick={onClick}
+            disabled={disabled}
+        >
             {icon && <span className="menu__icon">{icon}</span>}
             <span>{children}</span>
         </button>

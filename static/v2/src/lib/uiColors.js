@@ -240,3 +240,153 @@ export function pageContrast(hex, theme) {
     if (!rgb) return null;
     return contrastRatio(rgb, parseHex(PAGE_BG[key(theme)]));
 }
+
+// ── Presets ──────────────────────────────────────────────────────────────────
+//
+// A starting point, not a mode: choosing one writes its colours into the same
+// four settings the pickers edit, and every one of them can then be changed. So
+// there is nothing to "be on" — the panel works out which preset the current
+// colours match, if any, and says so.
+//
+// Each carries the theme it was drawn for, because half of these do not make
+// sense on the other one: amber on white is a highlighter, and Paper on black is
+// a light box. The default carries none and leaves the theme alone, since it *is*
+// the theme's own colours, whichever theme that is.
+//
+// Every preset clears the contrast bar the panel would warn about — measured, not
+// eyeballed, and pinned in test/uicolors.test.js. Two of them needed a nudge to
+// get there, which is the argument for measuring: the faint grey is the one that
+// fails, and it is the one nobody checks.
+export const UI_THEMES = [
+    {
+        id: 'default',
+        name: 'UberSDR',
+        note: 'The receiver\'s own blue, and the theme\'s own text',
+        // Nothing set: this is what "no colours chosen" looks like, and choosing
+        // it is how you get back there.
+        colors: {},
+    },
+    {
+        id: 'contrast',
+        name: 'High contrast',
+        note: 'Maximum legibility: white on near-black, and secondary text that is not faded',
+        theme: 'dark',
+        // For low vision, and the reason all four values are set rather than
+        // three derived: the failure mode of this interface is not the headline
+        // text, it is everything the design quietly steps back — labels, units,
+        // the clocks, placeholders. Left to follow, they would land at 6.8:1 and
+        // 3.4:1, which is the ordinary theme again. Here they are 17:1 and 12:1,
+        // so the hierarchy is carried by weight and size rather than by fading
+        // things until they are hard to read.
+        //
+        // Amber for the accent, and specifically not the brighter yellow this
+        // started as. That was 13.7:1 against the page and looked ideal, but it
+        // is only 1.4:1 against the white text beside it: the two differ in hue
+        // and hardly at all in brightness, which is the one distinction reduced
+        // colour discrimination takes away. This one is 9.6:1 on the page and
+        // 2.0:1 against the text, so a highlight reads as a highlight even to
+        // someone seeing it in greyscale — and amber survives every common colour
+        // vision deficiency, which a green or a red accent does not.
+        colors: {
+            accent: '#ffa000', text: '#ffffff', dim: '#eef1f5', faint: '#c9ced6',
+        },
+    },
+    {
+        id: 'amber',
+        name: 'Amber',
+        note: 'An amber monitor, as the first ones were',
+        theme: 'dark',
+        colors: { accent: '#ffb000', text: '#f3d9a8' },
+    },
+    {
+        id: 'phosphor',
+        name: 'Phosphor',
+        note: 'Green screen',
+        theme: 'dark',
+        colors: { accent: '#35e07a', text: '#c8f5d8' },
+    },
+    {
+        id: 'night',
+        name: 'Night',
+        note: 'Deep red only, to keep your dark adaptation at the radio',
+        theme: 'dark',
+        // Red the way a night scheme means it. The first attempt at this was a
+        // salmon — #ff7a63, which carries nearly as much green and blue as red —
+        // and that is not a night mode, it is a warm grey with a red cast: what
+        // costs an observer their dark adaptation is the short wavelengths, and
+        // a scheme that keeps them has done nothing.
+        //
+        // All four set, because the derived greys of a red text come out below
+        // the bar — the faint one at 2.4:1 — and a scheme for reading in the dark
+        // cannot have unreadable labels in it.
+        colors: {
+            accent: '#ff4b2e', text: '#ff9b84', dim: '#c96a58', faint: '#8f4c3f',
+        },
+    },
+    {
+        id: 'ice',
+        name: 'Ice',
+        note: 'Cyan on near-black',
+        theme: 'dark',
+        colors: { accent: '#45d6e6', text: '#dcf0f5' },
+    },
+    {
+        id: 'violet',
+        name: 'Violet',
+        note: 'The violet the app already uses for its second colour',
+        theme: 'dark',
+        colors: { accent: '#a58bff', text: '#e4dff7' },
+    },
+    {
+        id: 'mono',
+        name: 'Mono',
+        note: 'No hue in the interface at all — everything says what it is by weight',
+        theme: 'dark',
+        colors: { accent: '#aab6c6', text: '#e2e7ee' },
+    },
+    {
+        id: 'paper',
+        name: 'Paper',
+        // Its faint grey is set rather than derived: on a white page the derived
+        // one lands at 2.5:1, which is where the stock light theme sits and below
+        // where this is prepared to leave it.
+        note: 'Ink on paper, for a bright room',
+        theme: 'light',
+        colors: { accent: '#0a5ea8', text: '#16202e', faint: '#6f7885' },
+    },
+];
+
+const sameColor = (a, b) => (a ? norm(a) : null) === (b ? norm(b) : null);
+
+/**
+ * Which preset the current colours are, or null for a set that is nobody's.
+ *
+ * By value rather than by a stored id, deliberately: the pickers are the truth
+ * and any of them can be nudged afterwards, so a remembered name would go on
+ * claiming a preset that had been edited out from under it.
+ *
+ * The theme is not compared. Amber on the light theme is still Amber's colours —
+ * unusual, but the operator's business, and un-naming it would only be confusing.
+ */
+export function matchUiTheme(colors = {}) {
+    const has = (c) => ['accent', 'text', 'dim', 'faint'].some((k) => c[k]);
+    for (const preset of UI_THEMES) {
+        const p = preset.colors;
+        if (!has(p) && !has(colors)) return preset.id;
+        if (!has(p) || !has(colors)) continue;
+        const same = ['accent', 'text', 'dim', 'faint']
+            .every((k) => sameColor(p[k], colors[k]));
+        if (same) return preset.id;
+    }
+    return null;
+}
+
+/** The swatch a preset is drawn as: its accent over its page. */
+export function themeSwatch(preset) {
+    const t = key(preset.theme);
+    return {
+        bg: PAGE_BG[t],
+        accent: preset.colors.accent || ACCENT_DEFAULT[t],
+        text: preset.colors.text || TEXT_DEFAULT[t],
+    };
+}

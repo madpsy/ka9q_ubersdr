@@ -10,7 +10,9 @@ import {
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
 } from '../radio/idle.js';
 import { statsPlace } from '../lib/spectrumStats.js';
-import { contrastMin, effectiveColors, pageContrast } from '../lib/uiColors.js';
+import {
+    UI_THEMES, contrastMin, effectiveColors, matchUiTheme, pageContrast, themeSwatch,
+} from '../lib/uiColors.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
@@ -529,7 +531,16 @@ function UiColors() {
     const theme = d.theme === 'light' ? 'light' : 'dark';
     const mine = d.uiColors || {};
     const now = effectiveColors(mine, theme);
-    const chosen = Object.values(mine).some(Boolean);
+    const on = matchUiTheme(mine);
+
+    // A preset writes its colours into the same four settings the rows below
+    // edit, and switches to the theme it was drawn for — amber on white is a
+    // highlighter. The default carries no theme and leaves that alone: it is the
+    // theme's own colours, whichever theme is in force.
+    const apply = (preset) => d.set({
+        uiColors: { accent: null, text: null, dim: null, faint: null, ...preset.colors },
+        ...(preset.theme ? { theme: preset.theme } : {}),
+    });
 
     const row = (which, name, hint) => {
         const ratio = pageContrast(now[which], theme);
@@ -564,14 +575,44 @@ function UiColors() {
     };
 
     return (
-        <Field label="Colours" hint={chosen ? 'custom' : undefined}>
+        <>
+            {/* Swatches rather than a list of names, and the same grid the
+                palettes use two fields down: a colour scheme is a thing you
+                recognise on sight and cannot picture from a word. Each one is its
+                own page, accent and text, so what is on the button is what the
+                interface will look like. */}
+            <Field label="Colour scheme" hint={on ? undefined : 'custom'}>
+                <div className="palette-grid uitheme-grid">
+                    {UI_THEMES.map((preset) => {
+                        const sw = themeSwatch(preset);
+                        return (
+                            <button
+                                key={preset.id}
+                                type="button"
+                                className={`uitheme${on === preset.id ? ' is-active' : ''}`}
+                                style={{ background: sw.bg, color: sw.text }}
+                                title={`${preset.name} — ${preset.note}`}
+                                aria-label={preset.name}
+                                aria-pressed={on === preset.id}
+                                onClick={() => apply(preset)}
+                            >
+                                <span className="uitheme__dot" style={{ background: sw.accent }} />
+                                <span className="uitheme__name">{preset.name}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </Field>
+
+            <Field label="Colours">
             <div className="markcolors">
                 {row('accent', 'Accent', 'Everything the interface highlights: the tuned frequency, the selected mode, the dial line on the spectrum, focus rings. What goes on top of it is worked out from it')}
                 {row('text', 'Text', 'The main text colour. The two greys below follow it unless they have been set themselves')}
                 {row('dim', 'Dim', 'Secondary text — field labels, units, the clocks')}
                 {row('faint', 'Faint', 'The quietest text: placeholders, disabled controls, empty panels')}
             </div>
-        </Field>
+            </Field>
+        </>
     );
 }
 

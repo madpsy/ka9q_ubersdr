@@ -3286,7 +3286,48 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .menu__item:hover { background: var(--surface-hover); }
+/* The one in force, where a menu picks between things rather than listing
+   commands — see MenuItem's `active`. */
+.menu__item.is-active { background: var(--accent-soft); color: var(--accent); }
 .menu__icon { display: grid; place-items: center; color: var(--text-dim); }
+
+/* A menu with more than one kind of thing in it needs to say which is which: the
+   theme menu picks a base *and* a colour scheme, and an unbroken list of ten
+   would read as ten alternatives to each other. */
+.menu__label {
+    padding: 6px 9px 3px;
+    color: var(--text-faint);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.menu__sep { height: 1px; margin: 4px 2px; background: var(--border); }
+
+/* The top bar's theme button: the base as a glyph, the accent as a dot beside
+   it. Two facts in the space of one icon, because the base on its own stopped
+   being the whole answer when the colour schemes arrived. */
+.thememenu__icon { position: relative; display: grid; place-items: center; }
+.thememenu__dot {
+    position: absolute;
+    right: -3px;
+    bottom: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 1.5px var(--surface);
+}
+/* Each scheme drawn in its own two colours, at the size of a menu icon. */
+.thememenu__swatch {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+}
+.thememenu__swatch > span { width: 7px; height: 7px; border-radius: 50%; }
 
 /* =========================================================================
    Display + layout panels
@@ -3302,6 +3343,34 @@ a.btn { text-decoration: none; }
 }
 .palette:hover { transform: translateY(-1px); }
 .palette.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+/* The colour schemes, in the palette grid's shape — see UiColors. Each button is
+   drawn in its own colours rather than described in words: a scheme is something
+   you recognise on sight, and "Phosphor" tells you nothing until you have seen
+   it once. Two per row rather than the palettes' four, because these carry a
+   name as well as a colour. */
+.uitheme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.uitheme {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: calc(10.5px * var(--ui-scale));
+    font-weight: 600;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.uitheme:hover { transform: translateY(-1px); }
+.uitheme.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* The accent, as the one spot of colour on a button already painted in the
+   scheme's own page and text — which is the whole scheme in three values. */
+.uitheme__dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
+.uitheme__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The dial and passband colour pickers, under the palette grid. Two rows rather
    than a line, because each needs a name: two bare swatches side by side say

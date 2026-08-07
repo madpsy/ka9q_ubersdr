@@ -10,7 +10,7 @@ const {
     ACCENT_DEFAULT, CONTRAST_MIN, CONTRAST_MIN_FAINT, TEXT_DEFAULT, TEXT_DIM_DEFAULT,
     TEXT_FAINT_DEFAULT, contrastMin,
     UI_COLOR_VARS, accentVars, contrastRatio, effectiveColors, inkFor, luminance, pageContrast,
-    parseHex, textVars, uiColorVars,
+    UI_THEMES, matchUiTheme, parseHex, textVars, themeSwatch, uiColorVars,
 } = require('./.build/uicolors.cjs');
 
 let pass = 0;
@@ -195,6 +195,118 @@ t('every property the group can set is in the list that clears them', () => {
         assert.ok(UI_COLOR_VARS.includes(name), `${name} missing from UI_COLOR_VARS`);
     }
     assert.strictEqual(Object.keys(all).length, UI_COLOR_VARS.length);
+});
+
+// --- the presets ------------------------------------------------------------
+
+t('every preset is legible on its own page', () => {
+    // The bar the panel would warn about, applied to the colours it ships with.
+    // Two of these needed nudging to clear it, and the one that failed both times
+    // was the faint grey — the one nobody checks by eye.
+    for (const preset of UI_THEMES) {
+        const theme = preset.theme || 'dark';
+        const now = effectiveColors(preset.colors, theme);
+        for (const which of ['accent', 'text', 'dim', 'faint']) {
+            const ratio = pageContrast(now[which], theme);
+            assert.ok(
+                ratio >= contrastMin(which),
+                `${preset.id} ${which}: ${ratio.toFixed(2)}:1 under ${contrastMin(which)}:1`,
+            );
+        }
+    }
+});
+
+t('the default preset is the theme\'s own colours, named', () => {
+    // Named rather than left as an unlabelled "none", because it is a choice like
+    // the others — and because choosing it is how you get back.
+    const first = UI_THEMES[0];
+    assert.strictEqual(first.id, 'default');
+    assert.strictEqual(first.name, 'UberSDR');
+    assert.deepStrictEqual(first.colors, {}, 'sets nothing, so each theme keeps its own');
+    assert.strictEqual(first.theme, undefined, 'and does not drag the theme with it');
+});
+
+t('each preset says which theme it was drawn for', () => {
+    // Amber on white is a highlighter. Only the default is theme-agnostic.
+    for (const preset of UI_THEMES.slice(1)) {
+        assert.ok(['dark', 'light'].includes(preset.theme), preset.id);
+        assert.ok(preset.name && preset.note, preset.id);
+    }
+    assert.ok(UI_THEMES.some((p) => p.theme === 'light'), 'at least one for a bright room');
+});
+
+t('a preset is recognised by its colours, not by a remembered name', () => {
+    // The pickers are the truth and any of them can be nudged afterwards, so a
+    // stored id would go on claiming a scheme that had been edited out from under
+    // it.
+    for (const preset of UI_THEMES) {
+        assert.strictEqual(matchUiTheme(preset.colors), preset.id, preset.id);
+    }
+    assert.strictEqual(matchUiTheme({}), 'default', 'nothing set is the default');
+    assert.strictEqual(matchUiTheme({ accent: '#123456' }), null, 'a colour nobody ships');
+    // One value changed and it is nobody's scheme any more, which is what the
+    // panel's "custom" hint is for.
+    const amber = UI_THEMES.find((p) => p.id === 'amber');
+    assert.strictEqual(matchUiTheme({ ...amber.colors, dim: '#888888' }), null);
+});
+
+t('there is a scheme for low vision, and it does not fade anything', () => {
+    // The point of it, and the thing a "high contrast" theme usually gets wrong:
+    // the headline text is never the problem. What is unreadable is everything
+    // the design steps back — labels, units, the clocks, placeholders — so this
+    // one sets all four values rather than letting the quiet two follow the text
+    // down to where the ordinary theme has them.
+    const hc = UI_THEMES.find((p) => p.id === 'contrast');
+    assert.ok(hc, 'a high-contrast scheme is offered');
+    const now = effectiveColors(hc.colors, hc.theme);
+    for (const which of ['accent', 'text', 'dim', 'faint']) {
+        assert.ok(hc.colors[which], `${which} is set outright, not derived`);
+        // AAA for body text, on every one of them including the faint grey.
+        assert.ok(
+            pageContrast(now[which], hc.theme) >= 7,
+            `${which}: ${pageContrast(now[which], hc.theme).toFixed(1)}:1`,
+        );
+    }
+    // And the accent has to differ from the text in *brightness*, not only in
+    // hue — the distinction reduced colour discrimination takes away first. A
+    // bright yellow was the obvious choice here and failed this: 13.7:1 against
+    // the page and 1.4:1 against the white beside it, which in greyscale is the
+    // same colour twice.
+    assert.ok(
+        contrastRatio(parseHex(now.accent), parseHex(now.text)) >= 1.8,
+        'the accent vanishes into the text when hue is taken away',
+    );
+});
+
+t('the night scheme is actually red', () => {
+    // The first attempt was a salmon — as much green and blue in it as red — which
+    // is a warm grey with a cast, not a night mode: what costs dark adaptation is
+    // the short wavelengths, and a scheme that keeps them has done nothing.
+    const night = UI_THEMES.find((p) => p.id === 'night');
+    for (const hex of Object.values(night.colors)) {
+        const { r, g, b } = parseHex(hex);
+        assert.ok(r > g * 1.6 && r > b * 1.6, `${hex} is not red enough`);
+        assert.ok(b <= g, `${hex} has more blue than green in it`);
+    }
+});
+
+t('the ids and names are unique, so the grid cannot show two of anything', () => {
+    const ids = UI_THEMES.map((p) => p.id);
+    const names = UI_THEMES.map((p) => p.name);
+    assert.strictEqual(new Set(ids).size, ids.length);
+    assert.strictEqual(new Set(names).size, names.length);
+});
+
+t('a swatch is drawn in the scheme\'s own three colours', () => {
+    // What is on the button has to be what the interface will look like, or the
+    // grid is a row of guesses.
+    for (const preset of UI_THEMES) {
+        const sw = themeSwatch(preset);
+        for (const v of Object.values(sw)) assert.ok(parseHex(v), `${preset.id}: ${v}`);
+        // The default has no colours of its own, so its swatch borrows the
+        // theme's — which is exactly what choosing it produces.
+        if (preset.colors.accent) assert.strictEqual(sw.accent, preset.colors.accent);
+    }
 });
 
 console.log(`\n${pass} ok`);

@@ -1511,6 +1511,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tag--button:active { filter: brightness(0.9); }
 .tag--good { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .tag--bad { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
+/* The middle of the three. Added for the frequency-reference badge, which is the first
+   tag with something to say between "fine" and "wrong" — a few hertz of error is worth
+   knowing about and is not a fault. */
+.tag--warn { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
 
 /* The squelch gate tag, which is the one tag here whose text changes while you
    are looking at it — and it changes width, from "open" to "closed" and back,

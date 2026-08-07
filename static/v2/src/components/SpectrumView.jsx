@@ -36,6 +36,7 @@ import {
     TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
 } from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
+import { freqOffset, offsetBand, offsetLabel, offsetTitle } from '../lib/freqRef.js';
 import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
     peakCount, peakPlace, peakSnr,
@@ -258,6 +259,30 @@ function NoiseReductionTag() {
 // Output clipping. Deliberately its own tag rather than part of FilterTags:
 // this is a fault to fix, not a setting that is on, and it can happen with no
 // filters enabled at all.
+/**
+ * How far out the receiver's own oscillator is, when it knows.
+ *
+ * A port of widgets/frequency.widget.html, which put this in the corner of the v1 page.
+ * It belongs in this row rather than floating over the canvas: it is a fact about every
+ * frequency in the toolbar beside it, and a badge pinned over the waterfall would sit
+ * on the signals instead.
+ *
+ * Absent unless the operator runs the reference monitor *and* it has measured something
+ * — see freqOffset. A receiver that does not know its own error is every other
+ * receiver, and none of them says so.
+ */
+function FreqOffsetTag() {
+    const { serverInfo } = useRadio();
+    const hz = freqOffset(serverInfo);
+    if (hz == null) return null;
+    const band = offsetBand(hz);
+    return (
+        <span className={`tag tag--${band}`} title={offsetTitle(serverInfo)}>
+            Δf {offsetLabel(hz)}
+        </span>
+    );
+}
+
 function ClipTag() {
     const m = useMeters(8);
     if (!m.clipping) return null;
@@ -1580,6 +1605,10 @@ export default function SpectrumView() {
                     <div className="spectrum__meta" ref={metaRef}>
                         <span className="tag tag--accent">{formatSpan(span)}</span>
                         {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
+                        {/* Next to the frequencies it qualifies, and before the audio
+                            tags: this one is about what the numbers on screen mean,
+                            not about what is being done to the sound. */}
+                        <FreqOffsetTag />
                         {hoverInfo && room.cursor && (
                             <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
                         )}

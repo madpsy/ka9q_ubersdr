@@ -660,6 +660,13 @@ export default function SpectrumView() {
         dirty: false,
         dpr: 1,
         rowsPending: 0,
+        // Ever-increasing counters for the stats readout, differenced once a
+        // second by SpectrumStats. Declared here and not left to `g.paints++` to
+        // create: incrementing an undefined field gives NaN, which then reads
+        // back through `|| 0` as a perfectly plausible zero — the readout showed
+        // "0.0" for both of these while the loop ran perfectly well.
+        paints: 0,           // frames actually drawn
+        rows: 0,             // waterfall rows committed
         autoFloor: -110,
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px

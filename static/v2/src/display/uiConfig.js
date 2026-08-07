@@ -101,7 +101,21 @@ export function parseUiConfig(cfg) {
             ? Math.max(0, Math.min(1, o))
             : UI_CONFIG_DEFAULTS.bgOpacity,
         stationIdOverlay: cfg.station_id_overlay !== false,
-        stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) ? col : null,
+        // White is read as "the operator did not choose", not as a choice.
+        //
+        // The config has no way to say unset — the receiver sends
+        // station_id_color: "#ffffff" whether or not anybody picked it, which is
+        // its own default written out — and taking that literally would mean the
+        // overlay stayed white on every receiver in existence, whatever the
+        // listener's colour scheme said. An operator who genuinely wants white
+        // still very nearly gets it: the fallback is the interface's ink over the
+        // canvas, which is near-white unless a scheme has been chosen.
+        //
+        // Temporary. When the server can distinguish an unset key from a chosen
+        // colour, this becomes the plain format test again.
+        stationIdColor: /^#[0-9a-fA-F]{6}$/.test(col) && col.toLowerCase() !== '#ffffff'
+            ? col
+            : null,
         autoMinSpan: Number.isFinite(minSpan)
             ? Math.max(0, Math.min(60, minSpan))
             : UI_CONFIG_DEFAULTS.autoMinSpan,

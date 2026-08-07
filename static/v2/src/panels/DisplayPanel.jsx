@@ -602,11 +602,17 @@ function UiColors() {
 
     return (
         <>
-            {/* Swatches rather than a list of names, and the same grid the
-                palettes use two fields down: a colour scheme is a thing you
-                recognise on sight and cannot picture from a word. Each one is its
-                own page, accent and text, so what is on the button is what the
-                interface will look like. */}
+            {/* A swatch and a name, not a tile painted in the scheme: a colour
+                scheme is recognised on sight and cannot be pictured from a word,
+                but the first attempt at this drew each button in its own page
+                colour — and every dark scheme's page is near-black, so seven of
+                them came out as seven black rectangles telling you nothing. On
+                the light theme they read as holes in the panel.
+
+                So the button is an ordinary button, in whatever scheme is running
+                now, and the scheme it offers is in the swatch: its page, with its
+                accent and its text on top. Three colours at a size you can
+                compare, instead of one at a size you cannot. */}
             <Field label="Colour scheme" hint={on ? undefined : 'custom'}>
                 <div className="palette-grid uitheme-grid">
                     {UI_THEMES.map((preset) => {
@@ -616,13 +622,14 @@ function UiColors() {
                                 key={preset.id}
                                 type="button"
                                 className={`uitheme${on === preset.id ? ' is-active' : ''}`}
-                                style={{ background: sw.bg, color: sw.text }}
                                 title={`${preset.name} — ${preset.note}`}
-                                aria-label={preset.name}
                                 aria-pressed={on === preset.id}
                                 onClick={() => apply(preset)}
                             >
-                                <span className="uitheme__dot" style={{ background: sw.accent }} />
+                                <span className="uitheme__sw" style={{ background: sw.bg }}>
+                                    <i style={{ background: sw.accent }} />
+                                    <i style={{ background: sw.text }} />
+                                </span>
                                 <span className="uitheme__name">{preset.name}</span>
                             </button>
                         );

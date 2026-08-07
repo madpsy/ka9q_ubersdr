@@ -3329,16 +3329,20 @@ a.btn { text-decoration: none; }
     background: var(--accent);
     box-shadow: 0 0 0 1.5px var(--surface);
 }
-/* Each scheme drawn in its own two colours, at the size of a menu icon. */
+/* Each scheme in its own three colours, at the size of a menu icon — page,
+   accent, text. The same swatch the Display panel's grid uses (.uitheme__sw),
+   smaller. */
 .thememenu__swatch {
-    display: grid;
-    place-items: center;
-    width: 15px;
-    height: 15px;
-    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 20px;
+    height: 14px;
+    border-radius: 3px;
     border: 1px solid var(--border-strong);
 }
-.thememenu__swatch > span { width: 7px; height: 7px; border-radius: 50%; }
+.thememenu__swatch > i { width: 4px; height: 8px; border-radius: 1px; }
 
 /* =========================================================================
    Display + layout panels
@@ -3355,32 +3359,58 @@ a.btn { text-decoration: none; }
 .palette:hover { transform: translateY(-1px); }
 .palette.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 
-/* The colour schemes, in the palette grid's shape — see UiColors. Each button is
-   drawn in its own colours rather than described in words: a scheme is something
-   you recognise on sight, and "Phosphor" tells you nothing until you have seen
-   it once. Two per row rather than the palettes' four, because these carry a
-   name as well as a colour. */
+/* The colour schemes — see UiColors.
+ *
+ * An ordinary button carrying a swatch, rather than a tile painted in the scheme
+ * it offers. That was the first attempt and it failed on its own terms: every
+ * dark scheme's page is near-black, so the grid was seven black rectangles
+ * distinguished by a nine-pixel dot, and on the light theme they read as holes
+ * punched in the panel. The button belongs to the scheme you are running; the
+ * scheme on offer is in the swatch.
+ *
+ * Two per row rather than the palettes' four, because these carry a name as well
+ * as a colour. */
 .uitheme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .uitheme {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 7px;
+    gap: 7px;
+    padding: 4px 7px;
     height: 26px;
     border: 1px solid var(--border);
     border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text-dim);
     font-family: var(--font);
     font-size: calc(10.5px * var(--ui-scale));
     font-weight: 600;
     cursor: pointer;
     overflow: hidden;
-    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                color var(--dur) var(--ease);
 }
-.uitheme:hover { transform: translateY(-1px); }
-.uitheme.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-/* The accent, as the one spot of colour on a button already painted in the
-   scheme's own page and text — which is the whole scheme in three values. */
-.uitheme__dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
+.uitheme:hover { transform: translateY(-1px); color: var(--text); border-color: var(--border-strong); }
+.uitheme.is-active {
+    color: var(--text);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* The scheme itself: its page, with its accent and its text laid on it. Three
+   colours in the space of a favicon, which is enough to tell amber from green
+   from red at a glance — and enough to see that Paper is the light one. */
+.uitheme__sw {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 26px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border-strong);
+}
+.uitheme__sw > i { width: 5px; height: 9px; border-radius: 1px; }
 .uitheme__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The dial and passband colour pickers, under the palette grid. Two rows rather

@@ -78,12 +78,18 @@ export default function ThemeMenu() {
                         key={preset.id}
                         active={on === preset.id}
                         icon={(
-                            // The scheme's own accent over its own page, which is
-                            // the same swatch the Display panel's grid draws — a
-                            // scheme is recognised on sight, and "Phosphor" means
-                            // nothing until you have seen it once.
+                            // The scheme's page with its accent and its text on
+                            // it — the same three-colour swatch the Display
+                            // panel's grid draws, for the same reason: the page
+                            // alone is near-black on seven of these and tells you
+                            // nothing about which is which.
+                            //
+                            // Only the swatch is in the scheme's colours. The row
+                            // itself belongs to whatever scheme is running, or a
+                            // menu of them would be a menu you cannot read.
                             <span className="thememenu__swatch" style={{ background: sw.bg }}>
-                                <span style={{ background: sw.accent }} />
+                                <i style={{ background: sw.accent }} />
+                                <i style={{ background: sw.text }} />
                             </span>
                         )}
                         onClick={() => apply(preset)}

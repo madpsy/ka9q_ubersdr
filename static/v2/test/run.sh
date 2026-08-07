@@ -54,6 +54,8 @@ esbuild ../src/lib/voiceSkimmer.js --bundle --format=cjs --platform=node \
     --outfile=.build/voiceskimmer.cjs --log-level=warning
 esbuild ../src/lib/dxclusterSession.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxsession.cjs --log-level=warning
+esbuild ../src/lib/dockFocus.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dockfocus.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -333,5 +335,6 @@ node wefaxaddon.test.js
 node voiceskimmer.test.js
 node dxsession.test.js
 node hfdl.test.js
+node dockfocus.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

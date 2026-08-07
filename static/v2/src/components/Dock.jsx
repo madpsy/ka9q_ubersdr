@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
+import { noteDockFocus, restoreDockFocus } from '../lib/dockFocus.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useMediaQuery } from '../lib/useMediaQuery.js';
 import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
@@ -183,7 +184,17 @@ export default function Dock({ side }) {
         el.scrollTop = scrollAt.current.top;
         el.scrollLeft = scrollAt.current.left;
         echo.current = { top: el.scrollTop, left: el.scrollLeft };
-    }, []);
+        // ...and the keyboard, to whichever panel in here had it last. Same reasoning as
+        // the scroll above: a peek is a fresh mount, so anything that was focused is
+        // gone and something has to put it back. See lib/dockFocus.js — restoring is
+        // careful about not stealing focus from outside the dock.
+        restoreDockFocus(side, el);
+    }, [side]);
+
+    // Where the keyboard is, whenever it lands in this dock. A listener rather than a
+    // note taken at the moment the dock hides: focus can leave for a dozen reasons and
+    // only one of them is this dock closing, and recording it as it arrives cannot miss.
+    const onBodyFocus = useCallback((e) => noteDockFocus(side, e.target), [side]);
 
     const onBodyScroll = useCallback((e) => {
         const top = e.currentTarget.scrollTop;
@@ -301,6 +312,7 @@ export default function Dock({ side }) {
                 className={`dock__body${dropping ? ' is-dropping' : ''}`}
                 ref={bodyRef}
                 onScroll={onBodyScroll}
+                onFocus={onBodyFocus}
                 onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes('text/ubersdr-panel')) return;
                     e.preventDefault();

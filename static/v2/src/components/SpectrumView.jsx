@@ -2326,7 +2326,11 @@ function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, colBg, place)
         // quantity the threshold is set in, and "18 dB out of the noise" says whether a
         // signal is worth tuning to in a way that a raw dBFS number does not. The sign
         // is what distinguishes it from the axis labels down the left.
-        return `${formatFreqShort(hz, cfg.span)}  +${Math.round(p.snr)}`;
+        //
+        // One space between them, not two: the unit already separates the two figures,
+        // and in a monospace face a double space is a gap wide enough to read as two
+        // labels that happen to be next to each other.
+        return `${formatFreqShort(hz, cfg.span)} +${Math.round(p.snr)}`;
     });
     // The receiver-info block counts as occupied space, so a label that would land
     // under it is dropped exactly as one colliding with another label is — its mark and

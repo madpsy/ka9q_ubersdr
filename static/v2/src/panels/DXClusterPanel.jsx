@@ -170,9 +170,19 @@ export default function DXClusterPanel({ minimal }) {
         if (el) el.scrollTop = el.scrollHeight;
     }, [text]);
 
-    // The command line is where you are once you are in.
+    // The command line is where you are once you are in — on the way *in*, and not on
+    // every mount that happens to find the session already connected.
+    //
+    // That distinction is the second half of the dock-focus fix. The session now outlives
+    // the panel, so a collapsed dock peeked at remounts a panel that is already
+    // connected; focusing on mount meant the cluster took the keyboard off whatever had
+    // it — typically the chat box next to it — every single time the dock reappeared.
+    // See lib/dockFocus.js for the half that remembers where it should have gone.
+    const wasConnected = useRef(connected);
     useEffect(() => {
-        if (connected && inputRef.current) inputRef.current.focus();
+        const justConnected = connected && !wasConnected.current;
+        wasConnected.current = connected;
+        if (justConnected && inputRef.current) inputRef.current.focus();
     }, [connected]);
 
     const disconnect = () => dxDisconnect();
@@ -386,6 +396,8 @@ export default function DXClusterPanel({ minimal }) {
                     <span className="dxc-input__prompt">&gt;</span>
                     <input
                         ref={inputRef}
+                        /* Where this dock hands the keyboard back to when it reopens. */
+                        data-dock-focus=""
                         className="input"
                         placeholder="Type a command and press Enter…"
                         value={line}

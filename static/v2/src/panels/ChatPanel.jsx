@@ -293,6 +293,8 @@ export default function ChatPanel({ minimal }) {
                         )}
                         <input
                             ref={inputRef}
+                            /* Where this dock hands the keyboard back to when it reopens. */
+                            data-dock-focus=""
                             className="input"
                             placeholder={chat.connected ? `Message as ${chat.username}… (@name, :emoji)` : 'Reconnecting…'}
                             disabled={!chat.connected}

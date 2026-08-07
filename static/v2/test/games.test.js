@@ -17,6 +17,7 @@ const su = require('./.build/game-sudoku.cjs');
 const lo = require('./.build/game-lightsout.cjs');
 const mm = require('./.build/game-mastermind.cjs');
 const quiz = require('./.build/game-quiz.cjs');
+const cw = require('./.build/game-morse.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -437,6 +438,169 @@ t('an arc outside the view is rejected without looking at its points', () => {
     const arc = { pts: [], b: [-10, -10, -5, -5] };
     assert.ok(quiz.arcVisible(arc, { lon: -7, lat: -7, z: 8 }, 336, 168));
     assert.ok(!quiz.arcVisible(arc, { lon: 150, lat: 60, z: 8 }, 336, 168));
+});
+
+// --- morse: the code ------------------------------------------------------------
+//
+// A trainer that teaches the wrong code is worse than no trainer, and a test that
+// simply repeats the table agrees with whatever slip is in it. So most of these
+// check properties a transcription error breaks rather than the entries
+// themselves — and the entries that *are* written out are the half anybody can
+// check against a card, or a memory of one.
+
+t('the alphabet is the alphabet', () => {
+    const expected = {
+        A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', F: '..-.', G: '--.',
+        H: '....', I: '..', J: '.---', K: '-.-', L: '.-..', M: '--', N: '-.',
+        O: '---', P: '.--.', Q: '--.-', R: '.-.', S: '...', T: '-', U: '..-',
+        V: '...-', W: '.--', X: '-..-', Y: '-.--', Z: '--..',
+    };
+    assert.deepStrictEqual(cw.LETTERS, expected);
+});
+
+t('no two characters share a code', () => {
+    // The failure a typo actually produces: one entry wrong is usually one entry
+    // colliding with another, and then the reverse table silently loses a letter.
+    const codes = Object.values(cw.MORSE);
+    assert.strictEqual(new Set(codes).size, codes.length);
+    assert.strictEqual(Object.keys(cw.FROM_CODE).length, codes.length);
+});
+
+t('every code is dots and dashes and nothing else', () => {
+    for (const [ch, code] of Object.entries(cw.MORSE)) {
+        assert.ok(/^[.-]+$/.test(code), `${ch} is "${code}"`);
+    }
+});
+
+t('letters are one to four elements, digits exactly five', () => {
+    for (const [ch, code] of Object.entries(cw.LETTERS)) {
+        assert.ok(code.length >= 1 && code.length <= 4, `${ch} is ${code.length} elements`);
+    }
+    for (const [d, code] of Object.entries(cw.DIGITS)) {
+        assert.strictEqual(code.length, 5, `${d} is ${code.length} elements`);
+    }
+    for (const [ch, code] of Object.entries(cw.PUNCTUATION)) {
+        assert.ok(code.length >= 5 && code.length <= 6, `${ch} is ${code.length} elements`);
+    }
+});
+
+t('the digits count up in dahs from the left', () => {
+    // 1 is one dit then four dahs, 5 is five dits, 0 is five dahs — a pattern the
+    // whole set follows, and one that needs no table to check against.
+    for (let n = 1; n <= 5; n++) {
+        assert.strictEqual(cw.DIGITS[n], '.'.repeat(n) + '-'.repeat(5 - n), String(n));
+    }
+    for (let n = 6; n <= 9; n++) {
+        assert.strictEqual(cw.DIGITS[n], '-'.repeat(n - 5) + '.'.repeat(10 - n), String(n));
+    }
+    assert.strictEqual(cw.DIGITS[0], '-----');
+});
+
+t('the shortest codes are the commonest letters', () => {
+    // Morse was built that way, so it is a real property of a correct table.
+    const byLength = (n) => Object.entries(cw.LETTERS)
+        .filter(([, code]) => code.length === n).map(([ch]) => ch).sort();
+    assert.deepStrictEqual(byLength(1), ['E', 'T']);
+    assert.deepStrictEqual(byLength(2), ['A', 'I', 'M', 'N']);
+});
+
+t('SOS, CQ and a callsign come out right', () => {
+    assert.strictEqual(cw.toMorse('SOS'), '... --- ...');
+    assert.strictEqual(cw.toMorse('CQ'), '-.-. --.-');
+    assert.strictEqual(cw.toMorse('M9PSY'), '-- ----. .--. ... -.--');
+    assert.strictEqual(cw.toMorse('cq de'), '-.-. --.- / -.. .', 'case and words');
+});
+
+t('the code reads back as what was sent', () => {
+    for (const ch of Object.keys(cw.MORSE)) {
+        assert.strictEqual(cw.fromMorse(cw.toMorse(ch)), ch, ch);
+    }
+    assert.strictEqual(cw.fromMorse('... --- ...'), 'SOS');
+    assert.strictEqual(cw.fromMorse('-.-. --.- / -.. .'), 'CQ DE');
+});
+
+t('anything not in the table is left out rather than guessed at', () => {
+    assert.strictEqual(cw.codeFor('£'), '');
+    assert.strictEqual(cw.charFor('.-.-.-.-.-'), '');
+    assert.strictEqual(cw.toMorse('A£B'), '.- -...');
+});
+
+// --- morse: the timing ------------------------------------------------------------
+
+t('PARIS is fifty units, which is what a word per minute means', () => {
+    // The definition. Wrong here and every speed in the trainer is wrong, and
+    // somebody learns a rhythm they will have to unlearn.
+    assert.strictEqual(cw.unitsFor('PARIS') + cw.WORD_GAP, cw.PARIS_UNITS);
+});
+
+t('a unit is 1200 ms divided by the speed', () => {
+    assert.strictEqual(cw.unitMs(20), 60);
+    assert.strictEqual(cw.unitMs(12), 100);
+    assert.strictEqual(cw.unitMs(25), 48);
+    // ...so "PARIS " at 20 wpm takes exactly three seconds, which is twenty of
+    // them in a minute.
+    const total = cw.toneSlices('PARIS', 20).reduce((n, s) => n + s.ms, 0);
+    assert.strictEqual(Math.round(total + cw.WORD_GAP * cw.unitMs(20)), 3000);
+});
+
+t('a dit is one unit, a dah is three, and the gaps are one, three and seven', () => {
+    const u = cw.unitMs(20);
+    assert.deepStrictEqual(cw.toneSlices('A', 20), [
+        { on: true, ms: 1 * u },
+        { on: false, ms: 1 * u },
+        { on: true, ms: 3 * u },
+    ]);
+    assert.deepStrictEqual(cw.toneSlices('EE', 20)[1], { on: false, ms: 3 * u }, 'characters');
+    assert.deepStrictEqual(cw.toneSlices('E E', 20)[1], { on: false, ms: 7 * u }, 'words');
+});
+
+t('a character never starts or ends with silence', () => {
+    // Inaudible, but it would shift everything after it — the classic off-by-one
+    // in a keyer.
+    for (const ch of Object.keys(cw.MORSE)) {
+        const slices = cw.toneSlices(ch, 20);
+        assert.ok(slices[0].on, `${ch} starts silent`);
+        assert.ok(slices[slices.length - 1].on, `${ch} ends silent`);
+        slices.forEach((s, i) => assert.strictEqual(s.on, i % 2 === 0, `${ch} slice ${i}`));
+    }
+});
+
+t('Farnsworth stretches the space between characters, not inside them', () => {
+    // The whole point of the method: full-speed characters from the start with the
+    // spacing padded out. Stretching the insides teaches a rhythm that exists at
+    // no speed.
+    const slow = cw.toneSlices('AA', 10, 20);
+    assert.strictEqual(slow[0].ms, cw.unitMs(20), 'the dit is at character speed');
+    assert.strictEqual(slow[3].ms, cw.CHAR_GAP * cw.unitMs(10), 'the gap is at word speed');
+});
+
+// --- morse: learning ---------------------------------------------------------------
+
+t('Koch starts with two characters that sound nothing alike', () => {
+    assert.deepStrictEqual(cw.kochSet(cw.KOCH_MIN), ['K', 'M']);
+    assert.strictEqual(cw.KOCH_MIN, 2, 'one character is not a choice');
+});
+
+t('the Koch order has every character once, and all of them are sendable', () => {
+    assert.strictEqual(new Set(cw.KOCH).size, cw.KOCH.length);
+    for (const ch of cw.KOCH) assert.ok(cw.codeFor(ch), `${ch} has no code`);
+});
+
+t('a level can neither drop below two nor run off the end', () => {
+    assert.deepStrictEqual(cw.kochSet(0), ['K', 'M']);
+    assert.deepStrictEqual(cw.kochSet(-5), ['K', 'M']);
+    assert.strictEqual(cw.kochSet(9999).length, cw.KOCH.length);
+});
+
+t('the next character asked is one in play, and rarely the one just asked', () => {
+    const set = cw.kochSet(8);
+    for (let i = 0; i < 200; i++) {
+        const ch = cw.pickChar(8, ['K', 'M', 'R']);
+        assert.ok(set.includes(ch), `${ch} is not in play`);
+        assert.ok(!['K', 'M', 'R'].includes(ch), 'just asked');
+    }
+    // With only two in play there is nothing to avoid, and it must still answer.
+    assert.ok(['K', 'M'].includes(cw.pickChar(2, ['K', 'M'])));
 });
 
 console.log(`\n${pass} ok`);

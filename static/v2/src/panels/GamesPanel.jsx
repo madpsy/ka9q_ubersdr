@@ -30,11 +30,15 @@ import LightsOut, { gameHelp as loHelp } from './games/LightsOut.jsx';
 import Mastermind, { gameHelp as mmHelp } from './games/Mastermind.jsx';
 import CallsignQuiz, { gameHelp as cqHelp } from './games/CallsignQuiz.jsx';
 import Countries, { gameHelp as coHelp } from './games/Countries.jsx';
+import Morse, { gameHelp as cwHelp } from './games/Morse.jsx';
 
 const KEY = 'ubersdr.v2.games.chosen';
 
-// In the widget's order, which is roughly easiest first. The two that need the
-// receiver are last: they are the ones that can be unavailable.
+// In the widget's order, which is roughly easiest first. The ones that need the
+// receiver — or a speaker — are last: they are the ones that can be unavailable.
+//
+// The Morse trainer is not from the widget. It is here because a panel of games
+// on a radio ought to have one thing on it that makes you better at the radio.
 const GAMES = [
     { id: 'ttt', name: 'Noughts & Crosses', Component: Ttt, help: tttHelp },
     { id: 'ms', name: 'Minesweeper', Component: Minesweeper, help: msHelp },
@@ -46,6 +50,7 @@ const GAMES = [
     { id: 'mm', name: 'Mastermind', Component: Mastermind, help: mmHelp },
     { id: 'cq', name: 'Callsign Quiz', Component: CallsignQuiz, help: cqHelp },
     { id: 'co', name: 'Countries', Component: Countries, help: coHelp },
+    { id: 'cw', name: 'Morse Trainer', Component: Morse, help: cwHelp },
 ];
 
 function saved() {

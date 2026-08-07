@@ -58,6 +58,8 @@ esbuild ../src/lib/games/mastermind.js --bundle --format=cjs --platform=node \
     --outfile=.build/game-mastermind.cjs --log-level=warning
 esbuild ../src/lib/games/quiz.js --bundle --format=cjs --platform=node \
     --outfile=.build/game-quiz.cjs --log-level=warning
+esbuild ../src/lib/games/morse.js --bundle --format=cjs --platform=node \
+    --outfile=.build/game-morse.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \

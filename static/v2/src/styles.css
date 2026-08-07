@@ -6734,6 +6734,67 @@ a.btn { text-decoration: none; }
 .mm__sw:disabled { opacity: 0.4; cursor: default; }
 .mm__controls { display: flex; gap: 5px; justify-content: center; }
 
+/* ── Morse trainer ───────────────────────────────────────────────────────── */
+.cw { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+/* The pattern, at a size where dit-dah-dit is one shape rather than three
+   characters. Fixed height and always present: it is hidden while you listen and
+   shown once you answer, and the panel must not change size between the two.
+
+   The glyphs are · and – rather than . and -: a full stop at this size is nearly
+   invisible and a hyphen is nearly a full stop. */
+.cw__code {
+    display: grid;
+    place-items: center;
+    height: calc(30px * var(--ui-scale));
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: calc(22px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    line-height: 1;
+}
+.cw__code.is-hidden { color: var(--text-faint); letter-spacing: 0; }
+.cw__play { width: 100%; }
+
+.cw__options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: 100%; }
+.cw__opt {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: calc(16px * var(--ui-scale));
+    font-weight: 700;
+    cursor: pointer;
+}
+.cw__opt:hover:not(:disabled):not(.is-blank) { border-color: var(--accent); background: var(--accent-soft); }
+.cw__opt.is-blank { border-color: transparent; background: none; }
+.cw__opt.is-right { border-color: var(--good); background: rgba(69, 214, 154, 0.18); }
+.cw__opt.is-wrong { border-color: var(--bad); background: rgba(242, 100, 106, 0.18); }
+
+.cw__controls { display: flex; gap: 4px; width: 100%; }
+.cw__sel { flex: 1; min-width: 0; padding: 3px 4px; font-size: calc(10.5px * var(--ui-scale)); }
+/* What is in play: a reminder, and a measure of how far you have got. */
+.cw__set {
+    width: 100%;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ── The two quizzes ─────────────────────────────────────────────────────── */
 .cq { display: flex; flex-direction: column; gap: 6px; }
 .cq__call {

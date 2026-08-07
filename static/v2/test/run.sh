@@ -36,6 +36,8 @@ esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
 esbuild ../src/lib/packet.js --bundle --format=cjs --platform=node \
     --outfile=.build/packet.cjs --log-level=warning
+esbuild ../src/lib/packetMarkers.js --bundle --format=cjs --platform=node \
+    --outfile=.build/packetmarkers.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \

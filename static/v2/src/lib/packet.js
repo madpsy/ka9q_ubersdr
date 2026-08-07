@@ -50,6 +50,23 @@ export const framesUrl = (base = BASE, limit = FRAME_LIMIT) =>
 
 export const channelsUrl = (base = BASE) => `${base}/api/channels`;
 
+// Per-channel, for the markers. The aggregate query above cannot say which channel a
+// frame came from, and a marker has to sit on a frequency — so the markers ask each
+// channel separately. There are typically one or two.
+export const channelFramesUrl = (label, base = BASE, limit = MARKER_FRAMES) =>
+    `${base}/api/frames?channel=${encodeURIComponent(label)}&limit=${limit}`;
+
+// How many frames each channel's marker is built from, and how long a station stays on
+// it. Thirty frames and fifteen minutes: enough that a marker on a quiet channel still
+// says who is there, short enough that it is a picture of now rather than a log.
+export const MARKER_FRAMES = 30;
+export const MARKER_AGE_MS = 15 * 60 * 1000;
+
+// How often the marker store polls, when anything is subscribed to it. Slower than the
+// panel: a marker is a "who is on this frequency" caption, not a monitor, and it is
+// polling once per channel.
+export const MARKER_POLL_MS = 20000;
+
 // How long the panel keeps frames for: the headline figures are quoted over an hour.
 export const KEEP_MS = 60 * 60 * 1000;
 export const KEEP_MAX = 500;
@@ -189,6 +206,57 @@ export function channelSummary(rows) {
             up: String(inst.status || '').toLowerCase() === 'connected',
         };
     }).filter((c) => c.label || c.hz);
+}
+
+/**
+ * The station pairs heard on one channel: who was talking to whom, and how recently.
+ *
+ * This is the marker's whole reason for existing. Every other marker in the bar is one
+ * thing at one frequency — a bookmark, a spot, a detection — but a packet channel is a
+ * *shared* frequency, and what is worth knowing about it is not "packet is here", which
+ * the marker's own position says, but who is on it. A single 144.800 marker with six
+ * pairs behind it is the honest shape of that.
+ *
+ * Grouped by from→to rather than listed as frames: a station beaconing every minute is
+ * one line with a count, not thirty lines. Ordered by how recently each pair was heard,
+ * because the question is who is there *now*.
+ */
+export function stationPairs(frames, now = Date.now(), maxAge = MARKER_AGE_MS) {
+    const cutoff = now - maxAge;
+    const byPair = new Map();
+    for (const f of frames) {
+        if (!f || f.at < cutoff || !f.from) continue;
+        const key = `${f.from}>${f.to}`;
+        const hit = byPair.get(key);
+        if (hit) {
+            hit.n++;
+            if (f.at > hit.at) hit.at = f.at;
+        } else {
+            byPair.set(key, { from: f.from, to: f.to, n: 1, at: f.at });
+        }
+    }
+    return [...byPair.values()].sort((a, b) => b.at - a.at);
+}
+
+/** The distinct stations behind those pairs, most recently heard first. */
+export function stationsHeard(pairs) {
+    const seen = [];
+    for (const p of pairs) if (!seen.includes(p.from)) seen.push(p.from);
+    return seen;
+}
+
+/**
+ * What the marker says on its face: the busiest few callsigns, and how many more.
+ *
+ * A pill is forty pixels of a canvas. One callsign and "+4" is as much as fits and as
+ * much as is worth reading at a glance — the rest is in the tooltip, which is where
+ * somebody who is actually interested will look.
+ */
+export function markerLabel(pairs, mhz) {
+    const calls = stationsHeard(pairs);
+    if (!calls.length) return mhz ? `${mhz} pkt` : 'packet';
+    if (calls.length === 1) return calls[0];
+    return `${calls[0]} +${calls.length - 1}`;
 }
 
 /** HH:MM:SS in UTC — the addon's page uses UTC and so does everything else here. */

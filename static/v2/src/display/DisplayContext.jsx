@@ -66,6 +66,11 @@ export const DEFAULTS = {
     // The other VFOs — where A, B, C and D are parked. Not the one you are on:
     // that is the dial, and the spectrum already marks it.
     markerVfos: true,
+    // Packet channels, from the packet addon: a pill per configured channel carrying
+    // the stations heard on it. Only where the addon is installed. Unlike every other
+    // marker this one is a *shared* frequency rather than one station, which is why its
+    // tooltip is a list — see packetTip in MarkerBar.
+    markerPacket: true,
     // Spot markers, per feed and only where the instance has it. Digital spots
     // are deliberately absent: a decoder band puts every station on one
     // frequency, so they would stack into a single illegible pile rather than

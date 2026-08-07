@@ -6,6 +6,7 @@
 
 const assert = require('assert');
 const pk = require('./.build/packet.cjs');
+const { buildMarkers } = require('./.build/packetmarkers.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -210,6 +211,72 @@ t('nothing sensible from the addon is an empty list, not a crash', () => {
     assert.deepStrictEqual(pk.channelSummary([{}]), []);
 });
 
+// --- the marker: a shared frequency, and who is on it ----------------------------
+//
+// This is the part that makes a packet marker different from every other marker in the
+// bar. One frequency, several stations, and the useful question is who is working whom.
+
+t('frames become pairs, most recently heard first', () => {
+    const frames = [
+        raw(1000, { from: 'G0RDH', to: 'GB7XX' }),
+        raw(5000, { from: 'M0ABC', to: 'APRS' }),
+    ].map(pk.normaliseFrame);
+    const pairs = pk.stationPairs(frames, NOW);
+    assert.deepStrictEqual(pairs.map((p) => `${p.from}>${p.to}`), ['G0RDH>GB7XX', 'M0ABC>APRS']);
+});
+
+t('a station beaconing is one line and a count, not thirty lines', () => {
+    const frames = Array.from({ length: 12 }, (_, i) => (
+        pk.normaliseFrame(raw(i * 60000, { from: 'G0RDH', to: 'APRS' }))
+    ));
+    const pairs = pk.stationPairs(frames, NOW);
+    assert.strictEqual(pairs.length, 1);
+    assert.strictEqual(pairs[0].n, 12);
+    assert.strictEqual(pairs[0].at, NOW, 'and it is timed by the most recent one');
+});
+
+t('the same station working two others is two pairs', () => {
+    // The whole point of the tooltip: not "these stations are here" but who is talking
+    // to whom.
+    const frames = [
+        raw(1000, { from: 'G0RDH', to: 'M0ABC' }),
+        raw(2000, { from: 'G0RDH', to: 'GB7XX' }),
+    ].map(pk.normaliseFrame);
+    assert.strictEqual(pk.stationPairs(frames, NOW).length, 2);
+});
+
+t('a channel nobody has used lately has no pairs', () => {
+    const frames = [raw(20 * 60 * 1000)].map(pk.normaliseFrame);
+    assert.deepStrictEqual(pk.stationPairs(frames, NOW), []);
+});
+
+t('the stations behind the pairs are distinct and in the same order', () => {
+    const frames = [
+        raw(1000, { from: 'G0RDH', to: 'M0ABC' }),
+        raw(2000, { from: 'G0RDH', to: 'GB7XX' }),
+        raw(3000, { from: 'M0ABC', to: 'G0RDH' }),
+    ].map(pk.normaliseFrame);
+    assert.deepStrictEqual(pk.stationsHeard(pk.stationPairs(frames, NOW)), ['G0RDH', 'M0ABC']);
+});
+
+t('the pill names one station and counts the rest', () => {
+    // Forty pixels of canvas: one callsign and "+4" is as much as fits and as much as
+    // is worth reading at a glance. The rest is in the tooltip.
+    const one = pk.stationPairs([pk.normaliseFrame(raw(0, { from: 'G0RDH' }))], NOW);
+    assert.strictEqual(pk.markerLabel(one, '144.800'), 'G0RDH');
+    const three = pk.stationPairs([
+        raw(0, { from: 'G0RDH' }), raw(1000, { from: 'M0ABC' }), raw(2000, { from: 'GB7XX' }),
+    ].map(pk.normaliseFrame), NOW);
+    assert.strictEqual(pk.markerLabel(three, '144.800'), 'G0RDH +2');
+});
+
+t('a quiet channel is still labelled, by its frequency', () => {
+    // It is being listened to and has heard nothing, which is a real answer — a marker
+    // that vanished would look like a receiver that had stopped listening.
+    assert.strictEqual(pk.markerLabel([], '144.800'), '144.800 pkt');
+    assert.strictEqual(pk.markerLabel([], ''), 'packet');
+});
+
 // --- times -----------------------------------------------------------------------
 
 t('the clock is UTC, to the second', () => {
@@ -221,6 +288,26 @@ t('the age reads in the unit that fits, and never is a dash', () => {
     assert.strictEqual(pk.sinceLabel(NOW - 90000, NOW), '1m');
     assert.strictEqual(pk.sinceLabel(NOW - 7200000, NOW), '2h');
     assert.strictEqual(pk.sinceLabel(null, NOW), '—');
+});
+
+t('a marker is built per channel, in frequency order', () => {
+    const chans = [
+        { label: 'uhf', hz: 432500000, mhz: '432.500', up: true },
+        { label: 'vhf', hz: 144800000, mhz: '144.800', up: true },
+    ];
+    const frames = {
+        vhf: [raw(1000, { from: 'G0RDH', to: 'APRS' })].map(pk.normaliseFrame),
+        uhf: [],
+    };
+    const marks = buildMarkers(chans, frames, NOW);
+    assert.deepStrictEqual(marks.map((m) => m.label), ['vhf', 'uhf']);
+    assert.strictEqual(marks[0].text, 'G0RDH');
+    assert.strictEqual(marks[1].text, '432.500 pkt', 'the quiet one keeps its place');
+});
+
+t('a channel with no frequency has nowhere to be a marker', () => {
+    assert.deepStrictEqual(buildMarkers([{ label: 'x', hz: 0 }], {}, NOW), []);
+    assert.deepStrictEqual(buildMarkers(null, {}, NOW), []);
 });
 
 if (process.exitCode) console.log('\npacket tests FAILED');

@@ -4647,6 +4647,10 @@ a.btn { text-decoration: none; }
     bottom: calc(100% + 4px);
     transform: translateX(-50%);
     max-width: 340px;
+    /* Packet channels are the one marker whose tip is a list — a shared frequency has
+       several stations on it — so the newlines in it have to survive. Everything else
+       is a single line and is unaffected. */
+    white-space: pre-line;
     padding: 4px 8px;
     border-radius: var(--radius-sm);
     background: var(--surface-3);

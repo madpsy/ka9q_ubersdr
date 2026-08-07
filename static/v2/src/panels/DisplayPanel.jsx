@@ -13,6 +13,7 @@ import { statsPlace } from '../lib/spectrumStats.js';
 import {
     PEAK_COUNTS, PEAK_SNR_CHOICES, peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
+import { packetAvailable } from '../lib/packet.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
     themeSwatch, uiColorsFrom,
@@ -171,6 +172,14 @@ export default function DisplayPanel() {
             {serverInfo?.noise_floor && (
                 <Field label="Voice activity" inline>
                     <Switch checked={d.markerVoice !== false} onChange={(v) => d.set({ markerVoice: v })} />
+                </Field>
+            )}
+            {/* Only where the packet addon is installed. One pill per configured
+                channel, naming the stations heard on it — the tooltip has who is
+                working whom, which is the part a pill has no room for. */}
+            {packetAvailable(serverInfo) && (
+                <Field label="Packet channels" inline>
+                    <Switch checked={d.markerPacket !== false} onChange={(v) => d.set({ markerPacket: v })} />
                 </Field>
             )}
             {/* Spot markers, each present only where that feed is. Digital

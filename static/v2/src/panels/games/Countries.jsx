@@ -41,11 +41,21 @@ export const gameHelp = (
 const W = 336;
 const H = 168;
 const NEXT_MS = 3000;
-// How big the flag on the map is once the answer is in, in the canvas's own
-// 336×168 space. Twice the size a flag is anywhere else in the interface: this
-// one is the answer rather than a label, it is competing with a coastline behind
-// it, and the map is small enough that a 22 px mark reads as another pin.
+// How big the flag on the map is, in the canvas's own 336×168 space.
+//
+// The first is the answer, revealed once something has been chosen: twice the size a
+// flag is anywhere else in the interface, because it is an answer rather than a label,
+// it competes with a coastline behind it, and the map is small enough that a 22 px
+// mark reads as another pin.
+//
+// The second is the flag as the *question*, in flag-pin mode. Bigger again, and for a
+// different reason: it is what the round is asking, it is the thing being read rather
+// than glanced at, and some flags differ from another only in the arrangement of a
+// small charge — Chad and Romania, Monaco and Indonesia, Ireland and Côte d'Ivoire.
+// A question you cannot quite see is not a fair one. Still under a fifth of the map's
+// width with its plate, so the coastline it sits on is not buried.
 const FLAG_PX = 44;
+const FLAG_PX_ASK = 62;
 const BEST_KEY = 'ubersdr.v2.games.countries.best';
 const FLAG_KEY = 'ubersdr.v2.games.countries.flagpin';
 
@@ -158,6 +168,10 @@ export default function Countries() {
         if (picked || flagPin) {
             const flag = countryFlag(question.iso_a2);
             if (flag) {
+                // The same size for the whole of a flag-pin round, answered or not:
+                // shrinking it the instant something is picked would move the one
+                // thing on the map that had not changed.
+                const px = flagPin ? FLAG_PX_ASK : FLAG_PX;
                 c.save();
                 c.textAlign = 'center';
                 c.textBaseline = 'middle';
@@ -165,7 +179,7 @@ export default function Countries() {
                 // is no flag emoji in the system fonts and a regional-indicator
                 // pair renders as two letters in a box. Canvas will not fall back
                 // to a webfont it has not been told about.
-                c.font = `${FLAG_PX}px 'Twemoji Flags', 'Noto Color Emoji', sans-serif`;
+                c.font = `${px}px 'Twemoji Flags', 'Noto Color Emoji', sans-serif`;
                 // A plate behind it, because a flag is a rectangle of arbitrary
                 // colour and coastlines run right under it.
                 //
@@ -176,7 +190,7 @@ export default function Countries() {
                 // it is a card lying on the map, and on the light theme a plate the
                 // colour of the panel needs an edge to be a plate at all.
                 const css = getComputedStyle(document.documentElement);
-                plate(c, x - FLAG_PX * 0.62, y - FLAG_PX * 0.46, FLAG_PX * 1.24, FLAG_PX * 0.92, 3);
+                plate(c, x - px * 0.62, y - px * 0.46, px * 1.24, px * 0.92, 3);
                 c.fillStyle = css.getPropertyValue('--surface-3').trim() || '#1a2130';
                 c.fill();
                 c.lineWidth = 1;

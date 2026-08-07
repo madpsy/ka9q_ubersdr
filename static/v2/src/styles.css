@@ -6745,6 +6745,33 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
 }
 
+/* Who the callsign belongs to, once it has been guessed at — the reward for
+   getting it right, and the thing that makes this a receiver's game rather than
+   a flashcard. Photo beside the words rather than above them: the card sits under
+   five option buttons in a dock column, and height is the scarce direction. */
+.cq__op {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.cq__photo {
+    flex: none;
+    width: 46px;
+    height: 46px;
+    object-fit: cover;
+    border-radius: 5px;
+    border: 1px solid var(--border-strong);
+}
+.cq__who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cq__who > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq__name { font-size: calc(12px * var(--ui-scale)); font-weight: 650; color: var(--text); }
+.cq__qth { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+.cq__grid { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
+
 .co { display: flex; flex-direction: column; gap: 6px; }
 .co__map {
     width: 100%;

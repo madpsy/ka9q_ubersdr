@@ -5,10 +5,16 @@
 // lib/games/quiz.js). That is the point of it: the other nine games could be on
 // any web page, and this one can only exist on a receiver.
 //
-// Lookups go to /api/cty/lookup rather than the shared callsign cache the rest of
-// the app uses, deliberately: that cache is read by the Markers panel and the
-// media session, and warming it with the answer would show the country in another
-// panel before the question had been answered here.
+// The country comes from /api/cty/lookup rather than the shared callsign cache
+// the rest of the app uses, deliberately: that cache is read by the Markers panel
+// and the media session, and warming it with the answer would show the country in
+// another panel before the question had been answered here.
+//
+// Once the answer is in, though, the full lookup runs — the operator's name,
+// where they are and their photo, where the receiver has a lookup service and a
+// session to ask with. That is the widget's behaviour and it is the best part of
+// the game: the reward for a right answer is finding out who you were guessing
+// about, which is the difference between a quiz and a flashcard.
 
 import React, { useCallback, useEffect, useRef, useState } from '../../react.js';
 import Frame from './Frame.jsx';
@@ -16,6 +22,9 @@ import { useRadio } from '../../radio/RadioContext.jsx';
 import { subscribeSpots } from '../../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../../lib/voiceActivity.js';
 import { countryFlag } from '../../lib/format.js';
+import { getSessionId } from '../../radio/session.js';
+import { lookupCallsignData } from '../../lib/callsign.js';
+import { onPhotoShown, photoShown, photoUrl } from '../../lib/operatorPhoto.js';
 import {
     MIN_CALLSIGNS, RECENT_MAX, addSeen, buildOptions, ctyDetail, loadSeen, orderCandidates,
     saveSeen,
@@ -38,6 +47,14 @@ export default function CallsignQuiz() {
     const [picked, setPicked] = useState('');
     const [status, setStatus] = useState('Loading…');
     const [streak, setStreak] = useState({ now: 0, best: 0 });
+    // The operator behind the callsign, once it has been guessed at. Cleared with
+    // every question so the previous station's name cannot sit under the next
+    // one's callsign while its lookup is still in flight.
+    const [op, setOp] = useState(null);
+    const [showPhoto, setShowPhoto] = useState(photoShown);
+    // The Callsign panel's switch governs this too: somebody who has turned
+    // operator photos off has turned them off, and a game is not an exception.
+    useEffect(() => onPhotoShown(setShowPhoto), []);
     const busy = useRef(false);
     const alive = useRef(true);
     const recent = useRef([]);
@@ -97,6 +114,7 @@ export default function CallsignQuiz() {
         busy.current = true;
         setPicked('');
         setRound(null);
+        setOp(null);
 
         if (!countries || countries.length < 5) {
             setStatus('Country list unavailable');
@@ -153,6 +171,25 @@ export default function CallsignQuiz() {
     const answer = (name) => {
         if (picked || !question) return;
         setPicked(name);
+        // Who it actually is — asked only once the guess is in, and only where
+        // the receiver offers the service and this session can authenticate.
+        // Failures are silent: the card is a bonus, and a game is no place for an
+        // error about a service the player did not ask for.
+        if (serverInfo && serverInfo.lookup_service) {
+            const call = question.callsign;
+            lookupCallsignData(call, getSessionId())
+                .then((data) => {
+                    if (!alive.current || !data) return;
+                    setOp((o) => (o && o.call !== call ? o : {
+                        call,
+                        name: [data.fname, data.name].filter(Boolean).join(' ').trim(),
+                        qth: [data.addr2, data.country].filter(Boolean).join(', ').trim(),
+                        grid: (data.grid || '').trim(),
+                        image: (data.image || '').trim(),
+                    }));
+                })
+                .catch(() => { /* no lookup, no card */ });
+        }
         if (name === question.country) {
             setStreak((s) => {
                 const now = s.now + 1;
@@ -214,6 +251,21 @@ export default function CallsignQuiz() {
                     <div className="cq__detail">
                         {detail.where && <span>{detail.where}</span>}
                         {detail.zone && <span>{detail.zone}</span>}
+                    </div>
+                )}
+                {/* The operator card. Only for the callsign on screen — a lookup
+                    that lands after the next question has been dealt belongs to
+                    the station before it. */}
+                {op && op.call === question.callsign && (op.name || op.qth || op.image) && (
+                    <div className="cq__op">
+                        {showPhoto && op.image && (
+                            <img className="cq__photo" src={photoUrl(op.image)} alt="" />
+                        )}
+                        <div className="cq__who">
+                            {op.name && <span className="cq__name">{op.name}</span>}
+                            {op.qth && <span className="cq__qth">{op.qth}</span>}
+                            {op.grid && <span className="cq__grid">Grid {op.grid}</span>}
+                        </div>
                     </div>
                 )}
             </div>

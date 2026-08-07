@@ -5,7 +5,8 @@
 
 const assert = require('assert');
 const {
-    comboFor, comboLabel, comboProblem, isTyping, DEFAULT_BINDINGS, DEFAULTS,
+    comboFor, comboLabel, comboProblem, isTyping, claimKeys, keysClaimed, _releaseAllKeys,
+    DEFAULT_BINDINGS, DEFAULTS,
 } = require('./.build/shortcuts.cjs');
 const { catalogue } = require('./.build/functions.cjs');
 
@@ -148,6 +149,50 @@ t('shortcuts are on by default, unlike the announcements', () => {
     // A shortcut does nothing until a key is pressed; a speaking receiver
     // starts on its own.
     assert.strictEqual(DEFAULTS.enabled, true);
+});
+
+// --- claiming the keys --------------------------------------------------------
+//
+// The Morse trainer's typing mode holds one of these. What the tests are for is
+// the two ways a claim goes wrong and leaves a receiver that ignores its own
+// keyboard: a release that fires twice, and two claimants releasing each other.
+
+t('nothing is claimed to begin with', () => {
+    _releaseAllKeys();
+    assert.strictEqual(keysClaimed(), false);
+});
+
+t('a claim holds until it is released', () => {
+    _releaseAllKeys();
+    const release = claimKeys();
+    assert.strictEqual(keysClaimed(), true);
+    release();
+    assert.strictEqual(keysClaimed(), false);
+});
+
+t('releasing twice does not drop somebody else\'s claim', () => {
+    // React runs an effect cleanup more than once in development, and the second
+    // run must not decrement a count it has already given back.
+    _releaseAllKeys();
+    const first = claimKeys();
+    const second = claimKeys();
+    first();
+    first();
+    first();
+    assert.strictEqual(keysClaimed(), true, 'the second claim is still held');
+    second();
+    assert.strictEqual(keysClaimed(), false);
+});
+
+t('the count cannot go negative', () => {
+    // Belt and braces: a stray release from a claim that was never taken must not
+    // leave the count below zero, where the next real claim would look unheld.
+    _releaseAllKeys();
+    claimKeys()();
+    _releaseAllKeys();
+    const release = claimKeys();
+    assert.strictEqual(keysClaimed(), true);
+    release();
 });
 
 if (process.exitCode) console.log('\nshortcut tests FAILED');

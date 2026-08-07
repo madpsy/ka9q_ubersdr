@@ -15,7 +15,9 @@ import { useEffect, useRef, useState } from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useControlContext } from '../controls/panel.jsx';
 import { functionRepeats, runFunction } from '../controls/functions.js';
-import { comboFor, isTyping, onShortcutSettings, shortcutSettings } from '../lib/shortcuts.js';
+import {
+    comboFor, isTyping, keysClaimed, onShortcutSettings, shortcutSettings,
+} from '../lib/shortcuts.js';
 
 // Shortest gap between two firings of a held key.
 //
@@ -48,6 +50,9 @@ export default function ShortcutWatch() {
         const onKey = (e) => {
             const { settings: s, ctx: c } = live.current;
             if (!s.enabled) return;
+            // Something on screen is using the keyboard itself — the Morse
+            // trainer, typing answers. See claimKeys.
+            if (keysClaimed()) return;
             // Whatever is being typed into owns the keyboard.
             if (isTyping(e.target)) return;
 

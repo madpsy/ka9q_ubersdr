@@ -16,6 +16,14 @@
 // The code and the timing are lib/games/morse.js, pinned by tests: the table is
 // ITU, and the rhythm is the PARIS definition to the millisecond.
 //
+// It starts on a press, and that is not ceremony. A collapsed dock peeked at by
+// hovering its rail mounts the panels inside it, and a game that sent a character on
+// mount sounded one every time the pointer crossed that rail — from a panel that was
+// on screen for half a second, on a receiver somebody is listening to. Nothing here
+// makes a noise until it has been asked to, and every mount asks again. It also puts
+// the first tone inside a click, which is where a browser wants an AudioContext
+// started.
+//
 // Sound is optional and has a pitch, because this panel lives on a receiver: the
 // operator may be listening to something, or wearing headphones tuned to their own
 // sidetone. With it off, Copy shows the pattern instead of playing it — reading
@@ -26,6 +34,7 @@ import Frame from './Frame.jsx';
 import {
     DAH, DIT, KOCH, KOCH_MIN, UNLOCK_RUN, codeFor, kochSet, pickChar, toneSlices, unitMs,
 } from '../../lib/games/morse.js';
+import { claimKeys, isTyping } from '../../lib/shortcuts.js';
 
 // How to play — shown by the ? beside the game picker. See GamesPanel.
 export const gameHelp = (
@@ -44,12 +53,12 @@ export const gameHelp = (
             is the skill. Pick a level directly if you already know some.
         </p>
         <p>
-            <b>⌨</b> in Copy swaps the five keys for a box you type the character
-            into — no menu to choose from, which is harder and is what copying
-            actually is. The receiver&rsquo;s own keyboard shortcuts stand down while
-            that box has the keyboard, so <b>U</b> is an answer rather than USB; click
-            it again if you have clicked away, and the shortcuts come back the moment
-            you do.
+            <b>⌨</b> in Copy answers from the keyboard: press the character rather
+            than reaching for its key, which is how copying is actually done. The keys
+            stay on screen — they are the characters in play, and still clickable.
+            While it is on, the receiver&rsquo;s own shortcuts stand down so that
+            <b>U</b> is an answer and not USB; turn it off, or close the panel, and
+            they are back.
         </p>
         <p>
             <b>Speed</b> is real words per minute, and characters are sent at full
@@ -72,7 +81,10 @@ export const gameHelp = (
         <p>
             Sending is judged as you go: a wrong element is wrong the moment it is
             keyed rather than at the end of the character, which is how a fist feels
-            its own mistake. <b>Reveal</b> gives up and shows the answer.
+            its own mistake. <b>Hint</b> sounds the next element you need and shows
+            it, following along as you key — but never the last one, so it can narrow
+            a pattern without ever finishing it for you. <b>Reveal</b> gives up and
+            shows the answer.
         </p>
     </>
 );
@@ -112,13 +124,20 @@ function load() {
             wpm: SPEEDS.includes(saved.wpm) ? saved.wpm : 15,
             mode: saved.mode === 'send' ? 'send' : 'copy',
             typed: saved.typed === true,
+            // Part of the way to the next character. Clamped below the unlock, so a
+            // hand-edited or half-written value cannot leave somebody permanently
+            // one answer from a level they never reach.
+            run: Math.min(Math.max(Number(saved.run) || 0, 0), UNLOCK_RUN - 1),
         };
     } catch (e) {
-        return { level: KOCH_MIN, best: 0, sound: true, pitch: 600, wpm: 15, mode: 'copy', typed: false };
+        return {
+            level: KOCH_MIN, best: 0, sound: true, pitch: 600, wpm: 15,
+            mode: 'copy', typed: false, run: 0,
+        };
     }
 }
 
-export default function Morse() {
+export default function Morse({ visible = true, covered = false }) {
     const [prefs, setPrefs] = useState(load);
     const [target, setTarget] = useState('');
     const [options, setOptions] = useState([]);
@@ -132,17 +151,23 @@ export default function Morse() {
     // but it does not count towards the streak or the next unlock, or the level
     // would climb on guesswork.
     const [missed, setMissed] = useState(false);
-    // Copy: how many elements of the pattern the hint has given away. Never all of
-    // them — see hint().
-    const [hinted, setHinted] = useState(0);
-    // Typing mode: the character in the box, which is the last key pressed rather
-    // than an accumulating string — one answer per round, and seeing it land is the
-    // only feedback a typed guess gets.
-    const [typed, setTyped] = useState('');
-    const [armed, setArmed] = useState(false);      // the box holds the keyboard
-    const [run, setRun] = useState(0);              // correct in a row, towards the next unlock
+    // Send: the element a hint has just given away, if any. One at a time and never
+    // the last — see hint().
+    const [tip, setTip] = useState('');
+    // Correct in a row, towards the next unlock — and saved, because it is progress.
+    // Four in a row is most of the way to a new character, and losing it to a closed
+    // panel or a reload would make the level a thing you have to finish in one
+    // sitting. The streak beside it is not saved and is not meant to be: it is a run
+    // of attention rather than of learning, it ends when you stop, and the best one
+    // is kept.
+    // Read from prefs rather than by loading again: one parse of one key is enough,
+    // and useState only ever uses the first value it is given.
+    const [run, setRun] = useState(() => prefs.run);
     const [streak, setStreak] = useState(0);
-    const [status, setStatus] = useState('Listen');
+    // Nothing is sent, and no keys are claimed, until this is true. See the top of
+    // the file: it is per mount, deliberately, and is not remembered.
+    const [started, setStarted] = useState(false);
+    const [status, setStatus] = useState('Ready');
     const recent = useRef([]);
     const timer = useRef(null);
     const alive = useRef(true);
@@ -152,11 +177,6 @@ export default function Morse() {
     // could stop the audio it is playing. Created on the first press rather than on
     // mount, because a context made without a user gesture starts suspended.
     const audio = useRef({ ctx: null, osc: null, gain: null });
-    const typeRef = useRef(null);
-    const focusType = useCallback(() => {
-        const el = typeRef.current;
-        if (el) el.focus();
-    }, []);
 
     const save = useCallback((next) => {
         setPrefs(next);
@@ -218,6 +238,17 @@ export default function Morse() {
         }
     }, []);
 
+    /** Stop, mid-character if need be: everything queued is cancelled. */
+    const silence = useCallback(() => {
+        const a = audio.current;
+        if (!a.ctx || !a.gain) return;
+        try {
+            const now = a.ctx.currentTime;
+            a.gain.gain.cancelScheduledValues(now);
+            a.gain.gain.setValueAtTime(0, now);
+        } catch (e) { /* a context already torn down */ }
+    }, []);
+
     const sendChar = useCallback((ch, prefsNow) => {
         if (ch) schedule(toneSlices(ch, prefsNow.wpm), prefsNow);
     }, [schedule]);
@@ -235,8 +266,7 @@ export default function Morse() {
         setKeyed('');
         setVerdict('');
         setMissed(false);
-        setHinted(0);
-        setTyped('');
+        setTip('');
         const set = kochSet(prefsNow.level);
         const ch = pickChar(prefsNow.level, recent.current);
         recent.current = [...recent.current, ch].slice(-6);
@@ -254,7 +284,16 @@ export default function Morse() {
         }
     }, [prefs, sendChar]);
 
-    useEffect(() => { nextRound(); }, []);
+    const begin = useCallback((prefsNow = prefs) => {
+        setStarted(true);
+        nextRound(prefsNow);
+    }, [nextRound, prefs]);
+
+    // A round only follows a settings change once the game is running: switching mode
+    // or level from behind the start overlay must set the setting and stay quiet.
+    const restart = useCallback((prefsNow) => {
+        if (started) nextRound(prefsNow);
+    }, [nextRound, started]);
 
     // A round got right. `credit` is false when it took more than one go: shared by
     // both modes, so the progression cannot drift between them.
@@ -271,11 +310,14 @@ export default function Morse() {
         if (nextRun >= UNLOCK_RUN && prefsNow.level < KOCH.length) {
             setRun(0);
             const level = prefsNow.level + 1;
-            save({ ...prefsNow, level, best: Math.max(now, prefsNow.best) });
+            save({ ...prefsNow, level, run: 0, best: Math.max(now, prefsNow.best) });
             setStatus(`✓ ${ch} — new character: ${KOCH[level - 1]}`);
         } else {
             setRun(nextRun);
-            if (now > prefsNow.best) save({ ...prefsNow, best: now });
+            // Written on every correct answer rather than only when the best
+            // improves: the run is the thing that would be lost, and one small
+            // localStorage write per character is nothing next to sending one.
+            save({ ...prefsNow, run: nextRun, best: Math.max(now, prefsNow.best) });
             setStatus(`✓ ${ch}`);
         }
         timer.current = setTimeout(() => { if (alive.current) nextRound(); }, NEXT_MS);
@@ -289,32 +331,42 @@ export default function Morse() {
         setMissed(true);
         setStreak(0);
         setRun(0);
+        save({ ...prefsNow, run: 0 });
         sendChar(target, prefsNow);
         setStatus(prefsNow.mode === 'send' ? 'Not that — listen, and key it again' : 'Not that one — listen again');
-    }, [sendChar, target]);
+    }, [save, sendChar, target]);
 
     /**
-     * A hint: the next element of the pattern, heard on its own and left on screen.
+     * A hint, for Send: the next element you have to key, on its own.
      *
-     * Never the last one. A character with its final element missing is still a
-     * question — `-.` is N, but it is also the start of C, K, X and Y — so the hint
-     * can narrow the field without ever answering it. That also means E and T,
-     * being one element long, have no hint to give, and the button says so by being
-     * unavailable rather than by doing nothing.
+     * This belongs to Send and to nothing else. In Copy the character has already
+     * been sounded in full — replaying the first element of something you have just
+     * heard end to end is not a hint, it is a shorter copy of the question. Sending
+     * is the mode where the pattern genuinely is not known: it is on screen as a
+     * letter and has to come back out as rhythm.
+     *
+     * Never the last element. `-.` is N, but it is equally the start of C, K, X and
+     * Y, so a pattern with its final element still missing is a real question — and
+     * one element short of the answer is as far as help can go without becoming the
+     * answer. It follows from where you have keyed to, so it moves with you, and it
+     * runs out one before the end. E and T, one element long, have no hint to give.
+     *
+     * Sounded and shown, not one or the other: the sound is the point when it is on,
+     * and with it off there would otherwise be no hint at all.
      *
      * It costs the credit towards the next unlock, because a level climbed on hints
-     * is a level you cannot hear. It does not break the streak: only a wrong answer
-     * does that, and asking for help is not the same as getting it wrong.
+     * is a level you cannot send. It does not break the streak: only keying the wrong
+     * element does that, and asking for help is not the same as getting it wrong.
      */
     const hint = useCallback(() => {
         if (verdict || !target) return;
         const code = codeFor(target);
-        if (hinted >= code.length - 1) return;
-        const n = hinted + 1;
-        setHinted(n);
+        if (keyed.length >= code.length - 1) return;
+        const el = code[keyed.length];
+        setTip(el);
         setMissed(true);
-        sendElement(code[n - 1], prefs);
-    }, [hinted, prefs, sendElement, target, verdict]);
+        sendElement(el, prefs);
+    }, [keyed, prefs, sendElement, target, verdict]);
 
     // Giving up. Its own path rather than a wrong answer, because it is the one
     // case where showing the answer is the useful thing to do.
@@ -326,13 +378,11 @@ export default function Morse() {
         setVerdict('wrong');
         setStreak(0);
         setRun(0);
+        save({ ...prefs, run: 0 });
         setStatus(`✗ it was ${target}`);
         sendChar(target, prefs);
-        // Reveal is a button and a button takes the focus with it, which in typing
-        // mode means the next keystroke reaches the radio instead of the game.
-        if (prefs.typed && prefs.mode === 'copy') focusType();
         timer.current = setTimeout(() => { if (alive.current) nextRound(); }, WRONG_MS);
-    }, [focusType, nextRound, prefs, sendChar, target, verdict]);
+    }, [nextRound, prefs, save, sendChar, target, verdict]);
 
     const answer = (ch) => {
         if (verdict || !target || wrong.includes(ch)) return;
@@ -346,25 +396,6 @@ export default function Morse() {
         miss(prefs);
     };
 
-    /**
-     * A typed answer.
-     *
-     * Read from the value rather than from the keystroke: a phone's keyboard often
-     * reports `Unidentified` for the key and only the resulting text is reliable, so
-     * the box is the source of truth on every platform. Only the last character of
-     * it counts — the box holds one answer, not a word.
-     *
-     * A key that is not a Morse character at all is a slip and is ignored. One that
-     * is — including a character not yet in play — is a real answer and is wrong in
-     * the usual way, because "I heard something else" is the mistake being trained
-     * out, and the five-key version cannot express it at all.
-     */
-    const onTyped = (e) => {
-        const ch = String(e.target.value || '').slice(-1).toUpperCase();
-        setTyped(ch);
-        if (ch && codeFor(ch)) answer(ch);
-    };
-
     // Send mode: one element at a time, judged as it goes.
     //
     // Wrong the moment it diverges rather than at the end of the character — that
@@ -376,6 +407,7 @@ export default function Morse() {
         if (verdict || !target) return;
         const code = codeFor(target);
         const next = keyed + el;
+        setTip('');
         sendElement(el, prefs);
         if (!code.startsWith(next)) {
             setKeyed('');
@@ -386,15 +418,62 @@ export default function Morse() {
         if (next === code) finish(target, !missed, prefs);
     }, [finish, keyed, miss, missed, prefs, sendElement, target, verdict]);
 
-    // Turning typing on takes the keyboard there and then — inside the click, so a
-    // phone opens its keyboard rather than waiting to be tapped again. Not on mount,
-    // though: a panel restoring a saved preference has no business stealing the
-    // keyboard, or opening a keyboard over half the screen, before it is asked to.
-    const mounted = useRef(false);
+    /**
+     * Typing mode: the character itself, off the keyboard, with the keys still on
+     * screen — they are the set in play, and clicking one is still an answer.
+     *
+     * The listener is on the document rather than on a focused input. An input would
+     * have got the keys for free (the shortcut layer already stands down for one),
+     * but it would also have to *hold the focus* to keep them: a click on Hint, on
+     * Reveal, on a picker, and the next character typed would be tuning the radio.
+     * So the mode claims the keys outright for as long as it is on — see claimKeys —
+     * and the claim is taken and released by this effect, which means closing the
+     * panel or switching to Send gives them back without anything having to remember
+     * to.
+     *
+     * Read through a ref so the listener is registered once. Rebuilding it on every
+     * render would drop the keystroke that lands in the gap, and this one is a game
+     * answer being timed.
+     */
+    const live = useRef(null);
+    live.current = { answer, replay: () => sendChar(target, prefs) };
     useEffect(() => {
-        if (mounted.current && prefs.typed && prefs.mode === 'copy') focusType();
-        mounted.current = true;
-    }, [focusType, prefs.typed, prefs.mode]);
+        if (!started || !visible || covered || prefs.mode !== 'copy' || !prefs.typed) return undefined;
+        const release = claimKeys();
+        const onKey = (e) => {
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            // A chat message or a bookmark name still outranks the game.
+            if (isTyping(e.target)) return;
+            if (e.key === 'Enter') { e.preventDefault(); live.current.replay(); return; }
+            if (e.key.length !== 1) return;
+            const ch = e.key.toUpperCase();
+            // Not a Morse character at all: a slip, not an answer. One that *is* —
+            // including a character not yet in play — is a real answer and wrong in
+            // the usual way, which is a mistake the five keys cannot even express.
+            if (!codeFor(ch)) return;
+            e.preventDefault();
+            live.current.answer(ch);
+        };
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('keydown', onKey);
+            release();
+        };
+    }, [covered, prefs.mode, prefs.typed, started, visible]);
+
+    // Minimised, mid-round. The panel is still mounted — see GamesPanel — so nothing
+    // else would have stopped it: the character being sent would finish and the timer
+    // would deal another, into a window on the strip that nobody can see. It stops
+    // and it goes back behind the start overlay, because a game that resumed on its
+    // own when the window came back would be making a noise nobody had just asked for
+    // all over again.
+    useEffect(() => {
+        if (visible || !started) return;
+        clearTimeout(timer.current);
+        silence();
+        setStarted(false);
+        setStatus('Ready');
+    }, [silence, started, visible]);
 
     // Two keys side by side, so it can be played like a paddle rather than typed:
     // `.` and `/` are neighbours with the dit on the left, which is the way round a
@@ -408,19 +487,17 @@ export default function Morse() {
     const DIT_KEYS = ['.', 'd'];
     const DAH_KEYS = ['/', 'f', '-'];
     useEffect(() => {
-        if (prefs.mode !== 'send') return undefined;
+        if (!started || !visible || covered || prefs.mode !== 'send') return undefined;
         const onKey = (e) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
-            const el = e.target;
-            const tag = el && el.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+            if (isTyping(e.target)) return;
             const k = e.key.toLowerCase();
             if (DIT_KEYS.includes(k)) { e.preventDefault(); keyEl('.'); }
             else if (DAH_KEYS.includes(k)) { e.preventDefault(); keyEl('-'); }
         };
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
-    }, [prefs.mode, keyEl]);
+    }, [covered, prefs.mode, keyEl, started, visible]);
 
     const set = kochSet(prefs.level);
     const code = codeFor(target);
@@ -443,10 +520,10 @@ export default function Morse() {
                             value={prefs.level}
                             aria-label="Level"
                             onChange={(e) => {
-                                const next = { ...prefs, level: Number(e.target.value) };
+                                const next = { ...prefs, level: Number(e.target.value), run: 0 };
                                 setRun(0);
                                 save(next);
-                                nextRound(next);
+                                restart(next);
                             }}
                         >
                             {KOCH.map((ch, i) => (i + 1 >= KOCH_MIN
@@ -466,143 +543,141 @@ export default function Morse() {
             )}
             status={status}
             score={`Streak:${streak} Best:${prefs.best}`}
-            action={giveUp}
-            actionLabel="Reveal"
+            /* Wrapped, not passed: Frame hands its action the click event, and
+               begin() takes the prefs to start from — a MouseEvent has no level. */
+            action={started ? giveUp : () => begin()}
+            actionLabel={started ? 'Reveal' : 'Start'}
         >
             <div className="cw">
-                {prefs.mode === 'send' ? (
-                    <>
-                        {/* What to send. Big, because it is the prompt rather than
-                            the answer. */}
-                        <div className="cw__target">{target}</div>
-                        <div className={`cw__code cw__code--keyed is-${verdict || 'open'}`}>
-                            {keyed ? glyphs(keyed) : '·–'}
-                        </div>
-                        <div className="cw__paddle">
+                {/* The play area, and the start overlay over it. Wrapped so the
+                    overlay covers the game and nothing else: mode, level, pitch and
+                    speed stay reachable before the first character, which is where
+                    somebody who wants to send rather than copy would set them. */}
+                <div className="cw__area">
+                    {prefs.mode === 'send' ? (
+                        <>
+                            {/* What to send. Big, because it is the prompt rather than
+                                the answer. */}
+                            <div className="cw__target">{target}</div>
+                            <div className={`cw__code cw__code--keyed is-${verdict || 'open'}`}>
+                                {keyed ? glyphs(keyed) : '·–'}
+                            </div>
+                            <div className="cw__paddle">
+                                <button
+                                    type="button"
+                                    className="cw__key"
+                                    onClick={() => keyEl('.')}
+                                    disabled={!!verdict}
+                                    title="Dit — or the . or D key"
+                                >
+                                    ·
+                                </button>
+                                <button
+                                    type="button"
+                                    className="cw__key"
+                                    onClick={() => keyEl('-')}
+                                    disabled={!!verdict}
+                                    title="Dah — or the / or F key"
+                                >
+                                    –
+                                </button>
+                            </div>
                             <button
                                 type="button"
-                                className="cw__key"
-                                onClick={() => keyEl('.')}
-                                disabled={!!verdict}
-                                title="Dit — or the . or D key"
+                                className="chip chip--button cw__play"
+                                onClick={hint}
+                                disabled={!!verdict || keyed.length >= code.length - 1}
+                                title={code.length < 2
+                                    ? 'One element — there is nothing to give away'
+                                    : 'The next element, sounded and shown. Never the last one, so it never keys the character for you — and it costs the credit towards the next unlock'}
                             >
-                                ·
+                                Hint
                             </button>
+                            <div className="cw__hint">
+                                {verdict
+                                    ? `${target} is ${glyphs(code)}`
+                                    : tip
+                                        ? `next  ${glyphs(tip)}`
+                                        : 'keys  .  /   or  D  F'}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className={`cw__code${showCode ? '' : ' is-hidden'}`}>
+                                {showCode ? glyphs(code) : '?'}
+                            </div>
                             <button
                                 type="button"
-                                className="cw__key"
-                                onClick={() => keyEl('-')}
-                                disabled={!!verdict}
-                                title="Dah — or the / or F key"
-                            >
-                                –
-                            </button>
-                        </div>
-                        <div className="cw__hint">
-                            {verdict ? `${target} is ${glyphs(code)}` : 'keys  .  /   or  D  F'}
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div className={`cw__code${showCode ? '' : ' is-hidden'}`}>
-                            {showCode ? glyphs(code)
-                                : (hinted ? `${glyphs(code.slice(0, hinted))}?` : '?')}
-                        </div>
-                        <div className="cw__row">
-                            <button
-                                type="button"
-                                className="chip chip--button"
+                                className="chip chip--button cw__play"
                                 onClick={() => sendChar(target, prefs)}
-                                onMouseDown={(e) => { if (prefs.typed) e.preventDefault(); }}
                                 disabled={!prefs.sound}
-                                title={prefs.sound ? 'Send the whole character again' : 'Sound is off'}
+                                title={prefs.sound ? 'Send it again' : 'Sound is off'}
                             >
                                 ▶ Again
                             </button>
-                            <button
-                                type="button"
-                                className="chip chip--button"
-                                onClick={hint}
-                                onMouseDown={(e) => { if (prefs.typed) e.preventDefault(); }}
-                                disabled={!!verdict || hinted >= code.length - 1}
-                                title={code.length < 2
-                                    ? 'One element — there is nothing to give away'
-                                    : 'Play the next element. Never the last one, so it narrows the answer without giving it — and costs the credit towards the next unlock'}
-                            >
-                                Hint {hinted ? `${hinted}/${Math.max(code.length - 1, 0)}` : ''}
-                            </button>
-                        </div>
-                        {prefs.typed ? (
-                            <div className="cw__typerow">
-                                {/* A real input, and that is the whole trick: the
-                                    receiver's shortcut layer already stands down for
-                                    whatever is being typed into (see isTyping in
-                                    lib/shortcuts.js), so the letters are the game's
-                                    for as long as the box has the focus and nobody's
-                                    setting has been changed behind their back. A
-                                    toggle would have to be put back — on close, on
-                                    unmount, on a crash — and one that failed to
-                                    would leave the radio deaf to its own keys. */}
-                                <input
-                                    ref={typeRef}
-                                    className={`cw__type${armed ? ' is-armed' : ''} is-${verdict || 'open'}`}
-                                    value={typed}
-                                    /* Never disabled, not even while the verdict is
-                                       up: disabling an input takes the focus off it,
-                                       and doing that at the end of every round would
-                                       hand the next character to the radio. answer()
-                                       ignores a keystroke that arrives too late. */
-                                    onChange={onTyped}
-                                    onFocus={() => setArmed(true)}
-                                    onBlur={() => setArmed(false)}
-                                    aria-label="Type the character you heard"
-                                    placeholder={armed ? '' : 'tap to type'}
-                                    autoComplete="off"
-                                    autoCapitalize="characters"
-                                    spellCheck={false}
-                                />
-                                {/* What has been ruled out, which the five-key
-                                    version shows by striking the keys. Always here,
-                                    empty or not, so the panel keeps its height. */}
-                                <div className="cw__ruled">
-                                    {wrong.length ? `not ${wrong.join(' ')}` : '\u00a0'}
-                                </div>
+                            {/* Five columns always, so the row is the same height and
+                                the keys the same width at every level — but the ones in
+                                play sit in the middle of it rather than packed left.
+                                Early on there are only two characters to choose
+                                between, and two keys against the left edge of an empty
+                                row reads as something having failed to load. */}
+                            <div className="cw__options">
+                                {Array.from({ length: OPTIONS }, (_, i) => {
+                                    const ch = options[i - Math.floor((OPTIONS - options.length) / 2)];
+                                    if (!ch) return <span className="cw__opt is-blank" key={`b${i}`} aria-hidden="true" />;
+                                    return (
+                                        <button
+                                            key={ch}
+                                            type="button"
+                                            className={[
+                                                'cw__opt',
+                                                verdict ? 'is-done' : '',
+                                                verdict && ch === target ? 'is-right' : '',
+                                                wrong.includes(ch) ? 'is-wrong' : '',
+                                            ].filter(Boolean).join(' ')}
+                                            onClick={() => answer(ch)}
+                                            disabled={!!verdict || wrong.includes(ch)}
+                                        >
+                                            {ch}
+                                        </button>
+                                    );
+                                })}
                             </div>
-                        ) : null}
-                        {/* Five columns always, so the row is the same height and
-                            the keys the same width at every level — but the ones in
-                            play sit in the middle of it rather than packed left.
-                            Early on there are only two characters to choose
-                            between, and two keys against the left edge of an empty
-                            row reads as something having failed to load. */}
-                        <div className={`cw__options${prefs.typed ? ' is-off' : ''}`}>
-                            {prefs.typed ? null : Array.from({ length: OPTIONS }, (_, i) => {
-                                const ch = options[i - Math.floor((OPTIONS - options.length) / 2)];
-                                if (!ch) return <span className="cw__opt is-blank" key={`b${i}`} aria-hidden="true" />;
-                                return (
-                                    <button
-                                        key={ch}
-                                        type="button"
-                                        className={[
-                                            'cw__opt',
-                                            verdict ? 'is-done' : '',
-                                            verdict && ch === target ? 'is-right' : '',
-                                            wrong.includes(ch) ? 'is-wrong' : '',
-                                        ].filter(Boolean).join(' ')}
-                                        onClick={() => answer(ch)}
-                                        disabled={!!verdict || wrong.includes(ch)}
-                                    >
-                                        {ch}
-                                    </button>
-                                );
-                            })}
+                            {/* Said plainly, because it is a side effect on the rest of
+                                the page: while this is on, the receiver's shortcut keys
+                                do nothing. Better on screen than discovered by pressing
+                                M and wondering why the mode did not change. */}
+                            {prefs.typed ? (
+                                <div className="cw__hint">
+                                    press the character &nbsp;·&nbsp; radio keys paused
+                                </div>
+                            ) : null}
+                        </>
+                    )}
+                    {!started ? (
+                        <div className="cw__start">
+                            <button type="button" className="btn btn--primary cw__go" onClick={() => begin()}>
+                                ▶ Start
+                            </button>
+                            <div className="cw__starttip">
+                                {prefs.mode === 'send'
+                                    ? `Send · level ${prefs.level}`
+                                    : `Copy · level ${prefs.level}${prefs.sound ? '' : ' · silent'}`}
+                            </div>
                         </div>
-                    </>
-                )}
+                    ) : null}
+                </div>
 
-                {/* Mode, sound, pitch and speed — the four things you would reach
-                    for on a rig, in one row. Pitch and speed stay enabled with the
-                    sound off so they can be set before turning it on. */}
+                {/* Two rows, split by how often they are touched rather than by
+                    what would fit: the toggles are flipped mid-session — mode every
+                    few rounds, sound when someone walks in — and the pitch and speed
+                    are set once and left, the way they are on a rig.
+
+                    They did share a row, and it stopped working when typing made a
+                    fourth toggle. Three chips take about 100px of a dock that can be
+                    dragged down to 220, which left the two pickers 37px each for
+                    "700 Hz" — a clipped picker, and the only thing that shrinks in a
+                    row where everything else is fixed. */}
                 <div className="cw__controls">
                     <button
                         type="button"
@@ -611,7 +686,7 @@ export default function Morse() {
                         onClick={() => {
                             const next = { ...prefs, mode: prefs.mode === 'send' ? 'copy' : 'send' };
                             save(next);
-                            nextRound(next);
+                            restart(next);
                         }}
                     >
                         {prefs.mode === 'send' ? 'Send' : 'Copy'}
@@ -624,7 +699,7 @@ export default function Morse() {
                         onClick={() => {
                             const next = { ...prefs, sound: !prefs.sound };
                             save(next);
-                            if (next.sound && next.mode === 'copy') sendChar(target, next);
+                            if (started && next.sound && next.mode === 'copy') sendChar(target, next);
                         }}
                     >
                         {prefs.sound ? '🔊' : '🔇'}
@@ -635,13 +710,17 @@ export default function Morse() {
                             className={`chip chip--button${prefs.typed ? ' is-active' : ''}`}
                             aria-pressed={prefs.typed}
                             title={prefs.typed
-                                ? 'Typing — click for the five keys back'
-                                : 'Type the answer instead of picking it. The radio\u2019s keyboard shortcuts stand down while the box has the keyboard'}
+                                ? 'Keyboard on — the radio\u2019s shortcut keys are paused. Click to give them back'
+                                : 'Answer from the keyboard: press the character instead of clicking it. The radio\u2019s shortcut keys pause while it is on'}
                             onClick={() => save({ ...prefs, typed: !prefs.typed })}
                         >
                             ⌨
                         </button>
                     ) : null}
+                </div>
+                {/* Pitch and speed stay enabled with the sound off, so they can be
+                    set before it is turned on rather than after. */}
+                <div className="cw__rig">
                     <select
                         className="select cw__sel"
                         value={prefs.pitch}

@@ -20,6 +20,7 @@
 // themselves are all board and no chrome, so they cut down well.
 
 import React, { useState } from '../react.js';
+import { useLayout } from '../layout/LayoutContext.jsx';
 import Ttt, { gameHelp as tttHelp } from './games/Ttt.jsx';
 import Minesweeper, { gameHelp as msHelp } from './games/Minesweeper.jsx';
 import Puzzle15, { gameHelp as p15Help } from './games/Puzzle15.jsx';
@@ -63,6 +64,21 @@ function saved() {
 }
 
 export default function GamesPanel({ minimal }) {
+    // Whether the game is on screen, and whether something is over it. Only the
+    // Morse trainer reads them, and it reads them differently, which is why they are
+    // two props rather than one:
+    //
+    //   `visible` false means minimised — a floating window on the strip along the
+    //   bottom keeps its body mounted and merely hides it with `visibility`, so no
+    //   effect cleanup runs. A trainer that carried on sending would be a hidden
+    //   panel making Morse at somebody, which is the whole thing the start overlay
+    //   exists to stop. (A docked section drops its body when it collapses, so that
+    //   case needs nothing.)
+    //
+    //   `covered` means the help card is over the game. It is still on screen and may
+    //   as well keep playing — that is half of why you would read the rules — but a
+    //   keystroke must not answer a round nobody can see.
+    const { floats } = useLayout();
     const [id, setId] = useState(saved);
     const [helping, setHelping] = useState(false);
     const game = GAMES.find((g) => g.id === id) || GAMES[0];
@@ -119,7 +135,7 @@ export default function GamesPanel({ minimal }) {
                 {/* Keyed, so switching games unmounts the old one rather than
                     handing its board to the next. Two grids of buttons look alike
                     enough to React that a stale one would otherwise survive. */}
-                <game.Component key={game.id} />
+                <game.Component key={game.id} visible={!floats?.games?.min} covered={helping} />
                 {helping && <div className="games__help" role="note">{game.help}</div>}
             </div>
         </div>

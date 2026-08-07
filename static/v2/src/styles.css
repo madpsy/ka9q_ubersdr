@@ -6736,6 +6736,40 @@ a.btn { text-decoration: none; }
 
 /* ── Morse trainer ───────────────────────────────────────────────────────── */
 .cw { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+/* The play area: the same column as .cw, so wrapping it changes no geometry, and
+   the box the start overlay is measured against. */
+.cw__area {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+/* The start overlay, over the game and not over the settings. For the reason at the
+   top of Morse.jsx: a peeked dock mounts the panels in it, and a trainer that dealt
+   itself a character on mount sent Morse into the room every time the pointer
+   crossed a rail. Covering the game rather than replacing it keeps the panel one
+   height, before the first character and after it. */
+.cw__start {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.cw__go { min-width: calc(96px * var(--ui-scale)); }
+.cw__starttip {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
 /* The pattern, at a size where dit-dah-dit is one shape rather than three
    characters. Fixed height and always present: it is hidden while you listen and
    shown once you answer, and the panel must not change size between the two.
@@ -6758,10 +6792,7 @@ a.btn { text-decoration: none; }
     line-height: 1;
 }
 .cw__code.is-hidden { color: var(--text-faint); letter-spacing: 0; }
-/* Again and Hint share a line, each taking half of it: they are the two things you
-   do to a character you cannot place, and one above the other would cost a row. */
-.cw__row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; width: 100%; }
-.cw__row > .chip { width: 100%; }
+.cw__play { width: 100%; }
 
 /* Send mode. The character to key, at prompt size rather than answer size. */
 .cw__target {
@@ -6818,7 +6849,6 @@ a.btn { text-decoration: none; }
 }
 
 .cw__options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: 100%; }
-.cw__options.is-off { display: none; }
 .cw__opt {
     display: grid;
     place-items: center;
@@ -6838,48 +6868,10 @@ a.btn { text-decoration: none; }
 .cw__opt.is-right { border-color: var(--good); background: rgba(69, 214, 154, 0.18); }
 .cw__opt.is-wrong { border-color: var(--bad); background: rgba(242, 100, 106, 0.18); }
 
-/* Typing mode, in place of the five keys.
- *
- * One character wide and centred, at the size the answer is shown at elsewhere in
- * the game: a full-width text field invites a sentence, and the box takes exactly
- * one character. The border says whether it holds the keyboard, because that is the
- * difference between typing an answer and retuning the receiver. */
-.cw__typerow { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; }
-.cw__type {
-    width: calc(58px * var(--ui-scale));
-    height: calc(38px * var(--ui-scale));
-    padding: 0;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--surface-3);
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: calc(20px * var(--ui-scale));
-    font-weight: 600;
-    text-align: center;
-    text-transform: uppercase;
-}
-/* Solid once it has the keyboard: dashed is the empty socket, solid is plugged in. */
-.cw__type.is-armed { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
-.cw__type.is-armed:focus { outline: none; }
-.cw__type.is-right { border-color: var(--good); color: var(--good); }
-.cw__type.is-wrong { border-color: var(--bad); color: var(--bad); }
-.cw__type:disabled { opacity: 1; }
-.cw__type::placeholder {
-    font-size: calc(9.5px * var(--ui-scale));
-    font-weight: 400;
-    text-transform: none;
-    color: var(--text-faint);
-}
-.cw__ruled {
-    height: calc(13px * var(--ui-scale));
-    font-family: var(--mono);
-    font-size: calc(10.5px * var(--ui-scale));
-    letter-spacing: 0.08em;
-    color: var(--bad);
-}
-
 .cw__controls { display: flex; gap: 4px; width: 100%; }
+/* The two rig settings, half the width each: equal, because neither is the more
+   important, and wide enough that "700 Hz" fits at the narrowest dock. */
+.cw__rig { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 100%; }
 .cw__mode { flex: none; min-width: calc(44px * var(--ui-scale)); }
 /* The level picker doubles as the readout — see the info row in Morse.jsx. Fixed
    width, so the characters beside it are what shrinks. */

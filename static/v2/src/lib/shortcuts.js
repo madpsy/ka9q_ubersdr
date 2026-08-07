@@ -219,6 +219,40 @@ export function shortcutFor(combo) {
  * separately — the band keys in bands_state.js remembered, the rest of app.js
  * remembered, and each did it slightly differently.
  */
+/**
+ * A temporary claim on the letter keys, for something that needs them itself.
+ *
+ * The Morse trainer's typing mode is the case: `U` there is an answer, and a
+ * receiver that switched to USB while you copied would be unusable. What it must
+ * not do is turn the user's shortcuts *setting* off — that is theirs, it is
+ * persisted, and a game that flips it has to put it back on close, on unmount and
+ * on the reload that never runs the cleanup. The one time it failed, the radio
+ * would be deaf to its own keyboard with nothing on screen to explain why.
+ *
+ * So this is runtime only and deliberately unpersisted: worst case, a reload has
+ * every shortcut back. Counted rather than a flag, so two claimants cannot release
+ * each other's hold, and each release is idempotent — an effect cleanup that runs
+ * twice must not decrement twice.
+ */
+let claims = 0;
+
+export function claimKeys() {
+    claims += 1;
+    let held = true;
+    return () => {
+        if (!held) return;
+        held = false;
+        claims = Math.max(0, claims - 1);
+    };
+}
+
+export const keysClaimed = () => claims > 0;
+
+/** Test seam: no product code drops a claim it does not hold. */
+export function _releaseAllKeys() {
+    claims = 0;
+}
+
 export function isTyping(target) {
     if (!target) return false;
     const tag = target.tagName;

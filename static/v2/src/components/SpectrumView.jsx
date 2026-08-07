@@ -2157,6 +2157,56 @@ function markLine(c, x, H, dpr, colour, dash, width) {
 //
 // The dashes are DIAL_DASH and EDGE_DASH above, and the gap between them is
 // what says which line is which.
+// How strong the hover passband is against the tuned one, which is the same colour at
+// full strength. Half: it has to read as the same thing — this is the filter you
+// already have — while never being mistaken for where the receiver actually is.
+const HOVER_BAND_ALPHA = 0.5;
+
+/**
+ * The passband the current filter would give you, at the pointer.
+ *
+ * The point of it is that a filter is a width rather than a frequency: the hover line
+ * says which frequency clicking would tune, and this says what you would then be
+ * listening to — which is the question you are actually asking while looking for the
+ * edge of a crowded signal.
+ *
+ * The tuned offsets, moved, and not a symmetrical band of the same total width: an SSB
+ * filter is lopsided about the dial (+50 to +2900 on USB), so a band centred on the
+ * cursor would be a lie about where the audio would come from. Same shape, new place.
+ *
+ * `hoverPx` is in device pixels, like everything else drawn here. Both panes call this,
+ * because they share one frequency axis and shading one of them only would leave you
+ * eyeballing the other.
+ *
+ * Not while a gesture is running, though — see the call sites. Dragging a passband edge
+ * *is* setting the filter, and a ghost of the same filter trailing the pointer while you
+ * do it is two answers to one question; a pan does not change the frequency under the
+ * pointer at all, so there would be nothing to say.
+ */
+const hoverBandPx = (g, dpr) => (g.hover && !g.drag && !g.edge ? g.hover.x * dpr : null);
+
+function drawHoverBand(c, pxW, H, cfg, tuning, hoverPx, colBand) {
+    if (hoverPx == null || !cfg.span) return;
+    const hz0 = cfg.centerFreq - cfg.span / 2;
+    const at = hz0 + (hoverPx / pxW) * cfg.span;
+    const hzToX = (hz) => ((hz - hz0) / cfg.span) * pxW;
+    const x0 = hzToX(at + tuning.bandwidthLow);
+    const x1 = hzToX(at + tuning.bandwidthHigh);
+    const left = Math.min(x0, x1);
+    const w = Math.abs(x1 - x0);
+    // Off the side of the view, or a filter too narrow at this zoom to have a width:
+    // the hover line is already drawn and is the whole of the answer in that case.
+    if (w < 1 || left > pxW || left + w < 0) return;
+    c.save();
+    // globalAlpha rather than a second colour: --spec-band can be any CSS colour the
+    // theme fancies, and this multiplies whatever alpha it already carries instead of
+    // trying to take a hex or an rgba() apart.
+    c.globalAlpha = HOVER_BAND_ALPHA;
+    c.fillStyle = colBand;
+    c.fillRect(left, 0, w, H);
+    c.restore();
+}
+
 function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
@@ -2362,14 +2412,25 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
     if (!marks) return;
     const H = Math.max(1, Math.round(wfH * g.dpr));
 
+    // The band's colour is in the key too. Everything else here is geometry, and a
+    // theme change moves none of it — without this, switching palette would leave the
+    // shading painted in the old scheme's colour until the dial moved.
+    const colBand = colors()['--spec-band'] || 'rgba(124,108,247,0.20)';
     const key = `${pxW}|${H}|${cfg.centerFreq}|${cfg.span}|${tuning.frequency}|`
         + `${tuning.bandwidthLow}|${tuning.bandwidthHigh}|${g.hover ? g.hover.x : ''}|`
-        + `${colVfo}|${colEdge}`;
+        // Whether a gesture is running, because it decides whether the hover band is
+        // drawn: without it, letting go of an edge without moving the pointer would
+        // leave the band missing until the next flicker of the mouse.
+        + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}|`
+        + `${colVfo}|${colEdge}|${colBand}`;
     if (g.marksKey === key) return;
     g.marksKey = key;
 
     const c = marks.getContext('2d');
     c.clearRect(0, 0, pxW, H);
+
+    // Under the hover line, which is what it belongs to.
+    drawHoverBand(c, pxW, H, cfg, tuning, hoverBandPx(g, g.dpr), colBand);
 
     if (g.hover) {
         const hx = Math.round(g.hover.x * g.dpr) + 0.5;
@@ -2464,6 +2525,11 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
             c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
         }
     }
+
+    // ...and the same filter at the pointer, lighter. Here rather than beside the
+    // hover line further down, so it lies under the trace exactly as the tuned band
+    // does: a signal must never be dimmed by a shade that follows the mouse.
+    drawHoverBand(c, pxW, H, cfg, tuning, hoverBandPx(g, dpr), colBand);
 
     // Peak hold, drawn beneath the live trace.
     // Peak hold decays in dB per *second*, not per frame: the draw rate follows

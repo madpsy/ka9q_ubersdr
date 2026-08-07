@@ -63,12 +63,34 @@ export function dxClusterAvailable(serverInfo) {
 // How near the bottom still counts as following the output.
 const STICK_PX = 40;
 
+// What a floated cluster window opens at.
+//
+// The layout's own default is 320 across, which is the width this panel refuses to draw
+// in — floating it from the signpost and landing in the same predicament would be a
+// button that does not work. Eighty columns of the terminal's font is about 560 px, and
+// the rest is the quick-command grid, the scrollbar and somewhere for the login row to
+// sit on one line.
+//
+// Trimmed to the window if the window is smaller, because a panel opening wider than
+// the screen is a panel with its Close button off the edge.
+const FLOAT_W = 860;
+const FLOAT_H = 480;
+
+function floatSize() {
+    const vw = typeof window === 'undefined' ? FLOAT_W : window.innerWidth;
+    const vh = typeof window === 'undefined' ? FLOAT_H : window.innerHeight;
+    return {
+        w: Math.max(320, Math.min(FLOAT_W, vw - 80)),
+        h: Math.max(240, Math.min(FLOAT_H, vh - 120)),
+    };
+}
+
 export default function DXClusterPanel({ minimal }) {
     const { actions } = useRadio();
     // Where this panel is living. A side dock cannot show a cluster — see above — so
     // the panel becomes a signpost rather than a terminal, and none of the state below
     // is reached: no socket, no login, nothing held open.
-    const { placementOf, movePanel } = useLayout();
+    const { placementOf, movePanel, setFloat, floats } = useLayout();
     const where = placementOf('dxcluster');
     // Never on a phone. There are no docks there — every panel is a full-width sheet,
     // which is as much room as the device has — so the signpost would be replacing a
@@ -196,6 +218,18 @@ export default function DXClusterPanel({ minimal }) {
         say(`Tuned ${spot.khz} ${spot.mode.toUpperCase()}`);
     };
 
+    // Float it, at a width it can actually be used at. Both updates are queued on the
+    // same state, so the resize lands after the move that creates the window.
+    //
+    // Only when it would otherwise be too narrow: a window somebody has already sized
+    // and dragged is theirs, and re-imposing a default on it every time it is floated
+    // again would undo that silently.
+    const floatIt = () => {
+        movePanel('dxcluster', 'float', null);
+        const had = floats && floats.dxcluster;
+        if (!had || had.w < floatSize().w) setFloat('dxcluster', floatSize());
+    };
+
     if (cramped) {
         return (
             <div className="stack dxc-move">
@@ -206,7 +240,7 @@ export default function DXClusterPanel({ minimal }) {
                     <Button size="sm" variant="primary" onClick={() => movePanel('dxcluster', 'bottom', null)}>
                         Dock at the bottom
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => movePanel('dxcluster', 'float', null)}>
+                    <Button size="sm" variant="ghost" onClick={floatIt}>
                         Float it
                     </Button>
                 </div>

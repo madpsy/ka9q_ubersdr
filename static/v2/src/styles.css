@@ -7692,3 +7692,93 @@ a.btn { text-decoration: none; }
    unusable, two buttons in a row are two buttons nobody can read either. */
 .dxc-move__buttons { display: flex; flex-direction: column; gap: 4px; }
 .dxc-move__buttons .btn { width: 100%; justify-content: center; }
+
+/* =========================================================================
+   HFDL addon panel
+   ========================================================================= */
+
+/* The map is the button: there is nothing else on it to click, and a separate expand
+   control would be a second thing to aim at. */
+.hf__open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    cursor: pointer;
+    overflow: hidden;
+}
+.hf__open:hover { border-color: var(--accent); }
+.hf__map { display: block; width: 100%; height: auto; }
+
+.hf__stats {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.hf__stats b { color: var(--text); font-size: calc(12px * var(--ui-scale)); }
+/* "+3 older" — aircraft still on the map but out of date. Faint, because they are a
+   qualification on the number beside them rather than a number of their own. */
+.hf__stats i { font-style: normal; color: var(--text-faint); }
+.hf__stats span:last-child { margin-left: auto; }
+
+/* The modal: map, legend, table. */
+.hf__full { display: flex; flex-direction: column; gap: 6px; min-width: min(92vw, 920px); }
+.hf__full .hf__map {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    cursor: crosshair;
+}
+
+/* A legend, because three shapes on a world map is exactly the point where one is
+   needed and a fourth would be the point where it stops helping. */
+.hf__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.hf__legend span { display: inline-flex; align-items: center; gap: 4px; }
+.hf__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.hf__dot.is-stale { background: var(--warn); opacity: 0.5; }
+.hf__sq { width: 5px; height: 5px; background: var(--good); }
+.hf__me { width: 8px; height: 1px; box-shadow: 0 0 0 0 var(--accent); background: var(--accent); }
+.hf__msgs { margin-left: auto; font-family: var(--mono); }
+
+.hf__table { max-height: 34vh; overflow-y: auto; }
+.hf__table table { width: 100%; border-collapse: collapse; font-size: calc(11px * var(--ui-scale)); }
+.hf__table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 2px 6px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.hf__table td {
+    padding: 2px 6px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.hf__table td:first-child { color: var(--text); font-weight: 650; }
+.hf__table tbody tr { cursor: pointer; }
+.hf__table tbody tr:hover td { background: var(--surface-hover); }
+/* The row for the aircraft marked on the map, and the other way about — the two views
+   are the same list, and matching them up by eye across a world map is what needs the
+   help. */
+.hf__table tbody tr.is-picked td { background: var(--accent-soft); color: var(--text); }
+.hf__table tbody tr.is-stale td { opacity: 0.6; }

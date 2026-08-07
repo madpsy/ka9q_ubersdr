@@ -11,10 +11,11 @@
 import React, { useCallback, useEffect, useRef, useState } from '../../react.js';
 import Frame from './Frame.jsx';
 import { countryFlag } from '../../lib/format.js';
+import { OPTIONS, RECENT_MAX, buildOptions, pickCountry } from '../../lib/games/quiz.js';
 import {
-    OPTIONS, RECENT_MAX, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, arcVisible, buildOptions, clampView,
-    decodeArcs, pickCountry, project, unproject, viewFor,
-} from '../../lib/games/quiz.js';
+    ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, arcVisible, clampView, loadWorldArcs, project, unproject,
+    viewFor,
+} from '../../lib/worldMap.js';
 
 // How to play — shown by the ? beside the game picker. See GamesPanel.
 //
@@ -70,15 +71,16 @@ function loadData() {
             .then((r) => (r.ok ? r.json() : null))
             .then((j) => (j && Array.isArray(j.countries) ? j.countries : null))
             .catch(() => null),
-        fetch('/countries-110m.json')
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-    ]).then(([list, topo]) => ({
+        // The coastlines come from lib/worldMap.js, which caches them for the page: the
+        // HFDL panel draws the same map, and a hundred kilobytes of arcs is not worth
+        // fetching twice because two panels are open.
+        loadWorldArcs(),
+    ]).then(([list, arcs]) => ({
         // Only entries that can be pinned and flagged.
         list: (list || []).filter((c) => c && c.country
             && typeof c.lat === 'number' && typeof c.lon === 'number'
             && typeof c.iso_a2 === 'string' && c.iso_a2.length === 2),
-        arcs: decodeArcs(topo),
+        arcs,
     }));
     return cache;
 }

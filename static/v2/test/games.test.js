@@ -17,6 +17,9 @@ const su = require('./.build/game-sudoku.cjs');
 const lo = require('./.build/game-lightsout.cjs');
 const mm = require('./.build/game-mastermind.cjs');
 const quiz = require('./.build/game-quiz.cjs');
+// The projection and the coastline decode moved to lib/worldMap.js when the HFDL panel
+// wanted the same map; the cases stay here, with the game they were written for.
+const map = require('./.build/worldmap.cjs');
 // lib/morse.js rather than lib/games/: the announcer in the callsign panel shares
 // it. The Morse cases live on here because this is where they were written and the
 // trainer is still the fussiest caller.
@@ -384,34 +387,34 @@ t('the callsign pool is capped, dropping the oldest', () => {
 t('the view never leaves the planet', () => {
     // Zoomed out, an axis wider than the world locks to the centre rather than
     // showing empty space beside it.
-    const out = quiz.clampView({ lon: 170, lat: 80, z: 1 }, 336, 168);
+    const out = map.clampView({ lon: 170, lat: 80, z: 1 }, 336, 168);
     assert.strictEqual(out.lon, 0);
     assert.strictEqual(out.lat, 0);
     // Zoomed in, panning is allowed but stops at the edge.
-    const inn = quiz.clampView({ lon: 200, lat: 100, z: 8 }, 336, 168);
+    const inn = map.clampView({ lon: 200, lat: 100, z: 8 }, 336, 168);
     assert.ok(inn.lon < 180 && inn.lon > 0);
     assert.ok(inn.lat < 90 && inn.lat > 0);
     // And the zoom itself is bounded.
-    assert.strictEqual(quiz.clampView({ lon: 0, lat: 0, z: 1000 }, 336, 168).z, quiz.ZOOM_MAX);
-    assert.strictEqual(quiz.clampView({ lon: 0, lat: 0, z: 0.01 }, 336, 168).z, quiz.ZOOM_MIN);
+    assert.strictEqual(map.clampView({ lon: 0, lat: 0, z: 1000 }, 336, 168).z, map.ZOOM_MAX);
+    assert.strictEqual(map.clampView({ lon: 0, lat: 0, z: 0.01 }, 336, 168).z, map.ZOOM_MIN);
 });
 
 t('projecting and unprojecting are inverses', () => {
     const view = { lon: 12, lat: -30, z: 4 };
-    const [x, y] = quiz.project(20, -25, view, 336, 168);
-    const [lon, lat] = quiz.unproject(x, y, view, 336, 168);
+    const [x, y] = map.project(20, -25, view, 336, 168);
+    const [lon, lat] = map.unproject(x, y, view, 336, 168);
     assert.ok(Math.abs(lon - 20) < 1e-9 && Math.abs(lat + 25) < 1e-9);
 });
 
 t('a country with an absurd bounding box is framed by fallback, not by its box', () => {
     // Natural Earth spans are unusable for anything owning distant islands or
     // crossing the antimeridian — Russia, the USA, Fiji, Norway with Bouvet.
-    const russia = quiz.viewFor({
+    const russia = map.viewFor({
         country: 'Russia', lon: 100, lat: 60, min_lon: -180, max_lon: 180, min_lat: 41, max_lat: 82,
     }, 336, 168);
     assert.strictEqual(russia.z, 3, 'fell back to a regional zoom');
     // A compact country is framed by its own box, and closer in.
-    const wales = quiz.viewFor({
+    const wales = map.viewFor({
         country: 'Wales', lon: -3.5, lat: 52.3, min_lon: -5.3, max_lon: -2.6, min_lat: 51.3, max_lat: 53.4,
     }, 336, 168);
     assert.ok(wales.z > 3, `zoomed to ${wales.z}`);
@@ -431,16 +434,16 @@ t('TopoJSON arcs are decoded with the running sum and the transform', () => {
         transform: { scale: [1, 2], translate: [10, 20] },
         arcs: [[[0, 0], [1, 1], [2, 2]]],
     };
-    const [arc] = quiz.decodeArcs(topo);
+    const [arc] = map.decodeArcs(topo);
     assert.deepStrictEqual([...arc.pts], [10, 20, 11, 22, 13, 26]);
     assert.deepStrictEqual(arc.b, [10, 20, 13, 26], 'and the bounding box comes with it');
-    assert.strictEqual(quiz.decodeArcs(null), null);
+    assert.strictEqual(map.decodeArcs(null), null);
 });
 
 t('an arc outside the view is rejected without looking at its points', () => {
     const arc = { pts: [], b: [-10, -10, -5, -5] };
-    assert.ok(quiz.arcVisible(arc, { lon: -7, lat: -7, z: 8 }, 336, 168));
-    assert.ok(!quiz.arcVisible(arc, { lon: 150, lat: 60, z: 8 }, 336, 168));
+    assert.ok(map.arcVisible(arc, { lon: -7, lat: -7, z: 8 }, 336, 168));
+    assert.ok(!map.arcVisible(arc, { lon: 150, lat: 60, z: 8 }, 336, 168));
 });
 
 // --- morse: the code ------------------------------------------------------------

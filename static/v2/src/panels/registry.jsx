@@ -93,6 +93,7 @@ import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
 import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
 import WefaxPanel, { wefaxAvailable } from './WefaxPanel.jsx';
 import VoiceSkimmerPanel, { voiceSkimmerAvailable } from './VoiceSkimmerPanel.jsx';
+import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
@@ -299,6 +300,23 @@ export const PANELS = [
         minimal: true,
         Component: VoiceSkimmerPanel,
         requires: (serverInfo) => voiceSkimmerAvailable(serverInfo),
+    },
+    // Aeroplanes heard on shortwave, from the HFDL addon: a world map with the traffic
+    // on it, and a modal with the same map several times the size and the aircraft
+    // beside it. Everything else the addon knows — per-frequency statistics, the
+    // network, propagation, the message feed — stays on its own dashboard, which both
+    // the panel and the modal link to.
+    //
+    // Minimal: the map alone, which is most of why the panel exists.
+    {
+        id: 'hfdl',
+        title: 'HFDL',
+        icon: <Icon.Waves />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: HFDLPanel,
+        requires: (serverInfo) => hfdlAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

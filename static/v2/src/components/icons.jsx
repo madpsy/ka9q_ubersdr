@@ -87,6 +87,10 @@ export const Icon = {
     Trash: (p) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><path d="M10 11v6M14 11v6" /></Svg>,
     Upload: (p) => <Svg {...p}><path d="M12 14V3" /><path d="m7.5 7 4.5-4 4.5 4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Copy: (p) => <Svg {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></Svg>,
+    // Three nodes and the lines between them — the share glyph everywhere else,
+    // so nobody has to be told what the button is.
+    Share: (p) => <Svg {...p}><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.3 10.8 7.4-4.3" /><path d="m8.3 13.2 7.4 4.3" /></Svg>,
+    Tick: (p) => <Svg {...p}><path d="m5 12.5 4.5 4.5L19 7" /></Svg>,
     // A lidded box: settings put away somewhere they survive the browser.
     Archive: (p) => <Svg {...p}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></Svg>,
     // Packets in flight: a burst of data between two stations.

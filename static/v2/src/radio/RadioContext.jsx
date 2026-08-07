@@ -28,6 +28,7 @@ import { throttle } from '../lib/throttle.js';
 import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
 import { loadRadioSettings, saveRadioSettings } from '../lib/radioSettings.js';
 import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmarkGroups.js';
+import { readShareUrl, takeUrlView } from '../lib/share.js';
 
 const RadioContext = createContext(null);
 
@@ -40,25 +41,31 @@ const RadioContext = createContext(null);
 // receiver on, both outrank it.
 function initialTuning() {
     const saved = loadRadioSettings();
-    const url = new URLSearchParams(location.search);
+    // Everything a shared link can say about the radio, already validated and
+    // clamped — see lib/share.js, which is also what writes them.
+    const link = readShareUrl(location.search);
 
-    const urlFreq = Number(url.get('freq') || url.get('frequency'));
-    const urlMode = url.get('mode');
-
-    const mode = MODE_BY_ID[urlMode] ? urlMode : (MODE_BY_ID[saved.mode] ? saved.mode : 'lsb');
+    const mode = link.mode || (MODE_BY_ID[saved.mode] ? saved.mode : 'lsb');
     const def = MODE_BY_ID[mode];
     const restore = saved.mode === mode;
     // A layout saved before the limits changed can hold a wider passband than
     // the mode now allows, so restored edges are clamped too.
     const l = bandwidthLimits(mode);
+    // A link's filter beats the saved one, as its frequency and mode do: the
+    // whole point of being sent one is to hear what the sender was hearing, and
+    // on a narrow signal the filter is half of that.
+    const low = link.bandwidthLow != null ? link.bandwidthLow
+        : (restore && saved.bandwidthLow != null ? saved.bandwidthLow : def.low);
+    const high = link.bandwidthHigh != null ? link.bandwidthHigh
+        : (restore && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high);
     return {
-        frequency: clamp(urlFreq > 0 ? urlFreq : (saved.frequency || 7100000), MIN_FREQ, MAX_FREQ),
+        frequency: clamp(link.frequency > 0 ? link.frequency : (saved.frequency || 7100000), MIN_FREQ, MAX_FREQ),
         mode,
-        bandwidthLow: clamp(restore && saved.bandwidthLow != null ? saved.bandwidthLow : def.low, l.min, l.max),
-        bandwidthHigh: clamp(restore && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high, l.min, l.max),
+        bandwidthLow: clamp(low, l.min, l.max),
+        bandwidthHigh: clamp(high, l.min, l.max),
         chosen: {
-            frequency: urlFreq > 0 || saved.frequency != null,
-            mode: !!MODE_BY_ID[urlMode] || !!MODE_BY_ID[saved.mode],
+            frequency: link.frequency > 0 || saved.frequency != null,
+            mode: !!link.mode || !!MODE_BY_ID[saved.mode],
         },
     };
 }
@@ -590,7 +597,11 @@ export function RadioProvider({ children }) {
                 // off and on again within one visit should come back to the
                 // view you left, not the one you arrived with.
                 const last = loadRadioSettings();
-                await spectrumConn.connect(resumeView(last, t));
+                // A link's view wins the first time, and only the first time —
+                // takeUrlView hands it over once. Powering off and on again
+                // within the visit should come back to the view you left, not
+                // the one the link arrived with.
+                await spectrumConn.connect(takeUrlView() || resumeView(last, t));
             },
 
             powerOff() {

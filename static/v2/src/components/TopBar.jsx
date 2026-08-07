@@ -4,6 +4,7 @@ import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../displa
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
+import ShareMenu from './ShareMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
@@ -561,6 +562,17 @@ export default function TopBar({ compact }) {
                     />
                 </div>
             )}
+
+            {/* Last in the bar, past the dock buttons, on the far right. A link
+                to what you are hearing is the one control up here that is not
+                about operating the receiver, and it is what you reach for when
+                something interesting turns up — rarely, and never in a hurry, so
+                the end of the row is exactly where it belongs.
+
+                Kept on a phone, unlike most of what is up here: the sheet it
+                opens there is the system's own, and sending somebody a frequency
+                is likelier from a handset than from a desk. */}
+            <ShareMenu />
         </header>
     );
 }

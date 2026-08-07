@@ -646,6 +646,11 @@ export const PANELS = [
     // receiver that opens with a terminal across the bottom has led with the wrong
     // thing. See the note at the top of DXClusterPanel.
     //
+    // The login survives the panel: it lives in lib/dxclusterSession.js, so collapsing
+    // the dock it is in — or peeking at that dock, or dragging the panel elsewhere —
+    // keeps the cluster and the transcript. Only Disconnect, a side dock or a reload
+    // ends it.
+    //
     // Minimal: the transcript and the command line, without the quick commands.
     {
         id: 'dxcluster',

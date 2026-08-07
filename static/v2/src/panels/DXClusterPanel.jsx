@@ -6,19 +6,19 @@
 // is clickable — it tunes this receiver, with the mode worked out the way the
 // widget works it out.
 //
-// The socket is not opened until Connect, and is closed when the panel is
-// unmounted — which in this interface means when it is collapsed, hidden, or
-// dragged between docks. A login on a shared cluster is not something to hold
-// open because a panel happens to be on screen. A remembered callsign connects on
-// its own, as the widget does, because opening the panel is the asking.
+// The socket is not opened until Connect, and it does not belong to this component: the
+// session lives in lib/dxclusterSession.js and outlives every way a panel can be
+// unmounted. That was not the original design and the original design was wrong — the
+// panel disappears when a dock is collapsed, when a collapsed dock is peeked at, when it
+// is dragged to another dock and when a phone switches sheets, and none of those is
+// somebody asking to leave the cluster. Collapsing the bottom dock is the everyday one,
+// and losing a login and a screenful of spots to it is not a trade anybody would make on
+// purpose.
 //
-// Minimising a floating window is deliberately *not* one of those: it stays
-// mounted and only stops being painted (see FloatingPanel), so putting the
-// terminal on the strip for a minute keeps the login and the transcript. The two
-// gestures mean different things — collapsing a section is putting a tool away,
-// minimising a window is getting it out of the light — and this panel is where
-// the difference is most obvious, because the cost of the wrong one is a cluster
-// login and everything that had scrolled past.
+// What ends a session is now a decision: Disconnect, or moving the panel into a side
+// dock where it cannot be read, or reloading the page. A remembered callsign still
+// connects on its own, as the widget does, and only once per page load — see
+// dxAutoTried, which is in the session rather than here for exactly the reason above.
 //
 // `minimal` keeps the transcript and the command line, and drops the quick
 // commands, the links and the connected/disconnect row — once you are in,
@@ -47,9 +47,12 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
-    MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, openTerminal,
-    parseSpotLine, saveLogin, savedLogin, trimLines, webUrl,
+    MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, parseSpotLine,
+    savedLogin, webUrl,
 } from '../lib/dxclusterTerminal.js';
+import {
+    dxAutoTried, dxConnect, dxDisconnect, dxSend, dxSession, markDxAutoTried, onDxSession,
+} from '../lib/dxclusterSession.js';
 
 export const ADDON_NAME = 'dxcluster';
 
@@ -101,14 +104,13 @@ export default function DXClusterPanel({ minimal }) {
     const mobile = useMediaQuery(MOBILE_QUERY);
     const cramped = !mobile && (where === 'left' || where === 'right');
     const [login, setLogin] = useState(savedLogin);
-    const [state, setState] = useState('closed');
-    const [detail, setDetail] = useState('');
-    const [text, setText] = useState('');
+    // A mirror of the session, not a copy of the truth: everything below reads these and
+    // every change to them comes from the store.
+    const [{ state, detail, text }, setSession] = useState(dxSession);
     const [line, setLine] = useState('');
     const [flash, setFlash] = useState('');
     // A quick command that needs a callsign before it can be sent.
     const [asking, setAsking] = useState(null);   // { cmd, label, value }
-    const termRef = useRef(null);
     const outRef = useRef(null);
     const inputRef = useRef(null);
     const flashRef = useRef(null);
@@ -125,61 +127,42 @@ export default function DXClusterPanel({ minimal }) {
     }, []);
 
     const connect = useCallback(() => {
-        const call = login.callsign.trim().toUpperCase();
-        if (!call || termRef.current) return;
-        saveLogin({ callsign: call, password: login.password });
-        setText('');
-        setDetail('');
         stickRef.current = true;
-        termRef.current = openTerminal({
-            callsign: call,
-            password: login.password,
-            on: {
-                text: (chunk, isEcho) => {
-                    // Decided *before* the state update, because after it the
-                    // new lines have already pushed the view away from the
-                    // bottom and it would read as "the user scrolled up".
-                    // Echoes always follow: you typed it, you should see it.
-                    const el = outRef.current;
-                    stickRef.current = isEcho || !el
-                        || el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
-                    setText((t) => trimLines(t + chunk));
-                },
-                state: (st, why) => {
-                    setState(st);
-                    setDetail(why);
-                    if (st === 'closed') termRef.current = null;
-                },
-            },
-        });
+        dxConnect({ callsign: login.callsign, password: login.password });
     }, [login]);
 
-    // The panel's lifetime is the login's.
-    useEffect(() => () => {
-        if (termRef.current) termRef.current.close();
-        clearTimeout(flashRef.current);
-    }, []);
+    useEffect(() => () => clearTimeout(flashRef.current), []);
 
-    // A remembered callsign connects on its own, as the widget does. Once:
-    // a disconnect is a decision, and reconnecting over it would be a fight.
-    const tried = useRef(false);
+    // The session, and the one thing the panel has to decide as text arrives: whether it
+    // was following the output. Decided *before* the state update, because afterwards the
+    // new lines have already pushed the view away from the bottom and it would read as
+    // "the user scrolled up". Echoes always follow: you typed it, you should see it.
+    useEffect(() => onDxSession((next, event) => {
+        if (event && event.type === 'text') {
+            const el = outRef.current;
+            stickRef.current = event.isEcho || !el
+                || el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+        }
+        setSession(next);
+    }), []);
+
+    // A remembered callsign connects on its own, as the widget does. Once per page load,
+    // and the flag for that is in the session rather than here: a disconnect is a
+    // decision, and the panel coming back after a collapsed dock or a dragged panel is
+    // not a reason to log in over it.
     useEffect(() => {
         // Not from a side dock, where the panel is a signpost: a remembered callsign
         // would otherwise log in to a shared cluster to feed a terminal nobody can read.
-        if (tried.current || cramped) return;
-        tried.current = true;
+        if (dxAutoTried() || cramped) return;
+        markDxAutoTried();
         if (savedLogin().callsign.trim()) connect();
     }, [connect, cramped]);
 
-    // Dragged into a side dock while connected. The panel is not unmounted by a move
-    // within the layout, so without this the login would stay open behind the signpost.
+    // Dragged into a side dock while connected. One of the two things that still end a
+    // session, because the panel there cannot show what it is receiving.
     useEffect(() => {
-        if (!cramped || !termRef.current) return;
-        termRef.current.close();
-        termRef.current = null;
-        tried.current = false;
-        setState('closed');
-    }, [cramped]);
+        if (cramped && state !== 'closed') dxDisconnect();
+    }, [cramped, state]);
 
     useEffect(() => {
         if (!stickRef.current) return;
@@ -192,15 +175,10 @@ export default function DXClusterPanel({ minimal }) {
         if (connected && inputRef.current) inputRef.current.focus();
     }, [connected]);
 
-    const disconnect = () => {
-        if (termRef.current) termRef.current.close();
-        termRef.current = null;
-        setState('closed');
-        setDetail('');
-    };
+    const disconnect = () => dxDisconnect();
 
     const send = useCallback((cmd) => {
-        if (termRef.current) termRef.current.send(cmd);
+        dxSend(cmd);
         if (inputRef.current) inputRef.current.focus();
     }, []);
 

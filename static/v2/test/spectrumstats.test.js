@@ -107,9 +107,9 @@ t('a figure that is not known yet is left out, not shown as a dash', () => {
 
 t('a full sample produces the whole readout', () => {
     const lines = statLines({
-        fps: 23.6,
+        fps: 59.4,
         framesIn: 12.4,
-        rows: 18,
+        rows: 12.4,
         bytesIn: 42 * 1024,
         audioBytes: 6 * 1024,
         binCount: 1024,
@@ -119,11 +119,15 @@ t('a full sample produces the whole readout', () => {
         outLatSec: 0.02,
         underruns: 0,
     });
-    assert.strictEqual(value(lines, 'fps'), '24');
+    // The browser's frame rate, not the feed's. Counting drawn frames instead
+    // would put the same 12 here that FEED already says.
+    assert.strictEqual(value(lines, 'fps'), '59');
     // Whole frames per second above ten, as with the FPS above it: the decimal on
     // a feed rate changes every tick and says nothing the integer does not.
     assert.strictEqual(value(lines, 'feed'), '12/s');
-    assert.strictEqual(value(lines, 'rows'), '18/s');
+    // Rows keeping up with the feed: nothing is holding the picture back, so the
+    // line would be the feed rate written out twice.
+    assert.strictEqual(find(lines, 'rows'), undefined);
     assert.strictEqual(value(lines, 'fft'), '1024 bins  7.3 Hz');
     assert.strictEqual(value(lines, 'net'), '42 + 6.0 = 48 kB/s');
     // Queue plus hardware: 180 + 20. Reporting only the half this client controls
@@ -133,6 +137,21 @@ t('a full sample produces the whole readout', () => {
     for (const l of lines) {
         assert.ok(l.key && l.label && l.value, JSON.stringify(l));
     }
+});
+
+t('rows are shown only when something is holding them back', () => {
+    // The complaint that produced this rule: FPS, FEED and ROWS all reading the
+    // same number, which is three lines saying one thing. Rows are committed as
+    // frames arrive unless the Display panel's waterfall rate is set below the
+    // feed — a deliberately slow scroll — and that is the only case worth a line.
+    assert.strictEqual(find(statLines({ framesIn: 14, rows: 14 }), 'rows'), undefined);
+    // Sampling noise between two counters read a moment apart is not a cap.
+    assert.strictEqual(find(statLines({ framesIn: 14, rows: 13.5 }), 'rows'), undefined);
+    // Held at 5 rows a second against a 14/s feed: two thirds of the frames
+    // arriving are never shown, which is worth knowing.
+    assert.strictEqual(value(statLines({ framesIn: 14, rows: 5 }), 'rows'), '5.0/s');
+    // No feed to compare against — between reconnects — claims nothing either way.
+    assert.strictEqual(find(statLines({ rows: 5 }), 'rows'), undefined);
 });
 
 t('the poll divisor is shown only when it is not 1', () => {

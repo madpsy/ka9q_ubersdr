@@ -15,6 +15,11 @@
 // negotiating its geometry, a divisor of 1 that should say nothing at all. None
 // of that needs a canvas or a clock.
 
+// How far under the feed the committed rows have to fall before saying so. A few
+// per cent either way is the two counters being sampled at different moments, not
+// a display being held back.
+const ROWS_CAP_MARGIN = 0.9;
+
 // Where the readout sits, and the vocabulary the Display panel offers.
 export const STATS_PLACES = ['off', 'left', 'right'];
 
@@ -109,12 +114,12 @@ export function statLines(s = {}) {
         if (value) out.push({ key, label, value, title });
     };
 
-    // Painted frames, not animation frames: the loop only draws when something
-    // has changed, so this sits at the feed rate rather than at 60 and a figure
-    // *below* the feed rate is the one worth seeing — that is the browser failing
-    // to keep up, which is the difference between a slow receiver and a slow
-    // machine.
-    add('fps', 'FPS', rate(s.fps), 'Canvas repaints per second. The loop draws only when a frame has arrived, so this tracks the feed unless the browser cannot keep up.');
+    // Animation frames, drawn or not — what the browser is managing, which on a
+    // healthy machine is the display's refresh rate and on a struggling one is
+    // not. Counting only the *drawn* frames would report the feed a second time:
+    // the loop paints when a frame arrives and sleeps otherwise, so those two are
+    // the same number by construction and one of them is not worth a line.
+    add('fps', 'FPS', rate(s.fps), 'Animation frames per second — the rate the browser is managing, drawn or idle. Well below the screen refresh means this machine is struggling, whatever the receiver is doing.');
 
     add('feed', 'FEED', rate(s.framesIn) && `${rate(s.framesIn)}/s`, 'Spectrum frames arriving per second. Halves when the idle throttle takes effect, and drops to nothing when the socket is paused.');
 
@@ -128,7 +133,15 @@ export function statLines(s = {}) {
         .filter(Boolean).join('  ');
     add('fft', 'FFT', fft, 'Bins across the view, and what one bin is worth. The resolution decides whether two close carriers are one blob or two.');
 
-    add('rows', 'ROWS', rate(s.rows) && `${rate(s.rows)}/s`, 'Waterfall rows committed per second — the display speed, which is capped by the setting in the Display panel and by the feed.');
+    // Only when something is holding it back. Rows are committed as frames
+    // arrive, so unless the Display panel's waterfall rate is set below the feed —
+    // a deliberately slow scroll — this is the feed rate written out again, and
+    // the readout is small enough that a line saying nothing costs one that does.
+    // Same rule as POLL above: the corner is for what is not obvious.
+    const capped = s.rows != null && s.framesIn > 0 && s.rows < s.framesIn * ROWS_CAP_MARGIN;
+    if (capped) {
+        add('rows', 'ROWS', rate(s.rows) && `${rate(s.rows)}/s`, 'Waterfall rows committed per second. Shown because it is below the feed: the Display panel\'s waterfall rate is holding the scroll back, so frames are arriving that the picture is not showing.');
+    }
 
     add('net', 'NET', formatThroughput(s.bytesIn, s.audioBytes), 'Spectrum plus audio, and the total: what this session is costing the connection, and which half of it to do something about.');
 

@@ -561,7 +561,7 @@ function SpectrumStats({ place, bottom, gfx }) {
                 bytes: spectrumConn.bytesIn || 0,
                 audio: (audioConn && audioConn.bytesIn) || 0,
                 frames: spectrumConn.framesIn || 0,
-                paints: g.paints || 0,
+                ticks: g.ticks || 0,
                 rows: g.rows || 0,
             };
             const was = prev.current;
@@ -573,7 +573,7 @@ function SpectrumStats({ place, bottom, gfx }) {
             const ms = at.t - was.t;
             const m = meters.current;
             setLines(statLines({
-                fps: perSecond(at.paints - was.paints, ms),
+                fps: perSecond(at.ticks - was.ticks, ms),
                 framesIn: perSecond(at.frames - was.frames, ms),
                 rows: perSecond(at.rows - was.rows, ms),
                 bytesIn: perSecond(at.bytes - was.bytes, ms),
@@ -661,11 +661,17 @@ export default function SpectrumView() {
         dpr: 1,
         rowsPending: 0,
         // Ever-increasing counters for the stats readout, differenced once a
-        // second by SpectrumStats. Declared here and not left to `g.paints++` to
+        // second by SpectrumStats. Declared here and not left to `g.ticks++` to
         // create: incrementing an undefined field gives NaN, which then reads
         // back through `|| 0` as a perfectly plausible zero — the readout showed
         // "0.0" for both of these while the loop ran perfectly well.
-        paints: 0,           // frames actually drawn
+        //
+        // `ticks` is every animation frame, drawn or not. Counting only the drawn
+        // ones measured the *feed* — the loop paints when a frame arrives and
+        // sleeps otherwise, so "FPS" and "frames in" were the same number twice.
+        // The rate the browser is managing is a different fact, and the only one
+        // of the two this counter can tell you.
+        ticks: 0,            // animation frames, i.e. what the browser is managing
         rows: 0,             // waterfall rows committed
         autoFloor: -110,
         autoCeil: -40,
@@ -836,6 +842,7 @@ export default function SpectrumView() {
         const loop = () => {
             raf = requestAnimationFrame(loop);
             const g = gfx.current;
+            g.ticks++;              // before the early return: an idle frame is still a frame
             const d = dispRef.current;
             if (!g.bins || !g.dirty) return;
 
@@ -880,7 +887,6 @@ export default function SpectrumView() {
             });
             g.drawAt = now;
             g.dirty = false;
-            g.paints++;                 // ditto — a painted frame, not an idle one
         };
 
         raf = requestAnimationFrame(loop);

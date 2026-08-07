@@ -9,6 +9,7 @@ import {
     PAUSE_CHOICES, PAUSE_MIN_MOBILE, THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP,
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
 } from '../radio/idle.js';
+import { statsPlace } from '../lib/spectrumStats.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
@@ -403,6 +404,34 @@ export default function DisplayPanel() {
                 own — is something you notice here first. The Status panel's
                 "Poll rate" says what it is doing at any moment. */}
             <div className="section-label"><span>Data</span></div>
+
+            {/* The readout that says what the numbers below are doing. In this
+                section rather than with the display settings because it is about
+                the link and the load, which is what the rest of Data is about —
+                and because the two are usually reached for together: you turn the
+                stats on, see what the spectrum is costing, and then decide what to
+                do about it with the controls underneath. */}
+            {/* A dropdown, as the two settings under it are: three choices where
+                one of them is "none" is a list, and Off/Left/Right as a segmented
+                control would read as three things you might turn on rather than
+                one setting with a corner attached. */}
+            <Field label="Stats overlay">
+                <select
+                    className="select"
+                    value={statsPlace(d.spectrumStats)}
+                    onChange={(e) => d.set({ spectrumStats: e.target.value })}
+                >
+                    <option value="off">None</option>
+                    <option value="left">Bottom left</option>
+                    <option value="right">Bottom right</option>
+                </select>
+            </Field>
+            <div className="note note--tight">
+                Prints repaint rate, frames arriving, bin count and resolution,
+                throughput (spectrum + audio = total) and audio latency over the
+                waterfall. Bottom left is also where minimised windows sit, so the
+                right is the quieter corner on a busy layout.
+            </div>
             {/* A list, not a switch: "how long am I prepared to be counted as
                 away" is the actual question, and the old switch answered it with
                 a number the panel could only describe. `null` is not an option

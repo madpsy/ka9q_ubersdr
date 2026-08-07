@@ -164,6 +164,7 @@ export function RadioProvider({ children }) {
         peakDb: -Infinity,      // output peak, dBFS
         outLevel: 0,            // smoothed RMS after the volume control, 0..1
         queuedSec: 0,
+        outLatencySec: 0,       // what the audio hardware adds after the queue
         underruns: 0,
         frameAgeMs: 0,
         lastFrameAt: 0,
@@ -378,6 +379,7 @@ export function RadioProvider({ children }) {
             const m = meters.current;
             m.level = player.level;
             m.queuedSec = player.queuedSec;
+            m.outLatencySec = player.outputLatencySec;
             m.underruns = player.underruns;
             m.channels = player.channels;
             m.makeupDb = player.makeupDb;

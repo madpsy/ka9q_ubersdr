@@ -45,6 +45,7 @@ import { edgeHit } from '../lib/edgeHit.js';
 import {
     onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused, suspendSpectrum,
 } from '../lib/spectrumPause.js';
+import { perSecond, statLines, statsPlace } from '../lib/spectrumStats.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 
@@ -118,6 +119,13 @@ const TOUCH_EDGE_MIN_PX = EDGE_MIN_PX;
 // decided when the finger lands, so a tap meant to tune is still a tap, and only
 // a deliberate drag moves the filter.
 const TOUCH_SLOP_PX = 8;
+
+// How often the stats readout re-reads its counters. A second is what a rate
+// like this is quoted in, and anything faster is a number too busy to read.
+const STATS_MS = 1000;
+
+// Room between the readout and the ruler it sits above, CSS px.
+const STATS_GAP = 4;
 
 const SCALE_H = 26;       // frequency ruler height, CSS px
 // A second, thinner ruler under the waterfall. The one above it is the scale
@@ -526,6 +534,82 @@ function useStationOverlay(enabled) {
     }, [enabled, rx, weather, antenna]);
 }
 
+// The stats readout, in a corner of the waterfall. Off unless the Display panel
+// says otherwise — see statLines for what each figure is and why it earns a line.
+//
+// Its own component and its own once-a-second timer, for the reason every other
+// live readout here is: the view re-renders on pointer moves and the draw loop
+// runs at frame rate, and neither of those should be tied to a diagnostic.
+//
+// Everything is differenced from counters rather than measured directly. The
+// packet path and the draw loop increment an integer and nothing more; the rate
+// is this timer's problem. That is also why the counters are read off the
+// connection objects rather than from `view` — a closure over context state would
+// be a second later, and the whole point is to be able to trust these numbers.
+function SpectrumStats({ place, bottom, gfx }) {
+    const { spectrumConn, audioConn, meters } = useRadio();
+    const [lines, setLines] = useState([]);
+    const prev = useRef(null);
+
+    useEffect(() => {
+        prev.current = null;
+        const tick = () => {
+            const g = gfx.current;
+            const now = performance.now();
+            const at = {
+                t: now,
+                bytes: spectrumConn.bytesIn || 0,
+                audio: (audioConn && audioConn.bytesIn) || 0,
+                frames: spectrumConn.framesIn || 0,
+                paints: g.paints || 0,
+                rows: g.rows || 0,
+            };
+            const was = prev.current;
+            prev.current = at;
+            // Nothing to difference against on the first tick: a rate needs two
+            // readings, and inventing one from a counter's absolute value would
+            // report a session's whole history as one second of traffic.
+            if (!was) return;
+            const ms = at.t - was.t;
+            const m = meters.current;
+            setLines(statLines({
+                fps: perSecond(at.paints - was.paints, ms),
+                framesIn: perSecond(at.frames - was.frames, ms),
+                rows: perSecond(at.rows - was.rows, ms),
+                bytesIn: perSecond(at.bytes - was.bytes, ms),
+                audioBytes: perSecond(at.audio - was.audio, ms),
+                binCount: spectrumConn.binCount,
+                binHz: spectrumConn.binBandwidth,
+                divisor: spectrumConn.rateDivisor,
+                queuedSec: m.queuedSec,
+                outLatSec: m.outLatencySec,
+                underruns: m.underruns,
+            }));
+        };
+        tick();
+        const t = setInterval(tick, STATS_MS);
+        return () => clearInterval(t);
+    }, [spectrumConn, audioConn, meters, gfx]);
+
+    if (!lines.length) return null;
+
+    return (
+        // Never in the way: a press here has to reach the spectrum underneath, or
+        // a readout in the corner would be a patch of display you cannot drag,
+        // pan or click-to-tune on. That also means the per-figure titles do not
+        // appear as tooltips — they are what the Display panel's note is for, and
+        // they are left on the elements so the DOM says what each number is.
+        <div className={`spec-stats spec-stats--${place}`} style={{ bottom }}>
+            {lines.map((l) => (
+                <React.Fragment key={l.key}>
+                    <span className="spec-stats__k" title={l.title}>{l.label}</span>
+                    <span className="spec-stats__v" title={l.title}>{l.value}</span>
+                </React.Fragment>
+            ))}
+        </div>
+    );
+}
+
 export default function SpectrumView() {
     const radio = useRadio();
     const display = useDisplay();
@@ -537,6 +621,9 @@ export default function SpectrumView() {
     // stays on the canvas, dimmed, with the only way back in the middle of it.
     const [paused, setPaused] = useState(spectrumPaused);
     useEffect(() => onSpectrumPaused(setPaused), []);
+
+    // The diagnostic readout in a corner of the waterfall, and which corner.
+    const statsAt = statsPlace(display.spectrumStats);
 
     // Stopping and starting it by hand, which is the toolbar's toggle and the
     // overlay's button. The same state either way: there is one paused spectrum,
@@ -764,6 +851,7 @@ export default function SpectrumView() {
                 }
                 lastRow = now;
                 g.rowsPending = 0;
+                g.rows++;               // for the stats readout; see SpectrumStats
             }
 
             drawFrame(g, d, {
@@ -785,6 +873,7 @@ export default function SpectrumView() {
             });
             g.drawAt = now;
             g.dirty = false;
+            g.paints++;                 // ditto — a painted frame, not an idle one
         };
 
         raf = requestAnimationFrame(loop);
@@ -1576,6 +1665,19 @@ export default function SpectrumView() {
                             Spectrum paused — the audio carries on
                         </span>
                     </div>
+                )}
+                {/* The same corner in every view mode. What is at the bottom of
+                    the box changes — the 14 px waterfall ruler in split and
+                    waterfall views, the 26 px frequency scale in spectrum-only —
+                    so the offset clears whichever one it is and the readout sits
+                    in the same place on screen either way, rather than moving up
+                    and down as the view is switched. */}
+                {statsAt !== 'off' && (
+                    <SpectrumStats
+                        place={statsAt}
+                        bottom={(wfScaleH || SCALE_H) + STATS_GAP}
+                        gfx={gfx}
+                    />
                 )}
                 {hoverInfo && hoverInfo.db != null && (
                     <div

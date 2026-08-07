@@ -680,6 +680,22 @@ export class AudioPlayer extends Emitter {
         return Math.max(0, this.nextPlayTime - this.ctx.currentTime);
     }
 
+    // What the audio hardware adds after that, in seconds.
+    //
+    // The queue above is the part this client controls; this is the part it
+    // cannot — the buffer between the context and the speakers. Reported by
+    // Chrome and Firefox as `outputLatency`, an estimate of the real thing;
+    // Safari has only `baseLatency`, which is the context's own contribution and
+    // an underestimate rather than nothing. Zero where neither exists, so a
+    // total built on this is never worse than the queue alone.
+    get outputLatencySec() {
+        if (!this.ctx) return 0;
+        const out = this.ctx.outputLatency;
+        if (Number.isFinite(out) && out > 0) return out;
+        const base = this.ctx.baseLatency;
+        return Number.isFinite(base) && base > 0 ? base : 0;
+    }
+
     destroy() {
         if (this.decoder) {
             try { this.decoder.free(); } catch (e) { /* ignore */ }

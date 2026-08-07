@@ -121,6 +121,10 @@ export const DEFAULTS = {
     // waits to be asked, because a socket reopening because somebody walked past
     // the desk is the saving thrown away.
     idlePauseMin: null,
+    // The diagnostic readout over the waterfall: 'off', 'left' or 'right'. Off,
+    // because it is an instrument for when something looks wrong rather than
+    // something to watch — see lib/spectrumStats.js.
+    spectrumStats: 'off',
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator

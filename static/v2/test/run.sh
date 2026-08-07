@@ -34,6 +34,8 @@ esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumtrace.cjs --log-level=warning
+esbuild ../src/lib/spectrumStats.js --bundle --format=cjs --platform=node \
+    --outfile=.build/spectrumstats.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
@@ -231,6 +233,7 @@ node radiosettings.test.js
 node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
+node spectrumstats.test.js
 node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js

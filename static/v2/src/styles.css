@@ -1337,6 +1337,58 @@ button, input, select, textarea { font: inherit; color: inherit; }
    of the waterfall rather than as a strip of its own. */
 .spectrum__pane--wfscale { border-top: 1px solid rgba(255, 255, 255, 0.06); }
 
+/* The stats readout — a corner of the waterfall, when the Display panel asks for
+ * one. See lib/spectrumStats.js for what is in it.
+ *
+ * Deliberately a debug overlay and not a panel: mono, tabular figures, two
+ * columns, white on a plate dark enough to survive whatever the waterfall is
+ * doing underneath. Nothing here is styled with the app's surfaces or text
+ * colours, because this is not part of the interface — it is an instrument
+ * switched on over the top of one, and it should look switched on.
+ *
+ * White in both themes for the same reason: what is behind it is a waterfall,
+ * which is dark whatever the theme is, and a readout that followed the theme
+ * would be black text on a black picture half the time.
+ *
+ * `bottom` is set inline — the strip it has to clear is a different height in
+ * each view mode. See SpectrumStats. */
+.spec-stats {
+    position: absolute;
+    /* Above the canvases, below everything anybody put there on purpose. The
+       spectrum's own layers are unnumbered and paint in DOM order, the hover
+       readout and the paused overlay are 5, and a floating panel is 10 or more
+       (FloatingPanel sets it inline), with the extension window at 60 and the
+       minimised strip at 70. Nothing between here and the root opens a stacking
+       context, so those numbers really are compared against each other — and a
+       docked panel never overlaps this box at all, being in a different column.
+       So: over the picture, under the windows. */
+    z-index: 4;
+    /* Never in the way of the display it is over: a press has to reach the
+       spectrum, or this would be a patch that cannot be dragged or tuned on. */
+    pointer-events: none;
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 0 8px;
+    padding: 4px 7px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.42);
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    /* The plate is translucent, so the glyphs still need an edge of their own
+       over a bright trace. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+    white-space: nowrap;
+}
+.spec-stats--left { left: 6px; }
+.spec-stats--right { right: 6px; }
+/* The label column reads as the quieter half without being another colour: this
+   is white text, and a second hue would start to look like a status. */
+.spec-stats__k { opacity: 0.6; letter-spacing: 0.04em; }
+.spec-stats__v { font-weight: 600; }
+
 /* Paused: the spectrum socket has been closed after a long idle spell and the
  * last frame is still on the canvas.
  *

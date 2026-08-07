@@ -44,6 +44,13 @@ export class SpectrumConnection extends Emitter {
         this.reconnectTimer = null;
         // Bytes taken off this socket, ever — see AudioConnection.bytesIn.
         this.bytesIn = 0;
+        // Frames decoded off it, ever. Same shape as bytesIn and for the same
+        // reason: a counter costs nothing on the packet path, and anything that
+        // wants a rate differences it on a timer of its own. This is what the
+        // spectrum's stats readout shows as the feed rate — the number that makes
+        // a halved poll divisor, a struggling server or a stalled socket visible
+        // as something other than "the waterfall looks slow".
+        this.framesIn = 0;
 
         // Server-reported view geometry, from the `config` message.
         this.centerFreq = 0;
@@ -413,6 +420,7 @@ export class SpectrumConnection extends Emitter {
             return;
         }
 
+        this.framesIn++;
         this.emit('frame', { bins: this._unwrap(bins), frequency, timestamp });
     }
 

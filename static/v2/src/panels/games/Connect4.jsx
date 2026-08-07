@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from '../../react.js';
 import Frame from './Frame.jsx';
+import { useOpponent } from './opponent.js';
 import {
     AI, CELLS, COLS, EMPTY, HUMAN, bestCol, dropDisc, dropRow, emptyBoard, hasWon, isFull, winLine,
 } from '../../lib/games/connect4.js';
@@ -19,6 +20,11 @@ export default function Connect4() {
     const [status, setStatus] = useState('Your turn 🔴');
     const [tally, setScore] = useState({ w: 0, d: 0, l: 0 });
     const [line, setLine] = useState(null);
+    // Held in a ref as well: the status is set from inside callbacks that must
+    // not be rebuilt every time /api/description answers.
+    const opponent = useOpponent();
+    const them = useRef(opponent);
+    them.current = opponent;
     const blunder = useRef(BLUNDER_START);
     const starter = useRef(null);
     const timer = useRef(null);
@@ -36,7 +42,7 @@ export default function Connect4() {
             blunder.current = adaptBlunder(blunder.current, true);
         } else if (who === AI) {
             setScore((s) => ({ ...s, l: s.l + 1 }));
-            setStatus('🤖 Receiver wins');
+            setStatus(`🤖 ${them.current} wins`);
             starter.current = AI;
             blunder.current = adaptBlunder(blunder.current, false);
         } else {
@@ -69,7 +75,7 @@ export default function Connect4() {
             setStatus('Your turn 🔴');
         } else {
             turn.current = false;
-            setStatus('Receiver opens…');
+            setStatus(`${them.current} opens…`);
             timer.current = setTimeout(() => aiPlay(b), THINK_MS);
         }
     }, [aiPlay]);

@@ -456,28 +456,16 @@ export default function DisplayPanel() {
                     <option value="right">Bottom right</option>
                 </select>
             </Field>
-            <div className="note note--tight">
-                Prints frame rate, frames arriving, bin count and resolution,
-                throughput (every stream and the total), audio latency, how many
-                people are on the receiver and the address you are connecting from.
-                Bottom left by default on a desktop and off on a phone, where the
-                corner is busier and the screen is likelier to be in public.
-                Minimised windows also sit bottom left, so the right is the quieter
-                corner on a crowded layout.
-            </div>
             {/* Beside the stats for the same reason they are beside the spectrum
                 controls: both are readouts laid over the trace rather than settings
                 that change what is drawn. A count rather than a switch, because "how
                 many" is the only question — one marker on a quiet band and a dozen on
                 a busy one are both reasonable, and there is no sensible default number
                 to switch on to. */}
-            <Field
-                label="Peak markers"
-                hint={d.peakMarks == null ? 'default for this device' : 'spectrum only'}
-            >
+            <Field label="Peak markers" hint="spectrum only">
                 <select
                     className="select"
-                    value={peakCount(d.peakMarks, mobile)}
+                    value={peakCount(d.peakMarks)}
                     onChange={(e) => d.set({ peakMarks: Number(e.target.value) })}
                 >
                     {PEAK_COUNTS.map((n) => (
@@ -489,7 +477,7 @@ export default function DisplayPanel() {
             </Field>
             {/* Only with markers on: a threshold for something that is not being drawn
                 is a control with nothing to do. */}
-            {peakCount(d.peakMarks, mobile) > 0 && (
+            {peakCount(d.peakMarks) > 0 && (
                 <Field label="Peak marks" hint="where they sit">
                     <select
                         className="select"
@@ -501,7 +489,7 @@ export default function DisplayPanel() {
                     </select>
                 </Field>
             )}
-            {peakCount(d.peakMarks, mobile) > 0 && (
+            {peakCount(d.peakMarks) > 0 && (
                 <Field label="Peak threshold" hint="above the noise floor">
                     <select
                         className="select"
@@ -514,16 +502,6 @@ export default function DisplayPanel() {
                     </select>
                 </Field>
             )}
-            <div className="note note--tight">
-                Points at the strongest signals in the view and names each one&rsquo;s
-                frequency and how far it stands above the noise. The count is a ceiling
-                rather than a quota — a band with two signals on it gets two markers,
-                not five spread over the noise — and two signals too close to label
-                separately show one label with both marks. The trace is averaged over
-                about a second before anything is measured, so the markers hold still
-                instead of chasing the noise. Nothing is drawn in waterfall-only view,
-                where there is no trace to point at.
-            </div>
             {/* A list, not a switch: "how long am I prepared to be counted as
                 away" is the actual question, and the old switch answered it with
                 a number the panel could only describe. `null` is not an option

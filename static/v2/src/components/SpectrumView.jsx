@@ -1022,12 +1022,9 @@ export default function SpectrumView() {
     // chosen resolves per device — see statsPlace — which is why it is worked out
     // here rather than higher up: it needs `mobile`.
     const statsAt = statsPlace(display.spectrumStats, mobile);
-    // Peak markers resolve per device too. The answer goes on the gfx ref rather than
-    // being read from the settings inside the draw, as bgOpacity and the station colour
-    // do: the canvas code has no idea what kind of screen it is on, and telling it would
-    // be a second copy of this decision.
-    const peaksWanted = peakCount(display.peakMarks, mobile);
-    gfx.current.peaksWanted = peaksWanted;
+    // Peak markers. Resolved here and left on the gfx ref, as bgOpacity and the station
+    // colour are, rather than being dug out of the settings inside the draw.
+    gfx.current.peaksWanted = peakCount(display.peakMarks);
     gfx.current.peaksSnr = peakSnr(display.peakMinSnr);
     gfx.current.peaksPlace = peakPlace(display.peakMarksAt);
 
@@ -2252,7 +2249,38 @@ function refreshPeaks(g, trace, count, snr, cfg, pxW, now) {
 // like a comb of signals that are not there.
 const PEAK_DROP_ALPHA = 0.3;
 
-function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, place) {
+// The backing behind each label.
+//
+// A shadow was not enough, and could not be: the spectrum pane can have an operator's
+// photograph behind it, the palette runs from near-black to bright yellow, and a strong
+// signal is a wall of colour going through exactly where the text is. One ink cannot be
+// legible on all of that, and a shadow only helps where the background is light *and*
+// busy — over a bright backdrop it is a smudge.
+//
+// So each label carries its own background: the spectrum's own colour, at enough alpha
+// to knock back whatever is under it while the trace still shows faintly through. It is
+// the same answer a bench analyser gives its marker readouts, and unlike a full-width
+// gutter along the top it covers only where there is text — which matters, because the
+// top of the pane is exactly where the strongest signals are.
+const PEAK_PLATE_ALPHA = 0.78;
+const PEAK_PLATE_PAD_X = 3;
+const PEAK_PLATE_PAD_Y = 2;
+
+// A rounded rectangle by hand. ctx.roundRect is recent enough that the marker bar and
+// the countries map both carry their own, and a canvas in the hot path is no place to
+// find out which browsers have it.
+function plate(c, x, y, w, h, r) {
+    const rad = Math.min(r, h / 2, w / 2);
+    c.beginPath();
+    c.moveTo(x + rad, y);
+    c.arcTo(x + w, y, x + w, y + h, rad);
+    c.arcTo(x + w, y + h, x, y + h, rad);
+    c.arcTo(x, y + h, x, y, rad);
+    c.arcTo(x, y, x + w, y, rad);
+    c.closePath();
+}
+
+function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, colBg, place) {
     if (!peaks.length || !cfg.span) return;
     const hz0 = cfg.centerFreq - cfg.span / 2;
 
@@ -2271,11 +2299,21 @@ function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, place) {
         // is what distinguishes it from the axis labels down the left.
         return `${formatFreqShort(hz, cfg.span)}  +${Math.round(p.snr)}`;
     });
+    // The receiver-info block counts as occupied space, so a label that would land
+    // under it is dropped exactly as one colliding with another label is — its mark and
+    // its hairline stay. Two texts on top of each other are both unreadable, and this
+    // one is somebody's callsign.
+    //
+    // Only in the fixed row, where the labels are at the block's own height. On the
+    // signal they are wherever their peaks are, and a peak that tall in that corner is
+    // rare enough not to be worth refusing a label for.
+    const blocked = [];
+    if (place !== 'signal' && g.stationBox) blocked.push([g.stationBox.x0, g.stationBox.x1]);
     const placed = layoutPeakLabels(
         peaks,
         texts.map((t) => c.measureText(t).width),
         pxW,
-        { pad: PEAK_LABEL_GAP_PX * dpr },
+        { pad: PEAK_LABEL_GAP_PX * dpr, blocked },
     );
 
     const caret = PEAK_CARET_PX * dpr;
@@ -2322,13 +2360,16 @@ function drawPeakMarks(c, g, peaks, pxW, H, dpr, cfg, yOf, colInk, place) {
         const y = place === 'signal'
             ? Math.max(PEAK_TOP_PAD_PX * dpr, tip - caret - PEAK_LABEL_GAP_PX * dpr)
             : rowLabelY;
-        // Shadowed rather than plated, as the dB labels are: the palette behind this
-        // can be anything from near-black to bright yellow, and a shadow is what makes
-        // one ink legible over all of them without a box that hides the trace.
-        c.shadowColor = 'rgba(0, 0, 0, 0.9)';
-        c.shadowBlur = 3 * dpr;
+        const padX = PEAK_PLATE_PAD_X * dpr;
+        const padY = PEAK_PLATE_PAD_Y * dpr;
+        const textH = 10 * dpr;
+        c.globalAlpha = PEAK_PLATE_ALPHA;
+        c.fillStyle = colBg;
+        plate(c, p.left - padX, y - textH - padY, p.width + padX * 2, textH + padY * 2, 3 * dpr);
+        c.fill();
+        c.globalAlpha = 1;
+        c.fillStyle = colInk;
         c.fillText(texts[i], p.left, y);
-        c.shadowBlur = 0;
     }
     c.restore();
 }
@@ -2749,7 +2790,8 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         drawPeakMarks(
             c, g,
             refreshPeaks(g, trace, g.peaksWanted, g.peaksSnr, cfg, pxW, performance.now()),
-            pxW, H, dpr, cfg, yOf, colors()['--accent'] || '#08a2fb', g.peaksPlace,
+            pxW, H, dpr, cfg, yOf,
+            colors()['--accent'] || '#08a2fb', colBg, g.peaksPlace,
         );
     }
 
@@ -2806,6 +2848,10 @@ const STATION_W = new Map();
 // a 1 px black drop shadow under every line so the text stays legible over a
 // bright backdrop image or a strong signal.
 function drawStationId(g, c, pxW, dpr) {
+    // Where it ended up, for anything else that draws in the same corner — the peak
+    // labels, which are a row along the top and would otherwise run straight under it.
+    // Cleared first: it is stale the moment the operator turns the block off.
+    g.stationBox = null;
     const lines = g.station;
     if (!lines || !lines.length) return;
 
@@ -2849,6 +2895,12 @@ function drawStationId(g, c, pxW, dpr) {
         c.fillStyle = col;
         c.fillText(line.text, x, y);
         y += 16 * dpr;
+        const box = g.stationBox;
+        g.stationBox = {
+            x0: Math.min(box ? box.x0 : Infinity, x),
+            x1: rightX,
+            y1: y,
+        };
     }
     c.restore();
 }

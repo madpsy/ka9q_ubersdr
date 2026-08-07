@@ -43,26 +43,14 @@
 // its place while it is within a decibel or so of the newcomer that would displace it,
 // so two signals trading a fraction of a dB do not swap markers several times a second.
 
-// How many markers the picker offers, and what "not chosen" resolves to.
-//
-// Three on a desktop: enough to name what is worth naming on a busy band without the
-// spectrum becoming a page of text, and the marker on the strongest signal is the one
-// most often wanted anyway. One on a phone, where the trace is a couple of hundred
-// pixels wide — two labels there would collide about as often as not, and the panel is
-// being read at arm's length.
-//
-// `null` means the operator has not chosen and is not the same as 0: it resolves per
-// device, so the same saved settings behave sensibly on a desktop and a handset, and the
-// picker shows what is actually in force. Same shape as the stats overlay.
+// How many markers the picker offers. None first, and it is the default: a receiver
+// that arrives with labels scattered over the spectrum has decided on your behalf what
+// you are looking at, and the trace already shows where the signals are — this is for
+// when you want them named.
 export const PEAK_COUNTS = [0, 1, 3, 5, 8, 12];
-export const PEAK_DEFAULT_DESKTOP = 3;
-export const PEAK_DEFAULT_MOBILE = 1;
 
-/** How many markers to draw: the setting, or this device's default if none was chosen. */
-export function peakCount(n, isMobile = false) {
-    if (n == null) return isMobile ? PEAK_DEFAULT_MOBILE : PEAK_DEFAULT_DESKTOP;
-    return PEAK_COUNTS.includes(Number(n)) ? Number(n) : 0;
-}
+/** A count from the settings, made safe. */
+export const peakCount = (n) => (PEAK_COUNTS.includes(Number(n)) ? Number(n) : 0);
 
 // Where the markers live.
 //
@@ -329,11 +317,16 @@ export function findPeaks(trace, {
  *   naming is the bigger one — and with the hysteresis above, which one that is holds
  *   still between frames.
  *
+ * `blocked` is spans that are already spoken for — the receiver-info block in the
+ * corner of the spectrum, which is text of somebody's own and must not be written over.
+ * They are seeded into the same collision list, so "something else is there" and
+ * "another label is there" have one answer rather than two.
+ *
  * `widths` is measured text in the same pixel space as `viewW`, in the order of
  * `peaks`. Returns one entry per peak, `label` false where the text is dropped.
  */
-export function layoutPeakLabels(peaks, widths, viewW, { pad = 6 } = {}) {
-    const taken = [];
+export function layoutPeakLabels(peaks, widths, viewW, { pad = 6, blocked = [] } = {}) {
+    const taken = blocked.map(([a, b]) => [a - pad, b + pad]);
     return peaks.map((p, i) => {
         const w = widths[i] || 0;
         const left = Math.max(0, Math.min(viewW - w, p.x - w / 2));

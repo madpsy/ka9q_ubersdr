@@ -144,14 +144,11 @@ export const DEFAULTS = {
     //
     // See statsPlace, and lib/spectrumStats.js for what it shows.
     spectrumStats: null,
-    // How many peak markers to point at the strongest signals in the view.
-    //
-    // null is "not chosen" and resolves per device, the same shape as the stats overlay
-    // and the idle delays: three on a desktop, one on a phone, where the trace is a
-    // couple of hundred pixels wide and two labels would collide more often than not.
-    // 0 is a choice of its own and means off. Spectrum pane only — see peakCount in
-    // lib/spectrumPeaks.js and drawPeakMarks in SpectrumView.
-    peakMarks: null,
+    // How many peak markers to point at the strongest signals in the view. Off, because
+    // the trace already shows where the signals are and this is for when you want them
+    // named — a spectrum that arrives covered in labels has decided that for you.
+    // Spectrum pane only: see lib/spectrumPeaks.js and drawPeakMarks in SpectrumView.
+    peakMarks: 0,
     // How far above the noise floor a signal has to be, in dB, to earn one of those
     // markers — named to differ from the peakSnr clamp it is passed through, since a
     // bare key here reads exactly like a use of that function. The count above is

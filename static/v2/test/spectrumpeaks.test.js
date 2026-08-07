@@ -270,6 +270,23 @@ t('a chain of labels alternates rather than dropping everything after the first'
     assert.deepStrictEqual(got.map((p) => p.label), [true, false, true]);
 });
 
+t('a label that would land on the receiver-info block is dropped', () => {
+    // The block is somebody's callsign, drawn in the same corner as the fixed label
+    // row. Two texts on top of each other are both unreadable, so this uses the same
+    // rule as two labels colliding: the text goes, the mark stays.
+    const got = pk.layoutPeakLabels(
+        [{ x: 450 }, { x: 100 }], [40, 40], 500, { pad: 4, blocked: [[430, 500]] },
+    );
+    assert.strictEqual(got[0].label, false, 'under the block');
+    assert.strictEqual(got[1].label, true, 'well clear of it');
+});
+
+t('no blocked spans is the same answer as before there were any', () => {
+    const a = pk.layoutPeakLabels([{ x: 100 }], [40], 500);
+    const b = pk.layoutPeakLabels([{ x: 100 }], [40], 500, { blocked: [] });
+    assert.deepStrictEqual(a, b);
+});
+
 t('a zero-width label is never placed and never blocks one', () => {
     const got = pk.layoutPeakLabels([{ x: 100 }, { x: 100 }], [0, 40], 500);
     assert.strictEqual(got[0].label, false);
@@ -278,27 +295,12 @@ t('a zero-width label is never placed and never blocks one', () => {
 
 // --- the settings ------------------------------------------------------------
 
-t('not chosen resolves per device, and 0 is a choice of its own', () => {
-    // The distinction that matters: absent means "this device's default", which is not
-    // the same as somebody having turned the markers off.
-    assert.strictEqual(pk.peakCount(null, false), pk.PEAK_DEFAULT_DESKTOP);
-    assert.strictEqual(pk.peakCount(null, true), pk.PEAK_DEFAULT_MOBILE);
-    assert.strictEqual(pk.peakCount(undefined, true), pk.PEAK_DEFAULT_MOBILE);
-    assert.strictEqual(pk.peakCount(0, false), 0, 'off stays off on any screen');
-    assert.strictEqual(pk.peakCount('5'), 5, 'a number from a <select> is a string');
-});
-
-t('the defaults are fewer on a phone, and both are on the list', () => {
-    assert.ok(pk.PEAK_DEFAULT_MOBILE < pk.PEAK_DEFAULT_DESKTOP);
-    assert.ok(pk.PEAK_COUNTS.includes(pk.PEAK_DEFAULT_MOBILE));
-    assert.ok(pk.PEAK_COUNTS.includes(pk.PEAK_DEFAULT_DESKTOP));
+t('off is the default, and anything unrecognised is off too', () => {
     assert.strictEqual(pk.PEAK_COUNTS[0], 0, 'None is the first thing in the list');
-});
-
-t('a value that is not on the list is off, not a guess', () => {
-    for (const v of ['', 'lots', 7, -3, 1e9, NaN]) {
+    for (const v of [undefined, null, '', 'lots', 7, -3, 1e9, NaN]) {
         assert.strictEqual(pk.peakCount(v), 0, String(v));
     }
+    assert.strictEqual(pk.peakCount('5'), 5, 'a number from a <select> is a string');
 });
 
 t('the threshold falls back to ten, which is a signal you can hear', () => {

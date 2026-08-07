@@ -47,7 +47,7 @@
 // that arrives with labels scattered over the spectrum has decided on your behalf what
 // you are looking at, and the trace already shows where the signals are — this is for
 // when you want them named.
-export const PEAK_COUNTS = [0, 1, 3, 5, 8, 12];
+export const PEAK_COUNTS = [0, 1, 2, 3, 5, 8, 12];
 
 /** A count from the settings, made safe. */
 export const peakCount = (n) => (PEAK_COUNTS.includes(Number(n)) ? Number(n) : 0);

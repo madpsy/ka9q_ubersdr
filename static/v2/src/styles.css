@@ -6836,15 +6836,21 @@ a.btn { text-decoration: none; }
 
 .cw__controls { display: flex; gap: 4px; width: 100%; }
 .cw__mode { flex: none; min-width: calc(44px * var(--ui-scale)); }
-/* The level picker doubles as the readout — see the info row in Morse.jsx. */
-.cw__level { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* The level picker doubles as the readout — see the info row in Morse.jsx. Fixed
+   width, so the characters beside it are what shrinks. */
+.cw__level { flex: none; display: flex; align-items: center; gap: 4px; }
 .cw__level .cw__sel { flex: none; width: auto; }
 .cw__sel { flex: 1; min-width: 0; padding: 3px 4px; font-size: calc(10.5px * var(--ui-scale)); }
-/* The characters in play, in the info row. Mono and spaced, and allowed to run to
-   an ellipsis: by level thirty this is a long line and the level number beside it
-   matters more than the tail of it. */
+/* The newest characters in play, in the info row.
+ *
+ * This is the element that gives way when the row is tight — `flex: 1` with a zero
+ * minimum — and the picker beside it is fixed. Without both halves of that a long
+ * line does not shrink at all: a flex item will not go below its content width
+ * unless it is told it may, and the two then overlap rather than one truncating. */
 .cw__inplay {
+    flex: 1 1 auto;
     min-width: 0;
+    text-align: right;
     font-family: var(--mono);
     letter-spacing: 0.08em;
     overflow: hidden;

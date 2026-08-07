@@ -66,6 +66,10 @@ const KEY = 'ubersdr.v2.games.morse';
 const NEXT_MS = 1400;
 const WRONG_MS = 2200;      // longer, because there is something to read
 const OPTIONS = 5;
+// How many of the characters in play to name in the info row. Four fits beside the
+// level picker at any width the panel is given, and they are the four that matter:
+// the most recently unlocked are the ones still being learned.
+const NEWEST = 4;
 
 // Sidetone choices, in hertz. The range CW operators actually use: much below 400
 // is muddy on a small speaker and much above 900 is tiring within a minute.
@@ -321,7 +325,14 @@ export default function Morse() {
                                 : null))}
                         </select>
                     </label>
-                    <span className="cw__inplay" title="The characters in play">{set.join(' ')}</span>
+                    {/* The newest few rather than all of them. By level 28 the
+                        full set is a line and a half of monospace, which crowded
+                        the picker beside it — and the ones worth showing are the
+                        ones being learned, not the twenty that are known. The whole
+                        set is in the tooltip. */}
+                    <span className="cw__inplay" title={`In play: ${set.join(' ')}`}>
+                        {set.length > NEWEST ? '… ' : ''}{set.slice(-NEWEST).join(' ')}
+                    </span>
                 </>
             )}
             status={status}

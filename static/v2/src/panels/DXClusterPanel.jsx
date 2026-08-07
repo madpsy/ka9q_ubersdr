@@ -68,12 +68,13 @@ const STICK_PX = 40;
 // The layout's own default is 320 across, which is the width this panel refuses to draw
 // in — floating it from the signpost and landing in the same predicament would be a
 // button that does not work. Eighty columns of the terminal's font is about 560 px, and
-// the rest is the quick-command grid, the scrollbar and somewhere for the login row to
-// sit on one line.
+// the rest is the scrollbar and somewhere for the login row to sit on one line. Enough
+// and no more: a window that opens across most of the screen has decided how you are
+// going to use the rest of it, and this one is meant to sit beside the spectrum.
 //
 // Trimmed to the window if the window is smaller, because a panel opening wider than
 // the screen is a panel with its Close button off the edge.
-const FLOAT_W = 860;
+const FLOAT_W = 680;
 const FLOAT_H = 480;
 
 function floatSize() {

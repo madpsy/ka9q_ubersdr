@@ -415,10 +415,13 @@ export default function DisplayPanel() {
                 one of them is "none" is a list, and Off/Left/Right as a segmented
                 control would read as three things you might turn on rather than
                 one setting with a corner attached. */}
-            <Field label="Stats overlay">
+            <Field
+                label="Stats overlay"
+                hint={d.spectrumStats == null ? 'default for this device' : undefined}
+            >
                 <select
                     className="select"
-                    value={statsPlace(d.spectrumStats)}
+                    value={statsPlace(d.spectrumStats, mobile)}
                     onChange={(e) => d.set({ spectrumStats: e.target.value })}
                 >
                     <option value="off">None</option>
@@ -428,10 +431,12 @@ export default function DisplayPanel() {
             </Field>
             <div className="note note--tight">
                 Prints frame rate, frames arriving, bin count and resolution,
-                throughput (spectrum + audio = total), audio latency and how many
-                people are on the receiver, over the waterfall. Bottom left is also
-                where minimised windows sit, so the right is the quieter corner on a
-                busy layout.
+                throughput (every stream and the total), audio latency, how many
+                people are on the receiver and the address you are connecting from.
+                Bottom left by default on a desktop and off on a phone, where the
+                corner is busier and the screen is likelier to be in public.
+                Minimised windows also sit bottom left, so the right is the quieter
+                corner on a crowded layout.
             </div>
             {/* A list, not a switch: "how long am I prepared to be counted as
                 away" is the actual question, and the old switch answered it with

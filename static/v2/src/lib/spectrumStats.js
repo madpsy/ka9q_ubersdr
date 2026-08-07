@@ -26,8 +26,26 @@
 // Where the readout sits, and the vocabulary the Display panel offers.
 export const STATS_PLACES = ['off', 'left', 'right'];
 
-export function statsPlace(setting) {
-    return STATS_PLACES.includes(setting) ? setting : 'off';
+// What "not chosen" means, per device.
+//
+// A desktop gets it: there is room in the corner, and somebody at a desk in front
+// of a receiver is the person the readout is for. A phone does not — the bottom
+// of that screen is the pad, the sheet and the band chips, and one of the lines
+// is the address you are connecting from, which is not something to put on screen
+// by default on a device used in public.
+export const STATS_DEFAULT_DESKTOP = 'left';
+export const STATS_DEFAULT_MOBILE = 'off';
+
+/**
+ * The corner in force, for a stored setting that may be absent.
+ *
+ * null or anything unrecognised is "not chosen" and takes this device's default.
+ * 'off' is a choice like any other and survives — the same rule the idle delays
+ * follow, where 0 means never and must not be read as unset.
+ */
+export function statsPlace(setting, isMobile) {
+    if (STATS_PLACES.includes(setting)) return setting;
+    return isMobile ? STATS_DEFAULT_MOBILE : STATS_DEFAULT_DESKTOP;
 }
 
 /** A rate per second from a counter difference over `ms`, or null if unmeasurable. */

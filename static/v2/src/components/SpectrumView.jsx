@@ -666,8 +666,6 @@ export default function SpectrumView() {
     const [paused, setPaused] = useState(spectrumPaused);
     useEffect(() => onSpectrumPaused(setPaused), []);
 
-    // The diagnostic readout in a corner of the waterfall, and which corner.
-    const statsAt = statsPlace(display.spectrumStats);
 
     // Stopping and starting it by hand, which is the toolbar's toggle and the
     // overlay's button. The same state either way: there is one paused spectrum,
@@ -1008,6 +1006,11 @@ export default function SpectrumView() {
     // has it, and the tags left of the zoom buttons are the scarcest row in the
     // layout there.
     const mobile = useMediaQuery(MOBILE_QUERY);
+
+    // The diagnostic readout in a corner of the waterfall, and which corner. Not
+    // chosen resolves per device — see statsPlace — which is why it is worked out
+    // here rather than higher up: it needs `mobile`.
+    const statsAt = statsPlace(display.spectrumStats, mobile);
 
     // A handset on its side gives the whole toolbar up, tags and all. With the
     // top bar gone too (see MobileShell) the spectrum starts at the marker bar,

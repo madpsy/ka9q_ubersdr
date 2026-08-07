@@ -121,10 +121,18 @@ export const DEFAULTS = {
     // waits to be asked, because a socket reopening because somebody walked past
     // the desk is the saving thrown away.
     idlePauseMin: null,
-    // The diagnostic readout over the waterfall: 'off', 'left' or 'right'. Off,
-    // because it is an instrument for when something looks wrong rather than
-    // something to watch — see lib/spectrumStats.js.
-    spectrumStats: 'off',
+    // The diagnostic readout over the waterfall: 'off', 'left' or 'right'.
+    //
+    // null means "not chosen" and resolves per device, the same shape as the two
+    // idle delays above: bottom left on a desktop, off on a phone. A desktop has
+    // the room and the operator is usually sitting in front of the receiver
+    // working out why something looks wrong; a phone has neither the pixels nor
+    // the corner to spare — the pad, the sheet and the chips are all down there —
+    // and one of the figures is the address you are connecting from, which is not
+    // something to have on screen by default on a device used in public.
+    //
+    // See statsPlace, and lib/spectrumStats.js for what it shows.
+    spectrumStats: null,
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator
@@ -193,7 +201,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 function migrate(saved) {
     // v2: zoomAnchor gained 'auto', which is tuned on a phone.
@@ -216,6 +224,15 @@ function migrate(saved) {
         if (saved.idleThrottle === false) saved.idleThrottleMin = 0;
         delete saved.idleThrottle;
     }
+
+    // v4: the stats overlay's default became per-device rather than flat 'off'.
+    //
+    // A stored 'off' from before this is the old default written out on first
+    // load — every setting is persisted whole, so everyone has one — and it would
+    // hold the new default off for ever on machines that should now have it. Any
+    // other stored value is a corner somebody picked and is left alone.
+    if (!(saved.v >= 4) && saved.spectrumStats === 'off') delete saved.spectrumStats;
+
     return saved;
 }
 

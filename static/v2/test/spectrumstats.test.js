@@ -8,7 +8,8 @@
 
 const assert = require('assert');
 const {
-    STATS_PLACES, formatThroughput, perSecond, statLines, statsPlace,
+    STATS_DEFAULT_DESKTOP, STATS_DEFAULT_MOBILE, STATS_PLACES,
+    formatThroughput, perSecond, statLines, statsPlace,
 } = require('./.build/spectrumstats.cjs');
 
 let pass = 0;
@@ -22,14 +23,33 @@ const value = (lines, key) => (find(lines, key) || {}).value;
 
 // --- where it sits ------------------------------------------------------------
 
-t('an unset or unknown placement is off', () => {
-    // A stored value from another build must not resolve to a corner nobody
-    // chose — the overlay is off by default and stays off unless asked for.
-    assert.strictEqual(statsPlace(undefined), 'off');
-    assert.strictEqual(statsPlace(null), 'off');
-    assert.strictEqual(statsPlace('middle'), 'off');
-    assert.strictEqual(statsPlace(true), 'off');
-    for (const p of STATS_PLACES) assert.strictEqual(statsPlace(p), p);
+t('unset takes the device default: a corner on a desktop, nothing on a phone', () => {
+    assert.strictEqual(STATS_DEFAULT_DESKTOP, 'left');
+    assert.strictEqual(STATS_DEFAULT_MOBILE, 'off');
+    assert.strictEqual(statsPlace(null, false), 'left');
+    assert.strictEqual(statsPlace(null, true), 'off');
+    assert.strictEqual(statsPlace(undefined, false), 'left');
+    // Both defaults have to be offerable, or the control could not show what is
+    // running.
+    assert.ok(STATS_PLACES.includes(STATS_DEFAULT_DESKTOP));
+    assert.ok(STATS_PLACES.includes(STATS_DEFAULT_MOBILE));
+});
+
+t('a stored value from another build is not a corner nobody chose', () => {
+    assert.strictEqual(statsPlace('middle', false), 'left');
+    assert.strictEqual(statsPlace('middle', true), 'off');
+    assert.strictEqual(statsPlace(true, false), 'left');
+    assert.strictEqual(statsPlace(0, true), 'off');
+});
+
+t('a chosen corner is the same on either device, and off is a choice', () => {
+    for (const p of STATS_PLACES) {
+        assert.strictEqual(statsPlace(p, true), p);
+        assert.strictEqual(statsPlace(p, false), p);
+    }
+    // The trap the idle delays have too: 'off' chosen on a desktop must not read
+    // as unset and come back as 'left' on the next load.
+    assert.strictEqual(statsPlace('off', false), 'off');
 });
 
 // --- rates ---------------------------------------------------------------------

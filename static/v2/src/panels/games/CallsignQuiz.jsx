@@ -30,6 +30,27 @@ import {
     orderCandidates, saveSeen,
 } from '../../lib/games/quiz.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>
+            A callsign this receiver has actually heard — from the spot feeds and the
+            voice detector — and five countries. Pick the one it belongs to.
+        </p>
+        <p>
+            Get it right and the streak goes up; get it wrong and it starts again.
+            Either way the answer is shown, along with the operator's details where
+            this receiver has a lookup service.
+        </p>
+        <p>
+            The pool grows as the receiver hears more, and is remembered between
+            visits.
+        </p>
+    </>
+);
 // How long the answer stays up before the next round. Long enough to read the
 // country and the detail under it, short enough that it does not feel like being
 // kept waiting.

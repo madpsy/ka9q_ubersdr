@@ -11,6 +11,26 @@ import {
     CELLS, COLS, MINE, MINES, colOf, floodReveal, idx, isWon, minesLeft, placeMines, rowOf,
 } from '../../lib/games/minesweeper.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>Ten mines in an 8×8 field. Open every square that is not one.</p>
+        <p>
+            A number is how many mines touch that square, counting diagonals — so a
+            <b> 1</b> beside three unopened squares means one of the three is a mine.
+            An empty square opens its neighbours automatically.
+        </p>
+        <p>
+            <b>Hold</b> a square — or right-click it — to plant a flag where you think
+            a mine is. Flags are not opened by accident, and the counter shows how
+            many you have left.
+        </p>
+        <p>The first square you open is always safe, and so is everything around it.</p>
+    </>
+);
 const LONG_PRESS_MS = 450;
 
 const fresh = () => ({

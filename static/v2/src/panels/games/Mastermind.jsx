@@ -7,6 +7,34 @@ import {
     COLORS, MAX_ROWS, SLOTS, isCracked, makeSecret, scoreGuess,
 } from '../../lib/games/mastermind.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>
+            The receiver has picked a secret code: <b>four pegs</b> from six colours.
+            Colours can repeat. You have eight guesses to work it out.
+        </p>
+        <p>
+            Tap four colours from the palette — <b>Undo</b> takes one back — then
+            <b> Submit</b>. The small dots beside your guess are the reply:
+        </p>
+        <p>
+            ● a <b>black</b> dot for each peg that is the right colour in the right
+            place.<br />
+            ○ a <b>white</b> dot for each peg that is the right colour in the
+            <i> wrong</i> place.
+        </p>
+        <p>
+            The dots never say <i>which</i> pegs — that is the whole game. Two black
+            and one white means three of your four colours are in the code, two of
+            them where you put them, and the next guess has to work out which.
+        </p>
+        <p>Run out of guesses and the code is shown.</p>
+    </>
+);
 const Pegs = ({ pegs, className = '' }) => (
     <div className={`mm__pegs ${className}`}>
         {Array.from({ length: SLOTS }, (_, i) => (
@@ -74,7 +102,11 @@ export default function Mastermind() {
             : 'Crack the code';
 
     return (
-        <Frame status={status} score={`W:${tally.w} L:${tally.l}`} action={newGame}>
+        <Frame
+            status={status}
+            score={`W:${tally.w} L:${tally.l}`}
+            action={newGame}
+        >
             <div className="mm">
                 <div className="mm__board">
                     {Array.from({ length: MAX_ROWS }, (_, r) => {

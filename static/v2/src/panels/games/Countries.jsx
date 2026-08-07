@@ -16,9 +16,29 @@ import {
     decodeArcs, pickCountry, project, unproject, viewFor,
 } from '../../lib/games/quiz.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>A pin on the world; name the country it is in.</p>
+        <p>
+            <b>Drag</b> the map to pan and <b>scroll</b> to zoom if the coastline is
+            not enough to go on — the view starts framed on the answer, so zooming out
+            shows you where in the world you are looking.
+        </p>
+        <p>Your longest streak is kept between visits.</p>
+    </>
+);
 const W = 336;
 const H = 168;
 const NEXT_MS = 3000;
+// How big the flag on the map is once the answer is in, in the canvas's own
+// 336×168 space. Twice the size a flag is anywhere else in the interface: this
+// one is the answer rather than a label, it is competing with a coastline behind
+// it, and the map is small enough that a 22 px mark reads as another pin.
+const FLAG_PX = 44;
 const BEST_KEY = 'ubersdr.v2.games.countries.best';
 
 // One fetch each per page, shared by every mount of this panel — the arcs are a
@@ -43,6 +63,20 @@ function loadData() {
         arcs: decodeArcs(topo),
     }));
     return cache;
+}
+
+// A rounded rectangle, by hand. `ctx.roundRect` is recent enough that the marker
+// bar carries its own too — see MarkerBar — and a game panel is no place to find
+// out which browsers have it.
+function plate(c, x, y, w, h, r) {
+    const rad = Math.min(r, h / 2, w / 2);
+    c.beginPath();
+    c.moveTo(x + rad, y);
+    c.arcTo(x + w, y, x + w, y + h, rad);
+    c.arcTo(x + w, y + h, x, y + h, rad);
+    c.arcTo(x, y + h, x, y, rad);
+    c.arcTo(x, y, x + w, y, rad);
+    c.closePath();
 }
 
 export default function Countries() {
@@ -99,6 +133,35 @@ export default function Countries() {
 
         if (!question) return;
         const [x, y] = project(question.lon, question.lat, view.current, W, H);
+
+        // Answered: the pin becomes the country's flag. The mark has done its job
+        // of asking "here" by then, and a flag says what the answer was in a way
+        // the name in the list beneath cannot — it is the thing you will recognise
+        // next time the pin lands there.
+        if (picked) {
+            const flag = countryFlag(question.iso_a2);
+            if (flag) {
+                c.save();
+                c.textAlign = 'center';
+                c.textBaseline = 'middle';
+                // The bundled flag font by name, not just a size: on Windows there
+                // is no flag emoji in the system fonts and a regional-indicator
+                // pair renders as two letters in a box. Canvas will not fall back
+                // to a webfont it has not been told about.
+                c.font = `${FLAG_PX}px 'Twemoji Flags', 'Noto Color Emoji', sans-serif`;
+                // A plate behind it, because a flag is a rectangle of arbitrary
+                // colour and coastlines run right under it.
+                c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+                plate(c, x - FLAG_PX * 0.62, y - FLAG_PX * 0.46, FLAG_PX * 1.24, FLAG_PX * 0.92, 3);
+                c.fill();
+                c.fillText(flag, x, y);
+                c.restore();
+                return;
+            }
+            // No flag for this one — fall through and leave the pin, rather than
+            // marking the spot with nothing.
+        }
+
         // A teardrop with a halo, so it reads over a coastline.
         c.beginPath();
         c.arc(x, y, 8, 0, Math.PI * 2);
@@ -116,7 +179,7 @@ export default function Countries() {
         c.lineWidth = 1.2;
         c.strokeStyle = '#fff';
         c.stroke();
-    }, [data, question]);
+    }, [data, question, picked]);
 
     useEffect(() => { draw(); }, [draw]);
 
@@ -256,7 +319,12 @@ export default function Countries() {
                                 disabled={!!picked}
                                 title={name}
                             >
-                                {picked ? `${countryFlag(question.codes.get(name) || '')} ` : ''}{name}
+                                {/* Every option carries its own flag, from the
+                                    start. It gives nothing away — each answer
+                                    shows its own — and it is half the pleasure of
+                                    the game: recognising a flag you cannot place
+                                    is exactly the gap this is for. */}
+                                {countryFlag(question.codes.get(name) || '')} {name}
                             </button>
                         );
                     })}

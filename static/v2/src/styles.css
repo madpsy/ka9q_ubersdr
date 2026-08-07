@@ -6484,6 +6484,32 @@ a.btn { text-decoration: none; }
 }
 .game__body { display: flex; flex-direction: column; gap: 6px; }
 
+/* The picker and the ? that explains what it picked. */
+.games__row { display: flex; align-items: center; gap: 5px; }
+.games__row .select { flex: 1; min-width: 0; }
+.games__help-btn { flex: none; font-family: var(--mono); font-weight: 700; }
+
+/* The rules, over the game. Opaque and inset to the game's own box, so the panel
+   is exactly the same size with the help open as with it shut — and scrollable,
+   because a 5×5 board is not much room for four sentences. */
+.games__stage { position: relative; }
+.games__help {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    overflow-y: auto;
+    padding: 8px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: calc(11.5px * var(--ui-scale));
+    line-height: 1.45;
+    color: var(--text-dim);
+}
+.games__help p { margin: 0 0 6px; }
+.games__help p:last-child { margin-bottom: 0; }
+.games__help b { color: var(--text); font-weight: 650; }
+
 /* ── Noughts and crosses ─────────────────────────────────────────────────── */
 .ttt { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .ttt__cell {

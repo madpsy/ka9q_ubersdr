@@ -4,6 +4,23 @@ import React, { useCallback, useState } from '../../react.js';
 import Frame from './Frame.jsx';
 import { BLANK, isSolved, slide, shuffle, solvedTiles } from '../../lib/games/puzzle15.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>Slide the tiles until they read 1 to 15 with the gap last.</p>
+        <p>
+            Only a tile directly beside the gap can move — press it and it slides in.
+            Diagonals do not count.
+        </p>
+        <p>
+            <b>Shuffle</b> deals a board that can actually be finished: half of all
+            arrangements cannot be, and there is no way to tell by looking.
+        </p>
+    </>
+);
 export default function Puzzle15() {
     const [tiles, setTiles] = useState(solvedTiles);
     const [moves, setMoves] = useState(0);

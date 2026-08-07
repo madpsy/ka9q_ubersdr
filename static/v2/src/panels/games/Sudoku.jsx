@@ -10,6 +10,26 @@ import {
     CELLS, DIGITS, N, conflicts, generate, isComplete,
 } from '../../lib/games/sudoku.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>
+            Six by six, digits <b>1 to 6</b>. Every row, every column and every 2×3
+            box outlined on the grid holds each digit exactly once.
+        </p>
+        <p>
+            Tap a cell, then a digit below. The same digit again clears it. The
+            darker digits were given and cannot be changed.
+        </p>
+        <p>
+            Anything clashing with another digit turns red — both of them, so you can
+            see what the argument is. There is exactly one solution.
+        </p>
+    </>
+);
 export default function Sudoku() {
     const [game, setGame] = useState(generate);
     const [grid, setGrid] = useState(() => game.puzzle.slice());

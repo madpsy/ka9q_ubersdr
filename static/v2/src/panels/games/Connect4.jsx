@@ -13,6 +13,23 @@ import {
 } from '../../lib/games/connect4.js';
 import { BLUNDER_START, adaptBlunder } from '../../lib/games/ttt.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>
+            Drop a <b>red</b> disc down a column with the arrows. It falls to the
+            lowest free space.
+        </p>
+        <p>
+            First to four in a row wins — across, down, or either diagonal. The
+            receiver is yellow, thinks four moves ahead, and plays to your level the
+            same way it does at noughts and crosses.
+        </p>
+    </>
+);
 const THINK_MS = 220;
 
 export default function Connect4() {

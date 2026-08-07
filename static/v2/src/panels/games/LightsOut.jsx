@@ -4,6 +4,32 @@ import React, { useCallback, useEffect, useState } from '../../react.js';
 import Frame from './Frame.jsx';
 import { N, isWon, litCount, pressAt, scramble } from '../../lib/games/lightsout.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>Turn every light off. Sounds easy; it is not.</p>
+        <p>
+            Pressing a square toggles <b>five</b> lights: that one and the four beside
+            it — up, down, left and right. Not the diagonals, and not past the edge of
+            the board.
+        </p>
+        <p>
+            So every press both helps and hinders, and pressing the same square twice
+            undoes it entirely. The order you press in makes no difference to the
+            result — only which squares, and how many times each.
+        </p>
+        <p>
+            <b>A way in:</b> ignore the top row and work downwards — whenever a light
+            is on, press the square directly <i>below</i> it. That clears everything
+            except the bottom row, and which pattern is left there tells you which
+            squares to press along the top to finish.
+        </p>
+        <p>Every board dealt can be cleared.</p>
+    </>
+);
 export default function LightsOut() {
     const [grid, setGrid] = useState(() => scramble());
     const [moves, setMoves] = useState(0);

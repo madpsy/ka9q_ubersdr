@@ -12,6 +12,22 @@ import {
     AI, BLUNDER_START, EMPTY, HUMAN, adaptBlunder, bestMove, emptyBoard, winLine, winner,
 } from '../../lib/games/ttt.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>Three in a row wins — across, down or corner to corner. You are <b>✕</b>.</p>
+        <p>
+            Whoever won last goes first next time, and the receiver plays to your
+            level: it makes more mistakes while you are losing and fewer while you
+            are winning. A perfect opponent can never be beaten at this game, which
+            is why it does not try to be one.
+        </p>
+        <p>A finished board deals again after three seconds, or when you press it.</p>
+    </>
+);
 const THINK_MS = 120;
 const OPENING_MS = 300;
 

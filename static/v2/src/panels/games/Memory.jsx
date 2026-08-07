@@ -6,6 +6,20 @@ import {
     FLIP_BACK_MS, PAIRS, canFlip, deal, isMatched, isWon,
 } from '../../lib/games/memory.js';
 
+// How to play — shown by the ? beside the game picker. See GamesPanel.
+//
+// `gameHelp` rather than `help`: it is exported into an app where half a dozen
+// files have a local of that name, and test/unresolved.js refuses the collision.
+export const gameHelp = (
+    <>
+        <p>Sixteen cards, eight pairs, all face down.</p>
+        <p>
+            Turn two. If they match they stay up; if they do not they turn back over
+            after a moment — and nothing else can be turned until they do.
+        </p>
+        <p>Find every pair in as few flips as you can. Your best is kept.</p>
+    </>
+);
 export default function Memory() {
     const [cards, setCards] = useState(deal);
     const [flipped, setFlipped] = useState([]);

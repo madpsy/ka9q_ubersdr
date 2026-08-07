@@ -38,6 +38,8 @@ esbuild ../src/lib/spectrumStats.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumstats.cjs --log-level=warning
 esbuild ../src/lib/share.js --bundle --format=cjs --platform=node \
     --outfile=.build/share.cjs --log-level=warning
+esbuild ../src/lib/uiColors.js --bundle --format=cjs --platform=node \
+    --outfile=.build/uicolors.cjs --log-level=warning
 esbuild ../src/lib/markers.js --bundle --format=cjs --platform=node \
     --outfile=.build/markers.cjs --log-level=warning
 esbuild ../src/lib/audioBand.js --bundle --format=cjs --platform=node \
@@ -235,6 +237,7 @@ node radiosettings.test.js
 node format.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
+node uicolors.test.js
 node share.test.js
 node spectrumstats.test.js
 node audiosinks.test.js

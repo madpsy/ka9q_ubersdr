@@ -53,6 +53,14 @@ export function paletteGradients(c, H, palette, contrast) {
 // rendering itself.
 let themeCache = null;
 
+// Drop it. The cache is keyed on the theme, which is enough while the values
+// come only from the stylesheet — but the accent is settable now (see
+// DisplayContext), and a colour changed without the theme changing has to reach
+// the canvas too.
+export function invalidateThemeColors() {
+    themeCache = null;
+}
+
 export function themeColors(vars) {
     const theme = document.documentElement.dataset.theme || 'dark';
     if (themeCache && themeCache.theme === theme) return themeCache;

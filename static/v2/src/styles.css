@@ -3314,6 +3314,16 @@ a.btn { text-decoration: none; }
     gap: 10px;
 }
 .markcolors__name { font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+/* Shown only when a chosen colour is too close to the page to read — see
+   UiColors. Pushed against the picker rather than the label: it is about the
+   swatch, and the row is a name at one end and a control at the other. */
+.markcolors__warn {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--warn);
+}
 
 .colorpick { display: inline-flex; align-items: center; gap: 6px; }
 /* A swatch, not a form control: the native input carries its own inset border

@@ -10,6 +10,7 @@ import {
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
 } from '../radio/idle.js';
 import { statsPlace } from '../lib/spectrumStats.js';
+import { contrastMin, effectiveColors, pageContrast } from '../lib/uiColors.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
@@ -72,6 +73,8 @@ export default function DisplayPanel() {
                     ]}
                 />
             </Field>
+
+            <UiColors />
 
             <Field label="View">
                 <Segmented
@@ -501,6 +504,74 @@ export default function DisplayPanel() {
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>
             </div>
         </div>
+    );
+}
+
+// The interface's own colours: what it highlights in, what it writes in, and the
+// two quieter greys under that — the labels, the units, the clocks.
+//
+// The same block the marker colours use, and deliberately: a row per colour, the
+// picker opening on what is actually on screen, and a Default beside it. Nobody
+// should have to learn a second way to change a colour in the same panel.
+//
+// Four rows rather than one, because they are four different jobs. Somebody
+// wanting an amber receiver wants the accent; somebody who finds the labels too
+// faint at night wants the greys and nothing else. Left alone, the greys follow
+// the text colour, so changing one thing still looks deliberate — see
+// lib/uiColors.js.
+//
+// The contrast figure is there because it is the one thing the OS colour picker
+// cannot show: it knows nothing about the page the colour will sit on. It appears
+// only against a colour somebody chose, and only when that colour is too close to
+// the page to read — see contrastMin.
+function UiColors() {
+    const d = useDisplay();
+    const theme = d.theme === 'light' ? 'light' : 'dark';
+    const mine = d.uiColors || {};
+    const now = effectiveColors(mine, theme);
+    const chosen = Object.values(mine).some(Boolean);
+
+    const row = (which, name, hint) => {
+        const ratio = pageContrast(now[which], theme);
+        // Only about a colour somebody chose. The stock light-theme accent is
+        // 3.97:1 against its own page, so measuring the defaults would open the
+        // panel by warning about the receiver's own design.
+        const poor = !!mine[which] && ratio != null && ratio < contrastMin(which);
+        return (
+            <label className="markcolors__row">
+                <span className="markcolors__name" title={hint}>{name}</span>
+                {/* Only when it is bad news: a ratio beside every row would be a
+                    readout, and this is a warning. */}
+                {poor && (
+                    <span
+                        className="markcolors__warn"
+                        title={`${ratio.toFixed(1)}:1 against the page — under ${contrastMin(which)}:1, which is where this text stops being comfortably legible`}
+                    >
+                        {ratio.toFixed(1)}:1
+                    </span>
+                )}
+                <ColorPicker
+                    value={now[which]}
+                    inherited={!mine[which]}
+                    onChange={(v) => d.setUiColor(which, v)}
+                    onClear={() => d.setUiColor(which, '')}
+                    clearLabel="Default"
+                    ariaLabel={name}
+                    title={hint}
+                />
+            </label>
+        );
+    };
+
+    return (
+        <Field label="Colours" hint={chosen ? 'custom' : undefined}>
+            <div className="markcolors">
+                {row('accent', 'Accent', 'Everything the interface highlights: the tuned frequency, the selected mode, the dial line on the spectrum, focus rings. What goes on top of it is worked out from it')}
+                {row('text', 'Text', 'The main text colour. The two greys below follow it unless they have been set themselves')}
+                {row('dim', 'Dim', 'Secondary text — field labels, units, the clocks')}
+                {row('faint', 'Faint', 'The quietest text: placeholders, disabled controls, empty panels')}
+            </div>
+        </Field>
     );
 }
 

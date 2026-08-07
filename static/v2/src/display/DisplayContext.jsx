@@ -4,6 +4,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
+import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
+import { invalidateThemeColors } from '../lib/spectrumTrace.js';
 
 const STORAGE_KEY = 'ubersdr.v2.display';
 
@@ -156,6 +158,18 @@ export const DEFAULTS = {
     // the one that answers "is anything there".
     topMeter: 'signal',
     theme: 'dark',
+    // The interface's own colours: the accent everything is highlighted in, the
+    // text, and the two quieter greys under it — labels, units, the clocks.
+    //
+    // Each is null until chosen, and null means the theme's own value rather than
+    // a colour written out here: that is what keeps "I have changed nothing"
+    // meaning nothing has changed, on a theme this build has not thought of as
+    // much as on the two it has. A chosen colour applies to both themes, because
+    // somebody who picked amber picked amber, not amber-when-dark.
+    //
+    // The greys follow the text unless chosen themselves. See lib/uiColors.js,
+    // which also derives what goes on top of an accent fill.
+    uiColors: { accent: null, text: null, dim: null, faint: null },
     uiScale: 1,             // multiplier on every font-size (top bar A-/A+)
     // Vibration on touch: 'off' | 'light' | 'medium' | 'strong'. On by default,
     // because a phone's controls have no travel and nothing else says a tap
@@ -202,6 +216,8 @@ export const UI_SCALE_STEP = 0.05;
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
 const SETTINGS_VERSION = 4;
+
+
 
 function migrate(saved) {
     // v2: zoomAnchor gained 'auto', which is tuned on a phone.
@@ -278,6 +294,27 @@ export function DisplayProvider({ children }) {
         document.documentElement.dataset.theme = state.theme;
     }, [state.theme]);
 
+    // The chosen colours, as properties on the root. Every property the group
+    // owns is visited every time: one that is set gets written, one that is not
+    // gets *removed*, which is what lets the stylesheet's own per-theme value
+    // apply again rather than being overwritten with a copy of itself.
+    //
+    // Keyed on the theme as well: the ink that goes on top of an accent fill and
+    // the alphas of its wash both differ between them.
+    useEffect(() => {
+        const root = document.documentElement.style;
+        const vars = uiColorVars(state.uiColors, state.theme);
+        for (const name of UI_COLOR_VARS) {
+            if (vars[name]) root.setProperty(name, vars[name]);
+            else root.removeProperty(name);
+        }
+        // The spectrum resolves its colours once per theme and caches them —
+        // --accent among them, for the dial line — so a colour changed without
+        // the theme changing would not reach the canvas until something else
+        // did. See themeColors.
+        invalidateThemeColors();
+    }, [state.uiColors, state.theme]);
+
     // Exposed as a custom property rather than an inline style so every
     // floating window picks it up without re-rendering — the same approach v1
     // uses for its controls_opacity setting.
@@ -309,9 +346,16 @@ export function DisplayProvider({ children }) {
         return { ...s, markOverrides: next };
     }), []);
 
+    // One of the interface's own colours. `hex` empty puts it back on the theme's
+    // — or, for the two greys, back on following the text colour.
+    const setUiColor = useCallback((which, hex) => setState((s) => ({
+        ...s,
+        uiColors: { ...(s.uiColors || {}), [which]: hex || null },
+    })), []);
+
     const value = useMemo(
-        () => ({ ...state, server, set, reset, setMarkColor }),
-        [state, server, set, reset, setMarkColor],
+        () => ({ ...state, server, set, reset, setMarkColor, setUiColor }),
+        [state, server, set, reset, setMarkColor, setUiColor],
     );
     return <DisplayContext.Provider value={value}>{children}</DisplayContext.Provider>;
 }

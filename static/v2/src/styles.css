@@ -7936,8 +7936,11 @@ a.btn { text-decoration: none; }
 /* The icon in the same grey as the name above it, not in the severity's colour: it says
    where this came from, and the colour down the left edge is already saying how bad it
    is. Two colours for two different facts on one small card is one too many. */
-.toast__panel-icon { display: grid; place-items: center; color: var(--text-faint); }
-.toast__panel-icon svg { width: 13px; height: 13px; }
+.toast__panel-icon { display: grid; place-items: center; color: var(--text-dim); }
+/* Big enough to be the thing you recognise rather than a decoration beside the name: at
+   thirteen pixels it read as punctuation, and the whole point of it is being identified
+   across the room before a word of the toast has been read. */
+.toast__panel-icon svg { width: 22px; height: 22px; }
 .toast__body {
     margin-top: 1px;
     font-size: calc(11px * var(--ui-scale));
@@ -8005,8 +8008,10 @@ a.btn { text-decoration: none; }
     text-transform: uppercase;
     color: var(--text-faint);
 }
-.notes__icon { display: grid; place-items: center; color: var(--text-faint); }
-.notes__icon svg { width: 12px; height: 12px; }
+.notes__icon { display: grid; place-items: center; color: var(--text-dim); }
+/* Bigger here too, though not toast-sized: this list is read rather than glanced at, and
+   the row has one line of height to give. */
+.notes__icon svg { width: 15px; height: 15px; }
 /* The per-source switches wear the same icon, so the switch and the notifications it
    governs are recognisably the same thing. */
 .notes__switch { display: inline-flex; align-items: center; gap: 5px; }

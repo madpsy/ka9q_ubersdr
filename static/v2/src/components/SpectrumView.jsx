@@ -3098,10 +3098,15 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
  * The dial and the passband edges, across the surface.
  *
  * The same three marks the heat map carries, and the same rules for when each is
- * drawn — but converging, because on a receding surface a fixed frequency is not
- * a vertical line. It is still a straight one, run on past the back of the
- * baseline plane so it does not stop short of terrain standing above it. See
- * edgeLine and MARK_OVERRUN.
+ * drawn — but each is a *pair* of converging lines rather than one.
+ *
+ * A ridge stands vertically off the ground plane, so at a given frequency the
+ * terrain fills a face between the ground and a full-height crest. One line on
+ * the ground answered for the wrong depth everywhere above the plane, and
+ * signals comfortably inside the passband appeared outside the edge meant to
+ * contain them. The ground line and the crest line together bound every place a
+ * ridge at that frequency can be drawn, so what is between them is inside. See
+ * edgeLine.
  *
  * Painted over the terrain rather than into it. Properly they would pass behind
  * a ridge that stands in front of them, which is what a depth buffer is for and
@@ -3115,10 +3120,15 @@ function drawDssMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     const unit = (hz) => (hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span;
 
     const line = (u, colour, dash, width) => {
-        const e = edgeLine(u);
+        // The ground first, then the crest above it. One path, two segments, so
+        // the halo is laid down under both before either is drawn — otherwise
+        // the second line's halo cuts a dark notch through the first.
         c.beginPath();
-        c.moveTo(e.x0 * pxW, e.y0 * H);
-        c.lineTo(e.x1 * pxW, e.y1 * H);
+        for (const lift of [0, 1]) {
+            const e = edgeLine(u, lift);
+            c.moveTo(e.x0 * pxW, e.y0 * H);
+            c.lineTo(e.x1 * pxW, e.y1 * H);
+        }
         c.setLineDash([dash[0] * dpr, dash[1] * dpr]);
         c.lineCap = 'butt';
         c.lineWidth = (width + 2 * MARK_HALO_PX) * dpr;

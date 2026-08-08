@@ -226,37 +226,48 @@ t('a mark is straight and converges on the vanishing point', () => {
     const e = edgeLine(0.8);
     assert.ok(near(e.x0, 0.8), 'full width at the front');
     assert.ok(near(e.y0, 1), 'and on the floor');
-    // Narrowed toward the centre, and above the plane's back edge.
-    assert.ok(e.x1 > 0.5 && e.x1 < 0.8);
-    assert.ok(e.y1 < 1 - DEPTH_SPAN);
+    assert.ok(near(e.x1, 0.5 + 0.3 * BACK_WIDTH), 'narrowed at the back');
+    assert.ok(near(e.y1, 1 - DEPTH_SPAN));
 });
 
-t('a mark runs past the plane far enough to clear the tallest terrain', () => {
-    // The bug: it stopped on the baseline plane, and ridges stand above that
-    // plane — up to a full ridge at back width — so with a signal at the back
-    // the terrain kept going where the mark ran out.
-    const e = edgeLine(0.5);
-    const tallest = (1 - DEPTH_SPAN) - FRONT_RIDGE * BACK_WIDTH;
-    assert.ok(near(e.y1, tallest, 1e-9),
-        `mark ends at ${e.y1}, top of the terrain box at ${tallest}`);
+t('the crest edge is the ground edge lifted by a full ridge', () => {
+    // The pair is what makes a mark contain anything: a ridge rises vertically
+    // off the plane, so the ground line alone answered for the wrong depth at
+    // every screen height above it.
+    const g = edgeLine(0.8, 0);
+    const c = edgeLine(0.8, 1);
+    assert.ok(near(c.x0, g.x0), 'same frequency, so the same x');
+    assert.ok(near(c.x1, g.x1));
+    assert.ok(near(c.y0, g.y0 - FRONT_RIDGE), 'a full ridge at the front');
+    assert.ok(near(c.y1, g.y1 - FRONT_RIDGE * BACK_WIDTH), 'and a narrowed one at the back');
+});
+
+t('every place a ridge can be drawn lies between the two edges', () => {
+    // The property the pair exists for, checked against the rasteriser's own
+    // height mapping rather than against a restatement of it.
+    const f = 0.75;
+    for (const depth of [0, 0.3, 0.7, 1]) {
+        const ground = project(f, depth);
+        const top = ground.y - ridgeHeight(1e6, -100, 45, depth);   // clamps to full
+        const g = edgeLine(f, 0);
+        const c = edgeLine(f, 1);
+        const at = (e) => e.y0 + (e.y1 - e.y0) * depth;
+        assert.ok(near(at(g), ground.y, 1e-9), `ground at depth ${depth}`);
+        assert.ok(near(at(c), top, 1e-9), `crest at depth ${depth}`);
+    }
 });
 
 t('the centre frequency is the one mark that stays vertical', () => {
-    const e = edgeLine(0.5);
-    assert.ok(near(e.x0, e.x1), 'the vanishing point is dead centre');
+    for (const lift of [0, 1]) {
+        const e = edgeLine(0.5, lift);
+        assert.ok(near(e.x0, e.x1), 'the vanishing point is dead centre');
+    }
 });
 
-t('the extension is the same line, not a kink', () => {
-    // Whatever the overrun, the far end has to lie on the line through the
-    // plane's own two ends — the mark is longer, not bent.
-    const f = 0.23;
-    const plane0 = project(f, 0);
-    const plane1 = project(f, 1);
-    const e = edgeLine(f);
-    const t = (e.y1 - plane0.y) / (plane1.y - plane0.y);
-    assert.ok(t > 1, 'and it does run past the plane');
-    assert.ok(near(e.x1, plane0.x + (plane1.x - plane0.x) * t, 1e-9),
-        'the far end is off the straight line');
+t('the crest edge reaches the top of the terrain box', () => {
+    const e = edgeLine(0.5, 1);
+    assert.ok(near(e.y1, (1 - DEPTH_SPAN) - FRONT_RIDGE * BACK_WIDTH),
+        'the deepest a full-height ridge can be drawn');
 });
 
 console.log(`\n${pass} passed`);

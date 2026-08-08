@@ -129,44 +129,34 @@ export function unproject(x, y) {
 }
 
 /**
- * How far a mark runs past the back of the baseline plane, as a multiple of the
- * front-to-back span.
+ * A constant frequency across the surface, in unit coordinates.
  *
- * Derived, not picked. Ridges stand *above* the plane the marks are drawn on —
- * by up to a full ridge at back width — so a mark that stopped at the plane
- * stopped short of the terrain every time there was a signal at the back. This
- * is exactly the extra travel that takes it to the top of the box the surface
- * can occupy: descending by FRONT_RIDGE x BACK_WIDTH costs that much depth at
- * DEPTH_SPAN per unit.
- */
-export const MARK_OVERRUN = (FRONT_RIDGE * BACK_WIDTH) / DEPTH_SPAN;
-
-/**
- * A constant frequency drawn across the surface, in unit coordinates.
+ * Straight — x and y are both linear in depth, so two endpoints are the whole
+ * geometry, and it comes from the same projection the terrain is built from.
  *
- * Straight, and that is not an approximation: x and y are both linear in depth,
- * so a fixed frequency is a straight line converging on the vanishing point.
- * Two endpoints is the whole geometry, and it comes from the same projection the
- * terrain is built from, so a mark and the ridges under it cannot splay apart.
+ * `lift` is which edge of the mark this is, and it is the correction for a real
+ * error. A mark is not a line: a ridge stands *vertically* off the ground plane,
+ * so at frequency f the terrain occupies a face bounded below by the ground and
+ * above by a full-height crest. Drawing only the ground line put the mark at the
+ * x of the wrong depth for every screen height above the plane — the ground had
+ * already converged inward while the crest beside it had not — so a signal well
+ * inside the passband stuck out past the edge that was supposed to contain it.
  *
- * The back end is the plane's, carried on by MARK_OVERRUN — the same line,
- * simply longer. Following the terrain instead was tried and is much worse to
- * read: a frequency reference that climbs over every signal it crosses stops
- * looking like a reference.
+ * lift 0 is the ground, lift 1 is the crest. Both are straight, both converge on
+ * the same vanishing point, and between them lies every place a ridge at this
+ * frequency can be drawn.
  *
  * @returns {{x0: number, y0: number, x1: number, y1: number}} front then back
  */
-export function edgeLine(freqUnit) {
-    const t = 1 + MARK_OVERRUN;
+export function edgeLine(freqUnit, lift = 0) {
     const front = project(freqUnit, 0);
-    // project() clamps depth to 1, which is the point being passed here, so the
-    // far end is worked out from the same two formulas rather than through it.
-    const width = 1 - t * (1 - BACK_WIDTH);
+    const back = project(freqUnit, 1);
+    const l = lift < 0 ? 0 : lift > 1 ? 1 : lift;
     return {
         x0: front.x,
-        y0: front.y,
-        x1: 0.5 + (freqUnit - 0.5) * width,
-        y1: 1 - t * DEPTH_SPAN,
+        y0: front.y - l * FRONT_RIDGE * depthScale(0),
+        x1: back.x,
+        y1: back.y - l * FRONT_RIDGE * depthScale(1),
     };
 }
 

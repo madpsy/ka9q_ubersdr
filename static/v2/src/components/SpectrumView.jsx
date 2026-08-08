@@ -3610,8 +3610,13 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         const x1 = clamp(Math.max(lox, hix), 0, pxW);
         if (x1 - x0 >= 1) {
             c.fillStyle = colEdge;
+            // One CSS pixel, which is thinner than the 1.4 the edge marks
+            // themselves are drawn at — this is a short bar read as a span
+            // rather than a line read as a position, and it does not need the
+            // weight. Fractions above one round up at dpr 1 and change nothing
+            // on an ordinary display, which is why this is a whole number.
             c.fillRect(Math.round(x0), Math.round(PIP_H * dpr),
-                Math.round(x1 - x0), Math.max(1, Math.round(1.5 * dpr)));
+                Math.round(x1 - x0), Math.max(1, Math.round(dpr)));
         }
     }
 }

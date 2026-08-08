@@ -57,6 +57,7 @@ import { useChat } from '../chat/ChatContext.jsx';
 import { fetchMyIp, peekMyIp } from '../lib/myip.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -515,11 +516,10 @@ function useStationOverlay(enabled) {
         const load = () => fetchWeather()
             .then((r) => { if (!cancelled) setWeather(r.data ? weatherLine(r.data) : null); })
             .catch(() => { /* weather is optional — leave the line off */ });
-        load();
         // 15 minutes, matching the server-side cache interval v1 tracks. Mostly
         // answered from the shared cache without a request going out.
-        const id = setInterval(load, 15 * 60 * 1000);
-        return () => { cancelled = true; clearInterval(id); };
+        const stop = feedInterval(load, 15 * 60 * 1000);
+        return () => { cancelled = true; stop(); };
     }, [enabled]);
 
     useEffect(() => {
@@ -530,9 +530,8 @@ function useStationOverlay(enabled) {
             .then((r) => (r.ok ? r.json() : null))
             .then((d) => { if (!cancelled && d && d.enabled) setAntenna(antennaLine(d)); })
             .catch(() => { /* keep the last known label */ });
-        load();
-        const id = setInterval(load, 30000);
-        return () => { cancelled = true; clearInterval(id); };
+        const stop = feedInterval(load, 30000);
+        return () => { cancelled = true; stop(); };
     }, [antEnabled, serverInfo]);
 
     // Memoised: SpectrumView re-renders on every pointer move, and the draw

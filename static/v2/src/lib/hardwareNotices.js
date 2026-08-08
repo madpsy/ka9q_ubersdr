@@ -19,6 +19,7 @@
 // stops it, which is the same shape the voice-activity and packet-marker stores use.
 
 import { pushNotification } from './notifications.js';
+import { feedInterval, setFeedsAllowed } from './serverFeeds.js';
 
 // v1's cadences, kept: a rotator is worth a second's resolution because you are waiting
 // for it, and an antenna switch changes when somebody presses something.
@@ -88,13 +89,12 @@ export function subscribeRotator(fn) {
         try { fn(rot.latest); } catch (e) { console.error('rotator subscriber threw', e); }
     }
     if (rot.timer === null) {
-        rotLoad();
-        rot.timer = setInterval(rotLoad, ROTATOR_POLL_MS);
+        rot.timer = feedInterval(rotLoad, ROTATOR_POLL_MS);
     }
     return () => {
         rot.subs.delete(fn);
         if (!rot.subs.size && rot.timer !== null) {
-            clearInterval(rot.timer);
+            rot.timer();
             rot.timer = null;
         }
     };
@@ -176,13 +176,12 @@ export function subscribeAntenna(fn) {
         try { fn(ant.latest); } catch (e) { console.error('antenna subscriber threw', e); }
     }
     if (ant.timer === null) {
-        antLoad();
-        ant.timer = setInterval(antLoad, ANTENNA_POLL_MS);
+        ant.timer = feedInterval(antLoad, ANTENNA_POLL_MS);
     }
     return () => {
         ant.subs.delete(fn);
         if (!ant.subs.size && ant.timer !== null) {
-            clearInterval(ant.timer);
+            ant.timer();
             ant.timer = null;
         }
     };
@@ -205,9 +204,13 @@ export function feedAntennaStatus(patch) {
 
 /** Test seam. */
 export function _resetHardwareNotices() {
+    // A store under test polls: the feed gate is the receiver's business, it
+    // has its own tests, and every case here is about this module's refcounting
+    // rather than about being switched off. See lib/serverFeeds.js.
+    setFeedsAllowed(true);
     for (const s of [rot, ant]) {
         s.subs.clear();
-        if (s.timer !== null) clearInterval(s.timer);
+        if (s.timer !== null) s.timer();
         s.timer = null;
         s.latest = null;
     }

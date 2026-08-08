@@ -22,6 +22,7 @@ import { countryFlag } from '../lib/format.js';
 import {
     ageLabel, beaufort, beaufortName, fetchWeather, localTime, round, windDirection, windKmh,
 } from '../lib/weather.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 // The server refreshes every fifteen minutes, so asking more often than every
 // five buys nothing. Unforced, so this goes through the cache the spectrum's
@@ -48,9 +49,8 @@ export default function WeatherPanel({ minimal }) {
         const load = (force) => fetchWeather({ force }).then((r) => {
             if (alive) setState({ ...r, loading: false });
         });
-        load(false);
-        const id = setInterval(() => load(false), POLL_MS);
-        return () => { alive = false; clearInterval(id); };
+        const stop = feedInterval(() => load(false), POLL_MS);
+        return () => { alive = false; stop(); };
     }, []);
 
     // Only so "20 mins ago" keeps counting while the panel sits open. `tick` is

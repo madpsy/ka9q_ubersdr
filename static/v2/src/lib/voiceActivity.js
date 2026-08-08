@@ -15,6 +15,7 @@
 // up on a live band.
 
 import { bandOrder } from './bands.js';
+import { feedInterval, setFeedsAllowed } from './serverFeeds.js';
 
 // v1's filter, and the same 5 s cadence its service polls at.
 export const MIN_CONFIDENCE = 0.7;
@@ -140,13 +141,12 @@ export function subscribeVoiceActivity(fn) {
         try { fn(latest); } catch (err) { console.error('voice activity subscriber threw', err); }
     }
     if (timer === null) {
-        load();
-        timer = setInterval(load, POLL_MS);
+        timer = feedInterval(load, POLL_MS);
     }
     return () => {
         subscribers.delete(fn);
         if (subscribers.size === 0 && timer !== null) {
-            clearInterval(timer);
+            timer();
             timer = null;
         }
     };
@@ -154,8 +154,12 @@ export function subscribeVoiceActivity(fn) {
 
 // Test seam.
 export function _resetVoiceActivity() {
+    // A store under test polls: the feed gate is the receiver's business, it
+    // has its own tests, and every case here is about this module's refcounting
+    // rather than about being switched off. See lib/serverFeeds.js.
+    setFeedsAllowed(true);
     subscribers.clear();
-    if (timer !== null) clearInterval(timer);
+    if (timer !== null) timer();
     timer = null;
     latest = null;
     inFlight = false;

@@ -50,6 +50,7 @@ import { formatRate } from '../lib/format.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
 import { retentionFor } from '../lib/timeConstant.js';
+import useFeedsAllowed from '../lib/useServerFeeds.js';
 
 // The card's proportions, from band_activity.html: the block is this much of its
 // own width, and the spectrum trace takes the top of it with the waterfall below.
@@ -276,6 +277,7 @@ function formatSpanMHz(meta) {
 // new stream, a new bin count and an empty history, which is what changing band
 // means. Nothing here has to unpick the old band's state.
 function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }) {
+    const feeds = useFeedsAllowed();
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
@@ -395,6 +397,10 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // curve — so there is one policy rather than the browser's timer running
     // alongside ours.
     useEffect(() => {
+        // Gated with the rest of the app's feeds: this is a continuous stream,
+        // and the loudest thing a stopped receiver was still asking for. See
+        // lib/serverFeeds.js.
+        if (!feeds) return undefined;
         let es = null;
         let retry = null;
         let attempts = 0;
@@ -470,7 +476,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             onRate(null);
             reportBandRate(null);
         };
-    }, [band, meta.bin_count, st, onRate]);
+    }, [band, meta.bin_count, st, onRate, feeds]);
 
     useEffect(() => { st.dirty = true; }, [zoom, st]);
     useEffect(() => {

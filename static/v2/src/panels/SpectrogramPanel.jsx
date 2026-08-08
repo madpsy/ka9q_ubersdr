@@ -28,6 +28,7 @@ import {
     pageUrl, pointReadout, spectrogramEnabled, thumbUrl, timeTicks,
 } from '../lib/spectrogram.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { spectrogramEnabled };
 
@@ -67,11 +68,10 @@ export default function SpectrogramPanel({ minimal }) {
     const tzOffset = serverInfo?.receiver?.timezone_offset;
 
     // The window advances one row a minute; so does the picture. The interval
-    // dies with the panel, so a closed panel asks for nothing.
-    useEffect(() => {
-        const id = setInterval(() => setTick(Date.now()), POLL_MS);
-        return () => clearInterval(id);
-    }, []);
+    // dies with the panel, so a closed panel asks for nothing — and it is gated,
+    // because the tick is what changes the thumbnail's URL and so is a request
+    // a minute in everything but name. See lib/serverFeeds.js.
+    useEffect(() => feedInterval(() => setTick(Date.now()), POLL_MS), []);
 
     // A new band is a new picture, not a stale one that failed.
     useEffect(() => { setFailed(false); }, [band]);

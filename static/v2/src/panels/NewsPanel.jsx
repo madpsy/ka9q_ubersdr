@@ -12,6 +12,7 @@ import {
     NEWS_PAGE, NEWS_SOURCES, fetchNews, formatNewsDate, loadNewsCache,
     saveNewsSource, savedNewsSource,
 } from '../lib/news.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 // The feeds publish a few times a day; this is only so a panel left open does
 // not go stale over an afternoon.
@@ -46,9 +47,9 @@ export default function NewsPanel({ minimal }) {
     }, []);
 
     useEffect(() => {
-        load(source);
-        const id = setInterval(() => load(current.current), REFRESH_MS);
-        return () => clearInterval(id);
+        // The first call is the gate's leading one, and it uses `source`
+        // through the ref exactly as the repeats do.
+        return feedInterval(() => load(current.current), REFRESH_MS);
     }, [source, load]);
 
     const pick = (id) => {

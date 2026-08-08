@@ -18,6 +18,7 @@ import {
     mergeFrames, normaliseFrame, packetAvailable, packetStats, topStations, trimFrames,
 } from '../lib/packet.js';
 import { clockOf, sinceLabel } from '../lib/format.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { packetAvailable };
 
@@ -95,9 +96,7 @@ export default function PacketPanel({ minimal }) {
     }, []);
 
     useEffect(() => {
-        poll();
-        const id = setInterval(poll, POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(poll, POLL_MS);
     }, [poll]);
 
     const stats = packetStats(frames, now);

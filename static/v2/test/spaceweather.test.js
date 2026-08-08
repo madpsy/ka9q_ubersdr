@@ -235,6 +235,10 @@ t('the age reads in the largest unit that fits, and never goes negative', () => 
 function withFetch(impl, fn) {
     const prev = global.fetch;
     global.fetch = impl;
+    // Reset on the way in as well as out: the seam is also what opens the server-feed
+    // gate, which starts closed, and the first case in the file would otherwise be the
+    // only one that ran with the store switched off. See src/lib/serverFeeds.js.
+    sw._resetSpaceWeather();
     return Promise.resolve(fn()).finally(() => { global.fetch = prev; sw._resetSpaceWeather(); });
 }
 

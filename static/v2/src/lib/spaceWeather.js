@@ -13,6 +13,7 @@
 // that no one would ever notice in review.
 
 import { bandOrder } from './bands.js';
+import { feedInterval, setFeedsAllowed } from './serverFeeds.js';
 
 export const ENDPOINT = '/api/spaceweather';
 // v1's cadence (space-weather-display.js). The server refreshes from NOAA far
@@ -264,13 +265,12 @@ export function subscribeSpaceWeather(fn) {
         try { fn(latest); } catch (err) { console.error('space weather subscriber threw', err); }
     }
     if (timer === null) {
-        load();
-        timer = setInterval(load, POLL_MS);
+        timer = feedInterval(load, POLL_MS);
     }
     return () => {
         subscribers.delete(fn);
         if (subscribers.size === 0 && timer !== null) {
-            clearInterval(timer);
+            timer();
             timer = null;
         }
     };
@@ -278,8 +278,12 @@ export function subscribeSpaceWeather(fn) {
 
 // Test seam.
 export function _resetSpaceWeather() {
+    // A store under test polls: the feed gate is the receiver's business, it
+    // has its own tests, and every case here is about this module's refcounting
+    // rather than about being switched off. See lib/serverFeeds.js.
+    setFeedsAllowed(true);
     subscribers.clear();
-    if (timer !== null) clearInterval(timer);
+    if (timer !== null) timer();
     timer = null;
     latest = null;
     inFlight = false;

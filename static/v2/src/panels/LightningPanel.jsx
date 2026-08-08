@@ -21,6 +21,7 @@ import {
     streamUrl, trimStrikes,
 } from '../lib/lightning.js';
 import { sinceLabel } from '../lib/format.js';
+import useFeedsAllowed from '../lib/useServerFeeds.js';
 
 export { lightningAvailable };
 
@@ -83,6 +84,7 @@ function Stat({ label, value, sub, tone }) {
 }
 
 export default function LightningPanel({ minimal }) {
+    const feeds = useFeedsAllowed();
     const [strikes, setStrikes] = useState([]);
     const [live, setLive] = useState(false);
     const [state, setState] = useState('loading');   // loading | ok | error
@@ -149,8 +151,10 @@ export default function LightningPanel({ minimal }) {
     // Same policy as the band spectrum panel: every failure closes it and reopens on the
     // backoff curve, so there is one schedule rather than the browser's running
     // alongside ours. Forever, because the panel is the subscription — closing the
-    // section is how you say stop.
+    // section is how you say stop — and so is stopping the receiver, which
+    // closes every feed on the page. See lib/serverFeeds.js.
     useEffect(() => {
+        if (!feeds) return undefined;
         let es = null;
         let retry = null;
         let attempts = 0;
@@ -188,7 +192,7 @@ export default function LightningPanel({ minimal }) {
             clearTimeout(retry);
             if (es) es.close();
         };
-    }, [take]);
+    }, [take, feeds]);
 
     const rate = strikeRate(strikes, now);
     const { count, best } = hourStats(strikes, now);

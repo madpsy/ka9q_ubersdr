@@ -15,6 +15,7 @@
 // so both frontends call the same band the same colour.
 
 import { BAND_NAMES } from './bands.js';
+import { feedInterval } from './serverFeeds.js';
 
 export const POLL_MS = 60 * 1000;
 export const WINDOW_MIN = 10;      // minutes of history averaged
@@ -115,15 +116,14 @@ function load() {
 export function subscribeBandConditions(fn) {
     subscribers.add(fn);
     if (subscribers.size === 1) {
-        load();
-        timer = setInterval(load, POLL_MS);
+        timer = feedInterval(load, POLL_MS);
     }
     try { fn(states); } catch (err) { console.error('band conditions subscriber threw', err); }
 
     return () => {
         if (!subscribers.delete(fn)) return;
         if (subscribers.size > 0) return;
-        clearInterval(timer);
+        timer();
         timer = null;
         // The last answer is deliberately kept: it is a ten-minute average, so
         // it is still true a moment later, and holding it means a panel coming

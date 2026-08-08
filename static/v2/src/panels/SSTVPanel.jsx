@@ -19,6 +19,7 @@ import {
     AGE_TICK_MS, MAX_IMAGES, POLL_MS, addonUrl, detailRows, downloadName, formatAge,
     imageUrl, imagesUrl, records, saveCount, savedCount, sstvAvailable,
 } from '../lib/sstv.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { sstvAvailable };
 
@@ -61,9 +62,7 @@ export default function SSTVPanel({ minimal }) {
     // Reloads when the count changes as well as on the timer, because asking
     // for more is asking for them now.
     useEffect(() => {
-        load(count);
-        const id = setInterval(() => load(count), POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(() => load(count), POLL_MS);
     }, [load, count]);
 
     // The age labels count up on their own.

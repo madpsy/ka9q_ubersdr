@@ -23,6 +23,7 @@ import {
     aircraftLabel, hfdlSummary, isStale, liveAircraft, stationList, stationOf, stationsUrl,
     statsUrl,
 } from '../lib/hfdl.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { hfdlAvailable };
 
@@ -247,9 +248,7 @@ export default function HFDLPanel({ minimal }) {
     }, []);
 
     useEffect(() => {
-        poll(open);
-        const id = setInterval(() => poll(open), open ? MODAL_POLL_MS : POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(() => poll(open), open ? MODAL_POLL_MS : POLL_MS);
     }, [poll, open]);
 
     // Where this receiver is, so the map has an origin. Absent on an instance that has

@@ -22,6 +22,7 @@ import {
     newestImage, pageSize, pickOptions, savePick, savedPick, sideways, sizeLabel, sortNewest,
     statusUrl, tookLabel, totalImages, turnBy, wefaxAvailable,
 } from '../lib/wefax.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { wefaxAvailable };
 
@@ -113,9 +114,7 @@ export default function WefaxPanel({ minimal }) {
                     setState((s) => (s === 'ok' ? s : 'error'));
                 });
         };
-        poll();
-        const id = setInterval(poll, POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(poll, POLL_MS);
     }, [loadImages]);
 
     const choose = (value) => {

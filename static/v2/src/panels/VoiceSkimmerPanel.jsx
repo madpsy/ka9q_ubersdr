@@ -27,6 +27,7 @@ import { countryFlag, sinceLabel } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { bandForFrequency } from '../lib/bands.js';
+import useFeedsAllowed from '../lib/useServerFeeds.js';
 import {
     AUTO_BAND, BAND_NAMES, BAND_SETTLE_MS, COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl,
     confirmedUrl, freqLabel, matchedCount, resolveBandFilter, saveBand, savedBand, spotList,
@@ -87,6 +88,7 @@ function Column({ title, rows, count, now, tunedHz, onPick }) {
 
 export default function VoiceSkimmerPanel({ minimal }) {
     const { actions, serverInfo, tuning } = useRadio();
+    const feeds = useFeedsAllowed();
     // Kept in storage rather than in state: this panel is unmounted every time its dock
     // collapses, and a filter that reset itself on every peek would be no filter at all.
     const [choice, setChoice] = useState(savedBand);
@@ -132,7 +134,12 @@ export default function VoiceSkimmerPanel({ minimal }) {
             setState((s) => (s === 'ok' ? s : 'error'));
         }), []);
 
+    // Gated as a whole rather than at the interval: the opening/settle branch
+    // below polls directly, and feedInterval's leading call would both hit the
+    // server while stopped and double the burst this panel exists to avoid.
+    // See lib/serverFeeds.js.
     useEffect(() => {
+        if (!feeds) return undefined;
         // Two queries, one after the other. /api/spots allows one request per second per
         // address, so firing both together would have one of them answered with a 429 —
         // and it is a real filter on the server, which is why it is worth two requests
@@ -177,7 +184,7 @@ export default function VoiceSkimmerPanel({ minimal }) {
             clearInterval(id);
             clearTimeout(second.current);
         };
-    }, [ask, band]);
+    }, [ask, band, feeds]);
 
     // Clicking a callsign: tune to where it was heard, in the mode it was heard in, and
     // ask for a lookup — exactly what clicking a spot does in the Spots panel and on the

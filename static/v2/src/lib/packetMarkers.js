@@ -20,8 +20,11 @@ import {
     MARKER_POLL_MS, channelFramesUrl, channelSummary, channelsUrl, markerLabel,
     normaliseFrame, stationPairs, stationsHeard,
 } from './packet.js';
+import { feedInterval, setFeedsAllowed } from './serverFeeds.js';
 
 const subscribers = new Set();
+// The feedInterval stop function, not a timer id: the poll is refcounted by its
+// subscribers as before, and gated on top of that. See lib/serverFeeds.js.
 let timer = null;
 let latest = null;
 let inFlight = false;
@@ -112,13 +115,12 @@ export function subscribePacketMarkers(fn) {
         try { fn(latest); } catch (err) { console.error('packet marker subscriber threw', err); }
     }
     if (timer === null) {
-        load();
-        timer = setInterval(load, MARKER_POLL_MS);
+        timer = feedInterval(load, MARKER_POLL_MS);
     }
     return () => {
         subscribers.delete(fn);
         if (subscribers.size === 0 && timer !== null) {
-            clearInterval(timer);
+            timer();
             timer = null;
         }
     };
@@ -126,8 +128,12 @@ export function subscribePacketMarkers(fn) {
 
 /** Test seam. */
 export function _resetPacketMarkers() {
+    // A store under test polls: the feed gate is the receiver's business, it
+    // has its own tests, and every case here is about this module's refcounting
+    // rather than about being switched off. See lib/serverFeeds.js.
+    setFeedsAllowed(true);
     subscribers.clear();
-    if (timer !== null) clearInterval(timer);
+    if (timer !== null) timer();
     timer = null;
     latest = null;
     channels = null;

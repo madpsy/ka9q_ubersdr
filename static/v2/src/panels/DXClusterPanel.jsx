@@ -45,6 +45,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { Button, Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
+import useFeedsAllowed from '../lib/useServerFeeds.js';
 import {
     MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, parseSpotLine,
     savedLogin, webUrl,
@@ -100,6 +101,8 @@ export default function DXClusterPanel({ minimal }) {
         flashRef.current = setTimeout(() => setFlash(''), 1600);
     }, []);
 
+    const feeds = useFeedsAllowed();
+
     const connect = useCallback(() => {
         stickRef.current = true;
         dxConnect({ callsign: login.callsign, password: login.password });
@@ -137,6 +140,26 @@ export default function DXClusterPanel({ minimal }) {
     useEffect(() => {
         if (cramped && state !== 'closed') dxDisconnect();
     }, [cramped, state]);
+
+    // Stopping the receiver ends the cluster session too, and starting it again
+    // brings the session back. It is a socket to this server held open for as
+    // long as the tab is, which is exactly what Stop is now understood to end —
+    // see lib/serverFeeds.js. Reconnected only if the gate closed on a live
+    // session, so a panel nobody had logged into stays logged out; `wasUp` is a
+    // ref rather than state because it is a note about the past, not something
+    // to draw.
+    const wasUp = useRef(false);
+    useEffect(() => {
+        if (feeds) {
+            if (wasUp.current && state === 'closed' && savedLogin().callsign.trim()) connect();
+            wasUp.current = false;
+            return;
+        }
+        if (state !== 'closed') {
+            wasUp.current = true;
+            dxDisconnect();
+        }
+    }, [feeds, state, connect]);
 
     useEffect(() => {
         if (!stickRef.current) return;

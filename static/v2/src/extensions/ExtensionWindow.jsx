@@ -14,6 +14,7 @@ import React, { useEffect } from '../react.js';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon } from '../components/ui.jsx';
 import { useExtensions } from './ExtensionsContext.jsx';
+import useWakeProps from '../radio/useWake.js';
 
 const MIN = { w: 380, h: 240 };
 
@@ -23,6 +24,9 @@ export default function ExtensionWindow({ bounds }) {
     } = useExtensions();
     const geom = geometryOf(active ? active.id : '');
     const minimal = minimalOf(active ? active.id : '');
+    // As a floating panel gets it, and for the same reason: working a decoder is
+    // being here. See radio/useWake.js.
+    const wake = useWakeProps();
 
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
         geom,
@@ -103,7 +107,7 @@ export default function ExtensionWindow({ bounds }) {
             {/* Unlike a panel, an extension lays itself out: its body is a flex
                 column that does not scroll, so a decoder can give its own table
                 or image the leftover height and scroll that instead. */}
-            <div className="floatwin__body floatwin__body--ext">
+            <div className="floatwin__body floatwin__body--ext" {...wake}>
                 <active.Component minimal={minimal} />
             </div>
 

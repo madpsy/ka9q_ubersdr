@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import { PasswordRow, usePassword } from './hardwareAuth.jsx';
 import { feedAntennaStatus, subscribeAntenna } from '../lib/hardwareNotices.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 const POLL_MS = 5000;
 const PER_PAGE = 10;
@@ -70,9 +71,7 @@ export default function AntennaPanel({ minimal }) {
     useEffect(() => subscribeAntenna(setStatus), []);
 
     useEffect(() => {
-        refresh();
-        const id = setInterval(refresh, POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(refresh, POLL_MS);
     }, [refresh]);
 
     const send = useCallback(async (cmd, pw) => {

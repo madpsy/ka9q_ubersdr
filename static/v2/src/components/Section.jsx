@@ -9,6 +9,7 @@ import React, { useRef } from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import { setDraggingPanel } from '../lib/panelDrag.js';
+import useWakeProps from '../radio/useWake.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -23,6 +24,10 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
+    // On the body, not the whole section: the header is where you collapse a
+    // panel and move it about, which is housekeeping and not a reason to open a
+    // session. See radio/useWake.js.
+    const wake = useWakeProps();
     const state = sections[panel.id] || { open: true };
     const minimal = !!panel.minimal && !!state.minimal;
     // The bottom dock is a row; the side docks are columns.
@@ -183,7 +188,7 @@ export default function Section({ panel, dock, index, weight, height, prev, next
             </header>
 
             {state.open && (
-                <div className="section__body">
+                <div className="section__body" {...wake}>
                     <panel.Component minimal={minimal} />
                 </div>
             )}

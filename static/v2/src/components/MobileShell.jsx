@@ -39,6 +39,7 @@ import { haptic } from '../lib/haptics.js';
 import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
+import useWakeProps from '../radio/useWake.js';
 
 /**
  * Tap or drag the title bar to cut a sheet down or open it out.
@@ -151,6 +152,10 @@ export default function MobileShell() {
         return first ? first.id : null;
     });
     const extMinimal = minimalOf(extension ? extension.id : '');
+    // Both sheet bodies share it — a decoder is as much a reason to be here as a
+    // panel is. Not the sheet heads: those are the grab handle and the close
+    // button. See radio/useWake.js.
+    const wake = useWakeProps();
 
     const visible = PANELS.filter(
         (p) => !sections[p.id]?.hidden && applies(p),
@@ -239,7 +244,7 @@ export default function MobileShell() {
                                 <Icon.Close size={18} />
                             </button>
                         </div>
-                        <div className="sheet__body">
+                        <div className="sheet__body" {...wake}>
                             <panel.Component minimal={panelMinimal} />
                         </div>
                     </div>
@@ -275,7 +280,7 @@ export default function MobileShell() {
                                 <Icon.Close size={18} />
                             </button>
                         </div>
-                        <div className="sheet__body sheet__body--ext">
+                        <div className="sheet__body sheet__body--ext" {...wake}>
                             <extension.Component minimal={extMinimal} />
                         </div>
                     </div>

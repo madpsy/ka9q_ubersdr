@@ -26,6 +26,7 @@ import {
     messageBody, metricsFreqs, metricsUrl, navtexAvailable, pickOptions, savePick,
     savedPick, shortFreq,
 } from '../lib/navtexAddon.js';
+import { feedInterval } from '../lib/serverFeeds.js';
 
 export { navtexAvailable };
 
@@ -81,9 +82,7 @@ export default function NavtexPanel({ minimal }) {
     }, []);
 
     useEffect(() => {
-        poll();
-        const id = setInterval(poll, POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(poll, POLL_MS);
     }, [poll]);
 
     // Rarely, and never fatally: with file logging off this answers with nothing, and
@@ -96,9 +95,7 @@ export default function NavtexPanel({ minimal }) {
                 .then((j) => { if (alive.current && j) setKnown(metricsFreqs(j)); })
                 .catch(() => {});
         };
-        load();
-        const id = setInterval(load, METRICS_POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(load, METRICS_POLL_MS);
     }, []);
 
     // After every render that could have changed the text: the panel is resizable and

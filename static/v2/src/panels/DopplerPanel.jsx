@@ -22,6 +22,8 @@ import {
     shiftBand, shiftSource, spectrumIntervalUrl, stationsUrl, streamUrl,
 } from '../lib/doppler.js';
 import { sinceLabel } from '../lib/format.js';
+import { feedInterval } from '../lib/serverFeeds.js';
+import useFeedsAllowed from '../lib/useServerFeeds.js';
 
 export { dopplerAvailable };
 
@@ -39,6 +41,7 @@ function Stat({ label, value, sub, tone }) {
 }
 
 export default function DopplerPanel({ minimal }) {
+    const feeds = useFeedsAllowed();
     const [stations, setStations] = useState([]);
     const [state, setState] = useState('loading');   // loading | ok | error
     const [live, setLive] = useState(false);
@@ -80,9 +83,7 @@ export default function DopplerPanel({ minimal }) {
     }, []);
 
     useEffect(() => {
-        loadStations();
-        const id = setInterval(loadStations, STATIONS_POLL_MS);
-        return () => clearInterval(id);
+        return feedInterval(loadStations, STATIONS_POLL_MS);
     }, [loadStations]);
 
     // ── The stream ───────────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ export default function DopplerPanel({ minimal }) {
     useEffect(() => {
         let es = null;
         let retry = null;
+        if (!feeds) return undefined;
         let attempts = 0;
         let stopped = false;
 
@@ -139,7 +141,7 @@ export default function DopplerPanel({ minimal }) {
             clearTimeout(retry);
             if (es) es.close();
         };
-    }, []);
+    }, [feeds]);
 
     const sum = dopplerSummary(stations, now);
     const shown = stations.filter((s) => s.enabled);

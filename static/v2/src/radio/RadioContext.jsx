@@ -29,6 +29,8 @@ import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
 import { loadRadioSettings, saveRadioSettings } from '../lib/radioSettings.js';
 import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmarkGroups.js';
 import { readShareUrl, takeUrlView } from '../lib/share.js';
+import { shouldWake } from '../lib/wake.js';
+import { setFeedsAllowed } from '../lib/serverFeeds.js';
 
 const RadioContext = createContext(null);
 
@@ -221,6 +223,19 @@ export function RadioProvider({ children }) {
     const agcDirty = useRef(false);
     const dspRef = useRef(dsp);
     dspRef.current = dsp;
+    // Read by wake(), which lives in the actions object and so cannot see the
+    // state.
+    const runningRef = useRef(running);
+    runningRef.current = running;
+    // Whether this visit has ever been through the front door. wake() will not
+    // open the first session of a visit: the Start overlay is where the audio
+    // gesture, the capacity check and the bypass password live, and a receiver
+    // that is full has to say so there rather than fail silently under a thumb.
+    // See StartOverlay, and actions.wake.
+    const everStarted = useRef(false);
+    // powerOn is async and a gesture is many events, so without this a single
+    // drag would start several sessions.
+    const waking = useRef(false);
 
     // Adopts server-reported AGC values, ignoring an echo that would otherwise
     // snap a slider back while it is still being dragged.
@@ -347,6 +362,21 @@ export function RadioProvider({ children }) {
         offs.push(audioConn.on('close', () => pushLog('warn', 'Audio stream closed')));
         offs.push(audioConn.on('open', () => {
             pushLog('info', 'Audio stream connected');
+            // Anything tuned while the socket was still opening commanded
+            // nothing: send() drops into a socket that is not open yet, and the
+            // connect URL carries the tuning as it stood when connect() read
+            // it. Ordinary now that a control can wake the receiver — the whole
+            // point is that the gesture is not made to wait — so replay the
+            // current tuning if it has moved on from what the server was asked
+            // for. Compared rather than sent unconditionally so a plain
+            // reconnect still costs no command.
+            const asked = audioConn.params;
+            const now = tuningRef.current;
+            if (!asked || asked.frequency !== now.frequency || asked.mode !== now.mode
+                || asked.bandwidthLow !== now.bandwidthLow
+                || asked.bandwidthHigh !== now.bandwidthHigh) {
+                audioConn.tune(now);
+            }
             // A new session starts with the gate disabled, so re-apply it on
             // every open — including reconnects, which would otherwise silently
             // un-squelch the receiver.
@@ -378,6 +408,13 @@ export function RadioProvider({ children }) {
 
         return () => offs.forEach((off) => off());
     }, []);
+
+    // The one place the server-feed gate is set. Every recurring request in the
+    // app — the streams, the decoder polls, the shared stores — hangs off this,
+    // so Stop stops them and both ways back (the power button and a wake from
+    // touching a control) start them again, without any of them knowing about
+    // the receiver at all. See lib/serverFeeds.js.
+    useEffect(() => { setFeedsAllowed(running); }, [running]);
 
     // Sample player-owned meters on a slow timer; the packet path stays free of
     // any per-frame bookkeeping.
@@ -561,47 +598,83 @@ export function RadioProvider({ children }) {
             }
         };
 
+        // Hoisted out of the actions object so wake() can call it — see there.
+        const powerOn = async () => {
+            everStarted.current = true;
+            const ok = await player.start();
+            if (!ok) pushLog('warn', 'Audio context did not start — tap again');
+            setRunning(true);
+            // A new session gets a new identity. Minted before either socket
+            // opens so audio and spectrum are paired under the same UUID.
+            newSessionId();
+            // Registers the UUID and tells us how long this session may run.
+            // The sockets share the cached result, so this costs no extra
+            // request; v1 reads max_session_time from the same reply.
+            connectionCheck().then((r) => {
+                if (r && r.maxSessionTime != null) {
+                    setSession({
+                        maxSec: r.maxSessionTime,
+                        idleSec: r.sessionTimeout,
+                        startedAt: Date.now(),
+                    });
+                }
+            }, () => { /* the countdown just stays as it was */ });
+            const t = tuningRef.current;
+            await audioConn.connect(t);
+            // Resume the view this browser was last on. The socket already
+            // carries the pair for reconnects, so a fresh session is the
+            // same journey with the values coming from the last visit
+            // instead of from the last second.
+            //
+            // Both or neither: the server applies whichever of the two it
+            // is given and keeps what it had for the other, so a centre
+            // without a zoom lands on the full-span default and asks for a
+            // 30 MHz window somewhere it cannot exist. connect() clamps for
+            // the same reason.
+            // Read now rather than from the load-time snapshot: powering
+            // off and on again within one visit should come back to the
+            // view you left, not the one you arrived with.
+            const last = loadRadioSettings();
+            // A link's view wins the first time, and only the first time —
+            // takeUrlView hands it over once. Powering off and on again
+            // within the visit should come back to the view you left, not
+            // the one the link arrived with.
+            await spectrumConn.connect(takeUrlView() || resumeView(last, t));
+        };
+
         return {
-            async powerOn() {
-                const ok = await player.start();
-                if (!ok) pushLog('warn', 'Audio context did not start — tap again');
-                setRunning(true);
-                // A new session gets a new identity. Minted before either socket
-                // opens so audio and spectrum are paired under the same UUID.
-                newSessionId();
-                // Registers the UUID and tells us how long this session may run.
-                // The sockets share the cached result, so this costs no extra
-                // request; v1 reads max_session_time from the same reply.
-                connectionCheck().then((r) => {
-                    if (r && r.maxSessionTime != null) {
-                        setSession({
-                            maxSec: r.maxSessionTime,
-                            idleSec: r.sessionTimeout,
-                            startedAt: Date.now(),
-                        });
-                    }
-                }, () => { /* the countdown just stays as it was */ });
-                const t = tuningRef.current;
-                await audioConn.connect(t);
-                // Resume the view this browser was last on. The socket already
-                // carries the pair for reconnects, so a fresh session is the
-                // same journey with the values coming from the last visit
-                // instead of from the last second.
-                //
-                // Both or neither: the server applies whichever of the two it
-                // is given and keeps what it had for the other, so a centre
-                // without a zoom lands on the full-span default and asks for a
-                // 30 MHz window somewhere it cannot exist. connect() clamps for
-                // the same reason.
-                // Read now rather than from the load-time snapshot: powering
-                // off and on again within one visit should come back to the
-                // view you left, not the one you arrived with.
-                const last = loadRadioSettings();
-                // A link's view wins the first time, and only the first time —
-                // takeUrlView hands it over once. Powering off and on again
-                // within the visit should come back to the view you left, not
-                // the one the link arrived with.
-                await spectrumConn.connect(takeUrlView() || resumeView(last, t));
+            powerOn,
+
+            // Power on because the operator reached for a control, rather than
+            // because they pressed the power button.
+            //
+            // The receiver can be off with the whole interface still live and
+            // usable — the idle watch stops it after a long silence and leaves
+            // everything on screen, and the power button is a toggle — and in
+            // that state every control still moves, still updates, and commands
+            // nothing: applyTuning sends into a closed socket and send() drops
+            // it. Reaching for a control is the operator saying they are back,
+            // so this takes them at their word rather than making them find the
+            // power button first and repeat themselves.
+            //
+            // Safe to call from any pointer handler, however often: it is a
+            // no-op while the receiver is running, while another wake is still
+            // connecting, and before the first manual start of the visit. It
+            // deliberately does not await — a wake must never delay the gesture
+            // that triggered it, and the commands that gesture produces are
+            // picked up by the tune replayed on 'open'. The three conditions are
+            // shouldWake, in lib/wake.js, with the reasoning for each.
+            wake() {
+                if (!shouldWake({
+                    running: runningRef.current,
+                    connecting: waking.current,
+                    everStarted: everStarted.current,
+                })) return false;
+                waking.current = true;
+                pushLog('info', 'Receiver woken by a control');
+                Promise.resolve(powerOn()).catch(() => { /* logged by the socket */ })
+                    .then(() => { waking.current = false; });
+                return true;
             },
 
             powerOff() {

@@ -17,6 +17,7 @@ import React from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
+import useWakeProps from '../radio/useWake.js';
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -26,6 +27,9 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     } = useLayout();
     // Same flag the docked section uses: a panel looks the same wherever it is.
     const minimal = !!panel.minimal && !!sections[panel.id]?.minimal;
+    // The body only, as in a docked section: raising, moving and resizing the
+    // window are not reasons to open a session. See radio/useWake.js.
+    const wake = useWakeProps();
 
     // The size floor lives in LayoutContext (setFloat clamps), so none is
     // passed here — this only has to stop the gesture running away.
@@ -101,7 +105,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
 
             {/* The window has a fixed height, so its body is a scroller — the
                 same rule as the mobile sheet: containers scroll, panels do not. */}
-            <div className="floatwin__body">
+            <div className="floatwin__body" {...wake}>
                 <panel.Component minimal={minimal} />
             </div>
 

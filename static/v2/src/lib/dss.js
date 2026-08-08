@@ -56,16 +56,33 @@ export const MIN_DIM = 0.45;
  * Forty-five decibels is about the useful span of a receiver on a quiet band. */
 export const HEIGHT_SPAN_DB = 45;
 
-/** Gamma on the ridge height. Below 1 lifts the weak end.
+/** Gamma on the ridge height.
  *
- * The aperture above stops a strong signal flattening everything else; this
- * gives the bottom of what remains enough relief to be seen at all. Applied to
- * height only — colour keeps the waterfall's own contrast setting, so the same
- * signal is the same colour in both halves of the pane. */
-export const HEIGHT_CURVE = 0.6;
+ * Linear, and that is a correction. A gamma below one was here to lift weak
+ * signals, and it does — but it lifts the *noise* by the same rule, and there is
+ * far more noise than signal on any band. At 0.6 the noise plain stood at nearly
+ * a third of full ridge height, which is not what the spectrum trace beside it
+ * shows and not what the surface is for: the floor should be a floor.
+ *
+ * What weak signals needed was the bounded aperture above, not a curve. Linear
+ * over 45 dB already gives a carrier fifteen decibels up a fifth of the height,
+ * where linear over the display's own seventy-decibel range gave it a tenth. */
+export const HEIGHT_CURVE = 1;
+
+/** dB of the measured floor to treat as flat ground.
+ *
+ * `floor` from the auto-levelling is the 25th percentile less 4 dB — deliberately
+ * *below* the noise, so the waterfall has somewhere dark to put it. Drawn as
+ * terrain that headroom becomes a raised plain with the noise standing on top of
+ * it, so the baseline is lifted back to where the noise actually is and the
+ * plain is flat again. Anything under it is ground, which is what it is. */
+export const HEIGHT_FLOOR_MARGIN_DB = 6;
 
 /** The dB span the ridge heights are drawn against, for a display range of `range`. */
 export const heightRange = (range) => Math.min(Number(range) || 0, HEIGHT_SPAN_DB);
+
+/** Where the ground is, in dBm, for an auto-levelling floor of `floor`. */
+export const heightFloor = (floor) => (Number(floor) || 0) + HEIGHT_FLOOR_MARGIN_DB;
 
 /**
  * Perspective narrowing with depth. `depth` is 0 at the front (newest) and 1 at
@@ -124,7 +141,7 @@ export function unproject(x, y) {
 export function ridgeHeight(dbm, floor, range, depth, curve = HEIGHT_CURVE) {
     if (!Number.isFinite(dbm)) return 0;
     const r = heightRange(range) || range;
-    let s = (dbm - floor) / (r > 0 ? r : 1);
+    let s = (dbm - heightFloor(floor)) / (r > 0 ? r : 1);
     s = s < 0 ? 0 : s > 1 ? 1 : s;
     if (curve !== 1) s = Math.pow(s, curve > 0.05 ? curve : 0.05);
     return s * FRONT_RIDGE * depthScale(depth);
@@ -332,6 +349,7 @@ export function drawSurface(ctx, ring, w, h, o) {
     const cols = ring.cols;
     const gammaInv = contrast !== 1 ? 1 / contrast : 1;
     const hRange = heightRange(range) || range;
+    const hFloor = heightFloor(floor);
     const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
 
     // Front to back. Each ridge is drawn only where it rises above everything
@@ -361,7 +379,7 @@ export function drawSurface(ctx, ring, w, h, o) {
             else if (c >= cols) c = cols - 1;
             const v = row[c];
 
-            let sv = (v - floor) / hRange;
+            let sv = (v - hFloor) / hRange;
             sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;
             if (curve !== 1) sv = Math.pow(sv, curve > 0.05 ? curve : 0.05);
             let y = Math.round(baseY - sv * maxRidge);

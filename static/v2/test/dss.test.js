@@ -183,30 +183,40 @@ t('the ring is as wide as the pane, so a thin line stays thin', () => {
 
 // --- colour and height, against the waterfall beside it ---------------------
 
-t('a weak signal has height, not just colour', () => {
-    // The failure the screenshot showed: the display range runs from the noise
-    // floor to the loudest thing on the band, so on a busy band a carrier ten
-    // decibels up got a seventh of the ridge height and read as flat — while the
-    // heat map beside it painted the same carrier bright.
-    //
-    // Height is what has to carry it, because in a stacked surface the body of
-    // each row is occluded and only the ridge is really visible.
-    const wide = ridgeHeight(-90, -100, 70, 0);      // 10 dB up, 70 dB on screen
-    assert.ok(wide > 0.25 * FRONT_RIDGE,
-        `10 dB above the floor should stand up, got ${(wide / FRONT_RIDGE).toFixed(2)} of full`);
+t('the noise plain is flat, not a raised shelf', () => {
+    // The auto-levelling floor is the 25th percentile less 4 dB, so the noise
+    // itself sits a few dB above it. Drawn straight, that headroom becomes a
+    // plateau with the noise standing on it — and a 0.6 gamma, which was here to
+    // lift weak signals, put it at nearly a third of full height.
+    const noise = ridgeHeight(-94, -100, 70, 0);     // 6 dB above floor
+    assert.strictEqual(noise, 0, 'the floor should be a floor');
+    assert.strictEqual(ridgeHeight(-97, -100, 70, 0), 0, 'and below it is ground');
+});
+
+t('a signal above the noise still stands up', () => {
+    // 15 dB above the floor is 9 above the ground, of a 45 dB aperture.
+    const s15 = ridgeHeight(-85, -100, 70, 0) / FRONT_RIDGE;
+    assert.ok(s15 > 0.15 && s15 < 0.30, `expected a fifth or so, got ${s15.toFixed(2)}`);
+    // And a strong one is unmistakable.
+    const s35 = ridgeHeight(-65, -100, 70, 0) / FRONT_RIDGE;
+    assert.ok(s35 > 0.6, `expected most of the height, got ${s35.toFixed(2)}`);
 });
 
 t('a loud signal turning up does not flatten everything else', () => {
-    // The same 10 dB signal, once with 45 dB on screen and once with 90. The
-    // aperture is bounded, so the second does not halve the first.
-    const narrow = ridgeHeight(-90, -100, 45, 0);
-    const huge = ridgeHeight(-90, -100, 90, 0);
+    // The same signal, once with 45 dB on screen and once with 90. The aperture
+    // is bounded, so the second does not halve the first — which is what the
+    // display's own range would do, and why the surface used to lose everything
+    // but the loudest carrier on a busy band.
+    const narrow = ridgeHeight(-85, -100, 45, 0);
+    const huge = ridgeHeight(-85, -100, 90, 0);
     assert.ok(near(narrow, huge, 1e-9),
         'the ridge height must not depend on how loud the loudest signal is');
 });
 
 t('full scale is still full height', () => {
-    assert.ok(near(ridgeHeight(-55, -100, 45, 0), FRONT_RIDGE));
+    // Ground plus the whole aperture, and anything above it clamps rather than
+    // running off the top of the pane.
+    assert.ok(near(ridgeHeight(-100 + 6 + 45, -100, 45, 0), FRONT_RIDGE));
     assert.ok(near(ridgeHeight(0, -100, 200, 0), FRONT_RIDGE));
 });
 

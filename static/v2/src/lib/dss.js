@@ -129,20 +129,56 @@ export function unproject(x, y) {
 }
 
 /**
- * A constant frequency drawn across the surface, in unit coordinates.
+ * A constant frequency across the surface, as a path along the terrain.
  *
- * Straight, and that is not an approximation: both x and y are linear in depth
- * — x through depthScale and y through DEPTH_SPAN — so a fixed frequency is a
- * straight line converging on the vanishing point. Two endpoints is the whole
- * geometry, and it is the same `project` the terrain is built from, so a dial
- * line and the ridge under it cannot drift apart.
+ * On the *baseline plane* a fixed frequency is a straight line: x and y are both
+ * linear in depth, so two endpoints would do. That was the first version and it
+ * stopped short — the plane is the ground the ridges stand on, and at the back
+ * they stand up to FRONT_RIDGE x BACK_WIDTH of the pane above it. The terrain
+ * kept going where the mark ran out.
  *
- * @returns {{x0: number, y0: number, x1: number, y1: number}} front then back
+ * So the mark is drawn where the surface actually is: one point per ridge, each
+ * lifted off the plane by that ridge's own height at this frequency. It ends
+ * exactly where the terrain ends, it rides over a signal instead of sinking
+ * through it, and it uses the same height mapping the rasteriser does — so a
+ * dial line and the ridge it marks cannot disagree by construction.
+ *
+ * @param o.floor dBm at the baseline, before HEIGHT_FLOOR_MARGIN_DB
+ * @param o.range the display's dB range, bounded by heightRange for height
+ * @param o.curve height gamma, HEIGHT_CURVE
+ * @param o.progress the sub-row slide, so the mark moves with the terrain
+ * @returns {Array<{x: number, y: number}>} front to back, in unit coordinates
  */
-export function edgeLine(freqUnit) {
-    const front = project(freqUnit, 0);
-    const back = project(freqUnit, 1);
-    return { x0: front.x, y0: front.y, x1: back.x, y1: back.y };
+export function surfaceLine(ring, freqUnit, o = {}) {
+    const { floor = 0, range = 1, curve = HEIGHT_CURVE, progress = 0 } = o;
+    const n = ridgeCount(ring);
+    const out = [];
+    if (n <= 0) {
+        // No history yet: the ground plane is all there is to mark.
+        const f = project(freqUnit, 0);
+        const b = project(freqUnit, 1);
+        return [{ x: f.x, y: f.y }, { x: b.x, y: b.y }];
+    }
+
+    const cols = ring.cols;
+    const hRange = heightRange(range) || range;
+    const hFloor = heightFloor(floor);
+    const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
+    // The column this frequency falls in. Clamped rather than skipped: a mark at
+    // the very edge of the view still has a ridge under it.
+    let c = Math.round(freqUnit * (cols - 1));
+    if (c < 0) c = 0;
+    else if (c >= cols) c = cols - 1;
+
+    for (let age = 0; age < n; age++) {
+        const depth = (age + p) / ring.rows;
+        const pt = project(freqUnit, depth);
+        let sv = (storedRow(ring, age)[c] - hFloor) / hRange;
+        sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;
+        if (curve !== 1) sv = Math.pow(sv, curve > 0.05 ? curve : 0.05);
+        out.push({ x: pt.x, y: pt.y - sv * FRONT_RIDGE * depthScale(depth) });
+    }
+    return out;
 }
 
 /**

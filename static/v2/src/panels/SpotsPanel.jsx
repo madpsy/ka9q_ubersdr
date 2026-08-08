@@ -31,10 +31,11 @@ import {
     cwGraphBand, cwGraphCleared, cwGraphFrequency, openCwGraph, setCwGraphContext,
 } from '../compat/cwGraph.js';
 import {
-    AGE_OPTIONS, BANDS, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
+    AGE_OPTIONS, AUTO_BAND, BANDS, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
     DISTANCE_OPTIONS, SNR_OPTIONS, WPM_OPTIONS,
-    ageLabel, countriesIn, filterSpots, modeForSpot,
+    ageLabel, countriesIn, filterSpots, modeForSpot, resolveBandFilter,
 } from '../lib/spots.js';
+import { bandForFrequency } from '../lib/bands.js';
 
 // Rows rendered before "show more", and how many each press adds. Kept small
 // because this panel is usually a few rows tall in a dock: a page much larger
@@ -81,7 +82,7 @@ function Select({ label, value, onChange, children }) {
 const toValue = (v) => (v == null ? '' : String(v));
 const fromValue = (v) => (v === '' ? null : Number(v));
 
-function Filters({ tab, filters, set, countries }) {
+function Filters({ tab, filters, set, countries, dialBand }) {
     return (
         <div className="spots__filters">
             <Select label="Age" value={toValue(filters.age)} onChange={(v) => set({ age: fromValue(v) })}>
@@ -90,7 +91,16 @@ function Filters({ tab, filters, set, countries }) {
                 ))}
             </Select>
 
+            {/* Auto first, because it is the default and because it is the answer to the
+                question a spot list is usually being asked: who can be heard where I am
+                listening. It names the band it has settled on — "Auto (20m)" — so a short
+                list is explained by the control rather than being a mystery, and says
+                "all bands" where the dial is outside every band, which is most of the
+                shortwave spectrum. */}
             <Select label="Band" value={filters.band} onChange={(v) => set({ band: v })}>
+                <option value={AUTO_BAND}>
+                    {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
+                </option>
                 <option value="all">All bands</option>
                 {BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
             </Select>
@@ -320,7 +330,9 @@ export default function SpotsPanel({ minimal }) {
     // once: the panel is unmounted whenever its section is collapsed, and the
     // graph has to keep working through that.
     setCwGraphContext({
-        band: () => filters.cw.band,
+        // Resolved, never 'auto': v1's graph takes a band name or 'all', and handing it
+        // a word it has never heard of would filter to nothing.
+        band: () => resolveBandFilter(filters.cw.band, bandForFrequency(tuning.frequency)),
         frequency: () => tuning.frequency,
         lookups: () => !!(serverInfo && serverInfo.lookup_service),
         uuid: () => getSessionId(),
@@ -331,14 +343,23 @@ export default function SpotsPanel({ minimal }) {
 
     // The graph mirrors our band filter and follows the dial for its
     // auto-lookup. Both are no-ops when it is not open.
-    useEffect(() => { cwGraphBand(filters.cw.band); }, [filters.cw.band]);
+    // Resolved for the same reason, and re-pushed when the dial changes band as well as
+    // when the filter does: on auto, moving to another band is a change of filter.
+    useEffect(() => {
+        cwGraphBand(resolveBandFilter(filters.cw.band, bandForFrequency(tuning.frequency)));
+    }, [filters.cw.band, tuning.frequency]);
     useEffect(() => { cwGraphFrequency(tuning.frequency); }, [tuning.frequency]);
 
     if (!tabs.length) return <Empty>This receiver publishes no spots.</Empty>;
 
     const list = spots;
     const f = filters[active];
-    const matched = filterSpots(list, f, now);
+    // The band the dial is in, for the 'auto' band filter — see bandFilter. Worked out
+    // here rather than inside the filter so the picker can say which band auto has
+    // landed on, which is the difference between a filter you trust and one that seems
+    // to be hiding things.
+    const dialBand = bandForFrequency(tuning.frequency);
+    const matched = filterSpots(list, f, now, dialBand);
     const countries = countriesIn(list);
     const page = matched.slice(0, shown);
 
@@ -409,7 +430,9 @@ export default function SpotsPanel({ minimal }) {
             {!running && <div className="note note--tight">Start listening to receive spots.</div>}
             {running && state === 'reconnecting' && <div className="note note--warn">Reconnecting…</div>}
 
-            {!minimal && <Filters tab={active} filters={f} set={set} countries={countries} />}
+            {!minimal && (
+                <Filters tab={active} filters={f} set={set} countries={countries} dialBand={dialBand} />
+            )}
 
             <div className={`list spots__list spots__list--${active}${minimal ? ' spots__list--min' : ''}`}>
                 {page.length === 0 && (

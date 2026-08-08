@@ -152,9 +152,21 @@ export function modeForSpot(spot) {
 
 // --- filtering -------------------------------------------------------------
 
+// The band filter's third state, along 'all' and a named band: follow the dial.
+//
+// Default, and it is the right default for a spot list. What somebody wants from one is
+// almost always "who can be heard where I am listening" — a 20m spot while you are on 40m
+// is a fact about somebody else's afternoon — and the alternative is a list that has to be
+// re-filtered by hand every time the dial moves to another band. The spectrogram panel
+// made the same choice for the same reason, and this is the same idea in a filter.
+//
+// 'all' stays, because "what is open anywhere" is the other real question, and a named band
+// stays because pinning one is how you watch a band you are not listening to.
+export const AUTO_BAND = 'auto';
+
 export const DEFAULT_FILTERS = {
     age: null,          // minutes, null = no limit (set per kind by the panel)
-    band: 'all',
+    band: AUTO_BAND,
     mode: 'all',        // digital only
     country: 'all',
     callsign: '',
@@ -164,14 +176,36 @@ export const DEFAULT_FILTERS = {
     tenMeterBeacons: false,   // CW only; v1 hides them by default
 };
 
-export function filterSpots(spots, filters, now = Date.now()) {
+/**
+ * Which band the filter means right now.
+ *
+ * Named at length because `bandFilter` is a key in the object v1's CW graph is handed
+ * (see compat/cwGraph.js), and a bare one in an object literal is indistinguishable from
+ * a use of this — which test/unresolved.js quite reasonably objects to.
+ *
+ * 'auto' resolves to the band the dial is in — and to 'all' when the dial is somewhere no
+ * band covers, which is most of the shortwave spectrum. That fallback matters: a listener
+ * parked on 6 MHz would otherwise see an empty list and no clue why, and "no band" is not
+ * a band anybody has spots for.
+ */
+export function resolveBandFilter(choice, dialBand) {
+    if (choice !== AUTO_BAND) return choice;
+    return dialBand || 'all';
+}
+
+/**
+ * `dialBand` is where the receiver is tuned, for the 'auto' band filter. Omit it and auto
+ * behaves as 'all', which is what a caller with no dial to consult should get.
+ */
+export function filterSpots(spots, filters, now = Date.now(), dialBand = null) {
     const f = { ...DEFAULT_FILTERS, ...filters };
+    const band = resolveBandFilter(f.band, dialBand);
     const call = f.callsign.trim().toUpperCase();
     const maxAgeMs = f.age == null ? null : f.age * 60000;
 
     return spots.filter((s) => {
         if (maxAgeMs != null && now - s.at > maxAgeMs) return false;
-        if (f.band !== 'all' && s.band !== f.band) return false;
+        if (band !== 'all' && s.band !== band) return false;
         if (f.mode !== 'all' && (s.mode || '').toUpperCase() !== f.mode) return false;
         if (f.country !== 'all' && s.country !== f.country) return false;
         // Substring, not prefix: v1 matches anywhere in the callsign so a

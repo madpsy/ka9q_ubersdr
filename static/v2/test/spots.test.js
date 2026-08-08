@@ -12,6 +12,7 @@ const {
     MAX_SPOTS, DEFAULT_AGE_MIN, TEN_M_BEACON_HZ, DEFAULT_FILTERS, MARKER_AGE_MIN,
     normaliseDX, normaliseDigital, normaliseCW,
     modeForSpot, filterSpots, countriesIn, addSpot, spotKey, ageLabel, markerSpots,
+    AUTO_BAND, resolveBandFilter,
 } = require('./.build/spots.cjs');
 
 let pass = 0;
@@ -301,6 +302,52 @@ t('ages read in seconds, minutes then hours', () => {
 t('a spot from the future reads as zero, not a negative age', () => {
     // Clock skew between the server and the browser is normal.
     assert.strictEqual(ageLabel(NOW + 5000, NOW), '0s');
+});
+
+// --- the band filter following the dial ------------------------------------------
+//
+// Default, because what a spot list is usually being asked is "who can be heard where I
+// am listening" — a 20m spot while you are on 40m is a fact about somebody else's
+// afternoon. The spectrogram panel made the same choice; this is the same idea in a
+// filter.
+
+t('the band filter follows the dial by default', () => {
+    assert.strictEqual(DEFAULT_FILTERS.band, AUTO_BAND);
+});
+
+t('auto resolves to the band the dial is in', () => {
+    assert.strictEqual(resolveBandFilter(AUTO_BAND, '20m'), '20m');
+});
+
+t('auto outside every band is all bands, not an empty list', () => {
+    // A listener parked on 6 MHz would otherwise see nothing and no clue why, and "no
+    // band" is not a band anybody has spots for.
+    assert.strictEqual(resolveBandFilter(AUTO_BAND, null), 'all');
+    assert.strictEqual(resolveBandFilter(AUTO_BAND, ''), 'all');
+});
+
+t('a chosen band is not overridden by where the dial is', () => {
+    // Pinning a band is how you watch one you are not listening to.
+    assert.strictEqual(resolveBandFilter('40m', '20m'), '40m');
+    assert.strictEqual(resolveBandFilter('all', '20m'), 'all');
+});
+
+t('filtering on auto keeps the dial\'s band and drops the rest', () => {
+    const spots = [
+        mk({ dx_call: 'W1AW', band: '20m' }),
+        mk({ dx_call: 'G4ABC', band: '40m' }),
+    ];
+    const on20 = filterSpots(spots, F({ band: AUTO_BAND }), NOW, '20m');
+    assert.deepStrictEqual(on20.map((x) => x.callsign), ['W1AW']);
+    const on40 = filterSpots(spots, F({ band: AUTO_BAND }), NOW, '40m');
+    assert.deepStrictEqual(on40.map((x) => x.callsign), ['G4ABC']);
+});
+
+t('a caller with no dial to consult gets everything, not nothing', () => {
+    // filterSpots is called from places with no receiver in scope; auto there has to mean
+    // "no band filter" rather than silently matching none.
+    const spots = [mk({ dx_call: 'W1AW', band: '20m' }), mk({ dx_call: 'G4ABC', band: '40m' })];
+    assert.strictEqual(filterSpots(spots, F({ band: AUTO_BAND }), NOW).length, 2);
 });
 
 console.log(`\nall ${pass} spots tests passed`);

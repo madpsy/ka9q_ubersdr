@@ -8,8 +8,7 @@
 
 const assert = require('assert');
 const {
-    QUICK_COMMANDS, SCROLLBACK_LIMIT, modeFromSpot, parseSpotLine, spotCommand,
-    spotsEnabledBy, trimLines,
+    QUICK_COMMANDS, SCROLLBACK_LIMIT, modeFromSpot, parseSpotLine, spotCommand, trimLines,
 } = require('./.build/dxterminal.cjs');
 
 let pass = 0;
@@ -170,19 +169,6 @@ t('nothing sendable gives no command rather than a malformed one', () => {
     assert.strictEqual(spotCommand({ hz: 14074000, callsign: '' }), '');
     assert.strictEqual(spotCommand({ hz: 0, callsign: 'MM3NDH' }), '');
     assert.strictEqual(spotCommand({ hz: NaN, callsign: 'MM3NDH' }), '');
-});
-
-t('spot rights are read from the line the cluster actually prints', () => {
-    // Both places the addon says it — the banner after a login-line password, and
-    // the reply to SET/SPOTPASS — are the same sentence.
-    assert.strictEqual(spotsEnabledBy('Spot submission enabled. Use: DX <freq_kHz> <callsign>'), true);
-    // And the one that says the opposite must not match it.
-    assert.strictEqual(
-        spotsEnabledBy('To submit spots: SET/SPOTPASS <password> then DX <freq_kHz> <callsign>'),
-        false,
-    );
-    assert.strictEqual(spotsEnabledBy('Spot submission has not been enabled by the administrator.'), false);
-    assert.strictEqual(spotsEnabledBy(''), false);
 });
 
 console.log(`\n${pass} ok`);

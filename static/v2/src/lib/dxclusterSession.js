@@ -18,13 +18,15 @@
 // The transcript lives here too, for the same reason: coming back to a panel that has
 // held its login but lost everything that scrolled past would be half a feature.
 
-import { openTerminal, saveLogin, spotCommand, spotsEnabledBy, trimLines } from './dxclusterTerminal.js';
+import { openTerminal, saveLogin, spotCommand, trimLines } from './dxclusterTerminal.js';
 
 let term = null;
-// `canSpot` is whether this session may submit spots — see spotAuthLine. It is part
-// of the state rather than a separate flag so that a subscriber re-renders when it
-// changes, which is what makes the context menu entry appear.
-let state = { state: 'closed', detail: '', text: '', canSpot: false };
+let state = { state: 'closed', detail: '', text: '' };
+// What the live session logged in with. Spot submission needs a password — the
+// cluster grants the right off the second token of the login line — so this is what
+// dxCanSpot reads. Held here rather than read back from storage because storage can
+// be edited after connecting, and what matters is what this session actually sent.
+let creds = { callsign: '', password: '' };
 const listeners = new Set();
 
 // Whether the remembered callsign has been offered a connection this page load. Here
@@ -87,7 +89,8 @@ export function dxConnect({ callsign, password }) {
     const call = String(callsign || '').trim().toUpperCase();
     if (!call || term) return false;
     saveLogin({ callsign: call, password });
-    state = { state: 'connecting', detail: '', text: '', canSpot: false };
+    creds = { callsign: call, password: String(password || '') };
+    state = { state: 'connecting', detail: '', text: '' };
     notify({ type: 'state' });
 
     term = openTerminal({
@@ -95,10 +98,7 @@ export function dxConnect({ callsign, password }) {
         password,
         on: {
             text: (chunk, isEcho) => {
-                // Latching: the line arrives once, in the banner or in reply to
-                // SET/SPOTPASS, and the rights last as long as the session does.
-                const canSpot = state.canSpot || (!isEcho && spotsEnabledBy(chunk));
-                state = { ...state, text: trimLines(state.text + chunk), canSpot };
+                state = { ...state, text: trimLines(state.text + chunk) };
                 notify({ type: 'text', isEcho: !!isEcho });
             },
             state: (st, why) => {
@@ -117,14 +117,25 @@ export function dxDisconnect() {
     // The transcript is kept. A disconnect is leaving the cluster, not throwing away
     // what it said — and reconnecting clears it, which is the point at which a fresh
     // screen is what anybody expects.
-    // Spot rights go with the session: a reconnect authenticates again, and an
-    // offer to spot on a closed cluster is an offer that cannot be met.
-    state = { ...state, state: 'closed', detail: '', canSpot: false };
+    // The login goes with the session: an offer to spot on a closed cluster is an
+    // offer that cannot be met.
+    creds = { callsign: '', password: '' };
+    state = { ...state, state: 'closed', detail: '' };
     notify({ type: 'state' });
 }
 
-/** Whether this session may submit spots: connected, and the password was accepted. */
-export const dxCanSpot = () => dxConnected() && state.canSpot;
+/**
+ * Whether this session may submit spots: connected, with a callsign and a password.
+ *
+ * The cluster grants the right off the second token of the login line — no password,
+ * no spotting — so those three facts are the whole test. Deliberately not read back
+ * from what the cluster said in reply: it answers a correct password and a wrong one
+ * the same way as far as connecting goes, the wording is the addon's to change, and a
+ * menu entry that depended on parsing a banner would go missing for reasons nobody
+ * could see. If the password turns out to be wrong the cluster says so in reply to
+ * the spot itself, in the panel's transcript.
+ */
+export const dxCanSpot = () => dxConnected() && !!creds.callsign && !!creds.password;
 
 /**
  * Submit a spot. The command itself is spotCommand, in lib/dxclusterTerminal.js with
@@ -148,7 +159,8 @@ export function dxSend(cmd) {
 export function _resetDxSession() {
     if (term) term.close();
     term = null;
-    state = { state: 'closed', detail: '', text: '', canSpot: false };
+    creds = { callsign: '', password: '' };
+    state = { state: 'closed', detail: '', text: '' };
     listeners.clear();
     autoTried = false;
 }

@@ -105,18 +105,6 @@ export function spotCommand({ hz, callsign, comment }) {
     return `DX ${khz.toFixed(1)} ${call}${note ? ` ${note}` : ''}`;
 }
 
-/**
- * The line the cluster prints once a session may submit spots.
- *
- * The addon says it in exactly two places and in the same words — in the banner when
- * the login line carried a correct password, and in reply to SET/SPOTPASS. Matched
- * from the transcript rather than assumed from "we sent a password", because a wrong
- * password is not an error there: the client connects normally and simply has no spot
- * rights. Assuming would offer a Spot command that always failed, into a terminal
- * panel that is collapsed most of the time.
- */
-export const spotsEnabledBy = (text) => /spot submission enabled/i.test(String(text || ''));
-
 /** Where the addon's own full web UI lives. */
 export const webUrl = (base = '/addon/dxcluster') => `${base}/`;
 

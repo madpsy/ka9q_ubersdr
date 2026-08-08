@@ -22,9 +22,7 @@ const t = (name, fn) => {
 // --- what a fresh page looks like ------------------------------------------------
 
 t('nothing is connected, and nothing has been said', () => {
-    assert.deepStrictEqual(dx.dxSession(), {
-        state: 'closed', detail: '', text: '', canSpot: false,
-    });
+    assert.deepStrictEqual(dx.dxSession(), { state: 'closed', detail: '', text: '' });
     assert.strictEqual(dx.dxConnected(), false);
 });
 
@@ -125,11 +123,18 @@ t('a closed session cannot spot', () => {
     assert.strictEqual(dx.dxSpot({ hz: 14074000, callsign: 'MM3NDH' }), false);
 });
 
-t('connecting without spot rights cannot spot either', () => {
-    // Being logged in is not the same as being allowed to submit — the password on
-    // the login line is what grants it, and a wrong one is silently no rights.
+t('a callsign with no password cannot spot', () => {
+    // The cluster grants spot rights off the second token of the login line, so a
+    // session that sent no password has none however well connected it is.
     dx.dxConnect({ callsign: 'MM3NDH', password: '' });
     assert.strictEqual(dx.dxCanSpot(), false);
+});
+
+t('the login goes with the session, so a disconnect ends the right to spot', () => {
+    dx.dxConnect({ callsign: 'MM3NDH', password: 'secret' });
+    dx.dxDisconnect();
+    assert.strictEqual(dx.dxCanSpot(), false);
+    assert.strictEqual(dx.dxSpot({ hz: 14074000, callsign: 'G0ABC' }), false);
 });
 
 if (process.exitCode) console.log('\nDX session tests FAILED');

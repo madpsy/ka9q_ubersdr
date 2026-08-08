@@ -7,10 +7,10 @@
 // The command is `DX <freq_kHz> <callsign> [comment]`, Spider-compatible and the
 // addon's own — see spotCommand in lib/dxclusterTerminal.js, which does the Hz-to-kHz
 // conversion, and handleDX in ubersdr_dxcluster/commands.go for what the far end
-// accepts. Only sessions that authenticated with a spot password may submit, which
-// is why the menu entry appears and disappears with dxCanSpot rather than being
-// shown disabled: an entry that is never usable on a receiver whose operator has
-// not enabled spotting is an entry that should not be in the menu at all.
+// accepts. A password is what the cluster grants spot rights off, so the menu entry
+// appears and disappears with dxCanSpot — connected, with a callsign and a password —
+// rather than being shown disabled: an entry that can never be pressed by somebody
+// who logs in without a password is an entry that should not be in their menu.
 //
 // The reply — accepted, or a reason — comes back as ordinary cluster text and lands
 // in the DX cluster panel's transcript. This closes on send rather than waiting for

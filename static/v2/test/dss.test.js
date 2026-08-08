@@ -356,4 +356,29 @@ t('a still view is left alone', () => {
     assert.strictEqual(storedRow(r, 0)[1], -20);
 });
 
+// --- the depth setting must not cost the history ----------------------------
+
+t('the ring holds the deepest the surface can go, whatever the setting', () => {
+    // The bug: the ring was sized from the depth setting, so every change to
+    // that number recreated it and wiped every row. With the rate measured as a
+    // float the number changed on *every frame*, and the history never lived
+    // long enough to have any depth at all.
+    //
+    // So the ring is created once at full depth and the setting only says how
+    // much of it to draw.
+    const r = createRing(MAX_RIDGES, 8);
+    assert.strictEqual(r.rows, MAX_RIDGES);
+    for (let i = 0; i < 40; i++) pushRow(r, row(-50, 8));
+    assert.strictEqual(ridgeCount(r), 40, 'forty rows survive being asked about');
+});
+
+t('a shallower setting draws fewer rows without losing any', () => {
+    const r = createRing(MAX_RIDGES, 8);
+    for (let i = 0; i < 60; i++) pushRow(r, row(-50, 8));
+    // Whatever depth is asked for, the stored history is untouched — which is
+    // what makes the setting free to change and free to change back.
+    assert.strictEqual(ridgeCount(r), 60);
+    assert.ok(ridgesFor(1, 20) < ridgesFor(3, 20), 'and a smaller setting asks for less');
+});
+
 console.log(`\n${pass} passed`);

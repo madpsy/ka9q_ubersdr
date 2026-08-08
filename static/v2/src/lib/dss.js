@@ -436,6 +436,11 @@ const CREST_GAIN = 1.18;
  * @param o.curve    gamma on height only; see HEIGHT_CURVE
  * @param o.lut      the waterfall's palette, a 768-byte rgb table
  * @param o.bg       background [r,g,b], what the haze fades toward
+ * @param o.ridges   how many of the stored rows to draw, front first. The ring
+ *                   is always the full depth the surface can show and is never
+ *                   resized — resizing it wipes the history, and a depth setting
+ *                   that wiped the picture every time it was read had no depth
+ *                   at all. This is the depth setting, and it costs nothing.
  * @param o.progress 0..1 through the gap between rows. This is what makes the
  *                   surface move rather than step: every ridge is drawn at
  *                   (age + progress) / ring.rows, so at progress 1 each one is
@@ -445,7 +450,7 @@ const CREST_GAIN = 1.18;
 export function drawSurface(ctx, ring, w, h, o) {
     const {
         floor, range, contrast = 1, curve = HEIGHT_CURVE, lut, bg = [5, 7, 12],
-        progress = 0,
+        progress = 0, ridges,
     } = o;
     if (w <= 0 || h <= 0) return;
 
@@ -471,7 +476,10 @@ export function drawSurface(ctx, ring, w, h, o) {
     }
     top.fill(h);
 
-    const n = ridgeCount(ring);
+    // What is drawn: the depth asked for, bounded by what has actually arrived.
+    // A part-filled ring draws what it has rather than a wall of empty rows.
+    const want = ridges > 0 ? Math.min(ridges, ring.rows) : ring.rows;
+    const n = Math.min(ridgeCount(ring), want);
     if (n <= 0 || !lut || !(range > 0)) {
         ctx.putImageData(img, 0, 0);
         return;
@@ -487,7 +495,10 @@ export function drawSurface(ctx, ring, w, h, o) {
     // already painted, so a pixel is written once and an occluded ridge costs
     // its columns and nothing else.
     for (let age = 0; age < n; age++) {
-        const depth = (age + p) / ring.rows;
+        // Over the drawn depth, not the ring's. The ring holds the most the
+        // surface can ever show; the setting says how much of that fills the
+        // pane, and the back of the picture has to be the back of the picture.
+        const depth = (age + p) / n;
         const width = depthScale(depth);
         const inset = (w * (1 - width)) / 2;
         const rowW = w - 2 * inset;

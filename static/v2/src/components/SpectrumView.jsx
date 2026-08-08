@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    clearRows as clearDssRows, createRing as createDssRing, drawSurface, edgeLine,
-    pushRow as pushDssRow, ridgesFor, ringCols, shiftRows as shiftDssRows,
+    MAX_RIDGES, clearRows as clearDssRows, createRing as createDssRing, drawSurface,
+    edgeLine, pushRow as pushDssRow, ridgesFor, ringCols, shiftRows as shiftDssRows,
     unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
@@ -2847,24 +2847,24 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
         // of history for a canvas that is not on screen, and the surface fills
         // again in a few seconds.
         g.dss = null;
-        g.dssRows = 0;
         return;
     }
 
-    // Sized in both directions from what is actually on screen: the depth in
-    // seconds against the rate rows arrive at, and one column per device pixel of
-    // the pane so a one-pixel carrier is a one-column ridge. A change to any of
-    // them is a different history — the stored rows were taken at the old spacing
-    // and the old width — so the ring is remade rather than reinterpreted.
-    // Against the measured rate, falling back to the setting until a couple of
-    // rows have arrived to measure. Sized from the setting alone, three seconds
-    // of history came out as eight on a server sending frames at a third of the
-    // requested speed.
-    const want = ridgesFor(d.dssSeconds, g.rowDt > 0 ? 1000 / g.rowDt : d.waterfallRate);
+    // One column per device pixel of the pane, so a one-pixel carrier is a
+    // one-column ridge. A width change is a different history — the stored rows
+    // were taken at the old width — so the ring is remade rather than resampled.
+    //
+    // The ring is always the full depth the surface can draw, and never resized
+    // by the depth setting. Sizing it from the setting meant recreating it — and
+    // wiping every row in it — whenever the number changed, which with a rate
+    // measured as a float was every single frame: the history never lived long
+    // enough to have any depth at all.
+    //
+    // How much of it to *draw* is the depth setting's job, and that costs
+    // nothing to change. See `ridges` below.
     const cols = ringCols(pxW);
-    if (!g.dss || g.dssRows !== want || g.dss.cols !== cols) {
-        g.dss = createDssRing(want, cols);
-        g.dssRows = want;
+    if (!g.dss || g.dss.cols !== cols) {
+        g.dss = createDssRing(MAX_RIDGES, cols);
         // A new ring has no recorded view, so the next align call adopts the
         // live one rather than trying to carry a history that does not exist.
         g.dssSpan = 0;
@@ -2877,6 +2877,18 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     alignDssToView(g, d, cfg);
 
     if (commitRow) pushDssRow(g.dss, g.px);
+
+    // How many of the stored rows the surface shows, from the rate they are
+    // actually landing at rather than the speed slider's cap — a row needs a
+    // spectrum frame to carry it, so a server sending fewer frames a second than
+    // the setting asks for makes the rows arrive at its rate. Three seconds of
+    // history came out as eight that way.
+    //
+    // Rounded to whole rows a second before use. The measurement is a smoothed
+    // float that never sits still, and an unrounded one would step the drawn
+    // depth by a ridge every frame for no reason anybody could see.
+    const rate = g.rowDt > 0 ? Math.round(1000 / g.rowDt) : d.waterfallRate;
+    const ridges = ridgesFor(d.dssSeconds, rate);
     // Remembered so the between-rows frames — which are handed the last known
     // mapping rather than a fresh one — draw against the same numbers.
     if (Number.isFinite(floor)) g.dssFloor = floor;
@@ -2885,9 +2897,8 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // No dirty check. The surface is in motion whenever a row is due, because
     // every ridge is drawn a fraction of a row further back than on the last
     // frame — that is what `progress` is, and skipping a frame is a visible
-    // stutter rather than a saving. It is affordable because a ridge is one
-    // traced path and a native copy of it, and because there are forty-eight of
-    // them rather than ninety-six. See lib/dss.js.
+    // stutter rather than a saving. It is affordable because the rasteriser
+    // writes each pixel once whatever the ridge count. See lib/dss.js.
     const ctx = dss.getContext('2d', { alpha: false });
     drawSurface(ctx, g.dss, dss.width, dss.height, {
         floor: g.dssFloor,
@@ -2895,6 +2906,7 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
         contrast: d.contrast,
         lut: getPalette(d.palette),
         bg: RING_BG_RGB,
+        ridges,
         // Straight from the row gap. One row per ridge means the geometry and
         // the content advance together by construction, which is what the
         // aggregated version could never manage however the phase was computed.

@@ -7706,6 +7706,60 @@ a.btn { text-decoration: none; }
 .too-narrow__buttons { display: flex; flex-direction: column; gap: 4px; }
 .too-narrow__buttons .btn { width: 100%; justify-content: center; }
 
+/* The manual level range in the spectrum toolbar: two thumbs and a readout. Narrow on
+   purpose — it sits in a row of icon buttons, and it is a nudge rather than a
+   measurement. The Display panel has the same two values as full-width sliders. */
+.spectrum__range { display: inline-flex; align-items: center; gap: 5px; }
+.spectrum__range .range { width: calc(88px * var(--ui-scale)); }
+.spectrum__range-read {
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+    min-width: 6ch;
+}
+
+/* =========================================================================
+   Two-ended slider
+   ========================================================================= */
+
+/* Hand-built rather than two overlapping range inputs — see RangeSlider for why. The
+   track is a bar, the fill is the part between the thumbs, and the thumbs are absolutely
+   placed so either can be dragged past the middle without the other intercepting it. */
+.range {
+    position: relative;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    touch-action: none;
+    cursor: pointer;
+}
+.range__track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--surface-3);
+}
+.range__fill {
+    position: absolute;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--accent);
+}
+.range__thumb {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    margin-left: -6px;
+    border-radius: 50%;
+    border: 2px solid var(--surface);
+    background: var(--accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.range__thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* =========================================================================
    HFDL addon panel
    ========================================================================= */

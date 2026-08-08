@@ -23,7 +23,7 @@ import {
 } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
-import { Button, Icon } from './ui.jsx';
+import { Button, Icon, RangeSlider } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
@@ -1693,6 +1693,51 @@ export default function SpectrumView() {
                                 aria-label="Waterfall history when panning"
                                 onClick={() => display.set({ waterfallPan: panFollows ? 'hold' : 'follow' })}
                             />
+                        )}
+                        {/* Auto or manual levelling, and the two limits when it is
+                            manual. Here as well as in the Display panel because it is
+                            the setting you reach for *while* looking at a signal: auto
+                            follows the noise floor, which is right until a strong
+                            carrier or a burst of QRM drags the whole picture with it,
+                            and the answer to that is two thumbs and a glance rather
+                            than opening a panel.
+
+                            Highlighted while auto, so the toolbar reads as state. */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            active={display.autoRange}
+                            icon={<Icon.Gauge />}
+                            title={display.autoRange
+                                ? 'Levels follow the noise floor — click to set them by hand'
+                                : `Levels set by hand, ${display.floorDb} to ${display.ceilDb} dB — click to follow the noise floor`}
+                            aria-label="Level range"
+                            onClick={() => display.set({ autoRange: !display.autoRange })}
+                        />
+                        {/* Not on a phone: the tools row there is already the scarcest
+                            space in the layout, and the Display panel has both limits as
+                            full-width sliders one tap away. */}
+                        {!display.autoRange && !mobile && (
+                            <span className="spectrum__range">
+                                {/* The floor and the ceiling on one track, because they
+                                    are one setting: what dB range the colours cover.
+                                    Ten decibels apart at the least — see RangeSlider's
+                                    `gap` — since a range narrower than that is a
+                                    two-colour display. */}
+                                <RangeSlider
+                                    low={display.floorDb}
+                                    high={display.ceilDb}
+                                    min={-160}
+                                    max={0}
+                                    step={1}
+                                    gap={10}
+                                    format={(v) => `${v} dB`}
+                                    onChange={({ low, high }) => display.set({ floorDb: low, ceilDb: high })}
+                                />
+                                <span className="spectrum__range-read">
+                                    {display.floorDb}/{display.ceilDb}
+                                </span>
+                            </span>
                         )}
                         <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
                         <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />

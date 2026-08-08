@@ -144,6 +144,113 @@ export function Slider({
     );
 }
 
+/**
+ * Two thumbs on one track: a range with a bottom and a top.
+ *
+ * Written by hand rather than as two overlapping `<input type=range>`s, which is the
+ * usual trick and brings two problems with it — the thumb on top swallows every drag
+ * near the middle, and neither input can be told to stop at the other. Here the pointer
+ * simply grabs whichever thumb it is nearer, and each end is clamped a `gap` away from
+ * the other, so the two can never cross or meet.
+ *
+ * The keyboard gets both ends too: each thumb is a real focusable element with arrow keys
+ * on it, because a control that can only be set by dragging is a control some people
+ * cannot set at all.
+ */
+export function RangeSlider({
+    low, high, min, max, step = 1, gap = 10, onChange, onCommit, format,
+}) {
+    const trackRef = useRef(null);
+    // Which end a drag is moving. Decided on the way down and held, so a fast drag past
+    // the other thumb keeps moving the one it started on rather than swapping.
+    const dragging = useRef(null);
+
+    const span = max - min || 1;
+    const pct = (v) => ((v - min) / span) * 100;
+    const round = (v) => Math.round(v / step) * step;
+
+    const clampLow = (v) => Math.max(min, Math.min(round(v), high - gap));
+    const clampHigh = (v) => Math.min(max, Math.max(round(v), low + gap));
+
+    const valueAt = (clientX) => {
+        const el = trackRef.current;
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        if (!r.width) return null;
+        return min + ((clientX - r.left) / r.width) * span;
+    };
+
+    const onDown = (e) => {
+        const at = valueAt(e.clientX);
+        if (at == null) return;
+        // Nearer end wins, and a tie goes to the one with room to move.
+        const end = Math.abs(at - low) <= Math.abs(at - high) ? 'low' : 'high';
+        dragging.current = end;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onChange(end === 'low' ? { low: clampLow(at), high } : { low, high: clampHigh(at) });
+    };
+
+    const onMove = (e) => {
+        if (!dragging.current) return;
+        const at = valueAt(e.clientX);
+        if (at == null) return;
+        if (dragging.current === 'low') onChange({ low: clampLow(at), high });
+        else onChange({ low, high: clampHigh(at) });
+    };
+
+    const onUp = (e) => {
+        if (!dragging.current) return;
+        dragging.current = null;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* gone */ }
+        if (onCommit) onCommit();
+    };
+
+    const onKey = (end) => (e) => {
+        const dir = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1
+            : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : 0;
+        if (!dir) return;
+        e.preventDefault();
+        const by = dir * step * (e.shiftKey ? 5 : 1);
+        if (end === 'low') onChange({ low: clampLow(low + by), high });
+        else onChange({ low, high: clampHigh(high + by) });
+        if (onCommit) onCommit();
+    };
+
+    const thumb = (end, v) => (
+        <span
+            className={`range__thumb range__thumb--${end}`}
+            style={{ left: `${pct(v)}%` }}
+            role="slider"
+            tabIndex={0}
+            aria-valuenow={v}
+            aria-valuemin={min}
+            aria-valuemax={max}
+            aria-label={end === 'low' ? 'Lower limit' : 'Upper limit'}
+            title={format ? format(v) : String(v)}
+            onKeyDown={onKey(end)}
+        />
+    );
+
+    return (
+        <div
+            className="range"
+            ref={trackRef}
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+        >
+            <span className="range__track" />
+            <span
+                className="range__fill"
+                style={{ left: `${pct(low)}%`, width: `${Math.max(0, pct(high) - pct(low))}%` }}
+            />
+            {thumb('low', low)}
+            {thumb('high', high)}
+        </div>
+    );
+}
+
 // `title` is the hover explanation. A switch's label has room for two words at
 // most, which is rarely enough to say what turning it on actually does, so the
 // sentence goes here rather than into the label or a note beside it.

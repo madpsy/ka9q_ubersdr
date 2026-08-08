@@ -8234,11 +8234,11 @@ a.btn { text-decoration: none; }
     color: var(--text-dim);
     pointer-events: none;
 }
-.toast__panel-icon svg { width: 19px; height: 19px; }
+.toast__panel-icon svg { width: 15px; height: 15px; }
 /* ...and the text keeps clear of it. Only where there is an icon to keep clear of, so a
    toast without a source uses its whole width. Kept in step with the icon's own width:
    the padding is what stops a long body running under it. */
-.toast:has(.toast__panel-icon) .toast__body { padding-right: 23px; }
+.toast:has(.toast__panel-icon) .toast__body { padding-right: 19px; }
 .toast__body {
     margin-top: 1px;
     font-size: calc(11px * var(--ui-scale));

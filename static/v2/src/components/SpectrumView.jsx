@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ridgePhase,
-    storeRows as dssStoreRows, unproject as dssUnproject,
+    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ringCols,
+    ridgePhase, storeRows as dssStoreRows, unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -2798,12 +2798,15 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
         return;
     }
 
-    // Sized from the depth in seconds and the rate rows actually arrive at. A
-    // change to either is a different history, and the rows already stored were
-    // taken at the old spacing — so the ring is remade rather than reinterpreted.
+    // Sized in both directions from what is actually on screen: the depth in
+    // seconds against the rate rows arrive at, and one column per device pixel of
+    // the pane so a one-pixel carrier is a one-column ridge. A change to any of
+    // them is a different history — the stored rows were taken at the old spacing
+    // and the old width — so the ring is remade rather than reinterpreted.
     const want = dssStoreRows(d.dssSeconds, d.waterfallRate);
-    if (!g.dss || g.dssRows !== want) {
-        g.dss = createDssRing(want);
+    const cols = ringCols(pxW);
+    if (!g.dss || g.dssRows !== want || g.dss.cols !== cols) {
+        g.dss = createDssRing(want, cols);
         g.dssRows = want;
     }
 

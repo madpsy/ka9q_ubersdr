@@ -39,8 +39,20 @@
  * together than the eye separates them at any pane height we have. */
 export const ROWS = 48;
 
-/** Resampled columns per stored row. */
-export const COLS = 256;
+/** Widest a stored row gets, whatever the pane.
+ *
+ * The ring is sized to the pane's own device-pixel width so a carrier one pixel
+ * wide in the waterfall is one column here too — see ringCols. At 256, which is
+ * where this started, four or five waterfall pixels collapsed into one column
+ * and every thin line came out as a wide mountain. The cap is where a pane stops
+ * being a panel and starts being a wall. */
+export const MAX_COLS = 1024;
+
+/** Columns for a pane `pxW` device pixels wide. */
+export function ringCols(pxW) {
+    const w = Math.round(Number(pxW) || 0);
+    return Math.max(64, Math.min(MAX_COLS, w));
+}
 
 /** Back row width as a fraction of the front row's. */
 export const BACK_WIDTH = 0.60;
@@ -167,7 +179,7 @@ export function ringSeconds(ring, rate) {
 }
 
 /** A ring with no history in it. */
-export function createRing(rows = ROWS, cols = COLS) {
+export function createRing(rows = ROWS, cols = 256) {
     return {
         rows: Math.max(1, Math.round(rows)),
         cols,
@@ -259,8 +271,21 @@ export function ridgeCount(ring, rows = ROWS) {
 export function ridgeInto(out, ring, age, rows = ROWS) {
     const { cols, data, count } = ring;
     const stride = ring.rows / rows;
-    const from = Math.floor(age * stride);
-    const to = Math.max(from + 1, Math.floor((age + 1) * stride));
+    // Offset by where we are in the ridge, which is what keeps the *content*
+    // still while the geometry glides over it.
+    //
+    // Without it the windows sat at fixed row-ages while the ridges slid, so a
+    // given row changed ridge `stride` pushes after it arrived — at a moment set
+    // by its own arrival, not by the glide. One row in six lined up; the other
+    // five handed off mid-slide and jumped. That is the pulsing: the terrain
+    // gliding backwards and its features stepping back inside it out of time.
+    //
+    // With the offset, ridge n covers one fixed block of rows for a whole cycle
+    // and takes the next block exactly as the phase wraps — which is exactly
+    // when that block's old ridge has reached where the next one starts.
+    const skew = ring.pushed % stride;
+    const from = Math.floor(age * stride) + skew;
+    const to = Math.max(from + 1, Math.floor((age + 1) * stride) + skew);
     out.fill(-Infinity);
     for (let r = from; r < to && r < count; r++) {
         const base = ((ring.head + r) % ring.rows) * cols;
@@ -345,11 +370,13 @@ export function drawSurface(ctx, ring, w, h, o) {
         const dim = MIN_DIM + (1 - MIN_DIM) * (1 - depth);
         const row = ridgeInto(ridge, ring, age);
 
-        // Fewer points the further back a ridge is. A back ridge is 60% of the
-        // width and a fraction of the height of a front one, so three columns of
-        // it land inside a pixel — and the point count is the other term every
-        // per-frame cost is multiplied by.
-        const step = depth < 0.34 ? 1 : depth < 0.67 ? 2 : 3;
+        // One point per device pixel of *this row's* on-screen width, and no
+        // more. A front ridge spans the whole pane and gets every column it has;
+        // a back one is 60% as wide, so two of its columns would land in a pixel
+        // and the second is invisible work. Derived rather than fixed, because a
+        // fixed decimation is how a carrier one column wide became a mountain
+        // several pixels across.
+        const step = Math.max(1, Math.round(cols / Math.max(1, rowW)));
 
         // Two gradients carry the whole row's amplitude colour, which is what
         // the per-column quads of the original exist to do: one dimmed for the

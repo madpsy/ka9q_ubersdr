@@ -8,7 +8,7 @@
 
 const assert = require('assert');
 const {
-    BACK_WIDTH, COLS, DEPTH_SPAN, FRONT_RIDGE, MAX_STORE, ROWS,
+    BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_STORE, ROWS, ringCols,
     createRing, depthScale, project, pushRow, ridgeCount, ridgeHeight, ridgeInto,
     ridgePhase, ringSeconds, storeRows, storedRow, unproject,
 } = require('./.build/dss.cjs');
@@ -81,7 +81,7 @@ t('ridges shrink with depth along with their row', () => {
 
 // --- the ring ---------------------------------------------------------------
 
-const row = (v, n = COLS) => Float32Array.from({ length: n }, () => v);
+const row = (v, n = 4) => Float32Array.from({ length: n }, () => v);
 
 t('the newest row is age 0 and the oldest falls off the end', () => {
     const r = createRing(4, 4);
@@ -231,6 +231,80 @@ t('the slide moves a ridge back, never forward', () => {
     const a = project(0.5, (3 + 0) / ROWS);
     const b = project(0.5, (3 + 0.5) / ROWS);
     assert.ok(b.y < a.y, 'a ridge climbs the pane as the gap is crossed');
+});
+
+// --- the property the pulse violated ----------------------------------------
+//
+// The one that matters, and the one the earlier tests missed: a single row of
+// data must appear to recede at a *constant* rate as pushes arrive. Geometry
+// and content each moved smoothly on their own; what was wrong was that they
+// were not tied to each other, so a row handed off between ridges at a moment
+// set by when it arrived rather than by the glide, and jumped when it did.
+
+// Which ridge currently holds the marker, or -1.
+function ridgeOfMarker(ring, cols, markerCol) {
+    const out = new Float32Array(cols);
+    for (let age = 0; age < ROWS; age++) {
+        ridgeInto(out, ring, age);
+        if (out[markerCol] > -50) return age;
+    }
+    return -1;
+}
+
+t('a row recedes at a constant rate, whenever it arrived', () => {
+    const cols = 4;
+    const stride = 6;
+    // Every possible arrival phase. Before the fix, only the one that happened
+    // to land on a ridge boundary was smooth and the other five jumped.
+    for (let offset = 0; offset < stride; offset++) {
+        const r = createRing(ROWS * stride, cols);
+        const quiet = Float32Array.from([-100, -100, -100, -100]);
+        const loud = Float32Array.from([-100, -20, -100, -100]);
+        // Filled first, and then offset by a different amount each time round,
+        // so the marker arrives at every possible point in the ridge cycle.
+        for (let i = 0; i < ROWS * stride; i++) pushRow(r, quiet);
+        for (let i = 0; i < offset; i++) pushRow(r, quiet);
+        pushRow(r, loud);
+
+        // The newest rows are deliberately not drawn until they make up a whole
+        // block — that wait is what keeps ridge n on one block for a full cycle,
+        // which is what makes the glide continuous. So measurement starts when
+        // the marker first appears, not when it arrives.
+        let guard = 0;
+        while (ridgeOfMarker(r, cols, 1) < 0) {
+            pushRow(r, quiet);
+            assert.ok(++guard <= stride, `offset ${offset}: marker never appeared`);
+        }
+
+        const depths = [];
+        for (let k = 0; k < stride * 3; k++) {
+            const age = ridgeOfMarker(r, cols, 1);
+            assert.ok(age >= 0, `offset ${offset}: marker lost at step ${k}`);
+            depths.push((age + ridgePhase(r, 0)) / ROWS);
+            pushRow(r, quiet);
+        }
+
+        // Every step the same size, and always backwards. A handoff out of step
+        // with the glide shows up here as one step of the wrong size.
+        const want = 1 / (stride * ROWS);
+        for (let i = 1; i < depths.length; i++) {
+            const d = depths[i] - depths[i - 1];
+            assert.ok(near(d, want, 1e-9),
+                `offset ${offset}, step ${i}: moved ${d} not ${want}`);
+        }
+    }
+});
+
+// --- resolution -------------------------------------------------------------
+
+t('the ring is as wide as the pane, so a thin line stays thin', () => {
+    // 256 fixed columns against a waterfall drawing every device pixel is how a
+    // one-pixel carrier came out as a mountain several pixels across.
+    assert.strictEqual(ringCols(900), 900);
+    assert.strictEqual(ringCols(4000), MAX_COLS);
+    // And never so few that the surface is coarser than any pane worth drawing.
+    assert.strictEqual(ringCols(10), 64);
+    assert.strictEqual(ringCols(undefined), 64);
 });
 
 console.log(`\n${pass} passed`);

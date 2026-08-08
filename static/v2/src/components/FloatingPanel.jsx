@@ -14,7 +14,7 @@
 // minimised extension, for the same reason.
 
 import React from '../react.js';
-import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
+import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 
@@ -62,7 +62,13 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
                             Dock to {DOCK_LABEL[d]}
                         </MenuItem>
                     ))}
-                    <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
+                    {/* Not offered for the Layout panel, which is the one that brings
+                        hidden panels back — see UNHIDEABLE. The context refuses it
+                        anyway; leaving the item here would be a control that does
+                        nothing. */}
+                    {panel.id !== UNHIDEABLE && (
+                        <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
+                    )}
                 </Menu>
                 {panel.minimal && (
                     <button

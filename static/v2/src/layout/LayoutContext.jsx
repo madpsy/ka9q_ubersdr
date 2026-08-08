@@ -30,6 +30,11 @@ export const DOCKS = ['left', 'right', 'bottom'];
 export const PLACEMENTS = [...DOCKS, 'float'];
 
 const FLOAT_DEFAULT = { w: 320, h: 320 };
+// The Layout panel: the one panel that cannot be hidden, because it is the one that
+// brings the others back. Named here rather than tested for inline so the reason has
+// somewhere to live and the id appears once.
+export const UNHIDEABLE = 'layout';
+
 const FLOAT_MIN = { w: 220, h: 120 };
 const FLOAT_CASCADE = 26;
 
@@ -275,7 +280,10 @@ export function reconcile(stored, env = machine()) {
         const d = firstRun(p, phone, touch);
         base.sections[p.id] = {
             open: s?.open ?? d.open,
-            hidden: s?.hidden ?? d.hidden,
+            // Un-hidden on the way in if it is the panel that cannot be hidden: a layout
+            // stored before that rule existed can have it hidden, and somebody in that
+            // state has no way to ask for it back. See UNHIDEABLE.
+            hidden: p.id === UNHIDEABLE ? false : (s?.hidden ?? d.hidden),
             // Only panels that declare a minimal view can be in one, so a
             // stored flag on a panel that has since dropped it is discarded
             // rather than leaving the panel stuck showing nothing extra.
@@ -399,6 +407,15 @@ export function LayoutProvider({ children }) {
     }, []);
 
     const setSectionHidden = useCallback((id, hidden) => {
+        // The one panel that cannot be hidden. It is the panel that unhides the others,
+        // so hiding it is a door locked from the inside: nothing left on screen offers
+        // the way back, and the only cure is clearing the layout out of localStorage.
+        //
+        // Refused here rather than only left out of the menus, because there are three
+        // ways to ask — the section header, a floating window's menu, and the Layout
+        // panel's own list — and a rule enforced in three places is a rule that will be
+        // missed by the fourth.
+        if (hidden && id === UNHIDEABLE) return;
         setLayout((l) => ({
             ...l,
             sections: { ...l.sections, [id]: { ...l.sections[id], hidden } },

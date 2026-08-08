@@ -6,7 +6,7 @@
 // supplies the drag image for free.
 
 import React, { useRef } from '../react.js';
-import { DOCKS, useLayout } from '../layout/LayoutContext.jsx';
+import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import { setDraggingPanel } from '../lib/panelDrag.js';
 
@@ -172,7 +172,13 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                         </MenuItem>
                     ))}
                     <MenuItem onClick={() => movePanel(panel.id, 'float', null)}>Float</MenuItem>
-                    <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
+                    {/* Not offered for the Layout panel, which is the one that brings
+                        hidden panels back — see UNHIDEABLE. The context refuses it
+                        anyway; leaving the item here would be a control that does
+                        nothing. */}
+                    {panel.id !== UNHIDEABLE && (
+                        <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
+                    )}
                 </Menu>
             </header>
 

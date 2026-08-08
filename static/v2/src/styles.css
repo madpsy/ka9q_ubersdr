@@ -8444,3 +8444,7 @@ a.btn { text-decoration: none; }
     position: absolute;
     left: 0;
 }
+/* The heat map's own clip box. It exists because the waterfall canvas overhangs
+   its slot — that overhang is what the smooth scroll slides — and with anything
+   drawn above it in the same container, an unclipped slide runs over it. */
+.spectrum__wf-heat { position: absolute; left: 0; right: 0; overflow: hidden; }

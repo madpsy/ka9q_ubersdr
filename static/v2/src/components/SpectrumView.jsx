@@ -2147,18 +2147,24 @@ export default function SpectrumView() {
                                 style={{ top: dssH }}
                             />
                         )}
+                        {/* The heat map gets its own clipping box.
+                            The canvas is RING_PAD taller than its slot and the
+                            smooth scroll translates it up by a row, so without a
+                            clip of its own that overhang slides over whatever is
+                            above it. With the waterfall filling this container
+                            that was the container's own edge and nothing showed;
+                            with a ruler at the seam it was the ruler, flickering
+                            once per row. The marks ride inside it so they cannot
+                            drift from the picture they mark. */}
                         {heatH > 0 && (
-                            <canvas
-                                ref={wfRef}
-                                className="spectrum__wf-pane"
-                                style={{ top: dssH + midH }}
-                            />
+                            <div
+                                className="spectrum__wf-heat"
+                                style={{ top: dssH + midH, height: heatH }}
+                            >
+                                <canvas ref={wfRef} className="spectrum__wf-pane" />
+                                <canvas ref={wfMarksRef} className="spectrum__wf-marks" />
+                            </div>
                         )}
-                        <canvas
-                            ref={wfMarksRef}
-                            className="spectrum__wf-marks"
-                            style={{ top: dssH + midH }}
-                        />
                     </div>
                 )}
                 {/* Notches under the waterfall, on the same frequencies as the

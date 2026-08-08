@@ -346,24 +346,35 @@ export default function TopBar({ compact }) {
         setLookupAt(null);
     }, []);
 
-    // The lookup itself. requestLookup returns false when nothing is listening — no
-    // Callsign panel open anywhere — and only then is the v1 page opened, with the
-    // callsign in it rather than empty. Either way the box closes: it has done its job,
-    // and a search box left open over the answer is in the way.
+    // Both surfaces, because either might be the one being looked at.
+    //
+    // requestLookup is the in-app route — the same one a click on a spot takes — so the
+    // Callsign panel fills in where one is open, and the announcer says the callsign if
+    // that is on. It does nothing at all when no panel is listening.
+    //
+    // openCallsignLookup is the page, which is what this button has always meant: the bio,
+    // the map and the QSL details the panel does not carry. It opens one if there is none
+    // and reuses the window if there is.
+    //
+    // The cost of doing both is one extra request for a callsign the server has just
+    // answered, and its cache allows a repeat at ten times the rate of a new lookup —
+    // which is the case this is.
     const submitLookup = useCallback(() => {
         const call = lookupCall.trim().toUpperCase();
         if (!call) return;
-        if (!requestLookup(call)) {
-            openCallsignLookup({ uuid: getSessionId(), callsign: call });
-        }
+        requestLookup(call);
+        openCallsignLookup({ uuid: getSessionId(), callsign: call });
         setLookupCall('');
         closeLookup();
     }, [closeLookup, lookupCall]);
 
+    // The page with nothing in it, which is exactly what this button used to do: still
+    // worth having, because the page has its own search box, its own history and the QSL
+    // details, and sometimes the page itself is the destination.
     const openLookupPage = useCallback(() => {
-        openCallsignLookup({ uuid: getSessionId(), callsign: lookupCall.trim().toUpperCase() });
+        openCallsignLookup({ uuid: getSessionId() });
         closeLookup();
-    }, [closeLookup, lookupCall]);
+    }, [closeLookup]);
 
     const filterWidth = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     // The Receiver panel's slider does exactly this. Shared through
@@ -574,16 +585,15 @@ export default function TopBar({ compact }) {
                 talks to us through compat/LegacyBridge. */}
             {!compact && serverInfo?.lookup_service && (
                 <>
-                    {/* Asks who, then looks them up. It used to open the lookup page
-                        empty, which made the button a way of getting to a search box
-                        rather than a way of searching — two steps and a new window before
-                        anything had been asked.
+                    {/* Asks who, then opens the lookup page for them. It used to open that
+                        page empty, which made the button a way of getting to a search box
+                        rather than a way of searching: a new window, and then the question.
 
-                        The box goes where the answer is: requestLookup reaches the
-                        Callsign panel when it is open, which is the same route a click on
-                        a spot takes, so the result lands in the interface rather than on
-                        top of it. Only when nothing is listening does the v1 page open,
-                        and then it opens *with* the callsign already in it. */}
+                        Both surfaces get it: the page, which is what this control has
+                        always meant, and the Callsign panel where one is open — see
+                        submitLookup. Whichever of the two somebody is looking at has the
+                        answer, and neither one being open is a reason for nothing to
+                        happen. */}
                     <Button
                         variant="ghost"
                         size="sm"
@@ -601,6 +611,7 @@ export default function TopBar({ compact }) {
                             at={lookupAt}
                             className="callpop"
                             aria-label="Callsign lookup"
+                            autoFocus
                             onClose={closeLookup}
                         >
                             <form
@@ -610,9 +621,11 @@ export default function TopBar({ compact }) {
                                     submitLookup();
                                 }}
                             >
-                                {/* Focused on open, because the popover exists to be typed
-                                    into and a box you have to click first is a box that
-                                    cost you a click. */}
+                                {/* Focused on open — by the Popover, once it has placed
+                                    itself: it paints hidden until then, and a hidden input
+                                    cannot take focus, so React's own autoFocus fires a
+                                    frame too early and does nothing. A box you have to
+                                    click first is a box that cost you a click. */}
                                 <input
                                     ref={lookupRef}
                                     className="input callpop__input"
@@ -621,7 +634,7 @@ export default function TopBar({ compact }) {
                                     onChange={(e) => setLookupCall(e.target.value.toUpperCase())}
                                     autoComplete="off"
                                     spellCheck={false}
-                                    autoFocus
+                                    data-autofocus=""
                                 />
                                 <Button
                                     type="submit"
@@ -632,11 +645,11 @@ export default function TopBar({ compact }) {
                                     disabled={!lookupCall.trim()}
                                 />
                             </form>
-                            {/* The old behaviour, kept as what it always was: a way to the
-                                page itself, which carries the bio, the map and the QSL
-                                details the panel does not. */}
+                            {/* Exactly what this button used to do, kept for when the page
+                                itself is the destination — it has its own search box and
+                                its own history. */}
                             <button type="button" className="callpop__page" onClick={openLookupPage}>
-                                Open the lookup page
+                                Open without a callsign
                             </button>
                         </Popover>
                     )}

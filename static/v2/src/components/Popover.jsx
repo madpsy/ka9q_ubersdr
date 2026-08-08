@@ -21,10 +21,16 @@ const EDGE = 8;
  *                  is worked out again. Not the children themselves: those are a
  *                  new object every render, and re-measuring on every render is
  *                  a loop.
+ * @param autoFocus for a popover that exists to be typed into — the callsign box under the
+ *                  top bar's lookup button. It has to be done here rather than with
+ *                  React's own autoFocus on the input, because this thing paints hidden
+ *                  until it has measured itself and a hidden element cannot take focus:
+ *                  the attribute fires a frame too early and silently does nothing. So the
+ *                  focus waits for the placement, which is the moment it becomes possible.
  */
 export default function Popover({
     at, onClose, children, className = '', role = 'dialog', remeasure = 0,
-    'aria-label': ariaLabel,
+    autoFocus = false, 'aria-label': ariaLabel,
 }) {
     const ref = useRef(null);
     const [pos, setPos] = useState({ left: at.x, top: at.y, ready: false });
@@ -43,6 +49,21 @@ export default function Popover({
             ready: true,
         });
     }, [at.x, at.y, remeasure]);
+
+    // Once it is visible, and only then. `[data-autofocus]` wins where the content says
+    // which element it means; otherwise the first thing that can be typed into, which for
+    // a popover that wanted focus is what it wanted focus for.
+    useEffect(() => {
+        if (!autoFocus || !pos.ready) return;
+        const el = ref.current;
+        if (!el) return;
+        const target = el.querySelector(
+            '[data-autofocus], input:not([type=hidden]):not([disabled]), textarea:not([disabled])',
+        );
+        // preventScroll: the popover is fixed and already placed, and a browser scrolling
+        // the page to bring a focused input into view would move everything under it.
+        if (target) target.focus({ preventScroll: true });
+    }, [autoFocus, pos.ready]);
 
     // Anything that is not a press inside closes it, including a second
     // right-click elsewhere — which then opens a fresh one where it landed.

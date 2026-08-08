@@ -24,11 +24,14 @@
 // means nothing next to a rank of 4 until you know one board has 225 stations on
 // it and the other has 50.
 //
-// `minimal` drops the per-band detail, the yesterday row and the footnotes, and
-// keeps every headline row and every trend — the placings and which way they are
-// going are the panel, and the rest is the working behind them.
+// `minimal` is the placings and nothing else: the headline row for each board,
+// without the trend lines, the per-band detail, the yesterday row or the
+// footnotes. A minimal view is what you leave open beside something else, and
+// "14th of 225" is the part that survives being glanced at — which way it moved
+// over the week is a thing you go and look at, and it is one line per section
+// that would otherwise double the panel's height.
 
-import React, { useEffect, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { Empty } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { sinceLabel } from '../lib/format.js';
@@ -136,6 +139,12 @@ export default function RankingPanel({ minimal }) {
     // a trend on. Held apart from the summary because it is a second request and
     // one may succeed while the other fails.
     const [rbn, setRbn] = useState([]);
+    // Read by the poll rather than depended on by it: the minimal view draws no
+    // trend line, so there is nothing to fetch a week for — but toggling the view
+    // must not restart the summary poll, which would put a second request on the
+    // wire for a change that is only about what is drawn.
+    const minimalRef = useRef(minimal);
+    minimalRef.current = minimal;
     // Only so the "20 mins ago" ages keep counting between polls, which are a
     // quarter of an hour apart — without it the freshest line on the panel would
     // be the one that looked most stale.
@@ -161,6 +170,7 @@ export default function RankingPanel({ minimal }) {
                 // for the callsign the summary says RBN is looked up under — often
                 // a different suffix from the receiver's own.
                 if (!summary || !summary.rbn.available || !summary.cwCallsign) return;
+                if (minimalRef.current) return;
                 json(RBN_HISTORY_URL(summary.cwCallsign))
                     .then((body) => { if (alive) setRbn(parseRbnHistory(body)); })
                     // The week is the trimming rather than the meal: losing it
@@ -219,7 +229,7 @@ export default function RankingPanel({ minimal }) {
                         two tables need different questions: reports add up over
                         the week and countries do not, so a pace on the countries
                         table would read as a 600% collapse. */}
-                    {pskPace && (
+                    {!minimal && pskPace && (
                         <Trend dir={pskPace.dir}>
                             {pskPace.dir === 0
                                 ? 'reporting at its usual weekly pace'
@@ -257,7 +267,7 @@ export default function RankingPanel({ minimal }) {
                             hint="Unique WSPR spots over the whole of yesterday, UTC"
                         />
                     )}
-                    {wsprTrend && (
+                    {!minimal && wsprTrend && (
                         <Trend dir={wsprTrend.dir}>
                             {wsprTrend.dir === 0
                                 ? 'holding yesterday\u2019s place'
@@ -282,7 +292,7 @@ export default function RankingPanel({ minimal }) {
                     {/* The one trend that costs a request. RBN's count is
                         cumulative, so the summary alone can never say which way
                         it is going — see RBN_HISTORY_URL. */}
-                    {rbnTrend && (
+                    {!minimal && rbnTrend && (
                         <Trend dir={rbnTrend.dir}>
                             {rbnTrend.dir === 0
                                 ? `holding ${ordinal(rbnTrend.to)} over the week`

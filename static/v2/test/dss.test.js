@@ -160,4 +160,27 @@ t('a part-filled ring draws only what it has', () => {
     assert.strictEqual(ridgeCount(r, 96), 3);
 });
 
+// --- the sub-row slide ------------------------------------------------------
+//
+// The reason the surface moves rather than steps. Its correctness is one
+// property: a ridge at the end of a gap must be exactly where its successor
+// starts at the beginning of the next one, or the motion jumps on every commit —
+// which is what it did before, twenty times a second, beside a heat map sliding
+// at the refresh rate.
+
+t('a ridge at full progress is where the next one starts', () => {
+    const at = (age, progress) => (age + progress) / ROWS;
+    for (const age of [0, 1, 17, ROWS - 2]) {
+        assert.ok(near(at(age, 1), at(age + 1, 0)), `age ${age} does not meet its successor`);
+    }
+});
+
+t('the slide moves a ridge back, never forward', () => {
+    // Depth grows with progress, and depth is what recedes — a sign error here
+    // would have the surface running toward the viewer between rows.
+    const a = project(0.5, (3 + 0) / ROWS);
+    const b = project(0.5, (3 + 0.5) / ROWS);
+    assert.ok(b.y < a.y, 'a ridge climbs the pane as the gap is crossed');
+});
+
 console.log(`\n${pass} passed`);

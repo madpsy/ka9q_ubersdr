@@ -795,14 +795,12 @@ export default function SpectrumView() {
         // nothing for a feature it is not using.
         dss: null,
         dssRows: 0,
-        dssDirty: false,
-        // What the surface was last painted against, so a rebuild happens when
-        // the picture would actually differ. NaN so the first frame always
-        // exceeds the threshold below.
+        // The level mapping the surface was last handed. Between-rows frames do
+        // not compute one — that work belongs to the full draw — so they reuse
+        // this. NaN until the first full frame, which drawSurface reads as
+        // nothing to draw rather than drawing at a nonsense height.
         dssFloor: NaN,
         dssRange: NaN,
-        dssPalette: '',
-        dssContrast: 0,
         ringHeight: 0,
         ringWidth: 0,
         dirty: false,
@@ -954,9 +952,6 @@ export default function SpectrumView() {
             dssc.style.width = sizes.w + 'px';
             dssc.style.height = dssH + 'px';
         }
-        // The surface is rebuilt from the ring rather than scrolled, so a resize
-        // only has to ask for one — there is no history in its pixels to keep.
-        g.dssDirty = true;
 
         const h = Math.max(1, Math.round(heatH * dpr)) + RING_PAD;
         const wfc = wfRef.current;
@@ -1029,12 +1024,25 @@ export default function SpectrumView() {
             const g = gfx.current;
             g.ticks++;              // before the early return: an idle frame is still a frame
             const d = dispRef.current;
-            if (!g.bins || !g.dirty) return;
+            if (!g.bins) return;
 
             const now = performance.now();
+            const rowGap = 1000 / d.waterfallRate;
+            // The surface moves *between* rows — see drawSurface's `progress` —
+            // so it is the one thing here that wants every animation frame. The
+            // heat map does not: its slide is a compositor transform and costs
+            // no JS at all, which is exactly why it looks the way it does.
+            if (!g.dirty) {
+                if (dssH > 0) {
+                    drawDss(g, d, dssRef.current, dssH, Math.max(1, Math.round(sizes.w * g.dpr)),
+                        g.dssFloor, g.dssRange, false,
+                        clamp((now - lastRow) / rowGap, 0, 1));
+                }
+                return;
+            }
             // Waterfall speed throttles how often a row is committed, so a fast
             // server feed can still be shown as a slow-scrolling history.
-            const rowInterval = 1000 / d.waterfallRate;
+            const rowInterval = rowGap;
             const commitRow = g.rowsPending > 0 && now - lastRow >= rowInterval;
             if (commitRow) {
                 // How long the last row took to arrive, which is the best guess
@@ -1058,6 +1066,11 @@ export default function SpectrumView() {
                 dss: dssRef.current,
                 dssH,
                 heatH,
+                // Where we are between rows, which is what the surface slides on.
+                // Computed before the commit below moves lastRow, so the frame a
+                // row lands on starts the new gap at zero rather than ending the
+                // old one at one.
+                rowProgress: clamp((now - lastRow) / rowGap, 0, 1),
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 wfScale: wfScaleRef.current,
@@ -2364,7 +2377,7 @@ function autoRange(px, trace, g, k) {
 function drawFrame(g, d, ctx) {
     const {
         spec, wf, wfMarks, scale, wfScale, cfg, tuning, width, specH, wfH, commitRow, dt,
-        dss, dssH, heatH,
+        dss, dssH, heatH, rowProgress,
     } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
@@ -2413,7 +2426,7 @@ function drawFrame(g, d, ctx) {
 
     drawWaterfall(g, d, wf, wfMarks, heatH != null ? heatH : wfH, pxW, floor, range,
         commitRow, cfg, tuning, colVfoLine, colEdge);
-    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow);
+    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
     drawWaterfallScale(g, wfScale, pxW, cfg, width);
@@ -2775,7 +2788,7 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
  * when a row arrives: the whole surface is rebuilt from the ring each time, so
  * there is no history in its pixels to preserve and nothing to scroll.
  */
-function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow) {
+function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
     if (!dss || !dssH || dssH <= 0) {
         // Dropped rather than kept: coming back to 2D should not hold a megabyte
         // of history for a canvas that is not on screen, and the surface fills
@@ -2792,37 +2805,28 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow) {
     if (!g.dss || g.dssRows !== want) {
         g.dss = createDssRing(want);
         g.dssRows = want;
-        g.dssDirty = true;
     }
 
-    if (commitRow) {
-        pushDssRow(g.dss, g.px);
-        g.dssDirty = true;
-    }
-    // The level mapping moves on its own with auto-range, and a surface drawn
-    // against last second's floor is a surface at the wrong height.
-    // Threshold, not equality. Auto-range eases the floor and ceiling toward
-    // their targets every frame, so an exact comparison would rebuild the whole
-    // surface sixty times a second to move every ridge by a fraction of a pixel.
-    // A quarter of a dB is below what a ridge can show at any pane height.
-    if (Math.abs(floor - g.dssFloor) > 0.25 || Math.abs(range - g.dssRange) > 0.25
-        || d.palette !== g.dssPalette || d.contrast !== g.dssContrast) {
-        g.dssFloor = floor;
-        g.dssRange = range;
-        g.dssPalette = d.palette;
-        g.dssContrast = d.contrast;
-        g.dssDirty = true;
-    }
-    if (!g.dssDirty) return;
-    g.dssDirty = false;
+    if (commitRow) pushDssRow(g.dss, g.px);
+    // Remembered so the between-rows frames — which are handed the last known
+    // mapping rather than a fresh one — draw against the same numbers.
+    if (Number.isFinite(floor)) g.dssFloor = floor;
+    if (Number.isFinite(range)) g.dssRange = range;
 
+    // No dirty check. The surface is in motion whenever a row is due, because
+    // every ridge is drawn a fraction of a row further back than on the last
+    // frame — that is what `progress` is, and skipping a frame is a visible
+    // stutter rather than a saving. It is affordable because a ridge is one
+    // traced path and a native copy of it, and because there are forty-eight of
+    // them rather than ninety-six. See lib/dss.js.
     const ctx = dss.getContext('2d', { alpha: false });
     drawSurface(ctx, g.dss, dss.width, dss.height, {
-        floor,
-        range,
+        floor: g.dssFloor,
+        range: g.dssRange,
         contrast: d.contrast,
         lut: getPalette(d.palette),
         bg: RING_BG_RGB,
+        progress,
     });
 }
 

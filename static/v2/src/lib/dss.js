@@ -30,8 +30,14 @@
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
-/** Rows of visible depth, front to back. */
-export const ROWS = 96;
+/** Ridges drawn, front to back.
+ *
+ * Halved from the 96 the original uses, and it costs nothing that shows. How far
+ * back the surface reaches is set in seconds and delivered by aggregation, so
+ * this is only how finely that span is sliced — while being the term that every
+ * per-frame cost is multiplied by. At 48 the far ridges are still closer
+ * together than the eye separates them at any pane height we have. */
+export const ROWS = 48;
 
 /** Resampled columns per stored row. */
 export const COLS = 256;
@@ -47,7 +53,7 @@ export const HAZE = 0.16;
 /** Dimming at the back, before haze — the far rows are lit less. */
 export const MIN_DIM = 0.45;
 /** One gradient stop per this many columns. */
-export const STOP_EVERY = 6;
+export const STOP_EVERY = 8;
 
 /**
  * Perspective narrowing with depth. `depth` is 0 at the front (newest) and 1 at
@@ -263,9 +269,19 @@ const rgb = (c, k = 1) =>
  *                   because colour and shape are read for different things
  * @param o.lut      the waterfall's palette, a 768-byte rgb table
  * @param o.bg       background [r,g,b], what the haze fades toward
+ * @param o.progress 0..1 through the gap between rows. This is what makes the
+ *                   surface move rather than step: every ridge is drawn at
+ *                   (age + progress) / ROWS, so at progress 1 each one is
+ *                   exactly where its successor starts and the motion is
+ *                   continuous across the commit. Without it the surface jumps
+ *                   once per row — twenty times a second at the default speed —
+ *                   beside a heat map that slides at the refresh rate, and the
+ *                   difference is the whole complaint.
  */
 export function drawSurface(ctx, ring, w, h, o) {
-    const { floor, range, contrast = 1, curve = 1, lut, bg = [5, 7, 12] } = o;
+    const {
+        floor, range, contrast = 1, curve = 1, lut, bg = [5, 7, 12], progress = 0,
+    } = o;
     ctx.fillStyle = rgb(bg);
     ctx.fillRect(0, 0, w, h);
 
@@ -274,7 +290,8 @@ export function drawSurface(ctx, ring, w, h, o) {
 
     const cols = ring.cols;
     const gammaInv = contrast !== 1 ? 1 / contrast : 1;
-    // Reused across every ridge: one allocation a rebuild, not ninety-six.
+    const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
+    // Reused across every ridge: one allocation a frame, not forty-eight.
     if (!ctx._dssRidge || ctx._dssRidge.length !== cols) {
         ctx._dssRidge = new Float32Array(cols);
     }
@@ -284,7 +301,8 @@ export function drawSurface(ctx, ring, w, h, o) {
     ctx.lineCap = 'round';
 
     for (let age = n - 1; age >= 0; age--) {
-        const depth = age / ROWS;
+        // The sub-row offset is what turns a step into a slide — see o.progress.
+        const depth = (age + p) / ROWS;
         const width = depthScale(depth);
         const inset = (w * (1 - width)) / 2;
         const rowW = w - 2 * inset;
@@ -293,9 +311,15 @@ export function drawSurface(ctx, ring, w, h, o) {
         const dim = MIN_DIM + (1 - MIN_DIM) * (1 - depth);
         const row = ridgeInto(ridge, ring, age);
 
+        // Fewer points the further back a ridge is. A back ridge is 60% of the
+        // width and a fraction of the height of a front one, so three columns of
+        // it land inside a pixel — and the point count is the other term every
+        // per-frame cost is multiplied by.
+        const step = depth < 0.34 ? 1 : depth < 0.67 ? 2 : 3;
+
         // Two gradients carry the whole row's amplitude colour, which is what
         // the per-column quads of the original exist to do: one dimmed for the
-        // body, one at full brightness for the crest on top of it.
+        // body, one brighter for the crest on top of it.
         const body = ctx.createLinearGradient(inset, 0, inset + rowW, 0);
         const crest = ctx.createLinearGradient(inset, 0, inset + rowW, 0);
         for (let c = 0; c < cols; c += STOP_EVERY) {
@@ -309,45 +333,32 @@ export function drawSurface(ctx, ring, w, h, o) {
             crest.addColorStop(stop, rgb(hazed, Math.min(1.35, dim * 1.5)));
         }
 
-        // The crest first, as an open polyline — stroked before the path is
-        // taken down to the floor, or the two vertical drops and the floor
-        // itself would be stroked as well and box every row in.
-        ctx.beginPath();
-        for (let c = 0; c < cols; c++) {
+        // Traced once. The body is the same line taken down to the floor, and
+        // Path2D copies it natively — so the fill costs no second pass through
+        // the columns, which at sixty frames a second is the difference between
+        // affordable and not.
+        const line = new Path2D();
+        for (let c = 0; c < cols; c += step) {
             const x = inset + (c / (cols - 1)) * rowW;
-            let s = (row[c] - floor) / range;
-            s = s < 0 ? 0 : s > 1 ? 1 : s;
-            if (curve !== 1) s = Math.pow(s, curve > 0.05 ? curve : 0.05);
-            const y = baseY - s * maxRidge;
-            if (c === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+            let sv = (row[c] - floor) / range;
+            sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;
+            if (curve !== 1) sv = Math.pow(sv, curve > 0.05 ? curve : 0.05);
+            const y = baseY - sv * maxRidge;
+            if (c === 0) line.moveTo(x, y);
+            else line.lineTo(x, y);
         }
-        // Filled first so the crest sits on top of its own body rather than
-        // being half-covered by it. The path is still the open ridge here, and
-        // fill() closes it implicitly along the straight line back — which is
-        // not what we want under it, so the floor corners go on first.
-        ctx.lineTo(inset + rowW, h);
-        ctx.lineTo(inset, h);
-        ctx.closePath();
-        ctx.fillStyle = body;
-        ctx.fill();
 
-        // Re-traced rather than stroked from the filled path, for the reason
-        // above: the fill needs the floor in the path and the stroke must not
-        // have it. Two passes over the same points, no branching inside either.
-        ctx.beginPath();
-        for (let c = 0; c < cols; c++) {
-            const x = inset + (c / (cols - 1)) * rowW;
-            let s = (row[c] - floor) / range;
-            s = s < 0 ? 0 : s > 1 ? 1 : s;
-            if (curve !== 1) s = Math.pow(s, curve > 0.05 ? curve : 0.05);
-            const y = baseY - s * maxRidge;
-            if (c === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
+        const solid = new Path2D(line);
+        solid.lineTo(inset + rowW, h);
+        solid.lineTo(inset, h);
+        solid.closePath();
+        ctx.fillStyle = body;
+        ctx.fill(solid);
+
+        // The crest on top of its own body, and thicker on the newest ridge so
+        // "now" is findable in the stack.
         ctx.strokeStyle = crest;
-        // Thicker on the newest row, so "now" is findable in a stack of ninety-six.
         ctx.lineWidth = age === 0 ? 1.8 : 1;
-        ctx.stroke();
+        ctx.stroke(line);
     }
 }

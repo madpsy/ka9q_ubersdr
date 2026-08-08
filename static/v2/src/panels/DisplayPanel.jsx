@@ -3,7 +3,8 @@ import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
-import { MAX_SECONDS, MIN_SECONDS, ridgesFor } from '../lib/dss.js';
+import { maxSeconds, minSeconds, ridgesFor } from '../lib/dss.js';
+import { clamp } from '../lib/format.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
@@ -316,18 +317,27 @@ export default function DisplayPanel() {
                         which is not a thing anybody sets in seconds. */}
                     {d.waterfallMode !== '2d' && (
                         /* The hint is what is actually drawn, not what was asked
-                           for. Seconds are bought with ridges and there is a
-                           ceiling on those, so past it the answer is the
-                           waterfall speed above rather than this slider — and
-                           saying so needs the real number. */
+                           for — the two can still differ by a rounding, since a
+                           ridge is a whole row.
+
+                           Both ends of the slider move with the waterfall speed,
+                           because that is what decides how much history a ridge
+                           buys. Fixed at 1–30 s it had four live positions and
+                           twenty-six dead ones at the default speed, and the
+                           mirror of that on a slow waterfall — every one of them
+                           reading the same span. */
                         <Field
                             label="3D depth"
                             hint={`${(ridgesFor(d.dssSeconds, d.waterfallRate) / d.waterfallRate).toFixed(1)}s of history`}
                         >
                             <Slider
-                                value={d.dssSeconds}
-                                min={MIN_SECONDS}
-                                max={MAX_SECONDS}
+                                value={clamp(
+                                    d.dssSeconds,
+                                    minSeconds(d.waterfallRate),
+                                    maxSeconds(d.waterfallRate),
+                                )}
+                                min={minSeconds(d.waterfallRate)}
+                                max={maxSeconds(d.waterfallRate)}
                                 onChange={(v) => d.set({ dssSeconds: v })}
                             />
                         </Field>

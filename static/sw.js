@@ -4,10 +4,26 @@
 // so we never want stale data. We only cache the app shell for offline
 // fallback so the user sees a useful message rather than a blank page.
 
-const CACHE_NAME = 'ubersdr-shell-v2';
+// Bumped whenever SHELL_ASSETS changes: the activate handler deletes every
+// cache that is not this one, which is how a stale shell is got rid of.
+const CACHE_NAME = 'ubersdr-shell-v3';
 
-// App-shell assets to pre-cache on install
+// App-shell assets to pre-cache on install.
+//
+// The v2 interface first, because that is where the installed app opens — see
+// start_url in handleManifest. v1's shell is kept beside it: it is still served,
+// still linked, and an offline launch of either should say so rather than fail.
+//
+// addAll is all-or-nothing, so every path here has to exist. A typo does not
+// degrade the cache, it stops the worker installing at all — and with it the
+// install prompt this worker is here to earn.
 const SHELL_ASSETS = [
+  '/v2/',
+  '/v2/dist/v2.css',
+  '/v2/dist/v2.js',
+  '/v2/vendor/react.production.min.js',
+  '/v2/vendor/react-dom.production.min.js',
+  '/opus-decoder.min.js',
   '/',
   '/style.css',
   '/app.js',

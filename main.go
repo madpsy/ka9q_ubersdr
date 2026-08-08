@@ -3736,10 +3736,24 @@ func handleManifest(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 
 	manifest := map[string]any{
-		"name":             appName,
-		"short_name":       shortName,
-		"description":      "Web-based SDR platform for amateur radio enthusiasts with real-time HF spectrum access.",
-		"start_url":        "/",
+		"name":       appName,
+		"short_name": shortName,
+		"description": "Web-based SDR platform for amateur radio enthusiasts with " +
+			"real-time HF spectrum access.",
+		// The app's identity, and it must never change. Without an explicit id a
+		// browser derives one from start_url, so moving start_url to /v2/ would
+		// have made this a *different* app: everyone who had already installed
+		// UberSDR would have kept an icon opening the old interface, and a second
+		// entry would have appeared beside it. Pinned to "/" because that is the
+		// id those existing installs were given.
+		"id": "/",
+		// Where the installed app opens. v2 is the interface now; v1 is still
+		// served and still reachable, but it is not what the icon is for.
+		"start_url": "/v2/",
+		// Deliberately the whole site rather than /v2/. Scope is what stays
+		// inside the app window, and the stats pages, the admin pages and the
+		// addon dashboards are all one host — narrowing it to /v2/ would spill
+		// every one of those out into a browser tab.
 		"scope":            "/",
 		"display":          "standalone",
 		"orientation":      "any",

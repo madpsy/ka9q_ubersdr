@@ -31,6 +31,10 @@ import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmark
 import { readShareUrl, takeUrlView } from '../lib/share.js';
 import { shouldWake } from '../lib/wake.js';
 import { setFeedsAllowed } from '../lib/serverFeeds.js';
+import {
+    CHECK_MS as SAM_CHECK_MS, createWatch as createSamWatch, notePower as noteSamPower,
+    resetWatch as resetSamWatch, shouldFallBack as samShouldFallBack,
+} from '../lib/samFallback.js';
 
 const RadioContext = createContext(null);
 
@@ -223,6 +227,10 @@ export function RadioProvider({ children }) {
     const agcDirty = useRef(false);
     const dspRef = useRef(dsp);
     dspRef.current = dsp;
+    // Watches basebandPower for the carrier going away while in SAM — see
+    // lib/samFallback.js. A ref because it is fed from the packet handler, which
+    // must not re-subscribe and must not re-render anything.
+    const samWatch = useRef(createSamWatch());
     // Read by wake(), which lives in the actions object and so cannot see the
     // state.
     const runningRef = useRef(running);
@@ -282,6 +290,9 @@ export function RadioProvider({ children }) {
             player.pushPCM(planes, sampleRate);
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noiseDensity }) => {
+            // Before anything else: the figure only counts as evidence when it
+            // changes, and the packet handler is the only place it is seen raw.
+            noteSamPower(samWatch.current, basebandPower, Date.now());
             const m = meters.current;
             m.basebandPower = basebandPower;
             m.noiseDensity = noiseDensity;
@@ -576,6 +587,11 @@ export function RadioProvider({ children }) {
         // moves can outrun rendering, and a state updater must stay pure.
         const applyTuning = (patch) => {
             const next = { ...tuningRef.current, ...patch };
+            // A mode change makes every reading so far irrelevant: they were
+            // taken in another mode. Arriving in SAM has to earn its own packet
+            // before the clock can start, or a quiet spell in AM would put SAM
+            // straight back out again. See resetWatch.
+            if (next.mode !== tuningRef.current.mode) resetSamWatch(samWatch.current);
             next.frequency = clamp(Math.round(next.frequency), MIN_FREQ, MAX_FREQ);
             tuningRef.current = next;
             lastLocalTune.current = Date.now();
@@ -1033,6 +1049,25 @@ export function RadioProvider({ children }) {
             log: pushLog,
         };
     }, []);
+
+    // SAM gives up on a carrier that has stopped moving — see lib/samFallback.js
+    // for why that is measured as a number holding still rather than as packets
+    // failing to arrive.
+    //
+    // Only while running: with the receiver stopped there are no packets, the
+    // figure holds still by definition, and the mode would be changed out from
+    // under an operator who is not listening to anything.
+    useEffect(() => {
+        if (!running) return undefined;
+        const id = setInterval(() => {
+            if (!samShouldFallBack(samWatch.current, tuningRef.current.mode, Date.now())) return;
+            // setMode resets the watch through applyTuning, so this cannot fire
+            // twice for one carrier.
+            actions.setMode('am');
+            pushLog('info', 'SAM: no carrier — switched to AM');
+        }, SAM_CHECK_MS);
+        return () => clearInterval(id);
+    }, [running, actions]);
 
     const squelch = useMemo(() => ({
         value: squelchValue,

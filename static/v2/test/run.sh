@@ -128,6 +128,8 @@ esbuild ../src/lib/ranking.js --bundle --format=cjs --platform=node \
     --outfile=.build/ranking.cjs --log-level=warning
 esbuild ../src/lib/dss.js --bundle --format=cjs --platform=node \
     --outfile=.build/dss.cjs --log-level=warning
+esbuild ../src/lib/samFallback.js --bundle --format=cjs --platform=node \
+    --outfile=.build/samfallback.cjs --log-level=warning
 esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bands.cjs --log-level=warning
 esbuild ../src/lib/vfos.js --bundle --format=cjs --platform=node \
@@ -290,6 +292,7 @@ node serverfeeds.test.js
 node voiceconfirmed.test.js
 node ranking.test.js
 node dss.test.js
+node samfallback.test.js
 node vfos.test.js
 node needle.test.js
 node listeners.test.js

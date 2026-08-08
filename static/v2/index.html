@@ -7,6 +7,10 @@
     <meta name="theme-color" content="#0b0e14">
     <title>UberSDR</title>
     <link rel="icon" href="/favicon.ico">
+    <!-- The installed app's manifest, served from Go so its name carries the
+         receiver's callsign — see handleManifest. Its start_url points here, so
+         installing from either interface opens this one. -->
+    <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="dist/v2.css">
 </head>
 <body>
@@ -19,5 +23,20 @@
     <script src="/opus-decoder.min.js"></script>
 
     <script src="dist/v2.js"></script>
+
+    <!-- The service worker exists to satisfy the install criteria, not to serve
+         anything from cache: this is a live receiver and a stale spectrum is
+         worse than none. It is network-first throughout and keeps only the app
+         shell, so an offline launch says so instead of showing a blank page.
+         Registered at the root, and shared with v1 — one app, one worker. -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js').catch(function (err) {
+                    console.warn('[SW] Registration failed:', err);
+                });
+            });
+        }
+    </script>
 </body>
 </html>

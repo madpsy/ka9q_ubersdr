@@ -204,13 +204,56 @@ export function ridgeHeight(dbm, floor, range, depth, curve = HEIGHT_CURVE) {
 // controls. See ridgesFor, which turns the operator's seconds into whichever of
 // those the machine can actually afford.
 
-/** Ridges the surface may be asked to draw. */
+/** Ridges the surface may be asked to draw.
+ *
+ * The ceiling was 96 when each ridge was a filled path that overdrew the whole
+ * pane, so the cost was ridges x pane. The rasteriser writes every pixel once,
+ * whatever the ridge count — what is left per ridge is a scan of its columns,
+ * most of which find themselves occluded and stop after a compare. That is a
+ * different price, and 96 was buying far less history than it needed to.
+ *
+ * 200 is where the picture stops improving rather than where the machine stops
+ * coping: the ridges span 0.58 of the pane's height, so past about two hundred
+ * they are less than a device pixel apart on any pane worth drawing on and the
+ * extra ones are hidden behind their own neighbours. */
 export const MIN_RIDGES = 16;
-export const MAX_RIDGES = 96;
+export const MAX_RIDGES = 200;
 
 /** Seconds of history the setting may ask for. */
 export const MIN_SECONDS = 1;
 export const MAX_SECONDS = 30;
+
+/**
+ * The longest history worth offering at `rate` rows per second.
+ *
+ * One row per ridge means the span is bought entirely in ridges, so beyond
+ * MAX_RIDGES / rate the setting can ask for more and get nothing. That is what a
+ * fixed 1–30 s slider produced: at 29 rows/s it had four live positions and
+ * twenty-six dead ones, all reading 3.3 s.
+ *
+ * So the slider's own maximum comes from here and moves with the waterfall
+ * speed. Slowing the waterfall really does buy more history — this is what makes
+ * that visible instead of leaving it to be discovered.
+ */
+export function maxSeconds(rate) {
+    const r = Number(rate) || 0;
+    if (r <= 0) return MIN_SECONDS;
+    return Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, Math.floor(MAX_RIDGES / r)));
+}
+
+/**
+ * The shortest history worth offering at `rate` rows per second.
+ *
+ * The same argument as maxSeconds, at the other end: MIN_RIDGES is a floor on
+ * how thin the surface may get, so on a slow waterfall every position below
+ * MIN_RIDGES / rate asks for less and gets the same. At 2 rows/s that was the
+ * first eight positions, all drawing eight seconds.
+ */
+export function minSeconds(rate) {
+    const r = Number(rate) || 0;
+    if (r <= 0) return MIN_SECONDS;
+    return Math.max(MIN_SECONDS, Math.min(maxSeconds(r), Math.ceil(MIN_RIDGES / r)));
+}
 
 /**
  * Ridges for `seconds` of history at `rate` rows per second.

@@ -15,7 +15,7 @@ const {
     BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_RIDGES, MIN_RIDGES,
     clearRows, createRing, depthScale, edgeLine, project, pushRow, ridgeCount,
     ridgeHeight, ridgesFor, shiftRows,
-    ringCols, ringSeconds, storedRow, unproject,
+    maxSeconds, minSeconds, ringCols, ringSeconds, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
 let pass = 0;
@@ -155,14 +155,45 @@ t('the newest ridge is the newest row, not a merge of several', () => {
 t('seconds are bought with ridges, and the ceiling is honest', () => {
     // 4 s at 20 rows/s is 80 ridges, which fits.
     assert.strictEqual(ridgesFor(4, 20), 80);
-    // 30 s at 20 would be 600, which does not: it is clamped, and the panel
-    // shows the span actually drawn rather than the one asked for.
+    // Past the ceiling it is clamped, and the panel shows the span actually
+    // drawn rather than the one asked for.
     assert.strictEqual(ridgesFor(30, 20), MAX_RIDGES);
     // A slow waterfall buys the seconds a fast one cannot.
     assert.strictEqual(ridgesFor(30, 3), 90);
     // And never so few that there is no surface left.
     assert.strictEqual(ridgesFor(0.1, 2), MIN_RIDGES);
     assert.strictEqual(ridgesFor(undefined, 20), MIN_RIDGES);
+});
+
+t('every position on the depth slider draws a different span', () => {
+    // The bug: the slider was a fixed 1-30 s while the span is bought entirely
+    // in ridges, so at 29 rows/s it had four live positions and twenty-six dead
+    // ones — all reading 3.3 s. The mirror of it appeared at the bottom on a
+    // slow waterfall, where MIN_RIDGES floored the first eight.
+    for (const rate of [2, 5, 11, 20, 29, 40]) {
+        const lo = minSeconds(rate);
+        const hi = maxSeconds(rate);
+        assert.ok(lo <= hi, `rate ${rate}: empty range ${lo}..${hi}`);
+        const spans = new Set();
+        for (let s = lo; s <= hi; s++) spans.add(ridgesFor(s, rate) / rate);
+        assert.strictEqual(spans.size, hi - lo + 1,
+            `rate ${rate}: ${hi - lo + 1} positions but ${spans.size} distinct spans`);
+    }
+});
+
+t('the ends of the slider are the ends of what is drawable', () => {
+    // At the top the ridge count is at its ceiling; below the top it is not.
+    assert.strictEqual(ridgesFor(maxSeconds(20), 20), MAX_RIDGES);
+    assert.ok(ridgesFor(maxSeconds(20) - 1, 20) < MAX_RIDGES);
+    // And at the bottom it is at the floor on a waterfall slow enough to hit it.
+    assert.strictEqual(ridgesFor(minSeconds(2), 2), 2 * minSeconds(2));
+    assert.ok(2 * minSeconds(2) >= MIN_RIDGES);
+});
+
+t('a nonsense rate still leaves a usable slider', () => {
+    for (const rate of [0, -5, undefined, NaN]) {
+        assert.ok(minSeconds(rate) <= maxSeconds(rate), `rate ${rate}`);
+    }
 });
 
 t('a ring reports the span it actually shows', () => {

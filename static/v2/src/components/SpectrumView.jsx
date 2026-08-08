@@ -158,6 +158,9 @@ const WF_SCALE_H = 14;
 // Tick lengths down from the top of that ruler, CSS px. The major stops just
 // short of the cap height of the label under it, which is what makes the two
 // read as one mark rather than as a line and a number that happen to line up.
+// How far the dial pip hangs from the top of the ruler, CSS px. The passband
+// bar sits on its point, so the two share the number.
+const PIP_H = 7;
 const TICK_MAJOR = 9;
 const TICK_MINOR = 5;
 const MIN_SPECTRUM_H = 60;
@@ -3557,7 +3560,7 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         c.beginPath();
         c.moveTo(x - 5 * dpr, 0);
         c.lineTo(x + 5 * dpr, 0);
-        c.lineTo(x, 7 * dpr);
+        c.lineTo(x, PIP_H * dpr);
         c.closePath();
         c.fill();
 
@@ -3595,13 +3598,20 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         // badge on both sides whenever the passband is wider than the number is,
         // which is most of the time at a narrow span. Lopsided about the dial for
         // SSB, as it should be.
+        //
+        // Sits on the pip's point rather than on the badge's top edge, which is
+        // where it ended up when the number moved down to join the tick labels.
+        // The pip marks the dial and the bar is the passband about that dial, so
+        // the two belong together — with the number under them both rather than
+        // between them.
         const lox = ((tuning.frequency + tuning.bandwidthLow - lo) / cfg.span) * pxW;
         const hix = ((tuning.frequency + tuning.bandwidthHigh - lo) / cfg.span) * pxW;
         const x0 = clamp(Math.min(lox, hix), 0, pxW);
         const x1 = clamp(Math.max(lox, hix), 0, pxW);
         if (x1 - x0 >= 1) {
             c.fillStyle = colEdge;
-            c.fillRect(Math.round(x0), by, Math.round(x1 - x0), Math.max(1, Math.round(2 * dpr)));
+            c.fillRect(Math.round(x0), Math.round(PIP_H * dpr),
+                Math.round(x1 - x0), Math.max(1, Math.round(2 * dpr)));
         }
     }
 }

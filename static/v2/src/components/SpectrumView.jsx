@@ -59,8 +59,9 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, edgeLine, pushRow as pushDssRow,
-    ridgesFor, ringCols, unproject as dssUnproject,
+    clearRows as clearDssRows, createRing as createDssRing, drawSurface, edgeLine,
+    pushRow as pushDssRow, ridgesFor, ringCols, shiftRows as shiftDssRows,
+    unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -800,6 +801,9 @@ export default function SpectrumView() {
         // nothing for a feature it is not using.
         dss: null,
         dssRows: 0,
+        // The view the surface's rows were recorded in, for the pan setting.
+        dssCentre: 0,
+        dssSpan: 0,
         // The level mapping the surface was last handed. Between-rows frames do
         // not compute one — that work belongs to the full draw — so they reuse
         // this. NaN until the first full frame, which drawSurface reads as
@@ -2850,7 +2854,16 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     if (!g.dss || g.dssRows !== want || g.dss.cols !== cols) {
         g.dss = createDssRing(want, cols);
         g.dssRows = want;
+        // A new ring has no recorded view, so the next align call adopts the
+        // live one rather than trying to carry a history that does not exist.
+        g.dssSpan = 0;
     }
+
+    // Bring the history onto the axis it is about to be drawn against, if that
+    // is the mode. Before the new row is written, so the row lands in the column
+    // its frequency belongs to — the same order, and the same rule, as the heat
+    // map's own realignment.
+    alignDssToView(g, d, cfg);
 
     if (commitRow) pushDssRow(g.dss, g.px);
     // Remembered so the between-rows frames — which are handed the last known
@@ -2967,6 +2980,51 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
  * rounding error is carried in the recorded centre rather than dropped, so it
  * cannot accumulate either. A zoom has to resample, and does it once.
  */
+/**
+ * The surface's history, held to the frequency scale — the Display panel's
+ * "Waterfall pan" setting, applied to the terrain as well as to the heat map.
+ *
+ * Same rule and the same transform as alignRingToView below, because it is the
+ * same question: an operator who has asked for the history to move with the view
+ * has not asked for half of it to. In '2d+3d' the two pictures sit against one
+ * ruler, and one of them ignoring the setting is visible at the seam.
+ *
+ * What differs is the doing. The heat map slides a bitmap with one drawImage;
+ * the surface has to move the numbers its ridge heights come from, which is
+ * shiftRows.
+ */
+function alignDssToView(g, d, cfg) {
+    if (!g.dss || !cfg || !cfg.span) return;
+
+    // Nothing recorded yet — a fresh ring is by definition in the current view.
+    if (!g.dssSpan) {
+        g.dssCentre = cfg.centerFreq;
+        g.dssSpan = cfg.span;
+        return;
+    }
+    // In hold mode the rows stay put, so the recorded view follows the live one
+    // without touching them: switching to follow later starts from where the
+    // picture actually is rather than replaying every past pan.
+    if (d.waterfallPan !== 'follow') {
+        g.dssCentre = cfg.centerFreq;
+        g.dssSpan = cfg.span;
+        return;
+    }
+
+    const t = panTransform(
+        { centre: g.dssCentre, span: g.dssSpan },
+        { centre: cfg.centerFreq, span: cfg.span },
+        g.dss.cols,
+    );
+    if (!t) return;
+
+    g.dssCentre = t.centre;
+    g.dssSpan = t.span;
+    if (t.still) return;
+    if (t.drop) { clearDssRows(g.dss); return; }
+    shiftDssRows(g.dss, t.offset, t.scale);
+}
+
 function alignRingToView(g, d, cfg) {
     if (!g.ring || !cfg || !cfg.span) return;
 

@@ -13,7 +13,8 @@
 const assert = require('assert');
 const {
     BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_RIDGES, MIN_RIDGES,
-    createRing, depthScale, edgeLine, project, pushRow, ridgeCount, ridgeHeight, ridgesFor,
+    clearRows, createRing, depthScale, edgeLine, project, pushRow, ridgeCount,
+    ridgeHeight, ridgesFor, shiftRows,
     ringCols, ringSeconds, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
@@ -268,6 +269,60 @@ t('the crest edge reaches the top of the terrain box', () => {
     const e = edgeLine(0.5, 1);
     assert.ok(near(e.y1, (1 - DEPTH_SPAN) - FRONT_RIDGE * BACK_WIDTH),
         'the deepest a full-height ridge can be drawn');
+});
+
+// --- holding the history to the frequency scale ------------------------------
+//
+// The Display panel's "Waterfall pan" setting applies to the terrain as well as
+// the heat map. The heat map slides a bitmap; the surface has to move the
+// numbers its ridge heights come from.
+
+t('a pan carries the rows with it', () => {
+    const r = createRing(2, 8);
+    pushRow(r, Float32Array.from([-100, -100, -20, -100, -100, -100, -100, -100]));
+    shiftRows(r, 3, 1);            // three columns right
+    assert.strictEqual(storedRow(r, 0)[5], -20, 'the signal moved with the view');
+    // And is not still where it was. Column 2 is off the left of what the
+    // history covers after a shift of three, so it is uncovered rather than
+    // quiet — which the next case is about.
+    assert.notStrictEqual(storedRow(r, 0)[2], -20);
+});
+
+t('ground the history has not covered is nothing, not floor', () => {
+    // -Infinity rather than the floor value: the rasteriser leaves it as
+    // background, where a floor value would draw as a flat plain of real
+    // terrain that nothing was ever heard on.
+    const r = createRing(2, 8);
+    pushRow(r, row(-100, 8));
+    shiftRows(r, 3, 1);
+    for (const x of [0, 1, 2]) {
+        assert.strictEqual(storedRow(r, 0)[x], -Infinity, `column ${x} should be uncovered`);
+    }
+});
+
+t('zooming out keeps a carrier rather than averaging it away', () => {
+    // Two source columns per destination. The mean of -20 and -100 is -60, which
+    // is a signal that is no longer there; the peak is the one that was.
+    const r = createRing(2, 8);
+    pushRow(r, Float32Array.from([-100, -20, -100, -100, -100, -100, -100, -100]));
+    shiftRows(r, 0, 0.5);
+    assert.strictEqual(storedRow(r, 0)[0], -20, 'the carrier survives the collapse');
+});
+
+t('a view change too large to carry drops the history', () => {
+    const r = createRing(2, 8);
+    pushRow(r, row(-50, 8));
+    assert.strictEqual(ridgeCount(r), 1);
+    clearRows(r);
+    assert.strictEqual(ridgeCount(r), 0, 'and nothing is drawn until rows arrive again');
+    assert.strictEqual(storedRow(r, 0)[0], -Infinity);
+});
+
+t('a still view is left alone', () => {
+    const r = createRing(2, 8);
+    pushRow(r, Float32Array.from([-100, -20, -100, -100, -100, -100, -100, -100]));
+    shiftRows(r, 0, 1);
+    assert.strictEqual(storedRow(r, 0)[1], -20);
 });
 
 console.log(`\n${pass} passed`);

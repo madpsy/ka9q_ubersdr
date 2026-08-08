@@ -297,6 +297,62 @@ export function storedRow(ring, age) {
     return ring.data.subarray(i * ring.cols, (i + 1) * ring.cols);
 }
 
+/**
+ * Move every stored row sideways, so the history keeps lining up with the
+ * frequency scale after a pan or a zoom.
+ *
+ * The waterfall does this to its pixels with one drawImage; the surface has to
+ * do it to its numbers, because a ridge height is a number and there is no
+ * bitmap to slide. `offset` and `scale` are pixels of the ring's own width and
+ * come from panTransform — the same transform the heat map is given, so in
+ * '2d+3d' the two pictures cannot disagree about where a frequency went.
+ *
+ * Peak-picked when zooming out, nearest when zooming in — the rule pushRow uses,
+ * for the reason pushRow gives: a carrier is one column wide and averaging it
+ * into its neighbours is how it disappears.
+ */
+export function shiftRows(ring, offset, scale) {
+    if (!(scale > 0) || (offset === 0 && scale === 1)) return ring;
+    const { cols, rows, data } = ring;
+    if (!ring._scratch || ring._scratch.length !== cols) {
+        ring._scratch = new Float32Array(cols);
+    }
+    const out = ring._scratch;
+
+    for (let r = 0; r < rows; r++) {
+        const base = r * cols;
+        for (let x = 0; x < cols; x++) {
+            const from = (x - offset) / scale;
+            const to = (x + 1 - offset) / scale;
+            if (to <= 0 || from >= cols) {
+                // Ground the history has not covered. Not zero and not the
+                // floor — those are values, and would draw as real flat terrain
+                // rather than as nothing.
+                out[x] = -Infinity;
+                continue;
+            }
+            let lo = Math.floor(from);
+            const hi = Math.ceil(to);
+            if (lo < 0) lo = 0;
+            let best = -Infinity;
+            for (let i = lo; i < hi && i < cols; i++) {
+                const v = data[base + i];
+                if (v > best) best = v;
+            }
+            out[x] = best;
+        }
+        data.set(out, base);
+    }
+    return ring;
+}
+
+/** Forget every stored row — a view change too large to carry any of it across. */
+export function clearRows(ring) {
+    ring.data.fill(-Infinity);
+    ring.count = 0;
+    return ring;
+}
+
 /** How many ridges are worth drawing: what has been written, at most the ring. */
 export function ridgeCount(ring) {
     return Math.min(ring.count, ring.rows);
@@ -410,6 +466,10 @@ export function drawSurface(ctx, ring, w, h, o) {
             if (c < 0) c = 0;
             else if (c >= cols) c = cols - 1;
             const v = row[c];
+            // Ground no row has covered — see shiftRows. Left as background
+            // rather than drawn at the floor, which would be a flat plain of
+            // real terrain where there is in fact nothing.
+            if (!Number.isFinite(v)) continue;
 
             let sv = (v - hFloor) / hRange;
             sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;

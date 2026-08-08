@@ -722,6 +722,9 @@ export const PANELS = [
         requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
     },
     // Minimal: the conversation, without the user list beside it.
+    // Like the cluster terminal, this one needs more width than a side dock has, and in
+    // one it shows two buttons that move it to the bottom dock or float it rather than
+    // rendering a room nobody can read. See components/DockTooNarrow.jsx.
     {
         id: 'chat',
         title: 'Chat',

@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from '..
 import { useChat } from '../chat/ChatContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Empty, Icon } from '../components/ui.jsx';
+import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import {
@@ -24,17 +25,34 @@ const EMOJI = [
     '🌟', '💡', '⚡', '🌈', '☀️', '🌙', '⚙️', '🔧',
 ];
 
+// What a floated chat window opens at. Narrower than the cluster's — a chat line is
+// prose and wraps happily, so the width only has to hold a name, a time and a sentence
+// without the sentence becoming a column — and taller, because a conversation is read
+// backwards up the screen.
+const FLOAT_WANT = { w: 520, h: 560 };
+
 // v1's wording exactly: "5242.252 KHz (USB)", so a frequency shared from either
 // frontend reads the same in the room.
 function freqMessage(frequency, mode) {
     return `${(frequency / 1000).toFixed(3)} KHz (${String(mode).toUpperCase()})`;
 }
 
+// A side dock is too narrow for it, and it says so rather than rendering badly there —
+// see components/DockTooNarrow.jsx. A line of chat is a name, a time and a sentence, with
+// the user list beside it; in 220 pixels every line wraps into three and the room becomes
+// unreadable at exactly the moment it gets busy. The bottom dock and a floating window
+// both have the width, and the signpost offers both.
+//
+// Nothing is disconnected by that: the chat connection belongs to ChatContext and feeds
+// the unread badge on the tab whether this panel is drawn or not. What the signpost does
+// prevent is messages being marked read — which is right, since they cannot be read there.
+//
 // `minimal` drops the user list and its drag grip, giving the whole panel to
 // the conversation. The list is still loaded — @-completion matches against it,
 // and the "N here" count is one expand away. See the registry's `minimal`.
 export default function ChatPanel({ minimal }) {
     const chat = useChat();
+    const { cramped, toBottom, floatIt } = useDockRoom('chat', FLOAT_WANT);
     const { actions: radio, running, tuning } = useRadio();
     const [draft, setDraft] = useState('');
     const [cursor, setCursor] = useState(0);
@@ -198,6 +216,16 @@ export default function ChatPanel({ minimal }) {
         chat.actions.send(freqMessage(tuning.frequency, tuning.mode));
         pinned.current = true;
     };
+
+    if (cramped) {
+        return (
+            <DockTooNarrow
+                note="A chat line is a name, a time and a sentence — too much for a side dock."
+                onBottom={toBottom}
+                onFloat={floatIt}
+            />
+        );
+    }
 
     return (
         <div className="chat">

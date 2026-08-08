@@ -466,7 +466,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
     gap: 1px;
     line-height: 1.15;
     flex: none;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+    text-align: left;
 }
+.topbar__clock:hover { background: var(--surface-hover); }
+/* One clock instead of two: the height the second line was using goes into the first.
+   A clock somebody has asked to see on its own is one they are watching, and the bar has
+   the room once it is only showing one. */
+.topbar__clock.is-single .topbar__clock-time { font-size: calc(17px * var(--ui-scale)); }
+.topbar__clock.is-single .topbar__clock-line { gap: 6px; }
 .topbar__clock-line { display: flex; align-items: baseline; gap: 5px; }
 .topbar__clock-time {
     font-family: var(--mono);

@@ -5,6 +5,7 @@ import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import ShareMenu from './ShareMenu.jsx';
+import { clockHint, nextClockMode, saveClockMode, savedClockMode } from '../lib/topClock.js';
 import ThemeMenu from './ThemeMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
@@ -41,6 +42,10 @@ const FILTER_W = 52;
 // from. Until /api/description answers we fall back to the browser clock.
 function Clock({ tzOffset }) {
     const [now, setNow] = useState(() => Date.now());
+    // Both, UTC alone, or local alone — see lib/topClock.js for why three. Remembered,
+    // because which clock somebody wants is about how they operate rather than what they
+    // are doing this minute.
+    const [mode, setMode] = useState(savedClockMode);
 
     useEffect(() => {
         const id = setInterval(() => setNow(Date.now()), 1000);
@@ -54,17 +59,29 @@ function Clock({ tzOffset }) {
             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
         });
 
+    const both = mode === 'both';
+    const lines = both
+        ? [[utc, 'UTC'], [local, 'Local']]
+        : [mode === 'utc' ? [utc, 'UTC'] : [local, 'Local']];
+
     return (
-        <div className="topbar__clock" data-optional="clock" title="Receiver time">
-            <span className="topbar__clock-line">
-                <span className="topbar__clock-time">{utc}</span>
-                <span className="topbar__clock-tag">UTC</span>
-            </span>
-            <span className="topbar__clock-line">
-                <span className="topbar__clock-time">{local}</span>
-                <span className="topbar__clock-tag">Local</span>
-            </span>
-        </div>
+        // A button because it does something, and the clock is the whole of the control:
+        // a separate toggle beside it would be a second thing in a row that is already
+        // the scarcest space in the interface.
+        <button
+            type="button"
+            className={`topbar__clock${both ? '' : ' is-single'}`}
+            data-optional="clock"
+            title={clockHint(mode)}
+            onClick={() => setMode((m) => saveClockMode(nextClockMode(m)))}
+        >
+            {lines.map(([time, tag]) => (
+                <span className="topbar__clock-line" key={tag}>
+                    <span className="topbar__clock-time">{time}</span>
+                    <span className="topbar__clock-tag">{tag}</span>
+                </span>
+            ))}
+        </button>
     );
 }
 

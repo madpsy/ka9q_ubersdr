@@ -56,6 +56,8 @@ esbuild ../src/lib/dxclusterSession.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxsession.cjs --log-level=warning
 esbuild ../src/lib/dockFocus.js --bundle --format=cjs --platform=node \
     --outfile=.build/dockfocus.cjs --log-level=warning
+esbuild ../src/lib/topClock.js --bundle --format=cjs --platform=node \
+    --outfile=.build/topclock.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -336,5 +338,6 @@ node voiceskimmer.test.js
 node dxsession.test.js
 node hfdl.test.js
 node dockfocus.test.js
+node topclock.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

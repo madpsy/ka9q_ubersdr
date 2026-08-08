@@ -56,14 +56,40 @@ export const NOTICE_TIMES = [3, 5, 8, 15, 0];
 // A push with a source that is not listed still works and cannot be muted. That is the
 // right way round: the failure of somebody forgetting to register a source should be a
 // notification that gets through, not one that vanishes.
+// `panel` is the panel id in panels/registry.jsx, and it is there so a notification can
+// wear that panel's own icon — the one on its header and its mobile tab. A notification
+// that looks like the panel it came from is one you can place without reading it, which is
+// most of what a toast has time to be.
+//
+// Kept as an id rather than the icon itself: this file is a plain store and importing the
+// panel registry into it would point a lib at the panels that use it. The components do
+// the lookup — see NoticeIcon.
 export const NOTICE_SOURCES = [
-    { id: 'rotator', label: 'Rotator', note: 'When the beam stops moving' },
-    { id: 'antenna', label: 'Antenna switch', note: 'When the antenna or grounding changes' },
+    {
+        id: 'rotator',
+        panel: 'rotator',
+        label: 'Rotator',
+        note: 'When the beam stops moving',
+    },
+    {
+        id: 'antenna',
+        panel: 'antenna',
+        label: 'Antenna switch',
+        note: 'When the antenna or grounding changes',
+    },
 ];
 
+const sourceEntry = (id) => NOTICE_SOURCES.find((s) => s.id === id) || null;
+
 export const sourceLabel = (id) => {
-    const hit = NOTICE_SOURCES.find((s) => s.id === id);
+    const hit = sourceEntry(id);
     return hit ? hit.label : String(id || '');
+};
+
+/** Which panel a source belongs to, or '' — for the icon, and nothing else. */
+export const sourcePanel = (id) => {
+    const hit = sourceEntry(id);
+    return (hit && hit.panel) || '';
 };
 
 // The four severities, in the order they escalate. `good` rather than `success` because

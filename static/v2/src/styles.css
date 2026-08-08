@@ -7917,15 +7917,27 @@ a.btn { text-decoration: none; }
 }
 .toast__count { font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--text-faint); }
 /* Which panel raised it, pushed to the far end: useful when you are working out where to
-   go, and never the first thing to read. */
-.toast__source {
+   go, and never the first thing to read. The panel's own icon sits under the name — the
+   name says where to go, the icon is what is recognised before anything is read. */
+.toast__from {
     margin-left: auto;
     flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+}
+.toast__source {
     font-size: calc(9px * var(--ui-scale));
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
+/* The icon in the same grey as the name above it, not in the severity's colour: it says
+   where this came from, and the colour down the left edge is already saying how bad it
+   is. Two colours for two different facts on one small card is one too many. */
+.toast__panel-icon { display: grid; place-items: center; color: var(--text-faint); }
+.toast__panel-icon svg { width: 13px; height: 13px; }
 .toast__body {
     margin-top: 1px;
     font-size: calc(11px * var(--ui-scale));
@@ -7981,10 +7993,20 @@ a.btn { text-decoration: none; }
 .notes__count { font-family: var(--mono); font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
 .notes__age { margin-left: auto; flex: none; font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
 .notes__body { font-size: calc(10.5px * var(--ui-scale)); line-height: 1.35; color: var(--text-dim); word-break: break-word; }
+/* Icon and name on one line here rather than stacked: a dock row is short of height and
+   long of width, which is the opposite of a toast. */
 .notes__source {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin-top: 1px;
     font-size: calc(9px * var(--ui-scale));
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-faint);
 }
+.notes__icon { display: grid; place-items: center; color: var(--text-faint); }
+.notes__icon svg { width: 12px; height: 12px; }
+/* The per-source switches wear the same icon, so the switch and the notifications it
+   governs are recognisably the same thing. */
+.notes__switch { display: inline-flex; align-items: center; gap: 5px; }

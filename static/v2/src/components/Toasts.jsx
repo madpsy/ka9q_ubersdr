@@ -11,8 +11,9 @@
 import React, { ReactDOM, useEffect, useRef, useState } from '../react.js';
 import { Icon } from './ui.jsx';
 import { sinceLabel } from '../lib/format.js';
+import NoticeIcon from './NoticeIcon.jsx';
 import {
-    dismissAll, dismissNotification, notificationState, onNotifications, toastMs,
+    dismissAll, dismissNotification, notificationState, onNotifications, sourceLabel, toastMs,
 } from '../lib/notifications.js';
 
 const ICON = {
@@ -70,7 +71,17 @@ export default function Toasts() {
                                 more than once — the alternative being three identical
                                 toasts, which is what the key exists to prevent. */}
                             {t.count > 1 && <span className="toast__count">×{t.count}</span>}
-                            {t.source && <span className="toast__source">{t.source}</span>}
+                            {/* Which panel it came from, and that panel's own icon under
+                                it. The name says where to go; the icon is what makes a
+                                toast recognisable in the half-second before anybody reads
+                                the words, and it is the same glyph as the panel's header
+                                and its tab. */}
+                            {t.source && (
+                                <span className="toast__from">
+                                    <span className="toast__source">{sourceLabel(t.source)}</span>
+                                    <NoticeIcon source={t.source} className="toast__panel-icon" />
+                                </span>
+                            )}
                         </div>
                         {t.body && <div className="toast__body">{t.body}</div>}
                         {/* Only on the ones that stay: a toast that is about to vanish

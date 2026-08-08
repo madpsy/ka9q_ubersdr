@@ -16,6 +16,7 @@
 import React, { useEffect, useState } from '../react.js';
 import { Button, Empty, Field, Segmented, Switch } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
+import NoticeIcon from '../components/NoticeIcon.jsx';
 import {
     NOTICE_PLACES, NOTICE_SOURCES, NOTICE_TIMES, clearNotifications, notificationState,
     onNotifications, pushNotification, setNotificationSettings, setSourceEnabled,
@@ -57,7 +58,14 @@ export default function NotificationsPanel({ minimal }) {
                                 <span className="notes__age">{sinceLabel(n.at)}</span>
                             </div>
                             {n.body && <div className="notes__body">{n.body}</div>}
-                            {n.source && <div className="notes__source">{sourceLabel(n.source)}</div>}
+                            {/* The same pairing as the toast, so a notification looks like
+                                itself in both places. */}
+                            {n.source && (
+                                <div className="notes__source">
+                                    <NoticeIcon source={n.source} className="notes__icon" />
+                                    {sourceLabel(n.source)}
+                                </div>
+                            )}
                         </li>
                     ))}
                 </ul>
@@ -152,7 +160,17 @@ export default function NotificationsPanel({ minimal }) {
                         HardwareNoticeWatch. */}
                     <div className="section-label"><span>From</span></div>
                     {NOTICE_SOURCES.map((src) => (
-                        <Field key={src.id} label={src.label} hint={src.note} inline>
+                        <Field
+                            key={src.id}
+                            label={(
+                                <span className="notes__switch">
+                                    <NoticeIcon source={src.id} className="notes__icon" />
+                                    {src.label}
+                                </span>
+                            )}
+                            hint={src.note}
+                            inline
+                        >
                             <Switch
                                 checked={sourceEnabled(src.id)}
                                 onChange={(v) => setSourceEnabled(src.id, v)}

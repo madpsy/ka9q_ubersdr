@@ -296,10 +296,22 @@ t('a source is named by its registry entry, not by its id', () => {
     assert.strictEqual(n.sourceLabel(undefined), '');
 });
 
-t('every registered source has a label and a note, since the panel shows both', () => {
+t('every registered source has a label, a note and a panel', () => {
+    // The label and the note are what the switch reads; the panel is where its icon comes
+    // from, and a notification that cannot be recognised without being read is a
+    // notification a toast has no time for.
     for (const src of n.NOTICE_SOURCES) {
-        assert.ok(src.id && src.label && src.note, JSON.stringify(src));
+        assert.ok(src.id && src.label && src.note && src.panel, JSON.stringify(src));
     }
+});
+
+t('a source names the panel its icon comes from', () => {
+    // An id rather than the icon itself: the store is a plain module, and importing the
+    // panel registry into it would point a lib at the panels that use it. See NoticeIcon.
+    assert.strictEqual(n.sourcePanel('rotator'), 'rotator');
+    assert.strictEqual(n.sourcePanel('antenna'), 'antenna');
+    assert.strictEqual(n.sourcePanel('something-new'), '', 'and an unregistered one has none');
+    assert.strictEqual(n.sourcePanel(undefined), '');
 });
 
 if (process.exitCode) console.log('\nnotification tests FAILED');

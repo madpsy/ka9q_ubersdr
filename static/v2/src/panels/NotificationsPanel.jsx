@@ -18,10 +18,11 @@ import { Button, Empty, Field, Segmented, Switch } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import NoticeIcon from '../components/NoticeIcon.jsx';
 import {
-    NOTICE_PLACES, NOTICE_SOURCES, NOTICE_TIMES, clearNotifications, notificationState,
-    onNotifications, pushNotification, setNotificationSettings, setSourceEnabled,
-    sourceEnabled, sourceLabel,
+    NOTICE_PLACES, NOTICE_SOURCES, NOTICE_STYLES, NOTICE_TIMES, clearNotifications,
+    notificationState, onNotifications, pushNotification, setNotificationSettings,
+    setSourceEnabled, sourceEnabled, sourceLabel,
 } from '../lib/notifications.js';
+import { nativePermission, requestNativePermission } from '../lib/nativeNotices.js';
 
 // How many the panel lists. Five is what fits a dock column without scrolling and about
 // as far back as anybody asks; the store keeps fifty, so the number here can grow without
@@ -30,9 +31,48 @@ const SHOWN = 5;
 
 const TIME_LABEL = (s) => (s === 0 ? 'Until dismissed' : `${s} seconds`);
 
+const STYLE_NOTE = (id) => (NOTICE_STYLES.find((x) => x.id === id) || {}).note || '';
+
+// What to say about the browser's permission, when there is something to say. Only ever a
+// statement of fact: the one outcome to avoid is a chosen setting that quietly delivers
+// nothing, so a refusal is spelled out and the fallback named.
+function permissionNote(permission, style) {
+    if (permission === 'unsupported') {
+        return 'Desktop notifications need a secure (https) connection — this one is not, so'
+            + ' toasts are all this browser can offer here.';
+    }
+    if (permission === 'denied') {
+        return 'Your browser has blocked notifications for this site. Toasts are being shown'
+            + ' instead; the block can only be lifted in the browser\u2019s own site settings.';
+    }
+    if (permission === 'default' && style !== 'toast') {
+        return 'Your browser has not been asked yet — choose Desktop or Auto again to ask.';
+    }
+    return '';
+}
+
 export default function NotificationsPanel({ minimal }) {
     const [{ history, settings }, setState] = useState(notificationState);
     useEffect(() => onNotifications(setState), []);
+    // Read rather than stored: the browser owns it, and it can change in the browser's own
+    // settings while this panel is open. Kept in state only so a decision redraws the panel.
+    const [permission, setPermission] = useState(nativePermission);
+
+    // Choosing Desktop or Auto is the request. A permission prompt has to come from a user
+    // gesture — Safari requires it, Firefox has since 72 — so there is no separate "allow"
+    // button to find: the press that says what you want is the press that asks for it.
+    //
+    // And the choice only sticks if the answer allows it. Storing 'auto' against a refusal
+    // would leave a setting that reads as configured and delivers nothing.
+    const chooseStyle = async (style) => {
+        if (style === 'toast') {
+            setNotificationSettings({ style });
+            return;
+        }
+        const answer = await requestNativePermission();
+        setPermission(answer);
+        setNotificationSettings({ style: answer === 'granted' ? style : 'toast' });
+    };
 
     // Redrawn on the clock so "2m ago" stays true between notifications, which arrive
     // far too rarely to be relied on for that.
@@ -96,9 +136,43 @@ export default function NotificationsPanel({ minimal }) {
 
                     {settings.enabled && (
                         <>
-                            {/* Six choices as a two-row grid rather than a dropdown: it is
-                                a position, and a picture of the screen's corners reads as
-                                one where a list of words does not. */}
+                            {/* One control, and choosing it is what asks the browser for
+                                permission — a prompt has to come from a press, and this is the
+                                press. If the answer is no, the choice falls back to toasts and
+                                says so rather than leaving a setting that delivers nothing. */}
+                            <Field label="Show as" hint={STYLE_NOTE(settings.style)}>
+                                <Segmented
+                                    size="sm"
+                                    value={settings.style}
+                                    onChange={chooseStyle}
+                                    options={NOTICE_STYLES.map((x) => ({
+                                        value: x.id,
+                                        label: x.label,
+                                        title: x.note,
+                                        // Nothing to choose where the API is absent: the label
+                                        // stays visible so it is clear what is missing, and the
+                                        // note below says why.
+                                        disabled: x.id !== 'toast' && permission === 'unsupported',
+                                    }))}
+                                />
+                            </Field>
+
+                            {permissionNote(permission, settings.style) && (
+                                <div className="note note--tight">
+                                    {permissionNote(permission, settings.style)}
+                                </div>
+                            )}
+
+                            {/* Both of these only describe a toast, so they go when there will
+                                not be one: a desktop notification is placed and timed by the
+                                system, and offering settings that cannot be honoured is worse
+                                than offering none.
+
+                                Six positions as a two-row grid rather than a dropdown — it is a
+                                position, and a picture of the screen's corners reads as one
+                                where a list of words does not. */}
+                            {settings.style !== 'native' && (
+                            <>
                             <Field label="Where">
                                 <Segmented
                                     size="sm"
@@ -113,7 +187,12 @@ export default function NotificationsPanel({ minimal }) {
                                 />
                             </Field>
 
-                            <Field label="For" hint={TIME_LABEL(settings.seconds)}>
+                            <Field
+                                label="For"
+                                hint={settings.style === 'auto'
+                                    ? `${TIME_LABEL(settings.seconds)} — toasts only`
+                                    : TIME_LABEL(settings.seconds)}
+                            >
                                 <Segmented
                                     size="sm"
                                     value={settings.seconds}
@@ -125,6 +204,8 @@ export default function NotificationsPanel({ minimal }) {
                                     }))}
                                 />
                             </Field>
+                            </>
+                            )}
 
                             {/* Because "where" and "for how long" are questions you answer
                                 by looking, not by reading — and because a notification
@@ -177,12 +258,6 @@ export default function NotificationsPanel({ minimal }) {
                             />
                         </Field>
                     ))}
-
-                    <div className="note note--tight">
-                        Anything in the receiver can raise one, and each kind can be
-                        switched off above. Notifications are kept here whether toasts are
-                        showing or not.
-                    </div>
                 </>
             )}
         </div>

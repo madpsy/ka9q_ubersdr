@@ -60,6 +60,12 @@ export function Segmented({ options, value, onChange, size = 'md', columns, minI
                     type="button"
                     title={o.title || o.label}
                     className={`segmented__item${o.className ? ` ${o.className}` : ''}${o.value === value ? ' is-active' : ''}`}
+                    // An option that exists but cannot be chosen here. Shown rather than
+                    // dropped, so it is clear what is missing and why — the notification
+                    // styles are the case: a plain-HTTP receiver has no desktop notifications
+                    // at all, and silently offering two choices instead of three would look
+                    // like the feature does not exist.
+                    disabled={!!o.disabled}
                     onClick={() => onChange(o.value)}
                 >
                     {o.label}

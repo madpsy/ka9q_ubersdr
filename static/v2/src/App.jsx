@@ -13,6 +13,7 @@ import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
 import Toasts from './components/Toasts.jsx';
+import NativeNotices from './components/NativeNotices.jsx';
 import HardwareNoticeWatch from './components/HardwareNoticeWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
@@ -144,6 +145,11 @@ export default function App() {
                                     panel was open would be no notifications at
                                     all. */}
                                 <Toasts />
+                                {/* The same notifications, handed to the browser instead when
+                                    the operator has asked for desktop ones — which is how a
+                                    notification reaches somebody whose tab is hidden, the case
+                                    a toast cannot serve at all. */}
+                                <NativeNotices />
                                 {/* Watches the rotator and the antenna switch for the
                                     two changes worth a notification, with or without
                                     their panels open. */}

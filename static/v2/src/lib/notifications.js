@@ -30,6 +30,8 @@
 // The operator's settings live here too rather than in the display settings, for the same
 // reason: the toast layer and the panel both read them, and neither is a good owner.
 
+import { nativePermission, nativeSupported, pageVisible } from './nativeNotices.js';
+
 // Where toasts appear. Two axes, kept as one value because it is one decision and a
 // stored pair could disagree with itself.
 export const NOTICE_PLACES = [
@@ -117,6 +119,52 @@ export const NOTICE_SEVERITIES = ['info', 'good', 'warn', 'bad'];
 // has an answer a few notifications later, and so the history is worth scrolling.
 export const HISTORY_MAX = 50;
 
+// ── Where a notification appears ─────────────────────────────────────────────
+//
+// A toast is drawn by this page, so it only exists while somebody is looking at the page —
+// which is precisely when it is least needed. The interesting notifications (your name in
+// chat, the rotator finishing) arrive while the tab is behind something else, and a toast
+// behind a hidden tab is a notification nobody received.
+//
+// So: three choices, and the third is the one worth having.
+//
+//   'toast'  — always this page's own. No permission, works everywhere, including a receiver
+//              served over plain HTTP where the browser API does not exist at all.
+//   'native' — always the browser's, so it survives the tab being hidden and lands in the OS
+//              notification centre.
+//   'auto'   — native when the page is hidden, a toast when it is in front. A system popup
+//              over a tab you are already reading is worse than the toast it duplicates, and
+//              a toast you cannot see is worse than nothing. Auto is each in its own case.
+export const NOTICE_STYLES = [
+    { id: 'toast', label: 'In page', note: 'Toasts drawn by the receiver' },
+    { id: 'native', label: 'Desktop', note: 'Your browser and system notifications' },
+    { id: 'auto', label: 'Auto', note: 'Desktop while this tab is hidden, toasts while it is not' },
+];
+
+/**
+ * Where one notification should go: 'toast', 'native', 'both' or 'none'.
+ *
+ * Kept as a pure function of four facts because every interesting case is a *fallback*, and
+ * silently delivering nothing is the one outcome that must be impossible:
+ *
+ *   Permission has not been granted — never asked, or refused, and browsers do not ask twice.
+ *   The API is missing entirely, which is every plain-HTTP receiver.
+ *   The setting says native but the page is in front, under 'auto'.
+ *
+ * All of them end at a toast rather than at silence. 'both' is never returned today; it exists
+ * because "toast *and* desktop" is a reasonable thing to want and this is where it would be
+ * decided rather than in two places at once.
+ */
+export function deliveryFor({ style, permission, supported, visible } = {}) {
+    const canNative = !!supported && permission === 'granted';
+    if (!canNative) return 'toast';
+    if (style === 'native') return 'native';
+    // Hidden: the page cannot show anything anybody will see, so the desktop is the only real
+    // delivery. Visible: the page can, and it is the less intrusive of the two.
+    if (style === 'auto') return visible ? 'toast' : 'native';
+    return 'toast';
+}
+
 // How many toasts are on screen at once. Beyond three they are a wall rather than a
 // message, and the oldest is the one nobody is reading — so it goes.
 export const TOAST_MAX = 3;
@@ -129,6 +177,11 @@ const DEFAULTS = {
     enabled: true,
     place: 'top-right',
     seconds: 5,
+    // In-page toasts until somebody asks for more. Not 'auto' by default, deliberately: auto
+    // is worthless without permission, permission needs a prompt, and a receiver that asks
+    // for desktop notifications before being told to is a receiver that gets its request
+    // refused for the whole session. Choosing Desktop or Auto in the panel is what asks.
+    style: 'toast',
     // Which sources are silenced, by id. A list of the *off* ones rather than the on
     // ones, so a source added later arrives switched on without a migration — the
     // alternative is every new notification being invisible to everybody who has ever
@@ -145,6 +198,7 @@ function load() {
             seconds: NOTICE_TIMES.includes(Number(saved.seconds))
                 ? Number(saved.seconds) : DEFAULTS.seconds,
             muted: Array.isArray(saved.muted) ? saved.muted.map(String) : [],
+            style: NOTICE_STYLES.some((x) => x.id === saved.style) ? saved.style : DEFAULTS.style,
         };
     } catch (e) {
         return { ...DEFAULTS };
@@ -176,11 +230,13 @@ export function onNotifications(fn) {
 export function setNotificationSettings(patch) {
     const place = patch.place === undefined ? settings.place : patch.place;
     const seconds = patch.seconds === undefined ? settings.seconds : Number(patch.seconds);
+    const style = patch.style === undefined ? settings.style : patch.style;
     settings = {
         enabled: patch.enabled === undefined ? settings.enabled : !!patch.enabled,
         place: NOTICE_PLACES.some((p) => p.id === place) ? place : settings.place,
         seconds: NOTICE_TIMES.includes(seconds) ? seconds : settings.seconds,
         muted: patch.muted === undefined ? settings.muted : [...new Set(patch.muted.map(String))],
+        style: NOTICE_STYLES.some((x) => x.id === style) ? style : settings.style,
     };
     try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) { /* private mode */ }
     // Turning them off clears what is on screen. Leaving three toasts up after the
@@ -248,6 +304,20 @@ export function pushNotification(spec = {}, now = Date.now()) {
         seconds: spec.timeout == null ? null : Math.max(0, Number(spec.timeout) || 0),
     };
 
+    // Where this one goes, decided once, here.
+    //
+    // Not in the two places that draw notifications: a toast layer that decided for itself and
+    // a desktop watcher that decided for itself would eventually disagree, and the failure is
+    // silent — a notification that neither of them showed. One answer per notification, carried
+    // on the notification, and each renderer only has to obey it.
+    const how = deliveryFor({
+        style: settings.style,
+        permission: nativePermission(),
+        supported: nativeSupported(),
+        visible: pageVisible(),
+    });
+    item.native = how === 'native' || how === 'both';
+
     if (key) {
         const prevToast = toasts.find((t) => t.key === key);
         const prevAny = prevToast || history.find((h) => h.key === key);
@@ -257,7 +327,11 @@ export function pushNotification(spec = {}, now = Date.now()) {
     }
 
     history = [item, ...history].slice(0, HISTORY_MAX);
-    if (settings.enabled) toasts = [item, ...toasts].slice(0, TOAST_MAX);
+    // The history keeps everything either way: "what did that say?" is the panel's job whether
+    // the answer appeared on the page, on the desktop, or was silenced by the master switch.
+    if (settings.enabled && (how === 'toast' || how === 'both')) {
+        toasts = [item, ...toasts].slice(0, TOAST_MAX);
+    }
     notifyAll();
     return id;
 }

@@ -235,6 +235,72 @@ t('a subscriber that throws does not stop the others or the notification', () =>
     assert.strictEqual(heard, 1);
 });
 
+// --- toast or desktop ----------------------------------------------------------------
+//
+// A toast only exists while somebody is looking at the page, which is when it is least
+// needed: the notifications worth having arrive while the tab is behind something else. So
+// deliveryFor decides, once per notification, and every branch that cannot deliver a desktop
+// notification has to end at a toast rather than at silence.
+
+const deliver = (over = {}) => n.deliveryFor({
+    style: 'auto', permission: 'granted', supported: true, visible: false, ...over,
+});
+
+t('the in-page choice is always a toast', () => {
+    assert.strictEqual(deliver({ style: 'toast' }), 'toast');
+    assert.strictEqual(deliver({ style: 'toast', visible: true }), 'toast');
+});
+
+t('the desktop choice is the desktop, seen or not', () => {
+    assert.strictEqual(deliver({ style: 'native' }), 'native');
+    assert.strictEqual(deliver({ style: 'native', visible: true }), 'native');
+});
+
+t('auto is the desktop while the tab is hidden and a toast while it is not', () => {
+    // The whole reason for having it: a toast behind a hidden tab is a notification nobody
+    // received, and a system popup over a tab you are already reading is worse than the toast
+    // it duplicates.
+    assert.strictEqual(deliver({ style: 'auto', visible: false }), 'native');
+    assert.strictEqual(deliver({ style: 'auto', visible: true }), 'toast');
+});
+
+t('without permission every choice falls back to a toast', () => {
+    // Never asked, or refused — and browsers do not ask twice. A setting that reads as
+    // configured and delivers nothing is the one outcome to make impossible.
+    for (const permission of ['default', 'denied', 'unsupported']) {
+        assert.strictEqual(deliver({ style: 'native', permission }), 'toast', permission);
+        assert.strictEqual(deliver({ style: 'auto', permission }), 'toast', permission);
+    }
+});
+
+t('without the API at all it is a toast, which is every plain-HTTP receiver', () => {
+    assert.strictEqual(deliver({ supported: false }), 'toast');
+    assert.strictEqual(deliver({ style: 'native', supported: false }), 'toast');
+});
+
+t('nonsense, and nothing at all, is a toast', () => {
+    assert.strictEqual(n.deliveryFor(), 'toast');
+    assert.strictEqual(deliver({ style: 'carrier pigeon' }), 'toast');
+});
+
+t('the style is remembered, and an unknown one is not', () => {
+    assert.strictEqual(n.notificationSettings().style, 'toast', 'toasts until asked otherwise');
+    n.setNotificationSettings({ style: 'auto' });
+    assert.strictEqual(n.notificationSettings().style, 'auto');
+    n.setNotificationSettings({ style: 'semaphore' });
+    assert.strictEqual(n.notificationSettings().style, 'auto', 'kept, rather than replaced');
+});
+
+t('a notification carries where it is going, and the history keeps it either way', () => {
+    // In node there is no Notification API, so this is the plain-HTTP case: toast, and the
+    // desktop flag off.
+    const id = n.pushNotification({ source: 'rotator', title: 'Rotator stopped' });
+    assert.ok(id > 0);
+    const s = n.notificationState();
+    assert.strictEqual(s.history[0].native, false);
+    assert.strictEqual(s.toasts.length, 1, 'and it went to the page, since nothing else can');
+});
+
 // --- per-source switches -------------------------------------------------------------
 
 t('every source is on until somebody says otherwise', () => {

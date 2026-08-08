@@ -1642,6 +1642,10 @@ a.btn { text-decoration: none; }
     text-overflow: ellipsis;
 }
 .segmented__item:hover { color: var(--text); background: var(--surface-hover); }
+/* Present but not choosable — see the `disabled` note on Segmented. Dimmed rather than
+   hidden: the point is that the option exists and not here. */
+.segmented__item:disabled { opacity: 0.4; cursor: default; }
+.segmented__item:disabled:hover { background: none; color: inherit; }
 .segmented__item.is-active {
     background: var(--accent);
     color: var(--accent-ink);

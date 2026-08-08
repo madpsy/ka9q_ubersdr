@@ -3,7 +3,7 @@ import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
-import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
+import { MAX_SECONDS, MIN_SECONDS, ridgesFor } from '../lib/dss.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
@@ -315,7 +315,15 @@ export default function DisplayPanel() {
                         2D waterfall's own history is however much fits the pane,
                         which is not a thing anybody sets in seconds. */}
                     {d.waterfallMode !== '2d' && (
-                        <Field label="3D depth" hint={`${d.dssSeconds}s of history`}>
+                        /* The hint is what is actually drawn, not what was asked
+                           for. Seconds are bought with ridges and there is a
+                           ceiling on those, so past it the answer is the
+                           waterfall speed above rather than this slider — and
+                           saying so needs the real number. */
+                        <Field
+                            label="3D depth"
+                            hint={`${(ridgesFor(d.dssSeconds, d.waterfallRate) / d.waterfallRate).toFixed(1)}s of history`}
+                        >
                             <Slider
                                 value={d.dssSeconds}
                                 min={MIN_SECONDS}

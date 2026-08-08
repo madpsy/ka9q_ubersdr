@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ringCols,
-    ridgePhase, storeRows as dssStoreRows, unproject as dssUnproject,
+    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ridgesFor,
+    ringCols, unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -2803,7 +2803,7 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
     // the pane so a one-pixel carrier is a one-column ridge. A change to any of
     // them is a different history — the stored rows were taken at the old spacing
     // and the old width — so the ring is remade rather than reinterpreted.
-    const want = dssStoreRows(d.dssSeconds, d.waterfallRate);
+    const want = ridgesFor(d.dssSeconds, d.waterfallRate);
     const cols = ringCols(pxW);
     if (!g.dss || g.dssRows !== want || g.dss.cols !== cols) {
         g.dss = createDssRing(want, cols);
@@ -2829,11 +2829,10 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
         contrast: d.contrast,
         lut: getPalette(d.palette),
         bg: RING_BG_RGB,
-        // Ridges, not rows. With more than one stored row aggregated into a
-        // ridge those two advance at different rates, and driving the slide off
-        // the row rate makes the surface outrun its own features — see
-        // ridgePhase, which is what that bug cost.
-        progress: ridgePhase(g.dss, progress),
+        // Straight from the row gap. One row per ridge means the geometry and
+        // the content advance together by construction, which is what the
+        // aggregated version could never manage however the phase was computed.
+        progress,
     });
 }
 

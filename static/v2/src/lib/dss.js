@@ -30,30 +30,6 @@
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
-/** Ridges drawn, front to back.
- *
- * Halved from the 96 the original uses, and it costs nothing that shows. How far
- * back the surface reaches is set in seconds and delivered by aggregation, so
- * this is only how finely that span is sliced — while being the term that every
- * per-frame cost is multiplied by. At 48 the far ridges are still closer
- * together than the eye separates them at any pane height we have. */
-export const ROWS = 48;
-
-/** Widest a stored row gets, whatever the pane.
- *
- * The ring is sized to the pane's own device-pixel width so a carrier one pixel
- * wide in the waterfall is one column here too — see ringCols. At 256, which is
- * where this started, four or five waterfall pixels collapsed into one column
- * and every thin line came out as a wide mountain. The cap is where a pane stops
- * being a panel and starts being a wall. */
-export const MAX_COLS = 1024;
-
-/** Columns for a pane `pxW` device pixels wide. */
-export function ringCols(pxW) {
-    const w = Math.round(Number(pxW) || 0);
-    return Math.max(64, Math.min(MAX_COLS, w));
-}
-
 /** Back row width as a fraction of the front row's. */
 export const BACK_WIDTH = 0.60;
 /** How far up the pane the back row recedes, as a fraction of its height. */
@@ -64,8 +40,32 @@ export const FRONT_RIDGE = 0.46;
 export const HAZE = 0.16;
 /** Dimming at the back, before haze — the far rows are lit less. */
 export const MIN_DIM = 0.45;
-/** One gradient stop per this many columns. */
-export const STOP_EVERY = 8;
+/** dB above the floor that fills the ridge height.
+ *
+ * Not the display's own range, and this is the difference between a surface that
+ * shows what the waterfall shows and one that shows only the loudest thing on
+ * the band. The auto-levelling range runs from the noise floor to the strongest
+ * signal on screen, which on a busy band is seventy decibels or more — so a
+ * carrier ten above the noise gets a seventh of the available height and reads
+ * as flat, while the heat map beside it paints the same carrier bright cyan.
+ *
+ * Colour survives that and height does not, because in a stacked surface the
+ * body of each row is occluded by the ones in front: the only part of a row that
+ * is really visible is its ridge. So height is what has to carry a weak signal,
+ * and it needs an aperture that does not collapse when something loud turns up.
+ * Forty-five decibels is about the useful span of a receiver on a quiet band. */
+export const HEIGHT_SPAN_DB = 45;
+
+/** Gamma on the ridge height. Below 1 lifts the weak end.
+ *
+ * The aperture above stops a strong signal flattening everything else; this
+ * gives the bottom of what remains enough relief to be seen at all. Applied to
+ * height only — colour keeps the waterfall's own contrast setting, so the same
+ * signal is the same colour in both halves of the pane. */
+export const HEIGHT_CURVE = 0.6;
+
+/** The dB span the ridge heights are drawn against, for a display range of `range`. */
+export const heightRange = (range) => Math.min(Number(range) || 0, HEIGHT_SPAN_DB);
 
 /**
  * Perspective narrowing with depth. `depth` is 0 at the front (newest) and 1 at
@@ -121,9 +121,10 @@ export function unproject(x, y) {
  * Scaled by the row's own width, so a ridge shrinks with depth along with
  * everything else and the surface keeps one vanishing point.
  */
-export function ridgeHeight(dbm, floor, range, depth, curve = 1) {
+export function ridgeHeight(dbm, floor, range, depth, curve = HEIGHT_CURVE) {
     if (!Number.isFinite(dbm)) return 0;
-    let s = (dbm - floor) / (range > 0 ? range : 1);
+    const r = heightRange(range) || range;
+    let s = (dbm - floor) / (r > 0 ? r : 1);
     s = s < 0 ? 0 : s > 1 ? 1 : s;
     if (curve !== 1) s = Math.pow(s, curve > 0.05 ? curve : 0.05);
     return s * FRONT_RIDGE * depthScale(depth);
@@ -135,78 +136,94 @@ export function ridgeHeight(dbm, floor, range, depth, curve = 1) {
 // back into decibels: the palette clamps at both ends, so every value above the
 // ceiling is the same colour. A surface needs the numbers, so it keeps its own.
 //
-// ── Depth in seconds, not in rows ───────────────────────────────────────────
+// ── One row per ridge, and why the alternative failed ───────────────────────
 //
-// ROWS is how many ridges are *drawn*, and it is fixed: it is a drawing budget,
-// and past about a hundred the far ones are a few pixels apart and add nothing
-// but cost. How far back the surface reaches is a separate question, and it is
-// the one an operator actually has — "show me the last half minute" — so that is
-// what the setting says.
+// Every ridge drawn is exactly one row of FFT. There is no aggregation, and that
+// is a correction rather than a simplification.
 //
-// The two are joined by aggregation. The ring stores rows at the waterfall's own
-// rate, so `seconds x rate` of them; each drawn ridge is the peak over its share.
-// Peak and not mean, for the reason pushRow gives: a carrier is one bin wide and
-// one row long, and averaging thirty rows into one ridge would bury a burst that
-// is the whole reason somebody switched this on.
+// The obvious way to offer "thirty seconds of history" on a fixed number of
+// ridges is to merge several rows into each. It does not work, and it fails
+// worst exactly where it shows most. A ridge holding six rows can only be their
+// peak, so the front of the surface stops being *now* and becomes the strongest
+// thing in the last six rows; and because a block only completes every six
+// pushes, the front ridge rolls over a few times a second while the rest of the
+// display moves continuously. The newest thing on screen ends up the stalest,
+// which is the opposite of what a waterfall is for.
+//
+// So the ridge count *is* the history: seconds are bought by drawing more
+// ridges, or by slowing the waterfall down. Both are honest and both are already
+// controls. See ridgesFor, which turns the operator's seconds into whichever of
+// those the machine can actually afford.
 
-/** Ridges drawn is a budget; rows stored is bounded so a slow speed cannot run away. */
-export const MAX_STORE = 1200;
+/** Ridges the surface may be asked to draw. */
+export const MIN_RIDGES = 16;
+export const MAX_RIDGES = 96;
 
 /** Seconds of history the setting may ask for. */
-export const MIN_SECONDS = 5;
-export const MAX_SECONDS = 120;
+export const MIN_SECONDS = 1;
+export const MAX_SECONDS = 30;
 
 /**
- * How many rows to store for `seconds` of history at `rate` rows per second.
- * Never fewer than one per drawn ridge — below that the surface would repeat
- * rows rather than show more of them.
+ * Ridges for `seconds` of history at `rate` rows per second.
+ *
+ * Clamped, so a long depth at a fast waterfall asks for more ridges than are
+ * affordable and gets as many as there are. What that costs is honest and
+ * visible: the panel shows the span actually being drawn, not the one asked for,
+ * and the way to buy more of it is the waterfall speed slider above.
  */
-export function storeRows(seconds, rate, rows = ROWS) {
+export function ridgesFor(seconds, rate) {
     const want = Math.round((Number(seconds) || 0) * (Number(rate) || 0));
-    if (!Number.isFinite(want)) return rows;
-    const capped = Math.max(rows, Math.min(MAX_STORE, want));
-    // Rounded to a whole number of stored rows per ridge. With a fractional
-    // stride the ridge boundaries fall between stored rows and the phase that
-    // drives the slide never quite closes, so the surface creeps out of step
-    // with its own data — see ridgePhase.
-    return Math.max(1, Math.round(capped / rows)) * rows;
+    if (!Number.isFinite(want)) return MIN_RIDGES;
+    return Math.max(MIN_RIDGES, Math.min(MAX_RIDGES, want));
 }
 
-/** The seconds a ring of this size actually holds at `rate`. */
+/** The seconds a ring of this many ridges actually shows at `rate`. */
 export function ringSeconds(ring, rate) {
     const r = Number(rate) || 0;
     return r > 0 ? ring.rows / r : 0;
 }
 
+/** Widest a stored row gets, whatever the pane.
+ *
+ * The ring is as wide as the pane's own device pixels, so a carrier one pixel
+ * wide in the waterfall is one column here too. At the 256 this started with,
+ * four or five waterfall pixels collapsed into one column by peak and every thin
+ * line came out as a wide, soft mountain. The cap is where a pane stops being a
+ * panel and starts being a wall. */
+export const MAX_COLS = 1024;
+
+/** Columns for a pane `pxW` device pixels wide, so a one-pixel line stays one column. */
+export function ringCols(pxW) {
+    const w = Math.round(Number(pxW) || 0);
+    return Math.max(64, Math.min(MAX_COLS, w));
+}
+
 /** A ring with no history in it. */
-export function createRing(rows = ROWS, cols = 256) {
+export function createRing(rows = MAX_RIDGES, cols = 256) {
+    const n = Math.max(1, Math.round(rows));
     return {
-        rows: Math.max(1, Math.round(rows)),
+        rows: n,
         cols,
         head: 0,
         // How many rows have actually been written. Until the ring fills, the
         // surface draws only what it has rather than a wall of floor values.
         count: 0,
-        // Rows written ever, which is what ridgePhase counts in. Not `count`:
-        // that stops at the ring size, and the phase has to keep going.
-        pushed: 0,
-        data: new Float32Array(Math.max(1, Math.round(rows)) * cols),
+        data: new Float32Array(n * cols),
     };
 }
 
 /**
  * Add a row, resampling `px` (one value per screen column) to the ring's width.
  *
- * Peak-picked rather than averaged. A carrier is one bin wide and averaging four
- * columns into one buries it by 6 dB; on a display whose whole purpose is
- * finding narrow signals, the tallest thing in the interval is the honest
- * answer. Same rule the spectrum's own column collapse uses.
+ * Peak-picked rather than averaged, for the case the ring is narrower than the
+ * pane: a carrier is one bin wide and averaging columns into one buries it by
+ * 6 dB. Same rule the spectrum's own column collapse uses. At the sizes ringCols
+ * gives it is usually one-to-one and this does nothing.
  */
 export function pushRow(ring, px) {
     const { cols, data } = ring;
     const n = px.length;
     ring.head = (ring.head - 1 + ring.rows) % ring.rows;
-    ring.pushed++;
     if (ring.count < ring.rows) ring.count++;
     const base = ring.head * cols;
     if (n <= 0) {
@@ -225,201 +242,168 @@ export function pushRow(ring, px) {
     return ring;
 }
 
-/**
- * How far the surface has slid toward the back, 0..1 of one ridge.
- *
- * The correction for the bug that made this shudder. Geometry and content move at
- * different rates as soon as a ridge aggregates more than one stored row:
- * pushing a row shifts every aggregation window by one *stored row*, but the
- * depth was being advanced by a whole *ridge* over the same interval. At the
- * fifteen-second default that is six rows of content against one ridge of
- * geometry — so the terrain slid backwards faster than its own features and
- * snapped forward each time a row landed, which reads as going back and forth
- * rather than as sliding.
- *
- * So the slide is measured in ridges rather than rows: `stride` pushes move it
- * exactly one ridge, which is exactly when the windows have moved one ridge too.
- *
- * @param rowProgress 0..1 through the gap until the next row is committed
- */
-export function ridgePhase(ring, rowProgress, rows = ROWS) {
-    const stride = ring.rows / rows;
-    const p = rowProgress < 0 ? 0 : rowProgress > 1 ? 1 : rowProgress;
-    if (!(stride > 1)) return p;
-    const phase = ((ring.pushed % stride) + p) / stride;
-    return phase - Math.floor(phase);
-}
-
-/** One stored row, `age` back from the newest, as a view. age 0 is the newest. */
+/** One row, `age` back from the newest, as a view. age 0 is the newest. */
 export function storedRow(ring, age) {
     const i = (ring.head + age) % ring.rows;
     return ring.data.subarray(i * ring.cols, (i + 1) * ring.cols);
 }
 
-/** How many ridges are worth drawing: what has been stored, over the stride. */
-export function ridgeCount(ring, rows = ROWS) {
-    const stride = ring.rows / rows;
-    return Math.min(rows, Math.max(0, Math.floor(ring.count / stride)));
-}
-
-/**
- * The peak of every stored row belonging to ridge `age`, into `out`.
- *
- * With one stored row per ridge this is a copy; with thirty it is what stops a
- * half-minute surface being thirty times blinder than a five-second one.
- */
-export function ridgeInto(out, ring, age, rows = ROWS) {
-    const { cols, data, count } = ring;
-    const stride = ring.rows / rows;
-    // Offset by where we are in the ridge, which is what keeps the *content*
-    // still while the geometry glides over it.
-    //
-    // Without it the windows sat at fixed row-ages while the ridges slid, so a
-    // given row changed ridge `stride` pushes after it arrived — at a moment set
-    // by its own arrival, not by the glide. One row in six lined up; the other
-    // five handed off mid-slide and jumped. That is the pulsing: the terrain
-    // gliding backwards and its features stepping back inside it out of time.
-    //
-    // With the offset, ridge n covers one fixed block of rows for a whole cycle
-    // and takes the next block exactly as the phase wraps — which is exactly
-    // when that block's old ridge has reached where the next one starts.
-    const skew = ring.pushed % stride;
-    const from = Math.floor(age * stride) + skew;
-    const to = Math.max(from + 1, Math.floor((age + 1) * stride) + skew);
-    out.fill(-Infinity);
-    for (let r = from; r < to && r < count; r++) {
-        const base = ((ring.head + r) % ring.rows) * cols;
-        for (let c = 0; c < cols; c++) {
-            const v = data[base + c];
-            if (v > out[c]) out[c] = v;
-        }
-    }
-    return out;
+/** How many ridges are worth drawing: what has been written, at most the ring. */
+export function ridgeCount(ring) {
+    return Math.min(ring.count, ring.rows);
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
+//
+// A software rasteriser over an ImageData, not canvas paths.
+//
+// Paths were the obvious way and they are the wrong one. Filling a row needs a
+// colour *per column* — that is what a spectral display is — and the only way to
+// get that out of one path is a gradient, which means a stop every few columns
+// and linear interpolation between them. A carrier one column wide then lands
+// between two stops and never appears at all, and every colour that does get in
+// is smeared across the gap. Both were visible against the waterfall beside it:
+// lines missing entirely, and the ones that survived the wrong colour.
+//
+// Per-pixel also makes the occlusion cheap, which paths did not. Drawing
+// front-to-back and keeping the topmost painted row per column means every
+// screen pixel is written at most once — where painting back-to-front with
+// filled paths overdraws the whole pane once per ridge. So the honest renderer
+// is also the fast one: cost is the size of the pane, not the pane times the
+// number of ridges.
 
-/** Mixes two [r,g,b] toward `t`, 0..1. */
-function mix(a, b, t) {
-    return [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-    ];
-}
-
-const rgb = (c, k = 1) =>
-    `rgb(${Math.round(c[0] * k)},${Math.round(c[1] * k)},${Math.round(c[2] * k)})`;
+/** How much brighter a ridge's crest is than its own body. */
+const CREST_GAIN = 1.18;
 
 /**
  * Paint the surface.
  *
- * Back to front — the painter's algorithm — so nearer rows, which are wider and
- * sit lower and fill to the floor, cover the ones behind them.
- *
  * @param ctx        a 2D context, already sized to w x h device pixels
  * @param ring       from createRing/pushRow
  * @param o.floor    dBm at the baseline
- * @param o.range    dB from the floor to a full-height ridge
- * @param o.contrast the waterfall's own colour gamma, applied identically here
- *                   so a signal is the same colour in both halves of the pane
- * @param o.curve    relief gamma for *height*: below 1 lifts the floor region so
- *                   weak signals stand up as terrain. Separate from `contrast`
- *                   because colour and shape are read for different things
+ * @param o.range    dB from the floor to the top of the display's range, used
+ *                   for colour — the waterfall's own mapping, so a signal is the
+ *                   same colour in both halves of the pane
+ * @param o.contrast the waterfall's colour gamma, applied identically here
+ * @param o.curve    gamma on height only; see HEIGHT_CURVE
  * @param o.lut      the waterfall's palette, a 768-byte rgb table
  * @param o.bg       background [r,g,b], what the haze fades toward
  * @param o.progress 0..1 through the gap between rows. This is what makes the
  *                   surface move rather than step: every ridge is drawn at
- *                   (age + progress) / ROWS, so at progress 1 each one is
+ *                   (age + progress) / ring.rows, so at progress 1 each one is
  *                   exactly where its successor starts and the motion is
- *                   continuous across the commit. Without it the surface jumps
- *                   once per row — twenty times a second at the default speed —
- *                   beside a heat map that slides at the refresh rate, and the
- *                   difference is the whole complaint.
+ *                   continuous across the commit.
  */
 export function drawSurface(ctx, ring, w, h, o) {
     const {
-        floor, range, contrast = 1, curve = 1, lut, bg = [5, 7, 12], progress = 0,
+        floor, range, contrast = 1, curve = HEIGHT_CURVE, lut, bg = [5, 7, 12],
+        progress = 0,
     } = o;
-    ctx.fillStyle = rgb(bg);
-    ctx.fillRect(0, 0, w, h);
+    if (w <= 0 || h <= 0) return;
+
+    // Reused across frames: an ImageData and a horizon buffer per frame would be
+    // two allocations sixty times a second.
+    let buf = ctx._dssBuf;
+    if (!buf || buf.w !== w || buf.h !== h) {
+        buf = { w, h, img: ctx.createImageData(w, h), top: new Int32Array(w) };
+        ctx._dssBuf = buf;
+    }
+    const { img, top } = buf;
+    const px = img.data;
+
+    const bg0 = bg[0];
+    const bg1 = bg[1];
+    const bg2 = bg[2];
+    // Background, and the horizon reset to the floor of the pane.
+    for (let i = 0; i < px.length; i += 4) {
+        px[i] = bg0;
+        px[i + 1] = bg1;
+        px[i + 2] = bg2;
+        px[i + 3] = 255;
+    }
+    top.fill(h);
 
     const n = ridgeCount(ring);
-    if (n <= 0 || !lut || !(range > 0)) return;
+    if (n <= 0 || !lut || !(range > 0)) {
+        ctx.putImageData(img, 0, 0);
+        return;
+    }
 
     const cols = ring.cols;
     const gammaInv = contrast !== 1 ? 1 / contrast : 1;
+    const hRange = heightRange(range) || range;
     const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
-    // Reused across every ridge: one allocation a frame, not forty-eight.
-    if (!ctx._dssRidge || ctx._dssRidge.length !== cols) {
-        ctx._dssRidge = new Float32Array(cols);
-    }
-    const ridge = ctx._dssRidge;
 
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-
-    for (let age = n - 1; age >= 0; age--) {
-        // The sub-row offset is what turns a step into a slide — see o.progress.
-        const depth = (age + p) / ROWS;
+    // Front to back. Each ridge is drawn only where it rises above everything
+    // already painted, so a pixel is written once and an occluded ridge costs
+    // its columns and nothing else.
+    for (let age = 0; age < n; age++) {
+        const depth = (age + p) / ring.rows;
         const width = depthScale(depth);
         const inset = (w * (1 - width)) / 2;
         const rowW = w - 2 * inset;
+        if (rowW < 1) continue;
         const baseY = h - depth * DEPTH_SPAN * h;
         const maxRidge = FRONT_RIDGE * h * width;
         const dim = MIN_DIM + (1 - MIN_DIM) * (1 - depth);
-        const row = ridgeInto(ridge, ring, age);
+        const hazeT = depth * HAZE;
+        const row = storedRow(ring, age);
 
-        // One point per device pixel of *this row's* on-screen width, and no
-        // more. A front ridge spans the whole pane and gets every column it has;
-        // a back one is 60% as wide, so two of its columns would land in a pixel
-        // and the second is invisible work. Derived rather than fixed, because a
-        // fixed decimation is how a carrier one column wide became a mountain
-        // several pixels across.
-        const step = Math.max(1, Math.round(cols / Math.max(1, rowW)));
+        const x0 = Math.max(0, Math.ceil(inset));
+        const x1 = Math.min(w - 1, Math.floor(inset + rowW));
 
-        // Two gradients carry the whole row's amplitude colour, which is what
-        // the per-column quads of the original exist to do: one dimmed for the
-        // body, one brighter for the crest on top of it.
-        const body = ctx.createLinearGradient(inset, 0, inset + rowW, 0);
-        const crest = ctx.createLinearGradient(inset, 0, inset + rowW, 0);
-        for (let c = 0; c < cols; c += STOP_EVERY) {
-            let t = (row[c] - floor) / range;
-            t = t < 0 ? 0 : t > 1 ? 1 : t;
-            if (contrast !== 1) t = Math.pow(t, gammaInv);
-            const i = ((t * 255) | 0) * 3;
-            const hazed = mix([lut[i], lut[i + 1], lut[i + 2]], bg, depth * HAZE);
-            const stop = Math.min(1, c / (cols - 1));
-            body.addColorStop(stop, rgb(hazed, dim));
-            crest.addColorStop(stop, rgb(hazed, Math.min(1.35, dim * 1.5)));
-        }
+        for (let x = x0; x <= x1; x++) {
+            // Screen column back to the column of the stored row under it. The
+            // ring is as wide as the pane, so at the front this is one-to-one
+            // and a one-pixel line stays one pixel.
+            let c = Math.round(((x - inset) / rowW) * (cols - 1));
+            if (c < 0) c = 0;
+            else if (c >= cols) c = cols - 1;
+            const v = row[c];
 
-        // Traced once. The body is the same line taken down to the floor, and
-        // Path2D copies it natively — so the fill costs no second pass through
-        // the columns, which at sixty frames a second is the difference between
-        // affordable and not.
-        const line = new Path2D();
-        for (let c = 0; c < cols; c += step) {
-            const x = inset + (c / (cols - 1)) * rowW;
-            let sv = (row[c] - floor) / range;
+            let sv = (v - floor) / hRange;
             sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;
             if (curve !== 1) sv = Math.pow(sv, curve > 0.05 ? curve : 0.05);
-            const y = baseY - sv * maxRidge;
-            if (c === 0) line.moveTo(x, y);
-            else line.lineTo(x, y);
+            let y = Math.round(baseY - sv * maxRidge);
+            if (y < 0) y = 0;
+
+            const ceilY = top[x];
+            if (y >= ceilY) continue;      // wholly behind what is already drawn
+
+            // Colour on the waterfall's own mapping, then hazed toward the
+            // background and dimmed with depth — the only two things that are
+            // allowed to differ from the heat map, and both go to zero at the
+            // front row.
+            let t = (v - floor) / range;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            if (contrast !== 1) t = Math.pow(t, gammaInv);
+            const li = ((t * 255) | 0) * 3;
+            const r0 = (lut[li] + (bg0 - lut[li]) * hazeT) * dim;
+            const g0 = (lut[li + 1] + (bg1 - lut[li + 1]) * hazeT) * dim;
+            const b0 = (lut[li + 2] + (bg2 - lut[li + 2]) * hazeT) * dim;
+
+            // The crest: one pixel, a little brighter than its own body so the
+            // ridge reads as an edge. Deliberately a small gain — at the 1.7x
+            // this had at first, every mid-tone clipped toward white and the
+            // surface disagreed with the waterfall about what colour a signal is.
+            let o1 = (y * w + x) * 4;
+            const cr = r0 * CREST_GAIN;
+            const cg = g0 * CREST_GAIN;
+            const cb = b0 * CREST_GAIN;
+            px[o1] = cr > 255 ? 255 : cr;
+            px[o1 + 1] = cg > 255 ? 255 : cg;
+            px[o1 + 2] = cb > 255 ? 255 : cb;
+
+            // The body, down to whatever was already painted under it.
+            for (let yy = y + 1; yy < ceilY; yy++) {
+                o1 = (yy * w + x) * 4;
+                px[o1] = r0;
+                px[o1 + 1] = g0;
+                px[o1 + 2] = b0;
+            }
+            top[x] = y;
         }
-
-        const solid = new Path2D(line);
-        solid.lineTo(inset + rowW, h);
-        solid.lineTo(inset, h);
-        solid.closePath();
-        ctx.fillStyle = body;
-        ctx.fill(solid);
-
-        // The crest on top of its own body, and thicker on the newest ridge so
-        // "now" is findable in the stack.
-        ctx.strokeStyle = crest;
-        ctx.lineWidth = age === 0 ? 1.8 : 1;
-        ctx.stroke(line);
     }
+
+    ctx.putImageData(img, 0, 0);
 }

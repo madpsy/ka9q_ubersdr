@@ -67,11 +67,12 @@ export const DEFAULTS = {
     // — it occludes, which the heat map never does — so it is something to go
     // and find, not something to be given.
     waterfallMode: '2d',
-    // How far back the surface reaches, in seconds. Separate from the number of
-    // ridges drawn, which is a fixed drawing budget — see lib/dss.js. At the
-    // default 20 rows/s one ridge per stored row would be 4.8 seconds, which is
-    // too short to show an over or an exchange, so the ridges aggregate.
-    dssSeconds: 15,
+    // How far back the surface reaches, in seconds — which it buys by drawing
+    // more ridges, one row of FFT each. There is a ceiling on those, so past it
+    // the way to more history is the waterfall speed rather than this: the panel
+    // shows the span actually drawn. See ridgesFor in lib/dss.js, and the note
+    // there on why merging rows into a ridge was tried and taken out again.
+    dssSeconds: 4,
     markerBands: true,      // band allocations in the marker bar
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser

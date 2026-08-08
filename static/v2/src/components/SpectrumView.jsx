@@ -2463,7 +2463,7 @@ function drawFrame(g, d, ctx) {
         commitRow, cfg, tuning, colVfoLine, colEdge);
     drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress, cfg, tuning);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
-    drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
+    drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine, colEdge);
     drawWaterfallScale(g, wfScale, pxW, cfg, tuning, width, colVfoLine);
     // The seam ruler carries a pip into each picture: the surface's newest row is
     // just above it and the heat map's is just below, and they are the same
@@ -3495,7 +3495,7 @@ function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo, cssH = WF_
     }
 }
 
-function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
+function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
     if (!scale) return;
     const c = scale.getContext('2d', { alpha: false });
     const dpr = g.dpr;
@@ -3576,9 +3576,25 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
         c.fillStyle = MARK_HALO;
         c.fillRect(bx, by, bw, bh);
         c.fillStyle = colVfo;
-        c.fillRect(bx, by, bw, Math.max(1, Math.round(dpr)));
-
-        c.fillStyle = colVfo;
         c.fillText(label, bx + bw / 2, by + bh / 2 + 0.5 * dpr);
+
+        // The passband, along the badge's top edge: from the low edge to the
+        // high one, in the edge marks' own colour so it reads as the same thing
+        // they are. This replaced a plain rule that was there to cap the badge
+        // and said nothing — a line across a frequency ruler ought to mean a
+        // span of frequency, and this is the span that matters.
+        //
+        // Drawn after the badge so it is not painted over, and it runs past the
+        // badge on both sides whenever the passband is wider than the number is,
+        // which is most of the time at a narrow span. Lopsided about the dial for
+        // SSB, as it should be.
+        const lox = ((tuning.frequency + tuning.bandwidthLow - lo) / cfg.span) * pxW;
+        const hix = ((tuning.frequency + tuning.bandwidthHigh - lo) / cfg.span) * pxW;
+        const x0 = clamp(Math.min(lox, hix), 0, pxW);
+        const x1 = clamp(Math.max(lox, hix), 0, pxW);
+        if (x1 - x0 >= 1) {
+            c.fillStyle = colEdge;
+            c.fillRect(Math.round(x0), by, Math.round(x1 - x0), Math.max(1, Math.round(2 * dpr)));
+        }
     }
 }

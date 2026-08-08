@@ -63,6 +63,11 @@ export const DEFAULTS = {
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser
     markerVoice: true,           // detected voice activity (only where the receiver has it)
+    // Callsigns the voice skimmer has heard and validated — the addon's Confirmed
+    // column, on the bar. A different question from markerVoice above: that one is
+    // "speech was heard here in the last ninety seconds", this one is "this station
+    // identified itself". Only where the voiceskimmer addon is installed.
+    markerVoiceConfirmed: true,
     // The other VFOs — where A, B, C and D are parked. Not the one you are on:
     // that is the dial, and the spectrum already marks it.
     markerVfos: true,

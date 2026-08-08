@@ -86,7 +86,9 @@ export const CALLSIGN_TYPES = new Set(['cw', 'dx', 'voice']);
 // `priority` is what makes a live spot beat a bookmark sitting on the same
 // frequency, which is v1's rule and the right one: the bookmark is what the
 // frequency always is, the spot is who is on it right now.
-export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], local = [] } = {}) {
+export function collectMarkers({
+    dx = [], cw = [], voice = [], confirmed = [], bookmarks = [], local = [],
+} = {}) {
     const out = [];
 
     // Spots arrive already normalised (lib/spots.js), so they carry `kind` and
@@ -119,6 +121,26 @@ export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], l
             freq, mode, family: modeFamily(mode), name: activityLabel(a),
             call: a.dx_callsign || '', countryCode: a.dx_country_code || '',
             type: 'voice', priority: 1,
+        });
+    }
+    // Confirmed voice sightings, under the same `voice` type rather than one of
+    // their own: stepping between "voices" is one activity, and a picker that made
+    // you tick two boxes to do it would be describing where the data came from
+    // rather than what you are looking for.
+    //
+    // Priority 2, above the detections. Both can land on the same frequency —
+    // often will, since the skimmer confirms what the detector heard — and when
+    // they do the named one is what the dial should be labelled with. That is the
+    // same judgement the marker bar makes by drawing this layer second.
+    for (const sp of confirmed) {
+        if (!(sp.hz > 0)) continue;
+        const mode = sp.mode ? String(sp.mode).toLowerCase() : voiceMode(sp.hz);
+        out.push({
+            freq: sp.hz, mode, family: modeFamily(mode),
+            // A confirmed sighting *is* a callsign, so unlike a bare detection the
+            // label and the lookup are the same string.
+            name: sp.callsign || '', call: sp.callsign || '',
+            countryCode: sp.cc || '', type: 'voice', priority: 2,
         });
     }
     // A bookmark with no mode is a wildcard: `family: null` matches whatever

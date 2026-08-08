@@ -14,6 +14,7 @@ import {
     PEAK_COUNTS, PEAK_SNR_CHOICES, peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
 import { packetAvailable } from '../lib/packet.js';
+import { voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
     themeSwatch, uiColorsFrom,
@@ -187,6 +188,18 @@ export default function DisplayPanel() {
             {serverInfo?.noise_floor && (
                 <Field label="Voice activity" inline>
                     <Switch checked={d.markerVoice !== false} onChange={(v) => d.set({ markerVoice: v })} />
+                </Field>
+            )}
+            {/* Only where the voice skimmer addon is installed. The callsigns from
+                its Confirmed column — heard on SSB and validated — which is a
+                different marker from the voice activity above: one says speech was
+                heard, this one says who it was. */}
+            {voiceSkimmerAvailable(serverInfo) && (
+                <Field label="Confirmed voice" inline>
+                    <Switch
+                        checked={d.markerVoiceConfirmed !== false}
+                        onChange={(v) => d.set({ markerVoiceConfirmed: v })}
+                    />
                 </Field>
             )}
             {/* Only where the packet addon is installed. One pill per configured

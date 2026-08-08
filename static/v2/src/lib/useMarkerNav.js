@@ -14,6 +14,8 @@
 import { useEffect, useMemo, useState } from '../react.js';
 import { subscribeSpots } from './spotStore.js';
 import { subscribeVoiceActivity } from './voiceActivity.js';
+import { subscribeConfirmedVoice } from './voiceConfirmed.js';
+import { voiceSkimmerAvailable } from './voiceSkimmer.js';
 import { collectMarkers, findMarkers } from './markerNav.js';
 import { markerTarget } from './bookmarkTune.js';
 import { onNavTypes, saveNavTypes, savedNavTypes } from './markerNavSettings.js';
@@ -46,6 +48,7 @@ export default function useMarkerNav(radio, types) {
     const [dx, setDx] = useState([]);
     const [cw, setCw] = useState([]);
     const [voice, setVoice] = useState([]);
+    const [confirmed, setConfirmed] = useState([]);
 
     // Subscribed to only what this receiver has and only what is being stepped
     // between: the voice detector is a request every five seconds, and a feed
@@ -54,6 +57,12 @@ export default function useMarkerNav(radio, types) {
     const wantsDx = !!(running && serverInfo && serverInfo.dx_cluster && types.includes('dx'));
     const wantsCw = !!(running && serverInfo && serverInfo.cw_skimmer && types.includes('cw'));
     const wantsVoice = !!(running && serverInfo && serverInfo.noise_floor && types.includes('voice'));
+    // The skimmer's confirmed callsigns are the other half of 'voice' — see
+    // collectMarkers. Gated on its own addon rather than on the noise-floor
+    // detector, because a receiver can have either without the other, and the
+    // one selection has to work with whichever it has.
+    const wantsConfirmed = !!(running && types.includes('voice')
+        && voiceSkimmerAvailable(serverInfo));
 
     useEffect(() => {
         if (!wantsDx) { setDx([]); return undefined; }
@@ -70,16 +79,23 @@ export default function useMarkerNav(radio, types) {
         return subscribeVoiceActivity((state) => setVoice((state && state.activities) || []));
     }, [wantsVoice]);
 
+    useEffect(() => {
+        if (!wantsConfirmed) { setConfirmed([]); return undefined; }
+        return subscribeConfirmedVoice((list) => setConfirmed(list || []));
+    }, [wantsConfirmed]);
+
     return useMemo(() => findMarkers(
         collectMarkers({
             dx,
             cw,
             voice,
+            confirmed,
             bookmarks: types.includes('bookmark-server') ? (catalog.bookmarks || []) : [],
             local: types.includes('bookmark-local') ? (catalog.local || []) : [],
         }),
         tuning.frequency,
         tuning.mode,
         types,
-    ), [dx, cw, voice, catalog.bookmarks, catalog.local, tuning.frequency, tuning.mode, types]);
+    ), [dx, cw, voice, confirmed, catalog.bookmarks, catalog.local,
+        tuning.frequency, tuning.mode, types]);
 }

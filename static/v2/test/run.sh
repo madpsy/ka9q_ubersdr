@@ -122,6 +122,8 @@ esbuild ../src/lib/wake.js --bundle --format=cjs --platform=node \
     --outfile=.build/wake.cjs --log-level=warning
 esbuild ../src/lib/serverFeeds.js --bundle --format=cjs --platform=node \
     --outfile=.build/serverfeeds.cjs --log-level=warning
+esbuild ../src/lib/voiceConfirmed.js --bundle --format=cjs --platform=node \
+    --outfile=.build/voiceconfirmed.cjs --log-level=warning
 esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bands.cjs --log-level=warning
 esbuild ../src/lib/vfos.js --bundle --format=cjs --platform=node \
@@ -281,6 +283,7 @@ node modes.test.js
 node zoom.test.js
 node wake.test.js
 node serverfeeds.test.js
+node voiceconfirmed.test.js
 node vfos.test.js
 node needle.test.js
 node listeners.test.js

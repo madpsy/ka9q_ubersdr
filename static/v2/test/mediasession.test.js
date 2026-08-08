@@ -189,6 +189,39 @@ t('a live spot beats a bookmark on the same frequency', () => {
     assert.strictEqual(findMarkers(m, 14200000, 'usb').current.name, 'VK3XYZ');
 });
 
+// --- confirmed voice, under the voice type ----------------------------------
+
+const heard = (hz, callsign, mode) => ({ hz, callsign, mode, cc: 'GB', country: 'Scotland' });
+const detected = (hz, mode) => ({ frequency: hz, mode });
+
+t('a confirmed callsign steps as a voice marker, not a type of its own', () => {
+    // Stepping between "voices" is one activity. A separate nav type would have
+    // made you tick two boxes to do it, describing where the data came from
+    // rather than what you were looking for.
+    const m = collectMarkers({ confirmed: [heard(14205000, 'MM3NDH', 'usb')] });
+    assert.strictEqual(m.length, 1);
+    assert.strictEqual(m[0].type, 'voice');
+    assert.strictEqual(findMarkers(m, 14205000, 'usb', ['voice']).current.name, 'MM3NDH');
+    // And it is filtered out with the rest of the voice markers.
+    assert.strictEqual(findMarkers(m, 14100000, 'usb', ['dx']).next, null);
+});
+
+t('a confirmed callsign is a callsign, so it is worth a lookup', () => {
+    const m = collectMarkers({ confirmed: [heard(14205000, 'MM3NDH', 'usb')] });
+    assert.strictEqual(callsignOf(m[0]), 'MM3NDH');
+    assert.strictEqual(m[0].countryCode, 'GB');
+});
+
+t('a confirmed callsign outranks a bare detection on the same frequency', () => {
+    // Both will often be there — the skimmer confirms what the detector heard —
+    // and when they are, the dial should be labelled with the name.
+    const m = collectMarkers({
+        voice: [detected(14205000, 'usb')],
+        confirmed: [heard(14205000, 'MM3NDH', 'usb')],
+    });
+    assert.strictEqual(findMarkers(m, 14205000, 'usb', ['voice']).current.name, 'MM3NDH');
+});
+
 t('prev and next are the nearest either side, in any mode', () => {
     const m = collectMarkers({
         bookmarks: [mark(7000000, 'low'), mark(7050000, 'near-low'), mark(7150000, 'near-high'), mark(7300000, 'high')],

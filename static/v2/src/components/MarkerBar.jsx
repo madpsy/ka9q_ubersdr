@@ -20,6 +20,8 @@ import { subscribeSpots } from '../lib/spotStore.js';
 import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
 import { packetAvailable } from '../lib/packet.js';
 import { subscribePacketMarkers } from '../lib/packetMarkers.js';
+import { subscribeConfirmedVoice } from '../lib/voiceConfirmed.js';
+import { tuneTarget, voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
 import { haptic } from '../lib/haptics.js';
 
 const BAND_H = 13;        // band strip along the top, CSS px
@@ -59,6 +61,17 @@ const LOCAL_INK = '#ffffff';
 // they are what the detector heard in the last 90 seconds.
 const VOICE_PILL = 'rgba(155, 89, 182, 0.95)';
 const VOICE_INK = '#ffffff';
+
+// Confirmed voice: a callsign the skimmer heard and validated. Teal, which is the
+// one hue this bar had left — and the collision it looks like it has is one that
+// cannot happen. The nearest colour is the CW spots' cyan, and CW spots live in the
+// CW segments while a voice skimmer produces nothing there, so the two are never on
+// screen together. What it *is* next to is the purple of voice activity, on the same
+// SSB segments, and against that it is unmistakable — which is the pair that matters,
+// because those two markers mean different things about the same station.
+const CONFIRMED_PILL = 'rgba(0, 150, 136, 0.95)';
+const CONFIRMED_STEM = 'rgba(0, 150, 136, 0.55)';
+const CONFIRMED_INK = '#ffffff';
 
 // The parked VFOs: a colour nothing else in the bar uses, because they are the
 // one marker that is neither something the receiver told us about nor something
@@ -107,6 +120,9 @@ export default function MarkerBar({ width }) {
     // have no marker layer: a decoder band puts every station on one frequency.
     const showDx = display.markerDxSpots !== false && !!(serverInfo && serverInfo.dx_cluster);
     const showCw = display.markerCwSpots !== false && !!(serverInfo && serverInfo.cw_skimmer);
+    // Confirmed callsigns from the voice skimmer, gated on the addon being installed.
+    const showConfirmed = display.markerVoiceConfirmed !== false
+        && voiceSkimmerAvailable(serverInfo);
     // Packet channels, gated on the addon being installed — the toggle would otherwise
     // promise markers that can never appear.
     const showPacket = display.markerPacket !== false && packetAvailable(serverInfo);
@@ -119,6 +135,15 @@ export default function MarkerBar({ width }) {
         if (!showPacket) { setPacket([]); return undefined; }
         return subscribePacketMarkers((list) => setPacket(list || []));
     }, [showPacket]);
+
+    // Its own poll, for every band rather than the panel's chosen one — see
+    // lib/voiceConfirmed.js. Subscribing is what starts it, so with the toggle off the
+    // addon is never asked anything.
+    const [confirmed, setConfirmed] = useState([]);
+    useEffect(() => {
+        if (!showConfirmed) { setConfirmed([]); return undefined; }
+        return subscribeConfirmedVoice((list) => setConfirmed(list || []));
+    }, [showConfirmed]);
 
     // One shared poll with the voice activity panel; subscribing is what starts
     // it, so with the toggle off nothing is fetched.
@@ -199,7 +224,9 @@ export default function MarkerBar({ width }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, width, MARKER_BAR_H);
 
-        hitsRef.current = { bookmarks: [], bands: [], voice: [], spots: [], vfos: [], packet: [] };
+        hitsRef.current = {
+            bookmarks: [], bands: [], voice: [], confirmed: [], spots: [], vfos: [], packet: [],
+        };
         if (!span) return;
 
         const startFreq = centerFreq - span / 2;
@@ -385,6 +412,56 @@ export default function MarkerBar({ width }) {
             placedMarks = placedMarks.concat(placedVoice);
         }
 
+        // ---- confirmed voice callsigns ------------------------------------
+        // After voice activity and seeded with it, so the two never overlap. They
+        // belong next to each other — the same station, once as "speech here" and
+        // once as "and it is this callsign" — and the order puts the named one
+        // second because a name is the more specific claim.
+        if (showConfirmed && confirmed.length) {
+            c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+
+            const items = [];
+            for (const sp of confirmed) {
+                if (!sp.hz || sp.hz < startFreq || sp.hz > endFreq) continue;
+                items.push({
+                    spot: sp,
+                    label: sp.callsign,
+                    x: ((sp.hz - startFreq) / span) * width,
+                    width: Math.min(140, c.measureText(sp.callsign).width + 10),
+                });
+            }
+            items.sort((a, b) => a.x - b.x);
+
+            const placedConfirmed = assignRows(items, placedMarks);
+            for (const p of placedConfirmed) {
+                const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
+                const { x, width: w } = p;
+
+                c.strokeStyle = CONFIRMED_STEM;
+                c.lineWidth = 1;
+                c.beginPath();
+                c.moveTo(Math.round(x) + 0.5, y + PILL_H);
+                c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+                c.stroke();
+
+                c.fillStyle = CONFIRMED_PILL;
+                roundRect(c, x - w / 2, y, w, PILL_H, 3);
+                c.fill();
+                c.strokeStyle = 'rgba(255,255,255,0.55)';
+                c.stroke();
+
+                c.fillStyle = CONFIRMED_INK;
+                clipText(c, p.label, x, y + PILL_H / 2, w - 6);
+
+                hitsRef.current.confirmed.push({
+                    x, y, w, h: PILL_H, spot: p.spot, label: p.label,
+                });
+            }
+            placedMarks = placedMarks.concat(placedConfirmed);
+        }
+
         // ---- DX and CW spots ---------------------------------------------
         // Last, and seeded with everything already placed, so a spot never
         // covers a bookmark or a detection. Both layers share the same two rows
@@ -530,7 +607,8 @@ export default function MarkerBar({ width }) {
         }
 
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
-        showVoice, voice, showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
+        showVoice, voice, showConfirmed, confirmed,
+        showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
         showVfos, vfos, tuning.frequency]);
 
     const locate = useCallback((e) => {
@@ -551,6 +629,10 @@ export default function MarkerBar({ width }) {
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
         if (v) return { kind: 'voice', ...v };
+        const cv = hitsRef.current.confirmed.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (cv) return { kind: 'confirmed', ...cv };
         const s = hitsRef.current.spots.find(
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
@@ -581,6 +663,8 @@ export default function MarkerBar({ width }) {
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
                 : hit.kind === 'voice'
                     ? voiceTip(hit.activity)
+                    : hit.kind === 'confirmed'
+                    ? confirmedTip(hit.spot)
                     : hit.kind === 'spot'
                         ? spotTip(hit.spot)
                         : hit.kind === 'packet'
@@ -613,6 +697,17 @@ export default function MarkerBar({ width }) {
             // if that is. Neither is ever opened by this click.
             const call = hit.activity.dx_callsign;
             if (lookups && call && !requestLookup(call)) lookupCallsign(call);
+        } else if (hit.kind === 'confirmed') {
+            // The frequency and the mode the skimmer heard it on — tuneTarget, the same
+            // one the panel's rows use, so clicking a callsign lands identically
+            // wherever you click it. A mode it did not report is left alone rather than
+            // guessed, which is why this is a spread and not two fixed fields.
+            const t = tuneTarget(hit.spot);
+            if (t) {
+                actions.tuneTo(t);
+                actions.ensureVisible(t.frequency);
+                if (lookups && !requestLookup(hit.spot.callsign)) lookupCallsign(hit.spot.callsign);
+            }
         } else if (hit.kind === 'packet') {
             // Tune to the channel. No mode is set: the addon's channels are configured
             // with their own demodulation, and guessing one here would fight whatever
@@ -644,7 +739,8 @@ export default function MarkerBar({ width }) {
         }
     }, [locate, actions, lookups, radio]);
 
-    if (!showBands && !showServer && !showLocal && !showVoice && !showDx && !showCw && !showVfos) {
+    if (!showBands && !showServer && !showLocal && !showVoice && !showConfirmed
+        && !showDx && !showCw && !showVfos) {
         return null;
     }
 
@@ -684,6 +780,18 @@ function who(callsign, code, country, fallback) {
 
 // What the detector found, not what someone named — so the tooltip leads with
 // the measurement rather than repeating the label already on the pill.
+/**
+ * A confirmed sighting: who, where, and how long ago. The country comes from the
+ * addon rather than being derived here — see normaliseSpot for why that matters for
+ * England, Scotland and Wales.
+ */
+function confirmedTip(sp) {
+    const where = sp.country ? ` (${sp.country})` : '';
+    const when = sp.at ? ` · ${sinceLabel(sp.at, Date.now())}` : '';
+    const mode = sp.mode ? ` ${sp.mode.toUpperCase()}` : '';
+    return `${sp.callsign}${where} · ${formatFreqShort(sp.hz)}${mode}${when} — heard and confirmed`;
+}
+
 function voiceTip(a) {
     const parts = [
         `${formatFreqShort(dialFreq(a))} ${(a.mode || 'LSB').toUpperCase()}`,

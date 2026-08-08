@@ -77,6 +77,22 @@ export const NOTICE_SOURCES = [
         label: 'Antenna switch',
         note: 'When the antenna or grounding changes',
     },
+    // Two sources rather than one, because the two halves of chat are wanted to very
+    // different degrees: being spoken to is always worth an interruption, and somebody
+    // arriving is worth one on a quiet receiver and not on a busy one. One switch would have
+    // meant choosing between missing your name and a toast every few minutes.
+    {
+        id: 'chat-mention',
+        panel: 'chat',
+        label: 'Chat mentions',
+        note: 'When somebody says your name',
+    },
+    {
+        id: 'chat-join',
+        panel: 'chat',
+        label: 'Chat arrivals',
+        note: 'When somebody joins the channel',
+    },
 ];
 
 const sourceEntry = (id) => NOTICE_SOURCES.find((s) => s.id === id) || null;

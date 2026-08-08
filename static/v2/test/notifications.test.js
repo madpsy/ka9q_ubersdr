@@ -305,6 +305,30 @@ t('every registered source has a label, a note and a panel', () => {
     }
 });
 
+t('chat has two sources, because its two halves are wanted differently', () => {
+    // Being spoken to is always worth an interruption; somebody arriving is worth one on a
+    // quiet receiver and not on a busy one. One switch would have meant choosing between
+    // missing your name and a toast every few minutes.
+    const chat = n.NOTICE_SOURCES.filter((src) => src.panel === 'chat').map((src) => src.id);
+    assert.deepStrictEqual(chat, ['chat-mention', 'chat-join']);
+    // Independently mutable, which is the whole reason for the split.
+    n.setSourceEnabled('chat-join', false);
+    assert.strictEqual(n.sourceEnabled('chat-join'), false);
+    assert.strictEqual(n.sourceEnabled('chat-mention'), true);
+    assert.strictEqual(n.pushNotification({ source: 'chat-join', title: 'G0ABC joined chat' }), 0);
+    assert.ok(n.pushNotification({ source: 'chat-mention', title: 'G0ABC mentioned you' }) > 0);
+});
+
+t('two different mentions are two notifications, not one with a count', () => {
+    // Unkeyed on purpose: a key collapses repeats, and two people asking you two different
+    // things are two things to answer.
+    n.pushNotification({ source: 'chat-mention', title: 'G0ABC mentioned you', body: 'you around?' });
+    n.pushNotification({ source: 'chat-mention', title: 'M0XYZ mentioned you', body: 'what is that on 40?' });
+    const s = n.notificationState();
+    assert.strictEqual(s.history.length, 2);
+    assert.strictEqual(s.history[0].count, 1);
+});
+
 t('a source names the panel its icon comes from', () => {
     // An id rather than the icon itself: the store is a plain module, and importing the
     // panel registry into it would point a lib at the panels that use it. See NoticeIcon.

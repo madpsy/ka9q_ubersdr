@@ -10,6 +10,7 @@ import { isMention } from '../lib/mentions.js';
 import {
     followSignature, followTarget, followView, loadFollowZoom, saveFollowZoom,
 } from '../lib/chatFollow.js';
+import { pushNotification } from '../lib/notifications.js';
 
 const ChatContext = createContext(null);
 
@@ -92,6 +93,14 @@ export function ChatProvider({ children }) {
     const [chimeOn, setChimeOn] = useState(() => {
         try { return localStorage.getItem('ubersdr.v2.chatChime') !== 'off'; } catch (e) { return true; }
     });
+    // Which arrivals have already been announced.
+    //
+    // Its own record rather than a look at `messages`, because the timing is the difficulty: a
+    // replayed buffer arrives as a burst of events, all of them before React has re-rendered,
+    // so a ref that tracks the message list is stale for every event after the first. The
+    // alternative — deciding inside the setMessages updater, where `prev` is current — would be
+    // raising a notification from a function React is allowed to call twice.
+    const joinsSeen = useRef(new Set());
     // Read inside the message handler, which must not resubscribe per keystroke.
     const nameRef = useRef(username);
     nameRef.current = username;
@@ -137,6 +146,16 @@ export function ChatProvider({ children }) {
             if (mentioned && fresh) {
                 setUnreadMentions((n) => n + 1);
                 if (chimeRef.current) playMentionChime();
+                // The same gate as the chime, and for the same reason — the server replays its
+                // buffer on every subscribe, so `fresh` is what separates being spoken to from
+                // being reminded of it. Unkeyed: two people asking you two different things are
+                // two notifications, not one with a ×2 on it.
+                pushNotification({
+                    source: 'chat-mention',
+                    severity: 'info',
+                    title: `${m.username} mentioned you`,
+                    body: m.message,
+                });
             }
         }));
         offs.push(chat.on('presence', (p) => {
@@ -147,6 +166,34 @@ export function ChatProvider({ children }) {
                 setAnnounced(true);
             }
             const key = msgKey(p.timestamp, p.username, p.kind);
+            // Somebody arriving, once. Three things have to be true, and each of them is a way
+            // this went wrong before the gate existed:
+            //
+            //   Not a replay. The server sends its recent buffer again on every subscribe_chat,
+            //   and a re-subscribe on a live socket is ordinary — so joins from an hour ago
+            //   arrive repeatedly. See joinsSeen for why that is tracked separately from the
+            //   log's own dedupe below, which asks the same question at a different moment.
+            //
+            //   Not us. Our own join comes back to us too, and "you joined" is not news.
+            //
+            //   Not a departure: `left` is the other half of this event and is not worth
+            //   interrupting anybody for.
+            const first = !joinsSeen.current.has(key);
+            joinsSeen.current.add(key);
+            // A session's worth of keys is a few hundred bytes; a very long one with a very
+            // busy channel is not, and past this point the oldest of them can never be
+            // replayed anyway.
+            if (joinsSeen.current.size > 2000) joinsSeen.current.clear();
+            if (first && p.kind === 'joined' && p.username !== nameRef.current) {
+                pushNotification({
+                    source: 'chat-join',
+                    severity: 'info',
+                    title: `${p.username} joined chat`,
+                    // Where from, when the server says — it is the interesting half of an
+                    // arrival, and the panel shows the same flag beside their name.
+                    body: p.country ? String(p.country) : '',
+                });
+            }
             setMessages((prev) => (prev.some((x) => x.key === key) ? prev : prev.concat({
                 key,
                 id: key,

@@ -7880,6 +7880,11 @@ a.btn { text-decoration: none; }
 .toasts--bottom-centre { bottom: 12px; left: 50%; transform: translateX(-50%); }
 
 .toast {
+    position: relative;
+    /* Room for the panel icon, which is positioned rather than laid out and so cannot ask
+       for height of its own. A one-line toast is otherwise shorter than the icon it is
+       wearing. */
+    min-height: calc(46px * var(--ui-scale));
     display: flex;
     align-items: flex-start;
     gap: 7px;
@@ -7917,17 +7922,10 @@ a.btn { text-decoration: none; }
 }
 .toast__count { font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--text-faint); }
 /* Which panel raised it, pushed to the far end: useful when you are working out where to
-   go, and never the first thing to read. The panel's own icon sits under the name — the
-   name says where to go, the icon is what is recognised before anything is read. */
-.toast__from {
+   go, and never the first thing to read. */
+.toast__source {
     margin-left: auto;
     flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 1px;
-}
-.toast__source {
     font-size: calc(9px * var(--ui-scale));
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -7936,11 +7934,23 @@ a.btn { text-decoration: none; }
 /* The icon in the same grey as the name above it, not in the severity's colour: it says
    where this came from, and the colour down the left edge is already saying how bad it
    is. Two colours for two different facts on one small card is one too many. */
-.toast__panel-icon { display: grid; place-items: center; color: var(--text-dim); }
-/* Big enough to be the thing you recognise rather than a decoration beside the name: at
-   thirteen pixels it read as punctuation, and the whole point of it is being identified
-   across the room before a word of the toast has been read. */
+/* Under the source name, in the corner, and out of the flow entirely: at the size worth
+   having, an icon in the header row sets that row's height and pushes the title and the
+   message down to make room for itself. The words are the notification; the icon is how
+   you spot which one it is. */
+.toast__panel-icon {
+    position: absolute;
+    top: calc(20px * var(--ui-scale));
+    right: 8px;
+    display: grid;
+    place-items: center;
+    color: var(--text-dim);
+    pointer-events: none;
+}
 .toast__panel-icon svg { width: 22px; height: 22px; }
+/* ...and the text keeps clear of it. Only where there is an icon to keep clear of, so a
+   toast without a source uses its whole width. */
+.toast:has(.toast__panel-icon) .toast__body { padding-right: 26px; }
 .toast__body {
     margin-top: 1px;
     font-size: calc(11px * var(--ui-scale));

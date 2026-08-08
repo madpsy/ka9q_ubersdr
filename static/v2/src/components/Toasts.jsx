@@ -71,19 +71,21 @@ export default function Toasts() {
                                 more than once — the alternative being three identical
                                 toasts, which is what the key exists to prevent. */}
                             {t.count > 1 && <span className="toast__count">×{t.count}</span>}
-                            {/* Which panel it came from, and that panel's own icon under
-                                it. The name says where to go; the icon is what makes a
-                                toast recognisable in the half-second before anybody reads
-                                the words, and it is the same glyph as the panel's header
-                                and its tab. */}
-                            {t.source && (
-                                <span className="toast__from">
-                                    <span className="toast__source">{sourceLabel(t.source)}</span>
-                                    <NoticeIcon source={t.source} className="toast__panel-icon" />
-                                </span>
-                            )}
+                            {/* Which panel it came from. The name says where to go; the
+                                icon under it is what makes a toast recognisable in the
+                                half-second before anybody reads the words, and it is the
+                                same glyph as the panel's header and its tab.
+                                
+                                The icon is a sibling of this row and positioned rather
+                                than laid out — see the CSS. At the size worth having it
+                                would otherwise set the height of the whole head and push
+                                the title and the message down to make room for itself,
+                                which is backwards: the words are the notification and the
+                                icon is how you spot it. */}
+                            {t.source && <span className="toast__source">{sourceLabel(t.source)}</span>}
                         </div>
                         {t.body && <div className="toast__body">{t.body}</div>}
+                        {t.source && <NoticeIcon source={t.source} className="toast__panel-icon" />}
                         {/* Only on the ones that stay: a toast that is about to vanish
                             does not need to tell you it arrived a moment ago. */}
                         {!toastMs(t, settings) && (

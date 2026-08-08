@@ -7682,6 +7682,71 @@ a.btn { text-decoration: none; }
    wider than the modal as well as taller. */
 .wx__paper.is-full img { width: auto; max-width: none; }
 
+/* ── A turned page ─────────────────────────────────────────────────────────────
+ *
+ * A transform does not change the box an element occupies, so rotating the image alone
+ * would leave a sideways chart overlapping the caption and a scrollbar measuring the wrong
+ * axis. The wrapper is the box; the panel hands it the page's pixel size in --w and --h,
+ * and these rules do the arithmetic CSS can do once it has the numbers.
+ *
+ * Upright and upside down need none of it: the box is unchanged, so only the transform is. */
+.wx__paper.is-turned img { transform: rotate(var(--turn)); }
+
+/* On its side, fitted to the width. The wrapper takes the *swapped* aspect ratio — a tall
+ * page becomes a wide one — and the image is sized so that its own height, which is what
+ * ends up across the screen, is exactly the wrapper's width:
+ *
+ *   img width = C·w/h  →  img height = C  →  on screen, rotated: C across, C·w/h down,
+ *
+ * which is the wrapper. Centred and absolute, because a rotated element's box stays where
+ * it was and only translate can put it back. */
+.wx__paper.is-side .wx__rot {
+    position: relative;
+    width: 100%;
+    aspect-ratio: var(--h) / var(--w);
+}
+.wx__paper.is-side .wx__rot img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(100% * var(--w) / var(--h));
+    height: auto;
+    transform: translate(-50%, -50%) rotate(var(--turn));
+}
+/* On its side at 1:1: the box is the page's own size with the axes swapped, and the image
+   is left at natural size inside it. The paper scrolls, as it does upright. */
+.wx__paper.is-full.is-side .wx__rot {
+    width: calc(var(--h) * 1px);
+    height: calc(var(--w) * 1px);
+    aspect-ratio: auto;
+}
+.wx__paper.is-full.is-side .wx__rot img { width: auto; max-width: none; }
+
+/* The row under the page: turning it on the left, what to do with it on the right. Wraps
+   rather than squeezing, because the modal is narrow on a phone and a rotate button that
+   has become 18 px wide is not a button. */
+.wx__tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+.wx__tools .row-end { flex: 1 1 auto; }
+.wx__turns { display: flex; align-items: center; gap: 4px; }
+/* Which way up it is, and the way back to how it arrived. */
+.wx__turn {
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: none;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.wx__turn:hover { border-color: var(--accent); color: var(--text); }
+
 .wx__others { display: flex; flex-wrap: wrap; gap: 4px; }
 .wx__other {
     padding: 1px 5px;

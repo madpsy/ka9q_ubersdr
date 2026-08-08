@@ -212,5 +212,49 @@ t('a choice nothing knows about falls back to the newest', () => {
     assert.strictEqual(wx.chosenImage([], 'gone'), null, 'and nothing at all is nothing');
 });
 
+// --- turning the page ------------------------------------------------------------
+//
+// A fax arrives in whatever orientation the station sent it, and the decoder cannot know:
+// it is demodulating scan lines. Four positions, reached by relative presses.
+
+t('a quarter turn each way lands on the four positions', () => {
+    assert.strictEqual(wx.turnBy(0, 90), 90);
+    assert.strictEqual(wx.turnBy(90, 90), 180);
+    assert.strictEqual(wx.turnBy(180, 90), 270);
+    assert.strictEqual(wx.turnBy(0, -90), 270, 'and anticlockwise wraps the other way');
+});
+
+t('turning past the top comes back upright rather than to 360', () => {
+    // Otherwise the fourth press leaves a page that looks upright but reports 360°, and the
+    // chip offering the way back would be a lie.
+    assert.strictEqual(wx.turnBy(270, 90), 0);
+    assert.strictEqual(wx.turnBy(0, -450), 270);
+    assert.strictEqual(wx.turnBy(180, 180), 0);
+});
+
+t('an angle off the quarter grid becomes upright, not a page nobody can straighten', () => {
+    assert.strictEqual(wx.turnBy(45, 0), 0);
+    assert.strictEqual(wx.turnBy(0, 1), 0);
+    assert.strictEqual(wx.turnBy(null, undefined), 0);
+});
+
+t('the two quarter turns are the ones that swap the axes', () => {
+    // Which is the whole reason the panel has to know: a rotated tall page is a wide one,
+    // and the box it is laid out in has to swap with it.
+    assert.strictEqual(wx.sideways(90), true);
+    assert.strictEqual(wx.sideways(270), true);
+    assert.strictEqual(wx.sideways(0), false);
+    assert.strictEqual(wx.sideways(180), false);
+});
+
+t('the page size comes from the record, and from the browser when the record has none', () => {
+    assert.deepStrictEqual(wx.pageSize({ width: 1809, height: 1277 }), { w: 1809, h: 1277 });
+    assert.deepStrictEqual(wx.pageSize({}, { w: 800, h: 2400 }), { w: 800, h: 2400 });
+    // Not knowing is null rather than a zero that would divide the layout by nothing — the
+    // panel disables the buttons on it.
+    assert.strictEqual(wx.pageSize({ width: 800, height: 0 }, null), null);
+    assert.strictEqual(wx.pageSize(null, null), null);
+});
+
 if (process.exitCode) console.log('\nWEFAX addon tests FAILED');
 else console.log(`\nall ${pass} WEFAX addon tests passed`);

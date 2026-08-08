@@ -7,7 +7,9 @@
 //
 // Clicking the page opens it full size. Fax pages are *tall*: about 1800 px across and
 // often several thousand lines, so the modal fits them to its width and scrolls, with a
-// 1:1 view a click away for reading the small print on a synoptic chart.
+// 1:1 view a click away for reading the small print on a synoptic chart — and quarter-turn
+// buttons, because a page arrives in whatever orientation the station sent it and a chart
+// on its side is a puzzle. See the rotation notes in lib/wefax.js.
 //
 // `minimal` drops the picker and the link and keeps the page. The choice is remembered,
 // so the minimal view is a way of pinning one frequency's latest chart to the dock.
@@ -17,8 +19,8 @@ import { Button, Empty, Icon, Modal, Segmented } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import {
     POLL_MS, addonUrl, channelImagesUrl, channelList, chosenImage, imageUrl, isTall,
-    newestImage, pickOptions, savePick, savedPick, sizeLabel, sortNewest, statusUrl,
-    tookLabel, totalImages, wefaxAvailable,
+    newestImage, pageSize, pickOptions, savePick, savedPick, sideways, sizeLabel, sortNewest,
+    statusUrl, tookLabel, totalImages, turnBy, wefaxAvailable,
 } from '../lib/wefax.js';
 
 export { wefaxAvailable };
@@ -38,6 +40,12 @@ export default function WefaxPanel({ minimal }) {
     // swapping the chart under the reader would be worse than showing an old one.
     const [viewing, setViewing] = useState(null);
     const [full, setFull] = useState(false);
+    // Quarter turns, and the page's pixel size — needed because a page on its side has to be
+    // laid out in a box with its axes swapped, not merely transformed. The addon reports the
+    // size; `natural` is the fallback for a record that does not carry it, measured by the
+    // browser when the image loads.
+    const [turn, setTurn] = useState(0);
+    const [natural, setNatural] = useState(null);
     const alive = useRef(true);
     // The image count the list was last fetched at. The whole polling strategy: ask a
     // 400-byte question every minute, and pay for the 300 KB answer only when it has
@@ -119,9 +127,17 @@ export default function WefaxPanel({ minimal }) {
         setViewing(img);
         // Fitted to the modal's width to begin with, whatever was chosen last time: a
         // chart you cannot see the shape of is not a chart, and 1:1 is a decision about
-        // *this* page.
+        // *this* page. Upright for the same reason — the turn that righted the last page
+        // says nothing about this one, which may well have come from another station.
         setFull(false);
+        setTurn(0);
+        setNatural(null);
     };
+
+    // What the modal needs to lay out a turned page: the size it is, and whether the turn
+    // swaps its axes. Both are cheap and neither is used when nothing is open.
+    const size = pageSize(viewing, natural);
+    const side = sideways(turn);
 
     const options = pickOptions(channels, images);
     const labels = options.slice(1).map((o) => o.value);
@@ -194,11 +210,84 @@ export default function WefaxPanel({ minimal }) {
                             </span>
                         </div>
 
-                        <div className={`wx__paper${full ? ' is-full' : ''}${isTall(viewing) ? ' is-tall' : ''}`}>
-                            <img src={imageUrl(viewing.file)} alt={`Weather fax from ${viewing.khz} kHz`} />
+                        <div
+                            className={`wx__paper${full ? ' is-full' : ''}`
+                                + `${isTall(viewing) ? ' is-tall' : ''}`
+                                + `${turn ? ' is-turned' : ''}`
+                                + `${side ? ' is-side' : ''}`}
+                            // The turn is a transform; the two numbers are the box the
+                            // rotated page needs, which CSS cannot work out for itself. No
+                            // size yet means no rotation offered, so they are never missing
+                            // when they are needed.
+                            style={{
+                                '--turn': `${turn}deg`,
+                                '--w': size ? size.w : 1,
+                                '--h': size ? size.h : 1,
+                            }}
+                        >
+                            <div className="wx__rot">
+                                <img
+                                    src={imageUrl(viewing.file)}
+                                    alt={`Weather fax from ${viewing.khz} kHz`}
+                                    // Only consulted when the record did not carry a size.
+                                    onLoad={(e) => setNatural({
+                                        w: e.target.naturalWidth,
+                                        h: e.target.naturalHeight,
+                                    })}
+                                />
+                            </div>
                         </div>
 
-                        <div className="row-end">
+                        {/* Under the page, because they are things you do *to* it, and left
+                            of the actions because turning it upright comes before deciding
+                            what to do with it. Relative turns rather than four absolute
+                            positions: a station that sends upside down sends every page
+                            upside down, so one press is the common case either way. */}
+                        <div className="wx__tools">
+                            <div className="wx__turns">
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    icon={<Icon.RotateLeft size={13} />}
+                                    disabled={!size}
+                                    title="Rotate a quarter turn anticlockwise"
+                                    aria-label="Rotate left"
+                                    onClick={() => setTurn((t) => turnBy(t, -90))}
+                                />
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    icon={<Icon.RotateRight size={13} />}
+                                    disabled={!size}
+                                    title="Rotate a quarter turn clockwise"
+                                    aria-label="Rotate right"
+                                    onClick={() => setTurn((t) => turnBy(t, 90))}
+                                />
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={!size}
+                                    title="Turn the page over"
+                                    onClick={() => setTurn((t) => turnBy(t, 180))}
+                                >
+                                    180°
+                                </Button>
+                                {/* Which way up it is, and the way back. Only when it is not
+                                    upright: a chip saying 0° is noise, and after three
+                                    presses "how do I undo this" is a fair question. */}
+                                {turn !== 0 && (
+                                    <button
+                                        type="button"
+                                        className="wx__turn"
+                                        title="Back to how it arrived"
+                                        onClick={() => setTurn(0)}
+                                    >
+                                        {turn}°
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="row-end">
                             {/* Fit and 1:1, which is the whole of what a viewer for a
                                 two-thousand-line chart needs: see the shape, then read
                                 the detail. */}
@@ -229,6 +318,7 @@ export default function WefaxPanel({ minimal }) {
                             <Button size="sm" variant="ghost" onClick={() => setViewing(null)}>
                                 Close
                             </Button>
+                            </div>
                         </div>
                     </div>
                 </Modal>

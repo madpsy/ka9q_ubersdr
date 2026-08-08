@@ -214,6 +214,46 @@ export function isTall(img) {
     return !!(img && img.height > img.width);
 }
 
+// ── Rotation ─────────────────────────────────────────────────────────────────
+//
+// A fax page arrives in whatever orientation the transmitting station sent it, and plenty
+// are sideways or upside down: charts drawn in landscape and sent as portrait, and stations
+// whose paper feeds the other way. The decoder cannot know — it is demodulating scan lines —
+// so turning the page is the reader's job, and it is the difference between a chart and a
+// puzzle.
+//
+// Kept as one of four quarter turns rather than a free angle: a fax is never five degrees
+// out, and four positions can be reached with one press each.
+export const TURNS = [0, 90, 180, 270];
+
+/** Turning by ±90 or 180, wrapped so the four positions form a ring. */
+export function turnBy(turn, delta) {
+    const n = (Math.round((Number(turn) || 0) + (Number(delta) || 0)) % 360 + 360) % 360;
+    // Anything off the quarter grid — which nothing here produces — becomes upright rather
+    // than a page at an angle no button can undo.
+    return TURNS.includes(n) ? n : 0;
+}
+
+/**
+ * Is the page on its side? The two quarter turns swap the axes, so the box the image is laid
+ * out in has to swap with them — a rotated tall page is a wide one — and that is the whole
+ * reason this is a question the panel has to ask rather than a CSS transform and nothing else.
+ */
+export function sideways(turn) {
+    return turn === 90 || turn === 270;
+}
+
+/**
+ * The page's pixel size, for laying out a rotated one. The addon reports both, but a record
+ * without them is not a reason to refuse to rotate: `natural` is what the browser measured
+ * when the image loaded, and either way the answer is a pair of numbers or null.
+ */
+export function pageSize(img, natural) {
+    const w = (img && img.width) || (natural && natural.w) || 0;
+    const h = (img && img.height) || (natural && natural.h) || 0;
+    return w > 0 && h > 0 ? { w, h } : null;
+}
+
 /** "1809 × 1277", for the caption. */
 export function sizeLabel(img) {
     if (!img || !img.width || !img.height) return '';

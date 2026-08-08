@@ -780,6 +780,8 @@ export default function SpectrumView() {
     const wfMarksRef = useRef(null);
     const scaleRef = useRef(null);
     const wfScaleRef = useRef(null);
+    // The ruler between the surface and the heat map, in '2d+3d' only.
+    const midScaleRef = useRef(null);
 
     // Everything the draw loop needs, kept out of React state.
     const gfx = useRef({
@@ -905,11 +907,18 @@ export default function SpectrumView() {
     // newest-at-the-front upward, so with the surface above the heat map the two
     // newest rows meet at the seam and time runs outward in both directions from
     // the same instant.
+    //
+    // With both on screen they get a ruler between them. The seam is where the
+    // two newest rows meet, so it is the one place in the pane where a frequency
+    // can be read against *both* pictures at once — and without it the surface's
+    // front edge runs straight into the heat map's top row with nothing to say
+    // they are the same instant.
     const wfMode = viewMode === 'spectrum' ? '2d' : (display.waterfallMode || '2d');
+    const midH = wfMode === 'both' && wfH > WF_SCALE_H * 4 ? WF_SCALE_H : 0;
     const dssH = wfMode === '3d' ? wfH
-        : wfMode === 'both' ? Math.round(wfH * DSS_SPLIT)
+        : wfMode === 'both' ? Math.round((wfH - midH) * DSS_SPLIT)
             : 0;
-    const heatH = wfH - dssH;
+    const heatH = wfH - dssH - midH;
 
     // Size the backing stores for device pixels and rebuild the waterfall ring.
     useEffect(() => {
@@ -945,6 +954,14 @@ export default function SpectrumView() {
         // That overhang is what the smooth scroll slides: the newest row is
         // painted above the top edge and travels down into view, so the picture
         // moves continuously between rows instead of jumping when one arrives.
+        const midc = midScaleRef.current;
+        if (midc) {
+            midc.width = w;
+            midc.height = Math.max(1, Math.round(midH * dpr));
+            midc.style.width = sizes.w + 'px';
+            midc.style.height = midH + 'px';
+        }
+
         const dssc = dssRef.current;
         if (dssc) {
             dssc.width = w;
@@ -999,7 +1016,7 @@ export default function SpectrumView() {
             if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
-    }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, wfScaleH]);
+    }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, midH, wfScaleH]);
 
     // ---- data -----------------------------------------------------------
 
@@ -1075,6 +1092,8 @@ export default function SpectrumView() {
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 wfScale: wfScaleRef.current,
+                midScale: midScaleRef.current,
+                midH,
                 cfg: cfgRef.current,
                 tuning: tuneRef.current,
                 width: sizes.w,
@@ -2119,17 +2138,26 @@ export default function SpectrumView() {
                                 style={{ height: dssH }}
                             />
                         )}
+                        {/* The seam ruler, and the only place a frequency can be
+                            read against both pictures at once. */}
+                        {midH > 0 && (
+                            <canvas
+                                ref={midScaleRef}
+                                className="spectrum__wf-mid"
+                                style={{ top: dssH }}
+                            />
+                        )}
                         {heatH > 0 && (
                             <canvas
                                 ref={wfRef}
                                 className="spectrum__wf-pane"
-                                style={{ top: dssH }}
+                                style={{ top: dssH + midH }}
                             />
                         )}
                         <canvas
                             ref={wfMarksRef}
                             className="spectrum__wf-marks"
-                            style={{ top: dssH }}
+                            style={{ top: dssH + midH }}
                         />
                     </div>
                 )}
@@ -2378,7 +2406,7 @@ function autoRange(px, trace, g, k) {
 function drawFrame(g, d, ctx) {
     const {
         spec, wf, wfMarks, scale, wfScale, cfg, tuning, width, specH, wfH, commitRow, dt,
-        dss, dssH, heatH, rowProgress,
+        dss, dssH, heatH, rowProgress, midScale, midH,
     } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
@@ -2431,6 +2459,10 @@ function drawFrame(g, d, ctx) {
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
     drawWaterfallScale(g, wfScale, pxW, cfg, tuning, width, colVfoLine);
+    // The seam ruler carries a pip into each picture: the surface's newest row is
+    // just above it and the heat map's is just below, and they are the same
+    // instant. See drawWaterfallScale's `both`.
+    drawWaterfallScale(g, midScale, pxW, cfg, tuning, width, colVfoLine, midH, true);
 }
 
 
@@ -3380,11 +3412,21 @@ function drawStationId(g, c, pxW, dpr) {
 // The ruler under the waterfall: notches and their frequencies, nothing else.
 // No dial pip and no splitter — those belong to the scale above, and repeating
 // them here would be two of each on one view.
-function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo) {
-    if (!scale) return;
+/**
+ * The slim ruler under the waterfall, and the one between the two pictures in
+ * '2d+3d'.
+ *
+ * `both` is the seam: notches hang from the top edge *and* rise from the bottom,
+ * and there is a pip aimed into each picture. That is the one place in the pane
+ * where the surface's newest row and the heat map's newest row are the same
+ * instant, so it is the one ruler that belongs to two displays at once.
+ */
+function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo, cssH = WF_SCALE_H,
+    both = false) {
+    if (!scale || cssH <= 0) return;
     const c = scale.getContext('2d', { alpha: false });
     const dpr = g.dpr;
-    const H = Math.round(WF_SCALE_H * dpr);
+    const H = Math.round(cssH * dpr);
     const col = colors();
     c.fillStyle = col['--scale-bg'] || '#0e131c';
     c.fillRect(0, 0, pxW, H);
@@ -3402,8 +3444,11 @@ function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo) {
         const cx = t.frac * pxW;
         c.fillStyle = t.major ? textCol : tickCol;
         // Notches hang from the top edge, so they meet the waterfall they
-        // belong to rather than the panel below.
-        c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((t.major ? 4 : 2.5) * dpr));
+        // belong to rather than the panel below. At the seam they do both, so
+        // neither picture is the one the ruler is not for.
+        const len = Math.round((t.major ? 4 : 2.5) * dpr);
+        c.fillRect(Math.round(cx - w / 2), 0, w, len);
+        if (both) c.fillRect(Math.round(cx - w / 2), H - len, w, len);
         if (t.major) c.fillText(formatFreqShort(t.hz, cfg.span), Math.round(cx), H * 0.72);
     }
 
@@ -3430,6 +3475,15 @@ function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo) {
         c.lineTo(x, 0);
         c.closePath();
         c.fill();
+        // And down into the other picture, where there is one below as well.
+        if (both) {
+            c.beginPath();
+            c.moveTo(x - 5 * dpr, H - 6 * dpr);
+            c.lineTo(x + 5 * dpr, H - 6 * dpr);
+            c.lineTo(x, H);
+            c.closePath();
+            c.fill();
+        }
     }
 }
 

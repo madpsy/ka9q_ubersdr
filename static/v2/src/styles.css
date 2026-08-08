@@ -634,10 +634,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 /* Sized for "S9+53", the widest the S label gets. */
 .topbar__s { font-family: var(--mono); min-width: 6ch; text-align: left; }
+/* Outlined rather than a bare filled strip. An unfilled track the same
+   lightness as the header reads as empty space, so there was no way to tell a
+   quiet band from a bar that ends just past the fill — and no way to see the
+   reading pinned at the top. The border draws the ends, so full scale is
+   visible as the fill meeting them. Height counts the border (box-sizing is
+   border-box globally), leaving the 6px of track that was there before. */
 .topbar__bar {
     flex: 1;
-    height: 6px;
+    height: 8px;
     background: var(--surface-3);
+    border: 1px solid var(--border-strong);
     border-radius: 99px;
     overflow: hidden;
 }
@@ -701,6 +708,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .topbar__zoom-val:hover { color: var(--text); }
 .topbar__volume { display: flex; align-items: center; gap: 8px; width: 150px; }
+/* The volume slider is also the output meter — its fill is the level, not the
+   setting — so it needs the same outline as the signal bar for the same reason:
+   without one there is nothing to show how far the level has left to go, or
+   that it has arrived. Only here, because every other slider in the app is a
+   control whose thumb already says where it is, and boxing those would be
+   noise. Border-box on the track so the outline grows the 4px track to 6px
+   rather than pushing the row taller; the thumb re-centres on it. */
+.topbar__volume .slider::-webkit-slider-runnable-track {
+    box-sizing: border-box;
+    height: 8px;
+    border: 1px solid var(--border-strong);
+}
+.topbar__volume .slider::-moz-range-track {
+    box-sizing: border-box;
+    height: 8px;
+    border: 1px solid var(--border-strong);
+}
+.topbar__volume .slider::-webkit-slider-thumb { margin-top: -3px; }
 
 .topbar__session {
     font-family: var(--mono);

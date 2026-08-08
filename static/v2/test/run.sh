@@ -222,6 +222,10 @@ esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrel.cjs --log-level=warning
 esbuild ../src/lib/paging.js --bundle --format=cjs --platform=node \
     --outfile=.build/paging.cjs --log-level=warning
+esbuild ../src/lib/localBookmarks.js --bundle --format=cjs --platform=node \
+    --outfile=.build/localbookmarks.cjs --log-level=warning
+esbuild ../src/lib/bookmarkTune.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bookmarktune.cjs --log-level=warning
 esbuild ../src/lib/sheetGesture.js --bundle --format=cjs --platform=node \
     --outfile=.build/sheetgesture.cjs --log-level=warning
 esbuild ../src/lib/visibilityPause.js --bundle --format=cjs --platform=node \
@@ -317,6 +321,8 @@ node haptics.test.js
 node appheight.test.js
 node barrel.test.js
 node paging.test.js
+node localbookmarks.test.js
+node bookmarktune.test.js
 node sheetgesture.test.js
 node visibilitypause.test.js
 node bandconditions.test.js

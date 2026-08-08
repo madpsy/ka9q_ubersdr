@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
+import { bookmarkTarget } from '../lib/bookmarkTune.js';
 import { countryFlag, formatFreqShort, sinceLabel } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { getVfos, markableVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
@@ -628,8 +629,9 @@ export default function MarkerBar({ width }) {
             const call = hit.spot.callsign;
             if (lookups && call && !requestLookup(call)) lookupCallsign(call);
         } else if (hit.kind === 'bookmark') {
-            if (hit.item.mode) actions.setMode(hit.item.mode);
-            actions.setFrequency(hit.item.frequency);
+            // Server or local — the pill draws both, and both can carry a passband. One
+            // tune, so a mode change does not send the old filter on the way through.
+            actions.tuneTo(bookmarkTarget(hit.item));
             // A pill sits at the edge of the bar as often as the middle, and
             // with follow-tuning off nothing else would move the view — so the
             // signal you just clicked could end up half off screen.

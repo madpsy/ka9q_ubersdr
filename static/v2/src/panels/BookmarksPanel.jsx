@@ -13,6 +13,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
 import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
+import { bookmarkTarget } from '../lib/bookmarkTune.js';
 
 export default function BookmarksPanel({ minimal }) {
     const { actions, catalog } = useRadio();
@@ -84,9 +85,12 @@ export default function BookmarksPanel({ minimal }) {
                             type="button"
                             className="list__row"
                             title={b.comment || ''}
+                            // Frequency, mode and the bookmark's passband if it has one, in
+                            // one tune — see lib/bookmarkTune.js. A receiver's config.yaml
+                            // can set bandwidth_low/high on a bookmark, and it used to be
+                            // published, drawn on the marker bar and then ignored here.
                             onClick={() => {
-                                if (b.mode) actions.setMode(b.mode);
-                                actions.setFrequency(b.frequency);
+                                actions.tuneTo(bookmarkTarget(b));
                                 actions.setSpectrumCenter(b.frequency);
                             }}
                         >

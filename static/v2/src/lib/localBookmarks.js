@@ -48,6 +48,44 @@ export async function mutate(fn) {
 // Import / export plumbing
 // ---------------------------------------------------------------------------
 
+/**
+ * The passband a bookmark's form is asking to store, from the two text fields.
+ *
+ * Here rather than in the panel because the rules are the awkward part, and all three of them
+ * are about what the rest of the code does with the pair:
+ *
+ *   Both edges or neither. Tuning only restores a passband when both are numbers — one edge
+ *   is not a filter — so a half-written pair would be stored for ever and never used.
+ *
+ *   Blank is null, not absent. The store leaves a field alone when it is `undefined`, which
+ *   is what preserved an invisible passband through every edit; null is how you clear one.
+ *
+ *   Low below high, because that is the only order the receiver accepts, and the two fields
+ *   are easy to fill in the wrong boxes.
+ *
+ * Returns `{ low, high }` on success, or `{ error }` with something to show the operator.
+ */
+export function passbandFields(lowText, highText) {
+    const edge = (v) => {
+        const t = String(v == null ? '' : v).trim();
+        if (!t) return null;
+        const n = parseInt(t, 10);
+        return Number.isFinite(n) ? n : NaN;
+    };
+    const low = edge(lowText);
+    const high = edge(highText);
+    if (Number.isNaN(low) || Number.isNaN(high)) {
+        return { error: 'The passband edges must be numbers, in Hz.' };
+    }
+    if ((low == null) !== (high == null)) {
+        return { error: 'Give both passband edges, or neither.' };
+    }
+    if (low != null && low >= high) {
+        return { error: 'The passband low edge must be below the high one.' };
+    }
+    return { low, high };
+}
+
 export const EXPORT_FORMATS = [
     { id: 'json', label: 'JSON', ext: 'json', type: 'application/json' },
     { id: 'yaml', label: 'YAML', ext: 'yaml', type: 'text/yaml' },

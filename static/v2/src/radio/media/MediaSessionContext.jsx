@@ -13,6 +13,7 @@ import { getSessionId } from '../session.js';
 import { subscribeSpots } from '../../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../../lib/voiceActivity.js';
 import { NAV_TYPES, callsignOf, collectMarkers, findMarkers } from '../../lib/markerNav.js';
+import { markerTarget } from '../../lib/bookmarkTune.js';
 import { MediaSessionController } from './controller.js';
 import { ANCHORS, mediaSupport } from './support.js';
 import { onLookupResolved, peekLookup, startLookup } from './lookup.js';
@@ -93,7 +94,7 @@ export function MediaSessionProvider({ children }) {
                 if (l.skipMode === 'marker') {
                     const target = dir < 0 ? l.markers.prev : l.markers.next;
                     if (target) {
-                        l.actions.tuneTo({ frequency: target.freq, mode: target.mode || undefined });
+                        l.actions.tuneTo(markerTarget(target));
                         return;
                     }
                 }

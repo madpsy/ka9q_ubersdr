@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from '../react.js';
 import { subscribeSpots } from './spotStore.js';
 import { subscribeVoiceActivity } from './voiceActivity.js';
 import { collectMarkers, findMarkers } from './markerNav.js';
+import { markerTarget } from './bookmarkTune.js';
 import { onNavTypes, saveNavTypes, savedNavTypes } from './markerNavSettings.js';
 
 // The shared selection of kinds to step between, as state that tracks it.
@@ -34,7 +35,9 @@ export function useNavTypes() {
 // no needle in it, and the fix must be the same wherever the step came from.
 export function stepToMarker(actions, marker) {
     if (!marker) return;
-    actions.tuneTo({ frequency: marker.freq, mode: marker.mode || undefined });
+    // A bookmark marker carries its passband, and stepping onto one should land on the
+    // filter it was saved with — see lib/bookmarkTune.js.
+    actions.tuneTo(markerTarget(marker));
     actions.ensureVisible(marker.freq);
 }
 

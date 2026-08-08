@@ -14,21 +14,36 @@ import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
 import { Button, Empty, Icon, Menu, MenuItem } from '../components/ui.jsx';
 import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
-import { formatFreqShort } from '../lib/format.js';
-import { MODES } from '../radio/constants.js';
+import { formatFilterWidth, formatFreqShort } from '../lib/format.js';
+import { bookmarkTarget } from '../lib/bookmarkTune.js';
+import { MODES, MODE_BY_ID } from '../radio/constants.js';
 import {
     EXPORT_FORMATS, downloadFile, exportText, importText,
-    localBookmarks, mutate, onLocalBookmarksChanged,
+    localBookmarks, mutate, onLocalBookmarksChanged, passbandFields,
 } from '../lib/localBookmarks.js';
 
-const BLANK = { name: '', frequency: '', mode: 'usb', group: '', comment: '' };
+const BLANK = {
+    name: '', frequency: '', mode: 'usb', group: '', comment: '', low: '', high: '',
+};
 
-// The panel edits the fields v1's form exposes. `extension` and the bandwidth
-// pair are preserved untouched on edit rather than being dropped, because
-// imports (KiwiSDR passbands especially) carry them.
+// The panel edits the fields v1's form exposes, plus the passband — which the format has
+// always carried and this form did not show. Both halves of that mattered:
+//
+//   Bookmarks made anywhere else in v2 store it (the ⭐ on the spectrum does), and imports
+//   carry it — KiwiSDR passbands especially — so an edit here that could not see it was
+//   editing a bookmark it could only partly describe. It was preserved rather than dropped,
+//   which is better than losing it and still no way to correct one.
+//
+//   And tuning to a bookmark restores it, so it is a field with visible effect: a bookmark on
+//   a narrow CW signal is not the same bookmark three kilohertz wide.
+//
+// Blank means "not stored", and the mode's own passband is used when tuning. `extension` is
+// still preserved untouched: nothing in v2 sets it, so a form field for it would be a control
+// with nothing behind it.
 function Form({ initial, onSave, onCancel, error }) {
     const [f, setF] = useState(initial);
     const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+    const def = MODE_BY_ID[f.mode] || {};
 
     return (
         <div className="lb-form">
@@ -44,6 +59,28 @@ function Form({ initial, onSave, onCancel, error }) {
                 <select className="select" value={f.mode} onChange={set('mode')}>
                     {MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </select>
+            </div>
+            {/* Offsets from the carrier in Hz, as the store keeps them and as the passband
+                controls elsewhere show them — negative below, positive above. The mode's own
+                figures are the placeholders, so leaving them empty visibly means "whatever
+                this mode normally does". */}
+            <div className="lb-form__row">
+                <input
+                    className="input"
+                    placeholder={def.low != null ? `Low (${def.low})` : 'Passband low'}
+                    inputMode="numeric"
+                    title="Passband low edge, Hz from the carrier. Blank for the mode's own"
+                    value={f.low}
+                    onChange={set('low')}
+                />
+                <input
+                    className="input"
+                    placeholder={def.high != null ? `High (${def.high})` : 'Passband high'}
+                    inputMode="numeric"
+                    title="Passband high edge, Hz from the carrier. Blank for the mode's own"
+                    value={f.high}
+                    onChange={set('high')}
+                />
             </div>
             <div className="lb-form__row">
                 <input className="input" placeholder="Group" value={f.group || ''} onChange={set('group')} />
@@ -107,23 +144,30 @@ export default function LocalBookmarksPanel({ minimal }) {
         deps: [query, group],
     });
 
+    // One tune rather than the three actions this used to take: a mode change resets the
+    // passband, so setMode-then-setBandwidth sent two tunes and passed through the wrong
+    // filter on the way. Shared with the other three places a bookmark is clicked — see
+    // lib/bookmarkTune.js.
     const tune = (b) => {
-        if (b.mode) actions.setMode(b.mode);
-        actions.setFrequency(b.frequency);
-        // v1 restores a bookmark's saved passband too, when it has one.
-        if (typeof b.bandwidth_low === 'number' && typeof b.bandwidth_high === 'number') {
-            actions.setBandwidth(b.bandwidth_low, b.bandwidth_high);
-        }
+        actions.tuneTo(bookmarkTarget(b));
         actions.ensureVisible(b.frequency);
     };
 
     const save = async (values) => {
+        // Both edges or neither, and low below high — see passbandFields for why each of
+        // those is a rule rather than a preference.
+        const band = passbandFields(values.low, values.high);
+        if (band.error) { setError(band.error); return; }
         const record = {
             name: values.name.trim(),
             frequency: parseInt(values.frequency, 10),
             mode: values.mode,
             group: values.group ? values.group.trim() : null,
             comment: values.comment ? values.comment.trim() : null,
+            // Explicitly null rather than absent, so clearing the two fields clears the
+            // stored pair — the store only leaves a field alone when it is undefined.
+            bandwidth_low: band.low,
+            bandwidth_high: band.high,
         };
         if (!record.name || !Number.isFinite(record.frequency) || !record.mode) {
             setError('Name, frequency and mode are required.');
@@ -187,7 +231,7 @@ export default function LocalBookmarksPanel({ minimal }) {
                     size="sm"
                     variant="primary"
                     icon={<Icon.Plus size={13} />}
-                    title="Save the current frequency and mode"
+                    title="Save the current frequency, mode and passband"
                     onClick={() => {
                         setError('');
                         setEditing({
@@ -196,6 +240,12 @@ export default function LocalBookmarksPanel({ minimal }) {
                                 ...BLANK,
                                 frequency: String(Math.round(tuning.frequency)),
                                 mode: tuning.mode,
+                                // The filter you are listening through is part of where you
+                                // are — the ⭐ on the spectrum has always saved it, and
+                                // "Current" meaning something narrower than that was the
+                                // odd one out.
+                                low: String(Math.round(tuning.bandwidthLow)),
+                                high: String(Math.round(tuning.bandwidthHigh)),
                             },
                         });
                     }}
@@ -282,6 +332,18 @@ export default function LocalBookmarksPanel({ minimal }) {
                             <span className="list__meta">
                                 {formatFreqShort(b.frequency)}
                                 <span className="chip">{b.mode.toUpperCase()}</span>
+                                {/* Only when one is stored: the row would otherwise repeat
+                                    the mode's own figure on every bookmark and say nothing.
+                                    Here because a passband is part of what tuning to this
+                                    bookmark will do, and it used to be invisible. */}
+                                {typeof b.bandwidth_low === 'number' && typeof b.bandwidth_high === 'number' && (
+                                    <span
+                                        className="chip"
+                                        title={`Passband ${b.bandwidth_low} to ${b.bandwidth_high} Hz`}
+                                    >
+                                        {formatFilterWidth(b.bandwidth_low, b.bandwidth_high)}
+                                    </span>
+                                )}
                                 {b.comment && <span className="lb-row__note">{b.comment}</span>}
                             </span>
                         </button>
@@ -305,6 +367,11 @@ export default function LocalBookmarksPanel({ minimal }) {
                                             mode: b.mode,
                                             group: b.group || '',
                                             comment: b.comment || '',
+                                            // Whatever is stored, including nothing — an
+                                            // import that carried a passband can now be
+                                            // seen and corrected rather than only obeyed.
+                                            low: typeof b.bandwidth_low === 'number' ? String(b.bandwidth_low) : '',
+                                            high: typeof b.bandwidth_high === 'number' ? String(b.bandwidth_high) : '',
                                         },
                                     });
                                 }}

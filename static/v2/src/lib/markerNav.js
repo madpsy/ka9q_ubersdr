@@ -129,6 +129,12 @@ export function collectMarkers({ dx = [], cw = [], voice = [], bookmarks = [], l
             out.push({
                 freq: b.frequency,
                 mode: b.mode || null,
+                // The bookmark's own passband, when it has one. Carried because stepping
+                // onto a bookmark tunes to it, and a bookmark on a narrow signal is about
+                // its filter — see lib/bookmarkTune.js. Only bookmarks have one: a spot
+                // says nothing about how to listen to it.
+                low: typeof b.bandwidth_low === 'number' ? b.bandwidth_low : null,
+                high: typeof b.bandwidth_high === 'number' ? b.bandwidth_high : null,
                 family: b.mode ? modeFamily(b.mode) : null,
                 name: b.name || '',
                 // A bookmark's name is whatever its owner typed, so it is never

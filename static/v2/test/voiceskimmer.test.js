@@ -74,6 +74,44 @@ t('the second query waits, because the endpoint allows one request a second', ()
     assert.ok(vs.POLL_MS > vs.SECOND_QUERY_MS * 2, 'and the pair fits inside a cycle');
 });
 
+// --- already tuned there? -------------------------------------------------------
+//
+// The skimmer hears what this receiver hears, so somebody who has found a voice by hand has
+// a fair chance of it being in this list — which is how the callsign gets attached to it.
+
+t('the row for the frequency the receiver is on matches', () => {
+    const s = vs.normaliseSpot(row());
+    assert.strictEqual(vs.tunedToSpot(s, 14297000), true);
+});
+
+t('a dial nudged a little off a spot still matches it', () => {
+    // Clicking a row tunes exactly; hand tuning does not, and neither does an addon that
+    // rounds. A couple of hundred Hz is a deliberate choice, not a channel.
+    const s = vs.normaliseSpot(row());
+    assert.strictEqual(vs.tunedToSpot(s, 14297000 + vs.TUNED_TOL_HZ), true);
+    assert.strictEqual(vs.tunedToSpot(s, 14297000 - vs.TUNED_TOL_HZ), true);
+});
+
+t('a neighbour in the next SSB channel is never claimed', () => {
+    // An SSB passband is more than ten times the tolerance, so the two cannot be confused.
+    const s = vs.normaliseSpot(row());
+    assert.strictEqual(vs.tunedToSpot(s, 14299000), false);
+    assert.ok(vs.TUNED_TOL_HZ * 10 < 2700, 'and the tolerance stays well inside a passband');
+});
+
+t('the mode is not part of the question', () => {
+    // Listening to an SSB station in the wrong sideband is worth being told about, and a row
+    // that stopped matching on a mode change would hide exactly that.
+    const s = vs.normaliseSpot(row({ mode: 'LSB' }));
+    assert.strictEqual(vs.tunedToSpot(s, 14297000), true);
+});
+
+t('nothing tuned and nothing to compare against match nothing', () => {
+    assert.strictEqual(vs.tunedToSpot(null, 14297000), false);
+    assert.strictEqual(vs.tunedToSpot(vs.normaliseSpot(row()), 0), false);
+    assert.strictEqual(vs.tunedToSpot(vs.normaliseSpot(row()), null), false);
+});
+
 // --- the band filter ------------------------------------------------------------
 //
 // It is the server's filter, not ours: each column asks for five rows, so filtering those

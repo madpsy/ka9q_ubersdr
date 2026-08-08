@@ -198,6 +198,27 @@ export function tuneTarget(spot) {
     return mode ? { frequency: spot.hz, mode } : { frequency: spot.hz };
 }
 
+// How far off a spot's frequency still counts as being tuned to it.
+//
+// Clicking a row tunes to the exact figure, so that case needs no tolerance at all; hand
+// tuning to a station somebody else spotted does. Two hundred Hz is the width of a
+// deliberate choice rather than of a channel: an SSB passband is more than ten times this,
+// so a neighbour a couple of kilohertz away is never claimed, while a dial nudged a little
+// off a spot — or a spot rounded to the nearest hundred by the addon — still matches.
+export const TUNED_TOL_HZ = 200;
+
+/**
+ * Is the receiver on this spot's frequency?
+ *
+ * Frequency only, deliberately: mode is not part of the question. Listening to an SSB
+ * station in the wrong sideband is a mistake worth being told about, and a row that stopped
+ * matching because the mode was changed would hide exactly that.
+ */
+export function tunedToSpot(spot, hz, tol = TUNED_TOL_HZ) {
+    if (!spot || !spot.hz || !(hz > 0)) return false;
+    return Math.abs(spot.hz - hz) <= tol;
+}
+
 /** "14.297" — the frequency as a spotting list writes it. */
 export function freqLabel(hz) {
     if (!hz) return '';

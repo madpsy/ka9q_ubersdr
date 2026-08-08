@@ -7734,6 +7734,15 @@ a.btn { text-decoration: none; }
     min-width: 0;
 }
 .vs__row:hover { background: var(--surface-hover); }
+/* The one the receiver is on. A tinted row and an accent edge rather than accent text: the
+   callsign, the age and the frequency are all doing their own job with colour, and a row
+   that changes them all reads as a different kind of row rather than as this one. */
+.vs__row.is-tuned {
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+.vs__row.is-tuned:hover { background: var(--accent-soft); }
+.vs__row.is-tuned .vs__sign { color: var(--accent); }
 .vs__call {
     display: flex;
     align-items: baseline;

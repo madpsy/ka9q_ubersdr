@@ -30,7 +30,7 @@ import { bandForFrequency } from '../lib/bands.js';
 import {
     AUTO_BAND, BAND_NAMES, BAND_SETTLE_MS, COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl,
     confirmedUrl, freqLabel, matchedCount, resolveBandFilter, saveBand, savedBand, spotList,
-    spottedUrl, tuneTarget, voiceSkimmerAvailable,
+    spottedUrl, tuneTarget, tunedToSpot, voiceSkimmerAvailable,
 } from '../lib/voiceSkimmer.js';
 
 export { voiceSkimmerAvailable };
@@ -38,7 +38,7 @@ export { voiceSkimmerAvailable };
 // How often the ages are redrawn between polls.
 const TICK_MS = 15000;
 
-function Column({ title, rows, count, now, onPick }) {
+function Column({ title, rows, count, now, tunedHz, onPick }) {
     return (
         <div className="vs__col">
             <div className="vs__title">
@@ -47,15 +47,23 @@ function Column({ title, rows, count, now, onPick }) {
             </div>
             {rows.length === 0 ? (
                 <div className="vs__none">—</div>
-            ) : rows.map((s) => (
+            ) : rows.map((s) => {
+                // Marked when the receiver is already there — see tunedToSpot. The skimmer
+                // hears what this receiver hears, so a listener who has found something
+                // interesting by hand has a fair chance of it being in this list, and this
+                // is how a callsign gets attached to a voice.
+                const here = tunedToSpot(s, tunedHz);
+                return (
                 <button
                     key={s.key}
                     type="button"
-                    className="vs__row"
+                    className={`vs__row${here ? ' is-tuned' : ''}`}
+                    aria-current={here ? 'true' : undefined}
                     onClick={() => onPick(s)}
                     title={`${s.callsign}${s.country ? ` — ${s.country}` : ''} · ${freqLabel(s.hz)} MHz`
                         + `${s.mode ? ` ${s.mode.toUpperCase()}` : ''}`
-                        + `${s.snr != null ? ` · ${Math.round(s.snr)} dB` : ''} — click to tune`}
+                        + `${s.snr != null ? ` · ${Math.round(s.snr)} dB` : ''}`
+                        + `${here ? ' — you are tuned here' : ' — click to tune'}`}
                 >
                     {/* The age sits with the callsign rather than on a line of its
                         own: it is three characters, and a row of its own for it made
@@ -71,7 +79,8 @@ function Column({ title, rows, count, now, onPick }) {
                         {s.mode && <span className="vs__mode">{s.mode.toUpperCase()}</span>}
                     </span>
                 </button>
-            ))}
+                );
+            })}
         </div>
     );
 }
@@ -223,6 +232,7 @@ export default function VoiceSkimmerPanel({ minimal }) {
                         rows={confirmed}
                         count={minimal ? null : totals.confirmed}
                         now={now}
+                        tunedHz={tuning.frequency}
                         onPick={pick}
                     />
                     <Column
@@ -230,6 +240,7 @@ export default function VoiceSkimmerPanel({ minimal }) {
                         rows={spotted}
                         count={minimal ? null : totals.spotted}
                         now={now}
+                        tunedHz={tuning.frequency}
                         onPick={pick}
                     />
                 </div>

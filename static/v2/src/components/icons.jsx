@@ -66,6 +66,10 @@ export const Icon = {
     Puzzle: (p) => <Svg {...p}><path d="M10 3h4v2.2a1.8 1.8 0 1 0 3.6 0V3H21v3.4h-2.2a1.8 1.8 0 1 0 0 3.6H21V21h-3.4v-2.2a1.8 1.8 0 1 0-3.6 0V21H3v-4h2.2a1.8 1.8 0 1 0 0-3.6H3V3z" /></Svg>,
     Plug: (p) => <Svg {...p}><path d="M9 2v6M15 2v6" /><path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z" /><path d="M12 17v5" /></Svg>,
     Chat: (p) => <Svg {...p}><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 1 1 21 12z" /><path d="M8.5 11h7M8.5 14h4" /></Svg>,
+    // A podium: three columns, the tallest in the middle. The Ranking panel's,
+    // and it has to read at 13 px in a dock header — so it is the shape of a
+    // leaderboard rather than a trophy, which at that size is a blob.
+    Podium: (p) => <Svg {...p}><path d="M9 10h6v11H9z" /><path d="M3 14h6v7H3z" /><path d="M15 13h6v8h-6z" /><path d="M12 3l1.2 2.5 2.8.4-2 2 .5 2.8L12 9.4 9.5 10.7l.5-2.8-2-2 2.8-.4z" /></Svg>,
     Users: (p) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16.5 5.5a3.2 3.2 0 0 1 0 6" /><path d="M18 14.6A6 6 0 0 1 21 20" /></Svg>,
     Bookmark: (p) => <Svg {...p}><path d="M6 4h12v17l-6-4-6 4z" /></Svg>,
     Eye: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></Svg>,

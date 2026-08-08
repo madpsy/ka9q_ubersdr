@@ -8312,3 +8312,119 @@ a.btn { text-decoration: none; }
 /* The per-source switches wear the same icon, so the switch and the notifications it
    governs are recognisably the same thing. */
 .notes__switch { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ── Ranking panel ─────────────────────────────────────────────────────────
+   Where this receiver stands on PSK Reporter, WSPR Live and the RBN. Three
+   groups of identically shaped rows — see RankingPanel for why the shape is
+   shared across boards that rank quite different things. */
+.rank { gap: 9px; }
+.rank__group { display: flex; flex-direction: column; gap: 5px; }
+
+/* The network's name, the callsign it is ranked under, and how long ago that
+   network last published. The age sits right because it is the caveat rather
+   than the heading. */
+.rank__net {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding-bottom: 1px;
+    border-bottom: 1px solid var(--border);
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.rank__netname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank__call {
+    font-family: var(--mono);
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--accent);
+}
+.rank__age { margin-left: auto; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+
+.rank__row { display: flex; flex-direction: column; gap: 2px; }
+.rank__head, .rank__foot { display: flex; align-items: baseline; gap: 6px; }
+.rank__label {
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The rank itself, which is the number somebody came to the panel for. */
+.rank__place {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: calc(14px * var(--ui-scale));
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    white-space: nowrap;
+}
+.rank__place.is-good { color: var(--good); }
+.rank__place.is-warn { color: var(--warn); }
+
+/* Outlined, like the top bar's meters: an unfilled track the same lightness as
+   the panel reads as empty space, and how much room is left is the comparison
+   this bar exists to make. */
+.rank__bar {
+    height: 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: 99px;
+    overflow: hidden;
+}
+.rank__fill {
+    height: 100%;
+    background: var(--text-faint);
+    transition: width 300ms var(--ease);
+}
+.rank__fill.is-good { background: var(--good); }
+.rank__fill.is-warn { background: var(--warn); }
+
+.rank__foot {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+.rank__count { margin-left: auto; font-family: var(--mono); white-space: nowrap; }
+
+/* Today against yesterday, as a direction rather than two numbers. */
+.rank__trend {
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+}
+.rank__trend.is-good { color: var(--good); }
+.rank__trend.is-warn { color: var(--warn); }
+
+/* The bands this receiver ranks best on — free from the description, and the one
+   actionable line here: it says where the aerial actually works. */
+.rank__bands { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+.rank__bandlabel {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.rank__band {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.rank__band i { font-style: normal; color: var(--accent); }
+
+.rank__note { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
+/* Level: no direction to report, which is itself an answer — "reporting at its
+   usual weekly pace" is a fact, not a missing one. Dimmed rather than coloured,
+   so the eye goes to the sections that did move. */
+.rank__trend.is-flat { color: var(--text-faint); }
+.rank__note--tight { margin-top: -2px; }

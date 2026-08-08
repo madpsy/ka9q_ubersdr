@@ -80,6 +80,7 @@ import RadioControlPanel from './RadioControlPanel.jsx';
 import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
+import RankingPanel from './RankingPanel.jsx';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
@@ -534,6 +535,30 @@ export const PANELS = [
         // to /api/spaceweather fails, so the panel is absent rather than
         // permanently empty. Same gate the top bar's summary uses.
         requires: (serverInfo) => !!(serverInfo && serverInfo.space_weather),
+    },
+    // How this receiver is doing against every other one, on the networks it
+    // reports into. Under space weather because they are the same kind of
+    // question asked at two scales — that one is how the ionosphere is behaving,
+    // this one is what this station managed to hear through it.
+    //
+    // Collapsed by default: it is a thing you look at now and then rather than
+    // while tuning, and it updates four times an hour.
+    //
+    // No `requires`. The three networks are reported per-section by the endpoint
+    // itself rather than by the description, and a receiver may feed any, all or
+    // none of them — so whether there is anything to show is a question only the
+    // fetch can answer, and the panel answers it in a line when the answer is
+    // none. See lib/ranking.js.
+    //
+    // Minimal: the headline rows without the per-band detail or the footnotes.
+    {
+        id: 'ranking',
+        title: 'Ranking',
+        icon: <Icon.Podium />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: RankingPanel,
     },
     // Under space weather, and the pairing is the point: one says what the
     // ionosphere is doing and the other what the sky is. Both end up in the

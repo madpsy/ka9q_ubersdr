@@ -1411,6 +1411,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .spec-stats--left { left: 6px; }
 .spec-stats--right { right: 6px; }
+/* The way out, in the box's own corner. Over the top-right rather than in the grid: the
+   readout is two columns of numbers and a third cell would push them about, and this is
+   not one of the figures. */
+.spec-stats__off {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.75);
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    /* The box lets presses through to the spectrum — see above — so this button has to ask
+       for them back. It is the only part of the readout that is a control. */
+    pointer-events: auto;
+}
+.spec-stats__off:hover { border-color: #fff; color: #fff; background: rgba(0, 0, 0, 0.9); }
 /* The label column reads as the quieter half without being another colour: this
    is white text, and a second hue would start to look like a status. */
 .spec-stats__k { opacity: 0.6; letter-spacing: 0.04em; }

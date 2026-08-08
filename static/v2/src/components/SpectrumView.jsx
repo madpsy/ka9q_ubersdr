@@ -579,7 +579,7 @@ function useStationOverlay(enabled) {
 // is this timer's problem. That is also why the counters are read off the
 // connection objects rather than from `view` — a closure over context state would
 // be a second later, and the whole point is to be able to trust these numbers.
-function SpectrumStats({ place, bottom, gfx }) {
+function SpectrumStats({ place, bottom, gfx, onClose }) {
     const { spectrumConn, audioConn, meters } = useRadio();
     const [lines, setLines] = useState([]);
     const prev = useRef(null);
@@ -679,6 +679,24 @@ function SpectrumStats({ place, bottom, gfx }) {
                     <span className="spec-stats__v" title={l.title}>{l.value}</span>
                 </React.Fragment>
             ))}
+            {/* The way out, on the thing itself. This readout is a diagnostic somebody
+                turned on to answer a question, and when it is answered the natural gesture
+                is to get rid of it — not to go looking through the Display panel for the
+                dropdown that produced it.
+
+                It is the one part of this box that takes a press: the rest deliberately
+                lets clicks through to the spectrum, so the button re-enables pointer
+                events for itself alone. Small and in the corner, because it sits over a
+                display somebody is trying to read and it is not the point of the box. */}
+            <button
+                type="button"
+                className="spec-stats__off"
+                title="Hide the stats — turn them back on in the Display panel"
+                aria-label="Hide the stats"
+                onClick={onClose}
+            >
+                <Icon.Close size={9} />
+            </button>
         </div>
     );
 }
@@ -1846,6 +1864,7 @@ export default function SpectrumView() {
                         place={statsAt}
                         bottom={(wfScaleH || SCALE_H) + STATS_GAP}
                         gfx={gfx}
+                        onClose={() => display.set({ spectrumStats: 'off' })}
                     />
                 )}
                 {hoverInfo && hoverInfo.db != null && (

@@ -1,16 +1,14 @@
-// How the interface looks, from the top bar.
+// How the interface looks, from the top bar: a list of colour schemes, and nothing else.
 //
-// This was a sun/moon button that flipped between the two themes, and two things
-// stopped that being enough: there are now eight colour schemes as well, and the
-// two axes are not the same question. Dark or light is the room you are sitting
-// in; the scheme is what the receiver looks like in it. Most schemes pin a base
-// — amber on white is a highlighter — but the default one works in either, and
-// nothing else in the app would let you say so.
+// It was a sun/moon toggle, then a menu with the base and the schemes as two sections,
+// and the two sections were one question too many. Every scheme carries the base it was
+// drawn for — amber on white is a highlighter, ink on black is not paper — so choosing
+// one already answers dark or light, and offering both meant offering combinations that
+// no scheme was designed for and that most schemes overrode on the next click anyway.
 //
-// So: a menu with both, the base first because it is the thing changed daily and
-// the one that used to be a single click. The Display panel has the same two
-// controls at length, with the pickers underneath for building a scheme of your
-// own; this is the shortcut.
+// So the base moved out of here. It is still explicit in the Display panel, where
+// somebody deliberately building their own scheme can put any colours on either page;
+// this is the shortcut, and the shortcut is "make it look like this".
 
 import React from '../react.js';
 import { Button, Icon, Menu, MenuItem } from './ui.jsx';
@@ -24,12 +22,8 @@ export default function ThemeMenu() {
     const on = matchUiTheme(mine);
     const named = UI_THEMES.find((p) => p.id === on);
 
-    // The base on its own leaves the colours alone: somebody who has built an
-    // amber scheme and wants it on a white page is entitled to ask for that, and
-    // the schemes that would rather not be there say so by carrying a base of
-    // their own.
-    const setBase = (v) => d.set({ theme: v });
-
+    // A scheme sets its colours and its base together, which is the whole point of it
+    // being one choice.
     const apply = (preset) => d.set({
         uiColors: uiColorsFrom(preset),
         ...(preset.theme ? { theme: preset.theme } : {}),
@@ -42,34 +36,24 @@ export default function ThemeMenu() {
                 <Button
                     size="sm"
                     variant="ghost"
-                    title={`Theme: ${theme}${named ? ` · ${named.name}` : ' · custom colours'}`}
-                    aria-label="Theme and colours"
+                    title={named ? `Colours: ${named.name}` : 'Colours: custom'}
+                    aria-label="Colour scheme"
                     icon={(
                         <span className="thememenu__icon">
+                            {/* Still a moon or a sun, but as a readout rather than a
+                                toggle: it says which way the page is, which the accent
+                                dot beside it does not — an amber scheme and a paper one
+                                are both warm and only one of them is dark. */}
                             {theme === 'dark' ? <Icon.Moon /> : <Icon.Sun />}
-                            {/* The accent in force, as a dot beside the glyph.
-                                The base is only half the answer: on an amber or a
-                                green scheme a moon on its own says almost nothing
-                                about what is on screen. */}
+                            {/* The accent in force. The base is only half the answer:
+                                on an amber or a green scheme a moon on its own says
+                                almost nothing about what is on screen. */}
                             <span className="thememenu__dot" />
                         </span>
                     )}
                 />
             )}
         >
-            <div className="menu__label">Theme</div>
-            {[['dark', 'Dark'], ['light', 'Light']].map(([id, label]) => (
-                <MenuItem
-                    key={id}
-                    active={theme === id}
-                    icon={id === 'dark' ? <Icon.Moon size={14} /> : <Icon.Sun size={14} />}
-                    onClick={() => setBase(id)}
-                >
-                    {label}
-                </MenuItem>
-            ))}
-
-            <div className="menu__sep" />
             <div className="menu__label">Colours</div>
             {UI_THEMES.map((preset) => {
                 const sw = themeSwatch(preset);

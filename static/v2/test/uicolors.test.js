@@ -304,6 +304,16 @@ t('a scheme can carry a receiver-info colour, and matching accounts for it', () 
 
 // --- the presets ------------------------------------------------------------
 
+t('every scheme says which page it is for, so choosing one answers dark or light', () => {
+    // The top bar's menu is a list of schemes and nothing else — see ThemeMenu — which
+    // only works if every entry carries a base. A scheme that left the page alone would
+    // be a scheme that looked different depending on what was chosen before it.
+    for (const preset of UI_THEMES) {
+        assert.ok(preset.theme === 'dark' || preset.theme === 'light',
+            `${preset.id} has no base`);
+    }
+});
+
 t('every preset is legible on its own page', () => {
     // The bar the panel would warn about, applied to the colours it ships with.
     // Two of these needed nudging to clear it, and the one that failed both times
@@ -328,7 +338,7 @@ t('the default preset is the theme\'s own colours, named', () => {
     assert.strictEqual(first.id, 'default');
     assert.strictEqual(first.name, 'UberSDR');
     assert.deepStrictEqual(first.colors, {}, 'sets nothing, so each theme keeps its own');
-    assert.strictEqual(first.theme, undefined, 'and does not drag the theme with it');
+    assert.strictEqual(first.theme, 'dark', 'and says which page it is the colours for');
 });
 
 t('each preset says which theme it was drawn for', () => {

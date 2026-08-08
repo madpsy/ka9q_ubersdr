@@ -324,9 +324,18 @@ export const UI_THEMES = [
     {
         id: 'default',
         name: 'UberSDR',
-        note: 'The receiver\'s own blue, and the theme\'s own text',
-        // Nothing set: this is what "no colours chosen" looks like, and choosing
-        // it is how you get back there.
+        note: 'The receiver\'s own blue on the dark page',
+        // Nothing set: this is what "no colours chosen" looks like, and choosing it is
+        // how you get back there.
+        //
+        // It carries the dark base like every other scheme here, because the top bar's
+        // menu is a list of schemes and nothing else now — so each one has to answer
+        // "dark or light" on its own. There is deliberately no light twin of it: the
+        // stock accent measures 3.97:1 on a white page, under the bar every preset in
+        // this list clears, and Paper is the scheme that exists to be the light one.
+        // The Display panel still puts any colours on either base for anybody building
+        // their own.
+        theme: 'dark',
         colors: {},
     },
     {

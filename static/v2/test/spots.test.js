@@ -12,7 +12,7 @@ const {
     MAX_SPOTS, DEFAULT_AGE_MIN, TEN_M_BEACON_HZ, DEFAULT_FILTERS, MARKER_AGE_MIN,
     normaliseDX, normaliseDigital, normaliseCW,
     modeForSpot, filterSpots, countriesIn, addSpot, spotKey, ageLabel, markerSpots,
-    AUTO_BAND, resolveBandFilter,
+    AUTO_BAND, resolveBandFilter, spotMapUrl,
 } = require('./.build/spots.cjs');
 
 let pass = 0;
@@ -348,6 +348,15 @@ t('a caller with no dial to consult gets everything, not nothing', () => {
     // "no band filter" rather than silently matching none.
     const spots = [mk({ dx_call: 'W1AW', band: '20m' }), mk({ dx_call: 'G4ABC', band: '40m' })];
     assert.strictEqual(filterSpots(spots, F({ band: AUTO_BAND }), NOW).length, 2);
+});
+
+t('each feed with a live map has one, and the cluster does not', () => {
+    // v1's own pages, one per feed. There is no cluster map to open, and a button that
+    // goes nowhere is worse than no button — so the panel asks here rather than assuming.
+    assert.strictEqual(spotMapUrl('digital'), '/digitalspots_map.html');
+    assert.strictEqual(spotMapUrl('cw'), '/cwskimmer_map.html');
+    assert.strictEqual(spotMapUrl('dx'), '');
+    assert.strictEqual(spotMapUrl(undefined), '');
 });
 
 console.log(`\nall ${pass} spots tests passed`);

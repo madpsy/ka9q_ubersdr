@@ -150,6 +150,20 @@ export function modeForSpot(spot) {
     }
 }
 
+// The live map for each feed: v1's own pages, which plot the same spots on a world map
+// with the greyline on it and a track per station. Not reimplemented here — they are a
+// page each, they are already written, and a map is the one thing a dock column is the
+// wrong shape for.
+//
+// DX spots have none. v1 publishes no cluster map, and the cluster's spots are what the
+// marker bar and the Markers panel already put in front of you.
+export const SPOT_MAPS = {
+    digital: '/digitalspots_map.html',
+    cw: '/cwskimmer_map.html',
+};
+
+export const spotMapUrl = (tab) => SPOT_MAPS[tab] || '';
+
 // --- filtering -------------------------------------------------------------
 
 // The band filter's third state, along 'all' and a named band: follow the dial.

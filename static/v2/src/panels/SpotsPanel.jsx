@@ -33,7 +33,7 @@ import {
 import {
     AGE_OPTIONS, AUTO_BAND, BANDS, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
     DISTANCE_OPTIONS, SNR_OPTIONS, WPM_OPTIONS,
-    ageLabel, countriesIn, filterSpots, modeForSpot, resolveBandFilter,
+    ageLabel, countriesIn, filterSpots, modeForSpot, resolveBandFilter, spotMapUrl,
 } from '../lib/spots.js';
 import { bandForFrequency } from '../lib/bands.js';
 
@@ -460,6 +460,30 @@ export default function SpotsPanel({ minimal }) {
                 <button type="button" className="show-more" onClick={() => setShown((n) => n + PAGE)}>
                     Show more <span className="show-more__count">{page.length} of {matched.length}</span>
                 </button>
+            )}
+
+            {/* The feed's own live map — v1's page, which plots these spots on a world map
+                with the greyline and a track per station. At the bottom because it is
+                where you go when the list has told you something worth looking at
+                properly, and a link out belongs after the thing it is about rather than
+                above it.
+
+                Only the two feeds that have one: there is no cluster map to open, and a
+                button that goes nowhere is worse than no button. Not in the minimal view
+                either — it opens a whole second window, which is not what a panel cut down
+                to a list is for. */}
+            {!minimal && spotMapUrl(active) && (
+                <div className="row-end">
+                    <a
+                        className="btn btn--ghost btn--sm"
+                        href={spotMapUrl(active)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Open map
+                        <Icon.External size={13} />
+                    </a>
+                </div>
             )}
         </div>
     );

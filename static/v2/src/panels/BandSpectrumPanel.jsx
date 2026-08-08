@@ -36,7 +36,8 @@ import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
     AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
     decodeFrame, dialWindow, formatAgeSec,
-    formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf, reportBandRate,
+    ACTIVITY_URL, formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf,
+    reportBandRate,
     rowAt, savePrefs,
     savedPrefs, scaleTicks, streamUrl, updateAutoRange, validValues, viewFrac, zoomAt, zoomBins,
     zoomHz,
@@ -200,6 +201,27 @@ export default function BandSpectrumPanel({ minimal }) {
                                 <span className="bsp__unit">dBFS</span>
                             </span>
                         )}
+                    </div>
+
+                    {/* v1's band activity page: every band at once, over hours. Last,
+                        under the controls, because it is where you go when this panel has
+                        raised a question it cannot answer — one band, live, is a good look
+                        at now and no help at all with "which band has been busy this
+                        afternoon".
+
+                        Not in the minimal view, like every other link out of a panel: it
+                        opens a second window, and a panel cut down to its picture is not
+                        the place to be offered one. */}
+                    <div className="row-end">
+                        <a
+                            className="btn btn--ghost btn--sm"
+                            href={ACTIVITY_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Band Activity
+                            <Icon.External size={13} />
+                        </a>
                     </div>
                 </>
             )}

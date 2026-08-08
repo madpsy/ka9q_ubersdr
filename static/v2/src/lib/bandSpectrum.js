@@ -53,6 +53,11 @@ export function bandRate() {
 // A pin the receiver no longer records — a band dropped from its config since
 // the choice was saved — falls back to following the dial rather than showing
 // an empty panel for a band that is not there.
+// v1's band activity page: every band the receiver records, side by side, over hours.
+// This panel is one band now; that page is the whole picture over time, which is a
+// different question and a page-sized answer to it.
+export const ACTIVITY_URL = '/band_activity.html';
+
 export const AUTO_BAND = 'auto';
 
 export function chosenBand(choice, bands, dialBand) {

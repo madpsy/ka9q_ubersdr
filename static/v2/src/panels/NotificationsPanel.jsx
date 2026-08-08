@@ -17,8 +17,9 @@ import React, { useEffect, useState } from '../react.js';
 import { Button, Empty, Field, Segmented, Switch } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import {
-    NOTICE_PLACES, NOTICE_TIMES, clearNotifications, notificationState, onNotifications,
-    pushNotification, setNotificationSettings,
+    NOTICE_PLACES, NOTICE_SOURCES, NOTICE_TIMES, clearNotifications, notificationState,
+    onNotifications, pushNotification, setNotificationSettings, setSourceEnabled,
+    sourceEnabled, sourceLabel,
 } from '../lib/notifications.js';
 
 // How many the panel lists. Five is what fits a dock column without scrolling and about
@@ -56,7 +57,7 @@ export default function NotificationsPanel({ minimal }) {
                                 <span className="notes__age">{sinceLabel(n.at)}</span>
                             </div>
                             {n.body && <div className="notes__body">{n.body}</div>}
-                            {n.source && <div className="notes__source">{n.source}</div>}
+                            {n.source && <div className="notes__source">{sourceLabel(n.source)}</div>}
                         </li>
                     ))}
                 </ul>
@@ -138,10 +139,31 @@ export default function NotificationsPanel({ minimal }) {
                         </>
                     )}
 
+                    <div className="divider" />
+
+                    {/* One switch per thing that raises notifications, so "I do not care
+                        about the rotator" is sayable without silencing everything.
+
+                        These are stronger than the master switch above: a muted source is
+                        not recorded either. The master switch is about being interrupted
+                        right now, so it keeps the history; a source switch says you do not
+                        want to know, and a log of things nobody wants to know is not worth
+                        keeping. Muting the rotator also stops it being polled — see
+                        HardwareNoticeWatch. */}
+                    <div className="section-label"><span>From</span></div>
+                    {NOTICE_SOURCES.map((src) => (
+                        <Field key={src.id} label={src.label} hint={src.note} inline>
+                            <Switch
+                                checked={sourceEnabled(src.id)}
+                                onChange={(v) => setSourceEnabled(src.id, v)}
+                            />
+                        </Field>
+                    ))}
+
                     <div className="note note--tight">
-                        Anything in the receiver can raise one — a stream dropping, a
-                        recording finishing, a decoder finding something. They are kept
-                        here whether toasts are on or not.
+                        Anything in the receiver can raise one, and each kind can be
+                        switched off above. Notifications are kept here whether toasts are
+                        showing or not.
                     </div>
                 </>
             )}

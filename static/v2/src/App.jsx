@@ -13,6 +13,7 @@ import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
 import Toasts from './components/Toasts.jsx';
+import HardwareNoticeWatch from './components/HardwareNoticeWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
@@ -142,6 +143,10 @@ export default function App() {
                                     panel was open would be no notifications at
                                     all. */}
                                 <Toasts />
+                                {/* Watches the rotator and the antenna switch for the
+                                    two changes worth a notification, with or without
+                                    their panels open. */}
+                                <HardwareNoticeWatch />
                                 <ShortcutWatch />
                                 {/* One delegated listener gives every button
                                     in the app its haptic tap; the gestures on

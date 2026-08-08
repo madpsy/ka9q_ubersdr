@@ -60,6 +60,8 @@ esbuild ../src/lib/topClock.js --bundle --format=cjs --platform=node \
     --outfile=.build/topclock.cjs --log-level=warning
 esbuild ../src/lib/notifications.js --bundle --format=cjs --platform=node \
     --outfile=.build/notifications.cjs --log-level=warning
+esbuild notices.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/hardwarenotices.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
     --outfile=.build/hovertip.cjs --log-level=warning
 esbuild ../src/lib/spectrumTrace.js --bundle --format=cjs --platform=node \
@@ -342,5 +344,6 @@ node hfdl.test.js
 node dockfocus.test.js
 node topclock.test.js
 node notifications.test.js
+node hardwarenotices.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

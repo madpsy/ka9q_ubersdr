@@ -235,5 +235,72 @@ t('a subscriber that throws does not stop the others or the notification', () =>
     assert.strictEqual(heard, 1);
 });
 
+// --- per-source switches -------------------------------------------------------------
+
+t('every source is on until somebody says otherwise', () => {
+    // Stored as a list of the muted ones, so a source added later arrives switched on
+    // without a migration — otherwise every new notification would be invisible to
+    // everybody who had ever touched this panel.
+    for (const src of n.NOTICE_SOURCES) {
+        assert.strictEqual(n.sourceEnabled(src.id), true, src.id);
+    }
+    assert.deepStrictEqual(n.notificationSettings().muted, []);
+});
+
+t('a muted source raises nothing at all, history included', () => {
+    // Stronger than the master switch on purpose: that one is about being interrupted
+    // now and keeps the record, while this says "I do not want to know" — and a log of
+    // things nobody wants to know is not worth keeping.
+    n.setSourceEnabled('rotator', false);
+    assert.strictEqual(n.pushNotification({ source: 'rotator', title: 'Rotator stopped' }), 0);
+    const s = n.notificationState();
+    assert.strictEqual(s.toasts.length, 0);
+    assert.strictEqual(s.history.length, 0);
+});
+
+t('muting one leaves the others alone', () => {
+    n.setSourceEnabled('rotator', false);
+    assert.ok(n.pushNotification({ source: 'antenna', title: 'Antenna grounded' }) > 0);
+    assert.strictEqual(n.sourceEnabled('antenna'), true);
+});
+
+t('unmuting brings it back', () => {
+    n.setSourceEnabled('rotator', false);
+    n.setSourceEnabled('rotator', true);
+    assert.ok(n.pushNotification({ source: 'rotator', title: 'Rotator stopped' }) > 0);
+    assert.deepStrictEqual(n.notificationSettings().muted, []);
+});
+
+t('muting the same source twice does not list it twice', () => {
+    n.setSourceEnabled('rotator', false);
+    n.setSourceEnabled('rotator', false);
+    assert.deepStrictEqual(n.notificationSettings().muted, ['rotator']);
+});
+
+t('an unregistered source is never silenced', () => {
+    // The failure of somebody forgetting to register a source should be a notification
+    // that gets through, not one that vanishes.
+    assert.strictEqual(n.sourceEnabled('something-new'), true);
+    assert.ok(n.pushNotification({ source: 'something-new', title: 'Hello' }) > 0);
+});
+
+t('a source with no id at all is not mutable, and does not corrupt the list', () => {
+    n.setSourceEnabled('', false);
+    assert.deepStrictEqual(n.notificationSettings().muted, []);
+});
+
+t('a source is named by its registry entry, not by its id', () => {
+    assert.strictEqual(n.sourceLabel('antenna'), 'Antenna switch');
+    // And an unregistered one is shown as whatever it called itself, rather than blank.
+    assert.strictEqual(n.sourceLabel('something-new'), 'something-new');
+    assert.strictEqual(n.sourceLabel(undefined), '');
+});
+
+t('every registered source has a label and a note, since the panel shows both', () => {
+    for (const src of n.NOTICE_SOURCES) {
+        assert.ok(src.id && src.label && src.note, JSON.stringify(src));
+    }
+});
+
 if (process.exitCode) console.log('\nnotification tests FAILED');
 else console.log(`\nall ${pass} notification tests passed`);

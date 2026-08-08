@@ -8,7 +8,8 @@
 //         severity: 'warn',                 // 'info' | 'good' | 'warn' | 'bad'
 //         title: 'Recorder',                // a few words; the toast's heading
 //         body: 'Disk is nearly full',      // a sentence, optional
-//         source: 'Recorder',               // which panel it came from, for the history
+//         source: 'recorder',               // a NOTICE_SOURCES id: names it, and lets
+//                                           // the operator switch this kind off
 //         key: 'recorder-disk',             // optional: replaces its own earlier toast
 //         timeout: 0,                       // optional: 0 stays until dismissed
 //     });
@@ -45,6 +46,26 @@ export const NOTICE_PLACES = [
 // and refused as the default for the obvious reason.
 export const NOTICE_TIMES = [3, 5, 8, 15, 0];
 
+// Where notifications come from, and what to call it.
+//
+// A registry rather than a free string, because the panel offers a switch per source and
+// a switch needs something stable to be about — and because a source that can be turned
+// off has to be listed somewhere the operator can find it. Adding one is an entry here
+// plus the `source` on the push; nothing else changes.
+//
+// A push with a source that is not listed still works and cannot be muted. That is the
+// right way round: the failure of somebody forgetting to register a source should be a
+// notification that gets through, not one that vanishes.
+export const NOTICE_SOURCES = [
+    { id: 'rotator', label: 'Rotator', note: 'When the beam stops moving' },
+    { id: 'antenna', label: 'Antenna switch', note: 'When the antenna or grounding changes' },
+];
+
+export const sourceLabel = (id) => {
+    const hit = NOTICE_SOURCES.find((s) => s.id === id);
+    return hit ? hit.label : String(id || '');
+};
+
 // The four severities, in the order they escalate. `good` rather than `success` because
 // that is what the rest of the interface calls this colour, and one word for one thing
 // across a codebase is worth more than either word is on its own.
@@ -66,6 +87,11 @@ const DEFAULTS = {
     enabled: true,
     place: 'top-right',
     seconds: 5,
+    // Which sources are silenced, by id. A list of the *off* ones rather than the on
+    // ones, so a source added later arrives switched on without a migration — the
+    // alternative is every new notification being invisible to everybody who has ever
+    // touched this panel.
+    muted: [],
 };
 
 function load() {
@@ -76,6 +102,7 @@ function load() {
             place: NOTICE_PLACES.some((p) => p.id === saved.place) ? saved.place : DEFAULTS.place,
             seconds: NOTICE_TIMES.includes(Number(saved.seconds))
                 ? Number(saved.seconds) : DEFAULTS.seconds,
+            muted: Array.isArray(saved.muted) ? saved.muted.map(String) : [],
         };
     } catch (e) {
         return { ...DEFAULTS };
@@ -111,6 +138,7 @@ export function setNotificationSettings(patch) {
         enabled: patch.enabled === undefined ? settings.enabled : !!patch.enabled,
         place: NOTICE_PLACES.some((p) => p.id === place) ? place : settings.place,
         seconds: NOTICE_TIMES.includes(seconds) ? seconds : settings.seconds,
+        muted: patch.muted === undefined ? settings.muted : [...new Set(patch.muted.map(String))],
     };
     try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) { /* private mode */ }
     // Turning them off clears what is on screen. Leaving three toasts up after the
@@ -118,6 +146,17 @@ export function setNotificationSettings(patch) {
     if (!settings.enabled) toasts = [];
     notifyAll();
     return settings;
+}
+
+/** Whether this source's notifications are wanted. Unknown sources always are. */
+export const sourceEnabled = (id) => !settings.muted.includes(String(id || ''));
+
+/** Turn one source on or off. */
+export function setSourceEnabled(id, on) {
+    const key = String(id || '');
+    if (!key) return settings;
+    const muted = on ? settings.muted.filter((m) => m !== key) : [...settings.muted, key];
+    return setNotificationSettings({ muted });
 }
 
 /** A severity, made safe. Anything unrecognised is information. */
@@ -134,12 +173,19 @@ export const severityOf = (s) => (NOTICE_SEVERITIES.includes(s) ? s : 'info');
  * `key` coalesces: a second notification with the same key replaces the first rather
  * than stacking on it, and carries a count. That is what stops a reconnecting stream
  * from filling the screen with the same sentence.
+ *
+ * A muted source is dropped entirely — no toast and no history. That is the difference
+ * between the master switch and a source switch: the master silences the interruption and
+ * keeps the record, because it is about this moment; a source switch says "I do not care
+ * about this", and a log of things nobody cares about is not worth keeping.
  */
 export function pushNotification(spec = {}, now = Date.now()) {
     const title = String(spec.title || '').trim();
     const body = String(spec.body || '').trim();
     // Nothing to say, nothing to show: a toast with no words is a coloured box.
     if (!title && !body) return 0;
+
+    if (spec.source && !sourceEnabled(spec.source)) return 0;
 
     const id = nextId++;
     const key = spec.key ? String(spec.key) : '';

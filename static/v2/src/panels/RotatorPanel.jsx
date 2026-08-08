@@ -16,6 +16,7 @@ import { Empty, Icon } from '../components/ui.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { loadScripts } from '../lib/loadScript.js';
 import { PasswordRow, usePassword } from './hardwareAuth.jsx';
+import { subscribeRotator } from '../lib/hardwareNotices.js';
 
 const POLL_MS = 1000;
 
@@ -89,16 +90,12 @@ export default function RotatorPanel({ minimal }) {
     const raw = geom ? Math.min(geom.w - 26, geom.h - MAP_CHROME_H) : 0;
     const mapSize = !mapFailed && raw >= MAP_MIN ? Math.round(raw / MAP_STEP) * MAP_STEP : 0;
 
-    useEffect(() => {
-        let cancelled = false;
-        const load = () => fetch('/api/rotctl/status')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => { if (!cancelled && d) setStatus(d); })
-            .catch(() => { if (!cancelled) setStatus((s) => ({ ...(s || {}), connected: false })); });
-        load();
-        const id = setInterval(load, POLL_MS);
-        return () => { cancelled = true; clearInterval(id); };
-    }, []);
+    // The status comes from lib/hardwareNotices.js rather than from a fetch of its own.
+    // That store polls at the same rate this panel used to, and it is also what notices
+    // the rotator finishing a move and raises the notification for it — which has to keep
+    // happening with this panel closed, since a rotation takes half a minute and nobody
+    // watches it. Subscribing here means one poll whether the panel is open or not.
+    useEffect(() => subscribeRotator(setStatus), []);
 
     useEffect(() => {
         let cancelled = false;

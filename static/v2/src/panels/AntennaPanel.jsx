@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import { PasswordRow, usePassword } from './hardwareAuth.jsx';
+import { feedAntennaStatus, subscribeAntenna } from '../lib/hardwareNotices.js';
 
 const POLL_MS = 5000;
 const PER_PAGE = 10;
@@ -55,16 +56,18 @@ export default function AntennaPanel({ minimal }) {
     const pwRef = useRef(password);
     pwRef.current = password;
 
+    // The status is the shared store's — see lib/hardwareNotices.js. It polls at the rate
+    // this panel used to and it is what notices the antenna or the grounding changing, so
+    // that notification keeps working with the panel closed, which is most of the time.
+    // The history stays here: nothing else wants it and it is decoration.
     const refresh = useCallback(() => {
-        fetch('/api/ant-switch/status')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => { if (d) setStatus(d); })
-            .catch(() => { /* keep the last known state */ });
         fetch('/api/ant-switch/history')
             .then((r) => (r.ok ? r.json() : null))
             .then((d) => { if (d && Array.isArray(d.history)) setHistory(d.history); })
             .catch(() => { /* history is decoration */ });
     }, []);
+
+    useEffect(() => subscribeAntenna(setStatus), []);
 
     useEffect(() => {
         refresh();
@@ -92,9 +95,12 @@ export default function AntennaPanel({ minimal }) {
             setError('');
             const result = await resp.json().catch(() => ({}));
             if (result.selected !== undefined) {
-                // The reply carries the verified hardware state, so the buttons
-                // update now rather than at the next poll.
-                setStatus((s) => ({ ...s, selected: result.selected, grounded: result.grounded }));
+                // The reply carries the verified hardware state, so the buttons update now
+                // rather than at the next poll. Fed to the store rather than set here, so
+                // it reaches the notification too: an antenna changed from this browser is
+                // announced exactly as one changed from another browser is, and the store
+                // hands the new status straight back to this panel.
+                feedAntennaStatus({ selected: result.selected, grounded: result.grounded });
             }
             refresh();
         } catch (e) {

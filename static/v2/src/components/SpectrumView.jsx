@@ -1616,19 +1616,24 @@ export default function SpectrumView() {
                             tags: this one is about what the numbers on screen mean,
                             not about what is being done to the sound. */}
                         {!mobile && <FreqOffsetTag />}
-                        {/* The cursor readout goes with them. It is the least useful of
-                            the four on a handset by some distance: there is no pointer to
-                            follow, so it only says where a finger last touched — and the
-                            hover tip that appears under the finger already says that,
-                            with the level beside it. */}
-                        {!mobile && hoverInfo && room.cursor && (
-                            <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
-                        )}
                         <SquelchTag />
                         <NoiseReductionTag />
                         <FilterTags />
                         <ControlTags />
                         <ClipTag />
+                        {/* Last in the row, and that is the whole point of where it is:
+                            it comes and goes with every pointer movement, so anywhere
+                            else it would shove the squelch, the filter and the DSP tags
+                            sideways each time the pointer crossed the spectrum. At the
+                            end it appends and nothing else moves.
+
+                            Not on a handset. It is the least useful of these there by
+                            some distance: with no pointer it only says where a finger
+                            last touched, and the hover tip under the finger already says
+                            that with the level beside it. */}
+                        {!mobile && hoverInfo && room.cursor && (
+                            <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
+                        )}
                     </div>
                     <div className="spectrum__tools">
                         {/* Zoom first, and first because it is the pair that

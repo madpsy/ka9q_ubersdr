@@ -178,6 +178,32 @@ export default function LinksMenu({ serverInfo, compact }) {
 
     const close = useCallback(() => setOpen(false), []);
 
+    // On a phone the logo is a logo and nothing more.
+    //
+    // Every page in this menu is a v1 page built for a desktop — analytics tables, maps,
+    // the admin pages — and opening one on a handset replaces the receiver with something
+    // that cannot be read, from a control in the corner that looks like branding. The
+    // pages are still reachable: they are ordinary URLs, and a phone has an address bar.
+    //
+    // Not merely hidden, because the mark is worth keeping: it says which receiver this is
+    // beside its callsign. It stops being a button.
+    if (compact) {
+        return (
+            <div className="links links--static">
+                <span className="topbar__logo">
+                    <img
+                        className="topbar__logo-img"
+                        src="/images/apple-touch-icon.png"
+                        alt=""
+                        width={26}
+                        height={26}
+                        draggable="false"
+                    />
+                </span>
+            </div>
+        );
+    }
+
     return (
         <div
             className="links"

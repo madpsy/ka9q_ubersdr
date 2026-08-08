@@ -129,56 +129,45 @@ export function unproject(x, y) {
 }
 
 /**
- * A constant frequency across the surface, as a path along the terrain.
+ * How far a mark runs past the back of the baseline plane, as a multiple of the
+ * front-to-back span.
  *
- * On the *baseline plane* a fixed frequency is a straight line: x and y are both
- * linear in depth, so two endpoints would do. That was the first version and it
- * stopped short — the plane is the ground the ridges stand on, and at the back
- * they stand up to FRONT_RIDGE x BACK_WIDTH of the pane above it. The terrain
- * kept going where the mark ran out.
- *
- * So the mark is drawn where the surface actually is: one point per ridge, each
- * lifted off the plane by that ridge's own height at this frequency. It ends
- * exactly where the terrain ends, it rides over a signal instead of sinking
- * through it, and it uses the same height mapping the rasteriser does — so a
- * dial line and the ridge it marks cannot disagree by construction.
- *
- * @param o.floor dBm at the baseline, before HEIGHT_FLOOR_MARGIN_DB
- * @param o.range the display's dB range, bounded by heightRange for height
- * @param o.curve height gamma, HEIGHT_CURVE
- * @param o.progress the sub-row slide, so the mark moves with the terrain
- * @returns {Array<{x: number, y: number}>} front to back, in unit coordinates
+ * Derived, not picked. Ridges stand *above* the plane the marks are drawn on —
+ * by up to a full ridge at back width — so a mark that stopped at the plane
+ * stopped short of the terrain every time there was a signal at the back. This
+ * is exactly the extra travel that takes it to the top of the box the surface
+ * can occupy: descending by FRONT_RIDGE x BACK_WIDTH costs that much depth at
+ * DEPTH_SPAN per unit.
  */
-export function surfaceLine(ring, freqUnit, o = {}) {
-    const { floor = 0, range = 1, curve = HEIGHT_CURVE, progress = 0 } = o;
-    const n = ridgeCount(ring);
-    const out = [];
-    if (n <= 0) {
-        // No history yet: the ground plane is all there is to mark.
-        const f = project(freqUnit, 0);
-        const b = project(freqUnit, 1);
-        return [{ x: f.x, y: f.y }, { x: b.x, y: b.y }];
-    }
+export const MARK_OVERRUN = (FRONT_RIDGE * BACK_WIDTH) / DEPTH_SPAN;
 
-    const cols = ring.cols;
-    const hRange = heightRange(range) || range;
-    const hFloor = heightFloor(floor);
-    const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
-    // The column this frequency falls in. Clamped rather than skipped: a mark at
-    // the very edge of the view still has a ridge under it.
-    let c = Math.round(freqUnit * (cols - 1));
-    if (c < 0) c = 0;
-    else if (c >= cols) c = cols - 1;
-
-    for (let age = 0; age < n; age++) {
-        const depth = (age + p) / ring.rows;
-        const pt = project(freqUnit, depth);
-        let sv = (storedRow(ring, age)[c] - hFloor) / hRange;
-        sv = sv < 0 ? 0 : sv > 1 ? 1 : sv;
-        if (curve !== 1) sv = Math.pow(sv, curve > 0.05 ? curve : 0.05);
-        out.push({ x: pt.x, y: pt.y - sv * FRONT_RIDGE * depthScale(depth) });
-    }
-    return out;
+/**
+ * A constant frequency drawn across the surface, in unit coordinates.
+ *
+ * Straight, and that is not an approximation: x and y are both linear in depth,
+ * so a fixed frequency is a straight line converging on the vanishing point.
+ * Two endpoints is the whole geometry, and it comes from the same projection the
+ * terrain is built from, so a mark and the ridges under it cannot splay apart.
+ *
+ * The back end is the plane's, carried on by MARK_OVERRUN — the same line,
+ * simply longer. Following the terrain instead was tried and is much worse to
+ * read: a frequency reference that climbs over every signal it crosses stops
+ * looking like a reference.
+ *
+ * @returns {{x0: number, y0: number, x1: number, y1: number}} front then back
+ */
+export function edgeLine(freqUnit) {
+    const t = 1 + MARK_OVERRUN;
+    const front = project(freqUnit, 0);
+    // project() clamps depth to 1, which is the point being passed here, so the
+    // far end is worked out from the same two formulas rather than through it.
+    const width = 1 - t * (1 - BACK_WIDTH);
+    return {
+        x0: front.x,
+        y0: front.y,
+        x1: 0.5 + (freqUnit - 0.5) * width,
+        y1: 1 - t * DEPTH_SPAN,
+    };
 }
 
 /**

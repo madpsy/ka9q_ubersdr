@@ -13,8 +13,8 @@
 const assert = require('assert');
 const {
     BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_RIDGES, MIN_RIDGES,
-    createRing, depthScale, project, pushRow, ridgeCount, ridgeHeight, ridgesFor,
-    ringCols, ringSeconds, storedRow, surfaceLine, unproject,
+    createRing, depthScale, edgeLine, project, pushRow, ridgeCount, ridgeHeight, ridgesFor,
+    ringCols, ringSeconds, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
 let pass = 0;
@@ -222,61 +222,41 @@ t('full scale is still full height', () => {
 
 // --- marks across the surface -----------------------------------------------
 
-t('a mark reaches exactly as far back as the terrain does', () => {
-    // The bug: the mark was a straight line on the baseline plane, and ridges
-    // stand *above* that plane — up to FRONT_RIDGE x BACK_WIDTH of the pane at
-    // the back. So the terrain kept going where the mark ran out.
-    const cols = 8;
-    const r = createRing(16, cols);
-    // A signal at full scale everywhere, so every ridge stands at full height.
-    for (let i = 0; i < 16; i++) pushRow(r, row(-49, cols));   // floor -100, +51 dB
-
-    const path = surfaceLine(r, 0.5, { floor: -100, range: 45 });
-    assert.strictEqual(path.length, 16, 'one point per drawn ridge');
-
-    const back = path[path.length - 1];
-    const depth = 15 / 16;
-    // Where the deepest ridge's crest actually is: the plane, less that ridge's
-    // own full height. The old straight line stopped at the plane.
-    const plane = project(0.5, depth).y;
-    assert.ok(near(back.y, plane - FRONT_RIDGE * depthScale(depth), 1e-6),
-        `mark ends at ${back.y}, terrain at ${plane - FRONT_RIDGE * depthScale(depth)}`);
-    assert.ok(back.y < plane, 'and above the plane, not on it');
+t('a mark is straight and converges on the vanishing point', () => {
+    const e = edgeLine(0.8);
+    assert.ok(near(e.x0, 0.8), 'full width at the front');
+    assert.ok(near(e.y0, 1), 'and on the floor');
+    // Narrowed toward the centre, and above the plane's back edge.
+    assert.ok(e.x1 > 0.5 && e.x1 < 0.8);
+    assert.ok(e.y1 < 1 - DEPTH_SPAN);
 });
 
-t('a mark over quiet ground lies on the plane', () => {
-    const cols = 8;
-    const r = createRing(16, cols);
-    for (let i = 0; i < 16; i++) pushRow(r, row(-100, cols));
-    const path = surfaceLine(r, 0.5, { floor: -100, range: 45 });
-    for (let i = 0; i < path.length; i++) {
-        const depth = i / 16;
-        assert.ok(near(path[i].y, project(0.5, depth).y, 1e-9),
-            `point ${i} is off the ground`);
-    }
+t('a mark runs past the plane far enough to clear the tallest terrain', () => {
+    // The bug: it stopped on the baseline plane, and ridges stand above that
+    // plane — up to a full ridge at back width — so with a signal at the back
+    // the terrain kept going where the mark ran out.
+    const e = edgeLine(0.5);
+    const tallest = (1 - DEPTH_SPAN) - FRONT_RIDGE * BACK_WIDTH;
+    assert.ok(near(e.y1, tallest, 1e-9),
+        `mark ends at ${e.y1}, top of the terrain box at ${tallest}`);
 });
 
-t('a mark converges on the vanishing point as the terrain does', () => {
-    const cols = 8;
-    const r = createRing(16, cols);
-    for (let i = 0; i < 16; i++) pushRow(r, row(-100, cols));
-    const path = surfaceLine(r, 0.8, { floor: -100, range: 45 });
-    assert.ok(near(path[0].x, 0.8), 'full width at the front');
-    // Narrowed by the depth of the deepest ridge, not by a whole depth of 1 —
-    // the mark spans what is drawn, not what could be.
-    assert.ok(near(path[path.length - 1].x, 0.5 + 0.3 * depthScale(15 / 16)));
-    // And the centre is the one frequency that stays put.
-    const mid = surfaceLine(r, 0.5, { floor: -100, range: 45 });
-    assert.ok(near(mid[0].x, mid[mid.length - 1].x), 'the vanishing point is dead centre');
+t('the centre frequency is the one mark that stays vertical', () => {
+    const e = edgeLine(0.5);
+    assert.ok(near(e.x0, e.x1), 'the vanishing point is dead centre');
 });
 
-t('an empty surface still gets a mark on the ground', () => {
-    // Nothing stored yet: there is no terrain to follow, and a mark that vanished
-    // until the first row arrived would look like a fault.
-    const path = surfaceLine(createRing(16, 8), 0.5, { floor: -100, range: 45 });
-    assert.strictEqual(path.length, 2);
-    assert.ok(near(path[0].y, 1));
-    assert.ok(near(path[1].y, 1 - DEPTH_SPAN));
+t('the extension is the same line, not a kink', () => {
+    // Whatever the overrun, the far end has to lie on the line through the
+    // plane's own two ends — the mark is longer, not bent.
+    const f = 0.23;
+    const plane0 = project(f, 0);
+    const plane1 = project(f, 1);
+    const e = edgeLine(f);
+    const t = (e.y1 - plane0.y) / (plane1.y - plane0.y);
+    assert.ok(t > 1, 'and it does run past the plane');
+    assert.ok(near(e.x1, plane0.x + (plane1.x - plane0.x) * t, 1e-9),
+        'the far end is off the straight line');
 });
 
 console.log(`\n${pass} passed`);

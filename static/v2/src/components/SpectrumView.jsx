@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ridgesFor,
-    ringCols, surfaceLine, unproject as dssUnproject,
+    createRing as createDssRing, drawSurface, edgeLine, pushRow as pushDssRow,
+    ridgesFor, ringCols, unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -2878,11 +2878,7 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // anything drawn before it would be painted out.
     if (cfg && tuning) {
         const { dial, edge } = markColors(d);
-        drawDssMarks(ctx, dss.width, dss.height, cfg, tuning, g.dpr, dial, edge, g.dss, {
-            floor: g.dssFloor,
-            range: g.dssRange,
-            progress,
-        });
+        drawDssMarks(ctx, dss.width, dss.height, cfg, tuning, g.dpr, dial, edge);
     }
 }
 
@@ -3100,8 +3096,9 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
  *
  * The same three marks the heat map carries, and the same rules for when each is
  * drawn — but converging, because on a receding surface a fixed frequency is not
- * a vertical line, and riding over the terrain rather than through it. See
- * surfaceLine, which is where the geometry lives and why it is not straight.
+ * a vertical line. It is still a straight one, run on past the back of the
+ * baseline plane so it does not stop short of terrain standing above it. See
+ * edgeLine and MARK_OVERRUN.
  *
  * Painted over the terrain rather than into it. Properly they would pass behind
  * a ridge that stands in front of them, which is what a depth buffer is for and
@@ -3110,19 +3107,15 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
  * wanted. The halo under each line is what keeps them readable over bright
  * terrain, and it is the same halo the flat marks use.
  */
-function drawDssMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor, ring, geom) {
+function drawDssMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const unit = (hz) => (hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span;
 
     const line = (u, colour, dash, width) => {
-        const path = surfaceLine(ring, u, geom);
+        const e = edgeLine(u);
         c.beginPath();
-        for (let i = 0; i < path.length; i++) {
-            const x = path[i].x * pxW;
-            const y = path[i].y * H;
-            if (i === 0) c.moveTo(x, y);
-            else c.lineTo(x, y);
-        }
+        c.moveTo(e.x0 * pxW, e.y0 * H);
+        c.lineTo(e.x1 * pxW, e.y1 * H);
         c.setLineDash([dash[0] * dpr, dash[1] * dpr]);
         c.lineCap = 'butt';
         c.lineWidth = (width + 2 * MARK_HALO_PX) * dpr;

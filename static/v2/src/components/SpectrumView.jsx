@@ -3611,7 +3611,7 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         if (x1 - x0 >= 1) {
             c.fillStyle = colEdge;
             c.fillRect(Math.round(x0), Math.round(PIP_H * dpr),
-                Math.round(x1 - x0), Math.max(1, Math.round(2 * dpr)));
+                Math.round(x1 - x0), Math.max(1, Math.round(1.5 * dpr)));
         }
     }
 }

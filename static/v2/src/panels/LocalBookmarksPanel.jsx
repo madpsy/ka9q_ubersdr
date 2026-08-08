@@ -1,6 +1,12 @@
 // Bookmarks kept in this browser, as opposed to the ones the receiver
 // publishes. Storage is v1's exactly — see lib/localBookmarks.js — so the two
 // frontends read and write one shared list; only the presentation is v2's.
+//
+// `minimal` is the search box and its matches, and nothing else: no group picker, no
+// Current/Import/Export, no edit or delete beside a row. Everything dropped is *writing* —
+// done once, at a desk, in the full panel — and what is left is the only thing anybody does
+// to a saved bookmark afterwards, which is tune to it. Nothing typed, nothing listed, so
+// the panel is two rows tall until it is being used.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -52,7 +58,7 @@ function Form({ initial, onSave, onCancel, error }) {
     );
 }
 
-export default function LocalBookmarksPanel() {
+export default function LocalBookmarksPanel({ minimal }) {
     const { actions, tuning } = useRadio();
     const [items, setItems] = useState(null);
     const [query, setQuery] = useState('');
@@ -89,9 +95,13 @@ export default function LocalBookmarksPanel() {
             .sort((a, b) => a.frequency - b.frequency);
     }, [items, query, group]);
 
+    // Cut down, the list is only the answer to a search: nothing typed, nothing listed.
+    const searching = query.trim().length > 0;
+    const listed = minimal && !searching ? null : filtered;
+
     // One page at a time — the dock scrolls, the panel does not. Deleting a bookmark can
     // empty the last page, which the pager clamps for us rather than leaving a blank list.
-    const { start, end, pager } = usePager(filtered.length, { deps: [query, group] });
+    const { start, end, pager } = usePager(listed ? listed.length : 0, { deps: [query, group] });
 
     const tune = (b) => {
         if (b.mode) actions.setMode(b.mode);
@@ -167,6 +177,7 @@ export default function LocalBookmarksPanel() {
 
     return (
         <div className="stack">
+            {!minimal && (
             <div className="lb-tools">
                 <Button
                     size="sm"
@@ -205,6 +216,7 @@ export default function LocalBookmarksPanel() {
                     onChange={onFile}
                 />
             </div>
+            )}
 
             {status && <div className="note note--tight">{status}</div>}
             {error && !editing && <div className="note note--warn">{error}</div>}
@@ -226,23 +238,37 @@ export default function LocalBookmarksPanel() {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                     />
-                    <GroupPicker
-                        groups={groups}
-                        value={group}
-                        onChange={setGroup}
-                        hidden={hidden}
-                        total={items.length}
-                    />
+                    {!minimal && (
+                        <GroupPicker
+                            groups={groups}
+                            value={group}
+                            onChange={setGroup}
+                            hidden={hidden}
+                            total={items.length}
+                        />
+                    )}
                 </>
             )}
 
-            {items.length === 0 && !editing && (
-                <Empty>Nothing saved yet — "Current" stores where you are now.</Empty>
+            {/* Absent rather than empty: a blank list still costs the stack a gap. */}
+            {items.length > 0 && !listed && (
+                <div className="note note--tight">{items.length} saved — type to find one.</div>
             )}
 
+            {items.length === 0 && !editing && (
+                // The full panel can name the button that fixes this; cut down, that button
+                // is not there to name.
+                <Empty>
+                    {minimal
+                        ? 'Nothing saved yet.'
+                        : 'Nothing saved yet — "Current" stores where you are now.'}
+                </Empty>
+            )}
+
+            {listed && (
             <div className="list">
-                {items.length > 0 && filtered.length === 0 && <Empty>No match</Empty>}
-                {filtered.slice(start, end).map((b) => (
+                {items.length > 0 && listed.length === 0 && <Empty>No match</Empty>}
+                {listed.slice(start, end).map((b) => (
                     <div className="lb-row" key={b.name}>
                         <button type="button" className="list__row lb-row__main" onClick={() => tune(b)}>
                             <span className="list__title">
@@ -255,6 +281,10 @@ export default function LocalBookmarksPanel() {
                                 {b.comment && <span className="lb-row__note">{b.comment}</span>}
                             </span>
                         </button>
+                        {/* Editing and deleting are the writing half of the panel, and the
+                            full view is where writing happens — cut down, a row is a thing
+                            to tune to, and the two buttons are most of its width. */}
+                        {!minimal && (
                         <div className="lb-row__actions">
                             <Button
                                 size="sm"
@@ -286,11 +316,13 @@ export default function LocalBookmarksPanel() {
                                 {confirming === b.name ? 'Delete?' : undefined}
                             </Button>
                         </div>
+                        )}
                     </div>
                 ))}
             </div>
+            )}
 
-            <Pager pager={pager} unit="bookmarks" />
+            {listed && <Pager pager={pager} unit="bookmarks" />}
         </div>
     );
 }

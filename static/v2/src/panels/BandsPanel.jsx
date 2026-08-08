@@ -2,6 +2,12 @@
 // 0–30 MHz — hundreds of entries — and panels do not scroll on their own, so
 // the list renders a page at a time. With no search term it opens on the page
 // holding the band the receiver is currently in, which is the part worth seeing.
+//
+// `minimal` is the search box and its matches alone. Full, the panel is for reading down a
+// band plan; cut down it is for looking one allocation up — "where is 60m", "what is at
+// 4 MHz" — so there is no list until something is typed, and the panel is two rows tall
+// until then. The current band is not shown there either: the dial and the marker bar are
+// both already saying where you are, and this is the view you shrank to get that space back.
 
 import React, { useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -14,7 +20,7 @@ function cleanLabel(raw) {
     return String(raw || '').split('|').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' · ');
 }
 
-export default function BandsPanel() {
+export default function BandsPanel({ minimal }) {
     const { tuning, actions, catalog } = useRadio();
     const bands = catalog.bands;
     const [query, setQuery] = useState('');
@@ -38,13 +44,17 @@ export default function BandsPanel() {
     // It is also a dep, so tuning into a *different* allocation brings the list with you.
     // Paging by hand stays put, because the dial has not moved: nothing recomputes until
     // the band under it changes.
-    const home = query.trim() ? -1 : activeIndex;
+    const searching = query.trim().length > 0;
+    // Cut down, only a search produces a list — and then it starts at the first match, so
+    // there is no band to open on.
+    const listed = minimal && !searching ? null : filtered;
+    const home = searching || minimal ? -1 : activeIndex;
     const homePage = home < 0 ? -1 : Math.floor(home / PAGE_ROWS);
-    const { start, end, pager } = usePager(filtered ? filtered.length : 0, {
+    const { start, end, pager } = usePager(listed ? listed.length : 0, {
         at: home,
         deps: [query, homePage],
     });
-    const visible = filtered ? filtered.slice(start, end) : [];
+    const visible = listed ? listed.slice(start, end) : [];
 
     if (!filtered) return <Empty>Loading bands…</Empty>;
 
@@ -56,29 +66,35 @@ export default function BandsPanel() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
             />
-            <div className="list">
-                {filtered.length === 0 && <Empty>No match</Empty>}
-                {visible.map((b, i) => (
-                    <button
-                        key={`${b.start}-${start + i}`}
-                        type="button"
-                        className={`list__row${start + i === activeIndex ? ' is-active' : ''}`}
-                        onClick={() => {
-                            const centre = Math.round((b.start + b.end) / 2);
-                            if (b.mode) actions.setMode(b.mode);
-                            actions.setFrequency(centre);
-                            actions.setSpectrumCenter(centre);
-                        }}
-                    >
-                        <span className="list__title">{b.button_name || cleanLabel(b.label)}</span>
-                        <span className="list__meta">
-                            {formatFreqShort(b.start)}–{formatFreqShort(b.end)}
-                            {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
-                        </span>
-                    </button>
-                ))}
-            </div>
-            <Pager pager={pager} unit="bands" />
+            {/* Absent rather than empty: a blank list still costs the stack a gap. */}
+            {!listed && (
+                <div className="note note--tight">{filtered.length} allocations — type to find one.</div>
+            )}
+            {listed && (
+                <div className="list">
+                    {listed.length === 0 && <Empty>No match</Empty>}
+                    {visible.map((b, i) => (
+                        <button
+                            key={`${b.start}-${start + i}`}
+                            type="button"
+                            className={`list__row${start + i === activeIndex ? ' is-active' : ''}`}
+                            onClick={() => {
+                                const centre = Math.round((b.start + b.end) / 2);
+                                if (b.mode) actions.setMode(b.mode);
+                                actions.setFrequency(centre);
+                                actions.setSpectrumCenter(centre);
+                            }}
+                        >
+                            <span className="list__title">{b.button_name || cleanLabel(b.label)}</span>
+                            <span className="list__meta">
+                                {formatFreqShort(b.start)}–{formatFreqShort(b.end)}
+                                {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
+            {listed && <Pager pager={pager} unit="bands" />}
         </div>
     );
 }

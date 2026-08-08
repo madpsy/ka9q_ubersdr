@@ -1,4 +1,10 @@
 // Server-published bookmarks (/api/bookmarks), grouped and searchable.
+//
+// `minimal` is the search box and what it finds, and nothing else. A published list runs to
+// hundreds of entries on a busy receiver, so the full view's job is browsing — the group
+// picker, the page you left off on — and none of that is what a cut-down panel is for. Cut
+// down, it answers one question: where is the bookmark called X? Until something is typed
+// there is no list at all, which is the point: the panel is then two rows tall.
 
 import React, { useEffect, useMemo, useState } from '../react.js';
 import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
@@ -8,7 +14,7 @@ import { Empty } from '../components/ui.jsx';
 import { Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
 
-export default function BookmarksPanel() {
+export default function BookmarksPanel({ minimal }) {
     const { actions, catalog } = useRadio();
     // The unfiltered list: this panel is where a hidden group is turned back
     // on, so it has to keep listing one. `catalog.bookmarks` is what the rest
@@ -32,9 +38,13 @@ export default function BookmarksPanel() {
         });
     }, [items, query, group]);
 
+    // Cut down, the list is only the answer to a search: nothing typed, nothing listed.
+    const searching = query.trim().length > 0;
+    const listed = minimal && !searching ? null : filtered;
+
     // Panels do not scroll on their own, so a few hundred bookmarks would make the dock
     // unusably long: one page at a time, and the search or group picker starts over.
-    const { start, end, pager } = usePager(filtered ? filtered.length : 0, { deps: [query, group] });
+    const { start, end, pager } = usePager(listed ? listed.length : 0, { deps: [query, group] });
 
     if (!filtered) return <Empty>Loading bookmarks…</Empty>;
     if (!items.length) return <Empty>No bookmarks published by this receiver.</Empty>;
@@ -47,36 +57,45 @@ export default function BookmarksPanel() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
             />
-            <GroupPicker
-                groups={groups}
-                value={group}
-                onChange={setGroup}
-                hidden={hidden}
-                total={items.length}
-            />
-            <div className="list">
-                {filtered.length === 0 && <Empty>No match</Empty>}
-                {filtered.slice(start, end).map((b, i) => (
-                    <button
-                        key={`${b.frequency}-${start + i}`}
-                        type="button"
-                        className="list__row"
-                        title={b.comment || ''}
-                        onClick={() => {
-                            if (b.mode) actions.setMode(b.mode);
-                            actions.setFrequency(b.frequency);
-                            actions.setSpectrumCenter(b.frequency);
-                        }}
-                    >
-                        <span className="list__title">{b.name}</span>
-                        <span className="list__meta">
-                            {formatFreqShort(b.frequency)}
-                            {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
-                        </span>
-                    </button>
-                ))}
-            </div>
-            <Pager pager={pager} unit="bookmarks" />
+            {!minimal && (
+                <GroupPicker
+                    groups={groups}
+                    value={group}
+                    onChange={setGroup}
+                    hidden={hidden}
+                    total={items.length}
+                />
+            )}
+            {/* An empty div here would still cost the stack a gap, so the whole list —
+                and its pager — is absent rather than blank until there is a search. */}
+            {!listed && (
+                <div className="note note--tight">{items.length} bookmarks — type to find one.</div>
+            )}
+            {listed && (
+                <div className="list">
+                    {listed.length === 0 && <Empty>No match</Empty>}
+                    {listed.slice(start, end).map((b, i) => (
+                        <button
+                            key={`${b.frequency}-${start + i}`}
+                            type="button"
+                            className="list__row"
+                            title={b.comment || ''}
+                            onClick={() => {
+                                if (b.mode) actions.setMode(b.mode);
+                                actions.setFrequency(b.frequency);
+                                actions.setSpectrumCenter(b.frequency);
+                            }}
+                        >
+                            <span className="list__title">{b.name}</span>
+                            <span className="list__meta">
+                                {formatFreqShort(b.frequency)}
+                                {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
+            {listed && <Pager pager={pager} unit="bookmarks" />}
         </div>
     );
 }

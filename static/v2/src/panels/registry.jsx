@@ -447,8 +447,30 @@ export const PANELS = [
         Component: SDRControlPanel,
     },
 
-    { id: 'bookmarks', title: 'Bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: BookmarksPanel },
-    { id: 'localbookmarks', title: 'Local bookmarks', icon: <Icon.Bookmark />, dock: 'left', defaultOpen: false, Component: LocalBookmarksPanel },
+    // Minimal, for both bookmark lists: the search box and what it finds. A list of a few
+    // hundred is for browsing, which is what the full view is; cut down they answer "where
+    // is the one called X", and until something is typed they are two rows tall. The local
+    // one also drops everything that *writes* — Current, Import, Export, the edit and
+    // delete beside a row — because saving is done once and tuning to what was saved is
+    // done every day.
+    {
+        id: 'bookmarks',
+        title: 'Bookmarks',
+        icon: <Icon.Bookmark />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: BookmarksPanel,
+    },
+    {
+        id: 'localbookmarks',
+        title: 'Local bookmarks',
+        icon: <Icon.Bookmark />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: LocalBookmarksPanel,
+    },
     // A leaderboard of where the dial actually spends its time, under the two
     // bookmark lists because it is the third of the same kind: one you curate,
     // one you save locally, and one that curates itself.
@@ -462,7 +484,18 @@ export const PANELS = [
         minimal: true,
         Component: TopFreqPanel,
     },
-    { id: 'bands', title: 'Band plan', icon: <Icon.List />, dock: 'left', defaultOpen: false, Component: BandsPanel },
+    // Minimal: the search box and its matches, without the page that opens on the band the
+    // receiver is in — the dial and the marker bar are both already saying that, and this
+    // is the view you shrank to get the space back.
+    {
+        id: 'bands',
+        title: 'Band plan',
+        icon: <Icon.List />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: BandsPanel,
+    },
 
     // Minimal: the two bar meters and the squelch. The numeric readouts and the
     // SNR trace are the same information at a resolution you only want when you

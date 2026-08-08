@@ -7856,6 +7856,30 @@ a.btn { text-decoration: none; }
 .hf__table tbody tr.is-picked td { background: var(--accent-soft); color: var(--text); }
 .hf__table tbody tr.is-stale td { opacity: 0.6; }
 
+/* The callsign box under the top bar's lookup button. Narrow: a callsign is six
+   characters, and a box sized for a sentence invites one. */
+.callpop { display: flex; flex-direction: column; gap: 5px; min-width: calc(190px * var(--ui-scale)); }
+.callpop__form { display: flex; align-items: center; gap: 5px; }
+.callpop__input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+/* The way to the page itself, as a quiet second choice rather than a second button: it is
+   what this control used to do, and it is no longer the thing most people want. */
+.callpop__page {
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.callpop__page:hover { color: var(--accent); text-decoration: underline; }
+
 /* =========================================================================
    Notifications: the toast layer, and the panel's list
    ========================================================================= */

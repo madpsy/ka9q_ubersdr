@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { useRadio, useMeters } from '../radio/RadioContext.jsx';
 import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../display/DisplayContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
@@ -20,6 +20,7 @@ import Popover from './Popover.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
+import { requestLookup } from '../lib/callsign.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
@@ -332,6 +333,37 @@ export default function TopBar({ compact }) {
     const modeClosedAt = useRef(0);
     const [widthAt, setWidthAt] = useState(null);
     const widthClosedAt = useRef(0);
+    // The callsign box under the lookup button. Same three pieces as the filter-width
+    // popover: where it opened, when it last closed (so the click that dismissed it does
+    // not immediately reopen it), and what is in it.
+    const [lookupAt, setLookupAt] = useState(null);
+    const [lookupCall, setLookupCall] = useState('');
+    const lookupClosedAt = useRef(0);
+    const lookupRef = useRef(null);
+
+    const closeLookup = useCallback(() => {
+        lookupClosedAt.current = performance.now();
+        setLookupAt(null);
+    }, []);
+
+    // The lookup itself. requestLookup returns false when nothing is listening — no
+    // Callsign panel open anywhere — and only then is the v1 page opened, with the
+    // callsign in it rather than empty. Either way the box closes: it has done its job,
+    // and a search box left open over the answer is in the way.
+    const submitLookup = useCallback(() => {
+        const call = lookupCall.trim().toUpperCase();
+        if (!call) return;
+        if (!requestLookup(call)) {
+            openCallsignLookup({ uuid: getSessionId(), callsign: call });
+        }
+        setLookupCall('');
+        closeLookup();
+    }, [closeLookup, lookupCall]);
+
+    const openLookupPage = useCallback(() => {
+        openCallsignLookup({ uuid: getSessionId(), callsign: lookupCall.trim().toUpperCase() });
+        closeLookup();
+    }, [closeLookup, lookupCall]);
 
     const filterWidth = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     // The Receiver panel's slider does exactly this. Shared through
@@ -541,13 +573,74 @@ export default function TopBar({ compact }) {
                 bar, on the same condition. The page it opens is a v1 one and
                 talks to us through compat/LegacyBridge. */}
             {!compact && serverInfo?.lookup_service && (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Icon.Search />}
-                    title="Callsign lookup"
-                    onClick={() => openCallsignLookup({ uuid: getSessionId() })}
-                />
+                <>
+                    {/* Asks who, then looks them up. It used to open the lookup page
+                        empty, which made the button a way of getting to a search box
+                        rather than a way of searching — two steps and a new window before
+                        anything had been asked.
+
+                        The box goes where the answer is: requestLookup reaches the
+                        Callsign panel when it is open, which is the same route a click on
+                        a spot takes, so the result lands in the interface rather than on
+                        top of it. Only when nothing is listening does the v1 page open,
+                        and then it opens *with* the callsign already in it. */}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Icon.Search />}
+                        title="Look up a callsign"
+                        aria-label="Look up a callsign"
+                        onClick={(e) => {
+                            if (performance.now() - lookupClosedAt.current < 250) return;
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setLookupAt({ x: r.left, y: r.bottom + 4 });
+                        }}
+                    />
+                    {lookupAt && (
+                        <Popover
+                            at={lookupAt}
+                            className="callpop"
+                            aria-label="Callsign lookup"
+                            onClose={closeLookup}
+                        >
+                            <form
+                                className="callpop__form"
+                                onSubmit={(e) => {
+                                    e.preventDefault();
+                                    submitLookup();
+                                }}
+                            >
+                                {/* Focused on open, because the popover exists to be typed
+                                    into and a box you have to click first is a box that
+                                    cost you a click. */}
+                                <input
+                                    ref={lookupRef}
+                                    className="input callpop__input"
+                                    placeholder="Callsign…"
+                                    value={lookupCall}
+                                    onChange={(e) => setLookupCall(e.target.value.toUpperCase())}
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    autoFocus
+                                />
+                                <Button
+                                    type="submit"
+                                    size="sm"
+                                    variant="primary"
+                                    icon={<Icon.Search />}
+                                    title="Look up"
+                                    disabled={!lookupCall.trim()}
+                                />
+                            </form>
+                            {/* The old behaviour, kept as what it always was: a way to the
+                                page itself, which carries the bio, the map and the QSL
+                                details the panel does not. */}
+                            <button type="button" className="callpop__page" onClick={openLookupPage}>
+                                Open the lookup page
+                            </button>
+                        </Popover>
+                    )}
+                </>
             )}
 
             {/* On a phone too, now that Listen is an icon and has the width to spare.

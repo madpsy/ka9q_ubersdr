@@ -86,5 +86,33 @@ t('only a reset — which is a page load — offers it again', () => {
     assert.strictEqual(dx.dxAutoTried(), false);
 });
 
+// --- whether there should be a session at all -------------------------------------------
+
+// The everyday layout for this panel: bottom dock, folded shut. It has to log in.
+const WANTED = { available: true, cramped: false, hidden: false, feeds: true };
+
+t('a remembered callsign logs in with the panel collapsed', () => {
+    // Being collapsed — being unmounted at all — is deliberately not a condition. This
+    // is the bug the watch exists for: the decision used to live in the panel's own
+    // effects, so a panel that never mounted never logged in.
+    assert.strictEqual(dx.dxSessionWanted(WANTED), true);
+});
+
+t('a side dock gets no session, because it cannot show one', () => {
+    assert.strictEqual(dx.dxSessionWanted({ ...WANTED, cramped: true }), false);
+});
+
+t('a panel taken off the layout gets no session', () => {
+    assert.strictEqual(dx.dxSessionWanted({ ...WANTED, hidden: true }), false);
+});
+
+t('a stopped receiver gets no session, like every other feed', () => {
+    assert.strictEqual(dx.dxSessionWanted({ ...WANTED, feeds: false }), false);
+});
+
+t('no addon, nothing to connect to', () => {
+    assert.strictEqual(dx.dxSessionWanted({ ...WANTED, available: false }), false);
+});
+
 if (process.exitCode) console.log('\nDX session tests FAILED');
 else console.log(`\nall ${pass} DX session tests passed`);

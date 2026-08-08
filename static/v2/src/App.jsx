@@ -22,6 +22,7 @@ import TopFreqWatch from './components/TopFreqWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
+import DXClusterWatch from './components/DXClusterWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import BridgeHost from './bridge/BridgeHost.jsx';
@@ -164,6 +165,10 @@ export default function App() {
                                     that was tuning the receiver has to go on
                                     doing it. */}
                                 <ControlWatch />
+                                {/* The cluster session, for the same reason: the
+                                    panel is collapsed most of the time, and a
+                                    remembered callsign has to log in anyway. */}
+                                <DXClusterWatch />
                                 {/* The "most used" leaderboard counts minutes on
                                     a frequency, and a dock that is collapsed has
                                     unmounted the panel that used to do the

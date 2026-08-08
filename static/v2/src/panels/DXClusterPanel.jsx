@@ -15,10 +15,11 @@
 // and losing a login and a screenful of spots to it is not a trade anybody would make on
 // purpose.
 //
-// What ends a session is now a decision: Disconnect, or moving the panel into a side
-// dock where it cannot be read, or reloading the page. A remembered callsign still
-// connects on its own, as the widget does, and only once per page load — see
-// dxAutoTried, which is in the session rather than here for exactly the reason above.
+// What ends a session is a decision: Disconnect, or moving the panel into a side dock
+// where it cannot be read, or stopping the receiver, or reloading the page. A remembered
+// callsign still connects on its own, as the widget does, and only once per page load.
+// None of that is decided here — see components/DXClusterWatch.jsx, which is mounted for
+// the life of the page so that a panel collapsed into a dock still logs in.
 //
 // `minimal` keeps the transcript and the command line, and drops the quick
 // commands, the links and the connected/disconnect row — once you are in,
@@ -45,16 +46,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { Button, Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
-import useFeedsAllowed from '../lib/useServerFeeds.js';
 import {
     MAX_CALLSIGN, MAX_COMMAND, MAX_PASSWORD, QUICK_COMMANDS, clientUrl, parseSpotLine,
     savedLogin, webUrl,
 } from '../lib/dxclusterTerminal.js';
 import {
-    dxAutoTried, dxConnect, dxDisconnect, dxSend, dxSession, markDxAutoTried, onDxSession,
+    dxConnect, dxDisconnect, dxSend, dxSession, onDxSession,
 } from '../lib/dxclusterSession.js';
 
 export const ADDON_NAME = 'dxcluster';
+
+// This panel's registry id. Exported because DXClusterWatch has to ask the layout
+// where the panel is without the panel being mounted.
+export const PANEL_ID = 'dxcluster';
 
 /** Is the addon on this receiver? Same test the widget makes. */
 export function dxClusterAvailable(serverInfo) {
@@ -101,7 +105,6 @@ export default function DXClusterPanel({ minimal }) {
         flashRef.current = setTimeout(() => setFlash(''), 1600);
     }, []);
 
-    const feeds = useFeedsAllowed();
 
     const connect = useCallback(() => {
         stickRef.current = true;
@@ -123,43 +126,13 @@ export default function DXClusterPanel({ minimal }) {
         setSession(next);
     }), []);
 
-    // A remembered callsign connects on its own, as the widget does. Once per page load,
-    // and the flag for that is in the session rather than here: a disconnect is a
-    // decision, and the panel coming back after a collapsed dock or a dragged panel is
-    // not a reason to log in over it.
-    useEffect(() => {
-        // Not from a side dock, where the panel is a signpost: a remembered callsign
-        // would otherwise log in to a shared cluster to feed a terminal nobody can read.
-        if (dxAutoTried() || cramped) return;
-        markDxAutoTried();
-        if (savedLogin().callsign.trim()) connect();
-    }, [connect, cramped]);
-
-    // Dragged into a side dock while connected. One of the two things that still end a
-    // session, because the panel there cannot show what it is receiving.
-    useEffect(() => {
-        if (cramped && state !== 'closed') dxDisconnect();
-    }, [cramped, state]);
-
-    // Stopping the receiver ends the cluster session too, and starting it again
-    // brings the session back. It is a socket to this server held open for as
-    // long as the tab is, which is exactly what Stop is now understood to end —
-    // see lib/serverFeeds.js. Reconnected only if the gate closed on a live
-    // session, so a panel nobody had logged into stays logged out; `wasUp` is a
-    // ref rather than state because it is a note about the past, not something
-    // to draw.
-    const wasUp = useRef(false);
-    useEffect(() => {
-        if (feeds) {
-            if (wasUp.current && state === 'closed' && savedLogin().callsign.trim()) connect();
-            wasUp.current = false;
-            return;
-        }
-        if (state !== 'closed') {
-            wasUp.current = true;
-            dxDisconnect();
-        }
-    }, [feeds, state, connect]);
+    // Auto-connect, the side-dock rule and the Stop rule all used to be three
+    // effects here. They are in components/DXClusterWatch.jsx now, because an
+    // effect in this panel only runs while the panel is mounted and a collapsed
+    // dock unmounts it — so a remembered callsign in a collapsed bottom dock,
+    // which is where this panel spends most of its life, never logged in at all.
+    // What is left here is the panel: the transcript, the command line and the
+    // buttons. Connect and Disconnect are still yours to press.
 
     useEffect(() => {
         if (!stickRef.current) return;

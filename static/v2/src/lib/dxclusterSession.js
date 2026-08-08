@@ -11,7 +11,8 @@
 // a session is now a decision rather than an accident:
 //
 //   Disconnect, which is the operator saying so.
-//   Moving the panel into a side dock, where it cannot be read — see DXClusterPanel.
+//   Moving the panel into a side dock, where it cannot be read — see dxSessionWanted.
+//   Stopping the receiver, which stops every feed on the page.
 //   Reloading the page, which ends everything.
 //
 // The transcript lives here too, for the same reason: coming back to a panel that has
@@ -37,6 +38,33 @@ function notify(event) {
     for (const fn of Array.from(listeners)) {
         try { fn(state, event); } catch (err) { console.error('dx session subscriber threw', err); }
     }
+}
+
+/**
+ * Whether there should be a cluster session at all.
+ *
+ * The conditions, and — just as importantly — the ones that are not here. Whether
+ * the panel is *mounted* is not a condition: a collapsed dock unmounts it, and this
+ * lived in the panel's own effects until a remembered callsign in a collapsed bottom
+ * dock turned out never to log in, because the effect that would have logged it in
+ * had never run. Nor is whether the panel is open, or which sheet a phone is on.
+ * See components/DXClusterWatch.jsx, which is where this is asked from.
+ *
+ *   available   the dxcluster addon is on this receiver. Without it every request
+ *               404s and there is nothing to connect to.
+ *   cramped     the panel is in a left or right dock, where it is a signpost rather
+ *               than a terminal — a login held open behind a panel that cannot show
+ *               the output is the worst of both. See DockTooNarrow.
+ *   hidden      the panel has been taken off the layout altogether, which is a
+ *               stronger statement than folding it shut.
+ *   feeds       the receiver is running. Stop stops this like everything else —
+ *               see lib/serverFeeds.js.
+ *
+ * @param {{available: boolean, cramped: boolean, hidden: boolean, feeds: boolean}} at
+ * @returns {boolean}
+ */
+export function dxSessionWanted({ available, cramped, hidden, feeds }) {
+    return !!available && !cramped && !hidden && !!feeds;
 }
 
 export const dxSession = () => state;

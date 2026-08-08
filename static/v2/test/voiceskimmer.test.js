@@ -74,6 +74,76 @@ t('the second query waits, because the endpoint allows one request a second', ()
     assert.ok(vs.POLL_MS > vs.SECOND_QUERY_MS * 2, 'and the pair fits inside a cycle');
 });
 
+// --- the band filter ------------------------------------------------------------
+//
+// It is the server's filter, not ours: each column asks for five rows, so filtering those
+// five here would empty the 40m column whenever the last five callsigns were on 20m.
+
+t('a named band goes into both queries', () => {
+    assert.ok(vs.confirmedUrl(5, '40m').includes('&band=40m'));
+    assert.ok(vs.spottedUrl(5, '40m').includes('&band=40m'));
+    // And still asks for what the column is: the band narrows the query, it does not
+    // replace the rest of it.
+    assert.ok(vs.spottedUrl(5, '40m').includes('submitted=true'));
+});
+
+t('all bands omits the parameter rather than passing a word for it', () => {
+    // Verified against a live receiver: `band=all` is compared against the band names and
+    // matches nothing, so passing it would empty both columns.
+    for (const band of ['all', 'auto', '', null, undefined]) {
+        assert.ok(!vs.confirmedUrl(5, band).includes('band='), String(band));
+        assert.ok(!vs.spottedUrl(5, band).includes('band='), String(band));
+    }
+});
+
+t('auto never reaches the query, because it is not a band', () => {
+    // The panel resolves it against the dial first; if one ever leaked through, a full list
+    // is the right failure rather than an empty one.
+    assert.strictEqual(vs.bandParam(vs.AUTO_BAND), '');
+});
+
+t('a band name this build does not know is dropped, not passed on', () => {
+    // A stored preference from another version, or a typo: better a full list than a query
+    // that quietly matches nothing.
+    assert.strictEqual(vs.bandParam('6m'), '');
+    assert.strictEqual(vs.bandParam('20 m'), '');
+    assert.strictEqual(vs.bandParam('20m'), '&band=20m');
+});
+
+t('auto means the band the dial is in, and all bands between them', () => {
+    // The same rule the spot lists use — it is the same function, from lib/bands.js.
+    assert.strictEqual(vs.resolveBandFilter(vs.AUTO_BAND, '20m'), '20m');
+    assert.strictEqual(vs.resolveBandFilter(vs.AUTO_BAND, null), 'all');
+    assert.strictEqual(vs.resolveBandFilter('40m', '20m'), '40m');
+});
+
+t('a band change waits long enough for a dial being swept to settle', () => {
+    // On auto the band comes from the dial; without the wait, sweeping through five bands
+    // is five pairs of requests at an endpoint that allows one a second.
+    assert.ok(vs.BAND_SETTLE_MS >= 500, 'long enough to swallow a sweep');
+    assert.ok(vs.BAND_SETTLE_MS < vs.POLL_MS, 'and short enough to be a delay, not a poll');
+});
+
+t('the chosen band survives the panel being unmounted', () => {
+    // Which happens every time the dock is peeked, so state alone would reset it all day.
+    const store = new Map();
+    global.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+    };
+    assert.strictEqual(vs.savedBand(), vs.AUTO_BAND, 'auto until something is chosen');
+    vs.saveBand('30m');
+    assert.strictEqual(vs.savedBand(), '30m');
+    vs.saveBand('all');
+    assert.strictEqual(vs.savedBand(), 'all');
+    // Nonsense in storage is auto again rather than a filter nobody can explain.
+    store.set('ubersdr.v2.voiceskimmer', '{"band":"6m"}');
+    assert.strictEqual(vs.savedBand(), vs.AUTO_BAND);
+    store.set('ubersdr.v2.voiceskimmer', 'not json');
+    assert.strictEqual(vs.savedBand(), vs.AUTO_BAND);
+    delete global.localStorage;
+});
+
 // --- one row ---------------------------------------------------------------------
 
 t('a row keeps its callsign, where it was heard and how strong it was', () => {

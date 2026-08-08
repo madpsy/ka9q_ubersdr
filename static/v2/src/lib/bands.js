@@ -29,6 +29,34 @@ export function bandForFrequency(hz) {
     return null;
 }
 
+// ── The 'auto' band filter ───────────────────────────────────────────────────
+//
+// Several panels offer a band picker whose default follows the dial — the spot lists, the
+// voice skimmer — and they have to agree on what that means, which is why it lives here
+// beside bandForFrequency rather than in whichever panel wanted it first.
+//
+// (lib/bandSpectrum.js has its own AUTO_BAND with the same value and a different job: it
+// resolves against the bands the *server* records, which is a shorter list than this one
+// and can be empty.)
+export const AUTO_BAND = 'auto';
+
+/**
+ * Which band a picker means right now.
+ *
+ * Named at length because `bandFilter` is a key in the object v1's CW graph is handed (see
+ * compat/cwGraph.js), and a bare one in an object literal is indistinguishable from a use
+ * of this — which test/unresolved.js quite reasonably objects to.
+ *
+ * 'auto' resolves to the band the dial is in, and to 'all' when the dial is somewhere no
+ * band covers — most of the shortwave spectrum. That fallback matters: a listener parked on
+ * a broadcast station should see a full list rather than an empty one, because "no band"
+ * is not a band with nothing in it.
+ */
+export function resolveBandFilter(choice, dialBand) {
+    if (choice !== AUTO_BAND) return choice;
+    return dialBand || 'all';
+}
+
 // Sort key for a band name: its start frequency, so a list of bands reads up
 // the spectrum. Unknown names (an operator's own band, say) sort last, then
 // alphabetically among themselves.

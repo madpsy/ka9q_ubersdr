@@ -7,7 +7,9 @@
 // goes blank for a frame and an operator who cannot say why.
 
 const assert = require('assert');
-const { PAGE_ROWS, homePage, pageCount, pageWindow } = require('./.build/paging.cjs');
+const {
+    MINIMAL_ROWS, PAGE_ROWS, homePage, pageCount, pageWindow,
+} = require('./.build/paging.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -109,6 +111,20 @@ t('a row beyond the list cannot open past the end', () => {
 t('the default page size is the one the panels use', () => {
     assert.strictEqual(PAGE_ROWS, 10);
     assert.strictEqual(pageWindow(25, 1).end, 20);
+});
+
+t('a minimal view pages five at a time, and its last page is still short', () => {
+    // Half a full page, because a minimal view is a panel taking less of the dock.
+    assert.strictEqual(MINIMAL_ROWS, 5);
+    assert.strictEqual(pageCount(12, MINIMAL_ROWS), 3);
+    const w = pageWindow(12, 2, MINIMAL_ROWS);
+    assert.deepStrictEqual([w.start, w.end], [10, 12]);
+});
+
+t('growing the page size clamps a page that no longer exists', () => {
+    // Which is what toggling out of a minimal view does: page 3 of five-row pages is past
+    // the end once the pages are ten rows long.
+    assert.strictEqual(pageWindow(12, 2, PAGE_ROWS).page, 1);
 });
 
 if (process.exitCode) console.log('\npaging tests FAILED');

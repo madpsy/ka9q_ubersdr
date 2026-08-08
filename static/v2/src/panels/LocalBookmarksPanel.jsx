@@ -13,7 +13,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
 import { Button, Empty, Icon, Menu, MenuItem } from '../components/ui.jsx';
-import { Pager, usePager } from '../components/Pager.jsx';
+import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODES } from '../radio/constants.js';
 import {
@@ -101,7 +101,11 @@ export default function LocalBookmarksPanel({ minimal }) {
 
     // One page at a time — the dock scrolls, the panel does not. Deleting a bookmark can
     // empty the last page, which the pager clamps for us rather than leaving a blank list.
-    const { start, end, pager } = usePager(listed ? listed.length : 0, { deps: [query, group] });
+    const { start, end, pager } = usePager(listed ? listed.length : 0, {
+        // Shorter pages cut down: the view exists to take less of the dock.
+        rows: minimal ? MINIMAL_ROWS : PAGE_ROWS,
+        deps: [query, group],
+    });
 
     const tune = (b) => {
         if (b.mode) actions.setMode(b.mode);

@@ -18,9 +18,9 @@
 
 import React, { useCallback, useMemo, useState } from '../react.js';
 import { Icon } from './ui.jsx';
-import { PAGE_ROWS, homePage, pageCount, pageWindow } from '../lib/paging.js';
+import { MINIMAL_ROWS, PAGE_ROWS, homePage, pageCount, pageWindow } from '../lib/paging.js';
 
-export { PAGE_ROWS };
+export { MINIMAL_ROWS, PAGE_ROWS };
 
 // First/last are only worth their width once there is somewhere to jump: with three pages
 // the ‹ › pair already reaches everything, and a dock column has no room to spare.

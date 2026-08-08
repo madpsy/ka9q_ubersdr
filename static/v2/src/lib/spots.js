@@ -15,6 +15,8 @@
 // way in (dxcluster.go: `spot.Frequency = freqKHz * 1000`), so every feed is
 // already in Hz by the time it reaches us.
 
+import { AUTO_BAND, resolveBandFilter } from './bands.js';
+
 // v1's list caps. The DX cluster is a slow feed and 500 is generous; the
 // skimmer and decoder feeds can run to thousands an hour on a good day.
 export const MAX_SPOTS = { dx: 500, digital: 5000, cw: 5000 };
@@ -176,8 +178,6 @@ export const spotMapUrl = (tab) => SPOT_MAPS[tab] || '';
 //
 // 'all' stays, because "what is open anywhere" is the other real question, and a named band
 // stays because pinning one is how you watch a band you are not listening to.
-export const AUTO_BAND = 'auto';
-
 export const DEFAULT_FILTERS = {
     age: null,          // minutes, null = no limit (set per kind by the panel)
     band: AUTO_BAND,
@@ -190,22 +190,9 @@ export const DEFAULT_FILTERS = {
     tenMeterBeacons: false,   // CW only; v1 hides them by default
 };
 
-/**
- * Which band the filter means right now.
- *
- * Named at length because `bandFilter` is a key in the object v1's CW graph is handed
- * (see compat/cwGraph.js), and a bare one in an object literal is indistinguishable from
- * a use of this — which test/unresolved.js quite reasonably objects to.
- *
- * 'auto' resolves to the band the dial is in — and to 'all' when the dial is somewhere no
- * band covers, which is most of the shortwave spectrum. That fallback matters: a listener
- * parked on 6 MHz would otherwise see an empty list and no clue why, and "no band" is not
- * a band anybody has spots for.
- */
-export function resolveBandFilter(choice, dialBand) {
-    if (choice !== AUTO_BAND) return choice;
-    return dialBand || 'all';
-}
+// The band picker's 'auto' lives in lib/bands.js, because the voice skimmer's picker has to
+// mean the same thing by it. Re-exported so callers of this module are unaffected.
+export { AUTO_BAND, resolveBandFilter };
 
 /**
  * `dialBand` is where the receiver is tuned, for the 'auto' band filter. Omit it and auto

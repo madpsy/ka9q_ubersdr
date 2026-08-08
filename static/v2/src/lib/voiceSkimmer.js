@@ -29,6 +29,25 @@
 // WEFAX panel had: spotted is a subset, so a quiet spell puts every submitted spot
 // outside whatever window was asked for and the column reads empty when it is not. The
 // server can filter exactly, so it does.
+//
+// ── The band filter belongs on the server for the same reason ────────────────
+//
+// Each column asks for five rows. Filtering those five here would show an empty 40m column
+// whenever the last five things heard were on 20m — a picture of the query rather than of
+// the band. `band=40m` is a real filter on the addon (verified against a live receiver: it
+// takes `matched` from 885 to 416 for 20m, and combines with `submitted=true`), so the band
+// goes into the query and five rows come back from the band asked about.
+//
+// One catch, also verified: `band=all` matches nothing, because it is compared against the
+// band names. "All bands" therefore has to *omit* the parameter rather than pass a word
+// meaning all, which is what bandParam does.
+
+import { AUTO_BAND, BAND_NAMES, resolveBandFilter } from './bands.js';
+
+// 'auto' — the band the dial is in — is shared with the spot lists so the two pickers mean
+// the same thing by it. Re-exported because the panel needs both, and one import of a band
+// vocabulary reads better than two.
+export { AUTO_BAND, BAND_NAMES, resolveBandFilter };
 
 export const BASE = '/addon/voiceskimmer';
 
@@ -57,23 +76,66 @@ export const FIELDS = [
 
 const query = (params) => `${BASE}/api/spots?${params}&fields=${FIELDS}`;
 
-/** Newest confirmed sightings — everything the skimmer has validated. */
-export const confirmedUrl = (rows = COLUMN_ROWS) =>
-    query(`limit=${rows}&sort=last_heard&order=desc`);
+/**
+ * The band as the query wants it. 'all' — and anything the panel cannot resolve to a band —
+ * becomes nothing at all, because `band=all` matches no rows on the addon.
+ *
+ * A name that is not one of ours is dropped rather than passed through: the picker cannot
+ * produce one, and a stored preference from a future version should show a full list rather
+ * than an empty one.
+ */
+export function bandParam(band) {
+    if (!band || band === 'all' || band === AUTO_BAND) return '';
+    return BAND_NAMES.includes(band) ? `&band=${encodeURIComponent(band)}` : '';
+}
+
+/** Newest confirmed sightings — everything the skimmer has validated, on one band or all. */
+export const confirmedUrl = (rows = COLUMN_ROWS, band = 'all') =>
+    query(`limit=${rows}&sort=last_heard&order=desc${bandParam(band)}`);
 
 /**
  * Newest submitted spots. Filtered and sorted by the server on purpose: `submitted` is
  * a real filter there, so the column cannot go empty because the submitted ones happen
  * to be older than the window.
  */
-export const spottedUrl = (rows = COLUMN_ROWS) =>
-    query(`limit=${rows}&submitted=true&sort=submitted_at&order=desc`);
+export const spottedUrl = (rows = COLUMN_ROWS, band = 'all') =>
+    query(`limit=${rows}&submitted=true&sort=submitted_at&order=desc${bandParam(band)}`);
 
 // How often each column is refreshed, and how long the second query waits behind the
 // first. Thirty seconds because a skimmer working three bands confirms a few callsigns a
 // minute; 1.2 s because the limit is one request a second and a margin costs nothing.
 export const POLL_MS = 30000;
 export const SECOND_QUERY_MS = 1200;
+
+// How long a band change waits before it is queried. On 'auto' the band comes from the dial,
+// and a dial being swept through the spectrum passes through several bands in a couple of
+// seconds — each of which would otherwise fire a pair of requests at an endpoint that allows
+// one a second. Waiting for the tuning to settle turns a sweep into one query.
+export const BAND_SETTLE_MS = 700;
+
+// ── The chosen band, kept between openings ───────────────────────────────────
+//
+// A panel is unmounted whenever its dock is collapsed — and peeked docks collapse constantly
+// — so a filter held in component state would reset itself all day. Stored rather than
+// remembered in a module variable so it also survives a reload, which is what somebody who
+// pinned a band they are watching expects.
+
+const KEY = 'ubersdr.v2.voiceskimmer';
+
+export function savedBand() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(KEY));
+        const band = raw && typeof raw.band === 'string' ? raw.band : '';
+        // Only a band this build knows, or one of the two words: anything else is a
+        // preference from another version, and 'auto' is the right thing to fall back to.
+        if (band === 'all' || band === AUTO_BAND || BAND_NAMES.includes(band)) return band;
+    } catch (e) { /* private mode */ }
+    return AUTO_BAND;
+}
+
+export function saveBand(band) {
+    try { localStorage.setItem(KEY, JSON.stringify({ band })); } catch (e) { /* private mode */ }
+}
 
 /**
  * One row, in the shape the panel uses.

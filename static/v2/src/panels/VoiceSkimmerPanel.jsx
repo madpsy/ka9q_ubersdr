@@ -8,18 +8,27 @@
 // Clicking a callsign tunes to it, in the mode it was heard in, and asks for a lookup —
 // the same thing clicking a spot does everywhere else in the interface.
 //
-// `minimal` drops the caption and the link and keeps the two columns, which are the
-// panel.
+// The band picker defaults to following the dial, as the spot lists and the spectrogram do,
+// and for the same reason: what somebody wants from a list of who is being heard is almost
+// always who is being heard *where they are listening*. The filter is the addon's, not ours
+// — see lib/voiceSkimmer.js — because five rows filtered here would be an empty column
+// whenever the last five callsigns happened to be on another band.
+//
+// `minimal` drops the caption and the link and keeps the two columns, which are the panel.
+// The picker stays: it is one row, it is the panel's only control, and a column filtered to
+// a band with the control hidden would be a short list with no visible reason.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Empty, Icon } from '../components/ui.jsx';
+import { Empty, Field, Icon } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { countryFlag, sinceLabel } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
+import { bandForFrequency } from '../lib/bands.js';
 import {
-    COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl, confirmedUrl, freqLabel, matchedCount,
-    spotList, spottedUrl, tuneTarget, voiceSkimmerAvailable,
+    AUTO_BAND, BAND_NAMES, BAND_SETTLE_MS, COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl,
+    confirmedUrl, freqLabel, matchedCount, resolveBandFilter, saveBand, savedBand, spotList,
+    spottedUrl, tuneTarget, voiceSkimmerAvailable,
 } from '../lib/voiceSkimmer.js';
 
 export { voiceSkimmerAvailable };
@@ -66,7 +75,10 @@ function Column({ title, rows, count, now, onPick }) {
 }
 
 export default function VoiceSkimmerPanel({ minimal }) {
-    const { actions, serverInfo } = useRadio();
+    const { actions, serverInfo, tuning } = useRadio();
+    // Kept in storage rather than in state: this panel is unmounted every time its dock
+    // collapses, and a filter that reset itself on every peek would be no filter at all.
+    const [choice, setChoice] = useState(savedBand);
     const [confirmed, setConfirmed] = useState([]);
     const [spotted, setSpotted] = useState([]);
     const [totals, setTotals] = useState({ confirmed: null, spotted: null });
@@ -74,6 +86,8 @@ export default function VoiceSkimmerPanel({ minimal }) {
     const [now, setNow] = useState(() => Date.now());
     const alive = useRef(true);
     const second = useRef(null);
+    // The opening poll goes out at once; every later one is a band change, which waits.
+    const first = useRef(true);
 
     useEffect(() => () => { alive.current = false; clearTimeout(second.current); }, []);
 
@@ -81,6 +95,14 @@ export default function VoiceSkimmerPanel({ minimal }) {
         const id = setInterval(() => setNow(Date.now()), TICK_MS);
         return () => clearInterval(id);
     }, []);
+
+    // What the picker means right now. 'auto' is the band the dial is in — and 'all' when the
+    // dial is between bands, which is most of the shortwave spectrum: somebody parked on a
+    // broadcast station should see the whole list, not an empty one.
+    const dialBand = bandForFrequency(tuning.frequency);
+    const band = resolveBandFilter(choice, dialBand);
+
+    const pickBand = (v) => { setChoice(v); saveBand(v); };
 
     const ask = useCallback((url, apply) => fetch(url)
         .then((r) => {
@@ -105,22 +127,46 @@ export default function VoiceSkimmerPanel({ minimal }) {
         // and it is a real filter on the server, which is why it is worth two requests
         // rather than one and a split here. See lib/voiceSkimmer.js.
         const poll = () => {
-            ask(confirmedUrl(COLUMN_ROWS), (rows, n) => {
+            ask(confirmedUrl(COLUMN_ROWS, band), (rows, n) => {
                 setConfirmed(rows);
                 setTotals((t) => ({ ...t, confirmed: n }));
             });
             clearTimeout(second.current);
             second.current = setTimeout(() => {
-                ask(spottedUrl(COLUMN_ROWS), (rows, n) => {
+                ask(spottedUrl(COLUMN_ROWS, band), (rows, n) => {
                     setSpotted(rows);
                     setTotals((t) => ({ ...t, spotted: n }));
                 });
             }, SECOND_QUERY_MS);
         };
-        poll();
+
+        // Read once, because the branch below clears it and the settle timer has to know
+        // which run this was rather than what the flag says afterwards.
+        const opening = first.current;
+        // A new band is a new question, and the rows on screen are the old one's answer —
+        // each carries the band it was heard on, so leaving them up would be visibly wrong.
+        // Cleared rather than left to be overwritten, and without going back to 'loading',
+        // which would take the picker off screen along with them.
+        if (opening) {
+            first.current = false;
+            poll();
+        } else {
+            setConfirmed([]);
+            setSpotted([]);
+            setTotals({ confirmed: null, spotted: null });
+        }
+
+        // On auto the band follows the dial, and a dial being swept passes through several
+        // bands in a couple of seconds. Waiting for it to settle makes that one query
+        // instead of a burst against an endpoint that allows one a second.
+        const settle = opening ? null : setTimeout(poll, BAND_SETTLE_MS);
         const id = setInterval(poll, POLL_MS);
-        return () => { clearInterval(id); clearTimeout(second.current); };
-    }, [ask]);
+        return () => {
+            clearTimeout(settle);
+            clearInterval(id);
+            clearTimeout(second.current);
+        };
+    }, [ask, band]);
 
     // Clicking a callsign: tune to where it was heard, in the mode it was heard in, and
     // ask for a lookup — exactly what clicking a spot does in the Spots panel and on the
@@ -135,33 +181,55 @@ export default function VoiceSkimmerPanel({ minimal }) {
         }
     };
 
-    if (state === 'loading') return <Empty>Loading…</Empty>;
-
-    if (state === 'error' && !confirmed.length && !spotted.length) {
-        return <Empty>The voice skimmer addon is not answering.</Empty>;
-    }
+    const dead = state === 'error' && !confirmed.length && !spotted.length;
 
     return (
         <div className="stack vs">
+            {/* Above the columns, and drawn even while they are loading or failing: it is
+                how you get off a band with nothing on it, which is exactly when somebody
+                reaches for it. Auto names the band it has settled on — "Auto (20m)" — so a
+                short list is explained by the control rather than being a mystery. */}
+            <Field label="Band" inline>
+                <select
+                    className="select"
+                    value={choice}
+                    onChange={(e) => pickBand(e.target.value)}
+                    title="Which band the two columns are asking the skimmer about"
+                >
+                    {/* Auto first, because it is the default and because it is the question
+                        a list of heard callsigns is usually being asked. */}
+                    <option value={AUTO_BAND}>
+                        {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
+                    </option>
+                    <option value="all">All bands</option>
+                    {BAND_NAMES.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+            </Field>
+
+            {state === 'loading' && <Empty>Loading…</Empty>}
+            {dead && <Empty>The voice skimmer addon is not answering.</Empty>}
+
             {/* Side by side rather than one list with a badge: spotted is a subset of
                 confirmed, and the interesting thing is the gap between the two — how
                 much of what the receiver hears it is prepared to put its name to. */}
-            <div className="vs__cols">
-                <Column
-                    title="Confirmed"
-                    rows={confirmed}
-                    count={minimal ? null : totals.confirmed}
-                    now={now}
-                    onPick={pick}
-                />
-                <Column
-                    title="Spotted"
-                    rows={spotted}
-                    count={minimal ? null : totals.spotted}
-                    now={now}
-                    onPick={pick}
-                />
-            </div>
+            {state !== 'loading' && !dead && (
+                <div className="vs__cols">
+                    <Column
+                        title="Confirmed"
+                        rows={confirmed}
+                        count={minimal ? null : totals.confirmed}
+                        now={now}
+                        onPick={pick}
+                    />
+                    <Column
+                        title="Spotted"
+                        rows={spotted}
+                        count={minimal ? null : totals.spotted}
+                        now={now}
+                        onPick={pick}
+                    />
+                </div>
+            )}
 
             {!minimal && (
                 <div className="row-end">

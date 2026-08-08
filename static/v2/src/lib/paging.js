@@ -8,6 +8,12 @@
 // without the panel becoming the whole of it.
 export const PAGE_ROWS = 10;
 
+// Rows to a page in a panel's minimal view. Half, because a minimal view is a panel that
+// has been asked to take less of the dock — ten rows of results would be the whole of the
+// saving. Five is still a page worth pressing through, and a search that needs more than
+// two presses is a search worth narrowing.
+export const MINIMAL_ROWS = 5;
+
 export function pageCount(total, rows = PAGE_ROWS) {
     if (!(total > 0) || !(rows > 0)) return 1;
     // Never zero: an empty list is on page 1 of 1, not page 1 of 0. The controls hide

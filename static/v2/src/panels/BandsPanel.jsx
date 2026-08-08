@@ -12,7 +12,7 @@
 import React, { useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
-import { PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
+import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
 
 // The API packs a second line after a "|" and sometimes uses tabs as spacing.
@@ -48,9 +48,12 @@ export default function BandsPanel({ minimal }) {
     // Cut down, only a search produces a list — and then it starts at the first match, so
     // there is no band to open on.
     const listed = minimal && !searching ? null : filtered;
+    // Shorter pages cut down: the view exists to take less of the dock.
+    const rows = minimal ? MINIMAL_ROWS : PAGE_ROWS;
     const home = searching || minimal ? -1 : activeIndex;
-    const homePage = home < 0 ? -1 : Math.floor(home / PAGE_ROWS);
+    const homePage = home < 0 ? -1 : Math.floor(home / rows);
     const { start, end, pager } = usePager(listed ? listed.length : 0, {
+        rows,
         at: home,
         deps: [query, homePage],
     });

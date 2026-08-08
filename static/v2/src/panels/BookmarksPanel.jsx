@@ -11,7 +11,7 @@ import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
-import { Pager, usePager } from '../components/Pager.jsx';
+import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
 
 export default function BookmarksPanel({ minimal }) {
@@ -44,7 +44,11 @@ export default function BookmarksPanel({ minimal }) {
 
     // Panels do not scroll on their own, so a few hundred bookmarks would make the dock
     // unusably long: one page at a time, and the search or group picker starts over.
-    const { start, end, pager } = usePager(listed ? listed.length : 0, { deps: [query, group] });
+    const { start, end, pager } = usePager(listed ? listed.length : 0, {
+        // Shorter pages cut down: the view exists to take less of the dock.
+        rows: minimal ? MINIMAL_ROWS : PAGE_ROWS,
+        deps: [query, group],
+    });
 
     if (!filtered) return <Empty>Loading bookmarks…</Empty>;
     if (!items.length) return <Empty>No bookmarks published by this receiver.</Empty>;

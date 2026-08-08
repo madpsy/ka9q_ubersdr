@@ -64,6 +64,7 @@ import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
 import ListenersPanel from './ListenersPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
+import NotificationsPanel from './NotificationsPanel.jsx';
 import GamesPanel from './GamesPanel.jsx';
 import ScopePanel from './ScopePanel.jsx';
 import LogPanel from './LogPanel.jsx';
@@ -640,6 +641,20 @@ export const PANELS = [
         Component: GamesPanel,
     },
     { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
+    // What the receiver has told you lately, and how much it is allowed to interrupt.
+    // Closed by default: the toasts are the feature and they need no panel open to
+    // appear — this is where you come to read one you missed or to turn them down.
+    //
+    // Minimal: the list alone. The settings are set once and left.
+    {
+        id: 'notifications',
+        title: 'Notifications',
+        icon: <Icon.Bell />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: NotificationsPanel,
+    },
     // Beside Layout, because it is the same kind of housekeeping and because
     // the arrangement built there is one of the things worth keeping.
     // Minimal: export, import and the merge/replace choice, without the

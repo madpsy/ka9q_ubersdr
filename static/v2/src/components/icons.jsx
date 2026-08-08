@@ -100,6 +100,9 @@ export const Icon = {
     Packet: (p) => <Svg {...p}><rect x="2.5" y="9" width="6" height="6" rx="1" /><rect x="15.5" y="9" width="6" height="6" rx="1" /><path d="M9 12h2M13 12h2" /><path d="M5.5 6.5V4M18.5 6.5V4" /></Svg>,
     // A picture in a frame: what SSTV produces.
     Picture: (p) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="1.5" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="m4 17 4.5-4.5 3 3L15 11l5 5" /></Svg>,
+    // A bell: notifications. Deliberately not the speaker Announce uses — that one
+    // means "the receiver will say this out loud", and these are read.
+    Bell: (p) => <Svg {...p}><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10" /><path d="M10 18.5a2 2 0 0 0 4 0" /></Svg>,
     // A bolt: the lightning addon. Drawn as an outline rather than the solid glyph,
     // so it sits in a row of stroked icons rather than reading as a filled badge.
     Bolt: (p) => <Svg {...p}><path d="M13 2.5 4.5 13.5H10l-1 8 9.5-11.5H13z" /></Svg>,

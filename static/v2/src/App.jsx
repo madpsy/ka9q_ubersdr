@@ -12,6 +12,7 @@ import IdleWatch from './components/IdleWatch.jsx';
 import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
+import Toasts from './components/Toasts.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
@@ -134,6 +135,13 @@ export default function App() {
                                     found. Both here for the same reason — a panel
                                     that is collapsed is unmounted. */}
                                 <CallsignAnnounceWatch />
+                                {/* The toast layer. Here rather than in the
+                                    Notifications panel because a panel is
+                                    unmounted whenever its dock is collapsed, and
+                                    notifications that only worked while their own
+                                    panel was open would be no notifications at
+                                    all. */}
+                                <Toasts />
                                 <ShortcutWatch />
                                 {/* One delegated listener gives every button
                                     in the app its haptic tap; the gestures on

@@ -7855,3 +7855,136 @@ a.btn { text-decoration: none; }
    help. */
 .hf__table tbody tr.is-picked td { background: var(--accent-soft); color: var(--text); }
 .hf__table tbody tr.is-stale td { opacity: 0.6; }
+
+/* =========================================================================
+   Notifications: the toast layer, and the panel's list
+   ========================================================================= */
+
+/* Fixed and above the panels, below the menus: a toast has to be readable over whatever
+   raised it, and must not sit on top of a menu somebody has just opened. */
+.toasts {
+    position: fixed;
+    z-index: 75;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: min(340px, calc(100vw - 24px));
+    pointer-events: none;
+}
+.toasts > * { pointer-events: auto; }
+.toasts--top-left { top: 12px; left: 12px; }
+.toasts--top-right { top: 12px; right: 12px; }
+.toasts--top-centre { top: 12px; left: 50%; transform: translateX(-50%); }
+.toasts--bottom-left { bottom: 12px; left: 12px; }
+.toasts--bottom-right { bottom: 12px; right: 12px; }
+.toasts--bottom-centre { bottom: 12px; left: 50%; transform: translateX(-50%); }
+
+.toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    padding: 7px 8px;
+    border: 1px solid var(--border-strong);
+    /* The severity is a bar down the leading edge rather than a tinted panel: a coloured
+       box is hard to read text off, and the edge is legible at a glance from across the
+       room, which is the whole point of a toast. */
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    animation: toast-in 160ms ease-out;
+}
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+}
+.toast.is-good { border-left-color: var(--good); }
+.toast.is-warn { border-left-color: var(--warn); }
+.toast.is-bad { border-left-color: var(--bad); }
+.toast__icon { flex: none; margin-top: 1px; color: var(--accent); }
+.toast.is-good .toast__icon { color: var(--good); }
+.toast.is-warn .toast__icon { color: var(--warn); }
+.toast.is-bad .toast__icon { color: var(--bad); }
+.toast__text { flex: 1; min-width: 0; }
+.toast__head { display: flex; align-items: baseline; gap: 5px; }
+.toast__title {
+    font-size: calc(11.5px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.toast__count { font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--text-faint); }
+/* Which panel raised it, pushed to the far end: useful when you are working out where to
+   go, and never the first thing to read. */
+.toast__source {
+    margin-left: auto;
+    flex: none;
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.toast__body {
+    margin-top: 1px;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.35;
+    color: var(--text-dim);
+    word-break: break-word;
+}
+.toast__age { margin-top: 2px; font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+.toast__close {
+    flex: none;
+    padding: 1px;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.toast__close:hover { background: var(--surface-hover); color: var(--text); }
+.toasts__clear {
+    align-self: flex-end;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    background: var(--surface-2);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.toasts__clear:hover { border-color: var(--accent); color: var(--text); }
+
+/* The panel's list. Same severity bar as the toast, so a notification looks like itself
+   in both places. */
+.notes { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.notes__row {
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    background: var(--surface-2);
+}
+.notes__row.is-good { border-left-color: var(--good); }
+.notes__row.is-warn { border-left-color: var(--warn); }
+.notes__row.is-bad { border-left-color: var(--bad); }
+.notes__head { display: flex; align-items: baseline; gap: 5px; }
+.notes__title {
+    font-size: calc(11px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.notes__count { font-family: var(--mono); font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+.notes__age { margin-left: auto; flex: none; font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+.notes__body { font-size: calc(10.5px * var(--ui-scale)); line-height: 1.35; color: var(--text-dim); word-break: break-word; }
+.notes__source {
+    margin-top: 1px;
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}

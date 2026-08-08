@@ -5,6 +5,7 @@ import { Button, Empty, Icon } from '../components/ui.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
+import { followable, sortFollowFirst } from '../lib/chatFollow.js';
 import {
     EMOJI_SHORTCODES, applyCompletion, applyEmojiCompletion, emojiQuery, expandShortcodes,
     matchShortcodes, matchUsernames, mentionQuery, shortcodeFor, splitMessage,
@@ -390,33 +391,90 @@ export default function ChatPanel({ minimal }) {
                 <div className="chat__users">
                     <div className="section-label"><span>{chat.users.length} here</span></div>
                     {chat.users.length === 0 && <Empty>Nobody yet.</Empty>}
-                    {chat.users.map((u) => (
-                        <button
+
+                    {/* Who is driving the dial, and the way out of it. On its own line above
+                        the list rather than only as a lit button in it: the receiver is being
+                        tuned by somebody else, which is worth stating in words. */}
+                    {chat.following && (
+                        <div className="chat__following">
+                            <span>
+                                Following <b>{chat.following}</b> — their dial moves yours
+                            </span>
+                            <button
+                                type="button"
+                                className="chat__unfollow"
+                                onClick={chat.actions.unfollow}
+                            >
+                                Stop
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Their spectrum view as well as their tuning, off by default: the view is
+                        your own window on the band, and somebody zoomed into 200 Hz of a CW
+                        signal would take away your sight of everything else. Only worth
+                        offering while following somebody. */}
+                    {chat.following && (
+                        <label className="chat__zoomsync">
+                            <input
+                                type="checkbox"
+                                checked={chat.followZoom}
+                                onChange={(e) => chat.actions.setFollowZoom(e.target.checked)}
+                            />
+                            <span>Match their zoom</span>
+                        </label>
+                    )}
+
+                    {/* Followed first, then alphabetical — v1's order. The server's own order
+                        changes as people come and go, which moves the row you are aiming at. */}
+                    {sortFollowFirst(chat.users, chat.following).map((u) => (
+                        <div
                             key={u.username}
-                            type="button"
-                            className={`chat__user${u.is_idle ? ' is-idle' : ''}`}
-                            // Their frequency is published over chat, so it
-                            // doubles as a way to go and listen to what they
-                            // are hearing.
-                            disabled={!u.frequency}
-                            title={u.frequency ? `Tune to ${formatFreqShort(u.frequency)}` : u.username}
-                            onClick={() => {
-                                if (!u.frequency) return;
-                                if (u.mode) radio.setMode(u.mode);
-                                radio.setFrequency(u.frequency);
-                                radio.setSpectrumCenter(u.frequency);
-                            }}
+                            className={`chat__user-row${u.username === chat.following ? ' is-following' : ''}`}
                         >
-                            <span className="chat__user-name">
-                                {countryFlag(u.country_code)} {u.username}
-                                {u.tx && <span className="chip">TX</span>}
-                            </span>
-                            <span className="chat__user-meta">
-                                {u.frequency ? formatFreqShort(u.frequency) : '—'}
-                                {u.mode ? ` ${u.mode.toUpperCase()}` : ''}
-                                {u.is_idle && u.idle_minutes ? ` · idle ${u.idle_minutes}m` : ''}
-                            </span>
-                        </button>
+                            <button
+                                type="button"
+                                className={`chat__user${u.is_idle ? ' is-idle' : ''}`}
+                                // Their frequency is published over chat, so it
+                                // doubles as a way to go and listen to what they
+                                // are hearing.
+                                disabled={!u.frequency}
+                                title={u.frequency ? `Tune to ${formatFreqShort(u.frequency)}` : u.username}
+                                onClick={() => {
+                                    if (!u.frequency) return;
+                                    if (u.mode) radio.setMode(u.mode);
+                                    radio.setFrequency(u.frequency);
+                                    radio.setSpectrumCenter(u.frequency);
+                                }}
+                            >
+                                <span className="chat__user-name">
+                                    {countryFlag(u.country_code)} {u.username}
+                                    {u.tx && <span className="chip">TX</span>}
+                                </span>
+                                <span className="chat__user-meta">
+                                    {u.frequency ? formatFreqShort(u.frequency) : '—'}
+                                    {u.mode ? ` ${u.mode.toUpperCase()}` : ''}
+                                    {u.zoom_bw > 0 ? ` · ${Math.round(u.zoom_bw)} Hz/bin` : ''}
+                                    {u.is_idle && u.idle_minutes ? ` · idle ${u.idle_minutes}m` : ''}
+                                </span>
+                            </button>
+                            {/* Not on our own row — we are already where we are — and not on
+                                somebody whose client has published no frequency and mode, whom
+                                there is nothing to follow. */}
+                            {followable(u, chat.username) && (
+                                <button
+                                    type="button"
+                                    className={`chat__follow${u.username === chat.following ? ' is-on' : ''}`}
+                                    title={u.username === chat.following
+                                        ? `Stop following ${u.username}`
+                                        : `Follow ${u.username} — your dial tracks theirs`}
+                                    aria-pressed={u.username === chat.following}
+                                    onClick={() => chat.actions.follow(u.username)}
+                                >
+                                    {u.username === chat.following ? <Icon.Tick size={12} /> : <Icon.Link size={12} />}
+                                </button>
+                            )}
+                        </div>
                     ))}
                 </div>
             )}

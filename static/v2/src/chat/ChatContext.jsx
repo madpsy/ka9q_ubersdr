@@ -7,6 +7,9 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { throttle } from '../lib/throttle.js';
 import { isMention } from '../lib/mentions.js';
+import {
+    followSignature, followTarget, followView, loadFollowZoom, saveFollowZoom,
+} from '../lib/chatFollow.js';
 
 const ChatContext = createContext(null);
 
@@ -56,7 +59,7 @@ function playMentionChime() {
 }
 
 export function ChatProvider({ children }) {
-    const { serverInfo, tuning, running } = useRadio();
+    const { serverInfo, tuning, running, view, actions: radio } = useRadio();
     const { sections } = useLayout();
     const enabled = !!(serverInfo && serverInfo.chat_enabled);
     // Hiding the panel should also drop the socket — otherwise everyone carries
@@ -77,6 +80,15 @@ export function ChatProvider({ children }) {
     });
     const [joined, setJoined] = useState(false);
     const [unreadMentions, setUnreadMentions] = useState(0);
+    // Whose dial is driving ours, or null — v1's "sync". One at a time, and not remembered
+    // between visits: it is about who is on the channel now, and arriving to find the dial
+    // being driven by a name you do not remember choosing is the wrong kind of surprise.
+    const [following, setFollowing] = useState(null);
+    // Whether their spectrum view comes with it. Stored, and off by default, because the view
+    // is your own window on the band — see lib/chatFollow.js.
+    // Named apart from the action below that drives it: a method called setFollowZoom whose
+    // body calls setFollowZoom is legal and reads like a bug.
+    const [followZoom, followZoomTo] = useState(loadFollowZoom);
     const [chimeOn, setChimeOn] = useState(() => {
         try { return localStorage.getItem('ubersdr.v2.chatChime') !== 'off'; } catch (e) { return true; }
     });
@@ -245,6 +257,44 @@ export function ChatProvider({ children }) {
         return chat.acquire('chat');
     }, [wanted, running, chat]);
 
+    // ── Following ────────────────────────────────────────────────────────────
+    //
+    // Applied here rather than in the panel, deliberately: a dock that is collapsed unmounts
+    // the panel, and a follow that stopped following the moment you tucked the chat away would
+    // be worse than not having it. ChatProvider is mounted once by App.
+    //
+    // Driven off the user list rather than the `chat_user_update` event. Both say the same
+    // thing — the handler above asks for a fresh list whenever an update arrives — but the
+    // list is the merged, authoritative record, and v1 goes out of its way to read from it too
+    // (its update payload can be partial, and syncing to a partial record tunes to half of it).
+    const applied = useRef('');
+    useEffect(() => {
+        if (!following) { applied.current = ''; return; }
+        const them = users.find((u) => u.username === following);
+        // Gone: they left, or the server dropped them. Stop rather than holding a name that
+        // will never move again — and say so by clearing it, so the panel stops claiming to
+        // follow somebody who is not there.
+        if (!them) { setFollowing(null); return; }
+        const sig = followSignature(them, followZoom);
+        // Nothing we would act on has changed. The list is refreshed by anything at all
+        // happening on the channel, and re-tuning on each of those would fight an operator who
+        // has since nudged the dial.
+        if (!sig || sig === applied.current) return;
+        applied.current = sig;
+
+        const target = followTarget(them);
+        if (!target) return;
+        radio.tuneTo(target);
+        // Their view too, when asked for — and then nothing else touches it. Matching a view
+        // already puts their frequency inside it, so ensureVisible would either do nothing or,
+        // at the edges of the band, argue with the centre we just chose.
+        const v = followZoom ? followView(them, view.binCount) : null;
+        if (v) radio.setSpectrumView(v.frequency, v.span);
+        // Otherwise the dial has moved and the window has not: v1 forces "edge tune" on for two
+        // seconds to drag the spectrum along, which is this said directly.
+        else radio.ensureVisible(target.frequency);
+    }, [following, followZoom, users, view.binCount, radio]);
+
     // Publish what we are tuned to, so it shows beside our name in the user
     // list. Throttled — this fires on every dial movement.
     //
@@ -254,10 +304,15 @@ export function ChatProvider({ children }) {
     // the first status push went out in exactly that window and came back
     // refused. Waiting on the announcement costs nothing: there is no status
     // worth publishing for someone the channel cannot see yet.
+    //
+    // The spectrum's resolution goes with it, so somebody following us can match our view —
+    // hence the zoom in the dependencies as well as the tuning.
     const pushStatus = useMemo(() => throttle((t) => chat.setStatus(t), 1500), [chat]);
     useEffect(() => {
-        if (joined && announced && chat.connected) pushStatus(tuning);
-    }, [joined, announced, tuning, pushStatus, chat]);
+        if (joined && announced && chat.connected) {
+            pushStatus({ ...tuning, binBandwidth: view.binBandwidth });
+        }
+    }, [joined, announced, tuning, view.binBandwidth, pushStatus, chat]);
 
     const actions = useMemo(() => ({
         join(name) {
@@ -286,7 +341,30 @@ export function ChatProvider({ children }) {
             // error handler's auto-join would put them straight back.
             nameRef.current = '';
             setUsername('');
+            // Leaving the channel ends the follow with it: the user list is about to be empty,
+            // and a dial still being driven by somebody you can no longer see is not a feature.
+            applied.current = '';
+            setFollowing(null);
             try { localStorage.removeItem(NAME_KEY); } catch (e) { /* ignore */ }
+        },
+        // Follow a user, or the same one again to stop. Immediate rather than waiting for
+        // their next move: the point of pressing it is to hear what they are hearing now.
+        follow(name) {
+            setFollowing((cur) => {
+                applied.current = '';
+                return cur === name ? null : name;
+            });
+        },
+        unfollow() {
+            applied.current = '';
+            setFollowing(null);
+        },
+        // Turning the zoom on mid-follow applies it at once, which is why the signature is
+        // cleared: the numbers have not changed, but what we do with them has.
+        setFollowZoom(on) {
+            applied.current = '';
+            followZoomTo(on);
+            saveFollowZoom(on);
         },
         send(text) {
             const body = String(text).trim();
@@ -303,9 +381,10 @@ export function ChatProvider({ children }) {
 
     const value = useMemo(() => ({
         enabled, state, messages, users, error, username, joined, actions,
-        unreadMentions, chimeOn,
+        unreadMentions, chimeOn, following, followZoom,
         connected: state === 'open',
-    }), [enabled, state, messages, users, error, username, joined, actions, unreadMentions, chimeOn]);
+    }), [enabled, state, messages, users, error, username, joined, actions, unreadMentions,
+        chimeOn, following, followZoom]);
 
     return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

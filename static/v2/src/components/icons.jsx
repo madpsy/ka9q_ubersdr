@@ -116,6 +116,8 @@ export const Icon = {
     // A fax page: a sheet with a chart drawn on it.
     Fax: (p) => <Svg {...p}><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M7 8h10" /><path d="M7 16c2-4 3.5 2 5-1s2.5-2 5 1" /></Svg>,
     // An anchor: maritime traffic, which is what NAVTEX carries.
+    // Two links of a chain, for following another listener's dial — v1 uses 🔗 for it.
+    Link: (p) => <Svg {...p}><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" /></Svg>,
     Anchor: (p) => <Svg {...p}><circle cx="12" cy="5" r="2.2" /><path d="M12 7.2V21" /><path d="M8 11h8" /><path d="M4 15a8 8 0 0 0 16 0" /><path d="M4 15h2.5M20 15h-2.5" /></Svg>,
     // Captions: a screen with lines of subtitle across it — speech turned into
     // text. Not the microphone, which FreeDV has: that one means "voice", and

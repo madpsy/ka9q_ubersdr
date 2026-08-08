@@ -5094,6 +5094,58 @@ a.btn { text-decoration: none; }
 .chat__user:hover:not(:disabled) { background: var(--surface-hover); }
 .chat__user:disabled { cursor: default; }
 .chat__user.is-idle { opacity: 0.55; }
+/* A user row: the name and where they are, plus the follow button beside it. The button is
+   its own control rather than part of the row, because the row already means "tune there
+   once" and following is the other thing you might want. */
+.chat__user-row { display: flex; align-items: stretch; gap: 2px; }
+.chat__user-row .chat__user { flex: 1; min-width: 0; }
+.chat__user-row.is-following { background: var(--accent-soft); border-radius: var(--radius-sm); }
+.chat__follow {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    flex: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.chat__follow:hover { border-color: var(--accent); color: var(--text); }
+.chat__follow.is-on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+/* Said in words, not only as a lit button: the receiver is being tuned by somebody else. */
+.chat__following {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.chat__following b { color: var(--text); }
+.chat__unfollow {
+    margin-left: auto;
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    background: none;
+    color: var(--text-dim);
+    font-size: calc(10px * var(--ui-scale));
+    cursor: pointer;
+}
+.chat__unfollow:hover { border-color: var(--accent); color: var(--text); }
+.chat__zoomsync {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
 .chat__user-name { font-size: calc(12px * var(--ui-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat__user-meta { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
 

@@ -287,13 +287,20 @@ export class DXClusterConnection extends Emitter {
     }
 
     // Publishes what this receiver is listening to, so other users see it
-    // beside our name.
-    setStatus({ frequency, mode, bandwidthLow, bandwidthHigh }) {
+    // beside our name — and can follow it. See lib/chatFollow.js.
+    //
+    // `zoom_bw` is the spectrum's resolution in Hz per bin, and it is only sent when there is
+    // one: v1 omits the field rather than sending a zero, and a follower reads "no zoom
+    // published" from its absence. It is what lets somebody following us match our view, so
+    // leaving it out made following a v2 user strictly worse than following a v1 one.
+    setStatus({ frequency, mode, bandwidthLow, bandwidthHigh, binBandwidth }) {
+        const zoom = Number(binBandwidth);
         this.lastStatus = {
             frequency: Math.round(frequency),
             mode,
             bw_low: Math.round(bandwidthLow),
             bw_high: Math.round(bandwidthHigh),
+            ...(zoom > 0 ? { zoom_bw: zoom } : {}),
         };
         return this.send({ type: 'chat_set_frequency_mode', ...this.lastStatus });
     }

@@ -32,6 +32,10 @@ export default function ThemeMenu() {
     return (
         <Menu
             align="end"
+            /* Hovering opens it as well as clicking: this menu is nine swatches to look
+               at rather than a form, and trying a scheme on should not cost a click.
+               Pointer devices only — see Menu. */
+            openOnHover
             trigger={(
                 <Button
                     size="sm"

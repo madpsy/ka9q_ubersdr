@@ -4,6 +4,7 @@
 
 import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 import Icon from './icons.jsx';
+import { useMediaQuery } from '../lib/useMediaQuery.js';
 
 // `className` is pulled out and merged rather than left in `rest`: spread after
 // className={cls} it would replace the lot — btn, the variant, the size and is-active
@@ -244,11 +245,48 @@ export function Bar({ value, min = 0, max = 1, peak, tone = 'accent', color }) {
  * way it is then nudged back on screen, since being readable outranks being
  * aligned.
  */
-export function Menu({ trigger, children, align = 'end' }) {
+// How long a pointer has to rest on a hover-opening trigger, and how long it can be
+// away before the menu closes.
+//
+// The open delay is what stops the menu appearing every time somebody crosses the top
+// bar on the way to something else; the close delay is what lets them travel the few
+// pixels of gap between the trigger and the panel without it vanishing under the
+// pointer. Both are the numbers the dock's own hover-to-peek uses, because it is the
+// same gesture and two different feels for it would be noticed.
+const HOVER_OPEN_MS = 180;
+const HOVER_CLOSE_MS = 220;
+
+/**
+ * `openOnHover` adds hovering to the ways it opens; clicking still works, and still
+ * toggles. For a menu that is a look at what is available rather than a form to fill in
+ * — the theme's colour schemes — reaching it should not cost a click.
+ *
+ * Only where hovering is something the pointer does: on a touch screen the enter event
+ * arrives with the tap that is already toggling the menu, so it would open and close in
+ * the same gesture. Same test the dock makes for the same reason.
+ */
+export function Menu({ trigger, children, align = 'end', openOnHover = false }) {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
     const panelRef = useRef(null);
     const [pos, setPos] = useState(null);
+    const canHover = useMediaQuery('(hover: hover) and (pointer: fine)');
+    const hoverable = openOnHover && canHover;
+    const hoverTimer = useRef(null);
+
+    const clearHover = () => { clearTimeout(hoverTimer.current); hoverTimer.current = null; };
+    useEffect(() => clearHover, []);
+
+    const onEnter = hoverable ? () => {
+        clearHover();
+        hoverTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_MS);
+    } : undefined;
+    // On the whole menu, trigger and panel together, so moving from one to the other is
+    // not a departure. A pointer that leaves and comes back inside the delay keeps it.
+    const onLeave = hoverable ? () => {
+        clearHover();
+        hoverTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
+    } : undefined;
 
     useLayoutEffect(() => {
         if (!open) {
@@ -302,8 +340,16 @@ export function Menu({ trigger, children, align = 'end' }) {
     }, [open]);
 
     return (
-        <div className="menu" ref={ref}>
-            <span onClick={() => setOpen((o) => !o)}>{trigger}</span>
+        <div
+            className="menu"
+            ref={ref}
+            onPointerEnter={onEnter}
+            onPointerLeave={onLeave}
+        >
+            {/* A click still toggles, and cancels any pending hover so the two cannot
+                fight: clicking a menu that was about to open on its own should close it,
+                which is what somebody who has just clicked it expects. */}
+            <span onClick={() => { clearHover(); setOpen((o) => !o); }}>{trigger}</span>
             {open && (
                 <div
                     ref={panelRef}

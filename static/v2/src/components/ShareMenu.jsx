@@ -75,6 +75,12 @@ export default function ShareMenu() {
     return (
         <Menu
             align="end"
+            /* Hovering opens it, as it does the theme menu beside it: two neighbouring
+               buttons in the same corner behaving differently is the kind of small
+               inconsistency that gets noticed every time. Pointer devices only — on a
+               phone this menu is reached by tapping, and the sheet it can open there is
+               the system's own. */
+            openOnHover
             trigger={(
                 <Button
                     size="sm"

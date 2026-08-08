@@ -1603,13 +1603,25 @@ export default function SpectrumView() {
             {!bare && (
                 <div className="spectrum__toolbar">
                     <div className="spectrum__meta" ref={metaRef}>
-                        <span className="tag tag--accent">{formatSpan(span)}</span>
+                        {/* The span, the centre and the receiver's frequency accuracy are
+                            all off on a phone. They are context rather than control: the ruler under the spectrum
+                            says where the view is and how wide it is, the accuracy is a
+                            standing fact about the receiver rather than something that
+                            changes while you listen, and the row they are in is the same
+                            one holding the squelch, the filter and the DSP tags — which
+                            are state you are actually working with. */}
+                        {!mobile && <span className="tag tag--accent">{formatSpan(span)}</span>}
                         {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
                         {/* Next to the frequencies it qualifies, and before the audio
                             tags: this one is about what the numbers on screen mean,
                             not about what is being done to the sound. */}
-                        <FreqOffsetTag />
-                        {hoverInfo && room.cursor && (
+                        {!mobile && <FreqOffsetTag />}
+                        {/* The cursor readout goes with them. It is the least useful of
+                            the four on a handset by some distance: there is no pointer to
+                            follow, so it only says where a finger last touched — and the
+                            hover tip that appears under the finger already says that,
+                            with the level beside it. */}
+                        {!mobile && hoverInfo && room.cursor && (
                             <span className="tag tag--ghost" data-optional="cursor">{formatFreqExact(hoverInfo.freq)}</span>
                         )}
                         <SquelchTag />

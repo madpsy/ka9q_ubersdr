@@ -17,6 +17,8 @@
 
 /** The background the ring is cleared to — nothing received yet. */
 export const RING_BG = '#05070c';
+/** The same colour as numbers, for anything mixing toward it — see lib/dss.js. */
+export const RING_BG_RGB = [0x05, 0x07, 0x0c];
 
 // Device pixels the waterfall canvas overhangs its container by, so the smooth
 // scroll always has a row in hand to slide into view while its container clips

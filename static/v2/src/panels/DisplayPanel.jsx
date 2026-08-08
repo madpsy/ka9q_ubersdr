@@ -3,6 +3,7 @@ import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
+import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
@@ -292,6 +293,37 @@ export default function DisplayPanel() {
 
             {hasWaterfall && (
                 <>
+                    {/* How the same history is drawn, which is why it sits with
+                        the speed and the pan rather than with the view mode: the
+                        view mode says whether there is a waterfall, this says
+                        what it looks like. See lib/dss.js. */}
+                    <Field
+                        label="Waterfall style"
+                        hint={d.waterfallMode === '2d' ? undefined : 'perspective history'}
+                    >
+                        <Segmented
+                            value={d.waterfallMode || '2d'}
+                            onChange={(v) => d.set({ waterfallMode: v })}
+                            options={[
+                                { value: '2d', label: '2D', title: 'Heat map — the classic waterfall' },
+                                { value: '3d', label: '3D', title: 'Perspective stack of recent traces' },
+                                { value: 'both', label: '2D+3D', title: 'Both, newest rows meeting in the middle' },
+                            ]}
+                        />
+                    </Field>
+                    {/* Only where there is a surface to set the depth of. The
+                        2D waterfall's own history is however much fits the pane,
+                        which is not a thing anybody sets in seconds. */}
+                    {d.waterfallMode !== '2d' && (
+                        <Field label="3D depth" hint={`${d.dssSeconds}s of history`}>
+                            <Slider
+                                value={d.dssSeconds}
+                                min={MIN_SECONDS}
+                                max={MAX_SECONDS}
+                                onChange={(v) => d.set({ dssSeconds: v })}
+                            />
+                        </Field>
+                    )}
                     <Field label="Waterfall speed" hint={`${d.waterfallRate} rows/s`}>
                         <Slider value={d.waterfallRate} min={2} max={40} onChange={(v) => d.set({ waterfallRate: v })} />
                     </Field>

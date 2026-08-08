@@ -70,6 +70,18 @@ export const Icon = {
     // and it has to read at 13 px in a dock header — so it is the shape of a
     // leaderboard rather than a trophy, which at that size is a blob.
     Podium: (p) => <Svg {...p}><path d="M9 10h6v11H9z" /><path d="M3 14h6v7H3z" /><path d="M15 13h6v8h-6z" /><path d="M12 3l1.2 2.5 2.8.4-2 2 .5 2.8L12 9.4 9.5 10.7l.5-2.8-2-2 2.8-.4z" /></Svg>,
+    // ── How the waterfall's history is drawn ──────────────────────────────
+    //
+    // Three glyphs rather than one highlighted button, for the same reason the
+    // ViewSplit/ViewSpectrum/ViewWaterfall trio below exists: these are states
+    // in a cycle, not an on/off, and one glyph could only say "waterfall" while
+    // leaving which kind to the tooltip. Rows for the heat map, a receding
+    // trapezoid for the surface, and the trapezoid over the rows for both —
+    // which is also exactly how the pane is laid out in that mode.
+    Wf2D: (p) => <Svg {...p}><path d="M4 6.5h16M4 10h16M4 13.5h16M4 17h16" /></Svg>,
+    Wf3D: (p) => <Svg {...p}><path d="M8.5 5.5h7l4.5 13H4z" /><path d="M7 13.5h10M6 16h12" /></Svg>,
+    WfBoth: (p) => <Svg {...p}><path d="M9.5 3.5h5l3.5 8H6z" /><path d="M4 14.5h16M4 17.5h16M4 20.5h16" /></Svg>,
+
     Users: (p) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16.5 5.5a3.2 3.2 0 0 1 0 6" /><path d="M18 14.6A6 6 0 0 1 21 20" /></Svg>,
     Bookmark: (p) => <Svg {...p}><path d="M6 4h12v17l-6-4-6 4z" /></Svg>,
     Eye: (p) => <Svg {...p}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></Svg>,

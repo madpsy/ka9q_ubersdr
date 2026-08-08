@@ -30,7 +30,7 @@ import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import {
-    RING_BG, RING_PAD, panTransform, ringKeepsHistory, ringSlices, smoothInterval,
+    RING_BG, RING_BG_RGB, RING_PAD, panTransform, ringKeepsHistory, ringSlices, smoothInterval,
 } from '../lib/waterfallRing.js';
 import {
     TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
@@ -58,6 +58,10 @@ import { fetchMyIp, peekMyIp } from '../lib/myip.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
+import {
+    createRing as createDssRing, drawSurface, pushRow as pushDssRow, storeRows as dssStoreRows,
+    unproject as dssUnproject,
+} from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
 
@@ -158,6 +162,31 @@ const TICK_MAJOR = 9;
 const TICK_MINOR = 5;
 const MIN_SPECTRUM_H = 60;
 const MIN_WATERFALL_H = 40;
+
+// The two toolbar cycles, and what each state's button says.
+//
+// Written out rather than derived from an array so the wording can say what
+// *pressing* does — a cycle whose tooltip only named the current state would
+// leave you pressing to find out where it goes.
+const NEXT_VIEW = { split: 'spectrum', spectrum: 'waterfall', waterfall: 'split' };
+const VIEW_TITLE = {
+    split: 'Spectrum above waterfall — click for spectrum only',
+    spectrum: 'Spectrum only — click for waterfall only',
+    waterfall: 'Waterfall only — click for both',
+};
+const NEXT_WF = { '2d': '3d', '3d': 'both', both: '2d' };
+const WF_STYLE_TITLE = {
+    '2d': 'Waterfall as a heat map — click for the 3D surface',
+    '3d': 'Waterfall as a 3D surface — click for both together',
+    both: 'Both, newest rows meeting in the middle — click for the heat map',
+};
+
+// How much of the waterfall area the surface takes in '2d+3d'.
+//
+// Slightly less than half. The surface spends the top of its own box on the far,
+// squashed rows and the heat map uses every pixel it is given, so an even split
+// reads as the surface having more room than it needs.
+const DSS_SPLIT = 0.45;
 
 // How far the split may be dragged, as the spectrum's share of the height.
 // Exactly the Display panel's slider range, because they are two ways of moving
@@ -742,6 +771,7 @@ export default function SpectrumView() {
     const wrapRef = useRef(null);
     const specRef = useRef(null);
     const wfRef = useRef(null);
+    const dssRef = useRef(null);
     // The tuning marks and the hover line, on a canvas of their own over the
     // waterfall. They have to be off the scrolling canvas: it is translated
     // between rows, and a marker that slid with it would not be pointing at the
@@ -760,6 +790,19 @@ export default function SpectrumView() {
         ring: null,          // offscreen canvas
         ringCtx: null,
         ringHead: 0,
+        // The surface's own magnitude ring, and whether its canvas needs
+        // repainting. Null until a mode that draws one is chosen, so 2D pays
+        // nothing for a feature it is not using.
+        dss: null,
+        dssRows: 0,
+        dssDirty: false,
+        // What the surface was last painted against, so a rebuild happens when
+        // the picture would actually differ. NaN so the first frame always
+        // exceeds the threshold below.
+        dssFloor: NaN,
+        dssRange: NaN,
+        dssPalette: '',
+        dssContrast: 0,
         ringHeight: 0,
         ringWidth: 0,
         dirty: false,
@@ -854,6 +897,22 @@ export default function SpectrumView() {
     }
     const wfH = avail - specH;
 
+    // How the waterfall area is shared. The surface is drawn on its own canvas
+    // rather than into the waterfall's, so the 2D path — the ring, the smooth
+    // scroll transform, the marks — is exactly the code it always was and the
+    // default mode cannot regress.
+    //
+    // In 'both' the surface takes the top half. That is not arbitrary: our
+    // waterfall runs newest-at-the-top downward, and the surface runs
+    // newest-at-the-front upward, so with the surface above the heat map the two
+    // newest rows meet at the seam and time runs outward in both directions from
+    // the same instant.
+    const wfMode = viewMode === 'spectrum' ? '2d' : (display.waterfallMode || '2d');
+    const dssH = wfMode === '3d' ? wfH
+        : wfMode === 'both' ? Math.round(wfH * DSS_SPLIT)
+            : 0;
+    const heatH = wfH - dssH;
+
     // Size the backing stores for device pixels and rebuild the waterfall ring.
     useEffect(() => {
         const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -870,7 +929,11 @@ export default function SpectrumView() {
 
         // Everything except the waterfall is sized to exactly what it shows.
         for (const [ref, h] of [
-            [specRef, specH], [scaleRef, SCALE_H], [wfMarksRef, wfH], [wfScaleRef, wfScaleH],
+            // The marks belong to the heat map, not to the surface: a VFO line
+            // drawn straight down a receding trapezoid would cross a different
+            // frequency on every row of it. The surface carries its own
+            // frequency sense through unproject instead.
+            [specRef, specH], [scaleRef, SCALE_H], [wfMarksRef, heatH], [wfScaleRef, wfScaleH],
         ]) {
             const c = ref.current;
             if (!c) continue;
@@ -884,7 +947,18 @@ export default function SpectrumView() {
         // That overhang is what the smooth scroll slides: the newest row is
         // painted above the top edge and travels down into view, so the picture
         // moves continuously between rows instead of jumping when one arrives.
-        const h = Math.max(1, Math.round(wfH * dpr)) + RING_PAD;
+        const dssc = dssRef.current;
+        if (dssc) {
+            dssc.width = w;
+            dssc.height = Math.max(1, Math.round(dssH * dpr));
+            dssc.style.width = sizes.w + 'px';
+            dssc.style.height = dssH + 'px';
+        }
+        // The surface is rebuilt from the ring rather than scrolled, so a resize
+        // only has to ask for one — there is no history in its pixels to keep.
+        g.dssDirty = true;
+
+        const h = Math.max(1, Math.round(heatH * dpr)) + RING_PAD;
         const wfc = wfRef.current;
         if (wfc) {
             wfc.width = w;
@@ -930,7 +1004,7 @@ export default function SpectrumView() {
             if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
-    }, [sizes.w, sizes.h, specH, wfH, wfScaleH]);
+    }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, wfScaleH]);
 
     // ---- data -----------------------------------------------------------
 
@@ -981,6 +1055,9 @@ export default function SpectrumView() {
             drawFrame(g, d, {
                 spec: specRef.current,
                 wf: wfRef.current,
+                dss: dssRef.current,
+                dssH,
+                heatH,
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 wfScale: wfScaleRef.current,
@@ -1011,7 +1088,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH]);
+    }, [sizes.w, specH, wfH, dssH, heatH]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {
@@ -1150,12 +1227,39 @@ export default function SpectrumView() {
 
     // ---- pointer interaction --------------------------------------------
 
-    const freqAtX = useCallback((clientX) => {
+    // The frequency under a point.
+    //
+    // Flat everywhere except inside the 3D surface, where a row's width shrinks
+    // with depth and a column of screen is a different frequency on every row of
+    // it. Passing clientY is what lets a click on a peak three seconds back tune
+    // to the frequency it was actually on — the same promise clicking partway
+    // down the heat map makes, which is the whole reason the surface can live in
+    // the waterfall pane at all. Omit it and the mapping is the flat one, which
+    // is right for everything outside that box.
+    const freqAtX = useCallback((clientX, clientY) => {
         const el = wrapRef.current;
         const cfg = cfgRef.current;
         if (!el || !cfg.span) return null;
         const r = el.getBoundingClientRect();
-        const frac = clamp((clientX - r.left) / r.width, 0, 1);
+        let frac = (clientX - r.left) / r.width;
+
+        const d = dssRef.current;
+        if (d != null && clientY != null) {
+            const dr = d.getBoundingClientRect();
+            if (dr.height > 0 && clientY >= dr.top && clientY <= dr.bottom) {
+                const u = dssUnproject(
+                    (clientX - dr.left) / dr.width,
+                    (clientY - dr.top) / dr.height,
+                );
+                // Beside the trapezoid rather than on it: there is no frequency
+                // under the pointer there, and clamping would silently tune to
+                // the band edge instead of doing nothing.
+                if (u.freqUnit < 0 || u.freqUnit > 1) return null;
+                frac = u.freqUnit;
+            }
+        }
+
+        frac = clamp(frac, 0, 1);
         return cfg.centerFreq - cfg.span / 2 + frac * cfg.span;
     }, []);
 
@@ -1254,7 +1358,7 @@ export default function SpectrumView() {
     }, [viewMode]);
 
     const onContextMenu = useCallback((e) => {
-        const f = freqAtX(e.clientX);
+        const f = freqAtX(e.clientX, e.clientY);
         if (f == null) return;   // no view yet; leave the browser menu alone
         e.preventDefault();
         // On a phone this arrives from a long press, which has no click and no
@@ -1395,7 +1499,7 @@ export default function SpectrumView() {
         g.dirty = true;
 
         const cfg = cfgRef.current;
-        const f = freqAtX(e.clientX);
+        const f = freqAtX(e.clientX, e.clientY);
         if (f != null) {
             // v1's readout: what is under the cursor, and the strongest signal
             // in view (spectrum-display.js:3303). g.px is the per-pixel dB
@@ -1494,8 +1598,8 @@ export default function SpectrumView() {
     // A release that means "tune here". Snapped to whatever the Receiver panel's
     // step is set to, so clicking the spectrum and pressing +/- agree about where
     // the channels are.
-    const tuneAt = useCallback((clientX) => {
-        const f = freqAtX(clientX);
+    const tuneAt = useCallback((clientX, clientY) => {
+        const f = freqAtX(clientX, clientY);
         if (f == null) return;
         const step = dispRef.current.tuneStep || 1;
         actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
@@ -1527,7 +1631,7 @@ export default function SpectrumView() {
         if (g.edge) {
             const tapped = g.edge.pending;
             g.edge = null;
-            if (tapped) tuneAt(e.clientX);
+            if (tapped) tuneAt(e.clientX, e.clientY);
             return;
         }
 
@@ -1535,7 +1639,7 @@ export default function SpectrumView() {
         g.drag = null;
         if (!drag) return;
         if (drag.moved) return;
-        tuneAt(e.clientX);
+        tuneAt(e.clientX, e.clientY);
     }, [tuneAt]);
 
     // A gesture taken away from us — the browser claiming it, the window losing
@@ -1617,7 +1721,7 @@ export default function SpectrumView() {
         // Anchor per the Display panel: 'cursor' holds the frequency under the
         // pointer still, 'tuned' re-centres on the dial the way the toolbar's
         // +/- buttons do — which zoomCenter() takes as a null point.
-        const f = anchorNow() === 'tuned' ? null : freqAtX(e.clientX);
+        const f = anchorNow() === 'tuned' ? null : freqAtX(e.clientX, e.clientY);
         if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
     }, [actions, freqAtX]);
 
@@ -1719,6 +1823,59 @@ export default function SpectrumView() {
                                     : 'Zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
                                 aria-label="Zoom anchor"
                                 onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
+                            />
+                        )}
+                        {/* What the centre area shows, and — where there is a
+                            waterfall in it — how that waterfall is drawn. Both
+                            mirror the Display panel, and both are here for the
+                            reason the anchor button is: they are the settings
+                            you change *while* looking at a signal, and going to
+                            a panel to swap to the waterfall means looking away
+                            from the thing that made you want to.
+
+                            Cycles rather than a menu. Three states, all cheap to
+                            pass through and all instantly legible when you land
+                            on them, is the case a cycle is for — and it costs one
+                            button of a row that is already full.
+
+                            Down here rather than at the near end, and beside the
+                            pan button, for the reason the zoom pair is first:
+                            the style button comes and goes with the view mode,
+                            and a control that appears and disappears must not sit
+                            where it would push the constantly-pressed pair
+                            sideways under a pointer already aiming at them.
+
+                            The icon is the state it is in, not the one it would
+                            move to, which is the rule the anchor and wheel
+                            buttons follow: the toolbar reads as state, and the
+                            tooltip says what pressing does. */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={viewMode === 'spectrum' ? <Icon.ViewSpectrum />
+                                : viewMode === 'waterfall' ? <Icon.ViewWaterfall />
+                                    : <Icon.ViewSplit />}
+                            title={VIEW_TITLE[viewMode] || VIEW_TITLE.split}
+                            aria-label="What the display shows"
+                            onClick={() => display.set({ viewMode: NEXT_VIEW[viewMode] || 'spectrum' })}
+                        />
+                        {/* Only where there is a waterfall to draw: in
+                            spectrum-only view the surface has no pane, and a
+                            button that could not change anything would be a
+                            control promising something that is not there. The
+                            depth in seconds stays in the Display panel — it is a
+                            slider, and a thing you set once. */}
+                        {viewMode !== 'spectrum' && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={wfMode !== '2d'}
+                                icon={wfMode === '3d' ? <Icon.Wf3D />
+                                    : wfMode === 'both' ? <Icon.WfBoth />
+                                        : <Icon.Wf2D />}
+                                title={WF_STYLE_TITLE[wfMode] || WF_STYLE_TITLE['2d']}
+                                aria-label="How the waterfall is drawn"
+                                onClick={() => display.set({ waterfallMode: NEXT_WF[wfMode] || '2d' })}
                             />
                         )}
                         {/* What the waterfall's history does when the view moves
@@ -1938,8 +2095,28 @@ export default function SpectrumView() {
                     sit above, still, on a canvas that is not translated. */}
                 {wfH > 0 && (
                     <div className="spectrum__wf" style={{ height: wfH }}>
-                        <canvas ref={wfRef} className="spectrum__wf-pane" />
-                        <canvas ref={wfMarksRef} className="spectrum__wf-marks" />
+                        {/* Above the heat map, so the two newest rows meet at the
+                            seam — see the note where dssH is worked out. Its own
+                            canvas, so nothing about the 2D path changes. */}
+                        {dssH > 0 && (
+                            <canvas
+                                ref={dssRef}
+                                className="spectrum__wf-dss"
+                                style={{ height: dssH }}
+                            />
+                        )}
+                        {heatH > 0 && (
+                            <canvas
+                                ref={wfRef}
+                                className="spectrum__wf-pane"
+                                style={{ top: dssH }}
+                            />
+                        )}
+                        <canvas
+                            ref={wfMarksRef}
+                            className="spectrum__wf-marks"
+                            style={{ top: dssH }}
+                        />
                     </div>
                 )}
                 {/* Notches under the waterfall, on the same frequencies as the
@@ -2187,6 +2364,7 @@ function autoRange(px, trace, g, k) {
 function drawFrame(g, d, ctx) {
     const {
         spec, wf, wfMarks, scale, wfScale, cfg, tuning, width, specH, wfH, commitRow, dt,
+        dss, dssH, heatH,
     } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
@@ -2233,7 +2411,9 @@ function drawFrame(g, d, ctx) {
 
     const { dial: colVfoLine, edge: colEdge } = markColors(d);
 
-    drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfoLine, colEdge);
+    drawWaterfall(g, d, wf, wfMarks, heatH != null ? heatH : wfH, pxW, floor, range,
+        commitRow, cfg, tuning, colVfoLine, colEdge);
+    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
     drawWaterfallScale(g, wfScale, pxW, cfg, width);
@@ -2584,6 +2764,66 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     // on top — it is the line you tune by.
     const x = hzToX(tuning.frequency);
     if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, DIAL_DASH, 1.6);
+}
+
+/**
+ * The waterfall as terrain — see lib/dss.js.
+ *
+ * On its own canvas, so the heat map's ring, its smooth-scroll transform and its
+ * marks are untouched code in every mode. Repainted only when a row arrives or
+ * something about the picture changed, exactly as the waterfall repaints only
+ * when a row arrives: the whole surface is rebuilt from the ring each time, so
+ * there is no history in its pixels to preserve and nothing to scroll.
+ */
+function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow) {
+    if (!dss || !dssH || dssH <= 0) {
+        // Dropped rather than kept: coming back to 2D should not hold a megabyte
+        // of history for a canvas that is not on screen, and the surface fills
+        // again in a few seconds.
+        g.dss = null;
+        g.dssRows = 0;
+        return;
+    }
+
+    // Sized from the depth in seconds and the rate rows actually arrive at. A
+    // change to either is a different history, and the rows already stored were
+    // taken at the old spacing — so the ring is remade rather than reinterpreted.
+    const want = dssStoreRows(d.dssSeconds, d.waterfallRate);
+    if (!g.dss || g.dssRows !== want) {
+        g.dss = createDssRing(want);
+        g.dssRows = want;
+        g.dssDirty = true;
+    }
+
+    if (commitRow) {
+        pushDssRow(g.dss, g.px);
+        g.dssDirty = true;
+    }
+    // The level mapping moves on its own with auto-range, and a surface drawn
+    // against last second's floor is a surface at the wrong height.
+    // Threshold, not equality. Auto-range eases the floor and ceiling toward
+    // their targets every frame, so an exact comparison would rebuild the whole
+    // surface sixty times a second to move every ridge by a fraction of a pixel.
+    // A quarter of a dB is below what a ridge can show at any pane height.
+    if (Math.abs(floor - g.dssFloor) > 0.25 || Math.abs(range - g.dssRange) > 0.25
+        || d.palette !== g.dssPalette || d.contrast !== g.dssContrast) {
+        g.dssFloor = floor;
+        g.dssRange = range;
+        g.dssPalette = d.palette;
+        g.dssContrast = d.contrast;
+        g.dssDirty = true;
+    }
+    if (!g.dssDirty) return;
+    g.dssDirty = false;
+
+    const ctx = dss.getContext('2d', { alpha: false });
+    drawSurface(ctx, g.dss, dss.width, dss.height, {
+        floor,
+        range,
+        contrast: d.contrast,
+        lut: getPalette(d.palette),
+        bg: RING_BG_RGB,
+    });
 }
 
 function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {

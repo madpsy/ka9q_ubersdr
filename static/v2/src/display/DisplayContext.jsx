@@ -59,6 +59,19 @@ export const DEFAULTS = {
     //              because there is no history for a part of the band that was
     //              not on screen.
     waterfallPan: 'hold',
+    // How the waterfall's history is drawn: '2d' is the heat map, '3d' is the
+    // perspective surface (lib/dss.js), 'both' splits the pane between them.
+    //
+    // '2d' everywhere, including where the machine could clearly manage more.
+    // The surface is a different way of reading a band rather than a better one
+    // — it occludes, which the heat map never does — so it is something to go
+    // and find, not something to be given.
+    waterfallMode: '2d',
+    // How far back the surface reaches, in seconds. Separate from the number of
+    // ridges drawn, which is a fixed drawing budget — see lib/dss.js. At the
+    // default 20 rows/s one ridge per stored row would be 4.8 seconds, which is
+    // too short to show an over or an exchange, so the ridges aggregate.
+    dssSeconds: 15,
     markerBands: true,      // band allocations in the marker bar
     markerBookmarks: true,       // bookmark pills the receiver publishes
     markerLocalBookmarks: true,  // bookmark pills saved in this browser

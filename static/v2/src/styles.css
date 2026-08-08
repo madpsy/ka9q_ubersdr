@@ -8428,3 +8428,13 @@ a.btn { text-decoration: none; }
    so the eye goes to the sections that did move. */
 .rank__trend.is-flat { color: var(--text-faint); }
 .rank__note--tight { margin-top: -2px; }
+
+/* The waterfall drawn as terrain — see lib/dss.js. Its own canvas above the heat
+   map, rebuilt from a magnitude ring rather than scrolled, so it needs none of
+   the overhang or the transform the heat map lives on. */
+.spectrum__wf-dss {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+}

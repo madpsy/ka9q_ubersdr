@@ -126,6 +126,8 @@ esbuild ../src/lib/voiceConfirmed.js --bundle --format=cjs --platform=node \
     --outfile=.build/voiceconfirmed.cjs --log-level=warning
 esbuild ../src/lib/ranking.js --bundle --format=cjs --platform=node \
     --outfile=.build/ranking.cjs --log-level=warning
+esbuild ../src/lib/dss.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dss.cjs --log-level=warning
 esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bands.cjs --log-level=warning
 esbuild ../src/lib/vfos.js --bundle --format=cjs --platform=node \
@@ -287,6 +289,7 @@ node wake.test.js
 node serverfeeds.test.js
 node voiceconfirmed.test.js
 node ranking.test.js
+node dss.test.js
 node vfos.test.js
 node needle.test.js
 node listeners.test.js

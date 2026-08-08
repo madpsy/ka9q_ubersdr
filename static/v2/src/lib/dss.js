@@ -476,10 +476,16 @@ export function drawSurface(ctx, ring, w, h, o) {
     }
     top.fill(h);
 
-    // What is drawn: the depth asked for, bounded by what has actually arrived.
-    // A part-filled ring draws what it has rather than a wall of empty rows.
-    const want = ridges > 0 ? Math.min(ridges, ring.rows) : ring.rows;
-    const n = Math.min(ridgeCount(ring), want);
+    // Two different numbers, and conflating them is a jerk on every row.
+    //
+    //   depth  how far back the *pane* reaches — the denominator every ridge is
+    //          placed against. It has to be a constant: derive it from how many
+    //          rows have arrived and each new row re-scales the whole surface,
+    //          so every ridge jumps backwards the moment one lands.
+    //   drawn  how many there are to draw. A part-filled ring draws what it has,
+    //          and the back of the pane is simply empty until it fills.
+    const depthRows = ridges > 0 ? Math.min(ridges, ring.rows) : ring.rows;
+    const n = Math.min(ridgeCount(ring), depthRows);
     if (n <= 0 || !lut || !(range > 0)) {
         ctx.putImageData(img, 0, 0);
         return;
@@ -495,10 +501,8 @@ export function drawSurface(ctx, ring, w, h, o) {
     // already painted, so a pixel is written once and an occluded ridge costs
     // its columns and nothing else.
     for (let age = 0; age < n; age++) {
-        // Over the drawn depth, not the ring's. The ring holds the most the
-        // surface can ever show; the setting says how much of that fills the
-        // pane, and the back of the picture has to be the back of the picture.
-        const depth = (age + p) / n;
+        // Over the depth the pane covers, never over how many have arrived.
+        const depth = (age + p) / depthRows;
         const width = depthScale(depth);
         const inset = (w * (1 - width)) / 2;
         const rowW = w - 2 * inset;

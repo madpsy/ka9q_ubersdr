@@ -800,7 +800,9 @@ export default function SpectrumView() {
         // repainting. Null until a mode that draws one is chosen, so 2D pays
         // nothing for a feature it is not using.
         dss: null,
-        dssRows: 0,
+        // How deep the surface reaches, in rows. Held rather than recomputed
+        // every frame — see drawDss.
+        dssRidges: 0,
         // The view the surface's rows were recorded in, for the pan setting.
         dssCentre: 0,
         dssSpan: 0,
@@ -1051,7 +1053,16 @@ export default function SpectrumView() {
             if (!g.bins) return;
 
             const now = performance.now();
-            const rowGap = 1000 / d.waterfallRate;
+            // How long the gap between rows is *actually* turning out to be,
+            // which is what the surface slides across. Not 1000 / waterfallRate:
+            // that setting is a cap, a row needs a spectrum frame to carry it,
+            // and on a server sending fewer frames a second than the cap asks
+            // for the real gap is several times longer. Measured against the
+            // nominal one, the slide finished in the first third of every row
+            // and then sat frozen until the next — glide, freeze, snap, twenty
+            // times a second. g.rowDt is the same measurement the heat map's
+            // scroll animation is timed from, so the two move together.
+            const rowGap = g.rowDt > 0 ? g.rowDt : 1000 / d.waterfallRate;
             // The surface moves *between* rows — see drawSurface's `progress` —
             // so it is the one thing here that wants every animation frame. The
             // heat map does not: its slide is a compositor transform and costs
@@ -1067,7 +1078,9 @@ export default function SpectrumView() {
             }
             // Waterfall speed throttles how often a row is committed, so a fast
             // server feed can still be shown as a slow-scrolling history.
-            const rowInterval = rowGap;
+            // The cap, which is a different number from the gap above: this is
+            // how often a row may be committed, that is how far apart they land.
+            const rowInterval = 1000 / d.waterfallRate;
             const commitRow = g.rowsPending > 0 && now - lastRow >= rowInterval;
             if (commitRow) {
                 // How long the last row took to arrive, which is the best guess
@@ -2878,17 +2891,27 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
 
     if (commitRow) pushDssRow(g.dss, g.px);
 
-    // How many of the stored rows the surface shows, from the rate they are
-    // actually landing at rather than the speed slider's cap — a row needs a
-    // spectrum frame to carry it, so a server sending fewer frames a second than
-    // the setting asks for makes the rows arrive at its rate. Three seconds of
-    // history came out as eight that way.
+    // How deep the pane reaches, in rows.
     //
-    // Rounded to whole rows a second before use. The measurement is a smoothed
-    // float that never sits still, and an unrounded one would step the drawn
-    // depth by a ridge every frame for no reason anybody could see.
-    const rate = g.rowDt > 0 ? Math.round(1000 / g.rowDt) : d.waterfallRate;
-    const ridges = ridgesFor(d.dssSeconds, rate);
+    // From the rate rows are actually landing at, not the speed slider's cap: a
+    // row needs a spectrum frame to carry it, so a server sending fewer frames a
+    // second than the setting asks for makes them arrive at its rate, and three
+    // seconds of history came out as eight when sized against the cap.
+    //
+    // Held once set, and only moved when the answer really has changed. This
+    // number is the denominator every ridge is placed against, so nudging it by
+    // one shifts the entire surface — and the rate it comes from is a smoothed
+    // float that never sits perfectly still. A few per cent of drift is a
+    // measurement wobbling, not the receiver doing something different, and it
+    // must not be paid for in movement. A genuine change — the slider moved, the
+    // waterfall speed changed, the server's rate really shifted — clears the
+    // threshold and is applied at once.
+    const rate = g.rowDt > 0 ? 1000 / g.rowDt : d.waterfallRate;
+    const want = ridgesFor(d.dssSeconds, rate);
+    if (!g.dssRidges || Math.abs(want - g.dssRidges) > Math.max(2, g.dssRidges * 0.08)) {
+        g.dssRidges = want;
+    }
+    const ridges = g.dssRidges;
     // Remembered so the between-rows frames — which are handed the last known
     // mapping rather than a fresh one — draw against the same numbers.
     if (Number.isFinite(floor)) g.dssFloor = floor;

@@ -381,4 +381,17 @@ t('a shallower setting draws fewer rows without losing any', () => {
     assert.ok(ridgesFor(1, 20) < ridgesFor(3, 20), 'and a smaller setting asks for less');
 });
 
+t('a ridge does not move as the ring fills behind it', () => {
+    // The jerk: with the depth denominator taken from how many rows had arrived,
+    // every new row re-scaled the whole surface and every ridge jumped backwards
+    // the moment one landed. The pane's depth is a constant; how many rows there
+    // are to draw is a separate number.
+    const depthRows = 60;
+    const at = (age, filled) => (age + 0) / depthRows;   // never a function of `filled`
+    for (const filled of [1, 5, 30, 60]) {
+        assert.ok(near(at(0, filled), 0), 'the newest ridge is at the front, always');
+        assert.ok(near(at(10, filled), 10 / depthRows), 'and the eleventh stays put');
+    }
+});
+
 console.log(`\n${pass} passed`);

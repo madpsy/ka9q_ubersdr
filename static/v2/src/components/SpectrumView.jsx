@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    MAX_RIDGES, clearRows as clearDssRows, createRing as createDssRing, drawSurface,
-    edgeLine, pushRow as pushDssRow, ridgesFor, ringCols, shiftRows as shiftDssRows,
+    RING_ROWS, clearRows as clearDssRows, createRing as createDssRing, drawSurface,
+    edgeLine, pushRow as pushDssRow, ringCols, shiftRows as shiftDssRows,
     unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
@@ -800,13 +800,6 @@ export default function SpectrumView() {
         // repainting. Null until a mode that draws one is chosen, so 2D pays
         // nothing for a feature it is not using.
         dss: null,
-        // How deep the surface reaches, in rows, and how far it has slid since
-        // the last row landed. Both held rather than recomputed — see drawDss
-        // and the draw loop's phase accumulator.
-        dssRidges: 0,
-        dssPhase: 0,
-        phaseAt: 0,
-        rowRate: 0,
         // The view the surface's rows were recorded in, for the pan setting.
         dssCentre: 0,
         dssSpan: 0,
@@ -1066,30 +1059,6 @@ export default function SpectrumView() {
             // and then sat frozen until the next — glide, freeze, snap, twenty
             // times a second. g.rowDt is the same measurement the heat map's
             // scroll animation is timed from, so the two move together.
-            const rowGap = g.rowDt > 0 ? g.rowDt : 1000 / d.waterfallRate;
-
-            // How far the surface has slid since the last row, in rows.
-            //
-            // Accumulated from real elapsed time rather than measured from the
-            // last commit, and decremented by exactly 1 when a row lands. That
-            // is what makes a commit continuous: the row's age goes up by one
-            // and this comes down by one, so the thing on screen does not move.
-            //
-            // Measuring it as (now - lastRow) / gap instead looked equivalent
-            // and was not. Rows land on frame arrivals, so the gaps jitter about
-            // the smoothed average — and every row that arrived early reset the
-            // measurement to zero while the ages had already gone up, yanking
-            // the whole surface backwards by whatever fraction of a row was
-            // left. That is the pull-back at the back of the picture.
-            //
-            // A weak pull toward the measured position keeps it from drifting
-            // out of range when the smoothed gap is a little wrong, and the
-            // bounds stop a stalled feed running away.
-            if (g.phaseAt) g.dssPhase += (now - g.phaseAt) / rowGap;
-            g.phaseAt = now;
-            g.dssPhase += ((now - lastRow) / rowGap - g.dssPhase) * 0.02;
-            if (!(g.dssPhase > -1)) g.dssPhase = 0;      // NaN, or a long way adrift
-            if (g.dssPhase > 2) g.dssPhase = 2;
             // The surface moves *between* rows — see drawSurface's `progress` —
             // so it is the one thing here that wants every animation frame. The
             // heat map does not: its slide is a compositor transform and costs
@@ -1097,15 +1066,13 @@ export default function SpectrumView() {
             if (!g.dirty) {
                 if (dssH > 0) {
                     drawDss(g, d, dssRef.current, dssH, Math.max(1, Math.round(sizes.w * g.dpr)),
-                        g.dssFloor, g.dssRange, false, g.dssPhase,
+                        g.dssFloor, g.dssRange, false, now,
                         cfgRef.current, tuneRef.current);
                 }
                 return;
             }
             // Waterfall speed throttles how often a row is committed, so a fast
             // server feed can still be shown as a slow-scrolling history.
-            // The cap, which is a different number from the gap above: this is
-            // how often a row may be committed, that is how far apart they land.
             const rowInterval = 1000 / d.waterfallRate;
             const commitRow = g.rowsPending > 0 && now - lastRow >= rowInterval;
             if (commitRow) {
@@ -1122,31 +1089,6 @@ export default function SpectrumView() {
                 }
                 lastRow = now;
                 g.rowsPending = 0;
-                // The other half of the continuity above: ages go up by one, so
-                // the slide comes down by one and nothing on screen moves.
-                g.dssPhase -= 1;
-                // What the waterfall speed actually turned out to be. It is a
-                // *cap*: a row is committed only when a spectrum frame has
-                // arrived, so on a server sending fewer frames a second than the
-                // setting asks for, rows land at the server's rate instead. The
-                // surface is sized in seconds and has to be sized against this,
-                // not against the number in the panel — see ridgesFor.
-                // One held figure for how fast rows are really landing, shared
-                // by the surface and by the Display panel's depth slider.
-                //
-                // Held, because it is a smoothed float that never sits still and
-                // both consumers are sensitive to it: it is the denominator the
-                // surface places every ridge against, and it sets the ends of
-                // the slider's range. Published raw, the slider's own thumb
-                // drifted about while nobody was touching it.
-                if (g.rowDt > 0) {
-                    const live = 1000 / g.rowDt;
-                    const held = g.rowRate || 0;
-                    if (!held || Math.abs(live - held) > Math.max(1, held * 0.08)) {
-                        g.rowRate = Math.round(live);
-                        meters.current.rowRate = g.rowRate;
-                    }
-                }
             }
 
             drawFrame(g, d, {
@@ -1155,9 +1097,10 @@ export default function SpectrumView() {
                 dss: dssRef.current,
                 dssH,
                 heatH,
-                // Where we are between rows, which is what the surface slides
-                // on — see g.dssPhase above.
-                rowProgress: g.dssPhase,
+                // The clock the surface places its rows against — see
+                // drawSurface. Nothing is accumulated; `now` moving is the whole
+                // animation.
+                drawAt: now,
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 wfScale: wfScaleRef.current,
@@ -2481,7 +2424,7 @@ function autoRange(px, trace, g, k) {
 function drawFrame(g, d, ctx) {
     const {
         spec, wf, wfMarks, scale, wfScale, cfg, tuning, width, specH, wfH, commitRow, dt,
-        dss, dssH, heatH, rowProgress, midScale, midH,
+        dss, dssH, heatH, drawAt, midScale, midH,
     } = ctx;
     // Either pane may be absent — the view mode can hide one of them entirely.
     if (!width) return;
@@ -2530,7 +2473,7 @@ function drawFrame(g, d, ctx) {
 
     drawWaterfall(g, d, wf, wfMarks, heatH != null ? heatH : wfH, pxW, floor, range,
         commitRow, cfg, tuning, colVfoLine, colEdge);
-    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress, cfg, tuning);
+    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, drawAt, cfg, tuning);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine, colEdge);
     drawWaterfallScale(g, wfScale, pxW, cfg, tuning, width, colVfoLine);
@@ -2896,7 +2839,7 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
  * when a row arrives: the whole surface is rebuilt from the ring each time, so
  * there is no history in its pixels to preserve and nothing to scroll.
  */
-function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, tuning) {
+function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, now, cfg, tuning) {
     if (!dss || !dssH || dssH <= 0) {
         // Dropped rather than kept: coming back to 2D should not hold a megabyte
         // of history for a canvas that is not on screen, and the surface fills
@@ -2909,17 +2852,13 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // one-column ridge. A width change is a different history — the stored rows
     // were taken at the old width — so the ring is remade rather than resampled.
     //
-    // The ring is always the full depth the surface can draw, and never resized
-    // by the depth setting. Sizing it from the setting meant recreating it — and
-    // wiping every row in it — whenever the number changed, which with a rate
-    // measured as a float was every single frame: the history never lived long
-    // enough to have any depth at all.
-    //
-    // How much of it to *draw* is the depth setting's job, and that costs
-    // nothing to change. See `ridges` below.
+    // Always the same number of rows, whatever the depth setting is. Which of
+    // them are drawn is decided by their age when the surface is painted, so the
+    // setting costs nothing to change and — the part that matters — cannot
+    // throw the history away by changing.
     const cols = ringCols(pxW);
     if (!g.dss || g.dss.cols !== cols) {
-        g.dss = createDssRing(MAX_RIDGES, cols);
+        g.dss = createDssRing(RING_ROWS, cols);
         // A new ring has no recorded view, so the next align call adopts the
         // live one rather than trying to carry a history that does not exist.
         g.dssSpan = 0;
@@ -2931,43 +2870,28 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // map's own realignment.
     alignDssToView(g, d, cfg);
 
-    if (commitRow) pushDssRow(g.dss, g.px);
+    // Stamped with the clock it will be placed against. There is no rate to
+    // measure and nothing to keep in step: the row knows when it arrived, and
+    // where it belongs follows from that and from `now`.
+    if (commitRow) pushDssRow(g.dss, g.px, now);
 
-    // How deep the pane reaches, in rows.
-    //
-    // From the rate rows are actually landing at, not the speed slider's cap: a
-    // row needs a spectrum frame to carry it, so a server sending fewer frames a
-    // second than the setting asks for makes them arrive at its rate, and three
-    // seconds of history came out as eight when sized against the cap.
-    //
-    // From the held rate, not a fresh reading: this number is the denominator
-    // every ridge is placed against, so nudging it by one shifts the whole
-    // surface, and the measurement it comes from never sits perfectly still.
-    // The Display panel's slider reads the same held figure, so the two agree
-    // about how many seconds are on screen.
-    const ridges = ridgesFor(d.dssSeconds, g.rowRate || d.waterfallRate);
     // Remembered so the between-rows frames — which are handed the last known
     // mapping rather than a fresh one — draw against the same numbers.
     if (Number.isFinite(floor)) g.dssFloor = floor;
     if (Number.isFinite(range)) g.dssRange = range;
 
-    // No dirty check. The surface is in motion whenever a row is due, because
-    // every ridge is drawn a fraction of a row further back than on the last
-    // frame — that is what `progress` is, and skipping a frame is a visible
-    // stutter rather than a saving. It is affordable because the rasteriser
-    // writes each pixel once whatever the ridge count. See lib/dss.js.
+    // Every frame, and no dirty check: the surface is in motion whenever the
+    // clock is, because every row's depth is its own age. Affordable because the
+    // rasteriser writes each pixel once however many rows are in range.
     const ctx = dss.getContext('2d', { alpha: false });
     drawSurface(ctx, g.dss, dss.width, dss.height, {
+        now,
+        spanMs: Math.max(1, d.dssSeconds) * 1000,
         floor: g.dssFloor,
         range: g.dssRange,
         contrast: d.contrast,
         lut: getPalette(d.palette),
         bg: RING_BG_RGB,
-        ridges,
-        // Straight from the row gap. One row per ridge means the geometry and
-        // the content advance together by construction, which is what the
-        // aggregated version could never manage however the phase was computed.
-        progress,
     });
 
     // Over the terrain, after it — the rasteriser writes the whole canvas, so

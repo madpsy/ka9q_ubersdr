@@ -4,18 +4,20 @@
 // inverse have to agree or a click tunes somewhere other than where you pointed,
 // and the ring has to drop the oldest row and not a middle one.
 //
-// A third used to be here and is gone with the code it covered. Merging several
-// rows into each ridge, to buy seconds of history without drawing more of them,
-// made the newest ridge a block that only rolled over a few times a second — the
-// front of the display was the stalest thing on it, and smeared besides. One row
-// per ridge; see the note in lib/dss.js.
+// Two more used to be here and are gone with the code they covered. Merging
+// several rows into each ridge, to buy seconds of history without drawing more
+// of them, made the newest ridge a block that rolled over a few times a second —
+// the front of the display was the stalest thing on it. Counting depth in rows
+// with a sub-row phase, to make the motion continuous between arrivals, needed
+// the row rate measured and the phase accumulated and corrected, and every one
+// of those numbers wobbled. A row is placed by how long ago it arrived; see the
+// note in lib/dss.js.
 
 const assert = require('assert');
 const {
-    BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_RIDGES, MIN_RIDGES,
+    BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, RING_ROWS,
     clearRows, createRing, depthScale, edgeLine, project, pushRow, ridgeCount,
-    ridgeHeight, ridgesFor, shiftRows,
-    maxSeconds, minSeconds, ringCols, ringSeconds, storedRow, unproject,
+    ridgeHeight, ringCols, shiftRows, shownSeconds, storedAt, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
 let pass = 0;
@@ -150,55 +152,6 @@ t('the newest ridge is the newest row, not a merge of several', () => {
     pushRow(r, Float32Array.from([-100, -20, -100, -100]));
     assert.strictEqual(storedRow(r, 0)[1], -20, 'the newest ridge is the newest row');
     assert.strictEqual(storedRow(r, 1)[1], -100, 'and nothing is smeared into the one behind');
-});
-
-t('seconds are bought with ridges, and the ceiling is honest', () => {
-    // 4 s at 20 rows/s is 80 ridges, which fits.
-    assert.strictEqual(ridgesFor(4, 20), 80);
-    // Past the ceiling it is clamped, and the panel shows the span actually
-    // drawn rather than the one asked for.
-    assert.strictEqual(ridgesFor(30, 20), MAX_RIDGES);
-    // A slow waterfall buys the seconds a fast one cannot.
-    assert.strictEqual(ridgesFor(30, 3), 90);
-    // And never so few that there is no surface left.
-    assert.strictEqual(ridgesFor(0.1, 2), MIN_RIDGES);
-    assert.strictEqual(ridgesFor(undefined, 20), MIN_RIDGES);
-});
-
-t('every position on the depth slider draws a different span', () => {
-    // The bug: the slider was a fixed 1-30 s while the span is bought entirely
-    // in ridges, so at 29 rows/s it had four live positions and twenty-six dead
-    // ones — all reading 3.3 s. The mirror of it appeared at the bottom on a
-    // slow waterfall, where MIN_RIDGES floored the first eight.
-    for (const rate of [2, 5, 11, 20, 29, 40]) {
-        const lo = minSeconds(rate);
-        const hi = maxSeconds(rate);
-        assert.ok(lo <= hi, `rate ${rate}: empty range ${lo}..${hi}`);
-        const spans = new Set();
-        for (let s = lo; s <= hi; s++) spans.add(ridgesFor(s, rate) / rate);
-        assert.strictEqual(spans.size, hi - lo + 1,
-            `rate ${rate}: ${hi - lo + 1} positions but ${spans.size} distinct spans`);
-    }
-});
-
-t('the ends of the slider are the ends of what is drawable', () => {
-    // At the top the ridge count is at its ceiling; below the top it is not.
-    assert.strictEqual(ridgesFor(maxSeconds(20), 20), MAX_RIDGES);
-    assert.ok(ridgesFor(maxSeconds(20) - 1, 20) < MAX_RIDGES);
-    // And at the bottom it is at the floor on a waterfall slow enough to hit it.
-    assert.strictEqual(ridgesFor(minSeconds(2), 2), 2 * minSeconds(2));
-    assert.ok(2 * minSeconds(2) >= MIN_RIDGES);
-});
-
-t('a nonsense rate still leaves a usable slider', () => {
-    for (const rate of [0, -5, undefined, NaN]) {
-        assert.ok(minSeconds(rate) <= maxSeconds(rate), `rate ${rate}`);
-    }
-});
-
-t('a ring reports the span it actually shows', () => {
-    assert.ok(near(ringSeconds(createRing(80, 4), 20), 4));
-    assert.strictEqual(ringSeconds(createRing(80, 4), 0), 0);
 });
 
 // --- resolution -------------------------------------------------------------
@@ -358,70 +311,84 @@ t('a still view is left alone', () => {
 
 // --- the depth setting must not cost the history ----------------------------
 
-t('the ring holds the deepest the surface can go, whatever the setting', () => {
-    // The bug: the ring was sized from the depth setting, so every change to
-    // that number recreated it and wiped every row. With the rate measured as a
-    // float the number changed on *every frame*, and the history never lived
-    // long enough to have any depth at all.
-    //
-    // So the ring is created once at full depth and the setting only says how
-    // much of it to draw.
-    const r = createRing(MAX_RIDGES, 8);
-    assert.strictEqual(r.rows, MAX_RIDGES);
-    for (let i = 0; i < 40; i++) pushRow(r, row(-50, 8));
-    assert.strictEqual(ridgeCount(r), 40, 'forty rows survive being asked about');
-});
+// --- a row is placed by when it arrived --------------------------------------
+//
+// The property all three failed versions violated, in one line: between
+// arrivals, nothing about a row changes except how old it is. There is no phase
+// to accumulate, no rate to measure, and no denominator that can move — so the
+// stutter, the pull-back and the drifting slider have nowhere to come from.
 
-t('a shallower setting draws fewer rows without losing any', () => {
-    const r = createRing(MAX_RIDGES, 8);
-    for (let i = 0; i < 60; i++) pushRow(r, row(-50, 8));
-    // Whatever depth is asked for, the stored history is untouched — which is
-    // what makes the setting free to change and free to change back.
-    assert.strictEqual(ridgeCount(r), 60);
-    assert.ok(ridgesFor(1, 20) < ridgesFor(3, 20), 'and a smaller setting asks for less');
-});
+const depthOf = (ring, age, now, spanMs) => (now - storedAt(ring, age)) / spanMs;
 
-t('a ridge does not move as the ring fills behind it', () => {
-    // The jerk: with the depth denominator taken from how many rows had arrived,
-    // every new row re-scaled the whole surface and every ridge jumped backwards
-    // the moment one landed. The pane's depth is a constant; how many rows there
-    // are to draw is a separate number.
-    const depthRows = 60;
-    const at = (age, filled) => (age + 0) / depthRows;   // never a function of `filled`
-    for (const filled of [1, 5, 30, 60]) {
-        assert.ok(near(at(0, filled), 0), 'the newest ridge is at the front, always');
-        assert.ok(near(at(10, filled), 10 / depthRows), 'and the eleventh stays put');
+t('a row recedes at exactly the rate the clock moves', () => {
+    const r = createRing(64, 4);
+    pushRow(r, row(-50, 4), 1000);
+    const span = 3000;
+    for (const now of [1000, 1500, 2500, 4000]) {
+        assert.ok(near(depthOf(r, 0, now, span), (now - 1000) / span),
+            `at ${now} the row is not where the clock puts it`);
     }
 });
 
-t('a commit moves nothing on screen', () => {
-    // The pull-back. Rows land on frame arrivals, so the gaps jitter about the
-    // smoothed average — and a slide measured as (now - lastRow) / gap resets to
-    // zero when a row lands while the ages have already gone up. Every early row
-    // yanked the whole surface backwards by whatever fraction of a row was left.
-    //
-    // The accumulator makes it exact by construction: age goes up by one, the
-    // slide comes down by one, and the sum — which is where a thing is drawn —
-    // does not change.
-    for (const phaseAtCommit of [0.1, 0.5, 0.78, 1, 1.4]) {
-        const before = 3 + phaseAtCommit;        // a ridge at age 3
-        const after = 4 + (phaseAtCommit - 1);   // the same data, one row later
-        assert.ok(near(before, after, 1e-12),
-            `a commit at phase ${phaseAtCommit} displaced it by ${after - before}`);
-    }
+t('a row arriving early or late does not move anything already drawn', () => {
+    // The pull-back. Rows land on frame arrivals, so the gaps jitter — and a
+    // depth counted in rows had to renumber every one of them when a row
+    // arrived, which moved them all if the arrival was off the expected beat.
+    // Here an arrival is just another row with its own stamp.
+    const r = createRing(64, 4);
+    pushRow(r, row(-50, 4), 1000);
+    const span = 3000;
+    const before = depthOf(r, 0, 1300, span);
+    pushRow(r, row(-60, 4), 1300);            // a new row lands, whenever it likes
+    assert.ok(near(depthOf(r, 1, 1300, span), before),
+        'the older row moved when a new one arrived');
+    // And again at an entirely different beat.
+    pushRow(r, row(-70, 4), 1310);
+    assert.ok(near(depthOf(r, 2, 1310, span), (1310 - 1000) / span));
 });
 
-t('a slide that has run past the front is still drawable', () => {
-    // A row that has not arrived yet legitimately puts the newest ridge below
-    // the pane, sliding up into view — the same overhang the heat map has. The
-    // geometry takes it raw; only the colour is clamped, or an off-pane ridge
-    // would be brighter than full.
-    assert.strictEqual(depthScale(-0.2), 1, 'still full width in front of the pane');
-    // The rasteriser places rows from the raw depth rather than through
-    // project(), which clamps — that clamp is right for a *frequency* mark,
-    // which must stay on the pane, and wrong for a row sliding up onto it.
-    const h = 100;
-    assert.ok(h - -0.2 * DEPTH_SPAN * h > h, 'and below its bottom edge');
+t('the depth setting changes what is shown and never what is stored', () => {
+    // The one that broke it worst: the ring used to be sized from the setting,
+    // so changing the number wiped the history — and the number was derived from
+    // a measured float, so it changed every frame and there was never any depth.
+    const r = createRing(64, 4);
+    for (let i = 0; i < 40; i++) pushRow(r, row(-50, 4), 1000 + i * 90);
+    assert.strictEqual(ridgeCount(r), 40);
+    // Reading it at any span leaves all forty in place.
+    for (const span of [1000, 3000, 30000]) {
+        assert.ok(depthOf(r, 0, 5000, span) < depthOf(r, 39, 5000, span));
+    }
+    assert.strictEqual(ridgeCount(r), 40, 'nothing was lost by asking');
+});
+
+t('rows older than the span fall off the back, in order', () => {
+    const r = createRing(64, 4);
+    for (let i = 0; i < 10; i++) pushRow(r, row(-50, 4), 1000 + i * 100);
+    const now = 1900;
+    // A one-second span at 100 ms apart reaches ten rows back; half a second
+    // reaches five. Ages are in time order, so the drawing loop can stop at the
+    // first one out of range.
+    let inRange = 0;
+    for (let age = 0; age < ridgeCount(r); age++) {
+        if (depthOf(r, age, now, 500) > 1) break;
+        inRange++;
+    }
+    assert.strictEqual(inRange, 6, 'the newest six are within half a second');
+});
+
+t('the ring reports the span it actually has, not the one asked for', () => {
+    const r = createRing(64, 4);
+    assert.strictEqual(shownSeconds(r, 30, 5000), 0, 'nothing stored yet');
+    for (let i = 0; i < 5; i++) pushRow(r, row(-50, 4), 1000 + i * 100);
+    // Rows spanning 400 ms: asking for thirty seconds shows 0.4 of them.
+    assert.ok(near(shownSeconds(r, 30, 1400), 0.4));
+    // And asking for less than there is shows what was asked.
+    assert.ok(near(shownSeconds(r, 0.2, 1400), 0.2));
+});
+
+t('the ring is a fixed size and the setting cannot resize it', () => {
+    assert.strictEqual(createRing().rows, RING_ROWS);
+    assert.strictEqual(createRing(RING_ROWS, 8).rows, RING_ROWS);
 });
 
 console.log(`\n${pass} passed`);

@@ -1,9 +1,9 @@
 import React from '../react.js';
 import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
-import { useMeters, useRadio } from '../radio/RadioContext.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
-import { maxSeconds, minSeconds, ridgesFor } from '../lib/dss.js';
+import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
 import { clamp } from '../lib/format.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
@@ -27,13 +27,6 @@ import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
-    // Rows a second as they are actually landing, not as the speed slider asks
-    // for — see meters.rowRate. Everything about the 3D depth is in seconds, and
-    // seconds come from the real rate: sized against the setting, three seconds
-    // of history came out as eight on a server sending frames at a third of it.
-    // Sampled slowly because it is a smoothed average that barely moves, and
-    // falls back to the setting until two rows have arrived to measure between.
-    const rowRate = useMeters(2).rowRate || d.waterfallRate;
     // Two settings resolve per device — the zoom anchor and the idle throttle —
     // and both have to show what is actually in force, not what is stored. The
     // same query IdleWatch and the spectrum use to decide, so the control and
@@ -323,24 +316,17 @@ export default function DisplayPanel() {
                         2D waterfall's own history is however much fits the pane,
                         which is not a thing anybody sets in seconds. */}
                     {d.waterfallMode !== '2d' && (
-                        /* The hint is what is actually drawn, not what was asked
-                           for — the two can still differ by a rounding, since a
-                           ridge is a whole row.
-
-                           Both ends of the slider move with the waterfall speed,
-                           because that is what decides how much history a ridge
-                           buys. Fixed at 1–30 s it had four live positions and
-                           twenty-six dead ones at the default speed, and the
-                           mirror of that on a slow waterfall — every one of them
-                           reading the same span. */
-                        <Field
-                            label="3D depth"
-                            hint={`${(ridgesFor(d.dssSeconds, rowRate) / rowRate).toFixed(1)}s of history`}
-                        >
+                        /* Plain seconds, and the same seconds on screen: a row
+                           is placed by how long ago it arrived, so the span is
+                           the setting and nothing has to be derived from how
+                           fast rows are turning up. Deriving it is what had the
+                           slider's own bounds — and its thumb — moving about
+                           while nobody was touching it. */
+                        <Field label="3D depth" hint={`${d.dssSeconds}s of history`}>
                             <Slider
-                                value={clamp(d.dssSeconds, minSeconds(rowRate), maxSeconds(rowRate))}
-                                min={minSeconds(rowRate)}
-                                max={maxSeconds(rowRate)}
+                                value={d.dssSeconds}
+                                min={MIN_SECONDS}
+                                max={MAX_SECONDS}
                                 onChange={(v) => d.set({ dssSeconds: v })}
                             />
                         </Field>

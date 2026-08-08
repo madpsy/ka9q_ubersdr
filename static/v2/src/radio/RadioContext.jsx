@@ -184,13 +184,6 @@ export function RadioProvider({ children }) {
         squelchOpen: true,      // is the server currently passing audio?
         lastGateOpenAt: 0,
         snrHistory: [],         // recent SNR readings, for the squelch auto-set
-        // Waterfall rows a second, as they are actually landing. Written by the
-        // spectrum view, which is what commits them. The display setting is a
-        // *cap* — a row needs a spectrum frame to carry it, so a server sending
-        // fewer frames a second than the setting asks for makes the rows arrive
-        // at its rate instead. Anything reasoning in seconds of history has to
-        // use this one; 0 until two rows have arrived to measure between.
-        rowRate: 0,
     });
 
     const conn = useRef(null);

@@ -537,14 +537,44 @@ export function Empty({ children }) {
 // Panels have no scroller of their own — the dock scrolls — so a list of a few
 // hundred rows would make the dock unusably long. Lists render a page at a time
 // and grow on demand instead.
-export function ShowMore({ shown, total, onMore, label = 'Show more' }) {
-    if (shown >= total) {
-        return total > 0 ? <div className="list__count">{total} shown</div> : null;
-    }
+//
+// And shrink again: pass `onLess` with the `base` page size and a "Show fewer" appears under
+// the "Show more" as soon as the list has grown past it. Without it growing was one-way — six
+// presses on a busy spot list leaves a panel several screens long with nothing to press,
+// short of closing the panel and opening it again.
+//
+// One press puts it back to `base` rather than stepping down a page at a time. Stepping would
+// mirror the button above it, but a list that took eight presses to grow would take eight to
+// collapse, which is not what somebody who wants their dock back is asking for. Collapsing
+// too far costs one press of Show more; the other way round costs eight.
+//
+// `count` is the "118 shown" line under a fully grown list. Some callers turn it off, because
+// the heading above them already carries the number.
+export function ShowMore({ shown, total, onMore, onLess, base = 0, label = 'Show more', count = true }) {
+    const canMore = shown < total;
+    const canLess = typeof onLess === 'function' && base > 0 && shown > base;
+    const tally = count && total > 0 ? <div className="list__count">{total} shown</div> : null;
+
+    if (!canMore && !canLess) return tally;
+
     return (
-        <button type="button" className="show-more" onClick={onMore}>
-            {label} <span className="show-more__count">{shown} of {total}</span>
-        </button>
+        <div className="show-more-pair">
+            {canMore ? (
+                <button type="button" className="show-more" onClick={onMore}>
+                    {label} <span className="show-more__count">{shown} of {total}</span>
+                </button>
+            ) : tally}
+            {canLess && (
+                <button
+                    type="button"
+                    className="show-more show-more--less"
+                    title={`Back to the first ${base}`}
+                    onClick={onLess}
+                >
+                    Show fewer
+                </button>
+            )}
+        </div>
     );
 }
 

@@ -197,4 +197,119 @@ t('the key is stable however the frequency arrived', () => {
     assert.strictEqual(tf.comboKey(14074000.4, 'USB'), tf.comboKey(14074000, 'usb'));
 });
 
+// --- the clock ---------------------------------------------------------------
+//
+// It lives in the store rather than in the panel, because a collapsed dock unmounts the
+// panel and the leaderboard was quietly counting only the time it spent on screen. Which
+// means the clock has to survive a whole session unattended, and these are the two ways a
+// wall clock gets that wrong: a throttled background tab, and a machine that was asleep.
+
+const clock = (name, fn) => t(name, () => {
+    tf._resetDwell();
+    store.clear();
+    try { fn(); } finally { tf._resetDwell(); }
+});
+
+const count = (hz, mode) => (tf.comboState().combos[tf.comboKey(hz, mode)] || {}).count || 0;
+
+// Starts a stay and hands back the moment its clock started from. Real time, because that is
+// what trackDwell reads — the fabricated times below are all offsets from it, so a step is a
+// step and not a three-hour gap the store would rightly throw away.
+const start = (hz, mode, running = true) => {
+    tf.trackDwell({ running, hz, mode });
+    return Date.now();
+};
+
+clock('nothing is timed until the receiver is running', () => {
+    const t0 = start(14074000, 'usb', false);
+    assert.strictEqual(tf.comboState().timing, false);
+    tf._tickDwell(t0 + 60000);
+    assert.strictEqual(count(14074000, 'usb'), 0, 'a stopped receiver is not listening');
+});
+
+clock('a full minute on one combination scores one point', () => {
+    const t0 = start(14074000, 'usb');
+    // Four looks at the clock, fifteen seconds apart, is one minute — and the score is one
+    // rather than four, because it is the time that counts and not the number of looks.
+    for (let i = 1; i <= 4; i++) tf._tickDwell(t0 + i * tf.DWELL_TICK_MS);
+    assert.strictEqual(count(14074000, 'usb'), 1);
+    assert.strictEqual(tf.comboState().dwell, 1);
+});
+
+clock('a part minute scores nothing, and is lost when the dial moves', () => {
+    // The widget's rule, and the reason tuning past a frequency never scores.
+    const t0 = start(14074000, 'usb');
+    tf._tickDwell(t0 + tf.DWELL_TICK_MS * 3);
+    assert.strictEqual(count(14074000, 'usb'), 0);
+    const t1 = start(7100000, 'lsb');
+    tf._tickDwell(t1 + tf.DWELL_TICK_MS);
+    assert.strictEqual(count(14074000, 'usb'), 0, 'the part minute did not follow the dial');
+    assert.strictEqual(count(7100000, 'lsb'), 0);
+});
+
+clock('a throttled tab still scores the minutes it was there', () => {
+    // A background tab has its timers cut to about one a minute. Counting firings would have
+    // credited a quarter of the time; measuring it credits all of it.
+    const t0 = start(14074000, 'usb');
+    for (let i = 1; i <= 3; i++) tf._tickDwell(t0 + i * 60000);
+    assert.strictEqual(count(14074000, 'usb'), 3);
+});
+
+clock('a gap too long to be a tick is thrown away, not credited', () => {
+    // A laptop shut for three hours must not hand three hours to whatever the dial was left
+    // on. There is no way to know when the sleep began, so the whole gap goes.
+    const t0 = start(14074000, 'usb');
+    tf._tickDwell(t0 + 3 * 60 * 60 * 1000);
+    assert.strictEqual(count(14074000, 'usb'), 0);
+    // And the clock carries on from the wake-up rather than staying stuck.
+    for (let i = 1; i <= 4; i++) tf._tickDwell(t0 + 3 * 60 * 60 * 1000 + i * tf.DWELL_TICK_MS);
+    assert.strictEqual(count(14074000, 'usb'), 1);
+});
+
+clock('the limit sits above a throttled tick and below anything else', () => {
+    assert.ok(tf.DWELL_TICK_MS < 60000, 'so a minute of throttling is still one step');
+    assert.ok(tf.DWELL_MAX_STEP_MS > 60000);
+    assert.ok(tf.DWELL_MAX_STEP_MS < 5 * 60000, 'and a coffee break is not listening time');
+});
+
+clock('several minutes at once are several points, not one', () => {
+    const t0 = start(14074000, 'usb');
+    // Two throttled ticks either side of a minute boundary: the second covers two whole
+    // minutes at once, and both have to land.
+    tf._tickDwell(t0 + 60000);
+    tf._tickDwell(t0 + 120000);
+    assert.strictEqual(count(14074000, 'usb'), 2);
+});
+
+clock('a subscriber hears the minute land, and can stop hearing it', () => {
+    const seen = [];
+    const off = tf.onCombos((s) => seen.push(s.dwell));
+    assert.strictEqual(seen.length, 1, 'and hears the current state at once');
+    const t0 = start(14074000, 'usb');
+    tf._tickDwell(t0 + 60000);
+    assert.strictEqual(seen[seen.length - 1], 1);
+    off();
+    tf._tickDwell(t0 + 120000);
+    assert.strictEqual(seen[seen.length - 1], 1, 'nothing after unsubscribing');
+});
+
+clock('clearing wipes the board and the stay in progress with it', () => {
+    const t0 = start(14074000, 'usb');
+    for (let i = 1; i <= 4; i++) tf._tickDwell(t0 + i * tf.DWELL_TICK_MS);
+    assert.strictEqual(count(14074000, 'usb'), 1);
+    tf.clearCombos();
+    assert.deepStrictEqual(tf.comboState().combos, {});
+    assert.strictEqual(tf.comboState().dwell, 0);
+});
+
+clock('the same reading twice does not restart the stay', () => {
+    // The watch re-runs its effect on every render of the app; a stay that restarted each
+    // time would never reach a full minute.
+    const t0 = start(14074000, 'usb');
+    tf._tickDwell(t0 + 30000);
+    tf.trackDwell({ running: true, hz: 14074000.4, mode: 'USB' });
+    tf._tickDwell(t0 + 60000);
+    assert.strictEqual(count(14074000, 'usb'), 1);
+});
+
 console.log(`\n${pass} ok`);

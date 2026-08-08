@@ -20,7 +20,7 @@
 import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
-import { Button, Empty, Icon, Segmented } from '../components/ui.jsx';
+import { Button, Empty, Icon, Segmented, ShowMore } from '../components/ui.jsx';
 import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
@@ -456,11 +456,17 @@ export default function SpotsPanel({ minimal }) {
                 ))}
             </div>
 
-            {shown < matched.length && (
-                <button type="button" className="show-more" onClick={() => setShown((n) => n + PAGE)}>
-                    Show more <span className="show-more__count">{page.length} of {matched.length}</span>
-                </button>
-            )}
+            {/* The shared control rather than a hand-rolled button, so this list shrinks
+                again like the others do. `count` off: a spot list is a feed, and "412 shown"
+                under it is a number about the filter rather than about the spots. */}
+            <ShowMore
+                shown={page.length}
+                total={matched.length}
+                base={PAGE}
+                count={false}
+                onMore={() => setShown((n) => n + PAGE)}
+                onLess={() => setShown(PAGE)}
+            />
 
             {/* The feed's own live map — v1's page, which plots these spots on a world map
                 with the greyline and a track per station. At the bottom because it is

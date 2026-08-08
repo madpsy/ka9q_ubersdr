@@ -17,6 +17,7 @@ import HardwareNoticeWatch from './components/HardwareNoticeWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
+import TopFreqWatch from './components/TopFreqWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
@@ -157,6 +158,12 @@ export default function App() {
                                     that was tuning the receiver has to go on
                                     doing it. */}
                                 <ControlWatch />
+                                {/* The "most used" leaderboard counts minutes on
+                                    a frequency, and a dock that is collapsed has
+                                    unmounted the panel that used to do the
+                                    counting — so the clock is here and the panel
+                                    only draws what it finds. */}
+                                <TopFreqWatch />
                                 <StartOverlay />
                                 <LegacyBridge />
                                 <BridgeHost />

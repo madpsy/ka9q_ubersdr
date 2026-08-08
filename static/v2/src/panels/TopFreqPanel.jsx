@@ -9,6 +9,11 @@
 // scores a dial left parked overnight with the audio stopped. That is not time
 // spent listening, and a leaderboard built from it says nothing.
 //
+// The clock is not here, though — it is in lib/topFreq.js, wound by TopFreqWatch, which App
+// mounts once. This panel only *draws* the leaderboard. It has to be that way round: a
+// collapsed dock unmounts its panels, so a clock living here counted the time the panel spent
+// on screen rather than the time the dial spent on a frequency.
+//
 // `minimal` is the top five alone — no Show more, no line saying what is being
 // timed now, no Clear.
 
@@ -18,42 +23,23 @@ import { Button, Empty, Icon, ShowMore } from '../components/ui.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODE_BY_ID } from '../radio/constants.js';
 import {
-    TOP_FREQ_ROWS, comboKey, creditMinute, formatDwell, loadCombos, saveCombos, sortedCombos,
+    TOP_FREQ_ROWS, clearCombos, comboKey, comboState, formatDwell, onCombos, sortedCombos,
 } from '../lib/topFreq.js';
-
-const MINUTE_MS = 60 * 1000;
 
 const modeLabel = (id) => (MODE_BY_ID[id] || {}).label || String(id || '').toUpperCase();
 
 export default function TopFreqPanel({ minimal }) {
     const { actions, running, tuning } = useRadio();
-    const [combos, setCombos] = useState(loadCombos);
-    // Minutes credited during the current stay, for the "timing this now" line.
-    const [dwell, setDwell] = useState(0);
+    // Whatever the store has now, and again whenever a minute lands. The store is the
+    // authority on both — it has been counting whether this panel existed or not.
+    const [{ combos, dwell, timing }, setStore] = useState(comboState);
     const [shown, setShown] = useState(TOP_FREQ_ROWS);
+
+    useEffect(() => onCombos(setStore), []);
 
     const hz = Math.round(tuning.frequency || 0);
     const mode = tuning.mode || '';
     const key = hz && mode ? comboKey(hz, mode) : null;
-    const timing = running && key;
-
-    // Restarted whenever the dial or the mode moves, which is what makes the
-    // first point cost a *full* minute on one combination rather than a minute
-    // spread across several. Tuning away throws away the part-minute, the same
-    // way the widget does.
-    useEffect(() => {
-        setDwell(0);
-        if (!timing) return undefined;
-        const id = setInterval(() => {
-            setDwell((n) => n + 1);
-            setCombos((prev) => {
-                const next = creditMinute(prev, hz, mode);
-                saveCombos(next);
-                return next;
-            });
-        }, MINUTE_MS);
-        return () => clearInterval(id);
-    }, [timing, hz, mode]);
 
     const all = sortedCombos(combos);
     // Minimal is the leaderboard: five rows, and no button to grow it.
@@ -70,9 +56,7 @@ export default function TopFreqPanel({ minimal }) {
 
     const clear = useRef(null);
     clear.current = () => {
-        setCombos({});
-        saveCombos({});
-        setDwell(0);
+        clearCombos();
         setShown(TOP_FREQ_ROWS);
     };
 
@@ -107,7 +91,9 @@ export default function TopFreqPanel({ minimal }) {
                 <ShowMore
                     shown={rows.length}
                     total={all.length}
+                    base={TOP_FREQ_ROWS}
                     onMore={() => setShown((n) => n + TOP_FREQ_ROWS)}
+                    onLess={() => setShown(TOP_FREQ_ROWS)}
                 />
             )}
 

@@ -457,7 +457,13 @@ export default function FT8Extension({ minimal }) {
                     </div>
                 ))}
 
-                <ShowMore shown={page.length} total={rows.length} onMore={() => setShown((n) => n + PAGE)} />
+                <ShowMore
+                    shown={page.length}
+                    total={rows.length}
+                    base={PAGE}
+                    onMore={() => setShown((n) => n + PAGE)}
+                    onLess={() => setShown(PAGE)}
+                />
             </div>
         </div>
     );

@@ -4689,6 +4689,20 @@ a.btn { text-decoration: none; }
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .show-more:hover { background: var(--surface-hover); color: var(--text); }
+/* Grow above, shrink below. Stacked rather than side by side: they are the same control at
+   two different widths otherwise, and the one that is pressed repeatedly should not move
+   when its partner appears. */
+.show-more-pair { display: flex; flex-direction: column; gap: 4px; }
+/* Quieter than the button above it. Growing a list is the common press; putting it back is
+   something you do once, and a second dashed box of equal weight reads as a choice between
+   two equals. */
+.show-more--less {
+    border-style: solid;
+    border-color: var(--border);
+    font-size: calc(10.5px * var(--ui-scale));
+    padding: 5px 10px;
+    color: var(--text-faint);
+}
 .show-more__count { color: var(--text-faint); font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); }
 .list__count {
     text-align: center;

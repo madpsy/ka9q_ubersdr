@@ -524,16 +524,18 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 </div>
             )}
 
-            {/* Only when there is more to see: ShowMore's other branch is a
-                "34 shown" line, and the section label above already says 34. */}
-            {rows.length > limit && (
-                <ShowMore
-                    shown={limit}
-                    total={rows.length}
-                    onMore={() => setLimit((n) => n + PAGE)}
-                    label="Show more mappings"
-                />
-            )}
+            {/* `count` off: ShowMore's other branch is a "34 shown" line, and the section
+                label above already says 34. No longer gated on there being more to see —
+                a fully grown list is when the "Show fewer" under it is wanted. */}
+            <ShowMore
+                shown={limit}
+                total={rows.length}
+                base={PAGE}
+                count={false}
+                onMore={() => setLimit((n) => n + PAGE)}
+                onLess={() => setLimit(PAGE)}
+                label="Show more mappings"
+            />
 
             <div className="chip-row">
                 <Button

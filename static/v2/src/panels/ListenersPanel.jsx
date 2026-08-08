@@ -151,7 +151,13 @@ export default function ListenersPanel({ minimal }) {
             </div>
 
             {!minimal && (
-                <ShowMore shown={page.length} total={channels.length} onMore={() => setShown((n) => n + PAGE)} />
+                <ShowMore
+                    shown={page.length}
+                    total={channels.length}
+                    base={PAGE}
+                    onMore={() => setShown((n) => n + PAGE)}
+                    onLess={() => setShown(PAGE)}
+                />
             )}
         </div>
     );

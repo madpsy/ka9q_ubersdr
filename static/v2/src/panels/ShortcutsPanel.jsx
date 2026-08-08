@@ -182,14 +182,19 @@ export default function ShortcutsPanel({ minimal }) {
                 </div>
             )}
 
-            {filtered.length > limit && (
-                <ShowMore
-                    shown={limit}
-                    total={filtered.length}
-                    onMore={() => setLimit((n) => n + PAGE)}
-                    label="Show more shortcuts"
-                />
-            )}
+            {/* No gate of its own: ShowMore draws nothing when the list fits on one page,
+                and it has to be reached when the list is fully grown — that is exactly when
+                the "Show fewer" under it is the button somebody wants. `count` off, because
+                a "34 shown" line says nothing the list above it has not. */}
+            <ShowMore
+                shown={limit}
+                total={filtered.length}
+                base={PAGE}
+                count={false}
+                onMore={() => setLimit((n) => n + PAGE)}
+                onLess={() => setLimit(PAGE)}
+                label="Show more shortcuts"
+            />
 
             {/* Everything the editor has to say, kept together at the foot of
                 the panel beside the picker that starts it.

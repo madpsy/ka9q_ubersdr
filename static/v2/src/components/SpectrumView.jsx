@@ -693,6 +693,21 @@ function SpectrumStats({ place, bottom, gfx, onClose }) {
                 className="spec-stats__off"
                 title="Hide the stats — turn them back on in the Display panel"
                 aria-label="Hide the stats"
+                // The press must not reach the wrapper this sits inside, for two reasons —
+                // the same pair the paused overlay above guards against, and the reason a
+                // click here used to do nothing except retune the receiver:
+                //
+                //   The wrapper takes pointer capture on pointerdown, for panning. While a
+                //   pointer is captured every later event for it — the click included — is
+                //   dispatched to the capture target, so the click never arrived at this
+                //   button at all.
+                //
+                //   And a press that goes down and up without moving is a tap, which tunes
+                //   to the frequency under it. So the button that was meant to dismiss the
+                //   readout moved the dial to whatever was behind it instead.
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.stopPropagation()}
                 onClick={onClose}
             >
                 <Icon.Close size={9} />

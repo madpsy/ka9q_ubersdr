@@ -220,6 +220,8 @@ esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrel.cjs --log-level=warning
+esbuild ../src/lib/paging.js --bundle --format=cjs --platform=node \
+    --outfile=.build/paging.cjs --log-level=warning
 esbuild ../src/lib/sheetGesture.js --bundle --format=cjs --platform=node \
     --outfile=.build/sheetgesture.cjs --log-level=warning
 esbuild ../src/lib/visibilityPause.js --bundle --format=cjs --platform=node \
@@ -314,6 +316,7 @@ node edgehit.test.js
 node haptics.test.js
 node appheight.test.js
 node barrel.test.js
+node paging.test.js
 node sheetgesture.test.js
 node visibilitypause.test.js
 node bandconditions.test.js

@@ -6,15 +6,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
-import { Button, Empty, Icon, Menu, MenuItem, ShowMore } from '../components/ui.jsx';
+import { Button, Empty, Icon, Menu, MenuItem } from '../components/ui.jsx';
+import { Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
 import { MODES } from '../radio/constants.js';
 import {
     EXPORT_FORMATS, downloadFile, exportText, importText,
     localBookmarks, mutate, onLocalBookmarksChanged,
 } from '../lib/localBookmarks.js';
-
-const PAGE = 10;
 
 const BLANK = { name: '', frequency: '', mode: 'usb', group: '', comment: '' };
 
@@ -59,7 +58,6 @@ export default function LocalBookmarksPanel() {
     const [query, setQuery] = useState('');
     const [group, setGroup] = useState(ALL);
     const [hidden, setHidden] = useState(hiddenGroups);
-    const [limit, setLimit] = useState(PAGE);
     const [editing, setEditing] = useState(null);   // { original, values } | 'new'
     const [error, setError] = useState('');
     const [status, setStatus] = useState('');
@@ -76,8 +74,6 @@ export default function LocalBookmarksPanel() {
         return onLocalBookmarksChanged(refresh);
     }, [refresh]);
 
-    useEffect(() => { setLimit(PAGE); }, [query, group]);
-
     const groups = useMemo(() => groupsOf(items), [items]);
     useEffect(() => onGroupsChanged(setHidden), []);
 
@@ -92,6 +88,10 @@ export default function LocalBookmarksPanel() {
             })
             .sort((a, b) => a.frequency - b.frequency);
     }, [items, query, group]);
+
+    // One page at a time — the dock scrolls, the panel does not. Deleting a bookmark can
+    // empty the last page, which the pager clamps for us rather than leaving a blank list.
+    const { start, end, pager } = usePager(filtered.length, { deps: [query, group] });
 
     const tune = (b) => {
         if (b.mode) actions.setMode(b.mode);
@@ -242,7 +242,7 @@ export default function LocalBookmarksPanel() {
 
             <div className="list">
                 {items.length > 0 && filtered.length === 0 && <Empty>No match</Empty>}
-                {filtered.slice(0, limit).map((b) => (
+                {filtered.slice(start, end).map((b) => (
                     <div className="lb-row" key={b.name}>
                         <button type="button" className="list__row lb-row__main" onClick={() => tune(b)}>
                             <span className="list__title">
@@ -290,11 +290,7 @@ export default function LocalBookmarksPanel() {
                 ))}
             </div>
 
-            <ShowMore
-                shown={Math.min(limit, filtered.length)}
-                total={filtered.length}
-                onMore={() => setLimit((n) => n + PAGE)}
-            />
+            <Pager pager={pager} unit="bookmarks" />
         </div>
     );
 }

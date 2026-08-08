@@ -1,14 +1,13 @@
 // Band list from /api/bands. The server returns every allocation across
 // 0–30 MHz — hundreds of entries — and panels do not scroll on their own, so
-// the list renders a page at a time. With no search term the page is positioned
-// around the band the receiver is currently in, which is the part worth seeing.
+// the list renders a page at a time. With no search term it opens on the page
+// holding the band the receiver is currently in, which is the part worth seeing.
 
-import React, { useEffect, useMemo, useState } from '../react.js';
+import React, { useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Empty, ShowMore } from '../components/ui.jsx';
+import { Empty } from '../components/ui.jsx';
+import { PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
-
-const PAGE = 10;
 
 // The API packs a second line after a "|" and sometimes uses tabs as spacing.
 function cleanLabel(raw) {
@@ -19,10 +18,6 @@ export default function BandsPanel() {
     const { tuning, actions, catalog } = useRadio();
     const bands = catalog.bands;
     const [query, setQuery] = useState('');
-    const [limit, setLimit] = useState(PAGE);
-
-    // A new search starts from the top again.
-    useEffect(() => { setLimit(PAGE); }, [query]);
 
     const filtered = useMemo(() => {
         if (!bands) return null;
@@ -36,9 +31,20 @@ export default function BandsPanel() {
         return filtered.findIndex((b) => tuning.frequency >= b.start && tuning.frequency < b.end);
     }, [filtered, tuning.frequency]);
 
-    // Show the current band in context rather than the bottom of the LF end.
-    const start = query.trim() || activeIndex < 0 ? 0 : Math.max(0, activeIndex - 2);
-    const visible = filtered ? filtered.slice(start, start + limit) : [];
+    // Where the list should open: the page holding the current band, so somebody who
+    // opens the panel sees where they are rather than the bottom of the LF end. A search
+    // overrides it — the matches are then the point, and the first of them is the answer.
+    //
+    // It is also a dep, so tuning into a *different* allocation brings the list with you.
+    // Paging by hand stays put, because the dial has not moved: nothing recomputes until
+    // the band under it changes.
+    const home = query.trim() ? -1 : activeIndex;
+    const homePage = home < 0 ? -1 : Math.floor(home / PAGE_ROWS);
+    const { start, end, pager } = usePager(filtered ? filtered.length : 0, {
+        at: home,
+        deps: [query, homePage],
+    });
+    const visible = filtered ? filtered.slice(start, end) : [];
 
     if (!filtered) return <Empty>Loading bands…</Empty>;
 
@@ -72,11 +78,7 @@ export default function BandsPanel() {
                     </button>
                 ))}
             </div>
-            <ShowMore
-                shown={Math.min(start + limit, filtered.length) - start}
-                total={filtered.length - start}
-                onMore={() => setLimit((n) => n + PAGE)}
-            />
+            <Pager pager={pager} unit="bands" />
         </div>
     );
 }

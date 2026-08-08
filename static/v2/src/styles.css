@@ -4686,6 +4686,52 @@ a.btn { text-decoration: none; }
     font-family: var(--mono);
 }
 
+/* Paging for the long lists — see components/Pager.jsx. One row, symmetrical, with the
+   position in the middle: the arrows stay where the last press left them however wide the
+   count grows, which is what makes paging through a hundred bands one repeated press
+   rather than a moving target. */
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+.pager__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 26px;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.pager__btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+/* Kept in place rather than removed at the ends: the arrows must not move when the first
+   or last page is reached, or the next press lands on the wrong one. */
+.pager__btn:disabled { opacity: 0.35; cursor: default; }
+/* The second chevron of a first/last jump, tucked under the first. */
+.pager__second { margin-left: -8px; }
+.pager__at {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    /* Enough for "100–110 of 1000" so the arrows do not shuffle as the numbers grow. */
+    min-width: 108px;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.pager__range { color: var(--text); }
+.pager__total { color: var(--text-faint); }
+/* A thumb, not a pointer: the arrows are pressed repeatedly and a 26 px target is a
+   pointer's size, not a finger's. */
+.shell--mobile .pager__btn { min-width: 38px; height: 34px; }
+
 /* ── Marker bar ───────────────────────────────────────────────────────────── */
 
 .markerbar {

@@ -3567,7 +3567,14 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         const padX = 4 * dpr;
         const bw = Math.ceil(c.measureText(label).width) + padX * 2;
         const bh = Math.round(13 * dpr);
-        const by = Math.round(7 * dpr);
+        // Sat on the same line as the tick labels, rather than tucked up under
+        // the pip. They are all frequencies on one ruler and reading along a row
+        // is what makes the dial's number comparable with the ones either side
+        // of it — the badge is a label with a plate behind it, not a separate
+        // thing that happens to contain a number. H * 0.65 is the ticks' own
+        // baseline; taking it from there means the two cannot drift apart.
+        const labelY = H * 0.65;
+        const by = Math.round(labelY - bh / 2);
         // Kept inside the ruler when the dial is near an edge: a badge half off
         // the canvas is a frequency you cannot read at the moment you most want
         // it, which is while tuning towards the edge.
@@ -3576,7 +3583,7 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         c.fillStyle = MARK_HALO;
         c.fillRect(bx, by, bw, bh);
         c.fillStyle = colVfo;
-        c.fillText(label, bx + bw / 2, by + bh / 2 + 0.5 * dpr);
+        c.fillText(label, bx + bw / 2, labelY);
 
         // The passband, along the badge's top edge: from the low edge to the
         // high one, in the edge marks' own colour so it reads as the same thing

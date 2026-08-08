@@ -31,6 +31,7 @@
 import React, { useCallback, useRef, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { LANDSCAPE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { sheetIntent, sheetWants } from '../lib/sheetGesture.js';
@@ -131,6 +132,7 @@ function useHeadGesture(enabled, minimal, toggle) {
 
 export default function MobileShell() {
     const { sections, toggleSectionMinimal } = useLayout();
+    const display = useDisplay();
     // Turned on its side, everything above the marker bar goes — see below.
     const landscape = useMediaQuery(LANDSCAPE_QUERY);
     const applies = usePanelApplies();
@@ -280,16 +282,27 @@ export default function MobileShell() {
                 )}
             </main>
 
-            {/* Only with the screen to itself — see the note at the top. The
-                sheet's own × is what brings it back, which is why that button
-                exists on every sheet including an extension's. */}
-            {!panel && !extension && (
-                <nav className="tabbar">
+            {/* Only with the screen to itself, unless the operator has asked otherwise —
+                see the note at the top, and mobileTabsAlways in the display settings.
+                The sheet's own × is what brings it back when it is hidden, which is why
+                that button exists on every sheet including an extension's.
+
+                Kept on, it is a row of panel names under an open sheet: a tap moves
+                straight from one panel to the next, at the cost of a tenth of the height
+                the sheet was using. Which of those two matters more depends on whether
+                somebody is working across panels or looking at one, and the receiver
+                cannot tell — hence a setting rather than a rule. */}
+            {(display.mobileTabsAlways || (!panel && !extension)) && (
+                <nav className={`tabbar${panel || extension ? ' tabbar--over' : ''}`}>
                     {visible.map((p) => (
                         <button
                             key={p.id}
                             type="button"
-                            className="tabbar__item"
+                            // Lit while its own sheet is the one showing, which only means
+                            // anything when the row stays up: without it, moving between
+                            // panels would be moving between identical-looking taps.
+                            className={`tabbar__item${panel && panel.id === p.id ? ' is-open' : ''}`}
+                            aria-current={panel && panel.id === p.id ? 'true' : undefined}
                             onClick={() => setOpenId(p.id)}
                         >
                             <span className="tabbar__icon">{p.icon}</span>

@@ -150,6 +150,21 @@ export default function DisplayPanel() {
                 </Field>
             )}
 
+            {/* Phone only, and only worth offering there: on a desktop the panels are
+                docks and there is no row of names to keep. */}
+            {mobile && (
+                <Field
+                    label="Keep panel bar"
+                    hint={d.mobileTabsAlways ? 'always shown' : 'hidden while a panel is open'}
+                    inline
+                >
+                    <Switch
+                        checked={!!d.mobileTabsAlways}
+                        onChange={(v) => d.set({ mobileTabsAlways: v })}
+                    />
+                </Field>
+            )}
+
             <div className="divider" />
 
             <div className="section-label"><span>Markers</span></div>

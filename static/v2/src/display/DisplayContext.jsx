@@ -167,6 +167,14 @@ export const DEFAULTS = {
     // See PEAK_PLACES; the key is named apart from the peakPlace clamp for the reason
     // given above.
     peakMarksAt: 'top',
+    // Phone only: whether the row of panel names stays on screen while a sheet is open.
+    //
+    // False is how the shell has always worked, and it is the right default — see the
+    // note at the top of MobileShell. The row is about a tenth of a handset's height, a
+    // sheet needs every pixel it can get, and switching panels is close-then-open rather
+    // than one tap. True is for somebody who moves between panels constantly and would
+    // rather pay that tenth than press × each time.
+    mobileTabsAlways: false,
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator

@@ -4544,6 +4544,17 @@ a.btn { text-decoration: none; }
 .tabbar__icon { display: grid; place-items: center; }
 .tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
 
+/* Kept up over an open sheet — see mobileTabsAlways in the display settings. Shorter
+   there than on an empty screen, because now it is taking height the sheet was using,
+   and the labels are what gives: the icons are what a thumb aims at, and the lit one
+   says where you are. */
+.tabbar--over { padding-top: 2px; padding-bottom: 2px; }
+.tabbar--over .tabbar__item { padding: 5px 4px; }
+.tabbar--over .tabbar__label { display: none; }
+/* Which panel is the one showing. Only means anything while the row stays up: without it,
+   moving between panels would be moving between identical-looking taps. */
+.tabbar__item.is-open { color: var(--accent); background: var(--accent-soft); }
+
 /* A sheet lies over the bottom of the spectrum, and takes no space of its own.
  *
  * It was modal — the screen dimmed behind a scrim that closed it on any tap —

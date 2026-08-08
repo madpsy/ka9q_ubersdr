@@ -3539,7 +3539,18 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
         if (t.major) c.fillText(formatFreqShort(t.hz, cfg.span), Math.round(cx), H * 0.65);
     }
 
-    // Tuned-frequency pip: a downward triangle hanging from the top edge.
+    // Tuned-frequency pip: a downward triangle hanging from the top edge, with
+    // the frequency itself in a badge under it.
+    //
+    // The badge is here rather than only in the top bar because this is where
+    // you are looking. Reading a signal off the ruler means working out which
+    // side of which label it falls on and interpolating; the one frequency worth
+    // knowing exactly is the one you are tuned to, and it belongs at the mark
+    // that says where that is.
+    //
+    // It sits over the tick labels near the dial, which is deliberate — it is
+    // drawn last for that reason. A number under the pip is the dial; a number
+    // it is covering is a tick you can read two of either side.
     const x = ((tuning.frequency - lo) / cfg.span) * pxW;
     if (x >= 0 && x <= pxW) {
         c.fillStyle = colVfo;
@@ -3549,5 +3560,25 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo) {
         c.lineTo(x, 7 * dpr);
         c.closePath();
         c.fill();
+
+        // The same formatting as the ticks it sits among, so the badge and the
+        // ruler cannot disagree about how many decimals this span deserves.
+        const label = formatFreqShort(tuning.frequency, cfg.span);
+        const padX = 4 * dpr;
+        const bw = Math.ceil(c.measureText(label).width) + padX * 2;
+        const bh = Math.round(13 * dpr);
+        const by = Math.round(7 * dpr);
+        // Kept inside the ruler when the dial is near an edge: a badge half off
+        // the canvas is a frequency you cannot read at the moment you most want
+        // it, which is while tuning towards the edge.
+        const bx = clamp(Math.round(x - bw / 2), 0, Math.max(0, pxW - bw));
+
+        c.fillStyle = MARK_HALO;
+        c.fillRect(bx, by, bw, bh);
+        c.fillStyle = colVfo;
+        c.fillRect(bx, by, bw, Math.max(1, Math.round(dpr)));
+
+        c.fillStyle = colVfo;
+        c.fillText(label, bx + bw / 2, by + bh / 2 + 0.5 * dpr);
     }
 }

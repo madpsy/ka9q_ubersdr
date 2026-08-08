@@ -176,6 +176,73 @@ t('nothing at all is nothing to show', () => {
 
 // --- the body -----------------------------------------------------------------------
 
+// --- one name per frequency ------------------------------------------------------
+//
+// The two sources do not agree on how to spell a frequency, which is how the picker came to
+// offer "Latest 490 490 518 518" on a receiver watching two frequencies.
+
+t('the two spellings of a frequency are one frequency', () => {
+    // Live receiver: /api/latest says "490 kHz", /api/metrics says "490kHz".
+    assert.strictEqual(nx.freqKey('490 kHz'), nx.freqKey('490kHz'));
+    assert.strictEqual(nx.freqKey('490 kHz'), '490');
+    assert.strictEqual(nx.freqKey('490.0 kHz'), '490', 'and a trailing zero is not a third');
+});
+
+t('a name that is not a number survives as it stands', () => {
+    // Nothing produces one today; turning it into NaN would be worse than passing it on.
+    assert.strictEqual(nx.freqKey('Ch A'), 'Ch A');
+    assert.strictEqual(nx.freqKey(''), '');
+});
+
+t('the picker offers one chip per frequency, not one per spelling', () => {
+    // The bug this exists for: the messages in memory and the frequencies the logs remember
+    // arrive spelled differently, and a chip each meant four buttons for two frequencies.
+    const list = nx.latestPerFreq([
+        row({ freq: '490 kHz' }),
+        row({ freq: '518 kHz', station: 'C' }),
+    ]);
+    const opts = nx.pickOptions(list, ['490kHz', '518kHz']);
+    assert.deepStrictEqual(opts.map((o) => o.label), ['Latest', '490', '518']);
+});
+
+t('two spellings in one reply are one row, not two', () => {
+    // The same guard inside latestPerFreq: whichever is newer wins, and there is one 490.
+    const list = nx.latestPerFreq([
+        row({ freq: '490 kHz', timestamp: iso(NOW - 600000) }),
+        row({ freq: '490kHz', timestamp: iso(NOW - 60000), station: 'C' }),
+    ]);
+    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list[0].station, 'C', 'and it is the newer of them');
+});
+
+t('a frequency can be chosen by either spelling', () => {
+    const list = nx.latestPerFreq([row({ freq: '518 kHz' }), row({ freq: '490 kHz', station: 'C' })]);
+    assert.strictEqual(nx.chosenMessage(list, '518kHz').short, '518');
+    assert.strictEqual(nx.chosenMessage(list, '518 kHz').short, '518');
+    assert.strictEqual(nx.chosenMessage(list, '518').short, '518', 'which is what the chips carry');
+});
+
+t('a known-but-silent frequency is still silent under the other spelling', () => {
+    // Otherwise the panel would quietly show 518's message under a chip reading 490.
+    const list = nx.latestPerFreq([row({ freq: '518 kHz' })]);
+    assert.strictEqual(nx.chosenMessage(list, '490', ['490kHz', '518kHz']), null);
+    assert.strictEqual(nx.chosenMessage(list, '490 kHz', ['490', '518']), null);
+});
+
+t('a choice stored before frequencies had one name still selects its chip', () => {
+    const store = new Map([[nx.PICK_KEY, '490 kHz']]);
+    global.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+    };
+    assert.strictEqual(nx.savedPick(), '490');
+    store.set(nx.PICK_KEY, nx.PICK_LATEST);
+    assert.strictEqual(nx.savedPick(), nx.PICK_LATEST);
+    store.delete(nx.PICK_KEY);
+    assert.strictEqual(nx.savedPick(), nx.PICK_LATEST);
+    delete global.localStorage;
+});
+
 t('the framing comes off, because the header already says it', () => {
     const body = nx.messageBody('ZCZC EA07\nBUOY ADRIFT 51-30N\nNNNN');
     assert.strictEqual(body, 'BUOY ADRIFT 51-30N');

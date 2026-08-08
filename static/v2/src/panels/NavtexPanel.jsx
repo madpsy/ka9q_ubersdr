@@ -196,11 +196,13 @@ export default function NavtexPanel({ minimal }) {
                 <div className="nx__others">
                     {list.filter((m) => m !== msg).map((m) => (
                         <button
-                            key={m.freq}
+                            key={m.key}
                             type="button"
                             className="nx__other"
                             title={`${m.id} — ${(subjectOf(m.subject) || {}).label || 'unknown subject'}`}
-                            onClick={() => choose(m.freq)}
+                            // The canonical name, which is what the picker's chips carry —
+                            // the addon's own spelling would not match any of them.
+                            onClick={() => choose(m.key)}
                         >
                             {m.short} <i>{m.at ? sinceLabel(m.at, now) : '—'}</i>
                         </button>

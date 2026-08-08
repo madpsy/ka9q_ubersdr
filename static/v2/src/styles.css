@@ -3882,6 +3882,17 @@ a.btn { text-decoration: none; }
 .bsp__state { margin-left: auto; }
 .bsp__state.is-live { color: var(--ok, var(--accent)); }
 
+/* The last row: the zoom switch on the left, the way out to the band activity page on the
+   right. Wraps rather than squeezing, because a narrow dock would otherwise ellipse a
+   two-word link. */
+.bsp__foot-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
 .bsp__ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .bsp__band-pick { width: auto; flex: none; padding: 2px 6px; font-size: calc(11px * var(--ui-scale)); }
 .bsp__pinned {

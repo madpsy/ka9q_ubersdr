@@ -225,11 +225,33 @@ t('preferences survive having nowhere to store them', () => {
     // No localStorage in node, and none in a private window either.
     const p = savedPrefs();
     assert.strictEqual(p.auto, true);
+    assert.strictEqual(p.zoom, true, 'and the gestures are on unless switched off');
     assert.ok(p.min < p.max);
     assert.strictEqual(clampDb(-999), -160);
     assert.strictEqual(clampDb(50), 0);
     assert.strictEqual(clampDb('-73.4'), -73);
     assert.strictEqual(clampDb('rubbish'), 0);
+});
+
+t('the zoom switch is remembered, and only an explicit no turns it off', () => {
+    // Stored settings written before the switch existed have no `zoom` at all, and those
+    // charts zoomed — so anything other than a literal false is on.
+    const store = new Map();
+    global.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+    };
+    const KEY = 'ubersdr.v2.bandspectrum';
+
+    store.set(KEY, JSON.stringify({ auto: true, min: -110, max: -20, band: AUTO_BAND }));
+    assert.strictEqual(savedPrefs().zoom, true, 'a setting from before the switch existed');
+
+    savePrefs({ auto: true, min: -110, max: -20, band: AUTO_BAND, zoom: false });
+    assert.strictEqual(savedPrefs().zoom, false);
+    savePrefs({ auto: true, min: -110, max: -20, band: AUTO_BAND, zoom: true });
+    assert.strictEqual(savedPrefs().zoom, true);
+
+    delete global.localStorage;
 });
 
 // ── Reading the chart ────────────────────────────────────────────────────────

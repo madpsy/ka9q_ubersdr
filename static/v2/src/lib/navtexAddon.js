@@ -77,6 +77,28 @@ export function metricsFreqs(payload) {
     return list.map((f) => String(f || '').trim()).filter(Boolean);
 }
 
+// ── One name per frequency ───────────────────────────────────────────────────
+//
+// The two sources spell the same frequency differently. /api/latest says "490 kHz" and
+// /api/metrics says "490kHz" — verified on a live receiver — so anything that treats the
+// string as the frequency's identity ends up believing in two 490s. That is exactly what the
+// picker did: four chips reading "Latest 490 490 518 518", two of them the same frequency
+// under a different spelling.
+//
+// So the identity is the number, and every comparison, map key and stored preference uses it.
+// The chips show the same string, because "490" is what a chip should read anyway.
+/** "518 kHz" as a chip wears it. The unit is the same on every one of them. */
+export const shortFreq = (freq) => String(freq || '').replace(/\s*kHz\s*$/i, '').trim();
+
+export function freqKey(freq) {
+    const bare = shortFreq(freq);
+    const n = Number(bare);
+    // Through Number and back, so "490.0 kHz" and "490 kHz" are also one frequency. A label
+    // that is not a number at all — a named channel, if the addon ever grows one — is kept
+    // as it stands rather than turned into NaN.
+    return Number.isFinite(n) && n > 0 ? String(n) : bare;
+}
+
 // Where the choice of what to show is kept. Per browser rather than per session: an
 // operator who cares about 490 kHz cares about it tomorrow as well.
 export const PICK_KEY = 'ubersdr.v2.navtex.pick';
@@ -86,7 +108,16 @@ export const PICK_KEY = 'ubersdr.v2.navtex.pick';
 export const PICK_LATEST = 'latest';
 
 export function savedPick() {
-    try { return localStorage.getItem(PICK_KEY) || PICK_LATEST; } catch (e) { return PICK_LATEST; }
+    try {
+        const raw = localStorage.getItem(PICK_KEY);
+        if (!raw || raw === PICK_LATEST) return PICK_LATEST;
+        // Normalised on the way out, so a choice stored before frequencies had one canonical
+        // name — "490 kHz", as /api/latest spells it — still selects its chip rather than
+        // silently falling back to whatever spoke last.
+        return freqKey(raw);
+    } catch (e) {
+        return PICK_LATEST;
+    }
 }
 
 export function savePick(value) {
@@ -110,11 +141,15 @@ export function normaliseMessage(raw) {
     const snr = raw.snr_db == null ? null : Number(raw.snr_db);
     const station = String(raw.station || '').toUpperCase().slice(0, 1);
     const subject = String(raw.subject || '').toUpperCase().slice(0, 1);
+    const key = freqKey(freq);
     return {
+        // As the addon spelled it, kept for the record; `key` is what anything comparing
+        // frequencies uses — see freqKey.
         freq,
-        // The label the picker shows: "518 kHz" is two words wider than a chip has, and
-        // the unit is the same on every one of them.
-        short: freq.replace(/\s*kHz\s*$/i, ''),
+        key,
+        // And the label the picker shows, which is the same string: "518 kHz" is two words
+        // wider than a chip has, and the unit is the same on every one of them.
+        short: key,
         station,
         subject,
         serial: raw.serial == null ? null : Number(raw.serial),
@@ -141,8 +176,10 @@ export function latestPerFreq(rows) {
     for (const raw of rows || []) {
         const m = normaliseMessage(raw);
         if (!m) continue;
-        const had = best.get(m.freq);
-        if (!had || m.at > had.at) best.set(m.freq, m);
+        // Keyed by the frequency's canonical name, not the string it arrived as, so two
+        // spellings of 490 are one frequency here as everywhere else.
+        const had = best.get(m.key);
+        if (!had || m.at > had.at) best.set(m.key, m);
     }
     return [...best.values()].sort((a, b) => b.at - a.at);
 }
@@ -160,19 +197,18 @@ export function latestPerFreq(rows) {
  * reshuffle when a message lands are chips you press by mistake.
  */
 export function pickOptions(list, known = []) {
-    const seen = new Map();
-    for (const m of list) seen.set(m.freq, shortFreq(m.freq));
-    for (const f of known) if (!seen.has(f)) seen.set(f, shortFreq(f));
-    const freqs = [...seen.entries()]
-        .sort((a, b) => (Number(a[1]) || 0) - (Number(b[1]) || 0));
+    // A Set of canonical names, which is what stops the two sources producing a chip each
+    // for the same frequency — see freqKey. The value and the label are that same name.
+    const seen = new Set();
+    for (const m of list) seen.add(m.key);
+    for (const f of known) seen.add(freqKey(f));
+    const freqs = [...seen].filter(Boolean).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
     return [
         { value: PICK_LATEST, label: 'Latest' },
-        ...freqs.map(([value, label]) => ({ value, label })),
+        ...freqs.map((f) => ({ value: f, label: f })),
     ];
 }
 
-/** "518 kHz" as a chip wears it. The unit is the same on every one of them. */
-export const shortFreq = (freq) => String(freq || '').replace(/\s*kHz\s*$/i, '').trim();
 
 /**
  * The message to show, given the choice.
@@ -193,9 +229,12 @@ export const shortFreq = (freq) => String(freq || '').replace(/\s*kHz\s*$/i, '')
  */
 export function chosenMessage(list, pick, known = null) {
     if (pick && pick !== PICK_LATEST) {
-        const hit = list.find((m) => m.freq === pick);
+        const want = freqKey(pick);
+        const hit = list.find((m) => m.key === want);
         if (hit) return hit;
-        if (known && known.includes(pick)) return null;
+        // `known` comes from the picker, so it is already canonical — but a caller passing
+        // the addon's own spelling should not be told a frequency is unknown either.
+        if (known && known.some((f) => freqKey(f) === want)) return null;
     }
     // The list is newest first.
     return list[0] || null;

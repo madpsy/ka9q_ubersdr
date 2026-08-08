@@ -212,7 +212,16 @@ export default function BandSpectrumPanel({ minimal }) {
                         Not in the minimal view, like every other link out of a panel: it
                         opens a second window, and a panel cut down to its picture is not
                         the place to be offered one. */}
-                    <div className="row-end">
+                    <div className="bsp__foot-row">
+                        {/* Sharing the last row with the link out, on the left: it is a
+                            setting rather than one of the range controls above, and this is
+                            the one row with space going spare. */}
+                        <Switch
+                            checked={prefs.zoom !== false}
+                            onChange={(v) => setPref({ zoom: v })}
+                            label="Zoom"
+                            title="Wheel and pinch zoom the chart. Off gives the wheel back to the dock column it sits in"
+                        />
                         <a
                             className="btn btn--ghost btn--sm"
                             href={ACTIVITY_URL}
@@ -477,9 +486,24 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // The wheel listener is attached by hand rather than with onWheel: React
     // registers that one passively, and a passive listener cannot stop the page
     // scrolling underneath the zoom.
+    //
+    // All of it can be switched off — see the Zoom toggle at the foot of the panel. A chart
+    // in a scrolling dock column is the reason: a wheel over it has two plausible meanings,
+    // this one claims it, and somebody who would rather scroll the column can say so. Off
+    // means the listener is not attached at all rather than attached and doing nothing, so
+    // the wheel is the column's again including its preventDefault.
+    const canZoom = prefs.zoom !== false;
+
+    // Switched off while zoomed in: back to the whole band, because the pan and reset
+    // buttons only exist while zoomed and turning the gestures off would otherwise leave a
+    // window nothing could move.
+    useEffect(() => {
+        if (!canZoom) setZoom(FULL_ZOOM);
+    }, [canZoom]);
+
     useEffect(() => {
         const wrap = wrapRef.current;
-        if (!wrap) return undefined;
+        if (!wrap || !canZoom) return undefined;
         const onWheel = (e) => {
             e.preventDefault();
             const r = wrap.getBoundingClientRect();
@@ -489,7 +513,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         };
         wrap.addEventListener('wheel', onWheel, { passive: false });
         return () => wrap.removeEventListener('wheel', onWheel);
-    }, []);
+    }, [canZoom]);
 
     // Pinch. Two pointers down and the distance between them is the zoom, the
     // point between them is what it zooms about — the same gesture as a photo,
@@ -500,6 +524,9 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     const drag = useRef(null);
 
     const onPointerDown = useCallback((e) => {
+        // Nothing to track with the gestures off — but the press is still a click, and a
+        // click still tunes, so `moved` has to be cleared as it is below.
+        if (!canZoom) { st.moved = false; return; }
         pinch.set(e.pointerId, e.clientX);
         if (pinch.size === 2) {
             const xs = [...pinch.values()];
@@ -513,7 +540,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         if (!zoomed || (e.target.closest && e.target.closest('button'))) return;
         drag.current = { id: e.pointerId, x: e.clientX, moved: false };
         if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
-    }, [pinch, st, zoomed]);
+    }, [canZoom, pinch, st, zoomed]);
 
     const onPointerUp = useCallback((e) => {
         pinch.delete(e.pointerId);
@@ -526,6 +553,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // the readout knows to stay out of the way — dragging is a gesture about
     // where you are looking, not a question about a pixel.
     const onDragMove = useCallback((e) => {
+        if (!canZoom) return false;
         const d = drag.current;
         if (!d || d.id !== e.pointerId) return false;
         // A mouse with no button down is a hover that happens to follow a click.
@@ -544,9 +572,10 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         // Dragging right moves the band right, which is moving the window left.
         setZoom((z) => panByFraction(z, -(dx / r.width)));
         return true;
-    }, []);
+    }, [canZoom]);
 
     const onPinchMove = useCallback((e) => {
+        if (!canZoom) return false;
         if (!pinch.has(e.pointerId)) return false;
         pinch.set(e.pointerId, e.clientX);
         if (pinch.size !== 2 || !pinchRef.current) return false;
@@ -563,7 +592,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         }
         pinchRef.current.dist = dist;
         return true;                        // a pinch is not a hover
-    }, [pinch]);
+    }, [canZoom, pinch]);
 
     // ── Hover readout ────────────────────────────────────────────────────────
     //

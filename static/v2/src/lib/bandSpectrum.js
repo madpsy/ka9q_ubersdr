@@ -291,7 +291,14 @@ export function validValues(bins) {
 const KEY = 'ubersdr.v2.bandspectrum';
 
 export function savedPrefs() {
-    const d = { auto: true, min: MANUAL_DEFAULT.min, max: MANUAL_DEFAULT.max, band: AUTO_BAND };
+    const d = {
+        auto: true, min: MANUAL_DEFAULT.min, max: MANUAL_DEFAULT.max, band: AUTO_BAND,
+        // Whether the chart takes wheel and pinch gestures at all. On, because zooming is
+        // most of what makes a band chart useful — but it is a chart inside a scrolling dock
+        // column, so a wheel over it has two plausible meanings and only one of them can
+        // win. Off gives the wheel back to the column.
+        zoom: true,
+    };
     try {
         const raw = JSON.parse(localStorage.getItem(KEY));
         if (!raw || typeof raw !== 'object') return d;
@@ -300,6 +307,7 @@ export function savedPrefs() {
             min: Number.isFinite(raw.min) ? clampDb(raw.min) : d.min,
             max: Number.isFinite(raw.max) ? clampDb(raw.max) : d.max,
             band: typeof raw.band === 'string' && raw.band ? raw.band : d.band,
+            zoom: raw.zoom !== false,
         };
     } catch (e) {
         return d;
@@ -313,6 +321,7 @@ export function savePrefs(p) {
             min: clampDb(p.min),
             max: clampDb(p.max),
             band: typeof p.band === 'string' && p.band ? p.band : AUTO_BAND,
+            zoom: p.zoom !== false,
         }));
     } catch (e) { /* private mode */ }
 }

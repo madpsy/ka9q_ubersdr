@@ -8,7 +8,8 @@
 
 const assert = require('assert');
 const {
-    QUICK_COMMANDS, SCROLLBACK_LIMIT, modeFromSpot, parseSpotLine, trimLines,
+    QUICK_COMMANDS, SCROLLBACK_LIMIT, modeFromSpot, parseSpotLine, spotCommand,
+    spotsEnabledBy, trimLines,
 } = require('./.build/dxterminal.cjs');
 
 let pass = 0;
@@ -128,6 +129,60 @@ t('the quick commands are the widget\'s, and each does one thing', () => {
     for (const q of QUICK_COMMANDS) {
         assert.ok(!!q.cmd !== !!q.prompt, `${q.label} must either send or prompt, not both`);
     }
+});
+
+// --- submitting a spot ------------------------------------------------------
+//
+// The receiver works in Hz and the cluster wants kHz, which is the kind of unit
+// boundary that produces a spot three decimal places out and nobody noticing.
+
+t('a spot is DX, the frequency in kHz, then the callsign', () => {
+    assert.strictEqual(spotCommand({ hz: 14074000, callsign: 'MM3NDH' }), 'DX 14074.0 MM3NDH');
+});
+
+t('the callsign is uppercased and trimmed, as the cluster would anyway', () => {
+    assert.strictEqual(spotCommand({ hz: 7100000, callsign: '  mm3ndh ' }), 'DX 7100.0 MM3NDH');
+});
+
+t('a comment goes on the end when there is one, and nothing when there is not', () => {
+    assert.strictEqual(
+        spotCommand({ hz: 14074000, callsign: 'MM3NDH', comment: 'FT8 -12 dB' }),
+        'DX 14074.0 MM3NDH FT8 -12 dB',
+    );
+    // No trailing space: the far end splits on whitespace, but a command that ends
+    // in one is a command that reads as though something was dropped.
+    assert.strictEqual(spotCommand({ hz: 14074000, callsign: 'MM3NDH', comment: '   ' }), 'DX 14074.0 MM3NDH');
+});
+
+t('a newline in the comment cannot become a second command', () => {
+    assert.strictEqual(
+        spotCommand({ hz: 14074000, callsign: 'MM3NDH', comment: 'nice\r\nBYE' }),
+        'DX 14074.0 MM3NDH nice BYE',
+    );
+});
+
+t('the dial is rounded to 100 Hz, which is as fine as a spot means anything', () => {
+    assert.strictEqual(spotCommand({ hz: 14074123, callsign: 'MM3NDH' }), 'DX 14074.1 MM3NDH');
+    assert.strictEqual(spotCommand({ hz: 3573000, callsign: 'MM3NDH' }), 'DX 3573.0 MM3NDH');
+});
+
+t('nothing sendable gives no command rather than a malformed one', () => {
+    assert.strictEqual(spotCommand({ hz: 14074000, callsign: '' }), '');
+    assert.strictEqual(spotCommand({ hz: 0, callsign: 'MM3NDH' }), '');
+    assert.strictEqual(spotCommand({ hz: NaN, callsign: 'MM3NDH' }), '');
+});
+
+t('spot rights are read from the line the cluster actually prints', () => {
+    // Both places the addon says it — the banner after a login-line password, and
+    // the reply to SET/SPOTPASS — are the same sentence.
+    assert.strictEqual(spotsEnabledBy('Spot submission enabled. Use: DX <freq_kHz> <callsign>'), true);
+    // And the one that says the opposite must not match it.
+    assert.strictEqual(
+        spotsEnabledBy('To submit spots: SET/SPOTPASS <password> then DX <freq_kHz> <callsign>'),
+        false,
+    );
+    assert.strictEqual(spotsEnabledBy('Spot submission has not been enabled by the administrator.'), false);
+    assert.strictEqual(spotsEnabledBy(''), false);
 });
 
 console.log(`\n${pass} ok`);

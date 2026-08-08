@@ -22,7 +22,9 @@ const t = (name, fn) => {
 // --- what a fresh page looks like ------------------------------------------------
 
 t('nothing is connected, and nothing has been said', () => {
-    assert.deepStrictEqual(dx.dxSession(), { state: 'closed', detail: '', text: '' });
+    assert.deepStrictEqual(dx.dxSession(), {
+        state: 'closed', detail: '', text: '', canSpot: false,
+    });
     assert.strictEqual(dx.dxConnected(), false);
 });
 
@@ -112,6 +114,22 @@ t('a stopped receiver gets no session, like every other feed', () => {
 
 t('no addon, nothing to connect to', () => {
     assert.strictEqual(dx.dxSessionWanted({ ...WANTED, available: false }), false);
+});
+
+// --- submitting a spot -----------------------------------------------------------------
+
+t('a closed session cannot spot', () => {
+    assert.strictEqual(dx.dxCanSpot(), false);
+    // And refuses rather than pretending: the caller shows an error instead of
+    // closing its dialog as though the spot had gone.
+    assert.strictEqual(dx.dxSpot({ hz: 14074000, callsign: 'MM3NDH' }), false);
+});
+
+t('connecting without spot rights cannot spot either', () => {
+    // Being logged in is not the same as being allowed to submit — the password on
+    // the login line is what grants it, and a wrong one is silently no rights.
+    dx.dxConnect({ callsign: 'MM3NDH', password: '' });
+    assert.strictEqual(dx.dxCanSpot(), false);
 });
 
 if (process.exitCode) console.log('\nDX session tests FAILED');

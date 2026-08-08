@@ -83,6 +83,40 @@ export function loginLine(callsign, password) {
     return pass ? `${call} ${pass}` : call;
 }
 
+/**
+ * `DX <freq_kHz> <callsign> [comment]` — a spot, in the addon's own syntax.
+ *
+ * Spider-compatible; see handleDX in ubersdr_dxcluster/commands.go for the far end.
+ * Frequency goes in kHz where the receiver works in Hz, and to one decimal, which is
+ * 100 Hz — finer than that is below what a spot means and would only ever disagree
+ * with the spotter's own dial.
+ *
+ * The callsign is validated at the far end, which has the regex and the country
+ * tables; guessing here would refuse the odd but legal ones. Newlines are stripped
+ * from the comment because those would make the rest of it a second command.
+ *
+ * @returns {string} the command, or '' if there is nothing sendable.
+ */
+export function spotCommand({ hz, callsign, comment }) {
+    const call = String(callsign || '').trim().toUpperCase();
+    const khz = Math.round(Number(hz) / 100) / 10;
+    if (!call || !Number.isFinite(khz) || khz <= 0) return '';
+    const note = String(comment || '').replace(/[\r\n]+/g, ' ').trim();
+    return `DX ${khz.toFixed(1)} ${call}${note ? ` ${note}` : ''}`;
+}
+
+/**
+ * The line the cluster prints once a session may submit spots.
+ *
+ * The addon says it in exactly two places and in the same words — in the banner when
+ * the login line carried a correct password, and in reply to SET/SPOTPASS. Matched
+ * from the transcript rather than assumed from "we sent a password", because a wrong
+ * password is not an error there: the client connects normally and simply has no spot
+ * rights. Assuming would offer a Spot command that always failed, into a terminal
+ * panel that is collapsed most of the time.
+ */
+export const spotsEnabledBy = (text) => /spot submission enabled/i.test(String(text || ''));
+
 /** Where the addon's own full web UI lives. */
 export const webUrl = (base = '/addon/dxcluster') => `${base}/`;
 

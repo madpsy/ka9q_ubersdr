@@ -18,10 +18,13 @@
 // The transcript lives here too, for the same reason: coming back to a panel that has
 // held its login but lost everything that scrolled past would be half a feature.
 
-import { openTerminal, saveLogin, trimLines } from './dxclusterTerminal.js';
+import { openTerminal, saveLogin, spotCommand, spotsEnabledBy, trimLines } from './dxclusterTerminal.js';
 
 let term = null;
-let state = { state: 'closed', detail: '', text: '' };
+// `canSpot` is whether this session may submit spots — see spotAuthLine. It is part
+// of the state rather than a separate flag so that a subscriber re-renders when it
+// changes, which is what makes the context menu entry appear.
+let state = { state: 'closed', detail: '', text: '', canSpot: false };
 const listeners = new Set();
 
 // Whether the remembered callsign has been offered a connection this page load. Here
@@ -84,7 +87,7 @@ export function dxConnect({ callsign, password }) {
     const call = String(callsign || '').trim().toUpperCase();
     if (!call || term) return false;
     saveLogin({ callsign: call, password });
-    state = { state: 'connecting', detail: '', text: '' };
+    state = { state: 'connecting', detail: '', text: '', canSpot: false };
     notify({ type: 'state' });
 
     term = openTerminal({
@@ -92,7 +95,10 @@ export function dxConnect({ callsign, password }) {
         password,
         on: {
             text: (chunk, isEcho) => {
-                state = { ...state, text: trimLines(state.text + chunk) };
+                // Latching: the line arrives once, in the banner or in reply to
+                // SET/SPOTPASS, and the rights last as long as the session does.
+                const canSpot = state.canSpot || (!isEcho && spotsEnabledBy(chunk));
+                state = { ...state, text: trimLines(state.text + chunk), canSpot };
                 notify({ type: 'text', isEcho: !!isEcho });
             },
             state: (st, why) => {
@@ -111,8 +117,26 @@ export function dxDisconnect() {
     // The transcript is kept. A disconnect is leaving the cluster, not throwing away
     // what it said — and reconnecting clears it, which is the point at which a fresh
     // screen is what anybody expects.
-    state = { ...state, state: 'closed', detail: '' };
+    // Spot rights go with the session: a reconnect authenticates again, and an
+    // offer to spot on a closed cluster is an offer that cannot be met.
+    state = { ...state, state: 'closed', detail: '', canSpot: false };
     notify({ type: 'state' });
+}
+
+/** Whether this session may submit spots: connected, and the password was accepted. */
+export const dxCanSpot = () => dxConnected() && state.canSpot;
+
+/**
+ * Submit a spot. The command itself is spotCommand, in lib/dxclusterTerminal.js with
+ * the rest of what goes down the socket.
+ *
+ * @returns {boolean} whether it was sent — false if there is no session, no spot
+ *                    rights, or nothing sendable to build a command from.
+ */
+export function dxSpot({ hz, callsign, comment }) {
+    if (!dxCanSpot()) return false;
+    const cmd = spotCommand({ hz, callsign, comment });
+    return cmd ? dxSend(cmd) : false;
 }
 
 export function dxSend(cmd) {
@@ -124,7 +148,7 @@ export function dxSend(cmd) {
 export function _resetDxSession() {
     if (term) term.close();
     term = null;
-    state = { state: 'closed', detail: '', text: '' };
+    state = { state: 'closed', detail: '', text: '', canSpot: false };
     listeners.clear();
     autoTried = false;
 }

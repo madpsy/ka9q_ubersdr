@@ -58,6 +58,8 @@ import { fetchMyIp, peekMyIp } from '../lib/myip.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
+import { dxCanSpot } from '../lib/dxclusterSession.js';
+import SpotOnCluster from './SpotOnCluster.jsx';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -1062,6 +1064,8 @@ export default function SpectrumView() {
     // dial; adding a bookmark is about the dial.
     const [menu, setMenu] = useState(null);
     const [adding, setAdding] = useState(null);
+    // The frequency being spotted, while the dialog is up. See SpotOnCluster.
+    const [spotting, setSpotting] = useState(null);
 
     // The cursor frequency is the one tag in the toolbar we can do without: it
     // is transient, and the same number is in the tooltip already following the
@@ -1967,6 +1971,25 @@ export default function SpectrumView() {
                                 bandwidthHigh: tuning.bandwidthHigh,
                             }),
                         },
+                        // Only where it can actually be used. dxCanSpot is
+                        // connected *and* authenticated for spot submission —
+                        // the cluster says so in its banner when the login line
+                        // carried the right password. Hidden rather than
+                        // disabled: on a receiver whose operator has not enabled
+                        // spotting at all this could never be pressed, and a
+                        // permanently dead entry is worse than no entry. Read
+                        // during render like getVfos below, which is fine for a
+                        // menu built at the moment it opens.
+                        ...(dxCanSpot() ? [{ key: 'sep-dx', separator: true }, {
+                            key: 'dx-spot',
+                            // The dial, not the click, for the same reason the
+                            // bookmark above uses it: you spot what you have
+                            // tuned and listened to, not a peak you happened to
+                            // right-click near.
+                            label: `Spot on DX cluster — ${formatFreqShort(tuning.frequency, span)}`,
+                            title: 'Submit this frequency to the cluster as a spot',
+                            onSelect: () => setSpotting(tuning.frequency),
+                        }] : []),
                         { key: 'sep-vfo', separator: true },
                         // Copy the receiver as it stands into a VFO without
                         // going there — the Receiver panel's buttons only ever
@@ -1990,6 +2013,13 @@ export default function SpectrumView() {
                             };
                         }),
                     ]}
+                />
+            )}
+
+            {spotting != null && (
+                <SpotOnCluster
+                    frequency={spotting}
+                    onClose={() => setSpotting(null)}
                 />
             )}
 

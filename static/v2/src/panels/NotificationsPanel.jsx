@@ -218,6 +218,12 @@ export default function NotificationsPanel({ minimal }) {
                                         severity: 'info',
                                         title: 'Test notification',
                                         body: 'This is what a notification looks like here.',
+                                        // Names this panel, so the test wears the
+                                        // same icon a real notification from here
+                                        // would — the point of the test being to
+                                        // show what one looks like. See
+                                        // sourcePanel, which resolves a source
+                                        // that names a panel outright.
                                         source: 'Notifications',
                                         key: 'notifications-test',
                                     })}

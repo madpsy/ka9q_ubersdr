@@ -107,7 +107,14 @@ export const sourceLabel = (id) => {
 /** Which panel a source belongs to, or '' — for the icon, and nothing else. */
 export const sourcePanel = (id) => {
     const hit = sourceEntry(id);
-    return (hit && hit.panel) || '';
+    if (hit && hit.panel) return hit.panel;
+    // A source that is not one of the switchable kinds above may still name a
+    // panel outright — the Notifications panel's own test does, and anything
+    // raised from a panel that has no per-source switch can. Lowercased because
+    // the source doubles as the label shown on the toast, so it is written the
+    // way it should read; panel ids are lowercase. Unknown names still resolve
+    // to nothing, and NoticeIcon draws nothing for them.
+    return String(id || '').toLowerCase();
 };
 
 // The four severities, in the order they escalate. `good` rather than `success` because

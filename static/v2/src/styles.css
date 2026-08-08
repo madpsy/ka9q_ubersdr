@@ -8221,13 +8221,19 @@ a.btn { text-decoration: none; }
 /* The icon in the same grey as the name above it, not in the severity's colour: it says
    where this came from, and the colour down the left edge is already saying how bad it
    is. Two colours for two different facts on one small card is one too many. */
-/* Under the source name, in the corner, and out of the flow entirely: at the size worth
-   having, an icon in the header row sets that row's height and pushes the title and the
-   message down to make room for itself. The words are the notification; the icon is how
-   you spot which one it is. */
+/* The bottom right corner, and out of the flow entirely: at the size worth having, an
+   icon in the header row sets that row's height and pushes the title and the message down
+   to make room for itself. The words are the notification; the icon is how you spot which
+   one it is.
+
+   Pinned to the bottom rather than hung a fixed distance from the top, which is what it
+   was. Hung from the top it only looked like a corner on a short toast — on a taller one
+   it floated in the middle — and its position moved whenever its size changed, since the
+   top edge stayed put while the bottom rose. Pinned to the corner it is in the corner at
+   every height, and resizing it grows it upward into the space it already had. */
 .toast__panel-icon {
     position: absolute;
-    top: calc(20px * var(--ui-scale));
+    bottom: 8px;
     right: 8px;
     display: grid;
     place-items: center;

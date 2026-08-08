@@ -400,8 +400,24 @@ t('a source names the panel its icon comes from', () => {
     // panel registry into it would point a lib at the panels that use it. See NoticeIcon.
     assert.strictEqual(n.sourcePanel('rotator'), 'rotator');
     assert.strictEqual(n.sourcePanel('antenna'), 'antenna');
-    assert.strictEqual(n.sourcePanel('something-new'), '', 'and an unregistered one has none');
+    // The two halves of chat are separate switches over one panel.
+    assert.strictEqual(n.sourcePanel('chat-mention'), 'chat');
+    assert.strictEqual(n.sourcePanel('chat-join'), 'chat');
     assert.strictEqual(n.sourcePanel(undefined), '');
+});
+
+t('a source with no switch of its own may still name a panel', () => {
+    // Not everything that raises a notification needs a per-source switch — the
+    // Notifications panel's own test button raises one, and it should wear that
+    // panel's icon like any other. Such a source names the panel directly.
+    //
+    // Lowercased, because the source doubles as the label printed on the toast
+    // and so is written the way it should read.
+    assert.strictEqual(n.sourcePanel('Notifications'), 'notifications');
+    assert.strictEqual(n.sourceLabel('Notifications'), 'Notifications', 'and the label is untouched');
+    // A name that is neither a switch nor a panel resolves to a panel that does
+    // not exist, and NoticeIcon draws nothing rather than the wrong glyph.
+    assert.strictEqual(n.sourcePanel('something-new'), 'something-new');
 });
 
 if (process.exitCode) console.log('\nnotification tests FAILED');

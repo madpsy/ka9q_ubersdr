@@ -204,10 +204,10 @@ export default function RankingPanel({ minimal }) {
                 <div className="rank__group">
                     <Head name="PSK Reporter" callsign={s.callsign} at={s.psk.at} now={now} />
                     <Row
-                        label="Reports filed"
+                        label="Unique spots"
                         position={s.psk.reports}
                         unit="spots"
-                        hint="Digital spots this receiver reported in the last 24 hours"
+                        hint="Unique digital spots this receiver reported in the last 24 hours"
                     />
                     <Row
                         label="Countries heard"

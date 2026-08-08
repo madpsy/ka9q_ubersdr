@@ -13,7 +13,7 @@
 const assert = require('assert');
 const {
     BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, MAX_RIDGES, MIN_RIDGES,
-    createRing, depthScale, project, pushRow, ridgeCount, ridgeHeight, ridgesFor,
+    createRing, depthScale, edgeLine, project, pushRow, ridgeCount, ridgeHeight, ridgesFor,
     ringCols, ringSeconds, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
@@ -218,6 +218,36 @@ t('full scale is still full height', () => {
     // running off the top of the pane.
     assert.ok(near(ridgeHeight(-100 + 6 + 45, -100, 45, 0), FRONT_RIDGE));
     assert.ok(near(ridgeHeight(0, -100, 200, 0), FRONT_RIDGE));
+});
+
+// --- marks across the surface -----------------------------------------------
+
+t('a fixed frequency converges on the vanishing point', () => {
+    const e = edgeLine(0.8);
+    // Front: full width, on the floor. Back: narrowed, and up the pane.
+    assert.ok(near(e.x0, 0.8));
+    assert.ok(near(e.y0, 1));
+    assert.ok(near(e.x1, 0.5 + 0.3 * BACK_WIDTH));
+    assert.ok(near(e.y1, 1 - DEPTH_SPAN));
+});
+
+t('the mark line is the same geometry as the terrain under it', () => {
+    // Drawn from `project`, so a dial line and the ridge it marks cannot drift
+    // apart — and being straight is a property of the projection rather than an
+    // approximation, since x and y are both linear in depth.
+    const f = 0.23;
+    const e = edgeLine(f);
+    for (const d of [0.25, 0.5, 0.75]) {
+        const p = project(f, d);
+        const t = (p.y - e.y0) / (e.y1 - e.y0);
+        assert.ok(near(p.x, e.x0 + (e.x1 - e.x0) * t, 1e-9),
+            `depth ${d} is off the straight line`);
+    }
+});
+
+t('the centre frequency is the one mark that stays vertical', () => {
+    const e = edgeLine(0.5);
+    assert.ok(near(e.x0, e.x1), 'the vanishing point is dead centre');
 });
 
 console.log(`\n${pass} passed`);

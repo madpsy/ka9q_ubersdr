@@ -129,6 +129,23 @@ export function unproject(x, y) {
 }
 
 /**
+ * A constant frequency drawn across the surface, in unit coordinates.
+ *
+ * Straight, and that is not an approximation: both x and y are linear in depth
+ * — x through depthScale and y through DEPTH_SPAN — so a fixed frequency is a
+ * straight line converging on the vanishing point. Two endpoints is the whole
+ * geometry, and it is the same `project` the terrain is built from, so a dial
+ * line and the ridge under it cannot drift apart.
+ *
+ * @returns {{x0: number, y0: number, x1: number, y1: number}} front then back
+ */
+export function edgeLine(freqUnit) {
+    const front = project(freqUnit, 0);
+    const back = project(freqUnit, 1);
+    return { x0: front.x, y0: front.y, x1: back.x, y1: back.y };
+}
+
+/**
  * How tall a ridge stands above its own baseline, 0..1 of the pane height.
  *
  * `curve` below 1 lifts the floor region so weak signals are visible as relief

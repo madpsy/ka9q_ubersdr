@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ridgesFor,
-    ringCols, unproject as dssUnproject,
+    createRing as createDssRing, drawSurface, edgeLine, pushRow as pushDssRow,
+    ridgesFor, ringCols, unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -1036,7 +1036,8 @@ export default function SpectrumView() {
                 if (dssH > 0) {
                     drawDss(g, d, dssRef.current, dssH, Math.max(1, Math.round(sizes.w * g.dpr)),
                         g.dssFloor, g.dssRange, false,
-                        clamp((now - lastRow) / rowGap, 0, 1));
+                        clamp((now - lastRow) / rowGap, 0, 1),
+                        cfgRef.current, tuneRef.current);
                 }
                 return;
             }
@@ -2426,7 +2427,7 @@ function drawFrame(g, d, ctx) {
 
     drawWaterfall(g, d, wf, wfMarks, heatH != null ? heatH : wfH, pxW, floor, range,
         commitRow, cfg, tuning, colVfoLine, colEdge);
-    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress);
+    drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress, cfg, tuning);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
     drawWaterfallScale(g, wfScale, pxW, cfg, tuning, width, colVfoLine);
@@ -2788,7 +2789,7 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
  * when a row arrives: the whole surface is rebuilt from the ring each time, so
  * there is no history in its pixels to preserve and nothing to scroll.
  */
-function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
+function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, tuning) {
     if (!dss || !dssH || dssH <= 0) {
         // Dropped rather than kept: coming back to 2D should not hold a megabyte
         // of history for a canvas that is not on screen, and the surface fills
@@ -2834,6 +2835,13 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
         // aggregated version could never manage however the phase was computed.
         progress,
     });
+
+    // Over the terrain, after it — the rasteriser writes the whole canvas, so
+    // anything drawn before it would be painted out.
+    if (cfg && tuning) {
+        const { dial, edge } = markColors(d);
+        drawDssMarks(ctx, dss.width, dss.height, cfg, tuning, g.dpr, dial, edge);
+    }
 }
 
 function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg, tuning, colVfo, colEdge) {
@@ -3043,6 +3051,58 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         c.stroke();
     }
     drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colVfo, colEdge);
+}
+
+/**
+ * The dial and the passband edges, across the surface.
+ *
+ * The same three marks the heat map carries, and the same rules for when each is
+ * drawn — but converging, because on a receding surface a fixed frequency is not
+ * a vertical line. It is still a *straight* one: see edgeLine.
+ *
+ * Painted over the terrain rather than into it. Properly they would pass behind
+ * a ridge that stands in front of them, which is what a depth buffer is for and
+ * is a great deal of machinery for a dashed line — and a dial mark that
+ * disappeared behind a strong signal would be hiding exactly when it is most
+ * wanted. The halo under each line is what keeps them readable over bright
+ * terrain, and it is the same halo the flat marks use.
+ */
+function drawDssMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
+    if (!cfg.span) return;
+    const unit = (hz) => (hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span;
+
+    const line = (u, colour, dash, width) => {
+        const e = edgeLine(u);
+        c.beginPath();
+        c.moveTo(e.x0 * pxW, e.y0 * H);
+        c.lineTo(e.x1 * pxW, e.y1 * H);
+        c.setLineDash([dash[0] * dpr, dash[1] * dpr]);
+        c.lineCap = 'butt';
+        c.lineWidth = (width + 2 * MARK_HALO_PX) * dpr;
+        c.strokeStyle = MARK_HALO;
+        c.stroke();
+        c.lineWidth = width * dpr;
+        c.strokeStyle = colour;
+        c.stroke();
+        c.setLineDash([]);
+    };
+
+    const dialU = unit(tuning.frequency);
+    // Judged in screen pixels at the *front*, where the row is widest and the
+    // two are furthest apart. Judging at the back would drop an edge that is
+    // still perfectly readable along most of its length.
+    const gap = (MARK_MIN_GAP_PX * dpr) / pxW;
+
+    for (const hz of [tuning.frequency + tuning.bandwidthLow,
+        tuning.frequency + tuning.bandwidthHigh]) {
+        const u = unit(hz);
+        if (u < 0 || u > 1) continue;
+        if (Math.abs(u - dialU) < gap) continue;
+        line(u, edgeColor, EDGE_DASH, 1.4);
+    }
+
+    // Last, so where the passband collapses the dial is what is left on top.
+    if (dialU >= 0 && dialU <= 1) line(dialU, dialColor, DIAL_DASH, 1.6);
 }
 
 function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, cssW, colVfo, colEdge) {

@@ -12,7 +12,7 @@ const assert = require('assert');
 const {
     RBN_HISTORY_URL, anyAvailable, dayTrend, ordinal, pace, parseRbnHistory, parseSummary,
     pskAllRank, pskBandRanks, pskCoverage, rankLabel, rankTone, rankTrend, ranked,
-    shortCount, standing,
+    rankingAvailable, shortCount, standing,
 } = require('./.build/ranking.cjs');
 
 let pass = 0;
@@ -267,6 +267,34 @@ t('one point is a standing, not a trend', () => {
 t('the RBN history is asked for by the skimmer callsign, url-safe', () => {
     assert.strictEqual(RBN_HISTORY_URL('MM9PSY'), '/api/stats/rbn?period=7d&callsign=MM9PSY');
     assert.ok(RBN_HISTORY_URL('A/B').includes('A%2FB'));
+});
+
+// --- whether the panel exists at all ----------------------------------------
+
+t('a receiver reporting to nothing loses the panel', () => {
+    assert.strictEqual(rankingAvailable({ rank_sources: { psk: false, wspr: false, rbn: false, any: false } }), false);
+});
+
+t('any one network is enough to keep it', () => {
+    // WSPR in particular: it is the one the description could never have been
+    // made to answer by inference, and the reason rank_sources exists.
+    assert.strictEqual(rankingAvailable({ rank_sources: { psk: false, wspr: true, rbn: false, any: true } }), true);
+    assert.strictEqual(rankingAvailable({ rank_sources: { psk: true, wspr: false, rbn: false, any: true } }), true);
+    assert.strictEqual(rankingAvailable({ rank_sources: { psk: false, wspr: false, rbn: true, any: true } }), true);
+});
+
+t('an older server, which sends no rank_sources, keeps the panel', () => {
+    // Failing open. Hiding the panel on every receiver that has not been updated
+    // is a worse failure than showing one that says it has nothing to report.
+    assert.strictEqual(rankingAvailable({}), true);
+    assert.strictEqual(rankingAvailable(null), true);
+    assert.strictEqual(rankingAvailable({ rank_sources: null }), true);
+});
+
+t('a server naming a network this client has never heard of keeps the panel', () => {
+    // `any` is the server's own summary, read in preference to or-ing the three
+    // flags, so a fourth leaderboard added there needs no change here.
+    assert.strictEqual(rankingAvailable({ rank_sources: { psk: false, wspr: false, rbn: false, any: true } }), true);
 });
 
 console.log(`\n${pass} passed`);

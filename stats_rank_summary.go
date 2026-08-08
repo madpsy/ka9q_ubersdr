@@ -118,6 +118,47 @@ func wsprRankIn(win WSPRRankWindow, callsign string) RankPosition {
 	return pos
 }
 
+// ─── Which leaderboards this receiver is in at all ────────────────────────────
+
+// RankSources says which of the three leaderboards this receiver is *configured*
+// to appear in, whether or not anything has been fetched yet.
+//
+// Deliberately about configuration rather than about cached data. BuildRankSummary
+// below reports a section as available only once a fetch has landed, which is the
+// right answer for "what is the standing"; it is the wrong answer for "should the
+// client offer a rankings view at all", because the fetchers wait five minutes
+// after start and the view would vanish from every browser for the first five
+// minutes of a restart.
+//
+// Published in /api/description so the frontend can hide the panel outright on a
+// receiver that reports to none of them. Nothing else in the description answers
+// this: PSK could be inferred from pskreporter_rank and RBN from the CW skimmer
+// callsign, but there was no way at all to tell whether WSPR ranking was on.
+type RankSources struct {
+	PSK  bool `json:"psk"`
+	WSPR bool `json:"wspr"`
+	RBN  bool `json:"rbn"`
+	// Any is the one the client actually asks. Sent rather than left to be
+	// derived so that adding a fourth network later does not need a matching
+	// change in every frontend.
+	Any bool `json:"any"`
+}
+
+// BuildRankSources reports which leaderboards are configured. The conditions are
+// the same ones BuildRankSummary gates each section on — minus the cache check —
+// so the two cannot disagree about whether a network is in play.
+func BuildRankSources(psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbn *RBNDataStore,
+	receiverCallsign, cwSkimmerCallsign string) RankSources {
+
+	out := RankSources{
+		PSK:  psk != nil && receiverCallsign != "",
+		WSPR: wspr != nil && receiverCallsign != "",
+		RBN:  rbn != nil && cwSkimmerCallsign != "",
+	}
+	out.Any = out.PSK || out.WSPR || out.RBN
+	return out
+}
+
 // ─── Summary assembly ─────────────────────────────────────────────────────────
 
 // BuildRankSummary reads the current standing out of the in-memory caches.

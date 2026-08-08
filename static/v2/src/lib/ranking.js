@@ -44,6 +44,30 @@ export const SUMMARY_URL = '/api/stats/rank-summary';
 export const RBN_HISTORY_URL = (callsign) =>
     `/api/stats/rbn?period=7d&callsign=${encodeURIComponent(String(callsign || ''))}`;
 
+/**
+ * Whether this receiver reports into any leaderboard at all.
+ *
+ * From `rank_sources` in /api/description — see BuildRankSources in
+ * stats_rank_summary.go. It exists because nothing else in the description could
+ * answer this: PSK can be inferred from `pskreporter_rank` and RBN from the CW
+ * skimmer callsign, but there was no way whatever to tell whether WSPR ranking
+ * was on, so a gate built from what was already there would have hidden the panel
+ * on a WSPR-only receiver.
+ *
+ * Absent means yes. An older server sends no `rank_sources`, and hiding the panel
+ * on every receiver that has not been updated would be a worse failure than
+ * showing one that says it has nothing to report — which is what it does when the
+ * summary comes back empty.
+ */
+export function rankingAvailable(serverInfo) {
+    const src = serverInfo && serverInfo.rank_sources;
+    if (!src || typeof src !== 'object') return true;
+    // `any` is the server's own summary of the three. Read in preference to
+    // or-ing the flags so that a network added there later needs no change here.
+    if (typeof src.any === 'boolean') return src.any;
+    return !!(src.psk || src.wspr || src.rbn);
+}
+
 // Fifteen minutes. The server's own fetchers run hourly at best, so anything
 // faster is asking a cache the same question several times for one answer — and
 // this is a standings table, which is not a thing anybody watches tick.

@@ -81,6 +81,7 @@ import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import RankingPanel from './RankingPanel.jsx';
+import { rankingAvailable } from '../lib/ranking.js';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
@@ -544,11 +545,15 @@ export const PANELS = [
     // Collapsed by default: it is a thing you look at now and then rather than
     // while tuning, and it updates four times an hour.
     //
-    // No `requires`. The three networks are reported per-section by the endpoint
-    // itself rather than by the description, and a receiver may feed any, all or
-    // none of them — so whether there is anything to show is a question only the
-    // fetch can answer, and the panel answers it in a line when the answer is
-    // none. See lib/ranking.js.
+    // Absent on a receiver that reports to none of the three, via `rank_sources`
+    // in the description — a field added for this, because nothing already there
+    // could tell whether WSPR ranking was on. See rankingAvailable, and
+    // BuildRankSources in stats_rank_summary.go.
+    //
+    // The panel still has its own empty state, and that is not redundant: this
+    // gate says whether the networks are *configured*, and the panel says whether
+    // they have produced a standing for this callsign yet. A receiver that is set
+    // up to report but has not appeared in a table keeps the panel and is told so.
     //
     // Minimal: the headline rows without the per-band detail or the footnotes.
     {
@@ -559,6 +564,7 @@ export const PANELS = [
         defaultOpen: false,
         minimal: true,
         Component: RankingPanel,
+        requires: (serverInfo) => rankingAvailable(serverInfo),
     },
     // Under space weather, and the pairing is the point: one says what the
     // ionosphere is doing and the other what the sky is. Both end up in the

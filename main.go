@@ -2651,7 +2651,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, wsprRankFetcher, rbnStore, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -4452,7 +4452,7 @@ func handleExtensionsBundle(w http.ResponseWriter, r *http.Request, config *Conf
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler, widgetManager *WidgetManager) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, wsprRankFetcher *WSPRRankFetcher, rbnStore *RBNDataStore, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler, widgetManager *WidgetManager) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -4690,6 +4690,18 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			}
 		}
 	}
+
+	// Which leaderboards this receiver is configured to appear in, so a client can
+	// hide a rankings view outright rather than showing an empty one. Configuration
+	// rather than fetched data — see BuildRankSources — and separate from
+	// pskreporter_rank above, which is gated on the decoder as well and so cannot
+	// answer this even for PSK.
+	cwRankCallsign := ""
+	if cwskimmerConfig != nil {
+		cwRankCallsign = cwskimmerConfig.Callsign
+	}
+	response["rank_sources"] = BuildRankSources(pskRankFetcher, wsprRankFetcher, rbnStore,
+		config.Decoder.ReceiverCallsign, cwRankCallsign)
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding description: %v", err)

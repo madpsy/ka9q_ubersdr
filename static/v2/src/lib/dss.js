@@ -495,7 +495,12 @@ export function drawSurface(ctx, ring, w, h, o) {
     const gammaInv = contrast !== 1 ? 1 / contrast : 1;
     const hRange = heightRange(range) || range;
     const hFloor = heightFloor(floor);
-    const p = progress < 0 ? 0 : progress > 1 ? 1 : progress;
+    // Not clamped to 0..1. It is a free-running slide — see the draw loop's
+    // phase accumulator — and a row that has not arrived yet legitimately puts
+    // the front ridge a little below the pane, exactly as the heat map's own
+    // overhang does. Clamping it here would put back the discontinuity the
+    // accumulator exists to remove.
+    const p = Number.isFinite(progress) ? progress : 0;
 
     // Front to back. Each ridge is drawn only where it rises above everything
     // already painted, so a pixel is written once and an occluded ridge costs
@@ -509,8 +514,13 @@ export function drawSurface(ctx, ring, w, h, o) {
         if (rowW < 1) continue;
         const baseY = h - depth * DEPTH_SPAN * h;
         const maxRidge = FRONT_RIDGE * h * width;
-        const dim = MIN_DIM + (1 - MIN_DIM) * (1 - depth);
-        const hazeT = depth * HAZE;
+        // Colour is taken from the depth clamped into range while the geometry
+        // uses it raw: a ridge sliding up from below the pane is at a negative
+        // depth, which is right for where it is drawn and would over-brighten it
+        // past full if the dimming were allowed to read it.
+        const dc = depth < 0 ? 0 : depth > 1 ? 1 : depth;
+        const dim = MIN_DIM + (1 - MIN_DIM) * (1 - dc);
+        const hazeT = dc * HAZE;
         const row = storedRow(ring, age);
 
         const x0 = Math.max(0, Math.ceil(inset));

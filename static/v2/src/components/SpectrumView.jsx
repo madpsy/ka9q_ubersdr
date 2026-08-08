@@ -800,9 +800,13 @@ export default function SpectrumView() {
         // repainting. Null until a mode that draws one is chosen, so 2D pays
         // nothing for a feature it is not using.
         dss: null,
-        // How deep the surface reaches, in rows. Held rather than recomputed
-        // every frame — see drawDss.
+        // How deep the surface reaches, in rows, and how far it has slid since
+        // the last row landed. Both held rather than recomputed — see drawDss
+        // and the draw loop's phase accumulator.
         dssRidges: 0,
+        dssPhase: 0,
+        phaseAt: 0,
+        rowRate: 0,
         // The view the surface's rows were recorded in, for the pan setting.
         dssCentre: 0,
         dssSpan: 0,
@@ -1063,6 +1067,29 @@ export default function SpectrumView() {
             // times a second. g.rowDt is the same measurement the heat map's
             // scroll animation is timed from, so the two move together.
             const rowGap = g.rowDt > 0 ? g.rowDt : 1000 / d.waterfallRate;
+
+            // How far the surface has slid since the last row, in rows.
+            //
+            // Accumulated from real elapsed time rather than measured from the
+            // last commit, and decremented by exactly 1 when a row lands. That
+            // is what makes a commit continuous: the row's age goes up by one
+            // and this comes down by one, so the thing on screen does not move.
+            //
+            // Measuring it as (now - lastRow) / gap instead looked equivalent
+            // and was not. Rows land on frame arrivals, so the gaps jitter about
+            // the smoothed average — and every row that arrived early reset the
+            // measurement to zero while the ages had already gone up, yanking
+            // the whole surface backwards by whatever fraction of a row was
+            // left. That is the pull-back at the back of the picture.
+            //
+            // A weak pull toward the measured position keeps it from drifting
+            // out of range when the smoothed gap is a little wrong, and the
+            // bounds stop a stalled feed running away.
+            if (g.phaseAt) g.dssPhase += (now - g.phaseAt) / rowGap;
+            g.phaseAt = now;
+            g.dssPhase += ((now - lastRow) / rowGap - g.dssPhase) * 0.02;
+            if (!(g.dssPhase > -1)) g.dssPhase = 0;      // NaN, or a long way adrift
+            if (g.dssPhase > 2) g.dssPhase = 2;
             // The surface moves *between* rows — see drawSurface's `progress` —
             // so it is the one thing here that wants every animation frame. The
             // heat map does not: its slide is a compositor transform and costs
@@ -1070,8 +1097,7 @@ export default function SpectrumView() {
             if (!g.dirty) {
                 if (dssH > 0) {
                     drawDss(g, d, dssRef.current, dssH, Math.max(1, Math.round(sizes.w * g.dpr)),
-                        g.dssFloor, g.dssRange, false,
-                        clamp((now - lastRow) / rowGap, 0, 1),
+                        g.dssFloor, g.dssRange, false, g.dssPhase,
                         cfgRef.current, tuneRef.current);
                 }
                 return;
@@ -1096,13 +1122,31 @@ export default function SpectrumView() {
                 }
                 lastRow = now;
                 g.rowsPending = 0;
+                // The other half of the continuity above: ages go up by one, so
+                // the slide comes down by one and nothing on screen moves.
+                g.dssPhase -= 1;
                 // What the waterfall speed actually turned out to be. It is a
                 // *cap*: a row is committed only when a spectrum frame has
                 // arrived, so on a server sending fewer frames a second than the
                 // setting asks for, rows land at the server's rate instead. The
                 // surface is sized in seconds and has to be sized against this,
                 // not against the number in the panel — see ridgesFor.
-                if (g.rowDt > 0) meters.current.rowRate = 1000 / g.rowDt;
+                // One held figure for how fast rows are really landing, shared
+                // by the surface and by the Display panel's depth slider.
+                //
+                // Held, because it is a smoothed float that never sits still and
+                // both consumers are sensitive to it: it is the denominator the
+                // surface places every ridge against, and it sets the ends of
+                // the slider's range. Published raw, the slider's own thumb
+                // drifted about while nobody was touching it.
+                if (g.rowDt > 0) {
+                    const live = 1000 / g.rowDt;
+                    const held = g.rowRate || 0;
+                    if (!held || Math.abs(live - held) > Math.max(1, held * 0.08)) {
+                        g.rowRate = Math.round(live);
+                        meters.current.rowRate = g.rowRate;
+                    }
+                }
             }
 
             drawFrame(g, d, {
@@ -1111,11 +1155,9 @@ export default function SpectrumView() {
                 dss: dssRef.current,
                 dssH,
                 heatH,
-                // Where we are between rows, which is what the surface slides on.
-                // Computed before the commit below moves lastRow, so the frame a
-                // row lands on starts the new gap at zero rather than ending the
-                // old one at one.
-                rowProgress: clamp((now - lastRow) / rowGap, 0, 1),
+                // Where we are between rows, which is what the surface slides
+                // on — see g.dssPhase above.
+                rowProgress: g.dssPhase,
                 wfMarks: wfMarksRef.current,
                 scale: scaleRef.current,
                 wfScale: wfScaleRef.current,
@@ -2898,20 +2940,12 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // second than the setting asks for makes them arrive at its rate, and three
     // seconds of history came out as eight when sized against the cap.
     //
-    // Held once set, and only moved when the answer really has changed. This
-    // number is the denominator every ridge is placed against, so nudging it by
-    // one shifts the entire surface — and the rate it comes from is a smoothed
-    // float that never sits perfectly still. A few per cent of drift is a
-    // measurement wobbling, not the receiver doing something different, and it
-    // must not be paid for in movement. A genuine change — the slider moved, the
-    // waterfall speed changed, the server's rate really shifted — clears the
-    // threshold and is applied at once.
-    const rate = g.rowDt > 0 ? 1000 / g.rowDt : d.waterfallRate;
-    const want = ridgesFor(d.dssSeconds, rate);
-    if (!g.dssRidges || Math.abs(want - g.dssRidges) > Math.max(2, g.dssRidges * 0.08)) {
-        g.dssRidges = want;
-    }
-    const ridges = g.dssRidges;
+    // From the held rate, not a fresh reading: this number is the denominator
+    // every ridge is placed against, so nudging it by one shifts the whole
+    // surface, and the measurement it comes from never sits perfectly still.
+    // The Display panel's slider reads the same held figure, so the two agree
+    // about how many seconds are on screen.
+    const ridges = ridgesFor(d.dssSeconds, g.rowRate || d.waterfallRate);
     // Remembered so the between-rows frames — which are handed the last known
     // mapping rather than a fresh one — draw against the same numbers.
     if (Number.isFinite(floor)) g.dssFloor = floor;

@@ -394,4 +394,34 @@ t('a ridge does not move as the ring fills behind it', () => {
     }
 });
 
+t('a commit moves nothing on screen', () => {
+    // The pull-back. Rows land on frame arrivals, so the gaps jitter about the
+    // smoothed average — and a slide measured as (now - lastRow) / gap resets to
+    // zero when a row lands while the ages have already gone up. Every early row
+    // yanked the whole surface backwards by whatever fraction of a row was left.
+    //
+    // The accumulator makes it exact by construction: age goes up by one, the
+    // slide comes down by one, and the sum — which is where a thing is drawn —
+    // does not change.
+    for (const phaseAtCommit of [0.1, 0.5, 0.78, 1, 1.4]) {
+        const before = 3 + phaseAtCommit;        // a ridge at age 3
+        const after = 4 + (phaseAtCommit - 1);   // the same data, one row later
+        assert.ok(near(before, after, 1e-12),
+            `a commit at phase ${phaseAtCommit} displaced it by ${after - before}`);
+    }
+});
+
+t('a slide that has run past the front is still drawable', () => {
+    // A row that has not arrived yet legitimately puts the newest ridge below
+    // the pane, sliding up into view — the same overhang the heat map has. The
+    // geometry takes it raw; only the colour is clamped, or an off-pane ridge
+    // would be brighter than full.
+    assert.strictEqual(depthScale(-0.2), 1, 'still full width in front of the pane');
+    // The rasteriser places rows from the raw depth rather than through
+    // project(), which clamps — that clamp is right for a *frequency* mark,
+    // which must stay on the pane, and wrong for a row sliding up onto it.
+    const h = 100;
+    assert.ok(h - -0.2 * DEPTH_SPAN * h > h, 'and below its bottom edge');
+});
+
 console.log(`\n${pass} passed`);

@@ -2429,7 +2429,7 @@ function drawFrame(g, d, ctx) {
     drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, rowProgress);
     drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, width, colVfoLine, colEdge);
     drawScale(g, d, scale, pxW, cfg, tuning, width, colVfoLine);
-    drawWaterfallScale(g, wfScale, pxW, cfg, width);
+    drawWaterfallScale(g, wfScale, pxW, cfg, tuning, width, colVfoLine);
 }
 
 
@@ -3320,7 +3320,7 @@ function drawStationId(g, c, pxW, dpr) {
 // The ruler under the waterfall: notches and their frequencies, nothing else.
 // No dial pip and no splitter — those belong to the scale above, and repeating
 // them here would be two of each on one view.
-function drawWaterfallScale(g, scale, pxW, cfg, cssW) {
+function drawWaterfallScale(g, scale, pxW, cfg, tuning, cssW, colVfo) {
     if (!scale) return;
     const c = scale.getContext('2d', { alpha: false });
     const dpr = g.dpr;
@@ -3345,6 +3345,31 @@ function drawWaterfallScale(g, scale, pxW, cfg, cssW) {
         // belong to rather than the panel below.
         c.fillRect(Math.round(cx - w / 2), 0, w, Math.round((t.major ? 4 : 2.5) * dpr));
         if (t.major) c.fillText(formatFreqShort(t.hz, cfg.span), Math.round(cx), H * 0.72);
+    }
+
+    // Tuned-frequency pip, answering the one on the scale above.
+    //
+    // The reason for a second one is that the first is at the wrong end. The top
+    // scale's pip sits above the waterfall and the history runs down away from
+    // it, so on a tall pane the dial frequency is marked only where the picture
+    // is newest — and a column of signal near the bottom has nothing beside it
+    // to line up against. Two pips give it a pair, one at each end.
+    //
+    // Point at the top edge rather than base-on-the-bottom, which is what a
+    // straight mirror of the pip above would be. This bar is fourteen pixels to
+    // that one's twenty-six and its labels are centred at ten, so a triangle
+    // rising from the bottom edge lands on the numbers. Standing it on its point
+    // against the waterfall clears them, covers only the notches — which is what
+    // the pip above does to its own — and aims at the thing being marked.
+    const x = ((tuning.frequency - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
+    if (x >= 0 && x <= pxW) {
+        c.fillStyle = colVfo;
+        c.beginPath();
+        c.moveTo(x - 5 * dpr, 6 * dpr);
+        c.lineTo(x + 5 * dpr, 6 * dpr);
+        c.lineTo(x, 0);
+        c.closePath();
+        c.fill();
     }
 }
 

@@ -14,9 +14,11 @@
 // — see lib/voiceSkimmer.js — because five rows filtered here would be an empty column
 // whenever the last five callsigns happened to be on another band.
 //
-// `minimal` drops the caption and the link and keeps the two columns, which are the panel.
-// The picker stays: it is one row, it is the panel's only control, and a column filtered to
-// a band with the control hidden would be a short list with no visible reason.
+// `minimal` drops the caption, the link and the band picker, and keeps the two columns,
+// which are the panel. The filter itself stays in force — it is stored, and on its default
+// it follows the dial, which is exactly what a cut-down view wants — but choosing a band is
+// setting something up, and a minimal view is what you leave behind afterwards. Each row
+// names the band it was heard on, so a pinned band is still legible without the control.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Field, Icon } from '../components/ui.jsx';
@@ -189,22 +191,24 @@ export default function VoiceSkimmerPanel({ minimal }) {
                 how you get off a band with nothing on it, which is exactly when somebody
                 reaches for it. Auto names the band it has settled on — "Auto (20m)" — so a
                 short list is explained by the control rather than being a mystery. */}
-            <Field label="Band" inline>
-                <select
-                    className="select"
-                    value={choice}
-                    onChange={(e) => pickBand(e.target.value)}
-                    title="Which band the two columns are asking the skimmer about"
-                >
-                    {/* Auto first, because it is the default and because it is the question
-                        a list of heard callsigns is usually being asked. */}
-                    <option value={AUTO_BAND}>
-                        {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
-                    </option>
-                    <option value="all">All bands</option>
-                    {BAND_NAMES.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-            </Field>
+            {!minimal && (
+                <Field label="Band" inline>
+                    <select
+                        className="select"
+                        value={choice}
+                        onChange={(e) => pickBand(e.target.value)}
+                        title="Which band the two columns are asking the skimmer about"
+                    >
+                        {/* Auto first, because it is the default and because it is the question
+                            a list of heard callsigns is usually being asked. */}
+                        <option value={AUTO_BAND}>
+                            {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
+                        </option>
+                        <option value="all">All bands</option>
+                        {BAND_NAMES.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                </Field>
+            )}
 
             {state === 'loading' && <Empty>Loading…</Empty>}
             {dead && <Empty>The voice skimmer addon is not answering.</Empty>}

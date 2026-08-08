@@ -1,6 +1,6 @@
 import React from '../react.js';
 import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
 import { maxSeconds, minSeconds, ridgesFor } from '../lib/dss.js';
@@ -27,6 +27,13 @@ import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
+    // Rows a second as they are actually landing, not as the speed slider asks
+    // for — see meters.rowRate. Everything about the 3D depth is in seconds, and
+    // seconds come from the real rate: sized against the setting, three seconds
+    // of history came out as eight on a server sending frames at a third of it.
+    // Sampled slowly because it is a smoothed average that barely moves, and
+    // falls back to the setting until two rows have arrived to measure between.
+    const rowRate = useMeters(2).rowRate || d.waterfallRate;
     // Two settings resolve per device — the zoom anchor and the idle throttle —
     // and both have to show what is actually in force, not what is stored. The
     // same query IdleWatch and the spectrum use to decide, so the control and
@@ -328,16 +335,12 @@ export default function DisplayPanel() {
                            reading the same span. */
                         <Field
                             label="3D depth"
-                            hint={`${(ridgesFor(d.dssSeconds, d.waterfallRate) / d.waterfallRate).toFixed(1)}s of history`}
+                            hint={`${(ridgesFor(d.dssSeconds, rowRate) / rowRate).toFixed(1)}s of history`}
                         >
                             <Slider
-                                value={clamp(
-                                    d.dssSeconds,
-                                    minSeconds(d.waterfallRate),
-                                    maxSeconds(d.waterfallRate),
-                                )}
-                                min={minSeconds(d.waterfallRate)}
-                                max={maxSeconds(d.waterfallRate)}
+                                value={clamp(d.dssSeconds, minSeconds(rowRate), maxSeconds(rowRate))}
+                                min={minSeconds(rowRate)}
+                                max={maxSeconds(rowRate)}
                                 onChange={(v) => d.set({ dssSeconds: v })}
                             />
                         </Field>

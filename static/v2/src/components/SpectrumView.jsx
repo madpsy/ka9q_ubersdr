@@ -753,7 +753,7 @@ function SpectrumStats({ place, bottom, gfx, onClose }) {
 export default function SpectrumView() {
     const radio = useRadio();
     const display = useDisplay();
-    const { spectrumConn, tuning, actions, view } = radio;
+    const { spectrumConn, tuning, actions, view, meters } = radio;
 
     // The spectrum socket has been closed after a long spell of nothing (see
     // IdleWatch, and PAUSE_CHOICES for why that is a setting and not a rule).
@@ -1083,6 +1083,13 @@ export default function SpectrumView() {
                 }
                 lastRow = now;
                 g.rowsPending = 0;
+                // What the waterfall speed actually turned out to be. It is a
+                // *cap*: a row is committed only when a spectrum frame has
+                // arrived, so on a server sending fewer frames a second than the
+                // setting asks for, rows land at the server's rate instead. The
+                // surface is sized in seconds and has to be sized against this,
+                // not against the number in the panel — see ridgesFor.
+                if (g.rowDt > 0) meters.current.rowRate = 1000 / g.rowDt;
             }
 
             drawFrame(g, d, {
@@ -2849,7 +2856,11 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress, cfg, t
     // the pane so a one-pixel carrier is a one-column ridge. A change to any of
     // them is a different history — the stored rows were taken at the old spacing
     // and the old width — so the ring is remade rather than reinterpreted.
-    const want = ridgesFor(d.dssSeconds, d.waterfallRate);
+    // Against the measured rate, falling back to the setting until a couple of
+    // rows have arrived to measure. Sized from the setting alone, three seconds
+    // of history came out as eight on a server sending frames at a third of the
+    // requested speed.
+    const want = ridgesFor(d.dssSeconds, g.rowDt > 0 ? 1000 / g.rowDt : d.waterfallRate);
     const cols = ringCols(pxW);
     if (!g.dss || g.dssRows !== want || g.dss.cols !== cols) {
         g.dss = createDssRing(want, cols);

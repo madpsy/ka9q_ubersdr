@@ -59,8 +59,8 @@ import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
-    createRing as createDssRing, drawSurface, pushRow as pushDssRow, storeRows as dssStoreRows,
-    unproject as dssUnproject,
+    createRing as createDssRing, drawSurface, pushRow as pushDssRow, ridgePhase,
+    storeRows as dssStoreRows, unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
@@ -2826,7 +2826,11 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, progress = 0) {
         contrast: d.contrast,
         lut: getPalette(d.palette),
         bg: RING_BG_RGB,
-        progress,
+        // Ridges, not rows. With more than one stored row aggregated into a
+        // ridge those two advance at different rates, and driving the slide off
+        // the row rate makes the surface outrun its own features — see
+        // ridgePhase, which is what that bug cost.
+        progress: ridgePhase(g.dss, progress),
     });
 }
 

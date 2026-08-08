@@ -152,7 +152,12 @@ export const MAX_SECONDS = 120;
 export function storeRows(seconds, rate, rows = ROWS) {
     const want = Math.round((Number(seconds) || 0) * (Number(rate) || 0));
     if (!Number.isFinite(want)) return rows;
-    return Math.max(rows, Math.min(MAX_STORE, want));
+    const capped = Math.max(rows, Math.min(MAX_STORE, want));
+    // Rounded to a whole number of stored rows per ridge. With a fractional
+    // stride the ridge boundaries fall between stored rows and the phase that
+    // drives the slide never quite closes, so the surface creeps out of step
+    // with its own data — see ridgePhase.
+    return Math.max(1, Math.round(capped / rows)) * rows;
 }
 
 /** The seconds a ring of this size actually holds at `rate`. */
@@ -170,6 +175,9 @@ export function createRing(rows = ROWS, cols = COLS) {
         // How many rows have actually been written. Until the ring fills, the
         // surface draws only what it has rather than a wall of floor values.
         count: 0,
+        // Rows written ever, which is what ridgePhase counts in. Not `count`:
+        // that stops at the ring size, and the phase has to keep going.
+        pushed: 0,
         data: new Float32Array(Math.max(1, Math.round(rows)) * cols),
     };
 }
@@ -186,6 +194,7 @@ export function pushRow(ring, px) {
     const { cols, data } = ring;
     const n = px.length;
     ring.head = (ring.head - 1 + ring.rows) % ring.rows;
+    ring.pushed++;
     if (ring.count < ring.rows) ring.count++;
     const base = ring.head * cols;
     if (n <= 0) {
@@ -202,6 +211,31 @@ export function pushRow(ring, px) {
         data[base + c] = best;
     }
     return ring;
+}
+
+/**
+ * How far the surface has slid toward the back, 0..1 of one ridge.
+ *
+ * The correction for the bug that made this shudder. Geometry and content move at
+ * different rates as soon as a ridge aggregates more than one stored row:
+ * pushing a row shifts every aggregation window by one *stored row*, but the
+ * depth was being advanced by a whole *ridge* over the same interval. At the
+ * fifteen-second default that is six rows of content against one ridge of
+ * geometry — so the terrain slid backwards faster than its own features and
+ * snapped forward each time a row landed, which reads as going back and forth
+ * rather than as sliding.
+ *
+ * So the slide is measured in ridges rather than rows: `stride` pushes move it
+ * exactly one ridge, which is exactly when the windows have moved one ridge too.
+ *
+ * @param rowProgress 0..1 through the gap until the next row is committed
+ */
+export function ridgePhase(ring, rowProgress, rows = ROWS) {
+    const stride = ring.rows / rows;
+    const p = rowProgress < 0 ? 0 : rowProgress > 1 ? 1 : rowProgress;
+    if (!(stride > 1)) return p;
+    const phase = ((ring.pushed % stride) + p) / stride;
+    return phase - Math.floor(phase);
 }
 
 /** One stored row, `age` back from the newest, as a view. age 0 is the newest. */

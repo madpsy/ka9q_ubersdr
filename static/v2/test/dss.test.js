@@ -10,7 +10,7 @@ const assert = require('assert');
 const {
     BACK_WIDTH, COLS, DEPTH_SPAN, FRONT_RIDGE, MAX_STORE, ROWS,
     createRing, depthScale, project, pushRow, ridgeCount, ridgeHeight, ridgeInto,
-    ringSeconds, storeRows, storedRow, unproject,
+    ridgePhase, ringSeconds, storeRows, storedRow, unproject,
 } = require('./.build/dss.cjs');
 
 let pass = 0;
@@ -112,12 +112,62 @@ t('a narrow carrier survives the column collapse', () => {
 // --- depth in seconds -------------------------------------------------------
 
 t('seconds and rate decide how many rows are stored', () => {
-    assert.strictEqual(storeRows(15, 20), 300);
+    // Rounded to a whole number of stored rows per ridge: 15 s at 20 rows/s is
+    // 300, which is 6.25 ridges' worth, and the quarter is what made the slide
+    // creep out of step with its own data. 288 is six exactly.
+    assert.strictEqual(storeRows(15, 20), 6 * ROWS);
+    assert.strictEqual(storeRows(15, 20) % ROWS, 0);
     // Never fewer than one per drawn ridge, or the surface would repeat rows
     // rather than show more of them.
     assert.strictEqual(storeRows(1, 2), ROWS);
     // And bounded, so a slow speed and a long depth cannot run away.
-    assert.strictEqual(storeRows(120, 40), MAX_STORE);
+    assert.ok(storeRows(120, 40) <= MAX_STORE);
+    assert.strictEqual(storeRows(120, 40) % ROWS, 0);
+});
+
+t('the stride is always whole, so a ridge boundary lands on a stored row', () => {
+    for (const secs of [5, 7, 13, 15, 23, 60, 120]) {
+        for (const rate of [2, 7, 20, 33, 40]) {
+            const n = storeRows(secs, rate);
+            assert.strictEqual(n % ROWS, 0, `${secs}s at ${rate}/s gives ${n}`);
+        }
+    }
+});
+
+// --- the slide, measured in ridges ------------------------------------------
+
+t('with one row per ridge the slide is the row gap', () => {
+    const r = createRing(ROWS, 4);
+    pushRow(r, row(-50, 4));
+    assert.ok(near(ridgePhase(r, 0.4), 0.4));
+});
+
+t('with six rows per ridge, six pushes make one ridge of travel', () => {
+    // The bug this exists for: the geometry used to advance a whole ridge per
+    // push while the content advanced one row, so the surface outran its own
+    // features and snapped back — "going back and forth".
+    const r = createRing(ROWS * 6, 4);
+    const seen = [];
+    for (let i = 0; i < 6; i++) {
+        seen.push(ridgePhase(r, 0));
+        pushRow(r, row(-50, 4));
+    }
+    assert.deepStrictEqual(seen.map((v) => Math.round(v * 6)), [0, 1, 2, 3, 4, 5]);
+    // And the sixth push brings it back to the start of the next ridge.
+    assert.ok(near(ridgePhase(r, 0), 0));
+});
+
+t('the phase never runs backwards within a ridge', () => {
+    const r = createRing(ROWS * 4, 4);
+    let last = -1;
+    for (let i = 0; i < 4; i++) {
+        for (const p of [0, 0.25, 0.5, 0.75, 0.999]) {
+            const v = ridgePhase(r, p);
+            assert.ok(v >= last - 1e-9 || last > 0.9, `phase went back: ${last} -> ${v}`);
+            last = v;
+        }
+        pushRow(r, row(-50, 4));
+    }
 });
 
 t('a ring reports the span it actually holds', () => {

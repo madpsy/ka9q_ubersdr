@@ -1726,11 +1726,15 @@ export default function SpectrumView() {
                             aria-label="Level range"
                             onClick={() => display.set({ autoRange: !display.autoRange })}
                         />
-                        {/* Not on a phone: the tools row there is already the scarcest
-                            space in the layout, and the Display panel has both limits as
-                            full-width sliders one tap away. */}
-                        {!display.autoRange && !mobile && (
-                            <span className="spectrum__range">
+                        {/* On a phone too. This was desktop-only on the grounds that the
+                            tools row is the scarcest space in the layout, and that was
+                            true until the four readouts left the row beside it — but it
+                            was the wrong call anyway: a toggle whose effect only appears
+                            on some screens is a toggle that looks broken on the others,
+                            and "set the levels by hand" with no way to set them is worse
+                            than not offering it. It is narrower there; see the CSS. */}
+                        {!display.autoRange && (
+                            <span className={`spectrum__range${mobile ? ' is-narrow' : ''}`}>
                                 {/* The floor and the ceiling on one track, because they
                                     are one setting: what dB range the colours cover.
                                     Ten decibels apart at the least — see RangeSlider's

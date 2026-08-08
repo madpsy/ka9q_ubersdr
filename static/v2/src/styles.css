@@ -7711,6 +7711,12 @@ a.btn { text-decoration: none; }
    measurement. The Display panel has the same two values as full-width sliders. */
 .spectrum__range { display: inline-flex; align-items: center; gap: 5px; }
 .spectrum__range .range { width: calc(88px * var(--ui-scale)); }
+/* Shorter on a phone, where this shares a row with the zoom pair and the pause button.
+   Still two thumbs and still the readout: a range control with no numbers on it is a
+   guess, and the whole reason for setting the levels by hand is that you know what you
+   want them to be. */
+.spectrum__range.is-narrow .range { width: calc(58px * var(--ui-scale)); }
+.spectrum__range.is-narrow .spectrum__range-read { font-size: calc(9px * var(--ui-scale)); }
 .spectrum__range-read {
     font-family: var(--mono);
     font-size: calc(9.5px * var(--ui-scale));

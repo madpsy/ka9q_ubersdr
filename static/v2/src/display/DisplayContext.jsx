@@ -109,6 +109,22 @@ export const DEFAULTS = {
     // pixels has re-shared the display instead. Only the drag goes — the slider
     // and the double-click reset both still work, so nothing becomes unreachable.
     splitDrag: true,
+    // Whether the passband edges on the spectrum can be dragged to set the
+    // filter width.
+    //
+    // On by default, and for the same reason the splitter drag is: grabbing the
+    // edge of the passband is how you would expect to widen it, and it is the
+    // only way to set the two sides independently without opening a panel.
+    //
+    // Off is for the operator who keeps catching it. The edges sit either side
+    // of the dial, which is exactly where you click to tune — and a click that
+    // landed a few pixels out has changed what you are listening *through*
+    // rather than what you are listening to, which is a harder mistake to spot
+    // and to undo than a mistuned dial. A touchscreen makes it likelier still,
+    // since the grab zone is widened for a fingertip. Only the drag goes: the
+    // Receiver panel's slider, the top bar's filter chip and the Multipad's
+    // width row all still set it.
+    edgeDrag: true,
     // Resting opacity of floating panel windows, 0.5..1 from the Layout panel.
     // 1 is solid, i.e. the effect off.
     floatOpacity: 0.8,

@@ -1325,6 +1325,11 @@ export default function SpectrumView() {
         const el = wrapRef.current;
         const cfg = cfgRef.current;
         if (!el || !cfg.span) return null;
+        // Switched off in the display settings, and switched off *here* so the
+        // whole gesture goes with it — the grab, the drag and the col-resize
+        // cursor that advertises them. Refusing it further down would have left
+        // the pointer still changing shape over a line that no longer answers.
+        if (dispRef.current.edgeDrag === false) return null;
         const r = el.getBoundingClientRect();
         return edgeHit(
             clientX - r.left, r.width, cfg.span, cfg.centerFreq, tuneRef.current,

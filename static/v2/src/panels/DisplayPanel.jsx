@@ -117,6 +117,19 @@ export default function DisplayPanel() {
                 </>
             )}
 
+            {/* The other thing on the spectrum that can be grabbed by mistake,
+                and the more expensive of the two to get wrong: the splitter
+                above only re-shares the display, where this changes what you are
+                hearing. Outside the split-only block, because the passband edges
+                are on the spectrum in every view mode. */}
+            <Field label="Drag passband edges" inline>
+                <Switch
+                    checked={d.edgeDrag !== false}
+                    onChange={(v) => d.set({ edgeDrag: v })}
+                    title="Drag either edge of the passband on the spectrum to set the filter width. Turn this off if you keep catching one when reaching to tune — the Receiver panel's slider, the top bar's filter chip and the Multipad all still set it"
+                />
+            </Field>
+
             <Field label="Scroll wheel" hint={d.wheelAction === 'tune' ? `steps ${d.tuneStep || 500} Hz` : undefined}>
                 <Segmented
                     size="sm"

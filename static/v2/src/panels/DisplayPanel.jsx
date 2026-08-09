@@ -107,7 +107,7 @@ export default function DisplayPanel() {
                     {/* The same setting from the other end: the slider is where
                         you set the share deliberately, this is whether the join
                         between the panes can be grabbed to do it by hand. */}
-                    <Field label="Drag to adjust" inline>
+                    <Field label="Drag divider to adjust" inline>
                         <Switch
                             checked={d.splitDrag !== false}
                             onChange={(v) => d.set({ splitDrag: v })}

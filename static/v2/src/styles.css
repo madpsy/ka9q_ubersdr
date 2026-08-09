@@ -3176,13 +3176,20 @@ a.btn { text-decoration: none; }
    nearly like the full page's would be worse than one that looked nothing like
    it.
 
+   Every map in v2 takes it, which is the point of listing them here rather than
+   putting it on one: the start overlay's and the lookup panel's are the same
+   OpenStreetMap tiles in the same interface, and one of them arriving dark and
+   the other bright read as two different maps rather than one map used twice.
+
    Dropped in the light theme, where the tiles were already right and inverting
    them would produce the one thing this is trying to avoid: a map that does not
    match the interface around it. */
-.csmap .leaflet-tile {
+.csmap .leaflet-tile,
+.startmap__canvas .leaflet-tile {
     filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
 }
-[data-theme="light"] .csmap .leaflet-tile { filter: none; }
+[data-theme="light"] .csmap .leaflet-tile,
+[data-theme="light"] .startmap__canvas .leaflet-tile { filter: none; }
 
 /* The callsign, pinned to the marker. Leaflet's own tooltip chrome is a white
    box with a border radius that belongs to a different interface, so it is

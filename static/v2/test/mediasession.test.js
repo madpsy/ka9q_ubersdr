@@ -47,13 +47,14 @@ t('Android Chrome needs the URL stream, not the bridge', () => {
     assert.strictEqual(s.androidChrome, true);
 });
 
-t('a handset is on by default, whichever handset it is', () => {
-    // The lock screen is the case the feature exists for, so both phone
-    // platforms are opt-out. Android costs the scope and the recorder while it
-    // runs — see the anchor above — and is on anyway, which is the trade the
-    // default is making.
+t('a handset is not on by default unless it is an Apple one', () => {
+    // Android needs the 'stream' anchor, which moves the audio off the WebSocket
+    // and silences the scope, the recorder and the client-side filters while it
+    // runs. Worth it for somebody who asked for lock-screen control; not a trade
+    // to make on their behalf. Apple's bridge costs nothing, so it stays opt-out
+    // there — which is also v1's behaviour.
     const android = detectSupport(CHROME_ANDROID, { hasMediaSession: true, hasContextSink: true });
-    assert.strictEqual(android.defaultEnabled, true);
+    assert.strictEqual(android.defaultEnabled, false);
     const ios = detectSupport(CHROME_IOS, { hasMediaSession: true, hasContextSink: false });
     assert.strictEqual(ios.defaultEnabled, true);
 });

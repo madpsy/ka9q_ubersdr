@@ -99,23 +99,20 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         windows,
         androidChrome,
         android,
-        // On by default wherever the screen locks over the audio, opt-in
-        // everywhere else. Apple is v1's default kept — it has worked there for
-        // years — and Android now joins it for the same reason: a phone in a
-        // pocket is the case the whole feature is for, and a receiver that goes
-        // silent-controlled the moment the screen turns off is one you have to
-        // wake and hunt through a panel for. Nobody gets a media widget they did
-        // not ask for on a desktop.
+        // v1's defaults, kept: Apple has had this working for years and it is
+        // where lock-screen control matters most, so it is opt-out there and
+        // opt-in everywhere else. Nobody gets a media widget they did not ask
+        // for on a desktop.
         //
-        // It is not free on Android Chrome, and this is the one place that
-        // matters: the anchor there is 'stream', which moves the audio off the
-        // WebSocket and takes the audio scope, the recorder and the client-side
-        // filters with it (see the anchor notes above). The panel says so while
-        // that anchor is live, and the switch is the first thing on it — but a
-        // phone is where lock-screen control is worth more than a scope nobody
-        // can see with the screen off, which is why the trade is made this way
-        // round here and not on the desktop.
-        defaultEnabled: available && (apple || android),
+        // Android was briefly included, on the reasoning that a phone in a
+        // pocket is the case the whole feature is for. It is out again, and the
+        // reason is what the anchor costs there: Android Chrome needs 'stream',
+        // which moves the audio off the WebSocket and takes the scope, the
+        // recorder and the client-side filters with it. That is a fair trade for
+        // somebody who asked for lock-screen control and a poor one to make on
+        // their behalf — and it is a trade Apple does not have to make, because
+        // the bridge anchor costs nothing.
+        defaultEnabled: available && apple,
     };
 }
 

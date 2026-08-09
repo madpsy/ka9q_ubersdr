@@ -9,6 +9,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
 import { MOBILE_QUERY, TOUCH_QUERY } from '../lib/useMediaQuery.js';
+import { cleanScale } from '../lib/panelScale.js';
 
 const STORAGE_KEY = 'ubersdr.v2.layout';
 const VERSION = 1;
@@ -107,6 +108,9 @@ function firstRun(p, phone, touch) {
         // whole where its neighbours opened trimmed would read as one that had
         // forgotten the setting rather than as one making a point.
         minimalMobile: true,
+        // Text size, as an offset from the global one — see lib/panelScale.js.
+        // Nobody's first run wants a panel out of step with the rest.
+        scale: 0,
     };
 }
 
@@ -294,6 +298,11 @@ export function reconcile(stored, env = machine()) {
             // stored before this existed, and those should get the default like
             // everybody else, not be pinned to full because the key was missing.
             minimalMobile: !!p.minimal && (s?.minimalMobile ?? d.minimalMobile),
+            // Cleaned rather than trusted: this one is a free number rather than
+            // a flag, so a hand-edited or half-written layout can put anything
+            // here, and anything here ends up multiplying every font size in the
+            // panel. See cleanScale.
+            scale: cleanScale(s?.scale ?? d.scale),
         };
     }
     return migrateRev(base, stored, phone, touch);
@@ -404,6 +413,18 @@ export function LayoutProvider({ children }) {
             ...l,
             sections: { ...l.sections, [id]: { ...l.sections[id], [key]: !l.sections[id]?.[key] } },
         }));
+    }, []);
+
+    // Text size for one panel, as an offset from the global — see
+    // lib/panelScale.js for why an offset rather than a size. The caller works
+    // out the new offset because it is the one that knows the global scale and
+    // the range the display settings allow; this only has to store it.
+    const setSectionScale = useCallback((id, scale) => {
+        setLayout((l) => {
+            const next = cleanScale(scale);
+            if ((l.sections[id]?.scale || 0) === next) return l;
+            return { ...l, sections: { ...l.sections, [id]: { ...l.sections[id], scale: next } } };
+        });
     }, []);
 
     const setSectionHidden = useCallback((id, hidden) => {
@@ -647,13 +668,14 @@ export function LayoutProvider({ children }) {
         setDockSize,
         toggleSection,
         toggleSectionMinimal,
+        setSectionScale,
         setSectionHidden,
         movePanel,
         movePanelNear,
         swapPanels,
         revealPanel,
         resetLayout,
-    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
+    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionScale, setSectionHidden, movePanel, movePanelNear,
         swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;

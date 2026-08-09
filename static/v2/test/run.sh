@@ -226,6 +226,8 @@ esbuild ../src/lib/roomFor.js --bundle --format=cjs --platform=node \
     --outfile=.build/roomfor.cjs --log-level=warning
 esbuild ../src/lib/fitScale.js --bundle --format=cjs --platform=node \
     --outfile=.build/fitscale.cjs --log-level=warning
+esbuild ../src/lib/panelScale.js --bundle --format=cjs --platform=node \
+    --outfile=.build/panelscale.cjs --log-level=warning
 esbuild ../src/lib/edgeHit.js --bundle --format=cjs --platform=node \
     --outfile=.build/edgehit.cjs --log-level=warning
 esbuild ../src/lib/haptics.js --bundle --format=cjs --platform=node \
@@ -339,6 +341,7 @@ node markernavsettings.test.js
 node medialookup.test.js
 node roomfor.test.js
 node fitscale.test.js
+node panelscale.test.js
 node edgehit.test.js
 node haptics.test.js
 node appheight.test.js

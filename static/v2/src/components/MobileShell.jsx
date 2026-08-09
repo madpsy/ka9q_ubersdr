@@ -40,6 +40,7 @@ import SpectrumView from './SpectrumView.jsx';
 import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
+import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 
 /**
  * Tap or drag the title bar to cut a sheet down or open it out.
@@ -174,6 +175,11 @@ export default function MobileShell() {
     // desktop that had room for it all along.
     const panelMinimal = !!panel?.minimal && !!sections[panel.id]?.minimalMobile;
 
+    // The open sheet's own text size. Unconditional, as a hook has to be: with
+    // no sheet open it reads the layout for a panel id of undefined and returns
+    // the global size, which is what an element that is not drawn should get.
+    const panelZoom = usePanelScale(panel?.id);
+
     // Both unconditionally, as hooks have to be — each returns null when its
     // sheet has no second state to be in.
     const panelHead = useHeadGesture(
@@ -212,6 +218,12 @@ export default function MobileShell() {
                         className={`sheet${panel.fill ? ' sheet--fill' : ''}`}
                         role="region"
                         aria-label={panel.title}
+                        /* This panel's own text size, if it has been given one —
+                           see PanelZoom. A phone is where it earns the most: the
+                           sheet is a third of a dock's room, and which panels
+                           want smaller type to fit and which want larger type to
+                           be read at arm's length is not the same answer. */
+                        style={panelZoom.style}
                     >
                         {/* The bar is the sheet's own control: tap it, or drag
                             it up and down — see useHeadGesture. The button below
@@ -231,6 +243,11 @@ export default function MobileShell() {
                                 carry, but its own stored flag: what a phone has
                                 room for and what a dock has room for are not the
                                 same question. */}
+                            {/* Full width to work with, so this one is never
+                                short of room — the pair is drawn on every sheet
+                                rather than being the first thing dropped as it is
+                                in a dock header. */}
+                            <PanelZoom panelId={panel.id} className="sheet__act" size={16} />
                             {panel.minimal && (
                                 <button
                                     type="button"

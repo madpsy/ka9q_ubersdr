@@ -1048,6 +1048,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
    between them — a dock can be 220px wide and the panel's title has the first
    claim on it — and drawn as one pair rather than two loose controls. */
 .section__order { display: flex; align-items: center; }
+/* The per-panel zoom pair, in whichever title bar it is drawn in: a box of its
+   own, with no gap between the two, exactly as the reorder arrows above are one
+   pair rather than two loose controls. `flex: none` because none of these bars
+   measures its own contents — the panel is what is measured (see useWiderThan) —
+   and a control that could shrink would be one drawn on top of the title rather
+   than one dropped. */
+.panelzoom { display: flex; align-items: center; flex: none; }
 .section__arrow { width: 17px; }
 /* At the end of the dock: kept in place rather than removed, so the pair does
    not change width and shuffle the title as panels move past each other. */
@@ -4702,6 +4709,9 @@ a.btn { text-decoration: none; }
 /* Lit while on, as the dock and window toggles are: a cut-down view must not
    read as a view that has lost half its controls. */
 .sheet__act[aria-pressed="true"] { color: var(--accent); }
+/* As on a window title bar: the zoom pair dims at the ends of the range rather
+   than leaving a hole in the row. */
+.sheet__act:disabled { opacity: 0.32; cursor: default; }
 .sheet__body {
     flex: 1;
     overflow-y: auto;
@@ -4905,6 +4915,13 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .floatwin__btn:hover { background: var(--surface-hover); color: var(--text); }
+/* The zoom pair is the only thing in a title bar that can be disabled, at the
+   ends of the size range. Dimmed and left in place rather than removed, as the
+   reorder arrows are: a button that vanished at the top of the range would take
+   the ones beside it with it, and the pair would jump about under the pointer
+   that was pressing it. */
+.floatwin__btn:disabled { opacity: 0.32; cursor: default; }
+.floatwin__btn:disabled:hover { background: transparent; color: var(--text-dim); }
 /* The menu wrapper must not be squeezed out by a long title. */
 .floatwin__head .menu { flex: none; }
 

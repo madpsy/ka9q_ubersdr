@@ -18,6 +18,13 @@ import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
+import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
+
+// The narrowest window that still has room for the zoom pair — the same figure
+// the docked header uses, and for the same reason. Read from the geometry rather
+// than measured: a window's width is a number the layout already holds, and one
+// that cannot be changed by what is drawn inside it.
+const ZOOM_MIN_W = 270;
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -33,6 +40,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
 
     // The size floor lives in LayoutContext (setFloat clamps), so none is
     // passed here — this only has to stop the gesture running away.
+    const zoom = usePanelScale(panel.id);
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
         geom,
         bounds,
@@ -43,7 +51,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     return (
         <section
             className={`floatwin${minimised ? ' floatwin--min' : ''}`}
-            style={{ left: geom.x, top: geom.y, width: geom.w, height: geom.h, zIndex: 10 + z }}
+            style={{ left: geom.x, top: geom.y, width: geom.w, height: geom.h, zIndex: 10 + z, ...zoom.style }}
             /* Hidden, not merely transparent: visibility takes it out of the
                accessibility tree and out of the tab order too, so a window on the
                strip cannot be tabbed into or read out from where it is not. */
@@ -74,6 +82,13 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
                         <MenuItem onClick={() => setSectionHidden(panel.id, true)}>Hide panel</MenuItem>
                     )}
                 </Menu>
+                {/* Text size for this window alone — see PanelZoom. First out
+                    when the window is dragged too narrow to carry the row, which
+                    is the one control here with the same job available elsewhere:
+                    the top bar zooms the lot. */}
+                {geom.w >= ZOOM_MIN_W && (
+                    <PanelZoom panelId={panel.id} className="floatwin__btn floatwin__ctl" />
+                )}
                 {panel.minimal && (
                     <button
                         type="button"

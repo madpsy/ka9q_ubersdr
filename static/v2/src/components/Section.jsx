@@ -10,6 +10,18 @@ import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import { setDraggingPanel } from '../lib/panelDrag.js';
 import useWakeProps from '../radio/useWake.js';
+import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
+import { useWiderThan } from '../lib/useWiderThan.js';
+
+// The narrowest panel that still has room for the zoom pair in its header.
+//
+// A side dock is 320 by default and can be dragged to 220, which is the width at
+// which the title is already truncating against the arrows, the minimal toggle
+// and the move menu. Two more buttons there would be two more characters of the
+// title gone, and a panel you cannot read the name of is worse than one you
+// cannot resize the type in — the Display panel's global zoom is still there,
+// and widening the dock brings these straight back.
+const ZOOM_MIN_W = 270;
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -24,6 +36,11 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
+    // Measured on the panel, never on its header — see useWiderThan for why that
+    // distinction is the whole reason this holds still.
+    const box = useRef(null);
+    const roomToZoom = useWiderThan(box, ZOOM_MIN_W);
+    const zoom = usePanelScale(panel.id);
     // On the body, not the whole section: the header is where you collapse a
     // panel and move it about, which is housekeeping and not a reason to open a
     // session. See radio/useWake.js.
@@ -56,9 +73,11 @@ export default function Section({ panel, dock, index, weight, height, prev, next
     // the user can drag rather than a fixed basis, and each may carry its own
     // height.
     const inRow = weight != null && state.open;
+    // The panel's own text size rides along with whatever the placement asks for
+    // — one style object, because an element has one.
     const style = inRow
-        ? { flexGrow: weight, flexShrink: 1, flexBasis: 0, ...(height ? { height, alignSelf: 'flex-start' } : {}) }
-        : undefined;
+        ? { flexGrow: weight, flexShrink: 1, flexBasis: 0, ...(height ? { height, alignSelf: 'flex-start' } : {}), ...zoom.style }
+        : zoom.style;
 
     // Corner grip: horizontal drag trades width with a neighbour (so the row's
     // total is unchanged, as with the splitters), vertical sets this panel's
@@ -105,6 +124,7 @@ export default function Section({ panel, dock, index, weight, height, prev, next
             className={cls}
             style={style}
             data-panel={panel.id}
+            ref={box}
         >
             <header
                 className="section__head"
@@ -154,6 +174,19 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                             {row ? <Icon.ChevronRight size={13} /> : <Icon.Chevron size={13} />}
                         </button>
                     </span>
+                )}
+
+                {/* Text size for this panel alone, on top of the global one in
+                    the top bar. Open panels only, as with the minimal toggle:
+                    the size of a collapsed panel is the size of its own title.
+
+                    First out when the panel is too narrow to carry everything —
+                    see ZOOM_MIN_W. Of the controls in this header it is the one
+                    with somewhere else to go: the same job is done for the whole
+                    interface from the top bar, whereas the move menu and the
+                    minimal toggle exist only here. */}
+                {state.open && roomToZoom && (
+                    <PanelZoom panelId={panel.id} className="section__grip section__arrow" />
                 )}
 
                 {/* Only for panels that declare one, and only while open —

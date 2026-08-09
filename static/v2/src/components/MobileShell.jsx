@@ -41,6 +41,7 @@ import TopBar from './TopBar.jsx';
 import { Icon } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
+import { SOLO, groupsFor } from '../panels/groups.jsx';
 
 /**
  * Tap or drag the title bar to cut a sheet down or open it out.
@@ -161,6 +162,18 @@ export default function MobileShell() {
     const visible = PANELS.filter(
         (p) => !sections[p.id]?.hidden && applies(p),
     );
+    // The row: the solo panel, then the groups this receiver has anything to put
+    // in. See panels/groups.jsx.
+    const solo = visible.find((p) => p.id === SOLO) || null;
+    const groups = groupsFor(visible.filter((p) => p.id !== SOLO));
+    // Which group's list is showing, if any. Not remembered: a menu is a thing
+    // you are in the middle of, and coming back to a phone with one hanging open
+    // over the spectrum would be coming back to a mess.
+    const [menuId, setMenuId] = useState(null);
+    const menu = menuId ? groups.find((g) => g.id === menuId) || null : null;
+    // A group is lit when the sheet showing belongs to it, which is the only way
+    // to tell where you are once the row is groups rather than panels.
+    const openGroup = panel ? groups.find((g) => g.items.some((p) => p.id === panel.id)) : null;
     // The extension wins the sheet: opening one is the more recent choice, and
     // it is opened from a panel that would otherwise sit on top of it.
     const panel = extension ? null : (openId ? PANEL_BY_ID[openId] : null);
@@ -317,23 +330,77 @@ export default function MobileShell() {
                 somebody is working across panels or looking at one, and the receiver
                 cannot tell — hence a setting rather than a rule. */}
             {(display.mobileTabsAlways || (!panel && !extension)) && (
-                <nav className={`tabbar${panel || extension ? ' tabbar--over' : ''}`}>
-                    {visible.map((p) => (
-                        <button
-                            key={p.id}
-                            type="button"
-                            // Lit while its own sheet is the one showing, which only means
-                            // anything when the row stays up: without it, moving between
-                            // panels would be moving between identical-looking taps.
-                            className={`tabbar__item${panel && panel.id === p.id ? ' is-open' : ''}`}
-                            aria-current={panel && panel.id === p.id ? 'true' : undefined}
-                            onClick={() => setOpenId(p.id)}
-                        >
-                            <span className="tabbar__icon">{p.icon}</span>
-                            <span className="tabbar__label">{p.title}</span>
-                        </button>
-                    ))}
-                </nav>
+                <div className="tabdock">
+                    {/* The list a group opens, over the row it opened from.
+                        Dismissed by anything else being touched — a menu you have
+                        to aim at a close button to be rid of is a menu in the way,
+                        and every tap outside it is already a tap at something the
+                        operator would rather be doing. */}
+                    {menu && (
+                        <div
+                            className="groupmenu__scrim"
+                            onPointerDown={() => setMenuId(null)}
+                            aria-hidden="true"
+                        />
+                    )}
+                    {menu && (
+                        <nav className="groupmenu" aria-label={menu.title}>
+                            <div className="groupmenu__head">{menu.title}</div>
+                            {menu.items.map((p) => (
+                                <button
+                                    key={p.id}
+                                    type="button"
+                                    className={`groupmenu__item${panel && panel.id === p.id ? ' is-open' : ''}`}
+                                    aria-current={panel && panel.id === p.id ? 'true' : undefined}
+                                    onClick={() => { setOpenId(p.id); setMenuId(null); }}
+                                >
+                                    <span className="groupmenu__icon">{p.icon}</span>
+                                    <span className="groupmenu__label">{p.title}</span>
+                                    {p.Badge && <p.Badge />}
+                                </button>
+                            ))}
+                        </nav>
+                    )}
+
+                    <nav className={`tabbar${panel || extension ? ' tabbar--over' : ''}`}>
+                        {/* Alone and first — see SOLO. It opens its panel rather
+                            than a list, because a group in front of the dial is a
+                            tap in the one place that cannot afford one. */}
+                        {solo && (
+                            <button
+                                type="button"
+                                className={`tabbar__item${panel && panel.id === solo.id ? ' is-open' : ''}`}
+                                aria-current={panel && panel.id === solo.id ? 'true' : undefined}
+                                onClick={() => { setMenuId(null); setOpenId(solo.id); }}
+                            >
+                                <span className="tabbar__icon">{solo.icon}</span>
+                                <span className="tabbar__label">{solo.title}</span>
+                            </button>
+                        )}
+                        {groups.map((g) => (
+                            <button
+                                key={g.id}
+                                type="button"
+                                // Lit while the sheet showing is one of its own, and
+                                // marked separately while its list is open: those are
+                                // two different things to know, and on a row of six
+                                // identical shapes both are worth saying.
+                                className={`tabbar__item${openGroup && openGroup.id === g.id ? ' is-open' : ''}${menuId === g.id ? ' is-menu' : ''}`}
+                                aria-expanded={menuId === g.id}
+                                aria-haspopup="menu"
+                                onClick={() => setMenuId((id) => (id === g.id ? null : g.id))}
+                            >
+                                <span className="tabbar__icon">{g.icon}</span>
+                                <span className="tabbar__label">{g.title}</span>
+                                {/* Its children's badges, on the group. A mention
+                                    that only badged the Chat panel would be a
+                                    mention nobody could see: the panel is two taps
+                                    inside a list that is not open. */}
+                                {g.items.map((p) => (p.Badge ? <p.Badge key={p.id} /> : null))}
+                            </button>
+                        ))}
+                    </nav>
+                </div>
             )}
         </div>
     );

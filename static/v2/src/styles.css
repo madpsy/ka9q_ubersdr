@@ -4725,8 +4725,69 @@ a.btn { text-decoration: none; }
     overflow-x: auto;
     z-index: 30;
 }
+/* Groups, not panels — see panels/groups.jsx. The dock is what the menu is
+   positioned against, and what keeps both it and the row above the scrim that
+   dismisses it: a tap on another group should open that group, not merely shut
+   this one. */
+.tabdock { position: relative; z-index: 32; }
+/* Transparent, and over everything except the dock. A menu you have to aim at a
+   close button to be rid of is a menu in the way — anywhere else on the screen
+   is somewhere the operator would rather be. */
+.groupmenu__scrim { position: fixed; inset: 0; z-index: 31; }
+/* Above the row it came from and out of the flow, so opening it resizes nothing
+   — the same rule the sheet follows, and for the same reason: the waterfall
+   behind must not be re-laid out to show a menu. */
+.groupmenu {
+    position: absolute;
+    bottom: 100%;
+    left: 6px;
+    right: 6px;
+    margin-bottom: 4px;
+    display: flex;
+    flex-direction: column;
+    padding: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    /* Ten panels is taller than some phones. */
+    max-height: 60vh;
+    max-height: calc(var(--app-height, 100dvh) * 0.6);
+    overflow-y: auto;
+    animation: sheet-in 140ms var(--ease);
+}
+.groupmenu__head {
+    padding: 4px 8px 6px;
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.groupmenu__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.groupmenu__icon { display: grid; place-items: center; color: var(--text-dim); }
+.groupmenu__label { flex: 1; min-width: 0; font-size: calc(12.5px * var(--ui-scale)); }
+.groupmenu__item.is-open { background: var(--accent-soft); color: var(--accent); }
+.groupmenu__item.is-open .groupmenu__icon { color: var(--accent); }
+
 .tabbar__item {
-    flex: 1 0 66px;
+    position: relative;
+    /* Seven fixed targets rather than fifty scrolling ones, so they have to fit:
+       a basis that cannot shrink is what made the row a corridor in the first
+       place. */
+    flex: 1 1 48px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -4740,7 +4801,27 @@ a.btn { text-decoration: none; }
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .tabbar__icon { display: grid; place-items: center; }
-.tabbar__label { font-size: calc(9.5px * var(--ui-scale)); letter-spacing: 0.03em; white-space: nowrap; }
+.tabbar__label {
+    max-width: 100%;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* A child's badge, on the group carrying it. In the corner rather than in the
+   column: the tab is an icon over a label and a third row would make this one
+   taller than the six beside it. */
+.tabbar__item > .badge {
+    position: absolute;
+    top: 1px;
+    right: 6px;
+    padding: 1px 5px;
+}
+/* The group whose list is open. Distinct from `is-open`, which is the group the
+   sheet belongs to — they are two different things to know, and often not the
+   same group. */
+.tabbar__item.is-menu { background: var(--surface-3); color: var(--text); }
 
 /* Kept up over an open sheet — see mobileTabsAlways in the display settings. Shorter
    there than on an empty screen, because now it is taking height the sheet was using,

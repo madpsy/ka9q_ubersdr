@@ -41,7 +41,14 @@ export const RING_PAD = 8;
 // tall window turning this into tens of megabytes of canvas — past it the band
 // comes back, which is the same behaviour as before at a size nobody reaches by
 // accident.
-export const RING_RESERVE_CSS = 340;
+// Temporarily zero, to confirm a Firefox diagnosis: the waterfall went jerky
+// there when the ring grew past the pane, and the suspicion is that Firefox
+// charges a `putImageData` against the whole canvas rather than the rows it
+// touched — so the per-row cost follows the ring's area. At 0 the ring is the
+// pane's own height again, which is what it was before the reserve, and the
+// width rescale above is untouched. If Firefox is smooth at 0 and jerky at 340,
+// the area is the cost and the reserve has to be bought some other way.
+export const RING_RESERVE_CSS = 0;
 export const RING_MAX_CSS = 1400;
 
 /**

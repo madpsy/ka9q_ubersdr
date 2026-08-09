@@ -60,7 +60,8 @@ import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
 import {
     RING_ROWS, clearRows as clearDssRows, createRing as createDssRing, drawSurface,
-    edgeLine, pushRow as pushDssRow, ringCols, shiftRows as shiftDssRows,
+    edgeLine, pushRow as pushDssRow, resizeRing as resizeDssRing, ringCols,
+    shiftRows as shiftDssRows,
     unproject as dssUnproject,
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
@@ -1008,13 +1009,18 @@ export default function SpectrumView() {
             wfc.style.height = (h / dpr) + 'px';
         }
         if (g.ringWidth !== w || g.ringHeight !== h) {
-            // A resize needs a new ring, but the history only has to be thrown
-            // away for a width change — see ringKeepsHistory for why the two
-            // dimensions differ. A height change is what dragging the splitter,
-            // the window edge or the dock beside it produces, and wiping the
-            // last few minutes of the band for one of those is pure loss.
+            // A resize needs a new ring; the history moves across into it.
+            //
+            // A height change is free — a row is a finished scanline and the
+            // height only says how many fit. A width change is a rescale: the
+            // columns are frequencies, and the axis they sit on has just been
+            // redrawn at a different length. Both are what dragging the window
+            // edge, the splitter or a dock beside it produce, and wiping the
+            // last few minutes of the band for either was pure loss. See
+            // ringKeepsHistory.
+            const oldW = g.ringWidth;
             const keep = ringKeepsHistory(
-                { ring: g.ring, width: g.ringWidth, height: g.ringHeight }, w,
+                { ring: g.ring, width: oldW, height: g.ringHeight }, w,
             );
 
             const ring = document.createElement('canvas');
@@ -1025,13 +1031,20 @@ export default function SpectrumView() {
             ctx.fillRect(0, 0, w, h);
 
             if (keep) {
+                // Nearest neighbour, as the zoom path uses: a column of history
+                // is duplicated or dropped rather than blended with the one
+                // beside it, so a one-pixel carrier stays a line instead of
+                // becoming a smear. Smoothing is what would turn a week of
+                // history into porridge over a long drag.
+                ctx.imageSmoothingEnabled = false;
                 // Copied out unrolled, newest first — the same read the paint
                 // does, which is why the head can then be 0. Growing leaves the
                 // background showing below the oldest row we have, since that
                 // history does not exist yet; shrinking drops the oldest rows,
-                // which are the ones about to scroll off anyway.
+                // which are the ones about to scroll off anyway. The horizontal
+                // extents differ where the width changed, which is the rescale.
                 for (const s of ringSlices(g.ringHead, g.ringHeight, Math.min(g.ringHeight, h))) {
-                    ctx.drawImage(g.ring, 0, s.sy, w, s.sh, 0, s.dy, w, s.sh);
+                    ctx.drawImage(g.ring, 0, s.sy, oldW, s.sh, 0, s.dy, w, s.sh);
                 }
             }
 
@@ -1040,8 +1053,10 @@ export default function SpectrumView() {
             g.ringWidth = w;
             g.ringHeight = h;
             g.ringHead = 0;
-            // A kept history is still in the view it was painted in; a dropped
-            // one has no view, and the next draw records the current one.
+            // A kept history is still in the view it was painted in — a rescale
+            // changes how many pixels it takes, not which frequencies it covers,
+            // so the recorded centre and span stand. A dropped one has no view,
+            // and the next draw records the current one.
             if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
@@ -2947,11 +2962,18 @@ function drawDss(g, d, dss, dssH, pxW, floor, range, commitRow, now, cfg, tuning
     // setting costs nothing to change and — the part that matters — cannot
     // throw the history away by changing.
     const cols = ringCols(pxW);
-    if (!g.dss || g.dss.cols !== cols) {
+    if (!g.dss) {
         g.dss = createDssRing(RING_ROWS, cols);
         // A new ring has no recorded view, so the next align call adopts the
         // live one rather than trying to carry a history that does not exist.
         g.dssSpan = 0;
+    } else if (g.dss.cols !== cols) {
+        // A resized pane, resampled rather than emptied — the same answer the
+        // heat map's ring gets, since the surface behind it is the same history
+        // seen a second way and the two going blank at different moments would
+        // be worse than either. The recorded view stands: a rescale changes how
+        // many columns the history takes, not which frequencies it covers.
+        g.dss = resizeDssRing(g.dss, cols);
     }
 
     // Bring the history onto the axis it is about to be drawn against, if that

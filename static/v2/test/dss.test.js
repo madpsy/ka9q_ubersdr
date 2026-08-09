@@ -17,7 +17,8 @@ const assert = require('assert');
 const {
     BACK_WIDTH, DEPTH_SPAN, FRONT_RIDGE, MAX_COLS, RING_ROWS,
     clearRows, createRing, depthScale, edgeLine, project, pushRow, ridgeCount,
-    ridgeHeight, ringCols, shiftRows, shownSeconds, storedAt, storedRow, unproject,
+    ridgeHeight, resizeRing, ringCols, shiftRows, shownSeconds, storedAt, storedRow,
+    unproject,
 } = require('./.build/dss.cjs');
 
 let pass = 0;
@@ -390,5 +391,49 @@ t('the ring is a fixed size and the setting cannot resize it', () => {
     assert.strictEqual(createRing().rows, RING_ROWS);
     assert.strictEqual(createRing(RING_ROWS, 8).rows, RING_ROWS);
 });
+
+// --- a resized pane --------------------------------------------------------
+
+t('a resize resamples the history instead of emptying it', () => {
+    // The pane is what sets the column count, so every dock toggle and window
+    // drag changes it. Emptying here would blank the surface for the same
+    // reason the heat map used to blank — and now that the heat map carries its
+    // history across, a surface that did not would go blank on its own while
+    // the picture beside it survived.
+    const r = createRing(4, 8);
+    pushRow(r, new Float32Array([0, 0, 0, 9, 9, 0, 0, 0]), 1000);
+
+    const wide = resizeRing(r, 16);
+    assert.strictEqual(wide.cols, 16);
+    assert.strictEqual(wide.count, r.count, 'the rows are still there');
+    assert.strictEqual(storedAt(wide, 0), 1000, 'and still carry when they arrived');
+    // The carrier is where it was, as a fraction of the width: columns 3–4 of 8
+    // become 6–9 of 16.
+    const row = storedRow(wide, 0);
+    assert.strictEqual(row[7], 9);
+    assert.strictEqual(row[8], 9);
+    assert.strictEqual(row[0], 0);
+});
+
+t('narrowing keeps a one-column carrier rather than averaging it away', () => {
+    // Peak-picking, as shiftRows does for a zoom: a carrier squeezed into a
+    // narrower ring has to survive as a line. Averaged, a single hot column
+    // among seven cold ones comes out as noise.
+    const r = createRing(2, 16);
+    const row = new Float32Array(16).fill(-120);
+    row[9] = -20;
+    pushRow(r, row, 1000);
+
+    const narrow = resizeRing(r, 4);
+    assert.strictEqual(narrow.cols, 4);
+    assert.strictEqual(Math.max(...storedRow(narrow, 0)), -20, 'the peak survived');
+});
+
+t('a resize to the same width is the ring it was given', () => {
+    const r = createRing(2, 8);
+    assert.strictEqual(resizeRing(r, 8), r);
+    assert.strictEqual(resizeRing(null, 8), null);
+});
+
 
 console.log(`\n${pass} passed`);

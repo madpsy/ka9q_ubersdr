@@ -348,6 +348,47 @@ export function shiftRows(ring, offset, scale) {
     return ring;
 }
 
+/**
+ * The same history at a different column count — a resized pane.
+ *
+ * The heat map's ring is a bitmap and a resize rescales it with drawImage; this
+ * one is magnitudes, so the resample is written out. Peak-picking across the
+ * source span, exactly as shiftRows does for a zoom: a carrier one column wide
+ * survives being squeezed into a narrower ring instead of being averaged into
+ * the noise beside it.
+ *
+ * Returns a new ring — `cols` is fixed at construction, and every consumer reads
+ * it from the ring rather than being told.
+ */
+export function resizeRing(ring, cols) {
+    const n = Math.max(1, Math.round(cols));
+    if (!ring || !ring.data || n === ring.cols) return ring;
+
+    const next = createRing(ring.rows, n);
+    next.head = ring.head;
+    next.count = ring.count;
+    next.at.set(ring.at);
+
+    const scale = n / ring.cols;
+    for (let r = 0; r < ring.rows; r++) {
+        const from = r * ring.cols;
+        const to = r * n;
+        for (let x = 0; x < n; x++) {
+            // The source span this column covers, which is where the peak has
+            // to be looked for when the ring is getting narrower.
+            const lo = Math.floor(x / scale);
+            const hi = Math.max(lo + 1, Math.ceil((x + 1) / scale));
+            let best = -Infinity;
+            for (let i = lo; i < hi && i < ring.cols; i++) {
+                const v = ring.data[from + i];
+                if (v > best) best = v;
+            }
+            next.data[to + x] = best;
+        }
+    }
+    return next;
+}
+
 /** Forget every stored row — a view change too large to carry any of it across. */
 export function clearRows(ring) {
     ring.data.fill(-Infinity);

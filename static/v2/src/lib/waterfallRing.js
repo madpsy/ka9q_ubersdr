@@ -116,15 +116,30 @@ export function ringSlices(head, height, rows) {
 /**
  * Whether a resized pane can keep the history it already has.
  *
- * Height and width are not the same kind of change. Every column of the ring is
- * a frequency — the bins are collapsed onto the pixel width — so at a new width
- * the stored columns mean something other than what the new axis says, and
- * carrying them over would draw signals where they never were. A row, by
- * contrast, is a finished scanline: the pane's height decides only how many of
- * them fit, and none of them becomes wrong when it changes.
+ * Height and width are not the same kind of change, but both are survivable.
+ *
+ * A row is a finished scanline: the pane's height decides only how many of them
+ * fit, so a height change costs nothing and the rows are copied across as they
+ * are. Every *column*, by contrast, is a frequency — the bins are collapsed onto
+ * the pixel width as each row arrives — so at a new width the stored columns sit
+ * under different frequencies than the new axis says. Copied over unchanged they
+ * would draw signals where they never were.
+ *
+ * They are not copied unchanged. The mapping from frequency to x is linear in
+ * the width, so the correction is a horizontal rescale of the bitmap — exactly
+ * what a zoom already does to it (see panTransform, which returns a scale for
+ * any span change and lets the caller resample once). A resize is the same
+ * operation with the roles swapped: the span holds still and the width moves.
+ *
+ * So this now answers "is there a ring worth carrying over" and the caller does
+ * the scaling. What it costs is one nearest-neighbour resample per width change:
+ * discrete for a dock being toggled, and one per frame while a window edge is
+ * dragged, which is where the quantisation accumulates. That is the trade — a
+ * history that goes slightly steppy after a long drag, against one that was
+ * thrown away every time the layout moved.
  */
 export function ringKeepsHistory(prev, width) {
-    return !!(prev && prev.ring && prev.height > 0 && prev.width === width);
+    return !!(prev && prev.ring && prev.height > 0 && prev.width > 0 && width > 0);
 }
 
 /**

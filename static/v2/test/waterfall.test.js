@@ -58,6 +58,12 @@ function resize(r, h, width = r.width) {
     return next;
 }
 
+// A row here is one value rather than a bitmap, so a width change moves it
+// across unchanged — which is what the real rescale does to a row's *identity*.
+// What the rescale actually costs is horizontal resolution, and that is a
+// property of drawImage rather than of this arithmetic; these tests are about
+// which rows survive and in what order.
+
 // A ring of `h` rows with `n` rows received, newest last.
 function filled(h, n, width) {
     const r = makeRing(h, width);
@@ -198,20 +204,29 @@ t('a one-row pane is not a special case', () => {
 
 // --- when the history has to go --------------------------------------------
 
-t('a width change throws the history away', () => {
-    // Every column is a frequency, so at a new width the stored columns mean
-    // something other than what the new axis says.
+t('a width change keeps the history, rescaled onto the new axis', () => {
+    // Every column is a frequency, so at a new width the stored columns sit
+    // under different frequencies — which is a rescale of the bitmap, the same
+    // one a zoom performs, and not a reason to throw the rows away. The caller
+    // does the scaling; this only says there is something worth carrying.
     const r = filled(4, 4, 640);
-    assert.strictEqual(ringKeepsHistory(r, 800), false);
-    assert.deepStrictEqual(paint(resize(r, 4, 800)), [BG, BG, BG, BG]);
-    // …and a height change at the same width does not.
+    assert.strictEqual(ringKeepsHistory(r, 800), true);
+    assert.deepStrictEqual(paint(resize(r, 4, 800)), [3, 2, 1, 0]);
+    // Narrower is the same answer: the axis is shorter, not different.
+    assert.deepStrictEqual(paint(resize(r, 4, 320)), [3, 2, 1, 0]);
+    // …as is a height change at the same width, which was always kept.
     assert.strictEqual(ringKeepsHistory(r, 640), true);
+    assert.deepStrictEqual(paint(resize(r, 2, 640)), [3, 2]);
 });
 
 t('there is nothing to keep before the first ring exists', () => {
     assert.strictEqual(ringKeepsHistory(null, 640), false);
     assert.strictEqual(ringKeepsHistory({ ring: null, width: 640, height: 300 }, 640), false);
     assert.strictEqual(ringKeepsHistory({ ring: true, width: 640, height: 0 }, 640), false);
+    // A width of nothing at either end is not a rescale, it is a division by
+    // zero waiting to happen: a pane that has not been laid out yet.
+    assert.strictEqual(ringKeepsHistory({ ring: true, width: 0, height: 300 }, 640), false);
+    assert.strictEqual(ringKeepsHistory({ ring: true, width: 640, height: 300 }, 0), false);
 });
 
 // --- the smooth scroll -----------------------------------------------------

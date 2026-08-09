@@ -437,14 +437,24 @@ function ControlTags() {
                 </span>
             )}
             {mediaOn && (
-                <span
-                    className={`tag tag--${media.status.state === 'active' ? 'accent' : 'ghost'}`}
+                // Clickable, like SPEAK below and unlike the three above it.
+                // Those report a connection made somewhere else — a dial, a
+                // surface, a rig — and switching one off from a badge would be
+                // reaching into another machine. This is a setting of this page
+                // and it is on by default on a handset, so the tag is where
+                // somebody who does not want the lock-screen card is looking
+                // when they notice it: the Media controls panel is two taps and
+                // a group away, and the badge is already in front of them.
+                <button
+                    type="button"
+                    className={`tag tag--button tag--${media.status.state === 'active' ? 'accent' : 'ghost'}`}
                     title={media.status.state === 'active'
-                        ? 'Media controls live — this receiver answers the system’s play, pause and track keys'
-                        : 'Media controls enabled — waiting for audio for the system to attach them to'}
+                        ? 'Media controls live — this receiver answers the system’s play, pause and track keys. Click to switch them off'
+                        : 'Media controls enabled — waiting for audio for the system to attach them to. Click to switch them off'}
+                    onClick={() => media.setEnabled(false)}
                 >
                     MEDIA
-                </span>
+                </button>
             )}
             {announce.enabled && (
                 // Clickable, unlike the four above it. Those report a

@@ -184,6 +184,23 @@ export class MediaSessionController {
                 await this._startAnchor();
             } catch (err) {
                 this.error = err.message || String(err);
+                // A start that failed is not a start that is over.
+                //
+                // The retry below existed only for a stream that had *ended*, so
+                // anything that went wrong on the way up killed the feature for
+                // the session: the switch stayed on, the panel sat at WAITING,
+                // and nothing came back until it was turned off and on by hand —
+                // which is exactly the difference between a session where this
+                // was already enabled and one where it was enabled by hand.
+                //
+                // The failure it is there for is a race, and defaulting the
+                // feature on is what exposed it. Enabled from the panel,
+                // everything the anchor needs has existed for minutes; enabled
+                // before the receiver starts, the anchor is attempted the moment
+                // `running` flips, which can be before the session id its URL is
+                // built from exists — and _startAnchor throws "No session yet".
+                // Three seconds later it is there.
+                this._scheduleRetry();
             }
         }
         this._installHandlers();

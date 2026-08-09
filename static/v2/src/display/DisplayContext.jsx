@@ -46,19 +46,21 @@ export const DEFAULTS = {
     smoothScroll: true,
     // What the waterfall's history does when the view moves under it.
     //
-    //   'hold'   — the rows stay where they were painted. A signal's trail
-    //              keeps the shape it had, and after a pan the old rows no
-    //              longer line up with the frequency axis: a carrier steps
-    //              sideways at the moment of the pan and its history reads at
-    //              the wrong frequency. This is what every waterfall of this
-    //              kind has always done, and it is the default because nothing
-    //              is ever thrown away.
     //   'follow' — the history is shifted with the axis, so a signal stays in
     //              its own column and the whole picture keeps meaning one
     //              frequency scale. What moves in from the edge is black,
     //              because there is no history for a part of the band that was
-    //              not on screen.
-    waterfallPan: 'hold',
+    //              not on screen. The default: a waterfall is a picture of the
+    //              band, and one whose old rows say a carrier was 3 kHz from
+    //              where it is now is a picture that has to be read twice — once
+    //              for the trace and once for how far it has been dragged since.
+    //              Black at the edge is honestly nothing, and reads as nothing.
+    //   'hold'    — the rows stay where they were painted. A signal's trail keeps
+    //              the exact shape it had and nothing is ever thrown away, which
+    //              is what every waterfall of this kind has always done and why
+    //              it is still here: the cost is that after a pan the history no
+    //              longer lines up with the frequency axis.
+    waterfallPan: 'follow',
     // How the waterfall's history is drawn: '2d' is the heat map, '3d' is the
     // perspective surface (lib/dss.js), 'both' splits the pane between them.
     //
@@ -277,7 +279,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 5;
+const SETTINGS_VERSION = 6;
 
 
 
@@ -318,6 +320,15 @@ function migrate(saved) {
     // the display panel at all — so it is dropped and the new default applies.
     // A stored true was already what somebody asked for and stays.
     if (!(saved.v >= 5) && saved.mobileTabsAlways === false) delete saved.mobileTabsAlways;
+
+    // v6: the waterfall's history now follows the frequency scale by default.
+    //
+    // A stored 'hold' from before this is the old default written out on first
+    // load — every setting here is persisted whole, so everybody has one — and
+    // it would hold the new default off for ever. 'follow' is the only value
+    // that could have been chosen deliberately under the old default, and it is
+    // left alone by being the thing this does not touch.
+    if (!(saved.v >= 6) && saved.waterfallPan === 'hold') delete saved.waterfallPan;
 
     return saved;
 }

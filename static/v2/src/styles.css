@@ -2561,7 +2561,27 @@ a.btn { text-decoration: none; }
    Meters and readouts
    ========================================================================= */
 
-.meter { display: flex; flex-direction: column; gap: 5px; }
+/* `align-items` and the widths below are what make this work in a <button>, and
+   they are not tidiness.
+ *
+ * WebKit does not lay a button's children out the way it lays out anything
+ * else's. The children go in an anonymous box of its own making, which centres
+ * and shrink-wraps them rather than stretching them across the button — so a
+ * child with no width of its own gets the width of its contents instead of the
+ * width of the meter.
+ *
+ * That is invisible for the needle, which carries `width: 100%` and is drawn
+ * from a viewBox, and fatal for the bar, which is nothing *but* widths:
+ * .meter__track shrink-wraps around a .bar that has no intrinsic width and
+ * collapses to nothing, so the bar does not appear at all; and .meter__scale
+ * holds only absolutely-positioned labels, so it collapses too and every tick
+ * from S1 to S9+60 lands on top of the others at `left: 0`. One quirk, both
+ * symptoms — the bars missing and the S scale in a heap — which is why they only
+ * ever showed up together, and only in Safari.
+ *
+ * Belt and braces on purpose: `align-items: stretch` says what was meant, and
+ * the explicit widths hold even where the anonymous box ignores it. */
+.meter { display: flex; flex-direction: column; gap: 5px; align-items: stretch; }
 /* The meters are buttons: clicking one swaps every meter between the bar and
    the analogue needle. Nothing else about them changes. */
 .meter--swap {
@@ -2572,7 +2592,11 @@ a.btn { text-decoration: none; }
     color: inherit;
     text-align: inherit;
     cursor: pointer;
+    /* Native appearance is what brings WebKit's button rendering with it. */
+    -webkit-appearance: none;
+    appearance: none;
 }
+.meter__scale, .meter__track, .meter__value { width: 100%; }
 .needle { display: block; width: 100%; }
 /* Labels are placed at their true position on the scale, not spread evenly —
    see S_TICKS in SignalPanel.jsx. */
@@ -4944,6 +4968,14 @@ a.btn { text-decoration: none; }
     height: 16px;
     cursor: nwse-resize;
     touch-action: none;
+    /* A finger resizing a window rests on this for a second before it moves,
+       which iOS reads as a press-and-hold and answers with the selection
+       callout — and raising that UI cancels the pointer stream the drag is made
+       of, so the gesture dies halfway through. touch-action does not cover it;
+       these two do. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
     background:
         linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 100%);
     border-bottom-right-radius: var(--radius);
@@ -5278,6 +5310,10 @@ a.btn { text-decoration: none; }
     height: 14px;
     cursor: nwse-resize;
     touch-action: none;
+    /* As the floating window's grip — see the note there. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
     opacity: 0;
     background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%);
     border-bottom-right-radius: var(--radius);
@@ -5285,6 +5321,24 @@ a.btn { text-decoration: none; }
 }
 .section:hover .section__grip-size { opacity: 1; }
 .section__grip-size:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
+
+/* Both corner grips, on anything that can be poked.
+ *
+ * Two things were wrong on a tablet, and the first is why the control looked
+ * broken rather than fiddly: a dock section's grip is drawn only on
+ * `.section:hover`, and there is no hover on an iPad. It was there the whole
+ * time, invisible, and the only way to find it was to know it was there.
+ *
+ * The second is size. Fourteen pixels is a mouse target — the pointer is one
+ * pixel and the cursor changes shape to say you have it. A fingertip is nearer
+ * forty across and covers whatever it is aiming at, so a corner this size is
+ * missed more often than hit, and every miss lands on the panel behind it and
+ * does nothing at all. Twice the size, which is still small for a finger but as
+ * much as a panel corner can give without the grip becoming the corner. */
+@media (any-pointer: coarse) {
+    .section__grip-size { opacity: 1; width: 26px; height: 26px; }
+    .floatwin__grip { width: 26px; height: 26px; }
+}
 
 .addon { flex-direction: row; align-items: center; justify-content: space-between; text-decoration: none; color: inherit; }
 .addon__go { display: grid; place-items: center; color: var(--text-faint); }

@@ -6068,6 +6068,21 @@ a.btn { text-decoration: none; }
    not the whole spectrum it is decoding from. */
 .sheet--ext { --sheet-height: 86%; }
 
+/* The two conversations, shorter than the rest.
+ *
+ * Every other sheet is as tall as what is in it, up to the 72% cap above — and
+ * these two are the panels whose content has no natural height at all. A chat log
+ * and a cluster transcript are scrollers that grow with every line, so they
+ * reached the cap within a few of them and then stayed there, three-quarters of a
+ * phone screen of text over a spectrum somebody had opened it beside.
+ *
+ * Under half the screen instead: enough for the last handful of lines and the box
+ * to write the next one, which is what either of them on a receiver is for.
+ * Nothing is lost — both were scrollers already, so the rest of the conversation
+ * is where it has always been. */
+.sheet[data-panel="chat"],
+.sheet[data-panel="dxcluster"] { --sheet-height: 42%; }
+
 /* A `fill` panel keeps its own scroller — a chat log, a cluster terminal, a spot
    table — with its controls pinned below it. That only works if the panel can be
    given a height rather than growing to its content: without one the chat log

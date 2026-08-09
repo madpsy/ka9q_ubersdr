@@ -233,6 +233,10 @@ export default function MobileShell() {
                         className={`sheet${panel.fill ? ' sheet--fill' : ''}`}
                         role="region"
                         aria-label={panel.title}
+                        /* So the stylesheet can say something about one panel's
+                           sheet without the shell having to know which — see
+                           .sheet[data-panel="chat"]. */
+                        data-panel={panel.id}
                         /* This panel's own text size, if it has been given one —
                            see PanelZoom. A phone is where it earns the most: the
                            sheet is a third of a dock's room, and which panels

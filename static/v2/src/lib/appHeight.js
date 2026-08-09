@@ -14,24 +14,29 @@
 //
 // ── The keyboard ────────────────────────────────────────────────────────────
 //
-// `innerHeight` is the measurement — except while the on-screen keyboard is up,
-// when it is a lie with a black band under it. iOS overlays the keyboard: the
-// window keeps its full height, the visual viewport shrinks, and Safari scrolls
-// the layout viewport to bring the focused input above the keys. This shell is
-// exactly one window tall and scrolls nowhere, so that scroll drags the whole
-// page up and exposes the html background beneath it — on an iPad with chat in
-// the bottom dock, a keyboard-sized black hole between the compose box and the
-// keys.
+// iOS overlays the keyboard: the window keeps its full height, the visual
+// viewport shrinks, and Safari *pans* the visual viewport down to bring the
+// focused input above the keys — with breathing room, which takes the pan past
+// the end of the document. The shell is exactly one window tall, so everything
+// past its end is bare html background: a black band between the bottom of the
+// page and the keyboard, exactly as tall as the overshoot.
 //
-// So while an editable element has focus and the visual viewport is meaningfully
-// shorter than the window, the visual viewport *is* the height: the shell fits
-// above the keys, the input is on screen without Safari scrolling anything, and
-// the scroll it already did is undone. The rest of the time innerHeight stands,
-// for the reason it always did — the visual viewport also shrinks for pinch
-// zoom and fires resize constantly, and driving the shell from it wholesale
-// would resize the spectrum canvas whenever anything twitched. Gated on focus
-// and on scale, it costs two canvas resizes per keyboard session, not one per
-// keystroke.
+// The first attempt at this shrank the shell to the visual viewport, and made
+// it worse, instructively: the pan Safari had already committed to was measured
+// against the old, taller layout, so shrinking left the visible region mostly
+// past the end of the new one — even a floating input, whose reveal pan is
+// small, got a band. There is also no API to un-pan a visual viewport, so the
+// pan cannot be fought, only accommodated.
+//
+// So the shell is never shrunk for a keyboard. It is *extended*: while an
+// editable element has focus and the viewport is keyboard-short, the height is
+// whatever reaches the bottom of wherever Safari has panned to —
+// scrollY + offsetTop + height, the visible region's bottom edge in document
+// coordinates. No pan, no change, and no canvas resize; a pan past the end
+// grows the shell by the overshoot so the compose box rides down to sit flush
+// on the keys. The pan clamps itself back to zero when the keyboard closes
+// (its ceiling is layout height minus viewport height, which returns to
+// nothing), and the height follows focus out the same moment.
 
 // Re-reads after the first paint. Standalone mode on iOS settles some time after
 // load and does not always say so; these cost one property write each.
@@ -63,13 +68,20 @@ export function startAppHeight(win = window, doc = document) {
 
         let h = inner;
         // `scale` keeps pinch zoom out of this: pinched in, the visual viewport
-        // is a window onto the page rather than the space above a keyboard, and
-        // shrinking the shell to it would shrink the page being looked at. A
+        // is a window onto the page rather than the space above a keyboard. A
         // band around 1, not a floor — a floor of 0.99 waves through the 2× the
         // whole condition exists to keep out.
         if (vv && Math.abs(vv.scale - 1) < 0.01 && editing()) {
-            const above = Math.round(vv.height);
-            if (inner - above > KEYBOARD_MIN) h = above;
+            const vvh = Math.round(vv.height);
+            if (inner - vvh > KEYBOARD_MIN) {
+                // The bottom of the visible region, in document coordinates —
+                // however Safari split the reveal between a layout scroll and a
+                // visual-viewport pan. Never less than the window: the shell
+                // only ever grows for a keyboard, so a reveal that needed no
+                // overshoot changes nothing and resizes nothing.
+                const seen = Math.round((win.scrollY || 0) + (vv.offsetTop || 0) + vv.height);
+                h = Math.max(inner, seen);
+            }
         }
 
         // Unchanged is the common case — a scroll event on the visual viewport
@@ -79,10 +91,11 @@ export function startAppHeight(win = window, doc = document) {
             doc.documentElement.style.setProperty('--app-height', `${h}px`);
         }
 
-        // Undo the reveal-the-input scroll. With the shell sized to the visual
-        // viewport the input is on screen at scroll zero, and any offset Safari
-        // keeps is doubled-up correction: the page moved up *and* got shorter.
-        if (h !== inner && (win.scrollY || (vv && vv.offsetTop))) {
+        // A reveal done with a layout scroll can survive the keyboard that
+        // asked for it; the page never scrolls on purpose, so once nothing is
+        // being edited any scroll is Safari's leftovers. The visual-viewport
+        // pan needs no undoing — its ceiling collapses to zero on its own.
+        if (h === inner && win.scrollY > 0 && typeof win.scrollTo === 'function') {
             win.scrollTo(0, 0);
         }
     };

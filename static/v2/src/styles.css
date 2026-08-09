@@ -6083,6 +6083,20 @@ a.btn { text-decoration: none; }
 .sheet[data-panel="chat"],
 .sheet[data-panel="dxcluster"] { --sheet-height: 42%; }
 
+/* A sheet being typed into gets the room back — after the rules above, so it
+   wins over them.
+ *
+ * The 42% above is reasoned against a full screen: the spectrum behind is why
+ * the sheet is short. With the on-screen keyboard up the screen is not full —
+ * Android resizes the viewport for it, so --app-height already reflects what is
+ * left — and 42% of what is left, less the sheet's head and the compose row, was
+ * two lines of conversation over a spectrum nobody is looking at mid-sentence.
+ * While the focus is in the sheet, the sheet is what the screen is for; the
+ * moment it leaves, the keyboard goes and the spectrum gets its share back.
+ * :focus-within is the keyboard signal without any script: nothing raises one
+ * except an editable child with focus. */
+.sheet:focus-within { --sheet-height: 88%; }
+
 /* A `fill` panel keeps its own scroller — a chat log, a cluster terminal, a spot
    table — with its controls pinned below it. That only works if the panel can be
    given a height rather than growing to its content: without one the chat log

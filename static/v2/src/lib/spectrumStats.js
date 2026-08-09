@@ -91,12 +91,13 @@ export function formatThroughput(...streams) {
     const [div, unit] = total < 1024
         ? [1, 'B/s']
         : (total < 1024 * 1024 ? [1024, 'kB/s'] : [1024 * 1024, 'MB/s']);
-    // A part that rounds to nothing still has to read as a number rather than as
-    // a blank, so the small end keeps a decimal.
-    const part = (v) => {
-        const n = v / div;
-        return n < 10 ? n.toFixed(1) : String(Math.round(n));
-    };
+    // Whole units throughout. The small end used to keep a decimal so that a few
+    // kB/s of audio beside a spectrum in the hundreds could not round to "0" and
+    // read as a stream that had stopped — but the mixed widths were the thing
+    // that made the line hard to take in at a glance, which is all this line is
+    // for. It only bites at the MB/s scale now: at kB/s, which is where a
+    // session actually lives, the audio is a whole number of its own.
+    const part = (v) => String(Math.round(v / div));
     // One stream known and the rest not — a socket that has never opened — so
     // there is no sum to show and no split worth pretending to.
     if (parts.length === 1) return `${part(parts[0])} ${unit}`;

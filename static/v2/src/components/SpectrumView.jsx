@@ -1079,8 +1079,25 @@ export default function SpectrumView() {
     }, [spectrumConn]);
 
     // ---- draw loop ------------------------------------------------------
-
+    //
+    // Stopped entirely while the spectrum is paused, rather than left ticking
+    // over its own early return.
+    //
+    // A requestAnimationFrame loop that keeps re-arming keeps the browser's
+    // refresh driver at the display's full rate for as long as the page is open
+    // — a hundred and twenty callbacks a second on a fast panel, each one
+    // returning immediately because there is nothing to draw. The callbacks
+    // themselves are nearly free; keeping the tab in a continuously animating
+    // state is not, and it is charged to the compositor rather than to this
+    // file, which is why every attempt to find it by removing *drawing* came
+    // back "no difference".
+    //
+    // Paused is the case where stopping is provably safe: no frames arrive, the
+    // overlay covers the canvas so there is no hover to track, and resuming
+    // re-runs this effect and starts a fresh loop. Nothing needs a frame in
+    // between.
     useEffect(() => {
+        if (paused) return undefined;
         let raf = 0;
         let lastRow = 0;
 
@@ -1175,7 +1192,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH, dssH, heatH]);
+    }, [sizes.w, specH, wfH, dssH, heatH, paused]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {

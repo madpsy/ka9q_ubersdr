@@ -34,6 +34,30 @@ const MAX_MESSAGES = 300;
 // same instant, where showing it once is the better answer anyway.
 const msgKey = (timestamp, username, body) => `${timestamp}|${username}|${body}`;
 
+// Was this said before we got here?
+//
+// The server replays its recent buffer to every client that subscribes, which is
+// how the panel opens with a conversation already in it — and those lines are
+// ordinary message events, indistinguishable from live ones. So a mention of
+// your callsign from two hours ago rang the chime, raised a notification and
+// badged the panel, every time the page was loaded. Being told you were
+// mentioned is useful; being told the moment you arrive, about something said
+// before you did, is not — there is nothing to answer and nobody waiting.
+//
+// The messages carry timestamps, so it is simply a comparison against when we
+// subscribed. The two clocks are not the same clock, but they are both wall
+// clocks on machines that keep time, and the only thing a second or two of
+// disagreement can do is misjudge a message sent in the same breath as we
+// arrived — which is the one case where either answer is defensible.
+//
+// No timestamp, or one that will not parse, counts as live: one notification too
+// many beats a mention that is never mentioned.
+const saidBefore = (since, timestamp) => {
+    if (!since) return false;
+    const at = Date.parse(timestamp);
+    return Number.isFinite(at) && at < since;
+};
+
 // Two short notes. Deliberately synthesised rather than shipped as an asset:
 // one small file to fetch, and it cannot 404 on a server that has not copied it.
 function playMentionChime() {
@@ -101,6 +125,13 @@ export function ChatProvider({ children }) {
     // alternative — deciding inside the setMessages updater, where `prev` is current — would be
     // raising a notification from a function React is allowed to call twice.
     const joinsSeen = useRef(new Set());
+    // When we got here — see saidBefore. Set at the subscribe rather than here,
+    // because those are not the same moment: this provider is mounted by App at
+    // page load, while the socket is not subscribed until the receiver is
+    // running. Anchoring it at mount would have counted anything said in between
+    // — which arrives in the replayed buffer, like the rest of the history — as
+    // having been said to us.
+    const since = useRef(null);
     // Read inside the message handler, which must not resubscribe per keystroke.
     const nameRef = useRef(username);
     nameRef.current = username;
@@ -141,9 +172,16 @@ export function ChatProvider({ children }) {
                 });
                 return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
             });
-            // Only for a message being seen for the first time: a replayed
-            // buffer must not chime again for a mention already read.
-            if (mentioned && fresh) {
+            // Only for a message being seen for the first time, and only for one
+            // said since we arrived.
+            //
+            // `fresh` and `saidBefore` sound like the same guard and are not. The
+            // first asks whether this line is already on screen, which is what
+            // stops a second delivery of the same buffer chiming twice — and it
+            // is exactly what fails on the first load of a session, where every
+            // replayed line is new to us. The second asks whether it was ever
+            // ours to hear. It took both to make an arrival quiet.
+            if (mentioned && fresh && !saidBefore(since.current, m.timestamp)) {
                 setUnreadMentions((n) => n + 1);
                 if (chimeRef.current) playMentionChime();
                 // The same gate as the chime, and for the same reason — the server replays its
@@ -184,7 +222,11 @@ export function ChatProvider({ children }) {
             // busy channel is not, and past this point the oldest of them can never be
             // replayed anyway.
             if (joinsSeen.current.size > 2000) joinsSeen.current.clear();
-            if (first && p.kind === 'joined' && p.username !== nameRef.current) {
+            //   Not from before we got here. Joins are replayed with the buffer like
+            //   everything else, so without this an arrival announced everyone who was
+            //   already in the room — as though they had all walked in at once.
+            if (first && p.kind === 'joined' && p.username !== nameRef.current
+                && !saidBefore(since.current, p.timestamp)) {
                 pushNotification({
                     source: 'chat-join',
                     severity: 'info',
@@ -300,6 +342,11 @@ export function ChatProvider({ children }) {
     // reason, its attach being keyed by the same UUID.
     useEffect(() => {
         if (!wanted || !running) return undefined;
+        // The first subscribe is our arrival: the buffer it brings back is, by
+        // definition, what was said before it. Only the first — this effect runs
+        // again whenever chat is switched off and on, and moving the anchor
+        // forward each time would silence everything said in between.
+        if (!since.current) since.current = Date.now();
         chat.refresh();
         return chat.acquire('chat');
     }, [wanted, running, chat]);

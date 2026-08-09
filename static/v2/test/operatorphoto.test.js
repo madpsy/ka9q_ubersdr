@@ -48,19 +48,24 @@ const okBody = () => Promise.resolve({ ok: true, status: 200, blob: () => Promis
 
 // --- the setting -------------------------------------------------------------
 
-t('photos are on unless turned off', () => {
+t('photos are off until turned on', () => {
+    // The largest thing a lookup fetches for the least it says, so it is asked
+    // for rather than given. Only an explicit 'on' counts — an absent key is
+    // somebody who has never touched the switch.
     install();
-    assert.strictEqual(photoShown(), true);
-    install({ [KEY]: 'off' });
     assert.strictEqual(photoShown(), false);
     install({ [KEY]: 'on' });
     assert.strictEqual(photoShown(), true);
+    install({ [KEY]: 'off' });
+    assert.strictEqual(photoShown(), false);
 });
 
-t('a storage that will not answer still says yes', () => {
-    // Private mode should not silently disable a feature.
+t('a storage that will not answer falls back to the default', () => {
+    // Private mode gets what a first visit gets, which is off — the setting
+    // cannot be read *or* written there, so a feature that turned itself on
+    // could never be turned off again.
     globalThis.localStorage = { getItem() { throw new Error('denied'); } };
-    assert.strictEqual(photoShown(), true);
+    assert.strictEqual(photoShown(), false);
 });
 
 t('turning it off tells everyone watching', () => {
@@ -85,11 +90,11 @@ t('a refused write does not throw', () => {
 // --- what renders ------------------------------------------------------------
 
 t('what renders gets a path, and nothing when photos are off', () => {
-    install();
+    install({ [KEY]: 'on' });
     assert.strictEqual(photoUrl('/api/lookup/image/abc'), '/api/lookup/image/abc');
     install({ [KEY]: 'off' });
     assert.strictEqual(photoUrl('/api/lookup/image/abc'), '');
-    install();
+    install({ [KEY]: 'on' });
     assert.strictEqual(photoUrl(''), '');
     assert.strictEqual(photoUrl(null), '');
 });
@@ -97,7 +102,7 @@ t('what renders gets a path, and nothing when photos are off', () => {
 // --- the blob cache ----------------------------------------------------------
 
 t('two callers asking at once share one fetch', async () => {
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     installUrlApi();
     const count = installFetch(() => new Promise((r) => setTimeout(() => r({
@@ -109,7 +114,7 @@ t('two callers asking at once share one fetch', async () => {
 });
 
 t('a photo already fetched is not fetched again', async () => {
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     installUrlApi();
     const count = installFetch(okBody);
@@ -121,7 +126,7 @@ t('a photo already fetched is not fetched again', async () => {
 
 t('a fetch that fails falls back to the path, and is not retried', async () => {
     // Retrying on every tuning change would be a request per marker passed.
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     installUrlApi();
     const count = installFetch(() => Promise.resolve({ ok: false, status: 404 }));
@@ -141,7 +146,7 @@ t('photos switched off means no fetch at all', async () => {
 });
 
 t('nothing to fetch is not a fetch', async () => {
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     installFetch(okBody);
     assert.strictEqual(await photoBlobUrl(''), '');
@@ -151,7 +156,7 @@ t('nothing to fetch is not a fetch', async () => {
 // --- trimming ----------------------------------------------------------------
 
 t('the cache is bounded, and the one in use survives', async () => {
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     const { revoked } = installUrlApi();
     installFetch(okBody);
@@ -167,7 +172,7 @@ t('the cache is bounded, and the one in use survives', async () => {
 t('a failure marker is not revoked as though it were a blob', async () => {
     // It is a path, not an allocation — revoking it would be meaningless and
     // revokeObjectURL on a non-blob is a silent no-op that hides the mistake.
-    install();
+    install({ [KEY]: 'on' });
     _resetPhotos();
     const { revoked } = installUrlApi();
     installFetch(() => Promise.resolve({ ok: false, status: 500 }));

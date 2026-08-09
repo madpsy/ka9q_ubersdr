@@ -3092,18 +3092,39 @@ a.btn { text-decoration: none; }
    is a wall. Tall enough to place a town, short enough to leave the details it
    belongs to on screen with it. */
 .csmap {
-    height: 190px;
+    /* v1's 220 is a page; this is a panel that shares a dock column with the
+       details it belongs to, so it gives twenty of those pixels back. */
+    height: 200px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     overflow: hidden;
     /* Leaflet draws its own panes; without this the tiles paint over the rounded
        corners the border is drawing. */
     isolation: isolate;
+    /* Behind the tiles until they arrive, and behind the gaps at the edges of
+       the world. v1 uses a flat #1a1a1a; this follows the theme so the light one
+       does not flash black. */
+    background: var(--surface-3);
     /* The map is a picture, and the panel around it is a document: a drag over
        the tiles is panning, not selecting the labels on them. */
     user-select: none;
     -webkit-user-select: none;
 }
+/* The same dark tiles callsign_lookup.html draws, by the same means: OSM serves
+   one set of tiles and they are a light map, so v1 filters them to sit in a dark
+   interface rather than shipping a second tile source. The filter is copied
+   verbatim — it is a recipe rather than a calculation, and a map that looked
+   nearly like the full page's would be worse than one that looked nothing like
+   it.
+
+   Dropped in the light theme, where the tiles were already right and inverting
+   them would produce the one thing this is trying to avoid: a map that does not
+   match the interface around it. */
+.csmap .leaflet-tile {
+    filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+[data-theme="light"] .csmap .leaflet-tile { filter: none; }
+
 /* The callsign, pinned to the marker. Leaflet's own tooltip chrome is a white
    box with a border radius that belongs to a different interface, so it is
    restyled to the receiver's — the same treatment StartMap's gives it. */

@@ -240,19 +240,23 @@ function Result({ call, data, serverInfo, showPhoto, showMap }) {
 const MAP_KEY = 'ubersdr.v2.callsignMap';
 
 const mapShown = () => {
-    try { return localStorage.getItem(MAP_KEY) === 'on'; } catch (e) { return false; }
+    try { return localStorage.getItem(MAP_KEY) !== 'off'; } catch (e) { return true; }
 };
 
 export default function CallsignPanel({ minimal }) {
     const [showPhoto, setShowPhoto] = useState(photoShown);
-    // Off until asked for, and remembered once it has been. Off because it is
-    // the one thing in here that fetches from somewhere other than this
-    // receiver — map tiles come from OpenStreetMap — and because a dock column
-    // has more use for the callsign's details than for a picture of the county
-    // it is in. Not shared with the other copy of the panel, unlike the photo
-    // and the announcer: those are about what a lookup *does*, this is about
-    // how much room one is given, and a floating window and a dock column do
-    // not have the same amount.
+    // On, and remembered once it has been touched. Where a station is is a fact
+    // about the contact — it is what the distance and bearing above it are
+    // derived from, drawn rather than stated — where the operator photo it
+    // replaced as the default is a fact about the operator. It costs requests to
+    // OpenStreetMap, which is the one thing in this panel that goes anywhere but
+    // this receiver, and the button turns it off for anyone who would rather it
+    // did not.
+    //
+    // Not shared with the other copy of the panel, unlike the photo and the
+    // announcer: those are about what a lookup *does*, this is about how much
+    // room one is given, and a floating window and a dock column do not have the
+    // same amount.
     const [showMap, setShowMap] = useState(mapShown);
     const toggleMap = () => setShowMap((on) => {
         try { localStorage.setItem(MAP_KEY, on ? 'off' : 'on'); } catch (e) { /* private mode */ }

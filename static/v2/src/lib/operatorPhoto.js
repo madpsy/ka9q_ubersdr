@@ -28,11 +28,20 @@ const KEY = 'ubersdr.v2.callsignPhoto';
 
 const listeners = new Set();
 
+// Off until asked for. It is the largest thing a lookup fetches and the least it
+// tells you — a shack photo or a portrait, against a callsign, a name, a country
+// and a bearing that all arrive in the same reply and all fit in a dock column.
+// The map took its place as the thing shown by default, because where a station
+// is is a fact about the contact; what its operator looks like is not.
+//
+// `=== 'on'`, so an absent key is off. Anyone who had photos on before this has
+// the key written out — setPhotoShown is the only thing that writes it, and only
+// on a click — so a deliberate choice survives and only the default moves.
 export function photoShown() {
     try {
-        return localStorage.getItem(KEY) !== 'off';
+        return localStorage.getItem(KEY) === 'on';
     } catch (e) {
-        return true;
+        return false;
     }
 }
 

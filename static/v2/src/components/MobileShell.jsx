@@ -341,7 +341,17 @@ export default function MobileShell() {
                     {menu && (
                         <div
                             className="groupmenu__scrim"
-                            onPointerDown={() => setMenuId(null)}
+                            /* On the click, not the pointerdown. A tap is a
+                               pointerdown, a pointerup and then a click, and the
+                               click is hit-tested against the DOM *as it is
+                               then* — so dismissing on the way down took the
+                               scrim out from under a tap that had not finished,
+                               and the click landed on the sheet behind it. The
+                               menu closed and the panel underneath acted on the
+                               same tap. Closing on the click means the scrim is
+                               still there to receive it, which is the whole job
+                               of a scrim: to be the thing that gets hit. */
+                            onClick={() => setMenuId(null)}
                             aria-hidden="true"
                         />
                     )}

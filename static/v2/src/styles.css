@@ -4723,6 +4723,10 @@ a.btn { text-decoration: none; }
     background: var(--surface);
     border-top: 1px solid var(--border);
     overflow-x: auto;
+    /* `position` because of the z-index below it, which does nothing at all on a
+       static box: the row has to sit over the menu's scrim, or a tap meant for
+       another group is swallowed dismissing the one that is open. */
+    position: relative;
     z-index: 30;
 }
 /* Groups, not panels — see panels/groups.jsx. The dock is what the menu is
@@ -4732,13 +4736,25 @@ a.btn { text-decoration: none; }
 .tabdock { position: relative; z-index: 32; }
 /* Transparent, and over everything except the dock. A menu you have to aim at a
    close button to be rid of is a menu in the way — anywhere else on the screen
-   is somewhere the operator would rather be. */
-.groupmenu__scrim { position: fixed; inset: 0; z-index: 31; }
+   is somewhere the operator would rather be.
+ *
+ * No z-index of its own, and that is the whole of it: this sits inside .tabdock,
+ * whose z-index lifts the group above the page, and *within* that context a
+ * positive z-index here would put the scrim over the two things it is there to
+ * serve. It did: every tap on a menu item hit the scrim instead, which closed
+ * the menu and opened nothing, and the row behind it stopped switching groups
+ * too. Painting order inside the dock is DOM order — scrim first, then the menu
+ * and the row over it. */
+.groupmenu__scrim { position: fixed; inset: 0; }
 /* Above the row it came from and out of the flow, so opening it resizes nothing
    — the same rule the sheet follows, and for the same reason: the waterfall
    behind must not be re-laid out to show a menu. */
 .groupmenu {
     position: absolute;
+    /* Over the scrim, said out loud rather than left to DOM order — this one is
+       load-bearing and the next person to add something to the dock should not
+       have to work that out from the order of two siblings. */
+    z-index: 1;
     bottom: 100%;
     left: 6px;
     right: 6px;

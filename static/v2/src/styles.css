@@ -5847,9 +5847,14 @@ a.btn { text-decoration: none; }
 }
 .spot-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-/* Digital rows are read, not clicked — see the note in SpotsPanel. No pointer
-   and no hover lift, so the row never offers an interaction it will not honour.
-   Text stays at full contrast: it is information, not a disabled control. */
+/* A row with nothing to do. Digital rows on a receiver with no lookup service:
+   they do not tune — see the note in SpotsPanel — and with nobody to ask about
+   the callsign there is nothing left for a press to mean. No pointer and no
+   hover lift, so the row never offers an interaction it will not honour. Text
+   stays at full contrast: it is information, not a disabled control.
+
+   Where lookups *are* available the same row is an ordinary button and takes the
+   ordinary hover, because pressing it does something. */
 .spot-row--static { cursor: default; }
 .spot-row--static:hover { background: transparent; }
 

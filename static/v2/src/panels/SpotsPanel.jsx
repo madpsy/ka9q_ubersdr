@@ -170,7 +170,7 @@ function Filters({ tab, filters, set, countries, dialBand }) {
     );
 }
 
-function Row({ spot, tab, now, tuned, onTune, minimal }) {
+function Row({ spot, tab, now, tuned, onTune, onLookup, minimal }) {
     const mhz = (spot.frequency / 1e6).toFixed(spot.frequency >= 1e6 ? 4 : 6);
     const flag = countryFlag(spot.countryCode);
     const utc = new Date(spot.at).toISOString().slice(11, 16);
@@ -180,10 +180,18 @@ function Row({ spot, tab, now, tuned, onTune, minimal }) {
     // frequency on the row is where the station sat in the passband, not
     // somewhere to point the receiver. Tuning there would leave you listening to
     // one corner of an FT8 slot. Same reason these get no spectrum markers.
-    const clickable = tab !== 'digital';
+    const tunes = tab !== 'digital';
+    // They do look up, though, where the receiver has a lookup service. A
+    // digital row is a callsign and a country and little else, and "who is
+    // that" is the only question it raises — it was the one row in the panel
+    // that answered nothing at all when pressed. The dial is left exactly where
+    // it was, which is the point: the reason not to tune has not changed.
+    const looksUp = !tunes && !!onLookup;
+    const clickable = tunes || looksUp;
 
     const title = [
-        clickable ? `${mhz} MHz — ${modeForSpot(spot).toUpperCase()}` : `${mhz} MHz`,
+        tunes ? `${mhz} MHz — ${modeForSpot(spot).toUpperCase()}` : `${mhz} MHz`,
+        looksUp ? `Look up ${spot.callsign}` : null,
         // Only when the column is not on screen, which is the minimal view —
         // the Age beside it says how long ago, but not at what time.
         minimal ? `${utc} UTC` : null,
@@ -227,9 +235,9 @@ function Row({ spot, tab, now, tuned, onTune, minimal }) {
     return (
         <button
             type="button"
-            className={`list__row spot-row${tuned ? ' is-active' : ''}`}
+            className={`list__row spot-row${tuned && tunes ? ' is-active' : ''}`}
             title={title}
-            onClick={() => onTune(spot)}
+            onClick={() => (tunes ? onTune(spot) : onLookup(spot))}
         >
             {cells}
         </button>
@@ -365,16 +373,27 @@ export default function SpotsPanel({ minimal }) {
 
     const set = (patch) => setFilters((prev) => ({ ...prev, [active]: { ...prev[active], ...patch } }));
 
+    // Whether there is anywhere to send a callsign. The same gate the CW graph's
+    // context uses, and the same one the Callsign panel's `requires` uses to
+    // exist at all.
+    const lookups = !!(serverInfo && serverInfo.lookup_service);
+
+    // Where a spot's callsign goes. The in-app panel wins when it is open;
+    // otherwise the v1 popup gets it, if *that* is open. Neither is ever opened
+    // by a click here — a row press that spawned a window would be a row press
+    // nobody would risk twice.
+    const lookup = (call) => {
+        if (!lookups || !call) return;
+        if (!requestLookup(call)) lookupCallsign(call);
+    };
+
     const tune = (spot) => {
         // One tune rather than a mode change that resets the passband followed
         // by a frequency change — the v1 extensions pass preserveBandwidth=false
         // for the same reason, so the row lands on the mode's own filter.
         actions.tuneTo({ frequency: Math.round(spot.frequency), mode: modeForSpot(spot) });
-        // And look the callsign up, as the v1 rows do. The in-app panel wins
-        // when it is open; otherwise the v1 popup gets it, if that is open.
-        // Neither is ever opened by a click here.
-        const call = spot.callsign;
-        if (serverInfo && serverInfo.lookup_service && call && !requestLookup(call)) lookupCallsign(call);
+        // And look the callsign up, as the v1 rows do.
+        lookup(spot.callsign);
     };
 
     return (
@@ -451,6 +470,10 @@ export default function SpotsPanel({ minimal }) {
                         now={now}
                         tuned={Math.abs(spot.frequency - tuning.frequency) < 200}
                         onTune={tune}
+                        // Only where there is a lookup service to ask. Without
+                        // one a digital row goes back to being a reading row
+                        // rather than a button that does nothing.
+                        onLookup={lookups ? (spot) => lookup(spot.callsign) : null}
                         minimal={minimal}
                     />
                 ))}

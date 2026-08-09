@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from '../react.js';
 import { useChat } from '../chat/ChatContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Empty, Icon } from '../components/ui.jsx';
+import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
@@ -61,6 +61,8 @@ export default function ChatPanel({ minimal }) {
     const [name, setName] = useState(chat.username);
     const [nameError, setNameError] = useState(null);
     const [emojiOpen, setEmojiOpen] = useState(false);
+    // The leave button asking to be sure. See the note on it.
+    const [leaving, setLeaving] = useState(false);
     const inputRef = useRef(null);
     const logRef = useRef(null);
 
@@ -391,16 +393,50 @@ export default function ChatPanel({ minimal }) {
                             )}
                         </div>
                         <Button type="submit" variant="primary" size="sm" disabled={!chat.connected}>Send</Button>
+                        {/* Asks first, unlike everything else in this row.
+                            Leaving is the one press here that cannot be taken
+                            back cheaply — it announces a departure to the
+                            channel, forgets the name, and ends any follow — and
+                            it sits one slip to the right of Send, the most
+                            pressed button in the panel, on exactly the screens
+                            where slips happen. A modal, not window.confirm: the
+                            browser's own dialog blurs the input and takes the
+                            keyboard down with it, so cancelling would still have
+                            cost what it exists to protect. */}
                         <Button
                             variant="ghost"
                             size="sm"
                             icon={<Icon.Close />}
                             title="Leave chat"
-                            onClick={chat.actions.leave}
+                            onClick={() => setLeaving(true)}
                         />
                     </form>
                 )}
                 {nameError && <div className="chat__hint">{nameError}</div>}
+
+                {leaving && (
+                    <Modal onClose={() => setLeaving(false)} label="Leave chat?">
+                        <div className="confirm">
+                            <h2 className="confirm__title">Leave chat?</h2>
+                            <p className="confirm__text">
+                                Your name is forgotten and the channel is told you left —
+                                coming back means joining again.
+                            </p>
+                            <div className="confirm__row">
+                                {/* Stay first and primary: the likeliest reason
+                                    this is open is a slip aimed at Send, and the
+                                    default-looking button should be the undo. */}
+                                <Button variant="primary" onClick={() => setLeaving(false)}>Stay</Button>
+                                <Button
+                                    variant="danger"
+                                    onClick={() => { setLeaving(false); chat.actions.leave(); }}
+                                >
+                                    Leave chat
+                                </Button>
+                            </div>
+                        </div>
+                    </Modal>
+                )}
             </div>
 
             {!minimal && (

@@ -1207,6 +1207,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .idle { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 6px 4px; }
 .idle__title { margin: 0; font-size: calc(17px * var(--ui-scale)); color: var(--warn); }
 .idle__text { margin: 0; max-width: 42ch; color: var(--text-dim); }
+
+/* A small are-you-sure, for the handful of presses that cost something to take
+   back — chat's leave button is the first. Same card the idle dialog draws,
+   named for what it is rather than borrowed from a component that happens to
+   look right today. */
+/* Its own card, as .spotmap learned the hard way: the Modal is a scrim and a
+   close button at the corner of whatever is inside it, and content with no
+   surface of its own floats over the blur with the × adrift beside it. */
+.confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 22px;
+    max-width: min(90vw, 340px);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.confirm__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
+.confirm__text { margin: 0; color: var(--text-dim); font-size: calc(12.5px * var(--ui-scale)); line-height: 1.45; }
+.confirm__row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 .idle__count {
     margin: 2px 0 6px;
     font-family: var(--mono);

@@ -3976,12 +3976,28 @@ a.btn { text-decoration: none; }
 .bsp__nav--right { right: 4px; }
 .bsp__reset { top: 4px; right: 4px; width: 24px; height: 24px; }
 
-/* Vertical page scrolling still works with a finger on the chart; a pinch and a
-   horizontal drag belong to the zoom. */
+/* Vertical scrolling of the column still works with a finger on the chart; a
+   pinch belongs to the zoom. */
 .bsp__chart { touch-action: pan-y; }
 /* Zoomed in, the chart can be dragged — say so before it is tried. The grabbing
-   state is set on the element while a drag is live. */
-.bsp__chart--zoomed { cursor: grab; }
+   state is set on the element while a drag is live.
+ *
+ * `touch-action: none` while zoomed, and only while zoomed, is what makes that
+ * drag possible with a finger at all. `pan-y` above reads as "the app gets the
+ * horizontal drags, the column keeps the vertical ones", and that is not how the
+ * browser decides: it watches the first few pixels and hands the whole gesture
+ * to whichever it thinks was meant. A finger never travels exactly sideways, so
+ * a pan that started a few degrees off went to the column as a scroll and the
+ * chart got a pointercancel instead of a drag — which is why it worked with a
+ * mouse, where nothing arbitrates, and never with a finger. Pinch was unaffected
+ * because two fingers cannot be a scroll under `pan-y` either way.
+ *
+ * The cost is that a finger starting on a zoomed chart no longer scrolls the
+ * dock column. That is the right way round: panning is the whole point of being
+ * zoomed in, it is a state you chose and can leave from the reset button beside
+ * it, and the column can be scrolled from anywhere else in it. Unzoomed there is
+ * nothing to pan, so the rule above stands and the column keeps the gesture. */
+.bsp__chart--zoomed { cursor: grab; touch-action: none; }
 
 /* Hover readout. The line spans both canvases, because a frequency is a
    frequency whether you are reading it off the trace or off the waterfall. */

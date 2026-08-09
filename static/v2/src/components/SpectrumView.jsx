@@ -212,6 +212,14 @@ const DB_LABEL_GAP = 13;
 // remembers the real width.
 const CURSOR_TAG_W = 96;
 
+// The same, for the three context tags. Each is measured the first time it is
+// drawn; these are only what to assume before that has happened. Icon, a space,
+// and the widest reading of each: a span in kHz, a nine-digit centre frequency,
+// and an offset in hertz with its sign.
+const SPAN_TAG_W = 84;
+const CENTRE_TAG_W = 104;
+const OFFSET_TAG_W = 72;
+
 // The first two live pointers, in the order they went down — a pinch, if there
 // are two of them. A third finger joins the map but is ignored.
 function pinchPair(pts) {
@@ -318,7 +326,7 @@ function FreqOffsetTag() {
     if (hz == null) return null;
     const band = offsetBand(hz);
     return (
-        <span className={`tag tag--${band}`} title={offsetTitle(serverInfo)}>
+        <span className={`tag tag--${band}`} data-optional="offset" title={offsetTitle(serverInfo)}>
             Δf {offsetLabel(hz)}
         </span>
     );
@@ -1204,12 +1212,33 @@ export default function SpectrumView() {
     // The frequency being spotted, while the dialog is up. See SpotOnCluster.
     const [spotting, setSpotting] = useState(null);
 
-    // The cursor frequency is the one tag in the toolbar we can do without: it
-    // is transient, and the same number is in the tooltip already following the
-    // pointer. On a narrow spectrum it is what tips the tag row into wrapping,
-    // so it is dropped whenever the row has no width left for it.
+    // Which of the toolbar's readouts still fit beside the tags that are state.
+    //
+    // The squelch, the noise reduction, the filters, the control surfaces and the
+    // clip warning are never dropped: each says something is *happening* that
+    // nothing else on screen says, and a wrapped second row of them is better
+    // than a missing one. The four here are context, and every one of them is
+    // already written somewhere else — so they are what gives way to keep the
+    // row on one line.
+    //
+    // In keep order, most important last to go:
+    //
+    //   span     what the ruler's whole width means. First of the four to be
+    //            kept because it is the one that changes as you work — a zoom
+    //            is the commonest thing done to this display.
+    //   centre   where the view is. The ruler says it too, in more detail, but
+    //            only if you read a tick.
+    //   offset   the receiver's own frequency error. A standing fact about the
+    //            hardware rather than about this moment.
+    //   cursor   where the pointer is. Transient, and the tooltip under the
+    //            pointer is already saying it — which is why it goes first.
     const metaRef = useRef(null);
-    const room = useRoomFor(metaRef, [{ key: 'cursor', width: CURSOR_TAG_W }]);
+    const room = useRoomFor(metaRef, [
+        { key: 'span', width: SPAN_TAG_W },
+        { key: 'centre', width: CENTRE_TAG_W },
+        { key: 'offset', width: OFFSET_TAG_W },
+        { key: 'cursor', width: CURSOR_TAG_W },
+    ]);
 
     // The centre frequency goes on a phone: the ruler under the spectrum already
     // has it, and the tags left of the zoom buttons are the scarcest row in the
@@ -1804,12 +1833,16 @@ export default function SpectrumView() {
                 <div className="spectrum__toolbar">
                     <div className="spectrum__meta" ref={metaRef}>
                         {/* The span, the centre and the receiver's frequency accuracy are
-                            all off on a phone. They are context rather than control: the ruler under the spectrum
-                            says where the view is and how wide it is, the accuracy is a
-                            standing fact about the receiver rather than something that
-                            changes while you listen, and the row they are in is the same
-                            one holding the squelch, the filter and the DSP tags — which
-                            are state you are actually working with. */}
+                            all off on a phone, and the first to go on anything else — see
+                            the keep order above. They are context rather than control:
+                            the ruler under the spectrum says where the view is and how
+                            wide it is, the accuracy is a standing fact about the receiver
+                            rather than something that changes while you listen, and the
+                            row they are in is the same one holding the squelch, the
+                            filter and the DSP tags — which are state you are actually
+                            working with. A phone drops them outright because the row
+                            there has space for one kind of tag and these are the other
+                            kind. */}
                         {/* Icons rather than words. Both of these are labels on a
                             number in a row that is otherwise all state, and the
                             words were the widest part of each: "centre" is five
@@ -1821,14 +1854,14 @@ export default function SpectrumView() {
                             the trade: one tag lost a word, the other gained a
                             meaning. The tooltips carry the words for anyone who
                             wants them, and the aria-labels carry them always. */}
-                        {!mobile && (
-                            <span className="tag tag--accent tag--ico" title="Span of the view">
+                        {!mobile && room.span && (
+                            <span className="tag tag--accent tag--ico" data-optional="span" title="Span of the view">
                                 <Icon.Span size={11} />
                                 <span aria-label={`Span ${formatSpan(span)}`}>{formatSpan(span)}</span>
                             </span>
                         )}
-                        {!mobile && (
-                            <span className="tag tag--ico" title="Centre frequency of the view">
+                        {!mobile && room.centre && (
+                            <span className="tag tag--ico" data-optional="centre" title="Centre frequency of the view">
                                 <Icon.Target size={11} />
                                 <span aria-label={`Centre ${formatFreqShort(view.centerFreq || 0)}`}>
                                     {formatFreqShort(view.centerFreq || 0)}
@@ -1838,7 +1871,7 @@ export default function SpectrumView() {
                         {/* Next to the frequencies it qualifies, and before the audio
                             tags: this one is about what the numbers on screen mean,
                             not about what is being done to the sound. */}
-                        {!mobile && <FreqOffsetTag />}
+                        {!mobile && room.offset && <FreqOffsetTag />}
                         <SquelchTag />
                         <NoiseReductionTag />
                         <FilterTags />

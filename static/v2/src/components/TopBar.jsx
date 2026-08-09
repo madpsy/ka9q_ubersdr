@@ -21,6 +21,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
+import { onFreqEntry } from '../lib/freqEntry.js';
 import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { useFitScale } from '../lib/useFitScale.js';
@@ -404,6 +405,10 @@ export default function TopBar({ compact }) {
     // Tuning straight from the readout: the frequency swaps for an input, the
     // mode drops a menu at the point it was clicked.
     const [editingFreq, setEditingFreq] = useState(false);
+    // The other way in: the `F` shortcut, or a pad mapped to "Type a frequency",
+    // opening the same box a click on the readout does. The bar registers rather
+    // than the box, because the box does not exist until this is asked for.
+    useEffect(() => onFreqEntry(() => setEditingFreq(true)), []);
     const [modeAt, setModeAt] = useState(null);
     const modeClosedAt = useRef(0);
     const [widthAt, setWidthAt] = useState(null);

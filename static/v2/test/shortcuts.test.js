@@ -114,6 +114,13 @@ t('v1s band keys are still the band keys', () => {
     });
 });
 
+t('F opens the frequency box, as it did in v1', () => {
+    // The key that turns the top bar's readout into something to type into.
+    assert.strictEqual(DEFAULT_BINDINGS.f, 'freq_entry');
+    // And Ctrl+F stays with the browser's Find, so nobody loses it to this.
+    assert.strictEqual(comboProblem('Ctrl+f'), 'The browser needs that one');
+});
+
 // --- collisions --------------------------------------------------------------
 
 t('a key can only ever run one function', () => {

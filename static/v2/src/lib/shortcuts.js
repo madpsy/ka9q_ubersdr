@@ -97,16 +97,18 @@ export function comboProblem(combo) {
 // v1's layout, as far as v2's catalogue covers it, so anyone arriving from the
 // old interface finds their fingers already work.
 //
-// Not carried over: E (max zoom), R (recorder) and F (focus the frequency box)
-// have no equivalent function yet, and v1's C/J/K mode *pairs* are single modes
-// here — v2 has eight modes and a next/previous pair, which covers the same
-// ground without three keys that each behave differently depending on where
-// they are pressed from.
+// Not carried over: E (max zoom) and R (recorder) have no equivalent function
+// yet, and v1's C/J/K mode *pairs* are single modes here — v2 has eight modes and
+// a next/previous pair, which covers the same ground without three keys that each
+// behave differently depending on where they are pressed from.
 export const DEFAULT_BINDINGS = {
     ArrowLeft: 'freq_step_down',
     ArrowRight: 'freq_step_up',
     ArrowUp: 'volume_up',
     ArrowDown: 'volume_down',
+    // v1's key for it, and the one the browser leaves alone: Ctrl+F is Find and
+    // is refused above, but bare F is ours.
+    f: 'freq_entry',
     m: 'mute_toggle',
     u: 'mode_usb',
     l: 'mode_lsb',

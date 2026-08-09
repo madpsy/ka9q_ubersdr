@@ -25,6 +25,7 @@ import {
 } from '../radio/constants.js';
 import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
 import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
+import { requestFreqEntry } from '../lib/freqEntry.js';
 import {
     antennaGround, antennaSelect, antennaStep, rotatorCommand, rotatorStep,
 } from './hardware.js';
@@ -104,6 +105,20 @@ const FREQUENCY = group('Frequency', [
         accepts: PRESS,
         repeat: true,
         run: (ev, ctx) => ctx.actions.nudge(-ctx.stepHz),
+    },
+    {
+        // v1's F key: the top bar's readout becomes a box with the frequency in
+        // it, selected, so a number typed straight in replaces it. The one
+        // function here that does not touch the receiver — see lib/freqEntry.js.
+        //
+        // A button and nothing else. `PRESS` counts an encoder detent as a press,
+        // and a dial that opened a text box on the first click of the wheel would
+        // then be typing into it.
+        id: 'freq_entry',
+        label: 'Type a frequency',
+        hint: 'opens the box in the top bar',
+        accepts: [TRIG],
+        run: () => requestFreqEntry(),
     },
 ]);
 

@@ -225,6 +225,17 @@ t('a button cannot drive a function that needs a position', () => {
     assert.strictEqual(r.calls.length, 0);
 });
 
+t('typing a frequency is a press only, and touches the receiver directly not at all', () => {
+    // It opens the top bar's box — see lib/freqEntry.js — so a detent must not
+    // reach it: a dial that opened a text box on its first click would then be
+    // typing into it. Nothing was listening here, which is not an error either.
+    const r = fakeRadio();
+    assert.ok(catalogue([]).some((f) => f.id === 'freq_entry'));
+    assert.strictEqual(runFunction('freq_entry', REL(1), r), false);
+    assert.strictEqual(runFunction('freq_entry', TRIG, r), true);
+    assert.strictEqual(r.calls.length, 0);
+});
+
 t('an unknown function is refused rather than throwing', () => {
     const r = fakeRadio();
     assert.strictEqual(runFunction('no_such_function', TRIG, r), false);

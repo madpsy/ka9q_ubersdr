@@ -83,11 +83,12 @@ export default function Section({ panel, dock, index, weight, height, prev, next
     const onGripDown = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Guarded, as every other setPointerCapture in the app is: it throws if
-        // the pointer is no longer active, and it was the first statement of the
-        // gesture — so a throw took the rest of the handler with it and the drag
-        // never started at all, silently. The capture is what keeps a drag alive
-        // once the finger leaves this 26px corner, which is most of a drag.
+        // Guarded, as the release below and useFloatDrag's pair already are: it
+        // throws if the pointer is no longer active, and it was the first
+        // statement of the gesture — so a throw took the rest of the handler
+        // with it and the drag never started at all, silently. The capture is
+        // what keeps a drag alive once the finger leaves this 26px corner, which
+        // is immediately.
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         const me = e.currentTarget.parentElement;
         const sibling = me.nextElementSibling?.nextElementSibling || me.previousElementSibling?.previousElementSibling;

@@ -939,11 +939,35 @@ button, input, select, textarea { font: inherit; color: inherit; }
     z-index: 5;
     background: transparent;
     transition: background var(--dur) var(--ease);
+    /* Without this the browser has already decided a touch here is the start of
+       a scroll before the first pointermove arrives, and cancels the gesture out
+       from under the drag — which is why a dock could be resized with a mouse
+       and not with a finger. Every other drag surface in the file says it; this
+       one was missed. */
+    touch-action: none;
+    /* And a finger resting on the edge before it moves is a press-and-hold to
+       iOS, which answers with the selection callout and cancels the pointer
+       stream — see the window grip for the same pair. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 .dock__resizer:hover, .dock__resizer:active { background: var(--accent-line); }
 .dock__resizer--left { top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
 .dock__resizer--right { top: 0; left: -3px; width: 6px; height: 100%; cursor: col-resize; }
 .dock__resizer--bottom { left: 0; top: -3px; height: 6px; width: 100%; cursor: row-resize; }
+
+/* Six pixels is a mouse target: the pointer is one pixel across and the cursor
+   changes shape to say you have it. A fingertip has neither, so the strip is
+   widened where there are fingers — but lopsided, most of it inside the dock.
+   The dock body's own padding is 8px of nothing much, whereas the pixels on the
+   other side belong to the spectrum, and a fat invisible strip over the edge of
+   the waterfall would swallow tuning drags that were nowhere near the dock. */
+@media (any-pointer: coarse) {
+    .dock__resizer--left { right: -6px; width: 18px; }
+    .dock__resizer--right { left: -6px; width: 18px; }
+    .dock__resizer--bottom { top: -6px; height: 18px; }
+}
 
 /* =========================================================================
    Section (collapsible panel)

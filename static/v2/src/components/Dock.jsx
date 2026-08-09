@@ -31,7 +31,8 @@ function SectionSplitter({ before, after, weights, setWeights }) {
 
     const onDown = (e) => {
         e.preventDefault();
-        e.currentTarget.setPointerCapture(e.pointerId);
+        // Same guard as the dock resizer's, for the same reason.
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         const row = e.currentTarget.parentElement;
         const kids = [...row.children];
         const me = kids.indexOf(e.currentTarget);
@@ -225,8 +226,12 @@ export default function Dock({ side }) {
 
     const onResizeDown = useCallback((e) => {
         e.preventDefault();
-        const el = e.currentTarget;
-        el.setPointerCapture(e.pointerId);
+        // Guarded, as the release below already is: capture throws if the
+        // pointer is no longer active, and it sat in front of the line that
+        // actually starts the drag — so a throw left the gesture dead with
+        // nothing said. The capture is what keeps the drag alive once the finger
+        // has left an 18px strip, which is immediately.
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         resizeRef.current = { start: side === 'bottom' ? e.clientY : e.clientX, size: dock.size };
     }, [dock.size, side]);
 

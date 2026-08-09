@@ -8671,3 +8671,58 @@ a.btn { text-decoration: none; }
    its slot — that overhang is what the smooth scroll slides — and with anything
    drawn above it in the same container, an unclipped slide runs over it. */
 .spectrum__wf-heat { position: absolute; left: 0; right: 0; overflow: hidden; }
+
+/* ── Selection on a touchscreen ───────────────────────────────────────────────
+ *
+ * A tap that moves a pixel or two is a drag as far as the browser is concerned,
+ * and over text a drag means "select this" — so on a phone or a tablet, pressing
+ * a button, a tag, a panel title or a row of a table kept raising a blue
+ * selection and, if the finger lingered, the copy callout with it. None of that
+ * is ever wanted here: this interface is controls, and nobody taps a Listen
+ * button to select the word "Listen".
+ *
+ * So selection is off by default on anything that can be poked, and switched
+ * back on for the places where the content *is* text somebody might want to
+ * take away — decoded messages, chat, a cluster transcript, a callsign lookup,
+ * anything typed into. That list is short and it is here rather than spread
+ * across twenty files; anything new that holds readable text can join it, or
+ * carry `.selectable` and be done with.
+ *
+ * A mouse is left alone entirely. Selecting a frequency off the screen to paste
+ * into a log is a normal thing to do with a pointer, and none of the accidents
+ * above happen with one — a click does not drift.
+ *
+ * `pointer: coarse`, not the `any-pointer: coarse` the rest of this file uses.
+ * That difference is deliberate and it is the only place it matters: every other
+ * touch rule here *adds* something — a bigger grip, a visible handle — and wants
+ * to know whether a finger is available at all, which is what `any-pointer`
+ * answers. This one takes a capability away, so the question is not "is there a
+ * finger" but "is a finger how this is driven". A convertible laptop with a
+ * touchscreen answers yes to the first and no to the second, and it has a mouse
+ * that should still be able to select a callsign.
+ */
+@media (pointer: coarse) {
+    body {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    .selectable,
+    input, textarea, [contenteditable],
+    /* Chat, the cluster terminal and the event log: conversations and
+       transcripts, all of them things people quote. */
+    .chat__log, .dxc-out, .log,
+    /* A lookup answer — the callsign, the name, the locator. */
+    .cs-result,
+    /* Everything a decoder has decoded. The whole point of the message is that
+       it can be read and kept. */
+    .ntx__msgs, .nx__msg, .tp__line, .sm__line, .stt__lines, .hf__msgs,
+    .sstv__lines,
+    /* Long-form text the receiver is telling you: a news item, a modal. */
+    .news__item, .modal__body {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
+    }
+}

@@ -28,7 +28,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
-import { maidenheadToLatLon } from '../lib/callsign.js';
+import { geodesicPoints, maidenheadToLatLon } from '../lib/callsign.js';
 
 // Tooltip content is HTML to Leaflet, and every part of it — a callsign, a
 // country from a prefix table — arrived over the wire.
@@ -66,6 +66,10 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
     const fitted = useRef(false);
+    // The path under the pointer, if any. One line, moved rather than added to:
+    // a map of several hundred stations with a path to each is a cat's cradle,
+    // and the question a hover asks is about one of them.
+    const hover = useRef(null);
     // Read by the redraw without making it a dependency: the timer fires on its
     // own schedule and wants whatever is current when it does.
     const live = useRef({ points, onPick });
@@ -145,6 +149,29 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
     useEffect(() => {
         if (!ready) return undefined;
 
+        const dropPath = () => {
+            if (!hover.current) return;
+            hover.current.remove();
+            hover.current = null;
+        };
+
+        const drawPath = (lat, lon) => {
+            const L = window.L;
+            const m = map.current;
+            if (!L || !m || !rx) return;
+            dropPath();
+            hover.current = L.polyline(geodesicPoints(rx.lat, rx.lon, lat, lon), {
+                color: '#e5484d',
+                weight: 2,
+                opacity: 0.85,
+                dashArray: '5, 6',
+                // Nothing to press: the dot underneath owns the click, and a
+                // line drawn across the map must not steal one meant for a
+                // station it happens to pass over.
+                interactive: false,
+            }).addTo(m);
+        };
+
         const draw = () => {
             const L = window.L;
             const m = map.current;
@@ -152,6 +179,9 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
             if (!L || !m || !g) return;
             const { points: pts, onPick: pick } = live.current;
 
+            // Any path drawn over the old markers belongs to a marker that is
+            // about to stop existing.
+            dropPath();
             g.clearLayers();
             for (const p of pts) {
                 const s = p.spot;
@@ -176,6 +206,16 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
                     { direction: 'top', className: 'csmap__tip' },
                 );
                 dot.on('click', () => { if (pick) pick(s); });
+                // The great circle to this one, while the pointer is on it. It
+                // is the thing a map of a band is for — not where the stations
+                // are, but which way the signals came — and drawing it on hover
+                // means every station answers that in turn without a single
+                // press. On a touchscreen there is no hover and the path arrives
+                // with the single-spot view instead, which a tap already opens.
+                if (rx) {
+                    dot.on('mouseover', () => drawPath(p.lat, p.lon));
+                    dot.on('mouseout', dropPath);
+                }
                 dot.addTo(g);
             }
 
@@ -195,7 +235,10 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
             lastDrawn.current = Date.now();
             draw();
         }, Math.max(0, REDRAW_MS - since));
-        return () => clearTimeout(id);
+        return () => {
+            clearTimeout(id);
+            dropPath();
+        };
     }, [ready, sig]);
 
     // No great-circle paths here, deliberately: one per station is a cat's

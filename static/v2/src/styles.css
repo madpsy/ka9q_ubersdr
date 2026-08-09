@@ -962,11 +962,54 @@ button, input, select, textarea { font: inherit; color: inherit; }
    widened where there are fingers — but lopsided, most of it inside the dock.
    The dock body's own padding is 8px of nothing much, whereas the pixels on the
    other side belong to the spectrum, and a fat invisible strip over the edge of
-   the waterfall would swallow tuning drags that were nowhere near the dock. */
+   the waterfall would swallow tuning drags that were nowhere near the dock.
+ *
+ * Widening it is not enough on its own, and the reason is not size: an invisible
+ * strip has to be *found*, and on a touchscreen there is no hover to find it
+ * with — no cursor changing shape, no line lighting up under the pointer. The
+ * whole affordance was a mouse-only one, so the edge read as scenery and getting
+ * a drag out of it was a matter of guessing the right pixel.
+ *
+ * Hence a handle, in the middle of the edge, where a drawer or a sheet would put
+ * one: ::after is the bar you can see, ::before is the part you can hit — a good
+ * deal larger than the bar, because a target you can see is one you aim at, and
+ * being off by a few pixels should still land. It is a band in the middle of the
+ * edge rather than the full length, so what it borrows from the spectrum is
+ * borrowed in one place and the rest of the waterfall edge stays live. */
 @media (any-pointer: coarse) {
     .dock__resizer--left { right: -6px; width: 18px; }
     .dock__resizer--right { left: -6px; width: 18px; }
     .dock__resizer--bottom { top: -6px; height: 18px; }
+
+    .dock__resizer::before,
+    .dock__resizer::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+    /* The target. Transparent, and wider than the strip it sits on — a
+       pseudo-element is hit-tested as part of the element that owns it, so this
+       is grabbable everywhere it reaches. */
+    .dock__resizer::before { background: transparent; }
+    /* The handle itself: the same grey as a panel border at rest, the accent
+       while it is being dragged, so a drag that has taken hold says so under a
+       finger that is covering the edge. */
+    .dock__resizer::after {
+        background: var(--border-strong);
+        border-radius: 99px;
+        transition: background var(--dur) var(--ease);
+    }
+    .dock__resizer:active::after { background: var(--accent); }
+
+    .dock__resizer--left::before,
+    .dock__resizer--right::before { width: 34px; height: 84px; }
+    .dock__resizer--left::after,
+    .dock__resizer--right::after { width: 4px; height: 42px; }
+
+    .dock__resizer--bottom::before { width: 84px; height: 34px; }
+    .dock__resizer--bottom::after { width: 42px; height: 4px; }
 }
 
 /* =========================================================================

@@ -20,7 +20,7 @@
 import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
-import { Button, Empty, Icon, Segmented, ShowMore } from '../components/ui.jsx';
+import { Button, Empty, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import SpotMap from '../components/SpotMap.jsx';
 import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
@@ -62,6 +62,15 @@ const TABS = [
 export function spotTabs(serverInfo) {
     return TABS.filter((t) => t.requires(serverInfo));
 }
+
+// Remembered, like the panel's other per-browser preferences. On unless it has
+// been turned off: `!== 'off'`, so a browser that has never been asked gets the
+// default rather than the absence of one.
+const MAP_MODAL_KEY = 'ubersdr.v2.spotMapModal';
+
+const mapModalWanted = () => {
+    try { return localStorage.getItem(MAP_MODAL_KEY) !== 'off'; } catch (e) { return true; }
+};
 
 function optionLabel(value, unit) {
     return value == null ? 'No limit' : `${value > 0 && unit === 'dB' ? '+' : ''}${value} ${unit}`;
@@ -374,6 +383,18 @@ export default function SpotsPanel({ minimal }) {
 
     const set = (patch) => setFilters((prev) => ({ ...prev, [active]: { ...prev[active], ...patch } }));
 
+    // Whether a click on a digital row opens the map modal as well as looking the
+    // callsign up. On, because the map is the answer to the question a digital
+    // row raises and a click that only filled a panel elsewhere in the layout —
+    // possibly a panel that is closed — looked like a click that did nothing.
+    // Off is for somebody working down the list with the Callsign panel open
+    // beside it, where a modal over the list is a modal in the way.
+    const [modalOnClick, setModalOnClick] = useState(mapModalWanted);
+    const toggleModal = () => setModalOnClick((on) => {
+        try { localStorage.setItem(MAP_MODAL_KEY, on ? 'off' : 'on'); } catch (e) { /* private mode */ }
+        return !on;
+    });
+
     // The spot whose map is open, if any. A modal rather than a panel: it is a
     // detour from a list — you came to read the decodes and stopped to ask about
     // one — and a detour that rearranged the panel would lose your place in the
@@ -502,7 +523,7 @@ export default function SpotsPanel({ minimal }) {
                         // and more than the row itself can show.
                         onLookup={lookups || spot.grid ? (s2) => {
                             lookup(s2.callsign);
-                            setMapped(s2);
+                            if (modalOnClick) setMapped(s2);
                         } : null}
                         minimal={minimal}
                     />
@@ -531,17 +552,38 @@ export default function SpotsPanel({ minimal }) {
                 button that goes nowhere is worse than no button. Not in the minimal view
                 either — it opens a whole second window, which is not what a panel cut down
                 to a list is for. */}
-            {!minimal && spotMapUrl(active) && (
-                <div className="row-end">
-                    <a
-                        className="btn btn--ghost btn--sm"
-                        href={spotMapUrl(active)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >
-                        Open map
-                        <Icon.External size={13} />
-                    </a>
+            {!minimal && (spotMapUrl(active) || active === 'digital') && (
+                <div className="spots__foot">
+                    {/* Whether a row press opens the map over the list. On the
+                        same row as the link out because the two are the same
+                        subject — this is the map you get here, that is the map
+                        you get there — and to its left because a switch that
+                        changes what a click does belongs before the thing it is
+                        changing, not after it.
+
+                        Digital only: it is the only tab whose rows open a modal.
+                        The others tune, which is not a thing to make optional. */}
+                    {active === 'digital' && (
+                        <Switch
+                            checked={modalOnClick}
+                            onChange={toggleModal}
+                            label="Modal"
+                            title={modalOnClick
+                                ? 'Clicking a spot opens its map — click to only look the callsign up'
+                                : 'Clicking a spot only looks the callsign up — click to open its map too'}
+                        />
+                    )}
+                    {spotMapUrl(active) && (
+                        <a
+                            className="btn btn--ghost btn--sm"
+                            href={spotMapUrl(active)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Open map
+                            <Icon.External size={13} />
+                        </a>
+                    )}
                 </div>
             )}
         </div>

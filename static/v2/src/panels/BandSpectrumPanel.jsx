@@ -580,6 +580,35 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         return true;
     }, [canZoom]);
 
+    // A drag belongs to the pointer, not to the element it started on.
+    //
+    // It used to be driven from the chart's own pointermove and ended by its
+    // pointerleave, and with a mouse that is the same thing: the press captures
+    // the pointer, so the moves keep arriving and the leave never fires until it
+    // is over. A finger is not the same thing. Safari does not hold a touch to
+    // the element it went down on the way the capture asks it to, so a pan that
+    // crossed onto the frequency strip — or over a readout that unmounted from
+    // under it, which happens on the first move of every drag — raised a
+    // pointerleave, and the leave ended the gesture. What was left was a pan
+    // that moved a few pixels per touch and then stopped, which is exactly what
+    // it looked like.
+    //
+    // So the moves are taken from the window and the gesture ends on pointerup
+    // or pointercancel, wherever those land. Nothing about crossing a boundary
+    // can stop a drag now, because nothing is listening for one.
+    useEffect(() => {
+        const onMove = (e) => { if (drag.current) onDragMove(e); };
+        const onEnd = (e) => onPointerUp(e);
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onEnd);
+        window.addEventListener('pointercancel', onEnd);
+        return () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onEnd);
+            window.removeEventListener('pointercancel', onEnd);
+        };
+    }, [onDragMove, onPointerUp]);
+
     const onPinchMove = useCallback((e) => {
         if (!canZoom) return false;
         if (!pinch.has(e.pointerId)) return false;
@@ -659,13 +688,17 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     const read = useCallback((e) => {
         // A second finger is a pinch, and a held button is a pan. Neither is a
         // reading, and both leave the tip behind if it is not cleared.
-        if (onPinchMove(e) || onDragMove(e)) { st.ptr = null; setAt(null); return; }
+        //
+        // The pan is only *detected* here, never applied: this fires for the same
+        // move the window listener above is already panning on, and doing it in
+        // both places would move the band twice as far as the finger.
+        if (onPinchMove(e) || (drag.current && drag.current.moved)) { st.ptr = null; setAt(null); return; }
         // Kept so the readout can be recomputed against the next frame without
         // the pointer having to move.
         st.ptr = { x: e.clientX, y: e.clientY, type: e.pointerType };
         const v = compute(st.ptr);
         if (v) setAt(v);
-    }, [compute, onDragMove, onPinchMove, st]);
+    }, [compute, onPinchMove, st]);
 
     // A press that neither panned nor pinched, and did not land on one of the
     // buttons over the chart, is a tune. Read from the same window arithmetic
@@ -759,7 +792,10 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onClick={onClick}
-            onPointerLeave={(e) => { onPointerUp(e); leave(e); }}
+            /* The readout only. A gesture ends when the pointer is released,
+               which the window listener hears wherever that happens — see the
+               note there. */
+            onPointerLeave={leave}
         >
             <canvas className="bsp__spec" ref={specRef} />
 

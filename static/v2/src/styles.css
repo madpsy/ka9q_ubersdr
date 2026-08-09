@@ -1055,6 +1055,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
    control that could shrink would be one drawn on top of the title instead of
    one taken away. */
 .panelzoom { display: flex; align-items: center; flex: none; }
+/* Held with a finger, these reset the panel to the global size — see PanelZoom.
+   Without this iOS answers a hold with the selection callout instead, which is
+   the system taking a gesture the control had a use for. */
+.panelzoom > button {
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
 .section__arrow { width: 17px; }
 /* At the end of the dock: kept in place rather than removed, so the pair does
    not change width and shuffle the title as panels move past each other. */

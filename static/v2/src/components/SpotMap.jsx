@@ -288,7 +288,13 @@ export default function SpotMap({
         if (db) distance = { ...db, fromGrid: !!state.position.fromGrid };
     }
 
-    const many = view === 'all';
+    // A map of every spot needs every spot to say where it is, and a cluster spot
+    // never does — DXSpot on the server carries a callsign, a band and a country
+    // and no locator at all. So the DX tab gets this modal without its second
+    // view: an "all spots" button that could only ever open an empty map is a
+    // button that teaches somebody the feature does not work.
+    const canShowAll = kind !== 'dx';
+    const many = canShowAll && view === 'all';
 
     return (
         <Modal onClose={onClose} label={many ? 'Digital spots on the map' : `${call} on the map`}>
@@ -315,18 +321,20 @@ export default function SpotMap({
                         names the other, which is what a toggle is for — and it
                         sits in the title row because it changes what the whole
                         modal is about rather than what is in it. */}
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        className="spotmap__swap"
-                        icon={many ? <Icon.Target /> : <Icon.Grid />}
-                        title={many
-                            ? `Back to ${call} on its own`
-                            : 'Show every spot that reported a locator'}
-                        onClick={() => setView(many ? 'one' : 'all')}
-                    >
-                        {many ? call : 'Show all'}
-                    </Button>
+                    {canShowAll && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="spotmap__swap"
+                            icon={many ? <Icon.Target /> : <Icon.Grid />}
+                            title={many
+                                ? `Back to ${call} on its own`
+                                : 'Show every spot that reported a locator'}
+                            onClick={() => setView(many ? 'one' : 'all')}
+                        >
+                            {many ? call : 'Show all'}
+                        </Button>
+                    )}
                 </div>
 
                 {/* Only in the all-spots view, and the same vocabulary the panel

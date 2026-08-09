@@ -19,7 +19,8 @@ const assert = require('assert');
 
 const {
     RING_BG, RING_PAD, SCROLL_MAX_MS, SCROLL_MIN_MS,
-    panTransform, ringKeepsHistory, ringSlices, smoothInterval,
+    panTransform, ringHeightFor, ringKeepsHistory, ringSlices, smoothInterval,
+    RING_MAX_CSS, RING_RESERVE_CSS,
 } = require('./.build/waterfallring.cjs');
 
 let pass = 0;
@@ -428,5 +429,48 @@ t('nonsense in, nothing out', () => {
     assert.strictEqual(panTransform(view(7e6, 1e3), view(7e6, 0), W), null);
     assert.strictEqual(panTransform(view(7e6, 1e3), view(7.1e6, 1e3), 0), null);
 });
+
+// --- how much is remembered, against how much is shown ----------------------
+
+t('the ring is taller than the pane, so growing it has something to show', () => {
+    // The black band this exists to prevent: close the bottom dock and the
+    // waterfall gets taller, and every row of that new space was never recorded.
+    const need = 600;
+    const h = ringHeightFor(need, 0, 1);
+    assert.ok(h >= need + RING_RESERVE_CSS, `${h} leaves no reserve above ${need}`);
+});
+
+t('the reserve is in CSS pixels, so a retina pane gets the same dock back', () => {
+    // A bottom dock is 240 CSS px whatever the device pixel ratio, and the
+    // reserve is sized against it — in device pixels it has to double when the
+    // pixels do.
+    const one = ringHeightFor(600, 0, 1);
+    const two = ringHeightFor(1200, 0, 2);
+    assert.strictEqual(two - 1200, (one - 600) * 2);
+});
+
+t('a shrinking pane keeps every row it had', () => {
+    // The point of the whole thing: give the height back and the history is
+    // still there. A ring that resized down with the pane would have dropped
+    // the oldest rows, and they do not come back.
+    const tall = ringHeightFor(1000, 0, 1);
+    assert.strictEqual(ringHeightFor(300, tall, 1), tall);
+});
+
+t('it grows for a pane taller than the ring', () => {
+    const small = ringHeightFor(300, 0, 1);
+    const grown = ringHeightFor(1200, small, 1);
+    assert.ok(grown >= 1200, 'the pane must fit in its own ring');
+});
+
+t('the ceiling stops a tall window from allocating without bound', () => {
+    // Past it the band comes back, which is what this did at every size before.
+    // Memory is the reason: the ring is a canvas as wide as the pane.
+    const huge = ringHeightFor(4000, 0, 1);
+    assert.strictEqual(huge, 4000, 'a pane taller than the cap still gets a ring that fits it');
+    const capped = ringHeightFor(RING_MAX_CSS - 100, 0, 1);
+    assert.ok(capped <= RING_MAX_CSS, `${capped} is past the ceiling`);
+});
+
 
 console.log(`\n${pass} passed`);

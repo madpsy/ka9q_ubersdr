@@ -30,7 +30,8 @@ import AddBookmark from './AddBookmark.jsx';
 import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import {
-    RING_BG, RING_BG_RGB, RING_PAD, panTransform, ringKeepsHistory, ringSlices, smoothInterval,
+    RING_BG, RING_BG_RGB, RING_PAD, panTransform, ringHeightFor, ringKeepsHistory,
+    ringSlices, smoothInterval,
 } from '../lib/waterfallRing.js';
 import {
     TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
@@ -1008,7 +1009,10 @@ export default function SpectrumView() {
             wfc.style.width = sizes.w + 'px';
             wfc.style.height = (h / dpr) + 'px';
         }
-        if (g.ringWidth !== w || g.ringHeight !== h) {
+        // How tall the ring is kept, which is not how tall the pane is: see
+        // ringHeightFor. `h` is what is shown; this is what is remembered.
+        const ringH = ringHeightFor(h, g.ringHeight, dpr);
+        if (g.ringWidth !== w || g.ringHeight !== ringH) {
             // A resize needs a new ring; the history moves across into it.
             //
             // A height change is free — a row is a finished scanline and the
@@ -1025,10 +1029,10 @@ export default function SpectrumView() {
 
             const ring = document.createElement('canvas');
             ring.width = w;
-            ring.height = h;
+            ring.height = ringH;
             const ctx = ring.getContext('2d', { alpha: false });
             ctx.fillStyle = RING_BG;
-            ctx.fillRect(0, 0, w, h);
+            ctx.fillRect(0, 0, w, ringH);
 
             if (keep) {
                 // Nearest neighbour, as the zoom path uses: a column of history
@@ -1043,7 +1047,7 @@ export default function SpectrumView() {
                 // history does not exist yet; shrinking drops the oldest rows,
                 // which are the ones about to scroll off anyway. The horizontal
                 // extents differ where the width changed, which is the rescale.
-                for (const s of ringSlices(g.ringHead, g.ringHeight, Math.min(g.ringHeight, h))) {
+                for (const s of ringSlices(g.ringHead, g.ringHeight, Math.min(g.ringHeight, ringH))) {
                     ctx.drawImage(g.ring, 0, s.sy, oldW, s.sh, 0, s.dy, w, s.sh);
                 }
             }
@@ -1051,7 +1055,7 @@ export default function SpectrumView() {
             g.ring = ring;
             g.ringCtx = ctx;
             g.ringWidth = w;
-            g.ringHeight = h;
+            g.ringHeight = ringH;
             g.ringHead = 0;
             // A kept history is still in the view it was painted in — a rescale
             // changes how many pixels it takes, not which frequencies it covers,
@@ -3054,9 +3058,14 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
     const octx = wf.getContext('2d', { alpha: false });
     octx.imageSmoothingEnabled = false;
     // Newest row sits at `head`; time runs downward through increasing indices,
-    // wrapping once — so the whole ring is one or two contiguous runs. The
+    // wrapping once — so the run wanted is one or two contiguous pieces. The
     // resize reads it back the same way; see lib/waterfallRing.js.
-    for (const s of ringSlices(g.ringHead, H, H)) {
+    //
+    // Only as many rows as the canvas can show, which is fewer than the ring
+    // holds: the rest is history kept against the pane being made taller again.
+    // Reading the whole ring here would draw the reserve past the bottom edge,
+    // where the canvas clips it — harmless, and a blit of rows nobody sees.
+    for (const s of ringSlices(g.ringHead, H, Math.min(H, wf.height))) {
         octx.drawImage(ring, 0, s.sy, pxW, s.sh, 0, s.dy, pxW, s.sh);
     }
 

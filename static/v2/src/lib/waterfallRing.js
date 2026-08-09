@@ -26,6 +26,40 @@ export const RING_BG_RGB = [0x05, 0x07, 0x0c];
 // device ratio of 2, so eight covers every case and costs eight rows of canvas.
 export const RING_PAD = 8;
 
+// History kept beyond what the pane can show, in CSS px, and the ceiling on the
+// whole ring.
+//
+// The pane's height decides how much of the waterfall is *visible*; it has no
+// business deciding how much is *remembered*. A ring sized to the pane means
+// growing it — closing the bottom dock, dragging the splitter down — reveals
+// rows that were never recorded, so the new space comes up as background: a
+// black band under a history that simply stops.
+//
+// So the ring is kept taller than the pane by about a bottom dock's worth, and
+// only ever grows: a pane that shrinks keeps its rows, off screen, and giving
+// the height back brings them straight into view. The ceiling is what stops a
+// tall window turning this into tens of megabytes of canvas — past it the band
+// comes back, which is the same behaviour as before at a size nobody reaches by
+// accident.
+export const RING_RESERVE_CSS = 340;
+export const RING_MAX_CSS = 1400;
+
+/**
+ * How tall the ring should be for a pane wanting `needH` device pixels.
+ *
+ * `haveH` is the current ring's height, and this never returns less than it —
+ * the rows already stored are the whole point. `dpr` converts the reserve and
+ * the ceiling, which are reasoned about in CSS pixels because that is what a
+ * dock's height is.
+ */
+export function ringHeightFor(needH, haveH, dpr) {
+    const scale = dpr > 0 ? dpr : 1;
+    const want = Math.max(1, Math.round(needH));
+    const cap = Math.max(want, Math.round(RING_MAX_CSS * scale));
+    const wanted = Math.min(cap, want + Math.round(RING_RESERVE_CSS * scale));
+    return Math.max(wanted, Math.round(haveH) || 0, want);
+}
+
 // Bounds on the estimated gap between rows, in ms. Below the floor there is
 // nothing worth animating — the step is already at the display's own rate — and
 // above the ceiling a feed that has stalled would otherwise leave the next row

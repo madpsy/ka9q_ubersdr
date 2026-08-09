@@ -15,6 +15,7 @@ const fs = require('fs');
 
 const { InstanceProxy } = require('./proxy');
 const { InstanceStore } = require('./store');
+const { SharedPrefs } = require('./prefs');
 const discovery = require('./discovery');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
@@ -28,6 +29,8 @@ try { buildInfo = fs.readFileSync(path.join(__dirname, 'ui', 'BUILD_INFO'), 'utf
 
 /** @type {InstanceStore} */
 let store;
+/** @type {SharedPrefs} */
+let prefs;
 let chooserWin = null;
 const running = new Map();      // instance id -> { proxy, win }
 const localOrigins = new Set(); // origins our proxies currently serve
@@ -103,6 +106,8 @@ async function connectInstance(desc) {
         height: 950,
         backgroundColor: '#0b0e14',
         title: entry.label,
+        // Only the shared-settings bridge; it exposes nothing to the page.
+        webPreferences: { preload: path.join(__dirname, 'receiver-preload.js') },
     });
     win.loadURL(proxy.localOrigin + '/v2/');
     win.on('closed', () => {
@@ -236,6 +241,40 @@ function setupIpc() {
         return entry;
     });
 
+    // Shared settings. The seed is synchronous because the receiver preload
+    // has to apply it before the page's own scripts read localStorage.
+    ipcMain.on('prefs:seed', (event) => {
+        event.returnValue = { enabled: prefs.enabled, prefs: prefs.snapshot() };
+    });
+    ipcMain.on('prefs:push', (_e, map) => {
+        if (prefs.enabled) prefs.update(map);
+    });
+    ipcMain.handle('prefs:shared', () => prefs.enabled);
+    ipcMain.handle('prefs:set-shared', (_e, on) => {
+        prefs.setEnabled(on);
+        // Switching it on makes the most recently connected receiver the
+        // template: with one window open — the common case — that is the
+        // window being looked at, and "share settings" means "like this".
+        let primaryId = null;
+        if (on) {
+            let best = '';
+            for (const id of running.keys()) {
+                const used = (store.get(id) || {}).lastUsed || '';
+                if (used >= best) {
+                    best = used;
+                    primaryId = id;
+                }
+            }
+        }
+        for (const [id, active] of running.entries()) {
+            active.win.webContents.send('prefs:mode', {
+                enabled: prefs.enabled,
+                primary: id === primaryId,
+            });
+        }
+        return prefs.enabled;
+    });
+
     ipcMain.handle('instances:disconnect', (_e, id) => {
         const active = running.get(id);
         if (active) active.win.close();
@@ -250,6 +289,7 @@ function setupIpc() {
 
 app.whenReady().then(() => {
     store = new InstanceStore(app.getPath('userData'));
+    prefs = new SharedPrefs(app.getPath('userData'));
     setupSession();
     setupMenu();
     setupIpc();

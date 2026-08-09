@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('ubersdr', {
     update: (id, patch) => ipcRenderer.invoke('instances:update', id, patch),
     disconnect: (id) => ipcRenderer.invoke('instances:disconnect', id),
     remove: (id) => ipcRenderer.invoke('instances:remove', id),
+    sharedPrefs: () => ipcRenderer.invoke('prefs:shared'),
+    setSharedPrefs: (on) => ipcRenderer.invoke('prefs:set-shared', !!on),
     onChanged: (cb) => {
         ipcRenderer.on('instances:changed', () => cb());
     },

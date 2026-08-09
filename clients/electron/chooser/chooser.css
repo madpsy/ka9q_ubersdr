@@ -103,6 +103,20 @@ section { margin-top: 18px; }
     margin-right: auto;
 }
 .section-status { color: var(--dim); font-size: 12px; }
+
+/* A global option riding in a section head: quiet like the status text, but a
+   control, so it brightens on hover the way the ghost buttons do. */
+.option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--dim);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+.option:hover { color: var(--text); }
+.option input { accent-color: var(--accent); }
 #dir-filter { width: 180px; }
 
 .list { display: flex; flex-direction: column; gap: 6px; }

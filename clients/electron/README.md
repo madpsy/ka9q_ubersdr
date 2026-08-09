@@ -42,6 +42,20 @@ Per saved receiver the chooser offers two modes:
 
 Switching modes takes effect immediately (the window reloads).
 
+### Shared settings
+
+Because each instance's local port is its own origin, every receiver keeps its
+own v2 settings — theme, layout, panels, shortcuts — in its own localStorage.
+That is the default. The chooser's **"Share settings between receivers"**
+toggle bridges them for whoever wants every receiver to look the same: with it
+on, a snapshot of the `ubersdr.v2.*` keys is kept in userData
+(`shared-prefs.json`), each receiver window is seeded from it before the page
+boots (`receiver-preload.js`, which exposes nothing to the page), and changes
+made in any window are written back to it. Turning sharing on makes the most
+recently opened receiver the template; windows already open pick up later
+changes when reloaded. Turning it off simply stops the bridging — every
+receiver is independent again with whatever settings it had last.
+
 ## Discovery
 
 Same three sources as the other clients (`clients/tui`,
@@ -76,7 +90,9 @@ proxy.js      per-instance localhost reverse proxy (HTTP + websocket upgrade)
 mdns.js       dependency-free mDNS-SD browser for _ubersdr._tcp
 discovery.js  directory fetch, LAN enrichment, manual-address resolution
 store.js      saved instances (JSON in userData), stable local ports
+prefs.js      the shared-settings snapshot (JSON in userData)
 preload.js    IPC surface for the chooser page
+receiver-preload.js  seeds/reports shared settings in receiver windows
 chooser/      the chooser window (plain HTML/CSS/JS, no framework)
 ui/           staged v2 build artifacts (generated, git-ignored)
 ```

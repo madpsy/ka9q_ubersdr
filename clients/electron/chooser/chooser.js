@@ -207,6 +207,11 @@ document.getElementById('add-form').addEventListener('submit', (event) => {
     addManual();
 });
 document.getElementById('lan-scan').addEventListener('click', scanLan);
+document.getElementById('shared-prefs-box').addEventListener('change', async (event) => {
+    // The main process answers with what it actually set, so the box can never
+    // show a state the store doesn't hold.
+    event.target.checked = await api.setSharedPrefs(event.target.checked);
+});
 document.getElementById('dir-refresh').addEventListener('click', loadDirectory);
 document.getElementById('dir-filter').addEventListener('input', renderDirectory);
 api.onChanged(refreshSaved);
@@ -214,6 +219,7 @@ api.onChanged(refreshSaved);
 (async () => {
     const info = await api.appInfo();
     builtinAvailable = info.builtinAvailable;
+    document.getElementById('shared-prefs-box').checked = await api.sharedPrefs();
     document.getElementById('footer').textContent = builtinAvailable
         ? `bundled v2 UI: ${info.buildInfo || 'staged'} · electron ${info.electron}`
         : 'no bundled UI staged (run build.sh) — receivers open with the UI they serve · electron ' + info.electron;

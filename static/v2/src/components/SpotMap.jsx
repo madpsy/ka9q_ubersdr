@@ -41,7 +41,8 @@ import {
     displayName, distanceBearing, lookupCallsignData, maidenheadToLatLon, positionOf,
 } from '../lib/callsign.js';
 import {
-    AGE_OPTIONS, BANDS, DIGITAL_MODES, SNR_OPTIONS, countriesIn, filterSpots,
+    AGE_OPTIONS, BANDS, DIGITAL_MODES, SNR_OPTIONS, WPM_OPTIONS,
+    countriesIn, filterSpots,
 } from '../lib/spots.js';
 
 // The prefix table the server already serves — the same one behind the country
@@ -142,6 +143,10 @@ function Details({ spot, cty, distance }) {
             <Row k="Mode">{spot.submode ? `${spot.mode} / ${spot.submode}` : spot.mode}</Row>
             <Row k="SNR">{spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : null}</Row>
             <Row k="Speed">{spot.wpm != null ? `${spot.wpm} WPM` : null}</Row>
+            {/* The skimmer adds these when it runs with callsign lookup on, and
+                only then — so they are absent far more often than not. */}
+            <Row k="Name">{spot.name || null}</Row>
+            <Row k="State">{spot.state || null}</Row>
             <Row k="Country">{country ? `${flag ? `${flag} ` : ''}${country}` : null}</Row>
             <Row k="Continent">{cty && cty.continent ? cty.continent : null}</Row>
             <Row k="Zones">{zones}</Row>
@@ -177,7 +182,12 @@ const MAP_FILTERS = {
     country: 'all',
     callsign: '',
     minSnr: null,
+    minWpm: null,
     minDistance: null,
+    // CW only, and the opposite of the list's default: v1 hides 10m beacons from
+    // a table because they crowd it, and on a map they are the clearest picture
+    // of where 10m is open that this receiver has.
+    tenMeterBeacons: true,
 };
 
 // Free text, over everything a spot says in words. The panel's own callsign box
@@ -208,7 +218,9 @@ function Pick({ label, value, onChange, children }) {
 const toValue = (v) => (v == null ? '' : String(v));
 const fromValue = (v) => (v === '' ? null : Number(v));
 
-export default function SpotMap({ spot: opened, spots, lookups, receiver, onClose }) {
+export default function SpotMap({
+    spot: opened, spots, kind = 'digital', lookups, receiver, onClose,
+}) {
     const [state, setState] = useState(null);
     // Which spot the single view is showing. Starts as the row that was clicked
     // and changes when a point on the all-spots map is picked, so switching back
@@ -329,10 +341,29 @@ export default function SpotMap({ spot: opened, spots, lookups, receiver, onClos
                             <option value="all">All bands</option>
                             {BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
                         </Pick>
-                        <Pick label="Mode" value={filters.mode} onChange={(v) => set({ mode: v })}>
-                            <option value="all">All modes</option>
-                            {DIGITAL_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </Pick>
+                        {/* One tab's filter each: every CW spot is CW, and no
+                            digital spot has a speed. Offering the other would be
+                            a control that could only ever match everything or
+                            nothing. */}
+                        {kind === 'digital' && (
+                            <Pick label="Mode" value={filters.mode} onChange={(v) => set({ mode: v })}>
+                                <option value="all">All modes</option>
+                                {DIGITAL_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </Pick>
+                        )}
+                        {kind === 'cw' && (
+                            <Pick
+                                label="Min WPM"
+                                value={toValue(filters.minWpm)}
+                                onChange={(v) => set({ minWpm: fromValue(v) })}
+                            >
+                                {WPM_OPTIONS.map((v) => (
+                                    <option key={toValue(v)} value={toValue(v)}>
+                                        {v == null ? 'No limit' : `${v} WPM`}
+                                    </option>
+                                ))}
+                            </Pick>
+                        )}
                         <Pick label="Country" value={filters.country} onChange={(v) => set({ country: v })}>
                             <option value="all">All countries</option>
                             {countries.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -342,7 +373,7 @@ export default function SpotMap({ spot: opened, spots, lookups, receiver, onClos
                             value={toValue(filters.age)}
                             onChange={(v) => set({ age: fromValue(v) })}
                         >
-                            {AGE_OPTIONS.digital.map((m) => (
+                            {(AGE_OPTIONS[kind] || AGE_OPTIONS.digital).map((m) => (
                                 <option key={toValue(m)} value={toValue(m)}>
                                     {m == null ? 'No limit' : `${m} min`}
                                 </option>
@@ -353,7 +384,7 @@ export default function SpotMap({ spot: opened, spots, lookups, receiver, onClos
                             value={toValue(filters.minSnr)}
                             onChange={(v) => set({ minSnr: fromValue(v) })}
                         >
-                            {SNR_OPTIONS.digital.map((v) => (
+                            {(SNR_OPTIONS[kind] || SNR_OPTIONS.digital).map((v) => (
                                 <option key={toValue(v)} value={toValue(v)}>
                                     {v == null ? 'No limit' : `${v > 0 ? '+' : ''}${v} dB`}
                                 </option>

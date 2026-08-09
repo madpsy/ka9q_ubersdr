@@ -5895,7 +5895,10 @@ a.btn { text-decoration: none; }
 /* The foot of the panel: the click-opens-a-map switch on the left, the link out
    to the feed's own page on the right. `row-end` would have pushed both to the
    right; these two want opposite ends. */
-.spots__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.spots__foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Pushed to the right whether or not the switch is beside it: `space-between`
+   would have left it on the left on the tabs that have no switch. */
+.spots__foot-link { margin-left: auto; }
 
 /* Grows to whatever the rows need; `.spots` above does the scrolling. `flex: 1`
    here would have it absorb the free space and compete with that scroller. */

@@ -63,13 +63,24 @@ export function spotTabs(serverInfo) {
     return TABS.filter((t) => t.requires(serverInfo));
 }
 
-// Remembered, like the panel's other per-browser preferences. On unless it has
-// been turned off: `!== 'off'`, so a browser that has never been asked gets the
-// default rather than the absence of one.
+// Whether a click on a row opens the map, remembered per browser and per tab.
+//
+// Per tab because the two tabs are asking different things of a click. A digital
+// row cannot tune, so the map is the whole of what pressing it means and it is on
+// by default. A CW row tunes — that is the point of it — and the map is an
+// addition, so it is off by default: a modal over the list every time you moved
+// the dial would be a modal between you and the band you had just tuned to.
 const MAP_MODAL_KEY = 'ubersdr.v2.spotMapModal';
+const MAP_MODAL_DEFAULT = { digital: true, cw: false };
 
-const mapModalWanted = () => {
-    try { return localStorage.getItem(MAP_MODAL_KEY) !== 'off'; } catch (e) { return true; }
+const mapModalWanted = (tab) => {
+    const fallback = !!MAP_MODAL_DEFAULT[tab];
+    try {
+        const v = localStorage.getItem(`${MAP_MODAL_KEY}.${tab}`);
+        return v == null ? fallback : v === 'on';
+    } catch (e) {
+        return fallback;
+    }
 };
 
 function optionLabel(value, unit) {
@@ -389,11 +400,17 @@ export default function SpotsPanel({ minimal }) {
     // possibly a panel that is closed — looked like a click that did nothing.
     // Off is for somebody working down the list with the Callsign panel open
     // beside it, where a modal over the list is a modal in the way.
-    const [modalOnClick, setModalOnClick] = useState(mapModalWanted);
-    const toggleModal = () => setModalOnClick((on) => {
-        try { localStorage.setItem(MAP_MODAL_KEY, on ? 'off' : 'on'); } catch (e) { /* private mode */ }
-        return !on;
-    });
+    // Read on every render rather than held in state: the answer is per tab and
+    // the tab changes under it, so state would have been a copy to keep in step
+    // with a thing that is already the truth.
+    const modalOnClick = mapModalWanted(active);
+    const [, bumpModal] = useState(0);
+    const toggleModal = () => {
+        try {
+            localStorage.setItem(`${MAP_MODAL_KEY}.${active}`, modalOnClick ? 'off' : 'on');
+        } catch (e) { /* private mode */ }
+        bumpModal((n) => n + 1);
+    };
 
     // The spot whose map is open, if any. A modal rather than a panel: it is a
     // detour from a list — you came to read the decodes and stopped to ask about
@@ -415,6 +432,12 @@ export default function SpotsPanel({ minimal }) {
         if (!requestLookup(call)) lookupCallsign(call);
     };
 
+    // Whether this tab's rows can open a map at all: a position from a lookup, or
+    // a locator the feed sent. The digital feed always sends one; the CW skimmer
+    // only does when it runs with callsign lookup on, which is why the lookup is
+    // worth having as the other half.
+    const mappable = (spot) => !!(lookups || (spot && spot.grid));
+
     const tune = (spot) => {
         // One tune rather than a mode change that resets the passband followed
         // by a frequency change — the v1 extensions pass preserveBandwidth=false
@@ -422,6 +445,10 @@ export default function SpotsPanel({ minimal }) {
         actions.tuneTo({ frequency: Math.round(spot.frequency), mode: modeForSpot(spot) });
         // And look the callsign up, as the v1 rows do.
         lookup(spot.callsign);
+        // And, where it has been asked for, show where they are. The tune above
+        // still happens either way — the map is an addition to the press, never
+        // a replacement for it.
+        if (modalOnClick && mappable(spot)) setMapped(spot);
     };
 
     return (
@@ -429,6 +456,7 @@ export default function SpotsPanel({ minimal }) {
             {mapped && (
                 <SpotMap
                     spot={mapped}
+                    kind={active}
                     // The whole feed, not the filtered page: the map has its own
                     // filters and asks a different question — "where has this
                     // band been reaching" rather than "what came in just now" —
@@ -521,7 +549,7 @@ export default function SpotsPanel({ minimal }) {
                         // reported and the country its prefix implies, which is
                         // the whole of what a digital row knows about a station
                         // and more than the row itself can show.
-                        onLookup={lookups || spot.grid ? (s2) => {
+                        onLookup={mappable(spot) ? (s2) => {
                             lookup(s2.callsign);
                             if (modalOnClick) setMapped(s2);
                         } : null}
@@ -563,19 +591,27 @@ export default function SpotsPanel({ minimal }) {
 
                         Digital only: it is the only tab whose rows open a modal.
                         The others tune, which is not a thing to make optional. */}
-                    {active === 'digital' && (
+                    {/* Both feeds that can place a spot. Not DX: a cluster spot
+                        carries no locator, and a lookup of every callsign
+                        somebody else spotted is a lot of asking for a map of
+                        where the *spotters* think people are. */}
+                    {(active === 'digital' || active === 'cw') && (
                         <Switch
                             checked={modalOnClick}
                             onChange={toggleModal}
                             label="Modal"
-                            title={modalOnClick
-                                ? 'Clicking a spot opens its map — click to only look the callsign up'
-                                : 'Clicking a spot only looks the callsign up — click to open its map too'}
+                            title={active === 'cw'
+                                ? (modalOnClick
+                                    ? 'Clicking a spot tunes to it and opens its map — click to only tune'
+                                    : 'Clicking a spot tunes to it — click to open its map as well')
+                                : (modalOnClick
+                                    ? 'Clicking a spot opens its map — click to only look the callsign up'
+                                    : 'Clicking a spot only looks the callsign up — click to open its map too')}
                         />
                     )}
                     {spotMapUrl(active) && (
                         <a
-                            className="btn btn--ghost btn--sm"
+                            className="btn btn--ghost btn--sm spots__foot-link"
                             href={spotMapUrl(active)}
                             target="_blank"
                             rel="noopener noreferrer"

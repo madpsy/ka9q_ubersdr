@@ -430,20 +430,6 @@ export default function CallsignPanel({ minimal }) {
                         title={`${ANNOUNCE_SAID[cw.mode]} — click to ${ANNOUNCE_NEXT[cw.mode]}`}
                         onClick={() => setCallAnnounce({ mode: nextAnnounce() })}
                     />
-                    {/* The v1 page, which carries the bio, the map and the QSL
-                        details this panel does not. Whatever is in the box goes
-                        with it. Icon only — it sits next to the primary action
-                        and a second label would compete with it. */}
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<Icon.External />}
-                        title="Open the full callsign lookup page"
-                        onClick={() => openCallsignLookup({
-                            uuid: getSessionId(),
-                            callsign: isValidCallsign(normaliseCallsign(entry)) ? entry : '',
-                        })}
-                    />
                 </form>
             )}
 
@@ -538,6 +524,33 @@ export default function CallsignPanel({ minimal }) {
                         ))}
                     </select>
                 </div>
+            )}
+
+            {/* The v1 page, which carries the bio, the map and the QSL details
+                this panel does not. Whatever is in the box goes with it.
+
+                At the foot rather than in the form row, and named rather than an
+                icon. It was a bare ↗ beside the search button, where it read as
+                one more thing to do to the box you were typing in — and it is
+                not that: it is the way *out* of the panel, to a second window.
+                Down here it is where anything that leaves is, after the answer
+                somebody came to read, and with a label saying where it goes,
+                because a lookup page opening in a new window is not something to
+                find out by trying an unmarked arrow. */}
+            {!minimal && (
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    className="cs-full"
+                    icon={<Icon.External />}
+                    title="Open the full callsign lookup page in a new window"
+                    onClick={() => openCallsignLookup({
+                        uuid: getSessionId(),
+                        callsign: isValidCallsign(normaliseCallsign(entry)) ? entry : '',
+                    })}
+                >
+                    Full Lookup
+                </Button>
             )}
         </div>
     );

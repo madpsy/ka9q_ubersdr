@@ -3085,6 +3085,12 @@ a.btn { text-decoration: none; }
     scrollbar-gutter: stable;
 }
 
+/* The way out of the panel, at the foot of it. Full width and self-aligned to
+   the end of the stack, so it reads as the last thing rather than as a control
+   that belongs to whatever it happens to sit under — the announcer's pickers are
+   above it and are nothing to do with it. */
+.cs-full { align-self: stretch; justify-content: center; margin-top: 2px; }
+
 .cs-result__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; }
 .cs-result__call {
     font-family: var(--mono);

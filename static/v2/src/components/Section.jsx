@@ -11,17 +11,13 @@ import { Icon, Menu, MenuItem } from './ui.jsx';
 import { setDraggingPanel } from '../lib/panelDrag.js';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
-import { useWiderThan } from '../lib/useWiderThan.js';
+import { useHeaderFits } from '../lib/useHeaderFits.js';
 
-// The narrowest panel that still has room for the zoom pair in its header.
-//
-// A side dock is 320 by default and can be dragged to 220, which is the width at
-// which the title is already truncating against the arrows, the minimal toggle
-// and the move menu. Two more buttons there would be two more characters of the
-// title gone, and a panel you cannot read the name of is worse than one you
-// cannot resize the type in — the Display panel's global zoom is still there,
-// and widening the dock brings these straight back.
-const ZOOM_MIN_W = 270;
+// What the zoom pair costs the header: two 17px buttons and the gap in front of
+// them. Compared against the slack actually left in the bar, so it is the only
+// figure needed — no threshold on the panel, which cannot know how long this
+// panel's title is or how many other controls this header is carrying.
+const ZOOM_W = 38;
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -36,10 +32,12 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
-    // Measured on the panel, never on its header — see useWiderThan for why that
-    // distinction is the whole reason this holds still.
-    const box = useRef(null);
-    const roomToZoom = useWiderThan(box, ZOOM_MIN_W);
+    // The title button, not the header: the button is `flex: 1` and would have
+    // swallowed the slack being asked about, so the question is put to the row
+    // inside it — chevron, icon, title, badge — where nothing grows. See
+    // lib/headerRoom.js.
+    const head = useRef(null);
+    const roomToZoom = useHeaderFits(head, '.section__title', ZOOM_W);
     const zoom = usePanelScale(panel.id);
     // On the body, not the whole section: the header is where you collapse a
     // panel and move it about, which is housekeeping and not a reason to open a
@@ -124,7 +122,6 @@ export default function Section({ panel, dock, index, weight, height, prev, next
             className={cls}
             style={style}
             data-panel={panel.id}
-            ref={box}
         >
             <header
                 className="section__head"
@@ -137,6 +134,7 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                     className="section__toggle"
                     aria-expanded={state.open}
                     onClick={() => toggleSection(panel.id)}
+                    ref={head}
                 >
                     <span className="section__chevron"><Icon.Chevron size={14} /></span>
                     <span className="section__icon">{panel.icon}</span>
@@ -180,8 +178,8 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                     the top bar. Open panels only, as with the minimal toggle:
                     the size of a collapsed panel is the size of its own title.
 
-                    First out when the panel is too narrow to carry everything —
-                    see ZOOM_MIN_W. Of the controls in this header it is the one
+                    First out when the title bar runs out of room — see ZOOM_W.
+                    Of the controls in this header it is the one
                     with somewhere else to go: the same job is done for the whole
                     interface from the top bar, whereas the move menu and the
                     minimal toggle exist only here. */}

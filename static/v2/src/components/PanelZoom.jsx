@@ -57,8 +57,9 @@ export default function PanelZoom({ panelId, className, size = 13 }) {
         /* One box around the two, with no gap between them: they are one control
            with two directions, and the title bars they sit in space their
            buttons out far enough that a loose pair would read as two unrelated
-           magnifiers. `flex: none` because the bars around it never measure
-           their own contents — see useWiderThan. */
+           magnifiers. `flex: none` because a title bar's optional control is
+           dropped when the room runs out, never squeezed — see
+           lib/headerRoom.js. */
         <span className="panelzoom">
             <button
                 type="button"

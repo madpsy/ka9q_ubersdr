@@ -1050,10 +1050,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .section__order { display: flex; align-items: center; }
 /* The per-panel zoom pair, in whichever title bar it is drawn in: a box of its
    own, with no gap between the two, exactly as the reorder arrows above are one
-   pair rather than two loose controls. `flex: none` because none of these bars
-   measures its own contents — the panel is what is measured (see useWiderThan) —
-   and a control that could shrink would be one drawn on top of the title rather
-   than one dropped. */
+   pair rather than two loose controls. `flex: none` because a bar short of room
+   drops this pair rather than squeezing it — see lib/headerRoom.js — and a
+   control that could shrink would be one drawn on top of the title instead of
+   one taken away. */
 .panelzoom { display: flex; align-items: center; flex: none; }
 .section__arrow { width: 17px; }
 /* At the end of the dock: kept in place rather than removed, so the pair does

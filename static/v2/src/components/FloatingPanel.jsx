@@ -13,18 +13,18 @@
 // asked to be logged out of a cluster. Same treatment ExtensionWindow gives a
 // minimised extension, for the same reason.
 
-import React from '../react.js';
+import React, { useRef } from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
+import { useHeaderFits } from '../lib/useHeaderFits.js';
 
-// The narrowest window that still has room for the zoom pair — the same figure
-// the docked header uses, and for the same reason. Read from the geometry rather
-// than measured: a window's width is a number the layout already holds, and one
-// that cannot be changed by what is drawn inside it.
-const ZOOM_MIN_W = 270;
+// What the pair costs this bar: two 22px buttons and the gap in front of them.
+// Wider than the docked header's, because a window's controls are — see
+// .floatwin__btn.
+const ZOOM_W = 50;
 
 const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom dock' };
 
@@ -41,6 +41,12 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     // The size floor lives in LayoutContext (setFloat clamps), so none is
     // passed here — this only has to stop the gesture running away.
     const zoom = usePanelScale(panel.id);
+    // The header itself this time: its title is the elastic child and every
+    // other child is a fixed-width button, which is exactly the shape
+    // measureSlack asks for. A dock section needs its title *button* instead —
+    // see the note there.
+    const head = useRef(null);
+    const roomToZoom = useHeaderFits(head, '.floatwin__title', ZOOM_W);
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
         geom,
         bounds,
@@ -60,6 +66,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
         >
             <header
                 className="floatwin__head"
+                ref={head}
                 onPointerDown={onMoveDown}
                 onPointerMove={onMove}
                 onPointerUp={onEnd}
@@ -86,7 +93,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
                     when the window is dragged too narrow to carry the row, which
                     is the one control here with the same job available elsewhere:
                     the top bar zooms the lot. */}
-                {geom.w >= ZOOM_MIN_W && (
+                {roomToZoom && (
                     <PanelZoom panelId={panel.id} className="floatwin__btn floatwin__ctl" />
                 )}
                 {panel.minimal && (

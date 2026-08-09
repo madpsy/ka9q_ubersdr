@@ -29,8 +29,12 @@ function fakeWin({ innerHeight = 800, visualViewport = false } = {}) {
     });
 
     const vvListeners = new Map();
+    const scrolled = [];
     const win = {
         innerHeight,
+        scrollY: 0,
+        scrollTo: (x, y) => { scrolled.push([x, y]); win.scrollY = y; },
+        _scrolled: scrolled,
         ...target(listeners),
         setTimeout: (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },
         clearTimeout: (id) => { timers.delete(id); },
@@ -50,6 +54,9 @@ function fakeDoc() {
     const written = [];
     return {
         written,
+        // Nothing focused unless a test says so — tagName BODY, like a real
+        // document at rest.
+        activeElement: { tagName: 'BODY' },
         documentElement: {
             style: {
                 setProperty: (name, value) => written.push([name, value]),
@@ -117,17 +124,68 @@ t('the visual viewport is listened to, since innerHeight settles silently', () =
     assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '734px']);
 });
 
-t('the keyboard does not shrink the shell', () => {
-    // The reason this reads innerHeight rather than visualViewport.height: on
-    // iOS the keyboard shrinks the visual viewport but not innerHeight, and
-    // resizing the spectrum canvas every time somebody types a frequency is not
-    // what anybody wants.
+t('the keyboard shrinks the shell, but only over something being typed into', () => {
+    // iOS overlays the keyboard: innerHeight holds still, the visual viewport
+    // shrinks, and Safari scrolls the page up to reveal the input — which on a
+    // shell exactly one window tall exposes a keyboard-sized band of nothing.
+    // While an editable element has focus, the visual viewport is the truth.
     const win = fakeWin({ innerHeight: 800, visualViewport: true });
     const doc = fakeDoc();
     startAppHeight(win, doc);
-    win.visualViewport.height = 400;   // keyboard up; innerHeight unchanged
+
+    doc.activeElement = { tagName: 'INPUT' };
+    win.visualViewport.scale = 1;
+    win.visualViewport.height = 466;   // keyboard up; innerHeight unchanged
     win._fireVV('resize');
-    assert.strictEqual(doc.written.length, 1, 'the shell followed the keyboard');
+    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '466px']);
+
+    // Blur closes the keyboard. `editing()` answers before the viewport does,
+    // so the full height comes back without waiting for a resize event.
+    doc.activeElement = { tagName: 'BODY' };
+    win._fireVV('resize');
+    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '800px']);
+});
+
+t('a shrunken viewport with nothing focused is not a keyboard', () => {
+    // The old rule, kept for everything that is not typing: the visual viewport
+    // twitches for all sorts of reasons, and resizing the spectrum canvas for
+    // them is not what anybody wants.
+    const win = fakeWin({ innerHeight: 800, visualViewport: true });
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    win.visualViewport.scale = 1;
+    win.visualViewport.height = 400;
+    win._fireVV('resize');
+    assert.strictEqual(doc.written.length, 1, 'the shell followed a viewport nobody was typing in');
+});
+
+t('pinch zoom is not a keyboard either', () => {
+    // Pinched in, the visual viewport is a window onto the page, and an input
+    // can perfectly well be focused while it is. Shrinking the shell to it
+    // would shrink the page being read.
+    const win = fakeWin({ innerHeight: 800, visualViewport: true });
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    doc.activeElement = { tagName: 'INPUT' };
+    win.visualViewport.scale = 2;
+    win.visualViewport.height = 400;
+    win._fireVV('resize');
+    assert.strictEqual(doc.written.length, 1, 'the shell followed a pinch');
+});
+
+t('the reveal scroll Safari already did is undone', () => {
+    // By the time the resize arrives Safari has scrolled the page up to show
+    // the input. With the shell now sized to fit, that scroll is doubled-up
+    // correction and leaves the layout hanging above the keyboard.
+    const win = fakeWin({ innerHeight: 800, visualViewport: true });
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    doc.activeElement = { tagName: 'INPUT' };
+    win.visualViewport.scale = 1;
+    win.visualViewport.height = 466;
+    win.scrollY = 334;
+    win._fireVV('resize');
+    assert.deepStrictEqual(win._scrolled, [[0, 0]]);
 });
 
 t('a height of zero is never written', () => {

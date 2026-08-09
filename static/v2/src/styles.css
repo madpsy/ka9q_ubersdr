@@ -2259,6 +2259,13 @@ a.btn { text-decoration: none; }
 .barrel {
     position: relative;
     overflow: hidden;
+    /* Already clipped by the line above, so this adds no visual rule — what it
+       adds is a promise to the compositor that nothing inside can affect
+       anything outside, which bounds the damage when something in here
+       repaints. The frequency drum carries a live SNR wash behind its scale
+       (see .barrel__snr), and without this a wash sample invalidated the page
+       rather than the drum. Same reasoning as .topbar. */
+    contain: paint;
     height: 48px;
     border-radius: var(--radius-sm);
     background: var(--surface-3);
@@ -2306,6 +2313,17 @@ a.btn { text-decoration: none; }
     opacity: 0.28;
     -webkit-mask-image: linear-gradient(90deg, #000 62%, transparent);
     mask-image: linear-gradient(90deg, #000 62%, transparent);
+    /* The expensive line in this rule, and it is left in deliberately.
+     *
+     * The wash is sampled ten times a second and these transitions carry it
+     * between samples, which is what makes it read as a level rising rather than
+     * a bar stepping. The cost is that a masked element is then repainting on
+     * most frames rather than ten times a second — a mask is not a cheap paint —
+     * so this is the pad's largest continuous cost by some way.
+     *
+     * Kept because the stepping is very visible and the containment above now
+     * bounds what it costs: the repaint is a 48px drum rather than the window.
+     * If the pad ever needs to be cheaper still, this is the line to cut. */
     transition: width 120ms linear, background 240ms linear;
 }
 
@@ -2599,7 +2617,10 @@ a.btn { text-decoration: none; }
 
 /* Label, control, reading — the same three columns for the filter width and the
    squelch, so the pair scans as one block rather than as two settings. */
-.pad-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* `contain: paint` for the squelch row's sake: it carries a live SNR marker
+   sampled twelve times a second, and each sample repainted the page rather than
+   the row. The rows have nothing that escapes their own box. */
+.pad-row { display: flex; align-items: center; gap: 10px; min-width: 0; contain: paint; }
 /* The label and the control it names. A row's action button is a sibling of
    this, not a child — see PadRow. */
 .pad-row__field { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }

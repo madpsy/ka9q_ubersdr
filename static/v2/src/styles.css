@@ -3085,6 +3085,46 @@ a.btn { text-decoration: none; }
     scrollbar-gutter: stable;
 }
 
+/* The map, when the lookup answered with a position and the operator asked for
+   one — see CallsignMap. A fixed height rather than an aspect ratio: this sits in
+   a dock column that can be 220px wide or a floating window that is 600, and a
+   square map in the first is most of the panel while the same rule in the second
+   is a wall. Tall enough to place a town, short enough to leave the details it
+   belongs to on screen with it. */
+.csmap {
+    height: 190px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    /* Leaflet draws its own panes; without this the tiles paint over the rounded
+       corners the border is drawing. */
+    isolation: isolate;
+    /* The map is a picture, and the panel around it is a document: a drag over
+       the tiles is panning, not selecting the labels on them. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+/* The callsign, pinned to the marker. Leaflet's own tooltip chrome is a white
+   box with a border radius that belongs to a different interface, so it is
+   restyled to the receiver's — the same treatment StartMap's gives it. */
+.csmap__tip {
+    padding: 2px 7px;
+    /* The theme's own surface, as .startmap__tip takes: a fixed dark plate is
+       right on exactly one of the nine colour schemes and wrong on the rest. */
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-sm);
+    /* Mono, unlike the other map's label: this one is a callsign, and callsigns
+       are read a character at a time everywhere else in the interface. */
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.csmap__tip::before { display: none; }
+
 /* The way out of the panel, at the foot of it. Full width and self-aligned to
    the end of the stack, so it reads as the last thing rather than as a control
    that belongs to whatever it happens to sit under — the announcer's pickers are

@@ -25,6 +25,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
 import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
+import CallsignMap from '../components/CallsignMap.jsx';
 import { countryFlag } from '../lib/format.js';
 import { onPhotoShown, photoShown, photoUrl, setPhotoShown } from '../lib/operatorPhoto.js';
 import {
@@ -132,7 +133,7 @@ function Beam({ position, serverInfo }) {
     );
 }
 
-function Result({ call, data, serverInfo, showPhoto }) {
+function Result({ call, data, serverInfo, showPhoto, showMap }) {
     const [photo, setPhoto] = useState(false);
     // Whether there is a picture to show is one decision, made in
     // lib/operatorPhoto.js. `showPhoto` is passed in only so this re-renders
@@ -218,6 +219,16 @@ function Result({ call, data, serverInfo, showPhoto }) {
                     <img className="cs-photo-full" src={photoSrc} alt={call} />
                 </Modal>
             )}
+
+            {/* Last in the result, under the photo. A map is the largest thing
+                here and the least specific — the details above it are what the
+                lookup was for, and a picture of a county between them and the
+                photo would be furniture in front of the answer.
+
+                Only where the answer carried a position. A lookup that came back
+                without one shows nothing rather than a map of the middle of the
+                Atlantic, which is where 0,0 is. */}
+            {showMap && position && <CallsignMap call={call} position={position} />}
         </div>
     );
 }
@@ -226,8 +237,27 @@ function Result({ call, data, serverInfo, showPhoto }) {
 // clicking a callsign in the spots or voice-activity lists routes here through
 // onLookupRequest, so it becomes a read-out of whoever you last clicked on.
 // See the registry's `minimal`.
+const MAP_KEY = 'ubersdr.v2.callsignMap';
+
+const mapShown = () => {
+    try { return localStorage.getItem(MAP_KEY) === 'on'; } catch (e) { return false; }
+};
+
 export default function CallsignPanel({ minimal }) {
     const [showPhoto, setShowPhoto] = useState(photoShown);
+    // Off until asked for, and remembered once it has been. Off because it is
+    // the one thing in here that fetches from somewhere other than this
+    // receiver — map tiles come from OpenStreetMap — and because a dock column
+    // has more use for the callsign's details than for a picture of the county
+    // it is in. Not shared with the other copy of the panel, unlike the photo
+    // and the announcer: those are about what a lookup *does*, this is about
+    // how much room one is given, and a floating window and a dock column do
+    // not have the same amount.
+    const [showMap, setShowMap] = useState(mapShown);
+    const toggleMap = () => setShowMap((on) => {
+        try { localStorage.setItem(MAP_KEY, on ? 'off' : 'on'); } catch (e) { /* private mode */ }
+        return !on;
+    });
     // As with the photo: shared, so the other copy of this panel agrees.
     const [cw, setCw] = useState(callAnnounceSettings);
     useEffect(() => onCallAnnounce(setCw), []);
@@ -405,6 +435,20 @@ export default function CallsignPanel({ minimal }) {
                             : 'Operator photos off — click to show them'}
                         onClick={() => setShowPhoto(setPhotoShown(!showPhoto))}
                     />
+                    {/* Where the station is. Beside the photo toggle because it
+                        is the same kind of switch — how much of the answer to
+                        draw — and in the row rather than at the foot with Full
+                        Lookup, which leaves the panel entirely. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        active={showMap}
+                        icon={<Icon.Compass />}
+                        title={showMap
+                            ? 'Map on — click to hide it'
+                            : 'Map off — click to show where the station is'}
+                        onClick={toggleMap}
+                    />
                     {/* How a lookup is announced. A dit and a dah rather than a
                         speaker, and a talking head for the spoken one: what matters
                         here is which kind of sound it is, since the receiver already
@@ -449,7 +493,15 @@ export default function CallsignPanel({ minimal }) {
                 </Empty>
             )}
 
-            {data && <Result call={call} data={data} serverInfo={serverInfo} showPhoto={showPhoto} />}
+            {data && (
+                <Result
+                    call={call}
+                    data={data}
+                    serverInfo={serverInfo}
+                    showPhoto={showPhoto}
+                    showMap={showMap}
+                />
+            )}
 
             {/* Whichever announcer is on, its own two settings — pitch and speed for
                 Morse, voice and speed for speech. Only while there is something to set

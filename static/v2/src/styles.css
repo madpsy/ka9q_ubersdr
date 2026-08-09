@@ -2941,6 +2941,7 @@ a.btn { text-decoration: none; }
    as the photo loads, which is what made this flicker on Edge. */
 .cs-result { min-width: 0; }
 .dock--bottom .section--fill .cs-result,
+.sheet--fill .cs-result,
 .floatwin__body .cs-result {
     flex: 1;
     min-height: 0;
@@ -3670,7 +3671,12 @@ a.btn { text-decoration: none; }
 .dock--bottom .section--fill .section__body > .stack,
 .floatwin__body > .stack { height: 100%; min-height: 0; }
 .dock--bottom .section--fill .dxc-out,
+.sheet--fill .dxc-out,
 .floatwin__body .dxc-out { height: auto; flex: 1 1 auto; min-height: 80px; }
+/* A sheet gets min-height rather than the height above: it is capped, not sized
+   — see .sheet--fill — so the stack takes the transcript's own height until the
+   cap, and shrinks into it after. */
+.sheet--fill .sheet__body > .stack { min-height: 0; }
 
 /* SSTV: the picture the addon last decoded. */
 /* Tiled to whatever the panel is wide enough for: one column in a narrow left
@@ -5595,19 +5601,37 @@ a.btn { text-decoration: none; }
    not the whole spectrum it is decoding from. */
 .sheet--ext { --sheet-height: 86%; }
 
-/* A `fill` panel keeps its own scroller — a chat log, a cluster terminal — with
-   its controls pinned below it. That only works if it is given a height to fill.
+/* A `fill` panel keeps its own scroller — a chat log, a cluster terminal, a spot
+   table — with its controls pinned below it. That only works if the panel can be
+   given a height rather than growing to its content: without one the chat log
+   grows without bound, the sheet body becomes the scroller, and the message box
+   ends up below the fold — and the log's own pin-to-bottom then scrolls an
+   element that does not scroll, so a sent message never comes into view either.
  *
- * Without one the sheet is as tall as its content, a percentage height inside it
- * is indeterminate, and the panel lays out at its natural height instead: the
- * chat log grows without bound, the sheet body becomes the scroller, and the
- * message box ends up below the fold. Worse, the log's own pin-to-bottom then
- * scrolls an element that does not scroll, so a sent message never came into
- * view either. The bottom dock makes the same arrangement for the same panels. */
-.sheet--fill { height: var(--sheet-height); }
+ * `height: var(--sheet-height)` was how that was arranged, and it cost the other
+ * half of the bargain: every one of these sheets was 72% of the screen whatever
+ * was in it. Six spots, one callsign, a quiet evening's voice activity — all of
+ * them opened as tall as a busy one and left the rest of the sheet empty over a
+ * spectrum the panel was covering for nothing.
+ *
+ * So the height is the *cap* it always was for other sheets (.sheet's own
+ * max-height), and the body is a flex column instead. Flex sizes children
+ * against a definite height when there is one and against their content when
+ * there is not, which is exactly the two cases here: under the cap the sheet is
+ * as tall as the panel, at the cap the children shrink — min-height: 0 lets them
+ * — and each falls back on the scroller it already had. Percentage heights are
+ * what could not do this; a `height: 100%` panel root now reads as auto and
+ * flexes like everything else, which is why none of them needed changing.
+ *
+ * The rules further up that fill a panel out in the bottom dock — .cs-result,
+ * .dxc-out, the cluster's stack — name .sheet--fill alongside .dock--bottom for
+ * the same reason they name .floatwin__body: those panels have no scroller of
+ * their own until something gives them one, and clipped is worse than tall. */
 .sheet--fill .sheet__body {
     min-height: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 .sheet__body--ext { display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
 

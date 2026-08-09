@@ -20,13 +20,13 @@
 // on running behind — nothing is resized when a panel opens, and the part still
 // showing is live to tune, drag and pinch.
 //
-// The tab bar, though, does go: it is a row of labelled icons that on a handset
-// is worth about a tenth of the screen, and while a sheet is open it is a
-// navigation control nobody is using in front of a panel somebody is. Hiding it
-// gives that back to the spectrum *and* to the sheet, which is a share of the
-// centre area and so grows with it. The cost is that swapping panels is two taps
-// rather than one — close, then open the next — which is the trade a phone is
-// worth making and a desktop is not.
+// The tab bar stays up over the sheet by default, so swapping panels is one tap
+// rather than close-then-open. It can be sent away instead — see mobileTabsAlways
+// in the display settings — which is worth doing on a small handset: the row of
+// labelled icons costs about a tenth of the screen, and hidden it gives that back
+// to the spectrum *and* to the sheet, which is a share of the centre area and so
+// grows with it. Which way round is better depends on whether somebody is working
+// across panels or looking at one, so it is a setting rather than a rule.
 
 import React, { useCallback, useRef, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
@@ -202,9 +202,11 @@ export default function MobileShell() {
             <main className="shell__center">
                 <SpectrumView />
 
-                {/* `fill` means the panel owns its own scroller and needs a
-                    height to fill — the same thing the bottom dock does for the
-                    same panels. See .sheet--fill. */}
+                {/* `fill` means the panel owns its own scroller and has to be
+                    told where its bottom is — the same thing the bottom dock
+                    does for the same panels. On a sheet that is a cap rather
+                    than a height: a panel with little in it gets a short sheet
+                    and leaves the spectrum showing. See .sheet--fill. */}
                 {panel && (
                     <div
                         className={`sheet${panel.fill ? ' sheet--fill' : ''}`}

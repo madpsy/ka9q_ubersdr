@@ -16,8 +16,13 @@
 // One file per game under panels/games/, because ten games in one file is how the
 // widget got to three thousand lines and why nobody wanted to touch it.
 //
-// `minimal` drops the picker and leaves whichever game is chosen — the games
-// themselves are all board and no chrome, so they cut down well.
+// `minimal` keeps the picker and drops the help button beside it. The picker is
+// how you get from one game to the next, and a minimal panel that could only ever
+// play the game you last chose in the full one is a panel you have to expand to
+// use — which is not a smaller version of this panel, it is a broken one. The
+// rules are the part that can go: they are read once, they arrive as a card over
+// the whole board, and expanding the panel brings them back. The games themselves
+// are all board and no chrome, so they cut down well without help from here.
 
 import React, { useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
@@ -82,6 +87,10 @@ export default function GamesPanel({ minimal }) {
     const [id, setId] = useState(saved);
     const [helping, setHelping] = useState(false);
     const game = GAMES.find((g) => g.id === id) || GAMES[0];
+    // Held rather than cleared, so a panel that is minimised while the rules are
+    // up and expanded again comes back where it was — and, more to the point, so
+    // the card cannot be left over the board with the button that closes it gone.
+    const showHelp = helping && !minimal;
 
     const choose = (next) => {
         setId(next);
@@ -101,28 +110,31 @@ export default function GamesPanel({ minimal }) {
                 are about the panel rather than about the game in it, and the ?
                 belongs beside what it explains rather than down in the game's own
                 footer among the score and the New button. */}
-            {!minimal && (
-                <div className="games__row">
-                    <select
-                        className="select"
-                        value={game.id}
-                        aria-label="Game"
-                        onChange={(e) => choose(e.target.value)}
-                    >
-                        {GAMES.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    </select>
+            <div className="games__row">
+                <select
+                    className="select"
+                    value={game.id}
+                    aria-label="Game"
+                    onChange={(e) => choose(e.target.value)}
+                >
+                    {GAMES.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+                {/* The one thing the minimal view sheds — see the note at the top.
+                    With the button gone the select has the row to itself, which is
+                    the only difference between the two views up here. */}
+                {!minimal && (
                     <button
                         type="button"
-                        className={`chip chip--button games__help-btn${helping ? ' is-active' : ''}`}
-                        title={helping ? 'Back to the game' : 'How to play'}
+                        className={`chip chip--button games__help-btn${showHelp ? ' is-active' : ''}`}
+                        title={showHelp ? 'Back to the game' : 'How to play'}
                         aria-label="How to play"
-                        aria-pressed={helping}
+                        aria-pressed={showHelp}
                         onClick={() => setHelping((v) => !v)}
                     >
-                        {helping ? '✕' : '?'}
+                        {showHelp ? '✕' : '?'}
                     </button>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* The rules lie *over* the game rather than above or instead of it:
                 the game's height is the panel's height, and help text that pushed
@@ -135,8 +147,8 @@ export default function GamesPanel({ minimal }) {
                 {/* Keyed, so switching games unmounts the old one rather than
                     handing its board to the next. Two grids of buttons look alike
                     enough to React that a stale one would otherwise survive. */}
-                <game.Component key={game.id} visible={!floats?.games?.min} covered={helping} />
-                {helping && <div className="games__help" role="note">{game.help}</div>}
+                <game.Component key={game.id} visible={!floats?.games?.min} covered={showHelp} />
+                {showHelp && <div className="games__help" role="note">{game.help}</div>}
             </div>
         </div>
     );

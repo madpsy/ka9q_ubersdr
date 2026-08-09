@@ -1829,9 +1829,17 @@ export default function SpectrumView() {
                             buttons come and go with the mobile breakpoint and
                             with the wheel's own mode, which shifted the zoom
                             pair sideways underneath a pointer that was already
-                            aiming at it. */}
-                        <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />
-                        <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />
+                            aiming at it.
+
+                            Not on a handset, where the row is the scarcest space
+                            in the layout and these two are the only buttons in
+                            it with a gesture that already does the same job:
+                            pinch zooms, and it zooms better than the buttons do
+                            — continuously, about the fingers, and without taking
+                            a thumb to the top of the screen. Everything after
+                            them has no gesture, so it stays. */}
+                        {!mobile && <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />}
+                        {!mobile && <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />}
                         {/* What the wheel does over the spectrum, mirroring the
                             Display panel's setting. Not on mobile: there is no
                             wheel there, and the row has no space to spare for a
@@ -2007,18 +2015,29 @@ export default function SpectrumView() {
                             is off, because a display that is not live has to be
                             legible as such from the toolbar as well as from the
                             overlay over it. Nothing to close if the receiver is
-                            not running. */}
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            active={paused}
-                            disabled={!spectrumConn}
-                            icon={paused ? <Icon.Play /> : <Icon.Pause />}
-                            title={paused
-                                ? 'Resume the spectrum'
-                                : 'Pause the spectrum — closes the connection and stops the server producing for it, until you resume'}
-                            onClick={togglePause}
-                        />
+                            not running.
+
+                            Not on a handset. Pausing by hand is a desktop habit —
+                            a phone's spectrum pauses itself when the screen goes
+                            or the tab does (see IdleWatch and VisibilityWatch),
+                            which is the whole reason somebody would press this —
+                            and the row there is short enough that a button nobody
+                            reaches for costs one somebody does. Getting back is
+                            unaffected either way: the paused overlay carries its
+                            own Resume. */}
+                        {!mobile && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={paused}
+                                disabled={!spectrumConn}
+                                icon={paused ? <Icon.Play /> : <Icon.Pause />}
+                                title={paused
+                                    ? 'Resume the spectrum'
+                                    : 'Pause the spectrum — closes the connection and stops the server producing for it, until you resume'}
+                                onClick={togglePause}
+                            />
+                        )}
                     </div>
                 </div>
             )}

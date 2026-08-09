@@ -187,12 +187,12 @@ export const DEFAULTS = {
     peakMarksAt: 'top',
     // Phone only: whether the row of panel names stays on screen while a sheet is open.
     //
-    // False is how the shell has always worked, and it is the right default — see the
-    // note at the top of MobileShell. The row is about a tenth of a handset's height, a
-    // sheet needs every pixel it can get, and switching panels is close-then-open rather
-    // than one tap. True is for somebody who moves between panels constantly and would
-    // rather pay that tenth than press × each time.
-    mobileTabsAlways: false,
+    // True by default: moving between panels is one tap rather than close-then-open, and
+    // the row always being there is what most people expect of a tab bar. It costs about
+    // a tenth of a handset's height, so somebody who wants every pixel for the sheet can
+    // turn it off and get the older close-then-open behaviour — see the note at the top
+    // of MobileShell.
+    mobileTabsAlways: true,
     // Whether the Quick bands panel paints its amateur band keys with the FT8
     // conditions (see bandTone). On, because that colouring is most of why the
     // panel is worth a glance — but a receiver used for one band, or an operator
@@ -277,7 +277,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 4;
+const SETTINGS_VERSION = 5;
 
 
 
@@ -310,6 +310,14 @@ function migrate(saved) {
     // hold the new default off for ever on machines that should now have it. Any
     // other stored value is a corner somebody picked and is left alone.
     if (!(saved.v >= 4) && saved.spectrumStats === 'off') delete saved.spectrumStats;
+
+    // v5: the phone tab bar now stays up over an open sheet by default.
+    //
+    // A stored false from before this is the old default written out on first
+    // load, not a choice — the switch is phone-only and most people never open
+    // the display panel at all — so it is dropped and the new default applies.
+    // A stored true was already what somebody asked for and stays.
+    if (!(saved.v >= 5) && saved.mobileTabsAlways === false) delete saved.mobileTabsAlways;
 
     return saved;
 }

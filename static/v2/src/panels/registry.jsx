@@ -694,7 +694,8 @@ export const PANELS = [
     // and closed by default: it is for the hours between signals, not the
     // signals. See GamesPanel for what the port kept and what it threw away.
     //
-    // Minimal: the game without its picker.
+    // Minimal: the game and its picker, without the rules button — you must still
+    // be able to change game from a minimised panel. See GamesPanel.
     {
         id: 'games',
         title: 'Mini Games',

@@ -325,6 +325,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
     background: linear-gradient(180deg, var(--surface-2), var(--surface));
     border-bottom: 1px solid var(--border);
     z-index: 20;
+    /* A layer of its own, because this strip is the busiest thing on the page.
+     *
+     * The S-meter redraws eight times a second and the volume slider's level
+     * fill twenty-four, for as long as audio is running — they are live
+     * readings, and that is what they are for. The cost is not the readings: it
+     * is that an invalidation anywhere in the page makes the compositor produce
+     * a new frame, and producing one means re-rendering everything on screen,
+     * which here is several full-width canvases. So a 150px fader repainting at
+     * 24 Hz was charging the whole window at 24 Hz, and the bill scaled with the
+     * window rather than with the fader — which is why narrowing the window
+     * helped and why every attempt to find it in the drawing code failed.
+     *
+     * `contain: paint` bounds the damage to this element, and `will-change`
+     * gives it a texture the compositor can leave alone: a meter tick then
+     * re-renders a strip 40 pixels tall instead of the display behind it. */
+    contain: paint;
+    will-change: transform;
 }
 
 /* `flex: none` is load-bearing.

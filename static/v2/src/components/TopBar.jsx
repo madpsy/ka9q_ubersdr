@@ -186,7 +186,14 @@ function SpaceWeather() {
  */
 function VolumeSlider({ slider }) {
     const { audio, actions } = useRadio();
-    const m = useMeters(24);
+    // Ten a second, not the twenty-four this had.
+    //
+    // The fill is an output *level*, not a waveform: it is read as "is anything
+    // coming out, and how hard", and that question is answered as well at 10 Hz
+    // as at 24. What the extra fourteen bought was a repaint — the fill is a
+    // gradient on the track, so every sample is a paint — and a repaint here is
+    // charged against the whole strip. See the note on .topbar.
+    const m = useMeters(10);
 
     // Unmuting with no fader on screen turns it up.
     //
@@ -337,7 +344,10 @@ export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo } = useRadio();
     const display = useDisplay();
     const { docks, toggleDock } = useLayout();
-    const meters = useMeters(8);
+    // Eight was already close to this; ten so the two live readings in this bar
+    // tick together rather than beating against each other, which is visible as
+    // the strip repainting at the sum of the two rates rather than at either.
+    const meters = useMeters(10);
 
     // Text size: one clamped number, stored with the rest of the display
     // settings so it survives a reload like the theme does.

@@ -21,6 +21,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
+import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { useFitScale } from '../lib/useFitScale.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
@@ -336,6 +337,10 @@ export default function TopBar({ compact }) {
     // Only compact. See useFitScale for why the desktop bar must not have this.
     const freqRef = useRef(null);
     const fit = useFitScale(barRef, freqRef, !!compact);
+
+    // Whether anything in this bar may talk about hovering — see the dock
+    // buttons at the foot of it.
+    const canHover = useMediaQuery(HOVER_QUERY);
 
     // Tuning straight from the readout: the frequency swaps for an input, the
     // mode drops a menu at the point it was clicked.
@@ -703,18 +708,28 @@ export default function TopBar({ compact }) {
                     {/* Beside the three dock buttons because it governs what
                         they leave behind: with the docks collapsed, this is
                         what decides whether resting on a rail opens it. Same
-                        setting as the Display panel's switch. */}
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        active={display.hoverPanels !== false}
-                        title={display.hoverPanels !== false
-                            ? 'Collapsed panels open on hover — click to turn that off'
-                            : 'Collapsed panels stay shut until clicked — click to open them on hover'}
-                        aria-label="Show panels on hover"
-                        icon={<Icon.Eye />}
-                        onClick={() => display.set({ hoverPanels: display.hoverPanels === false })}
-                    />
+                        setting as the Display panel's switch.
+
+                        Only where there is something to rest. This bar is
+                        already desktop-only, but "desktop" here means wide
+                        rather than pointed — a tablet gets the full layout,
+                        docks and all, and cannot hover over any of it. The
+                        setting it toggles is not wrong there, it is simply
+                        unreachable, and a lit button offering to change
+                        something that never happens is worse than no button. */}
+                    {canHover && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            active={display.hoverPanels !== false}
+                            title={display.hoverPanels !== false
+                                ? 'Collapsed panels open on hover — click to turn that off'
+                                : 'Collapsed panels stay shut until clicked — click to open them on hover'}
+                            aria-label="Show panels on hover"
+                            icon={<Icon.Eye />}
+                            onClick={() => display.set({ hoverPanels: display.hoverPanels === false })}
+                        />
+                    )}
                 </div>
             )}
 

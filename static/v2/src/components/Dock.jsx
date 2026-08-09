@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { noteDockFocus, restoreDockFocus } from '../lib/dockFocus.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { useMediaQuery } from '../lib/useMediaQuery.js';
+import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
@@ -120,8 +120,9 @@ export default function Dock({ side }) {
     const display = useDisplay();
     // Only where hovering is a thing the pointer does. On a touch screen
     // pointerenter fires on the tap that is already toggling the dock, so the
-    // panel would open and instantly close again.
-    const canHover = useMediaQuery('(hover: hover) and (pointer: fine)');
+    // panel would open and instantly close again. The same test decides whether
+    // the top bar offers the setting at all — see HOVER_QUERY.
+    const canHover = useMediaQuery(HOVER_QUERY);
     const peekEnabled = display.hoverPanels !== false && canHover;
     const [peeking, setPeeking] = useState(false);
     const peekTimer = useRef(null);

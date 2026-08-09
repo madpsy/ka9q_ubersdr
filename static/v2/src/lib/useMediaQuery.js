@@ -28,6 +28,22 @@ export const MOBILE_QUERY = '(max-width: 900px)';
 // machine that has room for docks and a screen worth spinning a drum on.
 export const TOUCH_QUERY = '(any-pointer: coarse)';
 
+// Can a pointer be rested on something here?
+//
+// `hover`, not `any-hover`, and not the inverse of TOUCH_QUERY: the question is
+// about the pointer being used, not about one being available somewhere. A
+// touchscreen laptop hovers with its trackpad and answers yes; a tablet has no
+// way to rest a pointer on anything and answers no, whatever its screen size —
+// which is the case this exists for, because a tablet is wide enough to get the
+// desktop layout and its docks, and none of the hover behaviour in them.
+//
+// `pointer: fine` as well, because this is the gate on the dock peek and a peek
+// opened by a coarse pointer closes itself: the pointerenter arrives on the same
+// tap that is already toggling the dock. Named here rather than written out at
+// each site so the control that offers the setting and the code that acts on it
+// cannot come to disagree about where it applies.
+export const HOVER_QUERY = '(hover: hover) and (pointer: fine)';
+
 // A handset turned on its side: wide enough, and nothing like tall enough.
 //
 // Keyed on the height, because height is the thing that has run out — a phone

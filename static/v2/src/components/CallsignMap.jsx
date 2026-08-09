@@ -35,13 +35,19 @@ const ZOOM_GRID = 5;
  *                  above the map; filled in the spot modal, where the map *is*
  *                  the answer and there is nothing else on screen.
  * @param className extra class for the box, so a modal can size it.
+ * @param zoomable  whether the wheel zooms. Off in the panel, where the map is a
+ *                  strip in a scrolling column and a wheel that zoomed would
+ *                  trap the pointer on its way past; on in a modal, where the
+ *                  map is the thing being looked at and there is nothing behind
+ *                  it to scroll. Dragging, pinching and the +/- buttons work
+ *                  either way — this is only about the wheel.
  * @param from      the receiver: { lat, lon, label }. Given one, the map draws
  *                  it as a second pin with a great-circle path to the station
  *                  and fits both on screen — the picture the distance and
  *                  bearing are numbers for. Omitted in the Callsign panel, where
  *                  the map is a strip and two pins on it would be two dots.
  */
-export default function CallsignMap({ call, position, lines, className, from }) {
+export default function CallsignMap({ call, position, lines, className, from, zoomable }) {
     const box = useRef(null);
     const map = useRef(null);
     const [failed, setFailed] = useState(false);
@@ -60,10 +66,11 @@ export default function CallsignMap({ call, position, lines, className, from }) 
             if (cancelled || !L || !box.current || map.current) return;
 
             const m = L.map(box.current, {
-                // The panel it sits in scrolls, and a map that ate the wheel
-                // would trap the pointer on the way past. Dragging and the zoom
-                // buttons still work, which is what a map this size is for.
-                scrollWheelZoom: false,
+                // See the note on `zoomable`. Everything else Leaflet offers a
+                // finger — drag to pan, pinch to zoom, double-tap — is on by
+                // default and stays on: none of them can be confused with
+                // scrolling the thing behind the map.
+                scrollWheelZoom: !!zoomable,
                 attributionControl: false,
             }).setView([lat, lon], fromGrid ? ZOOM_GRID : ZOOM);
             map.current = m;
@@ -153,7 +160,7 @@ export default function CallsignMap({ call, position, lines, className, from }) 
                 map.current = null;
             }
         };
-    }, [lat, lon, fromGrid, call, (lines || []).join('|'),
+    }, [lat, lon, fromGrid, call, (lines || []).join('|'), zoomable,
         from && from.lat, from && from.lon, from && from.label]);
 
     // Nothing to draw, or Leaflet did not load: no map, and no empty box where

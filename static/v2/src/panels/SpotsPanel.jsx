@@ -408,6 +408,12 @@ export default function SpotsPanel({ minimal }) {
             {mapped && (
                 <SpotMap
                     spot={mapped}
+                    // The whole feed, not the filtered page: the map has its own
+                    // filters and asks a different question — "where has this
+                    // band been reaching" rather than "what came in just now" —
+                    // and a map that silently changed when somebody adjusted the
+                    // list behind it would be a map you could not trust.
+                    spots={list}
                     lookups={lookups}
                     receiver={serverInfo && serverInfo.receiver}
                     onClose={() => setMapped(null)}

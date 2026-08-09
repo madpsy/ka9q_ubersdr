@@ -3175,6 +3175,28 @@ a.btn { text-decoration: none; }
    the modal becoming a page. */
 .csmap--modal { height: min(42vh, 340px); }
 
+/* The all-spots view: wider than the single one, because the picture is the
+   point and the picture is the world. */
+.spotmap--wide { width: min(900px, 92vw); }
+.csmap--world { height: min(56vh, 460px); }
+/* The two views' switch, at the end of the title row. */
+.spotmap__swap { margin-left: auto; flex: none; }
+
+/* The map's own filters. A wrapping row rather than a grid: there are six of
+   them, they are different widths, and on a phone they should stack in the order
+   they are written rather than into columns that pair a band with a country. */
+.spotmap__filters { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; }
+.spotmap__pick { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.spotmap__pick-label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* The search box takes whatever the pickers leave: it is the one control here
+   whose useful width depends on what is being typed into it. */
+.spotmap__pick--wide { flex: 1 1 180px; }
+
 /* What the decoder reported, named. Two columns on anything with room, one on a
    phone: these are short values against short labels, and a single column of
    them is a lot of scrolling for a modal opened from a list. */

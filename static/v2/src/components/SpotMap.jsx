@@ -31,14 +31,18 @@
 // deduplicated request the Callsign panel makes — clicking a row already asks
 // for one, so opening this costs nothing extra where a panel is listening.
 
-import React, { useEffect, useState } from '../react.js';
-import { Empty, Modal } from './ui.jsx';
+import React, { useEffect, useMemo, useState } from '../react.js';
+import { Button, Empty, Icon, Modal } from './ui.jsx';
 import CallsignMap from './CallsignMap.jsx';
+import SpotsWorldMap, { placeable } from './SpotsWorldMap.jsx';
 import { getSessionId } from '../radio/session.js';
 import { countryFlag } from '../lib/format.js';
 import {
     displayName, distanceBearing, lookupCallsignData, maidenheadToLatLon, positionOf,
 } from '../lib/callsign.js';
+import {
+    AGE_OPTIONS, BANDS, DIGITAL_MODES, SNR_OPTIONS, countriesIn, filterSpots,
+} from '../lib/spots.js';
 
 // The prefix table the server already serves — the same one behind the country
 // column on the row that opened this. Never fatal: a receiver without it loses
@@ -158,8 +162,64 @@ function Details({ spot, cty, distance }) {
     );
 }
 
-export default function SpotMap({ spot, lookups, receiver, onClose }) {
+// The map's own filters, kept apart from the panel's.
+//
+// The list behind the panel is filtered for reading — an age window so it does
+// not run away, a band because that is what you are listening to. The map is
+// asked a different question: not "what came in just now" but "where has this
+// band been reaching", which wants a wider net by default and its own controls
+// to narrow it. Filtering the map by the list's settings would also mean the map
+// silently changed whenever somebody adjusted the list behind it.
+const MAP_FILTERS = {
+    age: null,
+    band: 'all',
+    mode: 'all',
+    country: 'all',
+    callsign: '',
+    minSnr: null,
+    minDistance: null,
+};
+
+// Free text, over everything a spot says in words. The panel's own callsign box
+// matches callsigns only, which is right for a list you are scanning by callsign
+// and too narrow here: on a map the question is as often "who is in Norway" or
+// "who called CQ" as it is "where is G4ABC".
+function matchesText(spot, query) {
+    if (!query) return true;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [
+        spot.callsign, spot.mode, spot.submode, spot.country, spot.grid,
+        spot.message, spot.comment, spot.spotter,
+    ].some((v) => v && String(v).toLowerCase().includes(q));
+}
+
+function Pick({ label, value, onChange, children }) {
+    return (
+        <label className="spotmap__pick">
+            <span className="spotmap__pick-label">{label}</span>
+            <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+                {children}
+            </select>
+        </label>
+    );
+}
+
+const toValue = (v) => (v == null ? '' : String(v));
+const fromValue = (v) => (v === '' ? null : Number(v));
+
+export default function SpotMap({ spot: opened, spots, lookups, receiver, onClose }) {
     const [state, setState] = useState(null);
+    // Which spot the single view is showing. Starts as the row that was clicked
+    // and changes when a point on the all-spots map is picked, so switching back
+    // and forth never loses where you were.
+    const [spot, setSpot] = useState(opened);
+    useEffect(() => { setSpot(opened); }, [opened]);
+    // 'one' or 'all'. Opens on the spot that was clicked: somebody who pressed a
+    // row asked about that row, and the wider map is one press away.
+    const [view, setView] = useState('one');
+    const [filters, setFilters] = useState(MAP_FILTERS);
+    const [query, setQuery] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -167,6 +227,29 @@ export default function SpotMap({ spot, lookups, receiver, onClose }) {
         resolve(spot, lookups).then((r) => { if (!cancelled) setState(r); });
         return () => { cancelled = true; };
     }, [spot.key, spot.callsign, lookups]);
+
+    // A clock for the age filter, and only while it is being used. Without it an
+    // age window is only re-applied when a spot arrives — right on a busy band
+    // and wrong on a quiet one, where the map would go on showing a decode from
+    // twenty minutes ago under a ten-minute filter until something else came in.
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        if (view !== 'all' || filters.age == null) return undefined;
+        const id = setInterval(() => setNow(Date.now()), 15000);
+        return () => clearInterval(id);
+    }, [view, filters.age]);
+
+    const all = spots || [];
+    // Filtered with the panel's own function, so a band or a mode means exactly
+    // what it means in the list — then the free text on top, which the list has
+    // no equivalent of.
+    const shown = useMemo(
+        () => filterSpots(all, filters, now, null).filter((s) => matchesText(s, query)),
+        [all, filters, query, now],
+    );
+    const points = useMemo(() => placeable(shown), [shown]);
+    const countries = useMemo(() => countriesIn(all), [all]);
+    const set = (patch) => setFilters((prev) => ({ ...prev, ...patch }));
 
     const call = spot.callsign;
     const flag = countryFlag(spot.countryCode);
@@ -193,34 +276,133 @@ export default function SpotMap({ spot, lookups, receiver, onClose }) {
         if (db) distance = { ...db, fromGrid: !!state.position.fromGrid };
     }
 
+    const many = view === 'all';
+
     return (
-        <Modal onClose={onClose} label={`${call} on the map`}>
-            <div className="spotmap">
+        <Modal onClose={onClose} label={many ? 'Digital spots on the map' : `${call} on the map`}>
+            <div className={`spotmap${many ? ' spotmap--wide' : ''}`}>
                 <div className="spotmap__head">
-                    <span className="spotmap__call">{flag ? `${flag} ${call}` : call}</span>
+                    <span className="spotmap__call">
+                        {many ? 'All spots' : (flag ? `${flag} ${call}` : call)}
+                    </span>
                     {/* The one line that says which decode this was, in front of
                         everything else: the modal covers the list it came from,
                         and a mode and an SNR are what tell one row from the next.
                         Repeated in the rows below, where each has a name — this
                         is for recognising the row, those are for reading it. */}
                     <span className="spotmap__meta">
-                        {[
-                            spot.submode ? `${spot.mode}/${spot.submode}` : spot.mode,
-                            spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : '',
-                            `${(spot.frequency / 1e6).toFixed(4)} MHz`,
-                        ].filter(Boolean).join('  ·  ')}
+                        {many
+                            ? `${points.length} of ${shown.length} shown${shown.length === all.length ? '' : ` · ${all.length} held`}`
+                            : [
+                                spot.submode ? `${spot.mode}/${spot.submode}` : spot.mode,
+                                spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : '',
+                                `${(spot.frequency / 1e6).toFixed(4)} MHz`,
+                            ].filter(Boolean).join('  ·  ')}
                     </span>
+                    {/* The two views, one button. There are exactly two and each
+                        names the other, which is what a toggle is for — and it
+                        sits in the title row because it changes what the whole
+                        modal is about rather than what is in it. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        className="spotmap__swap"
+                        icon={many ? <Icon.Target /> : <Icon.Grid />}
+                        title={many
+                            ? `Back to ${call} on its own`
+                            : 'Show every spot that reported a locator'}
+                        onClick={() => setView(many ? 'one' : 'all')}
+                    >
+                        {many ? call : 'Show all'}
+                    </Button>
                 </div>
 
-                {state == null && <Empty>Locating {call}…</Empty>}
+                {/* Only in the all-spots view, and the same vocabulary the panel
+                    filters its list with — a band is a band and a mode is a mode
+                    in both, which is the difference between two controls and two
+                    ideas. The text box is the one thing beyond the list's own
+                    filters: over the map, "who is in Norway" and "who called CQ"
+                    are asked as often as "where is G4ABC". */}
+                {many && (
+                    <div className="spotmap__filters">
+                        <Pick label="Band" value={filters.band} onChange={(v) => set({ band: v })}>
+                            <option value="all">All bands</option>
+                            {BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                        </Pick>
+                        <Pick label="Mode" value={filters.mode} onChange={(v) => set({ mode: v })}>
+                            <option value="all">All modes</option>
+                            {DIGITAL_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </Pick>
+                        <Pick label="Country" value={filters.country} onChange={(v) => set({ country: v })}>
+                            <option value="all">All countries</option>
+                            {countries.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </Pick>
+                        <Pick
+                            label="Age"
+                            value={toValue(filters.age)}
+                            onChange={(v) => set({ age: fromValue(v) })}
+                        >
+                            {AGE_OPTIONS.digital.map((m) => (
+                                <option key={toValue(m)} value={toValue(m)}>
+                                    {m == null ? 'No limit' : `${m} min`}
+                                </option>
+                            ))}
+                        </Pick>
+                        <Pick
+                            label="Min SNR"
+                            value={toValue(filters.minSnr)}
+                            onChange={(v) => set({ minSnr: fromValue(v) })}
+                        >
+                            {SNR_OPTIONS.digital.map((v) => (
+                                <option key={toValue(v)} value={toValue(v)}>
+                                    {v == null ? 'No limit' : `${v > 0 ? '+' : ''}${v} dB`}
+                                </option>
+                            ))}
+                        </Pick>
+                        <label className="spotmap__pick spotmap__pick--wide">
+                            <span className="spotmap__pick-label">Search</span>
+                            <input
+                                className="input"
+                                value={query}
+                                placeholder="callsign, grid, country, message…"
+                                autoComplete="off"
+                                spellCheck={false}
+                                onChange={(e) => setQuery(e.target.value)}
+                            />
+                        </label>
+                    </div>
+                )}
 
-                {state && state.position && (
+                {many && (
+                    <SpotsWorldMap
+                        points={points}
+                        receiver={receiver}
+                        className="csmap--modal csmap--world"
+                        // Picking a point is asking about that station, which is
+                        // the other view's whole job — so it switches, rather
+                        // than growing a second way to say the same thing.
+                        onPick={(s) => { setSpot(s); setView('one'); }}
+                    />
+                )}
+
+                {many && !points.length && (
+                    <Empty>
+                        {shown.length
+                            ? 'None of the matching spots reported a locator.'
+                            : 'No spots match those filters.'}
+                    </Empty>
+                )}
+
+                {!many && state == null && <Empty>Locating {call}…</Empty>}
+
+                {!many && state && state.position && (
                     <CallsignMap
                         call={call}
                         position={state.position}
                         lines={state.lines}
                         className="csmap--modal"
                         from={rx}
+                        zoomable
                     />
                 )}
 
@@ -228,7 +410,7 @@ export default function SpotMap({ spot, lookups, receiver, onClose }) {
                     known: a decoder that reports no grid and a lookup that has
                     no coordinates is an ordinary outcome, not an error, and the
                     country is still worth reading. */}
-                {state && !state.position && (
+                {!many && state && !state.position && (
                     <Empty>
                         {`No position for ${call}.`}
                         {spot.country ? ` ${spot.country}, from the callsign's prefix.` : ''}
@@ -240,16 +422,19 @@ export default function SpotMap({ spot, lookups, receiver, onClose }) {
                     a position was found: a spot with no locator is still a spot,
                     and the message it carried is the part that only happened
                     once. */}
-                <Details spot={spot} cty={state && state.cty} distance={distance} />
+                {!many && <Details spot={spot} cty={state && state.cty} distance={distance} />}
 
-                {/* Where the pin came from, because the two are not the same
-                    claim — see the note at the top. */}
-                {state && state.position && (
+                {/* Only the locator case says anything, and only because it is a
+                    caveat: the pin is the centre of a grid square rather than an
+                    address, and a map is very good at making a guess look like a
+                    fact. The lookup case said "positioned from the callsign
+                    lookup", which is what the operator had just asked for, and a
+                    line explaining that the green pin was the receiver and the
+                    dashed path the way between them described a picture already
+                    on screen. Both are gone. */}
+                {!many && state && state.position && state.source === 'grid' && (
                     <div className="spotmap__source">
-                        {state.source === 'grid'
-                            ? 'Positioned from the reported locator — accurate to the grid square, not the address.'
-                            : 'Positioned from the callsign lookup.'}
-                        {rx ? ' The green pin is this receiver; the dashed path is the great circle between them.' : ''}
+                        Positioned from the reported locator — accurate to the grid square, not the address.
                     </div>
                 )}
             </div>

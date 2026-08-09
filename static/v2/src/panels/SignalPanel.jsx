@@ -422,8 +422,17 @@ export default function SignalPanel({ minimal }) {
                     </>
                 )}
                 <div className="meter__value">
+                    {/* The S meter above needs no unit — "S7" says what it is —
+                        but a bare "42.3 dB" does not: this panel has a squelch
+                        threshold in dB under it and a filter width in dB nowhere
+                        near it, and a number with a unit and no name is the one
+                        that gets misread. Small, unbolded and dimmed, so it reads
+                        as the label on the reading rather than part of it. Kept
+                        when there is nothing to show, so the line does not change
+                        shape the moment a signal arrives. */}
                     <span className="meter__num meter__num--snr">
                         {snr == null ? '--' : `${snr.toFixed(1)} dB`}
+                        <span className="meter__unit">SNR</span>
                     </span>
                 </div>
             </button>

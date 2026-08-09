@@ -2718,8 +2718,19 @@ a.btn { text-decoration: none; }
 /* Nothing held yet: the slot stays in the layout, so the live reading does not
    shift when the first peak arrives. */
 .meter__num.is-blank { visibility: hidden; }
-/* "60.0 dB" is the longest the SNR readout gets. */
+/* "60.0 dB" is the longest the SNR readout gets, before the label below. */
 .meter__num--snr { min-width: 7ch; }
+/* The name of the reading, after its unit. Sized in `em` rather than px so it
+   stays in proportion to the number whatever the text scale is — the global one
+   and this panel's own — instead of needing its own calc(). Not bold and not the
+   accent colour: it is what the number *is*, not part of what it says. */
+.meter__unit {
+    margin-left: 6px;
+    font-size: 0.6em;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+}
 
 .bar {
     position: relative;

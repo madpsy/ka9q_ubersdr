@@ -47,6 +47,17 @@ t('Android Chrome needs the URL stream, not the bridge', () => {
     assert.strictEqual(s.androidChrome, true);
 });
 
+t('a handset is on by default, whichever handset it is', () => {
+    // The lock screen is the case the feature exists for, so both phone
+    // platforms are opt-out. Android costs the scope and the recorder while it
+    // runs — see the anchor above — and is on anyway, which is the trade the
+    // default is making.
+    const android = detectSupport(CHROME_ANDROID, { hasMediaSession: true, hasContextSink: true });
+    assert.strictEqual(android.defaultEnabled, true);
+    const ios = detectSupport(CHROME_IOS, { hasMediaSession: true, hasContextSink: false });
+    assert.strictEqual(ios.defaultEnabled, true);
+});
+
 t('Apple takes the bridge and is on by default', () => {
     const s = detectSupport(SAFARI_IOS, { hasMediaSession: true, hasContextSink: false });
     assert.strictEqual(s.anchor, 'bridge');

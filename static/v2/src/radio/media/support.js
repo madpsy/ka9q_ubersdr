@@ -54,7 +54,8 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
     // Chrome there (CriOS) is not Blink and needs what Safari needs.
     const ios = /iPhone|iPad|iPod/i.test(ua);
     const blink = !ios && /Chrome\/|Chromium\/|Edg\//i.test(ua);
-    const androidChrome = /Android/i.test(ua) && blink;
+    const android = /Android/i.test(ua);
+    const androidChrome = android && blink;
     const windows = /Windows/i.test(ua);
 
     // Feature detection rather than a Firefox sniff: the browsers that cannot
@@ -97,11 +98,24 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         blink,
         windows,
         androidChrome,
-        // v1's defaults, kept: Apple has had this working for years and it is
-        // where lock-screen control matters most, so it is opt-out there and
-        // opt-in everywhere else. Nobody gets a media widget they did not ask
-        // for on a desktop.
-        defaultEnabled: available && apple,
+        android,
+        // On by default wherever the screen locks over the audio, opt-in
+        // everywhere else. Apple is v1's default kept — it has worked there for
+        // years — and Android now joins it for the same reason: a phone in a
+        // pocket is the case the whole feature is for, and a receiver that goes
+        // silent-controlled the moment the screen turns off is one you have to
+        // wake and hunt through a panel for. Nobody gets a media widget they did
+        // not ask for on a desktop.
+        //
+        // It is not free on Android Chrome, and this is the one place that
+        // matters: the anchor there is 'stream', which moves the audio off the
+        // WebSocket and takes the audio scope, the recorder and the client-side
+        // filters with it (see the anchor notes above). The panel says so while
+        // that anchor is live, and the switch is the first thing on it — but a
+        // phone is where lock-screen control is worth more than a scope nobody
+        // can see with the screen off, which is why the trade is made this way
+        // round here and not on the desktop.
+        defaultEnabled: available && (apple || android),
     };
 }
 

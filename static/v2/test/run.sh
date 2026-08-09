@@ -224,6 +224,8 @@ esbuild ../src/radio/media/lookup.js --bundle --format=cjs --platform=node \
     --outfile=.build/medialookup.cjs --log-level=warning
 esbuild ../src/lib/roomFor.js --bundle --format=cjs --platform=node \
     --outfile=.build/roomfor.cjs --log-level=warning
+esbuild ../src/lib/fitScale.js --bundle --format=cjs --platform=node \
+    --outfile=.build/fitscale.cjs --log-level=warning
 esbuild ../src/lib/edgeHit.js --bundle --format=cjs --platform=node \
     --outfile=.build/edgehit.cjs --log-level=warning
 esbuild ../src/lib/haptics.js --bundle --format=cjs --platform=node \
@@ -336,6 +338,7 @@ node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js
 node roomfor.test.js
+node fitscale.test.js
 node edgehit.test.js
 node haptics.test.js
 node appheight.test.js

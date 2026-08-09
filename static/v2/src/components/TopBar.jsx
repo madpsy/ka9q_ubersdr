@@ -22,6 +22,7 @@ import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
+import { useFitScale } from '../lib/useFitScale.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
 
 // Widths to assume until each has been on screen once to measure. The order
@@ -326,6 +327,16 @@ export default function TopBar({ compact }) {
         { key: 'session', width: SESSION_W },
     ]);
 
+    // ...and, on a phone, what the readout has to shrink to before any of that
+    // applies. The filter width is the first thing the row above would drop, and
+    // it is the one thing in the readout worth smaller type to keep: a passband
+    // is not guessable from the mode, and with the Receiver panel shut — which
+    // on a handset it usually is — this is the only place it is written down.
+    //
+    // Only compact. See useFitScale for why the desktop bar must not have this.
+    const freqRef = useRef(null);
+    const fit = useFitScale(barRef, freqRef, !!compact);
+
     // Tuning straight from the readout: the frequency swaps for an input, the
     // mode drops a menu at the point it was clicked.
     const [editingFreq, setEditingFreq] = useState(false);
@@ -402,17 +413,29 @@ export default function TopBar({ compact }) {
                 opens the same type-in box as the Receiver panel's dial, the
                 mode a picker. Both are here so the top bar alone is enough to
                 retune with every panel closed. */}
-            <div className="topbar__freq">
+            <div
+                className="topbar__freq"
+                ref={freqRef}
+                /* The one number the three font sizes are multiplied by — see
+                   .topbar__freq in the CSS. 1 everywhere but a narrow phone. */
+                style={fit === 1 ? undefined : { '--fit': fit }}
+            >
                 {editingFreq ? (
                     <FreqEntry
                         frequency={tuning.frequency}
                         className="topbar__hz-input"
+                        fitKey="hz"
                         onDone={(hz) => { setEditingFreq(false); if (hz != null) actions.setFrequency(hz); }}
                     />
                 ) : (
                     <button
                         type="button"
                         className="topbar__hz"
+                        /* The parts that scale, named so their widths survive
+                           one of them being dropped — see lib/fitScale.js. The
+                           type-in box above carries the same key, because while
+                           it is open it *is* this part of the readout. */
+                        data-fit="hz"
                         title="Type a frequency in kHz"
                         onClick={() => setEditingFreq(true)}
                     >
@@ -422,6 +445,7 @@ export default function TopBar({ compact }) {
                 <button
                     type="button"
                     className="topbar__mode"
+                    data-fit="mode"
                     title="Change mode"
                     aria-haspopup="menu"
                     onClick={(e) => {
@@ -443,13 +467,17 @@ export default function TopBar({ compact }) {
                     to read the passband you are listening through — or, since
                     it opens the same slider, to change it.
 
-                    Optional: the first thing to go as the bar narrows, because
-                    the mode beside it is the one that changes what you hear. */}
+                    Optional: still the first thing to go as the bar narrows,
+                    because the mode beside it is the one that changes what you
+                    hear — but on a phone the readout shrinks first and usually
+                    keeps it. See useFitScale above; the floor there is the point
+                    at which this is dropped after all. */}
                 {room.width && (
                     <button
                         type="button"
                         className="topbar__bw"
                         data-optional="width"
+                        data-fit="bw"
                         aria-haspopup="dialog"
                         title={`Filter width — passband ${tuning.bandwidthLow} to ${tuning.bandwidthHigh} Hz`}
                         onClick={(e) => {

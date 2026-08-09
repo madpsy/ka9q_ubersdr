@@ -25,7 +25,11 @@ const RANGE_HINT = `Frequency in kHz, ${MIN_FREQ / 1000} to ${MAX_FREQ / 1000}`;
 
 // `onDone` is called with the frequency in Hz, or null where nothing usable was
 // typed — either way the caller closes the editor.
-export default function FreqEntry({ frequency, className, onDone }) {
+// `fitKey` marks the box as one of the parts the top bar's readout scales — see
+// lib/fitScale.js. It has to carry the same key the button it replaced does, or
+// the measurement counts an 11ch input as fixed furniture *and* the frequency it
+// stands in for, and the readout shrinks while somebody is typing into it.
+export default function FreqEntry({ frequency, className, fitKey, onDone }) {
     const [draft, setDraft] = useState(() => freqToKHz(frequency));
     const ref = useRef(null);
     const done = useRef(false);
@@ -52,6 +56,7 @@ export default function FreqEntry({ frequency, className, onDone }) {
         <input
             ref={ref}
             className={`${className || ''}${valid ? '' : ' is-invalid'}`}
+            data-fit={fitKey}
             value={draft}
             inputMode="decimal"
             aria-label="Frequency in kHz"

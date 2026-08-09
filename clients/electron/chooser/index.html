@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'">
+    <title>UberSDR — receivers</title>
+    <link rel="stylesheet" href="chooser.css">
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <h1>UberSDR</h1>
+            <span class="tagline">choose a receiver</span>
+        </div>
+        <form id="add-form" autocomplete="off">
+            <input id="add-input" type="text" spellcheck="false"
+                   placeholder="host, host:port or https://receiver.example.org">
+            <button type="submit" id="add-btn">Connect</button>
+        </form>
+    </header>
+
+    <div id="add-status" class="status" hidden></div>
+
+    <main>
+        <section id="saved-section">
+            <div class="section-head">
+                <h2>Saved receivers</h2>
+            </div>
+            <div id="saved-list" class="list"></div>
+            <div id="saved-empty" class="empty" hidden>Receivers you connect to appear here.</div>
+        </section>
+
+        <section id="lan-section">
+            <div class="section-head">
+                <h2>Local network</h2>
+                <button id="lan-scan" class="ghost">Scan</button>
+                <span id="lan-status" class="section-status"></span>
+            </div>
+            <div id="lan-list" class="list"></div>
+        </section>
+
+        <section id="dir-section">
+            <div class="section-head">
+                <h2>Public directory</h2>
+                <input id="dir-filter" type="text" placeholder="filter…" spellcheck="false">
+                <button id="dir-refresh" class="ghost">Refresh</button>
+                <span id="dir-status" class="section-status"></span>
+            </div>
+            <div id="dir-list" class="list"></div>
+        </section>
+    </main>
+
+    <footer id="footer"></footer>
+
+    <script src="chooser.js"></script>
+</body>
+</html>

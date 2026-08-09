@@ -351,8 +351,10 @@ export function Bar({ value, min = 0, max = 1, peak, tone = 'accent', color }) {
  * its body, and a menu that belongs to the panel's own chrome has no business
  * being cropped to it. Made small enough and a docked panel is narrower than its
  * own move menu, which then opened half off the left edge with no way to read
- * it. Nothing between here and the viewport establishes a containing block, so
- * fixed escapes the clip without a portal.
+ * it. The panel goes through a portal to <body>, because `fixed` only escapes
+ * on its own while no ancestor establishes a containing block — and the top
+ * bar's `contain: paint` (a repaint fix; see .topbar in styles.css) does, which
+ * re-based its menus and clipped them to the bar's own 40px.
  *
  * `align` says which edge of the menu meets which edge of the trigger; either
  * way it is then nudged back on screen, since being readable outranks being
@@ -463,7 +465,10 @@ export function Menu({ trigger, children, align = 'end', openOnHover = false }) 
                 fight: clicking a menu that was about to open on its own should close it,
                 which is what somebody who has just clicked it expects. */}
             <span onClick={() => { clearHover(); setOpen((o) => !o); }}>{trigger}</span>
-            {open && (
+            {/* In the DOM the panel lives under <body>; in the React tree it is
+                still a child of this div, so the hover enter/leave pair above
+                treats trigger and panel as one surface, portal or not. */}
+            {open && ReactDOM.createPortal(
                 <div
                     ref={panelRef}
                     className="menu__panel"
@@ -477,7 +482,8 @@ export function Menu({ trigger, children, align = 'end', openOnHover = false }) 
                     onClick={() => setOpen(false)}
                 >
                     {children}
-                </div>
+                </div>,
+                document.body,
             )}
         </div>
     );

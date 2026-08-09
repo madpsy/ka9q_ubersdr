@@ -8,7 +8,7 @@
 // right. Internal pages open in a centred popup window, external links and
 // downloads in a plain tab. The dynamic add-ons group is appended last.
 
-import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import React, { ReactDOM, useCallback, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 
 const POPUP_W = 1200;
 const POPUP_H = 800;
@@ -148,7 +148,23 @@ export default function LinksMenu({ serverInfo, compact }) {
     const [open, setOpen] = useState(false);
     const [groups, setGroups] = useState(null);
     const ref = useRef(null);
+    const panelRef = useRef(null);
     const fetched = useRef(false);
+
+    // Where the panel goes: under the logo, as its absolute `top: 100%` used to
+    // put it. Measured now, because the panel is portalled to <body> — the top
+    // bar's `contain: paint` (see .topbar in styles.css) clips and re-bases
+    // anything positioned inside it, so hung off the wrapper the menu was
+    // cropped to the bar's own strip.
+    const [at, setAt] = useState(null);
+    useLayoutEffect(() => {
+        if (!open) {
+            setAt(null);
+            return;
+        }
+        const r = ref.current.getBoundingClientRect();
+        setAt({ left: r.left, top: r.bottom + 6 });
+    }, [open]);
 
     // Fetched on first open — a receiver whose operator never opens this menu
     // should not pay for the request.
@@ -166,7 +182,14 @@ export default function LinksMenu({ serverInfo, compact }) {
 
     useEffect(() => {
         if (!open) return undefined;
-        const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        // The panel is DOM-wise a child of <body>, not of the wrapper, so it
+        // has to be asked separately or a click inside it would count as
+        // outside and close the menu under the pointer.
+        const onDown = (e) => {
+            if (ref.current && ref.current.contains(e.target)) return;
+            if (panelRef.current && panelRef.current.contains(e.target)) return;
+            setOpen(false);
+        };
         const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
         document.addEventListener('pointerdown', onDown);
         document.addEventListener('keydown', onKey);
@@ -237,12 +260,21 @@ export default function LinksMenu({ serverInfo, compact }) {
                 />
             </button>
 
-            {open && (
-                <div className="links__panel" role="menu">
+            {/* In the React tree the panel is still a child of the hover
+                wrapper, so moving the pointer down into it never counts as
+                leaving — the portal only moves where it lives in the DOM. */}
+            {open && ReactDOM.createPortal(
+                <div
+                    ref={panelRef}
+                    className="links__panel"
+                    role="menu"
+                    style={at ? { left: at.left, top: at.top } : { visibility: 'hidden' }}
+                >
                     {groups == null && <div className="links__note">Loading…</div>}
                     {groups && groups.length === 0 && <div className="links__note">No pages published.</div>}
                     {(groups || []).map((g) => <GroupRow key={g.name} node={g} onDone={close} />)}
-                </div>
+                </div>,
+                document.body,
             )}
         </div>
     );

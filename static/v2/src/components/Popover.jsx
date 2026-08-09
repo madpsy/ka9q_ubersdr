@@ -10,7 +10,7 @@
 // here: the drag begins inside, so moving the pointer across the whole screen
 // and releasing over the waterfall never closes the popover mid-adjustment.
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from '../react.js';
+import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 
 // Kept clear of the viewport edge so it never sits flush against it.
 const EDGE = 8;
@@ -88,7 +88,13 @@ export default function Popover({
         };
     }, [onClose]);
 
-    return (
+    // A portal, like Modal's: `fixed` is only viewport-relative while no
+    // ancestor establishes a containing block, and the top bar now does — its
+    // `contain: paint` (a repaint fix, see .topbar in styles.css) both re-bases
+    // fixed descendants and clips them to the bar, so a popover opened from it
+    // was placed just below the bar and clipped to nothing. <body> is the one
+    // parent guaranteed never to trap it.
+    return ReactDOM.createPortal(
         <div
             ref={ref}
             className={`specmenu ${className}`.trim()}
@@ -99,6 +105,7 @@ export default function Popover({
             style={{ left: pos.left, top: pos.top, visibility: pos.ready ? 'visible' : 'hidden' }}
         >
             {children}
-        </div>
+        </div>,
+        document.body,
     );
 }

@@ -388,10 +388,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
    would be behind an opaque image and show nothing at all. */
 .links__btn:hover, .links__btn.is-open { box-shadow: 0 0 0 2px var(--accent); }
 
+/* Fixed and portalled to <body>, placed by measurement in LinksMenu — hanging
+   absolutely off the trigger put it inside the top bar's `contain: paint`,
+   which clips everything to the bar's own strip. left/top are inline. */
 .links__panel {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
+    position: fixed;
     min-width: 210px;
     padding: 4px;
     background: var(--surface-3);

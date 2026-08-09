@@ -1,0 +1,44 @@
+{
+  "name": "ubersdr-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UberSDR desktop client — the v2 web UI in an Electron shell with an instance chooser",
+  "author": "MadPsy",
+  "license": "SEE LICENSE IN ../../LICENSE.TXT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "org.ubersdr.desktop",
+    "productName": "UberSDR",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "proxy.js",
+      "mdns.js",
+      "discovery.js",
+      "store.js",
+      "preload.js",
+      "chooser/**",
+      "ui/**"
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "HamRadio"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    }
+  }
+}

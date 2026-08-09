@@ -200,6 +200,22 @@ export default function ChatPanel({ minimal }) {
             // scrolled up to read something leaves your own message off the
             // bottom of the log with no sign it went anywhere.
             pinned.current = true;
+            // Back in the box, ready for the next one.
+            //
+            // On a keyboard this was already true and needed nothing: Enter
+            // submits the form and focus never leaves the input it was pressed
+            // in. A phone submits by tapping Send, and tapping a button moves
+            // focus to the button — so the on-screen keyboard slid away after
+            // every message and the next one began with a tap to bring it back.
+            //
+            // Synchronous, and that is the whole trick: this runs inside the
+            // gesture that sent the message, which is the only time a browser
+            // will open the on-screen keyboard for a focus() it did not ask for.
+            // A frame later — in a requestAnimationFrame, or after an await —
+            // the gesture is over, the input takes focus and the keyboard stays
+            // shut, which is the more confusing half of the original fault.
+            const el = inputRef.current;
+            if (el && !el.disabled) el.focus();
         }
     };
 

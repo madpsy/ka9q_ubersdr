@@ -37,6 +37,10 @@ const SPACE_WEATHER_W = 210;
 const CLOCK_W = 96;
 // "12.00k" a shade under the frequency's size, and a space.
 const FILTER_W = 52;
+// The volume slider without its mute button: the track, and the gap that
+// separates the two. What is left when it goes is the button, which is a control
+// of its own rather than a stump — see VolumeSlider.
+const VOLUME_W = 124;
 
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
@@ -170,9 +174,37 @@ function SpaceWeather() {
 // clock — does not re-render with it, and fast enough to look like a meter: the
 // fill is a gradient stop, which cannot be transitioned, so the sample rate is
 // all the smoothing there is.
-function VolumeSlider() {
+/**
+ * Mute, and how loud.
+ *
+ * `slider` is whether the bar still has room for the fader. It is the one thing
+ * in this row that degrades rather than disappearing: what is left is the mute
+ * button, which is a complete control in its own right — the commonest thing
+ * anybody does to the volume is silence it — and the level itself is still on
+ * the Audio panel. Everything else the bar drops is all-or-nothing, which is why
+ * this is a prop here rather than another entry rendered conditionally above.
+ */
+function VolumeSlider({ slider }) {
     const { audio, actions } = useRadio();
     const m = useMeters(24);
+
+    // Unmuting with no fader on screen turns it up.
+    //
+    // Muted at 5% is a state you can see your way out of while the slider is
+    // there and cannot while it is not: the button says "unmute", you press it,
+    // and the receiver stays as silent as it was with nothing in the bar to say
+    // why. So where the bar has dropped the fader, unmute means what somebody
+    // pressing it in that state wants it to mean — audible — and the Audio panel
+    // is where a quieter setting can be dialled back in.
+    //
+    // Only on the way out of mute, and only when the level is low enough to be
+    // the problem: unmuting to something already audible must not overwrite a
+    // level that was deliberately set while the fader was still on screen.
+    const QUIET = 0.2;
+    const toggleMute = () => {
+        if (!slider && audio.muted && audio.volume < QUIET) actions.setVolume(1);
+        actions.toggleMute();
+    };
 
     return (
         <div className="topbar__volume">
@@ -180,22 +212,33 @@ function VolumeSlider() {
                 variant="ghost"
                 size="sm"
                 icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
-                onClick={actions.toggleMute}
+                onClick={toggleMute}
                 active={audio.muted}
-                title={audio.muted ? 'Unmute' : 'Mute'}
+                title={audio.muted
+                    ? `Unmute${!slider && audio.volume < QUIET ? ' — the level is very low, so this turns it up' : ''}`
+                    : 'Mute'}
             />
             {/* Disabled rather than hidden while muted: the level is still what
                 you will hear when you unmute, and a control that vanishes takes
-                the reading with it. */}
-            <Slider
-                value={Math.round(audio.volume * 100)}
-                min={0}
-                max={100}
-                disabled={audio.muted}
-                onChange={(v) => actions.setVolume(v / 100)}
-                level={audioLevelPercent(m.outLevel) / 100}
-                fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
-            />
+                the reading with it.
+
+                The span is what useRoomFor measures and what it removes — the
+                slider is a nested optional child, discounted from this box's
+                own width, which is why the box has no fixed width of its own.
+                See lib/roomFor.js. */}
+            {slider && (
+                <span className="topbar__vol-slider" data-optional="volume">
+                    <Slider
+                        value={Math.round(audio.volume * 100)}
+                        min={0}
+                        max={100}
+                        disabled={audio.muted}
+                        onChange={(v) => actions.setVolume(v / 100)}
+                        level={audioLevelPercent(m.outLevel) / 100}
+                        fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
+                    />
+                </span>
+            )}
         </div>
     );
 }
@@ -323,6 +366,12 @@ export default function TopBar({ compact }) {
     // it is nearly up, and the Session panel has it either way.
     const room = useRoomFor(barRef, [
         { key: 'width', width: FILTER_W },
+        // Second, so the fader outlasts all three readouts: it is a control, and
+        // the clock and the rest are things to glance at. Not first, because
+        // losing it costs less than losing anything else here — the mute button
+        // stays behind and the level is a panel away, where the filter width has
+        // nowhere else to be shown at all.
+        { key: 'volume', width: VOLUME_W },
         { key: 'clock', width: CLOCK_W },
         { key: 'spaceWeather', width: SPACE_WEATHER_W },
         { key: 'session', width: SESSION_W },
@@ -580,7 +629,7 @@ export default function TopBar({ compact }) {
                 </div>
             )}
 
-            {!compact && <VolumeSlider />}
+            {!compact && <VolumeSlider slider={room.volume} />}
 
             {/* On a phone the icon says it on its own — a power symbol is the most
                 universally read control there is, and the two buttons either side of it

@@ -713,7 +713,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     cursor: pointer;
 }
 .topbar__zoom-val:hover { color: var(--text); }
-.topbar__volume { display: flex; align-items: center; gap: 8px; width: 150px; }
+/* No width of its own: the fader inside it is an optional child, and useRoomFor
+   only frees the space if this box actually gives it back — a fixed 150px would
+   have left the mute button rattling around in exactly the width the drop was
+   supposed to reclaim. `flex: none` for the reason .topbar__brand carries it. */
+.topbar__volume { display: flex; align-items: center; gap: 8px; flex: none; }
+/* The fader's own width, which was the box's until the box had to be able to
+   lose it. 116 + the 8px gap + the mute button is the 150 this always was. */
+.topbar__vol-slider { display: flex; width: 116px; flex: none; }
 /* The volume slider is also the output meter — its fill is the level, not the
    setting — so it needs the same outline as the signal bar for the same reason:
    without one there is nothing to show how far the level has left to go, or

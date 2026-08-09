@@ -1657,6 +1657,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-dim);
     white-space: nowrap;
 }
+/* A tag whose label is an icon. Inline-flex so the glyph sits on the number's
+   centre rather than its baseline — an icon aligned to a baseline hangs low, and
+   in a pill 15px tall that reads as a misprint. The gap is tighter than a space
+   would be: the icon is the label, so it belongs against what it labels. */
+.tag--ico { display: inline-flex; align-items: center; gap: 4px; }
+.tag--ico > svg { flex: none; opacity: 0.85; }
 .tag--accent { background: var(--accent-soft); color: var(--accent); }
 .tag--ghost { background: transparent; border: 1px solid var(--border-strong); }
 /* A tag that switches its own feature off. Same pill, but it has to answer the

@@ -1800,8 +1800,31 @@ export default function SpectrumView() {
                             changes while you listen, and the row they are in is the same
                             one holding the squelch, the filter and the DSP tags — which
                             are state you are actually working with. */}
-                        {!mobile && <span className="tag tag--accent">{formatSpan(span)}</span>}
-                        {!mobile && <span className="tag">centre {formatFreqShort(view.centerFreq || 0)}</span>}
+                        {/* Icons rather than words. Both of these are labels on a
+                            number in a row that is otherwise all state, and the
+                            words were the widest part of each: "centre" is five
+                            characters spent saying what a crosshair says at a
+                            glance — the same crosshair the toolbar's own
+                            centre-on-tuned button carries, so it is a word this
+                            interface has already taught. The span had no label at
+                            all and now says what it is, which is the other half of
+                            the trade: one tag lost a word, the other gained a
+                            meaning. The tooltips carry the words for anyone who
+                            wants them, and the aria-labels carry them always. */}
+                        {!mobile && (
+                            <span className="tag tag--accent tag--ico" title="Span of the view">
+                                <Icon.Span size={11} />
+                                <span aria-label={`Span ${formatSpan(span)}`}>{formatSpan(span)}</span>
+                            </span>
+                        )}
+                        {!mobile && (
+                            <span className="tag tag--ico" title="Centre frequency of the view">
+                                <Icon.Target size={11} />
+                                <span aria-label={`Centre ${formatFreqShort(view.centerFreq || 0)}`}>
+                                    {formatFreqShort(view.centerFreq || 0)}
+                                </span>
+                            </span>
+                        )}
                         {/* Next to the frequencies it qualifies, and before the audio
                             tags: this one is about what the numbers on screen mean,
                             not about what is being done to the sound. */}

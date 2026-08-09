@@ -46,6 +46,10 @@ export const Icon = {
     RotateLeft: (p) => <Svg {...p}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></Svg>,
     RotateRight: (p) => <Svg {...p}><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></Svg>,
     Target: (p) => <Svg {...p}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></Svg>,
+    // How wide a view is: two edges with the distance between them measured out.
+    // The end bars are what make it a span rather than a pair of scroll arrows —
+    // it is a width being stated, not somewhere to go.
+    Span: (p) => <Svg {...p}><path d="M3 7v10M21 7v10" /><path d="M6 12h12" /><path d="m8.5 9.5-2.5 2.5 2.5 2.5" /><path d="m15.5 9.5 2.5 2.5-2.5 2.5" /></Svg>,
     Pointer: (p) => <Svg {...p}><path d="M5 3.5 18 11l-5.6 1.5L9.6 17.5z" /></Svg>,
     ZoomIn: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M11 8v6M8 11h6" /></Svg>,
     ZoomOut: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" /></Svg>,

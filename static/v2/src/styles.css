@@ -2600,6 +2600,20 @@ a.btn { text-decoration: none; }
    slider gives up the width instead, which is what has width to give. */
 .pad-row__act { flex: none; padding: 2px 6px; }
 
+/* Squelch and width side by side, where the pad is wide enough for both — see
+   MultipadPanel. Equal halves rather than content-sized: two sliders of
+   different lengths on one line read as one control that has gone wrong. The
+   `minmax(0, 1fr)` is what lets each half actually reach zero, so the sliders
+   give up width instead of the row overflowing the panel. */
+.pad__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+/* Tighter inside a half-width row: the label is the only part that can give,
+   and 50px of "SQUELCH" against a slider with 90px to work in is the wrong
+   split. The reading on the right keeps its width — it is what the slider is
+   being set to. */
+.pad__pair .pad-row { gap: 6px; }
+.pad__pair .pad-row__field { gap: 6px; }
+.pad__pair .pad-row__label { width: auto; }
+
 .pad__zoomrow { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
 .pad__zoomrow > .barrel { flex: 1; min-width: 0; }
 .pad__nr {

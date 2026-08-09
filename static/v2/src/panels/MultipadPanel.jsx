@@ -250,25 +250,13 @@ function MarkerEdges() {
 // gap in front of it.
 const BW_W = 52;
 
-function FreqWheel() {
+function FreqWheel({ headRef, showBw }) {
     const { tuning, actions } = useRadio();
     const display = useDisplay();
     // Shared with click-to-tune on the spectrum and with the Receiver panel's
     // ± buttons, so the pad tunes on the same grid as everything else.
     const step = display.tuneStep || 500;
     const [editing, setEditing] = useState(false);
-
-    // Whether the head has room for the passband beside the frequency.
-    //
-    // Measured on the readout, not on the row: the readout is the row's only
-    // flexible child, so the row's spare width is *inside* it and a measurement
-    // of the row would read zero however wide the panel got. The digits are the
-    // elastic part — they are what a narrower panel would have to eat into — and
-    // the chip is dropped rather than allowed to squeeze them. See
-    // lib/headerRoom.js for the two-question hysteresis that keeps that answer
-    // still.
-    const headRef = useRef(null);
-    const showBw = useHeaderFits(headRef, '.pad-wheel__digits', BW_W) && !editing;
 
     // A spin outruns React: the drum asks for a step per frame and the prop it
     // would read is the one from the frame before. Same ref trick the Receiver
@@ -339,7 +327,7 @@ function FreqWheel() {
                             Receiver panel's slider is where a passband is set
                             and a second way in from here would be a chip that
                             did something different from the thing around it. */}
-                        {showBw && (
+                        {showBw && !editing && (
                             <span className="pad-wheel__bw">
                                 {formatFilterWidth(tuning.bandwidthLow, tuning.bandwidthHigh)}
                             </span>
@@ -625,6 +613,27 @@ function PadRow({ label, value, children, action }) {
     );
 }
 
+// The filter width. Its own component because it is drawn in two places — on a
+// line of its own, or beside the squelch where the pad is wide enough for the
+// pair — and a slider defined inline twice is two sliders to keep in step.
+function WidthRow() {
+    const { tuning, actions } = useRadio();
+    const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
+    const maxWidth = maxFilterWidth(tuning.mode);
+
+    return (
+        <PadRow label="Width" value={`${(width / 1000).toFixed(2)}k`}>
+            <Slider
+                value={Math.min(width, maxWidth)}
+                min={FILTER_WIDTH_MIN}
+                max={maxWidth}
+                step={FILTER_WIDTH_STEP}
+                onChange={(w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning))}
+            />
+        </PadRow>
+    );
+}
+
 // Its own component so the 12 Hz meter sampling behind the live SNR marker
 // re-renders this line alone, and not the barrels above it.
 function SquelchRow() {
@@ -672,18 +681,38 @@ function SquelchRow() {
     );
 }
 
-// `minimal` keeps the two barrels and drops the rest. They are the controls a
-// pad is *for* — the ones with no good small form anywhere else — and the mode,
-// the width, the view and the squelch are all a tap away in their own panels.
-// See the registry's `minimal`.
+// `minimal` keeps the two barrels and the squelch, and drops the rest.
+//
+// The barrels are the controls a pad is *for* — the ones with no good small form
+// anywhere else — and the mode, the width and the view are all a tap away in
+// their own panels. The squelch is here on the strength of when it is reached
+// for rather than where else it lives: it is the one setting on this panel you
+// adjust *while listening*, against a signal that is fading in and out, and the
+// pad is what a phone has open while that is happening. Sending somebody to the
+// Signal panel for it means covering the dial they are working to hear.
+//
+// It also costs a line rather than a block: one slider and its reading, on the
+// row it already shares with Auto. See the registry's `minimal`.
 export default function MultipadPanel({ minimal }) {
     const { tuning, actions } = useRadio();
-    const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
-    const maxWidth = maxFilterWidth(tuning.mode);
+
+    // How wide the pad is, asked once and answered in two places: whether the
+    // readout carries the passband, and whether the squelch and the width fit on
+    // one line. It is the same question — is there a spare chip's worth of room —
+    // and a second measurement with a threshold of its own would give a pad that
+    // showed the passband but stacked the sliders, or the other way about, at
+    // whatever widths the two happened to disagree on.
+    //
+    // Measured on the readout rather than the row it sits in: the readout is the
+    // row's only flexible child, so the row's spare width is *inside* it and a
+    // measurement of the row would read zero however wide the panel got. See
+    // lib/headerRoom.js for the hysteresis that keeps the answer still.
+    const headRef = useRef(null);
+    const wide = useHeaderFits(headRef, '.pad-wheel__digits', BW_W);
 
     return (
         <div className="stack stack--tight pad">
-            <FreqWheel />
+            <FreqWheel headRef={headRef} showBw={wide} />
 
             {/* Which markers the drum's ends step to. Directly under the drum it
                 controls, rather than down with the other settings: five chips
@@ -730,17 +759,28 @@ export default function MultipadPanel({ minimal }) {
                     />
 
                     <BandRow />
+                </>
+            )}
 
-                    <PadRow label="Width" value={`${(width / 1000).toFixed(2)}k`}>
-                        <Slider
-                            value={Math.min(width, maxWidth)}
-                            min={FILTER_WIDTH_MIN}
-                            max={maxWidth}
-                            step={FILTER_WIDTH_STEP}
-                            onChange={(w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning))}
-                        />
-                    </PadRow>
+            {/* The two sliders you work while listening: on one line where there
+                is room for two, stacked where there is not.
 
+                Squelch on the left in both arrangements. It is the one the
+                minimal view keeps on its own, so it is the one whose position an
+                operator learns — the width joins it on the right rather than
+                displacing it.
+
+                In the full view this is where the Width row went. It was a line
+                of its own directly above the squelch, and half of that line was
+                empty at any width that can hold the pair. */}
+            {wide ? (
+                <div className="pad__pair">
+                    <SquelchRow />
+                    <WidthRow />
+                </div>
+            ) : (
+                <>
+                    {!minimal && <WidthRow />}
                     <SquelchRow />
                 </>
             )}

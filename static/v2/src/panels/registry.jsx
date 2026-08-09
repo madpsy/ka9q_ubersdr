@@ -120,10 +120,11 @@ export const PANELS = [
     // the spectrum, not occupying a column of the left dock. The size is the two
     // barrels and the frequency readout with nothing to scroll.
     //
-    // Minimal: the two barrels alone — the controls that exist here because
-    // they have no good small form anywhere else. Like every panel it opens cut
-    // down on a phone, which for this one is the two wheels; the mode buttons,
-    // the width and the squelch are one tap on the header away.
+    // Minimal: the two barrels and the squelch — the controls that exist here
+    // because they have no good small form anywhere else, plus the one setting
+    // on this panel that is adjusted while listening rather than beforehand.
+    // Like every panel it opens cut down on a phone; the mode buttons, the width
+    // and the view are one tap on the header away.
     {
         id: 'multipad',
         title: 'Multipad',

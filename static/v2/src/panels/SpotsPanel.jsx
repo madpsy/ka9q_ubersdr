@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Empty, Icon, Segmented, ShowMore } from '../components/ui.jsx';
+import SpotMap from '../components/SpotMap.jsx';
 import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
@@ -373,6 +374,12 @@ export default function SpotsPanel({ minimal }) {
 
     const set = (patch) => setFilters((prev) => ({ ...prev, [active]: { ...prev[active], ...patch } }));
 
+    // The spot whose map is open, if any. A modal rather than a panel: it is a
+    // detour from a list — you came to read the decodes and stopped to ask about
+    // one — and a detour that rearranged the panel would lose your place in the
+    // thing you were reading.
+    const [mapped, setMapped] = useState(null);
+
     // Whether there is anywhere to send a callsign. The same gate the CW graph's
     // context uses, and the same one the Callsign panel's `requires` uses to
     // exist at all.
@@ -398,6 +405,9 @@ export default function SpotsPanel({ minimal }) {
 
     return (
         <div className="stack spots">
+            {mapped && (
+                <SpotMap spot={mapped} lookups={lookups} onClose={() => setMapped(null)} />
+            )}
             <div className="spots__head">
                 {tabs.length > 1 && (
                     <Segmented
@@ -473,7 +483,16 @@ export default function SpotsPanel({ minimal }) {
                         // Only where there is a lookup service to ask. Without
                         // one a digital row goes back to being a reading row
                         // rather than a button that does nothing.
-                        onLookup={lookups ? (spot) => lookup(spot.callsign) : null}
+                        //
+                        // Offered on more than lookups alone: without a lookup
+                        // service the map still has the locator the decoder
+                        // reported and the country its prefix implies, which is
+                        // the whole of what a digital row knows about a station
+                        // and more than the row itself can show.
+                        onLookup={lookups || spot.grid ? (s2) => {
+                            lookup(s2.callsign);
+                            setMapped(s2);
+                        } : null}
                         minimal={minimal}
                     />
                 ))}

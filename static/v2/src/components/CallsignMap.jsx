@@ -26,7 +26,16 @@ const ZOOM = 7;
 // map that opens at street level on one is stating a precision it does not have.
 const ZOOM_GRID = 5;
 
-export default function CallsignMap({ call, position }) {
+/**
+ * @param call      the callsign, and the first line of the label.
+ * @param position  { lat, lon, fromGrid } — see positionOf.
+ * @param lines     what else the label says, under the callsign. Empty in the
+ *                  panel, where everything it could say is already in the rows
+ *                  above the map; filled in the spot modal, where the map *is*
+ *                  the answer and there is nothing else on screen.
+ * @param className extra class for the box, so a modal can size it.
+ */
+export default function CallsignMap({ call, position, lines, className }) {
     const box = useRef(null);
     const map = useRef(null);
     const [failed, setFailed] = useState(false);
@@ -68,13 +77,23 @@ export default function CallsignMap({ call, position }) {
                 iconAnchor: [7, 7],
             });
 
-            L.marker([lat, lon], { icon })
-                .addTo(m)
-                // Permanent, so the map says whose it is without being touched.
+            // Escaped, not trusted: every line of this comes off the wire — a
+            // lookup provider's idea of an operator's name, a country from a
+            // prefix table — and Leaflet takes tooltip content as HTML.
+            const esc = (v) => String(v)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const label = [
                 // A tilde where the position came from a grid square, for the
                 // same reason the distance readout carries one: it is the centre
                 // of a square, not an address.
-                .bindTooltip(`${call}${fromGrid ? ' ~' : ''}`, {
+                `<b>${esc(call)}${fromGrid ? ' ~' : ''}</b>`,
+                ...(lines || []).filter(Boolean).map(esc),
+            ].join('<br>');
+
+            L.marker([lat, lon], { icon })
+                .addTo(m)
+                // Permanent, so the map says whose it is without being touched.
+                .bindTooltip(label, {
                     permanent: true,
                     direction: 'top',
                     offset: [0, -8],
@@ -92,12 +111,12 @@ export default function CallsignMap({ call, position }) {
                 map.current = null;
             }
         };
-    }, [lat, lon, fromGrid, call]);
+    }, [lat, lon, fromGrid, call, (lines || []).join('|')]);
 
     // Nothing to draw, or Leaflet did not load: no map, and no empty box where
     // one would have been. The button that opens this is only offered when there
     // is a position, so the first case is a lookup that answered without one.
     if (lat == null || lon == null || failed) return null;
 
-    return <div className="csmap" ref={box} />;
+    return <div className={`csmap${className ? ` ${className}` : ''}`} ref={box} />;
 }

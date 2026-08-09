@@ -3146,6 +3146,33 @@ a.btn { text-decoration: none; }
 }
 .csmap__tip::before { display: none; }
 
+/* A spot's position, opened from a row that cannot be tuned — see SpotMap. The
+   modal sizes itself to this, so this is where the size is decided: as wide as
+   the window allows up to a point, because a map of one pin still has to show
+   enough around it to say where the pin is. */
+.spotmap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(560px, 86vw);
+}
+.spotmap__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-right: 26px; }
+.spotmap__call {
+    font-family: var(--mono);
+    font-size: calc(17px * var(--ui-scale));
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+}
+.spotmap__meta { font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
+/* Which of the two sources placed the pin. Small and dim: it qualifies the map
+   rather than competing with it, and only matters when somebody is about to
+   trust the position for something. */
+.spotmap__source { font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
+/* Taller than the panel's strip — this one is the whole answer rather than a
+   footnote under the rows that already gave it. */
+.csmap--modal { height: min(58vh, 420px); }
+
 /* The way out of the panel, at the foot of it. Full width and self-aligned to
    the end of the stack, so it reads as the last thing rather than as a control
    that belongs to whatever it happens to sit under — the announcer's pickers are

@@ -3150,13 +3150,45 @@ a.btn { text-decoration: none; }
    modal sizes itself to this, so this is where the size is decided: as wide as
    the window allows up to a point, because a map of one pin still has to show
    enough around it to say where the pin is. */
+/* A card, which is what the close button was missing.
+ *
+ * The modal draws a scrim and positions its × at the top right of whatever is
+ * inside it — right for the photo viewer, where the content is an image and its
+ * own edge is the corner. This content was a bare column with no background, so
+ * the × was inset six pixels from an edge nobody could see and landed in the
+ * middle of the title row instead of in a corner.
+ *
+ * So the content becomes a panel: a surface, a border and padding, and the ×
+ * ends up where a × belongs. The padding is also what keeps the map's own corners
+ * off the card's. */
 .spotmap {
     display: flex;
     flex-direction: column;
     gap: 8px;
     width: min(560px, 86vw);
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
 }
-.spotmap__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-right: 26px; }
+/* Clear of the × in the corner, which is 30px wide and inset 6 from the card's
+   edge — so 36 is what it occupies and 40 is what this row has to give back. The
+   swap button sits at the end of this row and was landing underneath it. */
+.spotmap__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    /* The × is measured from the card's border box and this padding from inside
+       it, so the 14px of card padding counts towards the clearance. */
+    padding-right: 26px;
+    /* And the row has to be at least as tall as the button in the corner, or a
+       one-line title leaves the × hanging below it. */
+    min-height: 26px;
+}
 .spotmap__call {
     font-family: var(--mono);
     font-size: calc(17px * var(--ui-scale));

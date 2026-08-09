@@ -44,17 +44,32 @@ Switching modes takes effect immediately (the window reloads).
 
 ### Shared settings
 
-Because each instance's local port is its own origin, every receiver keeps its
-own v2 settings — theme, layout, panels, shortcuts — in its own localStorage.
-That is the default. The chooser's **"Share settings between receivers"**
-toggle bridges them for whoever wants every receiver to look the same: with it
-on, a snapshot of the `ubersdr.v2.*` keys is kept in userData
+Because each instance's local port is its own origin, every receiver would
+otherwise keep its own v2 settings in its own localStorage. That isolation is a
+property of how the proxy works rather than something anybody asked for, so the
+chooser's **"Share settings between receivers"** option is **on by default**:
+one arrangement of the interface, on every receiver.
+
+With it on, a snapshot of the `ubersdr.v2.*` keys is kept in userData
 (`shared-prefs.json`), each receiver window is seeded from it before the page
 boots (`receiver-preload.js`, which exposes nothing to the page), and changes
-made in any window are written back to it. Turning sharing on makes the most
-recently opened receiver the template; windows already open pick up later
-changes when reloaded. Turning it off simply stops the bridging — every
-receiver is independent again with whatever settings it had last.
+made in any window are written back. The first receiver opened supplies the
+initial snapshot; windows already open pick up later changes when reloaded.
+
+Two things are deliberately never shared:
+
+- `ubersdr.v2.radio` — frequency, mode, filter edges, spectrum view, squelch
+  and volume. Carrying a frequency across would tune a receiver to a band it
+  may not cover, and a squelch set against one receiver's noise floor can gate
+  another's audio to silence.
+- the news panel's article cache, which is bulk rather than settings.
+
+The session password is in `sessionStorage`, not `localStorage`, so it is never
+part of the snapshot.
+
+Turning sharing off stops the bridging and nothing else: the per-origin stores
+are never emptied, so every receiver is independent again with whatever it had
+last — which makes the toggle safe to try both ways.
 
 ## Discovery
 

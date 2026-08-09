@@ -19,15 +19,31 @@ const { ipcRenderer } = require('electron');
 const PREFIX = 'ubersdr.v2.';
 // The news panel's fetched-article cache: bulky, transient, and nothing about
 // how the interface looks.
-const SKIP = 'ubersdr.v2.news.cache.';
+const SKIP_PREFIX = 'ubersdr.v2.news.cache.';
+// What this receiver was doing, as opposed to how the operator likes their
+// interface: frequency, mode, filter edges, where the spectrum is pointed, and
+// the squelch. All of it belongs to one receiver.
+//
+// Not merely surprising to share — carrying a frequency across would tune a
+// receiver to a band it may not even cover, and a squelch threshold set against
+// one receiver's noise floor can gate another's audio to silence, which reads
+// as a broken receiver rather than as a setting. Volume and the output device
+// live in the same blob and are the price of excluding it whole; they are set
+// once per receiver, where the tuning changes every minute.
+const SKIP_EXACT = new Set(['ubersdr.v2.radio']);
+
 // Settings change at human speed; this is a copy of a few kilobytes.
 const POLL_MS = 2000;
+
+function shared(key) {
+    return !!key && key.startsWith(PREFIX) && !key.startsWith(SKIP_PREFIX) && !SKIP_EXACT.has(key);
+}
 
 function read() {
     const map = {};
     for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        if (!key || !key.startsWith(PREFIX) || key.startsWith(SKIP)) continue;
+        if (!shared(key)) continue;
         map[key] = localStorage.getItem(key);
     }
     return map;
@@ -70,7 +86,10 @@ if (location.pathname.startsWith('/v2')) {
             // difference in how the shared ones are set.
             try {
                 for (const [key, value] of Object.entries(seed.prefs)) {
-                    localStorage.setItem(key, value);
+                    // Filtered on the way in as well as on the way out: a
+                    // snapshot written by an older build could hold a key this
+                    // one has since decided is the receiver's own business.
+                    if (shared(key)) localStorage.setItem(key, value);
                 }
             } catch { /* quota — the page still boots on its own settings */ }
         }

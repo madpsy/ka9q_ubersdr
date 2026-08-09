@@ -3170,8 +3170,25 @@ a.btn { text-decoration: none; }
    trust the position for something. */
 .spotmap__source { font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
 /* Taller than the panel's strip — this one is the whole answer rather than a
-   footnote under the rows that already gave it. */
-.csmap--modal { height: min(58vh, 420px); }
+   footnote under the rows that already gave it. Shorter than it was now that the
+   facts sit under it: between them they have to fit a phone in portrait without
+   the modal becoming a page. */
+.csmap--modal { height: min(42vh, 340px); }
+
+/* What the decoder reported, named. Two columns on anything with room, one on a
+   phone: these are short values against short labels, and a single column of
+   them is a lot of scrolling for a modal opened from a list. */
+.spotmap__facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+    gap: 1px 18px;
+    max-height: 30vh;
+    overflow-y: auto;
+}
+/* The message is a sentence rather than a field — it takes the width of the grid
+   however many columns there are, and wraps instead of being clipped. */
+.spotmap__facts > .kv:last-child { grid-column: 1 / -1; }
+.spotmap__facts > .kv:last-child .kv__v { white-space: normal; overflow-wrap: anywhere; }
 
 /* The way out of the panel, at the foot of it. Full width and self-aligned to
    the end of the stack, so it reads as the last thing rather than as a control

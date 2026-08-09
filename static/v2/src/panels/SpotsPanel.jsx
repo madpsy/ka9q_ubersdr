@@ -406,7 +406,12 @@ export default function SpotsPanel({ minimal }) {
     return (
         <div className="stack spots">
             {mapped && (
-                <SpotMap spot={mapped} lookups={lookups} onClose={() => setMapped(null)} />
+                <SpotMap
+                    spot={mapped}
+                    lookups={lookups}
+                    receiver={serverInfo && serverInfo.receiver}
+                    onClose={() => setMapped(null)}
+                />
             )}
             <div className="spots__head">
                 {tabs.length > 1 && (

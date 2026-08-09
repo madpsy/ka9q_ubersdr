@@ -199,6 +199,43 @@ t('an unrecognised failure falls back to the server text, then the status', () =
     assert.strictEqual(cs.lookupError(500, null), 'Lookup failed (HTTP 500).');
 });
 
+// --- the great-circle path -------------------------------------------------
+
+t('the path starts where it is told and ends where it is told', () => {
+    const pts = cs.geodesicPoints(51.5, -0.1, 40.7, -74, 64);
+    assert.strictEqual(pts.length, 65, 'steps + 1 vertices');
+    near(pts[0][0], 51.5, 1e-6, 'first lat');
+    near(pts[0][1], -0.1, 1e-6, 'first lon');
+    near(pts[64][0], 40.7, 1e-6, 'last lat');
+    near(pts[64][1], -74, 1e-6, 'last lon');
+});
+
+t('it is a great circle, not the straight line a flat map would draw', () => {
+    // London to New York bows north of the rhumb line by a few degrees — that
+    // bow is the whole reason the path is drawn as a curve rather than as two
+    // points joined up.
+    const pts = cs.geodesicPoints(51.5, -0.1, 40.7, -74, 64);
+    const mid = pts[32];
+    const flat = (51.5 + 40.7) / 2;
+    assert.ok(mid[0] > flat + 2, `midpoint ${mid[0]} should bow north of ${flat}`);
+});
+
+t('the same point twice is one vertex, not a division by zero', () => {
+    const pts = cs.geodesicPoints(51.5, -0.1, 51.5, -0.1, 64);
+    assert.deepStrictEqual(pts, [[51.5, -0.1]]);
+    for (const p of pts) assert.ok(Number.isFinite(p[0]) && Number.isFinite(p[1]));
+});
+
+t('every vertex is a real coordinate, however long the path', () => {
+    // Antipodal-ish is where a naive interpolation produces NaN.
+    for (const [a, b, c, d] of [[0, 0, 0, 179.9], [90, 0, -90, 0], [-33.9, 151.2, 51.5, -0.1]]) {
+        for (const p of cs.geodesicPoints(a, b, c, d, 32)) {
+            assert.ok(Number.isFinite(p[0]) && Number.isFinite(p[1]), `${a},${b} → ${c},${d}`);
+            assert.ok(p[0] >= -90.001 && p[0] <= 90.001, `lat ${p[0]}`);
+        }
+    }
+});
+
 // --- the lookup call --------------------------------------------------------
 
 // The stub is handed to the body as well as installed, so a test can ask it how

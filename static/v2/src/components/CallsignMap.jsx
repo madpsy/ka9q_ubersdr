@@ -14,6 +14,7 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
+import { geodesicPoints } from '../lib/callsign.js';
 
 const LEAFLET_JS = '/leaflet.js';
 const LEAFLET_CSS = '/leaflet.css';
@@ -34,8 +35,13 @@ const ZOOM_GRID = 5;
  *                  above the map; filled in the spot modal, where the map *is*
  *                  the answer and there is nothing else on screen.
  * @param className extra class for the box, so a modal can size it.
+ * @param from      the receiver: { lat, lon, label }. Given one, the map draws
+ *                  it as a second pin with a great-circle path to the station
+ *                  and fits both on screen — the picture the distance and
+ *                  bearing are numbers for. Omitted in the Callsign panel, where
+ *                  the map is a strip and two pins on it would be two dots.
  */
-export default function CallsignMap({ call, position, lines, className }) {
+export default function CallsignMap({ call, position, lines, className, from }) {
     const box = useRef(null);
     const map = useRef(null);
     const [failed, setFailed] = useState(false);
@@ -100,6 +106,42 @@ export default function CallsignMap({ call, position, lines, className }) {
                     className: 'csmap__tip',
                 })
                 .openTooltip();
+
+            // The receiver, and the path between. Green against the station's
+            // red, which is v1's pairing on the same map.
+            if (from && Number.isFinite(from.lat) && Number.isFinite(from.lon)) {
+                const rxIcon = L.divIcon({
+                    className: '',
+                    html: '<div style="width:14px;height:14px;background:#28a745;'
+                        + 'border:3px solid #fff;border-radius:50%;'
+                        + 'box-shadow:0 0 6px rgba(40,167,69,0.8);"></div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                });
+                L.marker([from.lat, from.lon], { icon: rxIcon })
+                    .addTo(m)
+                    // Not permanent, unlike the station's. Two labels on a map
+                    // this size overlap as soon as the path is short, and of the
+                    // two the station is the one you opened this to read.
+                    .bindTooltip(from.label || 'Receiver', { direction: 'top', className: 'csmap__tip' });
+
+                // A curve, because that is the path: a straight line between two
+                // distant points on a Mercator map is not where the signal went.
+                L.polyline(geodesicPoints(from.lat, from.lon, lat, lon), {
+                    color: '#e5484d',
+                    weight: 2,
+                    opacity: 0.85,
+                    dashArray: '5, 6',
+                }).addTo(m);
+
+                // Both ends on screen, with room at the top for the station's
+                // permanent tooltip — which sits above its pin and would
+                // otherwise be cropped by the edge it was just fitted to.
+                m.fitBounds(
+                    L.latLngBounds([from.lat, from.lon], [lat, lon]).pad(0.15),
+                    { paddingTopLeft: [0, 48] },
+                );
+            }
         };
 
         build().catch(() => { if (!cancelled) setFailed(true); });
@@ -111,7 +153,8 @@ export default function CallsignMap({ call, position, lines, className }) {
                 map.current = null;
             }
         };
-    }, [lat, lon, fromGrid, call, (lines || []).join('|')]);
+    }, [lat, lon, fromGrid, call, (lines || []).join('|'),
+        from && from.lat, from && from.lon, from && from.label]);
 
     // Nothing to draw, or Leaflet did not load: no map, and no empty box where
     // one would have been. The button that opens this is only offered when there

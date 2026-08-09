@@ -86,6 +86,42 @@ export function distanceBearing(fromLat, fromLon, toLat, toLon) {
 // position if it has one, otherwise the centre of their grid square. The widget
 // makes the same choice, and the distinction matters — a grid square is 3-5 km
 // across at best, so a bearing from one is an approximation.
+/**
+ * A great-circle path between two points, as [lat, lon] pairs for a polyline.
+ *
+ * Drawn as a curve because it is one: a straight line on a Mercator map between
+ * two distant points is not the path the signal took, and on HF the difference
+ * is most of what makes a contact interesting. This is v1's own interpolation
+ * (callsign_lookup.html, geodesicPoints) so the two frontends draw the same arc.
+ *
+ * `steps` segments, which at 64 is smooth at any zoom a panel map reaches.
+ */
+export function geodesicPoints(lat1, lon1, lat2, lon2, steps = 64) {
+    const rad = (d) => (d * Math.PI) / 180;
+    const deg = (r) => (r * 180) / Math.PI;
+    const p1 = rad(lat1);
+    const l1 = rad(lon1);
+    const p2 = rad(lat2);
+    const l2 = rad(lon2);
+    const d = 2 * Math.asin(Math.sqrt(
+        Math.sin((p2 - p1) / 2) ** 2
+        + Math.cos(p1) * Math.cos(p2) * Math.sin((l2 - l1) / 2) ** 2,
+    ));
+    // The same point twice: one vertex, and no division by a sine of nothing.
+    if (!d || !Number.isFinite(d)) return [[lat1, lon1]];
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+        const f = i / steps;
+        const A = Math.sin((1 - f) * d) / Math.sin(d);
+        const B = Math.sin(f * d) / Math.sin(d);
+        const x = A * Math.cos(p1) * Math.cos(l1) + B * Math.cos(p2) * Math.cos(l2);
+        const y = A * Math.cos(p1) * Math.sin(l1) + B * Math.cos(p2) * Math.sin(l2);
+        const z = A * Math.sin(p1) + B * Math.sin(p2);
+        pts.push([deg(Math.atan2(z, Math.sqrt(x * x + y * y))), deg(Math.atan2(y, x))]);
+    }
+    return pts;
+}
+
 export function positionOf(data) {
     if (!data) return null;
     const lat = Number(data.lat);

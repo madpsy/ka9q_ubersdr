@@ -35,8 +35,9 @@ import React, { useEffect, useState } from '../react.js';
 import { Empty, Modal } from './ui.jsx';
 import CallsignMap from './CallsignMap.jsx';
 import { getSessionId } from '../radio/session.js';
+import { countryFlag } from '../lib/format.js';
 import {
-    displayName, lookupCallsignData, maidenheadToLatLon, positionOf,
+    displayName, distanceBearing, lookupCallsignData, maidenheadToLatLon, positionOf,
 } from '../lib/callsign.js';
 
 // The prefix table the server already serves — the same one behind the country
@@ -71,10 +72,14 @@ async function resolve(spot, lookups) {
             if (position) {
                 const name = displayName(data);
                 const country = data.country || (data.cty && data.cty.country) || spot.country || '';
+                // The map's own label stays short — a name and a place. Everything
+                // else the lookup and the spot know is in the rows beside it, where
+                // there is room to name each field.
                 if (name) lines.push(name);
                 if (country) lines.push(country);
-                if (data.grid) lines.push(`Grid ${data.grid}`);
-                return { position, lines, source: 'lookup' };
+                return {
+                    position, lines, source: 'lookup', name, cty: null, grid: data.grid || '',
+                };
             }
         } catch (e) {
             // No answer, a rate limit, a provider that has never heard of them:
@@ -82,19 +87,78 @@ async function resolve(spot, lookups) {
         }
     }
 
+    // Asked for either way, because it is what the details show as continent and
+    // zones — the spot carries a country and nothing else about the entity.
+    const cty = await ctyOf(call);
     const grid = spot.grid || '';
     const at = grid ? maidenheadToLatLon(grid) : null;
-    if (!at) return { position: null, lines, source: 'none' };
+    if (!at) return { position: null, lines, source: 'none', cty };
 
-    const cty = await ctyOf(call);
     const country = (cty && cty.country) || spot.country || '';
     if (country) lines.push(country);
-    if (cty && cty.continent) lines.push(`${cty.continent}  CQ ${cty.cq_zone}  ITU ${cty.itu_zone}`);
     lines.push(`Grid ${grid}`);
-    return { position: { ...at, fromGrid: true }, lines, source: 'grid' };
+    return { position: { ...at, fromGrid: true }, lines, source: 'grid', cty, grid };
 }
 
-export default function SpotMap({ spot, lookups, onClose }) {
+function Row({ k, children }) {
+    if (children == null || children === '' || children === false) return null;
+    return (
+        <div className="kv">
+            <span className="kv__k">{k}</span>
+            <span className="kv__v">{children}</span>
+        </div>
+    );
+}
+
+/**
+ * Everything the spot itself carried, as rows.
+ *
+ * The row that opened this had four columns and a tooltip; this is the same
+ * record with nothing left out and nothing abbreviated to fit a dock. The
+ * decoder's own reading of the transmission — mode, submode, SNR, the message
+ * as sent — is the part that cannot be got anywhere else: a lookup can always be
+ * repeated, that decode happened once.
+ *
+ * `cty` is what the prefix table added, and only where it was asked: the country
+ * is on the spot already, the zones are not.
+ */
+function Details({ spot, cty, distance }) {
+    const mhz = (spot.frequency / 1e6).toFixed(spot.frequency >= 1e6 ? 4 : 6);
+    const flag = countryFlag(spot.countryCode);
+    const country = spot.country || (cty && cty.country) || '';
+    const zones = cty && (cty.cq_zone || cty.itu_zone)
+        ? [cty.cq_zone ? `CQ ${cty.cq_zone}` : '', cty.itu_zone ? `ITU ${cty.itu_zone}` : '']
+            .filter(Boolean).join('  ·  ')
+        : '';
+
+    return (
+        <div className="spotmap__facts">
+            <Row k="Heard">{`${new Date(spot.at).toISOString().slice(11, 19)} UTC`}</Row>
+            <Row k="Frequency">{`${mhz} MHz`}</Row>
+            <Row k="Mode">{spot.submode ? `${spot.mode} / ${spot.submode}` : spot.mode}</Row>
+            <Row k="SNR">{spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : null}</Row>
+            <Row k="Speed">{spot.wpm != null ? `${spot.wpm} WPM` : null}</Row>
+            <Row k="Country">{country ? `${flag ? `${flag} ` : ''}${country}` : null}</Row>
+            <Row k="Continent">{cty && cty.continent ? cty.continent : null}</Row>
+            <Row k="Zones">{zones}</Row>
+            <Row k="Locator">{spot.grid || null}</Row>
+            {/* From the receiver, which is what makes it worth printing: the
+                same pair the red path on the map draws. Marked where the
+                position it was measured from is a grid square. */}
+            <Row k="Distance">
+                {distance
+                    ? `${distance.distKm.toLocaleString()} km  ·  ${distance.bearing}°${distance.fromGrid ? ' ~' : ''}`
+                    : null}
+            </Row>
+            <Row k="Spotted by">{spot.spotter || null}</Row>
+            {/* Last, and the widest: an FT8 exchange is the only line here that
+                is a sentence rather than a field. */}
+            <Row k="Message">{spot.message || spot.comment || null}</Row>
+        </div>
+    );
+}
+
+export default function SpotMap({ spot, lookups, receiver, onClose }) {
     const [state, setState] = useState(null);
 
     useEffect(() => {
@@ -105,20 +169,45 @@ export default function SpotMap({ spot, lookups, onClose }) {
     }, [spot.key, spot.callsign, lookups]);
 
     const call = spot.callsign;
+    const flag = countryFlag(spot.countryCode);
+
+    // Where the receiver is, when it has said. 0,0 is the config default rather
+    // than a position — the Callsign panel's Beam readout rejects it the same
+    // way — and a path drawn from the Gulf of Guinea is worse than no path.
+    const rx = receiver && receiver.gps && (receiver.gps.lat || receiver.gps.lon)
+        ? { lat: receiver.gps.lat, lon: receiver.gps.lon, label: receiver.callsign || 'Receiver' }
+        : null;
+
+    // Preferring the server's own figure keeps this line and the spot list
+    // saying the same thing; computing it is for the fallback, where the
+    // position came from a locator the server did not measure against.
+    let distance = null;
+    if (spot.distanceKm != null) {
+        distance = {
+            distKm: Math.round(spot.distanceKm),
+            bearing: Math.round(spot.bearingDeg || 0),
+            fromGrid: false,
+        };
+    } else if (rx && state && state.position) {
+        const db = distanceBearing(rx.lat, rx.lon, state.position.lat, state.position.lon);
+        if (db) distance = { ...db, fromGrid: !!state.position.fromGrid };
+    }
 
     return (
         <Modal onClose={onClose} label={`${call} on the map`}>
             <div className="spotmap">
                 <div className="spotmap__head">
-                    <span className="spotmap__call">{call}</span>
-                    {/* What the row already said, kept in front of the map: the
-                        modal covers the list it came from, and a mode and an SNR
-                        are what make one decode different from the next. */}
+                    <span className="spotmap__call">{flag ? `${flag} ${call}` : call}</span>
+                    {/* The one line that says which decode this was, in front of
+                        everything else: the modal covers the list it came from,
+                        and a mode and an SNR are what tell one row from the next.
+                        Repeated in the rows below, where each has a name — this
+                        is for recognising the row, those are for reading it. */}
                     <span className="spotmap__meta">
                         {[
                             spot.submode ? `${spot.mode}/${spot.submode}` : spot.mode,
                             spot.snr != null ? `${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : '',
-                            spot.distanceKm != null ? `${Math.round(spot.distanceKm)} km` : '',
+                            `${(spot.frequency / 1e6).toFixed(4)} MHz`,
                         ].filter(Boolean).join('  ·  ')}
                     </span>
                 </div>
@@ -131,6 +220,7 @@ export default function SpotMap({ spot, lookups, onClose }) {
                         position={state.position}
                         lines={state.lines}
                         className="csmap--modal"
+                        from={rx}
                     />
                 )}
 
@@ -146,13 +236,20 @@ export default function SpotMap({ spot, lookups, onClose }) {
                     </Empty>
                 )}
 
+                {/* Everything the decoder reported, named. Shown whether or not
+                    a position was found: a spot with no locator is still a spot,
+                    and the message it carried is the part that only happened
+                    once. */}
+                <Details spot={spot} cty={state && state.cty} distance={distance} />
+
                 {/* Where the pin came from, because the two are not the same
                     claim — see the note at the top. */}
                 {state && state.position && (
                     <div className="spotmap__source">
                         {state.source === 'grid'
-                            ? `Positioned from the reported locator — accurate to the grid square, not the address.`
+                            ? 'Positioned from the reported locator — accurate to the grid square, not the address.'
                             : 'Positioned from the callsign lookup.'}
+                        {rx ? ' The green pin is this receiver; the dashed path is the great circle between them.' : ''}
                     </div>
                 )}
             </div>

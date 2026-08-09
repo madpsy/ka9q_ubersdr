@@ -266,6 +266,15 @@ export function ChatProvider({ children }) {
             // It is also the one error whose instruction you cannot follow —
             // the name *is* set, and setting it again is exactly what just
             // happened underneath.
+            // We got ahead of the handshake: nothing is accepted until the
+            // server has registered `subscribe_chat`, and the connection now
+            // holds anything sent before that and replays it on confirmation
+            // (see setUsername there). Whatever was refused is already on its
+            // way again, so this is our own race and not news for the operator.
+            if (/subscribe to chat/i.test(message)) {
+                setError(null);
+                return;
+            }
             if (message === 'username not set') {
                 // Still waiting to be announced: this is the race described at
                 // joinPending, so the join that is already on its way is the

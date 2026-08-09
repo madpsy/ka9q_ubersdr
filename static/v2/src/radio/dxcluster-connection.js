@@ -276,6 +276,27 @@ export class DXClusterConnection extends Emitter {
 
     setUsername(username) {
         this.username = username;
+        // Not before the server has said it is listening.
+        //
+        // Every chat message is refused until `subscribe_chat` has been
+        // registered — "you must subscribe to chat first" — and the socket is
+        // subscribed on open, so there is a round trip during which a join is
+        // simply thrown away. Someone who opened the panel and typed a name
+        // straight into it landed in exactly that window.
+        //
+        // What made it stick was the latch below. Setting `identitySent` here
+        // said "the name is on its way", and the confirmation handler skips the
+        // replay when it is set — so the one thing that would have recovered the
+        // join was disabled by the join that failed. Pressing Join again did the
+        // same thing again, which is why it kept saying the same thing.
+        //
+        // Held instead: `username` is remembered, `identitySent` stays false,
+        // and the subscription confirmation sends it. That path already exists —
+        // it is what restores identity across a reconnect.
+        if (!this.confirmed.chat) {
+            this.identitySent = false;
+            return false;
+        }
         // Sent now, so the replay does not send it a second time when the next
         // subscription confirmation arrives on this same socket.
         this.identitySent = true;
@@ -302,10 +323,15 @@ export class DXClusterConnection extends Emitter {
             bw_high: Math.round(bandwidthHigh),
             ...(zoom > 0 ? { zoom_bw: zoom } : {}),
         };
+        // Held until the subscription is confirmed, as the name above is, and
+        // for the same reason — the confirmation replays `lastStatus`, so a
+        // status published a moment too early is not lost, only deferred.
+        if (!this.confirmed.chat) return false;
         return this.send({ type: 'chat_set_frequency_mode', ...this.lastStatus });
     }
 
     requestUsers() {
+        if (!this.confirmed.chat) return false;
         return this.send({ type: 'chat_request_users' });
     }
 

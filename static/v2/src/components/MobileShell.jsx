@@ -171,12 +171,14 @@ export default function MobileShell() {
     // over the spectrum would be coming back to a mess.
     const [menuId, setMenuId] = useState(null);
     const menu = menuId ? groups.find((g) => g.id === menuId) || null : null;
-    // A group is lit when the sheet showing belongs to it, which is the only way
-    // to tell where you are once the row is groups rather than panels.
-    const openGroup = panel ? groups.find((g) => g.items.some((p) => p.id === panel.id)) : null;
     // The extension wins the sheet: opening one is the more recent choice, and
     // it is opened from a panel that would otherwise sit on top of it.
     const panel = extension ? null : (openId ? PANEL_BY_ID[openId] : null);
+    // A group is lit when the sheet showing belongs to it, which is the only way
+    // to tell where you are once the row is groups rather than panels. Below
+    // `panel` and not above it: a const read before its declaration is a
+    // ReferenceError, and this one is read on every render of the shell.
+    const openGroup = panel ? groups.find((g) => g.items.some((p) => p.id === panel.id)) : null;
     // Guarded by the panel's own declaration, as Section and FloatingPanel do:
     // a stored flag from a panel that has since dropped its minimal view would
     // otherwise render it a prop it no longer honours.

@@ -27,7 +27,10 @@ import NavTypes from '../components/NavTypes.jsx';
 import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
-import { clamp, countryFlag, formatFreqShort, formatHz, snrColour, snrFraction } from '../lib/format.js';
+import {
+    clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
+} from '../lib/format.js';
+import { useHeaderFits } from '../lib/useHeaderFits.js';
 import { isTap } from '../lib/barrel.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
@@ -243,6 +246,10 @@ function MarkerEdges() {
 }
 
 // Frequency: the readout, the step, and the drum that turns it.
+// What the passband chip costs the readout: "12.00k" at the size below, and the
+// gap in front of it.
+const BW_W = 52;
+
 function FreqWheel() {
     const { tuning, actions } = useRadio();
     const display = useDisplay();
@@ -250,6 +257,18 @@ function FreqWheel() {
     // ± buttons, so the pad tunes on the same grid as everything else.
     const step = display.tuneStep || 500;
     const [editing, setEditing] = useState(false);
+
+    // Whether the head has room for the passband beside the frequency.
+    //
+    // Measured on the readout, not on the row: the readout is the row's only
+    // flexible child, so the row's spare width is *inside* it and a measurement
+    // of the row would read zero however wide the panel got. The digits are the
+    // elastic part — they are what a narrower panel would have to eat into — and
+    // the chip is dropped rather than allowed to squeeze them. See
+    // lib/headerRoom.js for the two-question hysteresis that keeps that answer
+    // still.
+    const headRef = useRef(null);
+    const showBw = useHeaderFits(headRef, '.pad-wheel__digits', BW_W) && !editing;
 
     // A spin outruns React: the drum asks for a step per frame and the prop it
     // would read is the one from the frame before. Same ref trick the Receiver
@@ -296,9 +315,35 @@ function FreqWheel() {
                         className="pad-wheel__freq"
                         title="Tap to type a frequency"
                         onClick={() => setEditing(true)}
+                        ref={headRef}
                     >
-                        {formatHz(tuning.frequency)}
+                        {/* Wrapped rather than left as a bare text node, so the
+                            fit measurement below has an element to ask how wide
+                            the digits are. Layout is unchanged: an anonymous
+                            flex item and an explicit one lay out the same. */}
+                        <span className="pad-wheel__digits">{formatHz(tuning.frequency)}</span>
                         <span className="pad-wheel__unit">Hz</span>
+                        {/* The passband, after the frequency, as the top bar
+                            shows it after the mode — and dropped the same way
+                            when the row has no room for it. The pad's readout is
+                            the one place a phone reads its own dial from, and
+                            what you are listening *through* belongs beside what
+                            you are listening to.
+
+                            Inside the button rather than beside it, which is
+                            what makes the room measurable: the button is the
+                            row's flexible child, so every spare pixel in the
+                            head is inside this box and nowhere else. It reads
+                            rather than does — pressing it opens the frequency
+                            entry like the rest of the button — because the
+                            Receiver panel's slider is where a passband is set
+                            and a second way in from here would be a chip that
+                            did something different from the thing around it. */}
+                        {showBw && (
+                            <span className="pad-wheel__bw">
+                                {formatFilterWidth(tuning.bandwidthLow, tuning.bandwidthHigh)}
+                            </span>
+                        )}
                     </button>
                 )}
                 {/* Native selects on purpose: a phone gives them a full-height

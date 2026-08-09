@@ -2523,6 +2523,22 @@ a.btn { text-decoration: none; }
     text-transform: uppercase;
     color: var(--text-faint);
 }
+/* The digits, wrapped so the fit measurement has something to ask — see
+   FreqWheel. `flex: none` because it is the thing being measured: a readout that
+   shrank to fit would never report that it had run out of room. */
+.pad-wheel__digits { flex: none; }
+/* The passband, after the frequency. Sized like the top bar's chip rather than
+   in proportion to a 27px readout, which at the same ratio would have been a
+   second headline: this is the qualifier on the number beside it. Dimmer than
+   the digits and brighter than the "Hz" label, which is the order they matter
+   in. */
+.pad-wheel__bw {
+    flex: none;
+    font-size: calc(13px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+}
 .pad-wheel__input {
     flex: 1;
     min-width: 0;

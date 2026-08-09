@@ -275,6 +275,15 @@ export function ChatProvider({ children }) {
                 setError(null);
                 return;
             }
+            // A status update the server thought too soon. Nothing the operator
+            // did and nothing they can do: publishing frequency and mode is this
+            // panel's own housekeeping, it is throttled at our end already, and
+            // the next dial movement publishes again. Reporting it would be
+            // reporting our own timing at somebody trying to have a conversation.
+            if (/update rate limit/i.test(message)) {
+                setError(null);
+                return;
+            }
             if (message === 'username not set') {
                 // Still waiting to be announced: this is the race described at
                 // joinPending, so the join that is already on its way is the
@@ -431,7 +440,16 @@ export function ChatProvider({ children }) {
             setUsername(name);
             setJoined(true);
             try { localStorage.setItem(NAME_KEY, name); } catch (e) { /* ignore */ }
-            chat.setStatus(tuning);
+            // No status from here. The effect above publishes one the moment the
+            // server announces us, and it publishes the *whole* status — the
+            // spectrum's resolution included, which this call had no way to
+            // reach. Two publishes a few hundred milliseconds apart, differing
+            // only in that field, is two changes as far as the server is
+            // concerned, and the second comes back "update rate limit exceeded".
+            //
+            // It only surfaced once joining started working: before that the
+            // join failed, nothing was ever announced, and the effect that
+            // publishes never ran at all.
         },
         leave() {
             chat.leave();
@@ -480,7 +498,10 @@ export function ChatProvider({ children }) {
             setChimeOn(on);
             try { localStorage.setItem('ubersdr.v2.chatChime', on ? 'on' : 'off'); } catch (e) { /* ignore */ }
         },
-    }), [chat, tuning]);
+        // `tuning` is no longer among these: the join stopped publishing a status
+        // — see the note in it — and nothing else in here reads the dial, so
+        // keeping it would rebuild every action object on every knob movement.
+    }), [chat]);
 
     const value = useMemo(() => ({
         enabled, state, messages, users, error, username, joined, actions,

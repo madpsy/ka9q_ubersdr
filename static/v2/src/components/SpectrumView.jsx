@@ -270,6 +270,11 @@ function SquelchTag() {
 // Which noise-reduction filter is running, if any. `dsp.enabled` comes from the
 // server's dsp_status echo, so this reflects what the server is actually doing
 // rather than what was requested.
+//
+// The filter's own name, with no "NR" in front of it: the names are the ones the
+// server publishes and nothing else in this row wears them, so the prefix was
+// two characters of a full row spent saying what the word beside it already
+// said. The tooltip carries the description for anyone who does not know a name.
 function NoiseReductionTag() {
     const { dsp, actions } = useRadio();
     if (!dsp.enabled || !dsp.filter) return null;
@@ -284,7 +289,7 @@ function NoiseReductionTag() {
             title={`${schema ? schema.description : 'Noise reduction'} — click to switch it off`}
             onClick={() => actions.setDsp(dsp.filter, false)}
         >
-            NR {dsp.filter.toUpperCase()}
+            {dsp.filter.toUpperCase()}
         </button>
     );
 }

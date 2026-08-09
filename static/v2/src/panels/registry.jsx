@@ -629,6 +629,12 @@ export const PANELS = [
         dock: 'right',
         defaultOpen: false,
         minimal: true,
+        // Off a phone's tab bar to begin with: a handset has no keys to press,
+        // so this is a panel of bindings that cannot be used taking a slot in a
+        // row where every slot is one somebody could. Hidden rather than absent
+        // — a phone on a keyboard case is a real thing, and the Layout panel
+        // brings it back for anyone who has one.
+        mobile: { hidden: true },
         Component: ShortcutsPanel,
     },
     {

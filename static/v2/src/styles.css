@@ -1607,9 +1607,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
     justify-content: center;
     gap: 10px;
     /* Deliberately not opaque: the trace and the waterfall have to stay legible
-       through it, or this is a blank panel with a button on it. */
+       through it, or this is a blank panel with a button on it.
+     *
+     * The translucency is the whole effect. There was a `backdrop-filter:
+     * saturate(0.6)` here as well, to drain the colour out of a display that is
+     * no longer live, and it cost more than every other thing on this page put
+     * together: a backdrop filter is re-evaluated over its whole area on every
+     * composited frame, for as long as it is on screen, whether or not anything
+     * beneath it has changed. Pausing the spectrum — which stops all the drawing
+     * — took a Windows GPU from 85% to 100%, which is the wrong way round and is
+     * how it was found. The colour drain is not worth a permanently pegged GPU
+     * on a display that has stopped updating. */
     background: rgba(6, 9, 14, 0.55);
-    backdrop-filter: saturate(0.6);
     cursor: default;
 }
 [data-theme="light"] .spectrum__paused { background: rgba(226, 233, 242, 0.62); }

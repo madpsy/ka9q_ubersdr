@@ -373,12 +373,17 @@ function handleMessage(msg, sender) {
             break;
         }
 
-        // ── Content script: tab is navigating away ────────────────────────────
+        // ── Content script: the Radio Control panel's settings ────────────────
         case 'ubersdr:radiocontrol': {
+            // Derived here, as every other case does: `sender` is what says
+            // which tab spoke, and only the selected one drives the link.
+            const tabId = sender.tab ? sender.tab.id : null;
+            if (!tabId) break;
             applyRadioControl(tabId, msg.rc);
-            return;
+            break;
         }
 
+        // ── Content script: tab is navigating away ────────────────────────────
         case 'ubersdr:deregister': {
             const tabId = sender.tab ? sender.tab.id : null;
             if (!tabId) break;

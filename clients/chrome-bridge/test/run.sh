@@ -34,3 +34,4 @@ esbuild .build/commands-entry.js --bundle --format=cjs --platform=node \
 
 node contract.test.js
 node content_script.test.js
+node background.test.js

@@ -125,7 +125,15 @@ export default function RadioControlPanel({ minimal }) {
         />
     );
 
-    const picker = transports.length > 1 && (
+    // Always, even when Serial is the only one there is.
+    //
+    // It was hidden below two options, on the reasoning that a browser with
+    // nothing else attached should look as it always had. That was wrong twice
+    // over: it hid the answer to "what is this panel about to use", and it made
+    // the control appear and disappear depending on whether an extension
+    // happened to be installed — so somebody who read about the connection
+    // picker could not find it, and had no way to tell why.
+    const picker = (
         <Field label="Connection">
             <Segmented
                 options={transports}
@@ -334,7 +342,7 @@ export default function RadioControlPanel({ minimal }) {
                 </select>
             </Field>
 
-            <div className="chip-row">
+            <div className="chip-row chip-row--split">
                 {status.connected ? (
                     <Button variant="ghost" size="sm" disabled={status.busy} onClick={() => sync.disconnect()}>
                         Disconnect
@@ -349,6 +357,19 @@ export default function RadioControlPanel({ minimal }) {
                         {status.busy ? 'Connecting…' : 'Connect'}
                     </Button>
                 )}
+                {/* Present but not available here, rather than absent: a control
+                    that exists for one connection and not another reads as a
+                    bug. Opening a serial port raises the browser's own port
+                    picker, and that has to happen on the stack of a click — see
+                    the note in controls/radiosync.js — so there is nothing a
+                    page can do on load that would not be refused. */}
+                <Switch
+                    checked={false}
+                    disabled
+                    onChange={() => {}}
+                    label="Auto-connect"
+                    title="Not possible over serial: the browser only opens a port in response to a click"
+                />
             </div>
 
             {syncControls}

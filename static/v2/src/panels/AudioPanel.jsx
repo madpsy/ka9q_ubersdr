@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
+import { Button, Field, Icon, Modal, Segmented, Slider } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
 import {
     listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
@@ -11,6 +11,79 @@ const CHANNELS = [
     { value: 'left', label: 'Left' },
     { value: 'right', label: 'Right' },
 ];
+
+const FORMATS = [
+    { value: 'opus', label: 'Opus', title: 'Compressed — the default, and around 50 kbit/s in every mode' },
+    { value: 'pcm-zstd', label: 'Uncompressed', title: 'Lossless 16-bit PCM — 210 kbit/s on SSB and CW, 400 kbit/s on AM, SAM and FM' },
+];
+
+// Which audio format the stream is asked for, as the Python and Go clients
+// offer. Opus unless the operator says otherwise, and saying otherwise goes
+// through the same warning those clients show: the cost of the choice lands on
+// whoever runs the receiver, not on the person making it, so it is put in front
+// of them rather than left to be discovered.
+//
+// Only the expensive direction asks. Going back to Opus costs nothing and
+// stopping to confirm it would be a dialog in the way of the right answer.
+function FormatPicker() {
+    const { audio, actions } = useRadio();
+    const [confirming, setConfirming] = useState(false);
+    const current = audio.format || 'opus';
+
+    const choose = (value) => {
+        if (value === current) return;
+        if (value === 'pcm-zstd') {
+            setConfirming(true);
+            return;
+        }
+        actions.setAudioFormat(value);
+    };
+
+    const accept = () => {
+        setConfirming(false);
+        actions.setAudioFormat('pcm-zstd');
+    };
+
+    return (
+        <>
+            <Field label="Format" inline>
+                <Segmented options={FORMATS} value={current} onChange={choose} size="sm" />
+            </Field>
+            <div className="note note--tight">
+                Opus is compressed; uncompressed sends lossless 16-bit PCM at
+                four to eight times the bandwidth, depending on the mode.
+                Changing this reconnects the audio stream.
+            </div>
+            {confirming && (
+                <Modal onClose={() => setConfirming(false)} label="High bandwidth warning">
+                    <div className="stack vibe">
+                        <h2 className="vibe__title">High bandwidth warning</h2>
+                        {/* The Go and Python clients say 4×, which is the SSB
+                            figure. This interface offers the AM family too, and
+                            those run at 24 kHz where it is nearer 8×, so both
+                            are given rather than the flattering one. */}
+                        <p className="vibe__text">
+                            Uncompressed audio uses approximately 4&times; more bandwidth
+                            than Opus on SSB and CW, and around 8&times; on AM, SAM and FM.
+                        </p>
+                        <p className="vibe__text">
+                            This increases costs for the instance owner. Only switch if you
+                            have a specific reason to do so.
+                        </p>
+                        <div className="vibe__row">
+                            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+                                Cancel
+                            </Button>
+                            <Button size="sm" variant="primary" onClick={accept}>
+                                Use uncompressed
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+        </>
+    );
+}
 
 // Which output side to listen on, as in v1's Left/Right checkboxes. This is
 // output routing, not a stereo decode: every buffer is scheduled with two
@@ -244,6 +317,8 @@ export default function AudioPanel({ minimal }) {
                         The most delay allowed before audio is dropped to catch up.
                         A larger buffer rides out network jitter at the cost of latency.
                     </div>
+
+                    <FormatPicker />
 
                     <div className="divider" />
                 </>

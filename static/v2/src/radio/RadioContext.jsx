@@ -118,6 +118,9 @@ export function RadioProvider({ children }) {
         bufferFromUser: saved.bufferSec != null,
         // Which side of a stereo stream to listen to: 'both' | 'left' | 'right'.
         channel: saved.channel || 'both',
+        // Audio wire format: 'opus' | 'pcm-zstd'. Opus unless this browser has
+        // been through the bandwidth warning and chosen otherwise.
+        format: saved.audioFormat === 'pcm-zstd' ? 'pcm-zstd' : 'opus',
         // Output device ID, '' being the system default. Device IDs are
         // per-origin and survive a reload, so this is worth restoring — and if
         // the device has gone since, setAudioSink falls back to the default.
@@ -274,6 +277,10 @@ export function RadioProvider({ children }) {
         player.setBufferSec(audio.bufferSec);
         player.setChannelMode(audio.channel);
         player.setFilters(filters);
+        // Belongs to the socket rather than the player, and for the same
+        // reason: the first connect of the visit has to ask for the restored
+        // format, not the built-in one.
+        audioConn.setFormat(audio.format);
         // Only remembered here — there is no context to route until audio
         // starts, and _createContext applies it then.
         player.setSinkId(audio.sinkId).catch(() => { /* reported when it plays */ });
@@ -288,6 +295,12 @@ export function RadioProvider({ children }) {
         }));
         offs.push(audioConn.on('pcm', ({ planes, sampleRate }) => {
             player.pushPCM(planes, sampleRate);
+        }));
+        // The socket settling on a format other than the one asked for — the
+        // decoder would not load. Said out loud so the panel is not left
+        // showing a choice that did not happen.
+        offs.push(audioConn.on('format', (format) => {
+            setAudio((a) => (a.format === format ? a : { ...a, format }));
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noiseDensity }) => {
             // Before anything else: the figure only counts as evidence when it
@@ -537,6 +550,7 @@ export function RadioProvider({ children }) {
             bufferSec: audio.bufferSec,
             channel: audio.channel,
             sinkId: audio.sinkId,
+            audioFormat: audio.format,
             filters,
             squelchValue,
             dspFilter: dsp.filter,
@@ -827,6 +841,20 @@ export function RadioProvider({ children }) {
             setChannel(mode) {
                 player.setChannelMode(mode);
                 setAudio((a) => ({ ...a, channel: mode }));
+            },
+
+            // Opus or lossless PCM. The server takes the format from the
+            // connect URL and holds it for the life of the socket, so this is
+            // the one audio setting that costs a reconnect — a second or so of
+            // silence, and the tuning, squelch, AGC and DSP are replayed on the
+            // way back up by the 'open' handler.
+            async setAudioFormat(format) {
+                const before = audioConn.format;
+                const next = audioConn.setFormat(format);
+                setAudio((a) => (a.format === next ? a : { ...a, format: next }));
+                if (next === before || !runningRef.current) return;
+                audioConn.disconnect();
+                await audioConn.connect(tuningRef.current);
             },
 
             // Which device the audio comes out of; '' is the system default.

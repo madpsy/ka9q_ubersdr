@@ -6,10 +6,18 @@
 //                 [basebandPower f32][noiseDensity f32][opus payload...]
 //   text frame:   JSON control messages (status / error / pong / agc_state ...)
 //
+// The other format the server offers is `pcm-zstd`, lossless 16-bit PCM at
+// four to eight times the bandwidth depending on the mode's sample rate, which
+// the operator can ask for from the Audio panel. Its frames are shaped
+// differently and are decoded in pcm-stream.js. The format is fixed in the
+// connect URL — there is no command for it — so changing it means reopening
+// the socket.
+//
 // The server falls back to JSON `audio` messages (base64 PCM) when Opus is
 // unavailable; that path is handled too so the UI still works on such a server.
 
 import { Emitter } from './emitter.js';
+import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
 import {
     connectionCheck, frameSize, getBypassPassword, getSessionId, setServerSessionId, wsBase,
 } from './session.js';
@@ -23,6 +31,14 @@ export class AudioConnection extends Emitter {
         this.ws = null;
         this.state = 'idle';        // idle | connecting | open | reconnecting | rejected
         this.params = null;         // last successful connect params, for reconnect
+        // 'opus' | 'pcm-zstd'. Kept off `params` because it is not part of the
+        // tuning, and on the instance so a reconnect keeps it without the
+        // caller having to remember.
+        this.format = 'opus';
+        this.pcm = new PCMStreamDecoder();
+        // In-flight (or spent) attempt to fetch the inflater mid-stream; see
+        // _onPCMBinary. Cleared per connect so a later session may try again.
+        this._pcmLoad = null;
         this.closedByUser = false;
         this.attempts = 0;
         this.maxAttempts = 12;
@@ -37,11 +53,38 @@ export class AudioConnection extends Emitter {
         return this.ws && this.ws.readyState === WebSocket.OPEN;
     }
 
+    // Takes effect on the next connect: the server reads the format from the
+    // URL and never changes it for the life of a socket.
+    setFormat(format) {
+        this.format = format === 'pcm-zstd' ? 'pcm-zstd' : 'opus';
+        return this.format;
+    }
+
     async connect(params) {
         this.closedByUser = false;
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
         this.params = { ...params };
+        // Whatever the last session announced does not describe this one.
+        this.pcm.reset();
+        this._pcmLoad = null;
+
+        // The inflater has to be in hand before the first packet arrives, so it
+        // is fetched ahead of the socket. If it cannot be, fall back to Opus
+        // rather than opening a stream nothing can decode — and say so, so the
+        // panel stops claiming a format the operator is not getting.
+        if (this.format === 'pcm-zstd') {
+            try {
+                await this.pcm.load();
+            } catch (err) {
+                this.format = 'opus';
+                this.emit('error', {
+                    kind: 'format',
+                    message: 'Could not load the uncompressed audio decoder — using Opus.',
+                });
+                this.emit('format', 'opus');
+            }
+        }
 
         const check = await connectionCheck();
         if (!check.allowed) {
@@ -58,7 +101,7 @@ export class AudioConnection extends Emitter {
             bandwidthLow: String(Math.round(params.bandwidthLow)),
             bandwidthHigh: String(Math.round(params.bandwidthHigh)),
             user_session_id: getSessionId(),
-            format: 'opus',
+            format: this.format,
             version: '2',
         });
         const password = getBypassPassword();
@@ -76,7 +119,17 @@ export class AudioConnection extends Emitter {
         ws.binaryType = 'arraybuffer';
         this.ws = ws;
 
+        // Events from a socket that has since been replaced. Closing is not
+        // instant — the handshake outlives the call — so a close-then-connect
+        // (changing the audio format, or powering off and straight back on)
+        // can land the old socket's close event after the new one is live,
+        // where `this.ws = null` in _onClose would leave a connected stream
+        // that send() refuses to write to. A plain disconnect leaves this.ws
+        // null and still goes through, so nothing else changes.
+        const superseded = () => this.ws && this.ws !== ws;
+
         ws.onopen = () => {
+            if (superseded()) return;
             this.attempts = 0;
             this._setState('open');
             this.emit('open');
@@ -89,9 +142,12 @@ export class AudioConnection extends Emitter {
             // immortal and the operator's slot unreclaimable. The idle watch
             // pings on activity instead — see radio/idle.js.
         };
-        ws.onmessage = (ev) => this._onMessage(ev);
-        ws.onerror = () => this.emit('error', { kind: 'socket', message: 'audio socket error' });
-        ws.onclose = (ev) => this._onClose(ev);
+        ws.onmessage = (ev) => { if (!superseded()) this._onMessage(ev); };
+        ws.onerror = () => {
+            if (superseded()) return;
+            this.emit('error', { kind: 'socket', message: 'audio socket error' });
+        };
+        ws.onclose = (ev) => { if (!superseded()) this._onClose(ev); };
         return true;
     }
 
@@ -222,6 +278,14 @@ export class AudioConnection extends Emitter {
     }
 
     _onBinary(buffer) {
+        // Two shapes arrive here. What was asked for settles it in the normal
+        // case; the sniff catches the server that answered `format=opus` with
+        // pcm-zstd because it has no Opus encoder.
+        if (this.format === 'pcm-zstd' || isZstdFrame(buffer)) {
+            this._onPCMBinary(buffer);
+            return;
+        }
+
         // The header layout is fixed by the `version=2` we request at connect
         // time, so it can be parsed unconditionally.
         if (buffer.byteLength <= HEADER_BYTES) return;
@@ -240,6 +304,40 @@ export class AudioConnection extends Emitter {
             data: new Uint8Array(buffer, HEADER_BYTES),
             sampleRate,
             channels,
+        });
+    }
+
+    // Lossless frames, decoded into the same planar floats the JSON fallback
+    // produces so the player has one PCM entry point rather than two.
+    _onPCMBinary(buffer) {
+        if (!this.pcm.ready) {
+            // Only reachable on the server-fallback path — a requested
+            // pcm-zstd waits for this before the socket opens. Drop what
+            // arrives meanwhile; it is a fraction of a second of audio.
+            //
+            // Held in a field rather than started per packet: packets arrive at
+            // 50 a second, and a load that fails would otherwise append a
+            // script element and log an error for every one of them.
+            if (!this._pcmLoad) {
+                this._pcmLoad = this.pcm.load().catch(() => {
+                    this.emit('error', {
+                        kind: 'format',
+                        message: 'This receiver sent uncompressed audio and the decoder could not be loaded.',
+                    });
+                });
+            }
+            return;
+        }
+        const frame = this.pcm.decode(buffer);
+        if (!frame) return;
+        // Only a full header carries it, and every packet in the modes v2
+        // offers has one — but a minimal header must leave the meters showing
+        // the last reading rather than blanking them.
+        if (frame.signal) this.emit('quality', frame.signal);
+        this.emit('pcm', {
+            planes: frame.planes,
+            sampleRate: frame.sampleRate,
+            channels: frame.channels,
         });
     }
 

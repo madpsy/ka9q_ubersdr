@@ -74,6 +74,13 @@ export class Recorder extends Emitter {
         // finishes asynchronously, so a download taken straight after Stop would
         // otherwise be short by up to a second.
         this._flush = Promise.resolve();
+        // The finished recording as one playable Blob, and an object URL onto
+        // it. Both are built on demand and held until the recording is thrown
+        // away: downloading and playing want the same bytes, and for WAV those
+        // bytes cost ~58 MB to encode at the ten-minute cap — not something to
+        // redo every time Play is pressed.
+        this._blob = null;
+        this._url = '';
     }
 
     get elapsedMs() {
@@ -223,6 +230,43 @@ export class Recorder extends Emitter {
         this._chunks = [];
         this._pcm = [];
         this._flush = Promise.resolve();
+        // The URL is what keeps the Blob alive once nothing else references it,
+        // so it is revoked rather than merely dropped — otherwise a WAV's worth
+        // of memory survives every Clear until the tab is closed.
+        if (this._url) URL.revokeObjectURL(this._url);
+        this._url = '';
+        this._blob = null;
+    }
+
+    // The held recording as one Blob, or null if there is nothing to make one
+    // from. Callers word their own "nothing to play/download" error: this is
+    // the encoder, not the messenger.
+    //
+    // Awaiting the flush is the same reason save() does: MediaRecorder hands
+    // over its last chunk after stop(), so a Blob built without it is short by
+    // up to a second.
+    async audioBlob() {
+        await this._flush;
+        if (!this.hasData) return null;
+        if (this._blob) return this._blob;
+        const blob = this.format === 'wav'
+            ? new Blob([encodeWav(this._pcm, this._rate, this._channels)], { type: 'audio/wav' })
+            : new Blob(this._chunks, { type: 'audio/webm' });
+        // Only worth keeping once the recording has stopped growing. Caching a
+        // Blob mid-recording would hand out the same short prefix every time.
+        if (this.state !== 'recording') this._blob = blob;
+        return blob;
+    }
+
+    // A URL an <audio> element can play, held for the life of the recording so
+    // pressing Play twice does not build a second copy of it. Empty while a
+    // recording is still running — there is nothing complete to play yet.
+    async previewUrl() {
+        if (this.state === 'recording') return '';
+        const blob = await this.audioBlob();
+        if (!blob) return '';
+        if (!this._url) this._url = URL.createObjectURL(blob);
+        return this._url;
     }
 
     _teardown() {
@@ -309,16 +353,15 @@ export class Recorder extends Emitter {
         if (!this.hasData && this.state !== 'recording') {
             throw new Error('There is no recording to download.');
         }
-        await this._flush;
-        if (!this.hasData) throw new Error('There is no recording to download.');
+        // Shared with the Play button rather than encoded again here: for WAV
+        // that is the difference between one 58 MB encode and two.
+        const audio = await this.audioBlob();
+        if (!audio) throw new Error('There is no recording to download.');
 
         await loadScript(JSZIP_URL);
         if (typeof JSZip === 'undefined') throw new Error('JSZip failed to load.');
 
         const wav = this.format === 'wav';
-        const audio = wav
-            ? new Blob([encodeWav(this._pcm, this._rate, this._channels)], { type: 'audio/wav' })
-            : new Blob(this._chunks, { type: 'audio/webm' });
 
         const base = `sdr-recording-${new Date(this.startedAt).toISOString().replace(/[:.]/g, '-').slice(0, -5)}`;
 

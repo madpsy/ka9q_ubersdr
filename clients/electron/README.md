@@ -193,13 +193,43 @@ build needs only esbuild, same as the rest of the repo.
 stages the UI and then runs `electron-builder`, leaving distributables in
 `dist/`:
 
-- on **Linux**: `UberSDR-<version>.AppImage` plus `UberSDR-<version>-win.zip`
-  (unzip on Windows and run `UberSDR.exe`). A proper NSIS installer can only
+- on **Linux**: `UberSDR-<version>.AppImage`, `UberSDR-<version>-win.zip`
+  (unzip on Windows and run `UberSDR.exe`) and `UberSDR Setup <version>.exe`
+  (see below — needs Docker, and is skipped with a note without it). A proper NSIS installer can only
   be cross-built with a wine that has 32-bit support; built on Windows itself
   (`./build.sh --package` there) it comes out as `UberSDR Setup <version>.exe`.
 - on **macOS**: a dmg. Mac packages can only be built on a Mac — for all
   three platforms from one push, run `./build.sh --package` in a CI matrix
   (ubuntu / macos / windows runners).
+
+### The Windows installer
+
+`./build.sh --package` builds it on Linux along with everything else — the zip
+and the installer are both Windows artefacts, so there is no separate step to
+know about. `./build.sh --win-installer` asks for it specifically, and differs
+in one way: it fails when Docker is missing, where `--package` says so and
+carries on with the rest.
+
+Either way it produces `UberSDR Setup <version>.exe` — Start-menu entry,
+uninstaller, the lot. It runs electron-builder inside its own
+`electronuserland/builder:wine` image, because NSIS is a Windows toolchain and
+cross-building it needs a wine with 32-bit support.
+
+Running it against a wine without that is worse than it failing: it writes a
+~300 KB stub beside the ~78 MB payload it could not embed, and **exits 0**. The
+script therefore checks the size of what came out rather than the exit code, and
+fails loudly if the installer is too small to contain the app.
+
+The container runs as the invoking user, so `dist/` stays yours — as root it
+would leave artefacts you could not delete, and the next build would fail trying
+to overwrite them. The Electron and electron-builder caches are mounted from
+`~/.cache`, so only the first run downloads the Windows binaries.
+
+The image is fetched on first use — 4.7 GB, once — and the script says so
+before it starts, since a silent download that size looks like a hung build.
+
+On Windows itself no container is involved: `./build.sh --package` builds NSIS
+natively.
 
 None of the binaries are code-signed; macOS Gatekeeper and Windows SmartScreen
 will warn accordingly until signing identities are configured in the

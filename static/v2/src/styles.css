@@ -2087,6 +2087,13 @@ a.btn { text-decoration: none; }
 .chip-row { display: flex; gap: 5px; overflow-x: auto; }
 .chip-row--wrap { flex-wrap: wrap; overflow: visible; }
 .chip-row--center { justify-content: center; }
+
+/* Ducked: silenced by something other than the mute button. Dimmed rather than
+   recoloured, because it is a state that passes on its own — the rig stops
+   transmitting and the audio returns — and a red control would read as a fault
+   needing attention. */
+.topbar__volume.is-ducked,
+.volume-row.is-ducked { opacity: 0.55; }
 /* A row with something at each end: the action on the left, a setting about it
    on the right. `auto` rather than space-between so a row with one child still
    sits left. */

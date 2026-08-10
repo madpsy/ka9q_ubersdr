@@ -215,16 +215,22 @@ function VolumeSlider({ slider }) {
     };
 
     return (
-        <div className="topbar__volume">
+        // `is-ducked` is not `muted`: something else has silenced the audio for
+        // a moment — a transmitting rig, an extension speaking — and the mute
+        // setting is untouched. Without saying so, the audio stops while this
+        // control sits there looking perfectly normal.
+        <div className={`topbar__volume${audio.ducked ? ' is-ducked' : ''}`}>
             <Button
                 variant="ghost"
                 size="sm"
-                icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
+                icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
                 onClick={toggleMute}
                 active={audio.muted}
-                title={audio.muted
-                    ? `Unmute${!slider && audio.volume < QUIET ? ' — the level is very low, so this turns it up' : ''}`
-                    : 'Mute'}
+                title={audio.ducked
+                    ? 'Silenced while the radio is transmitting — your mute is unchanged'
+                    : (audio.muted
+                        ? `Unmute${!slider && audio.volume < QUIET ? ' — the level is very low, so this turns it up' : ''}`
+                        : 'Mute')}
             />
             {/* Disabled rather than hidden while muted: the level is still what
                 you will hear when you unmute, and a control that vanishes takes

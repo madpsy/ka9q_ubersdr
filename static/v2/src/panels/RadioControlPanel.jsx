@@ -18,6 +18,7 @@ import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
 import { serialAvailable } from '../controls/radiosync.js';
 import { getSync } from '../controls/sources.js';
 import { listProviders, onProviders } from '../controls/radioProviders.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { MessageLog, useControlState, useMessages } from '../controls/panel.jsx';
 
 const DIRECTIONS = [
@@ -155,13 +156,33 @@ export default function RadioControlPanel({ minimal }) {
     const connected = provider ? !!provider.status.connected : status.connected;
     const busy = provider ? !!provider.status.busy : status.busy;
 
+    // A rig somewhere the receiver cannot go — a 2 m handheld, a transverter's
+    // IF — while the rig is the one leading. The tune is refused rather than
+    // clamped, which is right, but silently: the readout shows the rig moving
+    // and the receiver simply does not follow, with nothing on screen to say
+    // why. Only while it matters: with the receiver leading, a rig out of range
+    // is about to be brought into it.
+    const following = connected && cfg.radiosync.direction === 'radio-to-sdr'
+        && cfg.radiosync.syncFrequency;
+    const outOfRange = following && rig.frequency
+        && (rig.frequency < MIN_FREQ || rig.frequency > MAX_FREQ);
+
     const readout = (
-        <RigReadout
-            frequency={rig.frequency}
-            mode={rig.mode}
-            tx={rig.tx}
-            connected={connected}
-        />
+        <>
+            <RigReadout
+                frequency={rig.frequency}
+                mode={rig.mode}
+                tx={rig.tx}
+                connected={connected}
+            />
+            {outOfRange && (
+                <div className="note note--warn note--tight">
+                    The radio is outside this receiver&rsquo;s range
+                    ({MIN_FREQ / 1000} kHz&ndash;{MAX_FREQ / 1e6} MHz), so the frequency
+                    cannot follow it.
+                </div>
+            )}
+        </>
     );
 
     // Always, even when Serial is the only one there is.
@@ -182,6 +203,11 @@ export default function RadioControlPanel({ minimal }) {
             />
         </Field>
     );
+
+    // Whether the radio can say it is transmitting. Serial always can; a
+    // provider says so when it registers, and may say otherwise once connected
+    // — see radioProviders.js.
+    const ptt = !provider || provider.capabilities.includes('ptt');
 
     // Everything below the transport's own controls is the same question
     // whichever one is in use: which way does the sync run, and what follows
@@ -219,13 +245,21 @@ export default function RadioControlPanel({ minimal }) {
                 </div>
             )}
 
-            {(!provider || provider.capabilities.includes('ptt')) && (
-                <Switch
-                    checked={cfg.radiosync.muteOnTx}
-                    onChange={(v) => setSync({ muteOnTx: v })}
-                    label="Mute while the radio transmits"
-                />
-            )}
+            {/* Disabled rather than removed where the radio cannot report
+                transmitting — plenty of Hamlib backends have no PTT to read.
+                A control that is present for one connection and absent for
+                another reads as a bug, and somebody who has used this switch
+                before will go looking for it rather than conclude it was never
+                there. The tooltip is where the reason lives. */}
+            <Switch
+                checked={cfg.radiosync.muteOnTx && ptt}
+                disabled={!ptt}
+                onChange={(v) => setSync({ muteOnTx: v })}
+                label="Mute while the radio transmits"
+                title={ptt
+                    ? 'Silence the receiver while the radio is transmitting'
+                    : 'This radio does not report when it is transmitting, so there is nothing to mute on'}
+            />
         </>
     );
 

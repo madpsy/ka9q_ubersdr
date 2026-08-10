@@ -15,6 +15,8 @@
 // parent window's; and the v1 pages' own keys are outside the prefix anyway.
 
 const { ipcRenderer } = require('electron');
+// Bundled in by build.sh, so this is inlined rather than required at run time.
+const { TciLink } = require('./tci.js');
 
 const PREFIX = 'ubersdr.v2.';
 // The news panel's fetched-article cache: bulky, transient, and nothing about
@@ -95,6 +97,15 @@ const PROVIDERS = [
         fields: [
             { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
             { key: 'port', label: 'Port', type: 'number', default: 12345 },
+        ],
+        capabilities: ['frequency', 'mode', 'ptt'],
+    },
+    {
+        id: 'tci',
+        label: 'TCI',
+        fields: [
+            { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
+            { key: 'port', label: 'Port', type: 'number', default: 40001 },
         ],
         capabilities: ['frequency', 'mode', 'ptt'],
     },
@@ -188,10 +199,10 @@ function onRadioControl(next) {
 
     // Moved rather than stopped: drop the old link before opening the new one,
     // or two pollers talk to two flrigs and the readout alternates.
-    if (wasRunning && shouldRun) ipcRenderer.send('radio:stop');
+    if (wasRunning && shouldRun) stopLink();
 
     if (!shouldRun) {
-        if (wasRunning) ipcRenderer.send('radio:stop');
+        if (wasRunning) stopLink();
         // Whatever the rig was doing stops being true the moment the link goes.
         rig = { frequency: null, mode: null, sdrMode: null, tx: false, connected: false };
         lastSentToRig = { frequency: null, mode: null };
@@ -201,7 +212,36 @@ function onRadioControl(next) {
         return;
     }
     report({ busy: true, error: null });
-    ipcRenderer.send('radio:start', JSON.parse(target));
+    startLink(JSON.parse(target));
+}
+
+// Where each transport's protocol actually runs.
+//
+// TCI is a WebSocket, which this side has and the main process does not, so it
+// lives here; flrig and rigctld are HTTP and raw TCP, which only the main
+// process can open. Either way what comes back is the same state object, and
+// nothing below this point knows the difference.
+let tci = null;
+
+function startLink({ kind, host, port }) {
+    stopLink();
+    if (kind !== 'tci') {
+        ipcRenderer.send('radio:start', { kind, host, port });
+        return;
+    }
+    tci = new TciLink({ host, port, onState: onRigState });
+    tci.start();
+}
+
+function stopLink() {
+    if (tci) { tci.stop(); tci = null; }
+    ipcRenderer.send('radio:stop');
+}
+
+function setOnRig(patch) {
+    if (!tci) { ipcRenderer.send('radio:set', patch); return; }
+    if (patch.frequency != null) tci.setFrequency(patch.frequency);
+    if (patch.mode) tci.setMode(patch.mode);
 }
 
 /** Settings changed without the link needing to move — a direction flip, say. */
@@ -249,73 +289,83 @@ function syncToRig() {
         patch.mode = tuning.mode;
         lastSentToRig.mode = tuning.mode;
     }
-    if (patch.frequency != null || patch.mode) ipcRenderer.send('radio:set', patch);
+    if (patch.frequency != null || patch.mode) setOnRig(patch);
+}
+
+/**
+ * What the rig is doing, from whichever transport is carrying it.
+ *
+ * One path for all three: flrig and rigctld arrive over IPC from the main
+ * process, TCI straight from the WebSocket in this window, and everything
+ * downstream — the panel's readout, the mute on transmit, the sync — is the
+ * same either way.
+ */
+function onRigState(state) {
+    // A rig that turns out to have no PTT: offer the transport again
+    // without that capability, so the panel stops showing a mute-on-
+    // transmit switch that nothing will ever trip. Registering the same id
+    // replaces the descriptor and leaves its status alone.
+    if (state.pttAvailable === false && selected && !droppedPtt.has(selected)) {
+        droppedPtt.add(selected);
+        const spec = PROVIDERS.find((p) => p.id === selected);
+        if (spec) command('radio', { action: 'register', provider: descriptorFor(spec) });
+    }
+    const wasConnected = rig.connected;
+    rig = { ...rig, ...state };
+    report({
+        connected: !!state.connected,
+        busy: false,
+        frequency: state.frequency ?? null,
+        mode: state.mode || null,
+        tx: !!state.tx,
+        error: state.error || null,
+    });
+    if (!state.connected) return;
+
+    // Mute while the rig transmits. `duck` rather than `mute`, so it leaves
+    // the operator's own mute alone — see the page API.
+    if (rc && rc.muteOnTx && !!state.tx !== ducked) {
+        ducked = !!state.tx;
+        command('duck', { ducked });
+    }
+
+    // The link has just come up, and the receiver leads: bring the rig to
+    // it rather than waiting for the next time somebody turns the dial.
+    if (!wasConnected && state.connected) syncToRig();
+
+    if (!rc || rc.direction !== 'radio-to-sdr') return;
+
+    // The rig leads. Only what changed, and only what the panel asked to
+    // follow — and never straight back what we just sent, which is what
+    // makes this a sync rather than a loop.
+    const patch = {};
+    if (rc.syncFrequency && state.frequency
+        && !sameFreq(state.frequency, lastPushedToSdr.frequency)) {
+        patch.frequency = state.frequency;
+        lastPushedToSdr.frequency = state.frequency;
+    }
+    if (rc.syncMode && state.sdrMode && state.sdrMode !== lastPushedToSdr.mode) {
+        patch.mode = state.sdrMode;
+        lastPushedToSdr.mode = state.sdrMode;
+    }
+    // One tune, not two: sending frequency and mode separately walks the
+    // receiver through an intermediate pair, which is audible.
+    if (patch.frequency != null || patch.mode) command('tune', patch);
+
+    // A rig that has only just connected has nothing to compare against, so
+    // the first poll is a starting point rather than a change.
+    if (!wasConnected && !patch.frequency) lastPushedToSdr.frequency = state.frequency ?? null;
 }
 
 function startRadio(client) {
     bridge = client;
 
-    ipcRenderer.on('radio:state', (_event, state) => {
-        // A rig that turns out to have no PTT: offer the transport again
-        // without that capability, so the panel stops showing a mute-on-
-        // transmit switch that nothing will ever trip. Registering the same id
-        // replaces the descriptor and leaves its status alone.
-        if (state.pttAvailable === false && selected && !droppedPtt.has(selected)) {
-            droppedPtt.add(selected);
-            const spec = PROVIDERS.find((p) => p.id === selected);
-            if (spec) command('radio', { action: 'register', provider: descriptorFor(spec) });
-        }
-        const wasConnected = rig.connected;
-        rig = { ...rig, ...state };
-        report({
-            connected: !!state.connected,
-            busy: false,
-            frequency: state.frequency ?? null,
-            mode: state.mode || null,
-            tx: !!state.tx,
-            error: state.error || null,
-        });
-        if (!state.connected) return;
-
-        // Mute while the rig transmits. `duck` rather than `mute`, so it leaves
-        // the operator's own mute alone — see the page API.
-        if (rc && rc.muteOnTx && !!state.tx !== ducked) {
-            ducked = !!state.tx;
-            command('duck', { ducked });
-        }
-
-        // The link has just come up, and the receiver leads: bring the rig to
-        // it rather than waiting for the next time somebody turns the dial.
-        if (!wasConnected && state.connected) syncToRig();
-
-        if (!rc || rc.direction !== 'radio-to-sdr') return;
-
-        // The rig leads. Only what changed, and only what the panel asked to
-        // follow — and never straight back what we just sent, which is what
-        // makes this a sync rather than a loop.
-        const patch = {};
-        if (rc.syncFrequency && state.frequency
-            && !sameFreq(state.frequency, lastPushedToSdr.frequency)) {
-            patch.frequency = state.frequency;
-            lastPushedToSdr.frequency = state.frequency;
-        }
-        if (rc.syncMode && state.sdrMode && state.sdrMode !== lastPushedToSdr.mode) {
-            patch.mode = state.sdrMode;
-            lastPushedToSdr.mode = state.sdrMode;
-        }
-        // One tune, not two: sending frequency and mode separately walks the
-        // receiver through an intermediate pair, which is audible.
-        if (patch.frequency != null || patch.mode) command('tune', patch);
-
-        // A rig that has only just connected has nothing to compare against, so
-        // the first poll is a starting point rather than a change.
-        if (!wasConnected && !patch.frequency) lastPushedToSdr.frequency = state.frequency ?? null;
-    });
+    ipcRenderer.on('radio:state', (_event, state) => onRigState(state));
 
     // The window is going away: drop the link rather than leaving it polling a
     // rig for a page that no longer exists.
     window.addEventListener('pagehide', () => {
-        ipcRenderer.send('radio:stop');
+        stopLink();
         if (!bridge) return;
         for (const id of PROVIDER_IDS) {
             bridge.command('radio', { action: 'unregister', id }).catch(() => {});

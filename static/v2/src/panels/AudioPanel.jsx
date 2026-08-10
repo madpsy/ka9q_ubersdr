@@ -194,11 +194,19 @@ export default function AudioPanel({ minimal }) {
         <div className="stack">
             {!minimal && (
                 <>
-                    <div className="volume-row">
+                    {/* `ducked` is not `muted`, and the difference is the whole
+                        point of it: something else — a transmitting rig, an
+                        extension speaking — has silenced the audio for a moment
+                        without touching the setting the button shows. Saying so
+                        here is what stops "the audio stopped and the volume
+                        control looks fine" from reading as a broken receiver. */}
+                    <div className={`volume-row${audio.ducked ? ' is-ducked' : ''}`}>
                         <Button
                             variant="ghost"
-                            icon={audio.muted ? <Icon.Mute /> : <Icon.Volume />}
-                            title={audio.muted ? 'Unmute' : 'Mute'}
+                            icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
+                            title={audio.ducked
+                                ? 'Silenced while the radio is transmitting — your mute is unchanged'
+                                : (audio.muted ? 'Unmute' : 'Mute')}
                             active={audio.muted}
                             onClick={actions.toggleMute}
                         />
@@ -210,10 +218,15 @@ export default function AudioPanel({ minimal }) {
                             disabled={audio.muted}
                             onChange={(v) => actions.setVolume(v / 100)}
                         />
-                        <span className={`volume-row__value${audio.muted ? ' is-muted' : ''}`}>
+                        <span className={`volume-row__value${audio.muted || audio.ducked ? ' is-muted' : ''}`}>
                             {Math.round(audio.volume * 100)}
                         </span>
                     </div>
+                    {audio.ducked && !audio.muted && (
+                        <div className="note note--tight">
+                            Silenced while the radio transmits. Your mute and volume are untouched.
+                        </div>
+                    )}
 
                     <ChannelPicker />
                     <OutputDevicePicker />

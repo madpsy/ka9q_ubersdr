@@ -138,6 +138,17 @@ Same three sources as the other clients (`clients/tui`,
   command, added in API 1.1), which means a panel dragged about in the UI moves
   its menu entry with it and the two cannot disagree. The Layout panel itself
   is greyed out for hiding, because it is what brings the others back.
+- **TCI**: an **TCI** connection for Expert Electronics radios (SunSDR and
+  friends), on port 40001. Unlike the other two this one runs in the receiver
+  window rather than the main process — TCI is carried over a WebSocket, which
+  a renderer has and Node 20 does not, and hand-rolling RFC 6455 to reach it
+  would risk the transport rather than the protocol. `tci.js` is browser code,
+  bundled into the preload. It follows `vfo` rather than `dds` (the latter is
+  the panorama's centre, not where the radio is listening) and will not send a
+  modulation the radio left out of its `modulations_list`, since TCI has no way
+  to refuse one. Tested against a real SunSDR2DX (ExpertSDR3 2.0), which sends
+  `dds:0,14254500` and `if:0,0,91500` alongside `vfo:0,0,14346000` — the first
+  two summing to the third, which is why the `vfo` is the one to follow.
 - **rigctld**: the Radio Control panel gains a **rigctld** connection beside
   Serial, with a host and port (4532 by default). Hamlib's own daemon, so it
   drives every rig Hamlib supports — without the page's 14 MB of WebAssembly,
@@ -180,6 +191,9 @@ store.js      saved instances (JSON in userData), stable local ports
 prefs.js      the shared-settings snapshot (JSON in userData)
 flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 rigctl.js     rigctld over its TCP protocol, likewise
+tci.js        the TCI protocol over a WebSocket — browser code, bundled into
+              receiver-preload.js and run in the window
+test/         node tests for the protocol handling (./test/run.sh)
 preload.js    IPC surface for the chooser page
 receiver-preload.js  seeds/reports shared settings in receiver windows
 serial-preload.js    IPC surface for the serial picker page

@@ -223,6 +223,8 @@ const CURSOR_TAG_W = 96;
 const SPAN_TAG_W = 84;
 const CENTRE_TAG_W = 104;
 const OFFSET_TAG_W = 72;
+// Three characters and the padding, and it never says anything else.
+const PCM_TAG_W = 48;
 
 // The first two live pointers, in the order they went down — a pinch, if there
 // are two of them. A third finger joins the map but is ignored.
@@ -343,6 +345,33 @@ function ClipTag() {
         <span className="tag tag--bad" title="Audio is hitting full scale — reduce volume, makeup or EQ boost">
             CLIP
         </span>
+    );
+}
+
+// That the audio is coming down uncompressed, and the one-press way back.
+//
+// Deliberately the quietest thing in the row: the dim base tone rather than a
+// warning colour, because this is a setting the operator chose on purpose after
+// being told what it costs, not a fault. It is a reminder that the choice is
+// still in force — easy to forget, and it is the receiver's owner who pays for
+// it — rather than something demanding to be dealt with.
+//
+// Pressing it goes back to Opus with no confirmation. The Audio panel asks
+// before the expensive direction and says nothing on the way back, and this is
+// the way back.
+function AudioFormatTag() {
+    const { audio, actions } = useRadio();
+    if (audio.format !== 'pcm-zstd') return null;
+    return (
+        <button
+            type="button"
+            className="tag tag--button"
+            data-optional="pcm"
+            title="Audio is set to Uncompressed — four to eight times the bandwidth of Opus. Click to switch to Opus"
+            onClick={() => actions.setAudioFormat('opus')}
+        >
+            PCM
+        </button>
     );
 }
 
@@ -1291,27 +1320,35 @@ export default function SpectrumView() {
     // The squelch, the noise reduction, the filters, the control surfaces and the
     // clip warning are never dropped: each says something is *happening* that
     // nothing else on screen says, and a wrapped second row of them is better
-    // than a missing one. The four here are context, and every one of them is
+    // than a missing one. The rest are context, and every one of them is
     // already written somewhere else — so they are what gives way to keep the
     // row on one line.
     //
     // In keep order, most important last to go:
     //
-    //   span     what the ruler's whole width means. First of the four to be
-    //            kept because it is the one that changes as you work — a zoom
-    //            is the commonest thing done to this display.
+    //   span     what the ruler's whole width means. First to be kept because
+    //            it is the one that changes as you work — a zoom is the
+    //            commonest thing done to this display.
     //   centre   where the view is. The ruler says it too, in more detail, but
     //            only if you read a tick.
     //   offset   the receiver's own frequency error. A standing fact about the
     //            hardware rather than about this moment.
     //   cursor   where the pointer is. Transient, and the tooltip under the
-    //            pointer is already saying it — which is why it goes first.
+    //            pointer is already saying it.
+    //   pcm      the audio format, and the only one here that is state rather
+    //            than context — so it is the exception to the paragraph above,
+    //            and last because being state does not make it urgent. It says
+    //            a deliberate setting is still in force, which will still be
+    //            true in a minute, and the Audio panel shows and changes it
+    //            whether or not there is room for the badge. Nothing is missed
+    //            by dropping it first; a wrapped row would cost more.
     const metaRef = useRef(null);
     const room = useRoomFor(metaRef, [
         { key: 'span', width: SPAN_TAG_W },
         { key: 'centre', width: CENTRE_TAG_W },
         { key: 'offset', width: OFFSET_TAG_W },
         { key: 'cursor', width: CURSOR_TAG_W },
+        { key: 'pcm', width: PCM_TAG_W },
     ]);
 
     // The centre frequency goes on a phone: the ruler under the spectrum already
@@ -1956,6 +1993,10 @@ export default function SpectrumView() {
                         <FilterTags />
                         <ControlTags />
                         <ClipTag />
+                        {/* Shown on a handset as well as the desktop, unlike the
+                            context tags: a phone is where the bandwidth this is
+                            about is most likely to be somebody's own data. */}
+                        {room.pcm && <AudioFormatTag />}
                         {/* Last in the row, and that is the whole point of where it is:
                             it comes and goes with every pointer movement, so anywhere
                             else it would shove the squelch, the filter and the DSP tags

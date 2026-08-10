@@ -8,9 +8,18 @@
 //   Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)
 //   ubersdr-desktop/0.1.0 Chrome/132.0.6834.210 Electron/34.5.8 Safari/537.36
 //
-// Right idea, wrong spelling: `ubersdr-desktop` is an npm package name, and it
-// is what a receiver operator sees in their listener list. This swaps that one
-// token for a readable one and leaves the rest of the string alone.
+// Right idea, wrong spelling: `ubersdr-desktop` is an npm package name. This
+// swaps that one token for a readable one and leaves the rest alone.
+//
+// Where that is actually read, so the change is not credited with more than it
+// does: a receiver stores the string verbatim and shows it in the admin session
+// list, the session activity log and the HTTP access log (session.go:3054,
+// session_activity_log.go:410, main.go:112) — those are where the rename shows.
+// The *public* listener list does not show it at all: GetNonBypassedAudioUsers
+// (session.go:2506-2519) collapses any user agent starting with `Mozilla/` to
+// the label "UberSDR", so this client reads as "UberSDR" there before and after.
+// The /stats browser breakdown reports it as Electron either way, off the
+// `Electron/` token Chromium already emits (session_stats_api.go:164-225).
 //
 // The rest is left alone deliberately. The token is *replaced* rather than
 // appended so the version is not stated twice, and the Mozilla/AppleWebKit/

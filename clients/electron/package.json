@@ -8,6 +8,7 @@
   "main": "main.js",
   "//desktopName": "Read by Electron itself (app.setDesktopName) and by electron-builder, which writes it as StartupWMClass. They must agree or the desktop environment cannot match a running window to the .desktop entry, and the taskbar shows a generic icon. Electron's fallback is `${app.name}.desktop` = ubersdr-desktop.desktop, so that is the name to pin.",
   "desktopName": "ubersdr-desktop.desktop",
+  "//buildFiles": "build.files is an allowlist, not a filter: anything not named there is left out of app.asar. A new top-level module therefore works under `npm start` and throws 'Cannot find module' only once packaged — so add it to build.files in the same commit that creates it. (This note lives out here because electron-builder validates the `build` object against a schema and rejects keys it does not know.)",
   "scripts": {
     "start": "electron ."
   },
@@ -34,6 +35,7 @@
       "tci.js",
       "tciserver.js",
       "wsserver.js",
+      "useragent.js",
       "preload.js",
       "receiver-preload.js",
       "serial-preload.js",

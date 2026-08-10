@@ -301,12 +301,13 @@ function setupSession() {
     // is what guarantees.
     //
     // Set here rather than anywhere later because the server records the User-
-    // Agent against the session UUID at POST /connection, and both socket
-    // endpoints refuse a UUID with no recorded one (websocket.go:562,
-    // user_spectrum_websocket.go:197). They check that it exists rather than
-    // that it matches, so a late change would not lock anyone out — but the
-    // string a receiver operator sees should be this one from the first
-    // request, not Chromium's default for the first window and ours after.
+    // Agent against the session UUID at POST /connection, and every socket
+    // endpoint refuses a UUID with no recorded one (websocket.go:562,
+    // user_spectrum_websocket.go:197). They test that it exists rather than
+    // that it matches — the stored value is never compared — so a late change
+    // would not lock anyone out. It is set before the first window anyway, so
+    // that the logs a receiver operator reads carry one string throughout
+    // rather than Chromium's default for the first request and ours after.
     app.userAgentFallback = browserUserAgent(app.userAgentFallback);
 
     // Web Serial (the FlexControl knob): Electron ships no picker UI, so

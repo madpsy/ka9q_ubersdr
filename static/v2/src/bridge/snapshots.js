@@ -171,6 +171,9 @@ export function layoutSnapshot(src) {
         panels: (layout.panels || []).map((p) => ({
             id: p.id,
             title: p.title,
+            // SVG markup, for a client that wants to draw the panel's own icon
+            // beside its name. Empty where there is none.
+            icon: p.icon || '',
             placement: p.placement,
             hidden: !!p.hidden,
             unhideable: !!p.unhideable,

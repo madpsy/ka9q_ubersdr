@@ -245,6 +245,73 @@ function startFlrig(client) {
 //
 // The client library is the page's own, bundled to CJS at staging time. Absent
 // when the UI has never been built, in which case there is simply no menu.
+// A panel icon, as something a native menu can show.
+//
+// The page sends SVG markup; nativeImage does not read SVG, so it is drawn to a
+// canvas here — the preload shares the page's DOM, and the main process has no
+// renderer to do it in. PNG data URLs go up with the layout, cached by panel id
+// because the icons never change while a page is open.
+//
+// One flat colour, because a menu is drawn by the desktop theme and there is no
+// way to ask which way round it is: `currentColor` would resolve to nothing
+// useful outside a page. Mid-grey is the compromise that stays legible on a
+// light menu and a dark one alike — macOS could do better with a template
+// image, but not GTK.
+const ICON_COLOUR = '#8a93a6';
+const ICON_PX = 32;
+const iconCache = new Map();
+
+function rasteriseIcon(id, svg) {
+    if (iconCache.has(id)) return Promise.resolve(iconCache.get(id));
+    if (!svg) { iconCache.set(id, null); return Promise.resolve(null); }
+    return new Promise((resolve) => {
+        // Two things the markup needs before it is a document rather than a
+        // fragment of a page:
+        //
+        //   * `xmlns`. Inline in HTML an <svg> needs none; loaded through an
+        //     Image it is a standalone document and without it nothing parses.
+        //   * one width and height. The icons already carry 16×16, and simply
+        //     prepending another pair produces duplicate attributes — which is
+        //     a fatal XML error, so the image fails to load and every panel
+        //     silently ends up with no icon.
+        //
+        // Only the opening tag is touched: several of these icons are drawn
+        // from <rect>s, whose own width and height must survive.
+        const sized = svg
+            .replace(/currentColor/g, ICON_COLOUR)
+            .replace(/^<svg[^>]*>/, (tag) => tag
+                .replace(/\s(?:width|height)="[^"]*"/g, '')
+                .replace('<svg', `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_PX}" height="${ICON_PX}"`));
+        const img = new Image();
+        const done = (value) => { iconCache.set(id, value); resolve(value); };
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = ICON_PX;
+                canvas.height = ICON_PX;
+                canvas.getContext('2d').drawImage(img, 0, 0, ICON_PX, ICON_PX);
+                done(canvas.toDataURL('image/png'));
+            } catch (e) { done(null); }
+        };
+        img.onerror = () => done(null);
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sized);
+    });
+}
+
+/** The layout, with each panel's icon drawn into a PNG the menu can use. */
+function withIcons(layout) {
+    const panels = layout.panels || [];
+    return Promise.all(panels.map((p) => rasteriseIcon(p.id, p.icon)))
+        .then((icons) => ({
+            ...layout,
+            panels: panels.map((p, i) => {
+                // The markup has done its job; only the picture travels on.
+                const { icon, ...rest } = p;
+                return { ...rest, iconPng: icons[i] };
+            }),
+        }));
+}
+
 function startLayoutBridge() {
     let createClient;
     try {
@@ -254,7 +321,11 @@ function startLayoutBridge() {
 
     const client = createClient(window, { id: 'electron-menu' });
     const push = (layout) => {
-        if (layout) ipcRenderer.send('layout:changed', layout);
+        if (!layout) return;
+        withIcons(layout)
+            .then((withPictures) => ipcRenderer.send('layout:changed', withPictures))
+            // An icon is a nicety; the menu is not.
+            .catch(() => ipcRenderer.send('layout:changed', layout));
     };
 
     // Subscribing is driven by `announce`, not by the reply to `hello`.

@@ -9,7 +9,7 @@
 // static/v2/build.sh, staged untouched into ui/ — runs against any instance
 // while believing it is same-origin with it.
 
-const { app, BrowserWindow, Menu, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, nativeImage, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -388,6 +388,22 @@ function openReceiverLink(win, item) {
 
 const PLACEMENT_LABELS = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Floating' };
 
+// The icon a menu row is given, at the size a menu row should be.
+//
+// The bitmap is 32 px, and handing that over directly makes every row 32 px
+// tall — the menu sizes itself to its images, so fifty panels became a very
+// long list of very deep rows. Adding it as a 2× representation instead says
+// the same picture is a 16 px icon drawn at twice the detail: the rows come out
+// half the height, and stay sharp on a HiDPI screen rather than being a 16 px
+// bitmap stretched.
+function menuIcon(dataUrl) {
+    const image = nativeImage.createEmpty();
+    image.addRepresentation({ scaleFactor: 2, dataURL: dataUrl });
+    // A representation that was refused leaves an empty image, which draws as a
+    // gap where the icon should be — worse than no icon at all.
+    return image.isEmpty() ? nativeImage.createFromDataURL(dataUrl).resize({ width: 16, height: 16 }) : image;
+}
+
 /**
  * One submenu per panel: shown or not, and where.
  *
@@ -402,6 +418,10 @@ function layoutSubmenu(snapshot, win) {
 
     return panels.map((p) => ({
         label: p.title,
+        // Drawn by the page and rasterised in its preload — nativeImage cannot
+        // read SVG, and this side has no renderer to do it in. Absent where
+        // that failed, which costs a picture and nothing else.
+        ...(p.iconPng ? { icon: menuIcon(p.iconPng) } : {}),
         submenu: [
             {
                 label: 'Shown',

@@ -18,10 +18,23 @@ const http = require('http');
 // a flrig that has gone away, and waiting longer only delays saying so.
 const TIMEOUT_MS = 4000;
 
-// How often the rig is read. flrig itself polls the radio over CAT, so asking
-// faster than this buys nothing and adds serial traffic the operator's own
-// logging software is competing for.
-const POLL_MS = 500;
+// The gap between the end of one read and the start of the next, and how long
+// to wait after one that failed.
+//
+// Measured from the end, not a fixed tick. A cycle is three XML-RPC calls and
+// flrig answers them from the radio over CAT, so on a slow serial link a cycle
+// can outlast any interval you pick — and a fixed `setInterval` then starts the
+// next read while the last is still in flight, and they pile up. Re-arming only
+// once the previous cycle has resolved runs at whatever rate the rig can
+// sustain and can never overlap. The browser extension has always done it this
+// way; this used to be a 500 ms interval, which is why the same rig followed
+// the extension visibly faster than it followed this.
+const POLL_GAP_MS = 25;
+// A refused connection is retried, but slowly: at the gap above a wrong port
+// would be a thousand connection attempts a minute, and the thing being waited
+// for — flrig being started, or an address being corrected — happens at human
+// speed.
+const RETRY_MS = 1000;
 
 // Mode names, both ways. flrig speaks the rig's own vocabulary and the receiver
 // speaks v2's; the pairs that have no counterpart are simply absent, and a rig
@@ -129,18 +142,25 @@ class FlrigLink {
     }
 
     start() {
-        this.poll();
-        this.timer = setInterval(() => this.poll(), POLL_MS);
+        this.run();
     }
 
     stop() {
         this.stopped = true;
-        clearInterval(this.timer);
+        clearTimeout(this.timer);
         this.timer = null;
     }
 
-    async poll() {
+    /** One read, then the next — never two at once. */
+    async run() {
         if (this.stopped) return;
+        const ok = await this.poll();
+        if (this.stopped) return;
+        this.timer = setTimeout(() => this.run(), ok ? POLL_GAP_MS : RETRY_MS);
+    }
+
+    async poll() {
+        if (this.stopped) return false;
         try {
             // Sequential, not parallel: flrig serialises requests onto one CAT
             // link, and three at once simply queue inside it with a worse
@@ -148,7 +168,7 @@ class FlrigLink {
             const freq = await call(this.host, this.port, 'rig.get_vfo');
             const mode = await call(this.host, this.port, 'rig.get_mode');
             const ptt = await call(this.host, this.port, 'rig.get_ptt');
-            if (this.stopped) return;
+            if (this.stopped) return false;
             this.failing = false;
             this.onState({
                 connected: true,
@@ -158,10 +178,17 @@ class FlrigLink {
                 sdrMode: FLRIG_TO_SDR[String(mode || '').toUpperCase()] || null,
                 tx: !!ptt,
             });
+            return true;
         } catch (err) {
-            if (this.stopped || this.failing) return;
-            this.failing = true;
-            this.onState({ connected: false, tx: false, error: `flrig: ${err.message}` });
+            if (this.stopped) return false;
+            // Reported once per spell of failure rather than once per attempt,
+            // so a flrig that is not running does not fill the panel with the
+            // same line over and over.
+            if (!this.failing) {
+                this.failing = true;
+                this.onState({ connected: false, tx: false, error: `flrig: ${err.message}` });
+            }
+            return false;
         }
     }
 

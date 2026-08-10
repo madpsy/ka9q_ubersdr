@@ -19,6 +19,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { DOCKS, PLACEMENTS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { PANELS } from '../panels/registry.jsx';
+import { svgMarkup } from '../lib/svgMarkup.js';
 import { useControlContext, useHardware } from '../controls/panel.jsx';
 import { runFunction } from '../controls/functions.js';
 import { getSessionId } from '../radio/session.js';
@@ -85,10 +86,27 @@ function setRadioControl(id, patch) {
     };
 }
 
+// A panel's icon, as SVG markup.
+//
+// The registry holds React elements and a native menu wants a picture, so the
+// element is walked into markup — see lib/svgMarkup.js, which also explains why
+// this is not done by rendering it. The desktop client turns the markup into an
+// image itself, in a canvas in its preload, because nativeImage does not read
+// SVG and the main process has no renderer.
+//
+// Cached by panel id: the icons are fixed for the life of the page, and this is
+// asked for on every layout snapshot.
+const iconCache = new Map();
+function iconMarkup(panel) {
+    if (!iconCache.has(panel.id)) iconCache.set(panel.id, svgMarkup(panel.icon));
+    return iconCache.get(panel.id);
+}
+
 function layoutFacade(layout) {
     const panels = () => PANELS.map((p) => ({
         id: p.id,
         title: p.title,
+        icon: iconMarkup(p),
         placement: layout.placementOf(p.id),
         hidden: !!(layout.layout.sections[p.id] || {}).hidden,
         unhideable: p.id === UNHIDEABLE,

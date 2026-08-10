@@ -19,11 +19,20 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Icon, Menu, MenuItem } from './ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { SHARE_TARGETS, buildShareUrl, shareText } from '../lib/share.js';
+import { SHARE_TARGETS, buildShareUrl, shareOrigin, shareText } from '../lib/share.js';
 
 // How long the button says it copied. Long enough to be read, short enough that
 // it is back to being a share button before the next glance.
 const COPIED_MS = 1600;
+
+// The address the desktop client is connected to, exposed by its receiver
+// preload (clients/electron/receiver-preload.js). Absent in a browser, where
+// the address in the bar is already the right one.
+function desktopUpstream() {
+    if (typeof window === 'undefined') return null;
+    const desktop = window.ubersdrDesktop;
+    return (desktop && desktop.upstreamOrigin) || null;
+}
 
 export default function ShareMenu() {
     const { tuning, view, serverInfo } = useRadio();
@@ -33,8 +42,16 @@ export default function ShareMenu() {
 
     // Built when the menu is used rather than held in state: the dial moves
     // constantly and a link is only ever wanted at the moment it is asked for.
+    //
+    // The origin is chosen rather than taken: under the desktop client this page
+    // is served from a loopback proxy, so `location.origin` there is not an
+    // address of the receiver at all. See shareOrigin.
     const link = () => buildShareUrl({
-        origin: location.origin,
+        origin: shareOrigin({
+            origin: location.origin,
+            publicUrl: serverInfo && serverInfo.receiver && serverInfo.receiver.public_url,
+            upstreamOrigin: desktopUpstream(),
+        }),
         pathname: location.pathname,
         tuning,
         view,

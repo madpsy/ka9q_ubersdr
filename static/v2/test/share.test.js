@@ -12,7 +12,7 @@
 
 const assert = require('assert');
 const {
-    SHARE_KEYS, SHARE_TARGETS, _resetUrlView, buildShareUrl, readShareUrl, shareText,
+    SHARE_KEYS, SHARE_TARGETS, _resetUrlView, buildShareUrl, readShareUrl, shareOrigin, shareText,
 } = require('./.build/share.cjs');
 
 let pass = 0;
@@ -74,6 +74,97 @@ t('a view the server has not described yet is not invented', () => {
     const url = buildShareUrl({ ...AT, tuning: TUNING, view: { centerFreq: 0, binBandwidth: 0 } });
     assert.ok(!url.includes('zoom_'), url);
     assert.ok(!buildShareUrl({ ...AT, tuning: TUNING }).includes('zoom_'), 'no view at all');
+});
+
+// --- which origin the link points at -------------------------------------------------
+
+const PUBLISHED = 'https://rx.example/';   // as ConstructPublicURL emits it: trailing slash
+const LOOPBACK = 'http://127.0.0.1:17820'; // as the desktop client's proxy serves it
+
+t('a browser shares the address it is already at', () => {
+    // Whatever is in the bar demonstrably reaches this receiver, and nothing
+    // configured elsewhere can be more current than it.
+    assert.strictEqual(shareOrigin({ origin: 'https://rx.example' }), 'https://rx.example');
+    assert.strictEqual(
+        shareOrigin({ origin: 'https://rx.example:8443', publicUrl: 'https://other.example/' }),
+        'https://rx.example:8443',
+        'even where the operator publishes something else',
+    );
+});
+
+t('a LAN address is an address, and is kept', () => {
+    // The people a LAN receiver is shared with are usually on that LAN. Swapping
+    // in whatever it advertises to the internet would be answering a question
+    // nobody asked — and most instances advertise nothing at all.
+    for (const lan of ['http://192.168.1.50:8080', 'http://10.0.0.4', 'http://sdr.local', 'http://shack:8080']) {
+        assert.strictEqual(shareOrigin({ origin: lan, publicUrl: PUBLISHED }), lan.replace(/\/$/, ''), lan);
+    }
+});
+
+t('under the desktop client the link is the address it dialled', () => {
+    // location.origin there is the local proxy: no address of the receiver at
+    // all, just an artefact of how this one client connects.
+    assert.strictEqual(
+        shareOrigin({ origin: LOOPBACK, upstreamOrigin: 'https://rx.example:8443' }),
+        'https://rx.example:8443',
+    );
+    // LAN included, and in preference to anything published — connecting over
+    // the LAN is how most of these instances are reached.
+    assert.strictEqual(
+        shareOrigin({ origin: LOOPBACK, upstreamOrigin: 'http://192.168.1.50:8080', publicUrl: PUBLISHED }),
+        'http://192.168.1.50:8080',
+    );
+});
+
+t('a published URL is the last resort, not the first', () => {
+    // Only when the address in hand is loopback — server and desktop client on
+    // one machine — does it reach nobody and leave nothing else to send.
+    assert.strictEqual(shareOrigin({ origin: LOOPBACK, publicUrl: PUBLISHED }), 'https://rx.example');
+    assert.strictEqual(
+        shareOrigin({ origin: LOOPBACK, upstreamOrigin: 'http://127.0.0.1:8080', publicUrl: PUBLISHED }),
+        'https://rx.example',
+    );
+    assert.strictEqual(shareOrigin({ origin: 'http://localhost:8080', publicUrl: PUBLISHED }), 'https://rx.example');
+});
+
+t('nothing published is the normal case, and not a failure', () => {
+    // Most instances have no public_url — local ones, manually entered ones, any
+    // that never turned instance reporting on. The link is still the best
+    // address there is.
+    assert.strictEqual(shareOrigin({ origin: LOOPBACK, upstreamOrigin: 'http://127.0.0.1:8080' }), 'http://127.0.0.1:8080');
+    assert.strictEqual(shareOrigin({ origin: 'http://localhost:8080' }), 'http://localhost:8080');
+});
+
+t('the published URL joins onto the path without doubling the slash', () => {
+    // ConstructPublicURL (config.go) ends its URL with a slash; buildShareUrl
+    // concatenates a pathname onto it.
+    const url = buildShareUrl({
+        origin: shareOrigin({ origin: LOOPBACK, publicUrl: PUBLISHED }),
+        pathname: '/v2/',
+        tuning: TUNING,
+    });
+    assert.ok(url.startsWith('https://rx.example/v2/?'), url);
+});
+
+t('the placeholder public URL is not a receiver', () => {
+    // ConstructPublicURL returns https://example.com when instance reporting has
+    // no host or port — a real-looking URL for a receiver that is not there, and
+    // the one value here that would quietly link somebody to another website.
+    assert.strictEqual(shareOrigin({ origin: LOOPBACK, publicUrl: 'https://example.com' }), LOOPBACK);
+});
+
+t('rubbish is never concatenated into a link', () => {
+    // A missing public_url, an old build that sends null, a preload that could
+    // not identify the window, a page opened from a file (whose origin
+    // serialises as the string "null"): each would otherwise produce a link
+    // reading `null/v2/` or `undefined/v2/`.
+    assert.strictEqual(shareOrigin({ origin: 'https://rx.example', upstreamOrigin: null }), 'https://rx.example');
+    assert.strictEqual(shareOrigin({ origin: 'https://rx.example', upstreamOrigin: 'not a url' }), 'https://rx.example');
+    assert.strictEqual(shareOrigin({ origin: LOOPBACK, publicUrl: 'ftp://rx.example/' }), LOOPBACK);
+    assert.strictEqual(shareOrigin({ origin: 'null' }), '');
+    assert.strictEqual(shareOrigin({}), '');
+    // ...and an empty origin leaves a relative link, which is still copyable.
+    assert.strictEqual(buildShareUrl({ origin: '', pathname: '/v2/', tuning: TUNING }).startsWith('/v2/?'), true);
 });
 
 // --- reading somebody else's link ---------------------------------------------------

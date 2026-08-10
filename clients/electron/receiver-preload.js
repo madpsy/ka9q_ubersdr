@@ -1,6 +1,6 @@
 'use strict';
 
-// Shared settings for receiver windows.
+// Shared settings for receiver windows, and the receiver's real address.
 //
 // Each receiver's proxy origin keeps its own localStorage — deliberately, so
 // receivers don't trample each other. With "share settings" on, this preload
@@ -14,7 +14,7 @@
 // share this origin's storage, so a poller there would be a duplicate of the
 // parent window's; and the v1 pages' own keys are outside the prefix anyway.
 
-const { ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 // Bundled in by build.sh, so this is inlined rather than required at run time.
 const { TciLink } = require('./tci.js');
 
@@ -686,6 +686,22 @@ function startLayoutBridge() {
 
 if (location.pathname.startsWith('/v2')) {
     startLayoutBridge();
+
+    // The one thing the page is told about running here rather than in a
+    // browser: this window's origin is the local proxy, so the share button's
+    // `location.origin` is no address of the receiver at all. This is — the one
+    // this client dialled, LAN address or public hostname, whichever the
+    // operator of *this* copy actually connects to. See lib/share.js.
+    //
+    // Read-only, one string, and nothing that can act on the main process — a
+    // receiver serves its operator's own pages, and this window is the one place
+    // that must not become a way for a page to reach the desktop.
+    try {
+        contextBridge.exposeInMainWorld('ubersdrDesktop', {
+            upstreamOrigin: ipcRenderer.sendSync('share:upstream-origin') || null,
+        });
+    } catch { /* nothing here is worth failing the whole preload for */ }
+
     const seed = ipcRenderer.sendSync('prefs:seed');
     if (seed && seed.enabled) {
         if (seed.prefs) {

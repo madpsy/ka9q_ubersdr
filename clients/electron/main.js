@@ -148,11 +148,11 @@ async function connectInstance(desc) {
         backgroundColor: '#0b0e14',
         title: entry.label,
         icon: APP_ICON,
-        // Shared settings and the Layout menu's end of the page API. It
-        // exposes nothing to the page.
+        // Shared settings and the Layout menu's end of the page API. All it
+        // exposes to the page is the receiver's own address, for the share
+        // button — one read-only string, and no way to call back in.
         webPreferences: { preload: RECEIVER_PRELOAD },
     });
-    win.loadURL(proxy.localOrigin + '/v2/');
     win.on('closed', () => {
         localOrigins.delete(proxy.localOrigin);
         proxy.stop();
@@ -170,6 +170,10 @@ async function connectInstance(desc) {
         surface: null, audioPort: null,
     };
     running.set(entry.id, rec);
+    // Loaded only once the record is in place: the preload asks the main process
+    // which receiver this window is on (share:upstream-origin), and it asks
+    // before the page's first script runs.
+    win.loadURL(proxy.localOrigin + '/v2/');
     watchMenuFocus(rec);
     store.recordUse(entry.id);
     notifyChooser();
@@ -820,6 +824,19 @@ function setupIpc() {
             }
         }
         return entry;
+    });
+
+    // Where this receiver actually lives, for the share button.
+    //
+    // The window's own origin is the loopback proxy, so a link built from it
+    // opens nothing on anybody else's computer. This is the address this client
+    // is connected to, which is what a link should carry — a LAN address where
+    // the receiver is on the LAN, because that is where it is being shared.
+    // Synchronous for the same reason as the seed below: it is read at preload,
+    // before the page exists to be told about it later.
+    ipcMain.on('share:upstream-origin', (event) => {
+        const rec = recordFor(event.sender);
+        event.returnValue = rec ? rec.proxy.upstreamOrigin : null;
     });
 
     // Shared settings. The seed is synchronous because the receiver preload

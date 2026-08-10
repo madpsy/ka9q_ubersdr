@@ -15,6 +15,9 @@
 // added, which matters for one reason above the tidiness: this page can be opened
 // with `?password=` (see radio/session.js), and a share button that carried
 // whatever was in the address bar would hand that to a group chat.
+//
+// Which origin, though, is a question `location.origin` does not always answer —
+// see shareOrigin below.
 
 import { MODE_BY_ID, bandwidthLimits } from '../radio/constants.js';
 import { clamp } from './format.js';
@@ -122,6 +125,98 @@ export function buildShareUrl({ origin, pathname, tuning, view } = {}) {
     const base = `${origin || ''}${pathname || '/'}`;
     const qs = q.toString();
     return qs ? `${base}?${qs}` : base;
+}
+
+// --- which origin the link points at ---------------------------------------------
+//
+// Almost always `location.origin`: the address in the bar is the address that
+// demonstrably reaches this receiver, and nothing configured anywhere can be
+// more current than it. That holds for a LAN address as much as for a domain —
+// a receiver shared with the other people on its own network wants the address
+// those people use, not whatever it advertises to the internet.
+//
+// The exception is the desktop client (clients/electron), which runs a reverse
+// proxy on loopback in front of the receiver and loads the window from it. There
+// `location.origin` is http://127.0.0.1:17820 — not a hard-to-reach address of
+// the receiver but no address of it at all, an artefact of how this one client
+// happens to connect. What the receiver is actually being reached at is the
+// address the client dialled, which its preload passes in as `upstreamOrigin`;
+// that is what the link should carry, LAN address or not.
+//
+// `publicUrl` — `receiver.public_url` from /api/description, the operator's own
+// declaration (config.go, ConstructPublicURL) — is the last resort only, for the
+// one case where the address in hand is loopback and so reaches nobody: server
+// and client on the same machine. Most instances publish nothing, which is why
+// it cannot be the thing the link is built on.
+
+// The placeholder ConstructPublicURL returns when instance reporting has no host
+// or port configured — a real-looking URL for a receiver that is not there, and
+// the one value in this whole path that would silently produce a link to
+// somebody else's website.
+const PLACEHOLDER_HOSTS = new Set(['example.com', 'www.example.com']);
+
+// An origin, or null. Anything that is not an absolute http(s) URL is not an
+// origin — including the empty string, `null` as a string, and the "origin" of a
+// page opened from a file, which serialises as "null" and would otherwise
+// concatenate into a link reading `null/v2/`.
+function usableOrigin(value) {
+    if (!value) return null;
+    let url;
+    try {
+        url = new URL(String(value));
+    } catch {
+        return null;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (!url.hostname) return null;
+    if (PLACEHOLDER_HOSTS.has(url.hostname.toLowerCase())) return null;
+    // `origin` normalises away the trailing slash public_url arrives with, and
+    // the default port, which is what makes this safe to concatenate a path onto.
+    return url.origin;
+}
+
+// This machine, and only this machine.
+//
+// The single distinction worth drawing, and drawn no wider than that: a LAN
+// address is a real address of the receiver and is kept, because the person it
+// is being sent to is very often on that LAN. Loopback is the one address that
+// is true for nobody but the sender.
+function loopback(origin) {
+    let host;
+    try {
+        host = new URL(origin).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    // IPv6 arrives bracketed from `hostname`.
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+    if (host === 'localhost' || host.endsWith('.localhost')) return true;
+    if (host === '::1' || host === '::' || host === '') return true;
+    // 127.0.0.0/8, and 0.0.0.0 — which is not loopback but is not an address
+    // anybody can be sent to either.
+    return /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0)$/.test(host);
+}
+
+/**
+ * The origin a shared link should carry.
+ *
+ * `upstreamOrigin` is present under the desktop client and absent in a browser,
+ * which is the whole of the difference between the two cases.
+ *
+ * Returns '' if nothing usable is on offer, which leaves buildShareUrl making a
+ * relative link — still copyable, still readable, and honest about knowing no
+ * address rather than inventing one.
+ */
+export function shareOrigin({ origin, publicUrl, upstreamOrigin } = {}) {
+    // Where the receiver is being reached, as opposed to where this page is
+    // served from. The two differ only under the desktop client, and there it is
+    // the page that is the odd one out.
+    const reached = usableOrigin(upstreamOrigin) || usableOrigin(origin);
+    if (reached && !loopback(reached)) return reached;
+
+    // Loopback: nothing about this address travels, so the only thing left worth
+    // sending is whatever the receiver publishes about itself. Usually nothing.
+    return usableOrigin(publicUrl) || reached || '';
 }
 
 // What goes with the link, where the target takes a line of text as well.

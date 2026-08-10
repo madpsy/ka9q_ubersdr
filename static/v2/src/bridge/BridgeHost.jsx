@@ -18,7 +18,8 @@ import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { DOCKS, PLACEMENTS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
-import { PANELS } from '../panels/registry.jsx';
+import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
+import { SOLO, groupsFor } from '../panels/groups.jsx';
 import { svgMarkup } from '../lib/svgMarkup.js';
 import { useControlContext, useHardware } from '../controls/panel.jsx';
 import { runFunction } from '../controls/functions.js';
@@ -102,6 +103,14 @@ function iconMarkup(panel) {
     return iconCache.get(panel.id);
 }
 
+// The same, for a group. Keyed apart from the panels because a group of one
+// carries its panel's id and the two would otherwise share a cache entry.
+const groupIconCache = new Map();
+function groupIconMarkup(group) {
+    if (!groupIconCache.has(group.id)) groupIconCache.set(group.id, svgMarkup(group.icon));
+    return groupIconCache.get(group.id);
+}
+
 function layoutFacade(layout) {
     const panels = () => PANELS.map((p) => ({
         id: p.id,
@@ -123,7 +132,32 @@ function layoutFacade(layout) {
         // same thing a drag in the Layout panel does. Index omitted: "put it
         // over there" is the whole of what a menu can say, and that appends.
         move: (id, placement) => layout.movePanel(id, placement),
-        snapshot() { return { panels: panels(), docks: this.docks }; },
+        // How a phone's tab bar arranges the same panels: six groups by the
+        // question being asked, and the Multipad on its own. Sent so a client
+        // with a menu can offer the panels the way the app already does rather
+        // than as one list of fifty — the grouping is a decision this app has
+        // already made, and two arrangements of the same panels would be two
+        // things to learn. See panels/groups.jsx.
+        get groups() {
+            return [
+                ...(PANEL_BY_ID[SOLO]
+                    ? [{
+                        id: SOLO,
+                        title: PANEL_BY_ID[SOLO].title,
+                        // Its own, being a group of one.
+                        icon: iconMarkup(PANEL_BY_ID[SOLO]),
+                        panels: [SOLO],
+                    }]
+                    : []),
+                ...groupsFor(PANELS).map((g) => ({
+                    id: g.id,
+                    title: g.title,
+                    icon: groupIconMarkup(g),
+                    panels: g.items.map((p) => p.id),
+                })),
+            ];
+        },
+        snapshot() { return { panels: panels(), docks: this.docks, groups: this.groups }; },
     };
 }
 

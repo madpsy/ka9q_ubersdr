@@ -298,18 +298,31 @@ function rasteriseIcon(id, svg) {
     });
 }
 
-/** The layout, with each panel's icon drawn into a PNG the menu can use. */
+/**
+ * The layout, with every icon drawn into a PNG the menu can use — the panels'
+ * and the groups' alike.
+ *
+ * Group ids are namespaced in the cache: a group of one carries its panel's id
+ * (the Multipad is its own group), and the two would otherwise share an entry.
+ */
 function withIcons(layout) {
     const panels = layout.panels || [];
-    return Promise.all(panels.map((p) => rasteriseIcon(p.id, p.icon)))
-        .then((icons) => ({
-            ...layout,
-            panels: panels.map((p, i) => {
-                // The markup has done its job; only the picture travels on.
-                const { icon, ...rest } = p;
-                return { ...rest, iconPng: icons[i] };
-            }),
-        }));
+    const groups = layout.groups || [];
+    return Promise.all([
+        ...panels.map((p) => rasteriseIcon(p.id, p.icon)),
+        ...groups.map((g) => rasteriseIcon('group:' + g.id, g.icon)),
+    ]).then((icons) => ({
+        ...layout,
+        panels: panels.map((p, i) => {
+            // The markup has done its job; only the picture travels on.
+            const { icon, ...rest } = p;
+            return { ...rest, iconPng: icons[i] };
+        }),
+        groups: groups.map((g, i) => {
+            const { icon, ...rest } = g;
+            return { ...rest, iconPng: icons[panels.length + i] };
+        }),
+    }));
 }
 
 function startLayoutBridge() {

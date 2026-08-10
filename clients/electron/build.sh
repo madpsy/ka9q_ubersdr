@@ -173,4 +173,19 @@ if [[ "$PACKAGE" -eq 1 ]]; then
     ls -1sh dist/ | grep -v -- '-unpacked\|builder-\|^total'
 fi
 
-echo "done — start with: npm start"
+if [[ "$PACKAGE" -eq 1 ]]; then
+    echo "done — start with: npm start"
+else
+    # Said plainly, because the run that stops here looks exactly like the run
+    # that builds installers: both end in a wall of esbuild output and a "done".
+    # Nothing names the flag, so the way to find out you wanted it is to go
+    # looking in dist/ for something that was never built.
+    echo
+    echo "done — the UI is built and staged, and nothing was packaged."
+    echo
+    echo "  ./build.sh --package    installable builds in dist/ — the AppImage,"
+    echo "                          the Windows zip and the Windows installer."
+    echo "                          This is usually the one you want."
+    echo
+    echo "  npm start               run it from here without packaging."
+fi

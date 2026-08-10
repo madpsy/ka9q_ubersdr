@@ -412,11 +412,27 @@ function menuIcon(dataUrl) {
  * bring anything back, and that is what somebody opens it for.
  */
 function layoutSubmenu(snapshot, win) {
-    const panels = [...(snapshot.panels || [])]
-        .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+    const panels = snapshot.panels || [];
     if (!panels.length) return null;
+    const byId = new Map(panels.map((p) => [p.id, p]));
 
-    return panels.map((p) => ({
+    // Grouped the way the app groups them on a phone — by the question being
+    // asked — rather than as one list of fifty. The page sends the grouping and
+    // its order (see panels/groups.jsx); alphabetical within a group, because
+    // the registry's order means something on screen and nothing in a menu.
+    //
+    // A page too old to send groups, or one whose groups somehow name nothing,
+    // still gets a flat list: this is a menu, and it working is worth more than
+    // it being tidy.
+    const groups = (snapshot.groups || [])
+        .map((g) => ({
+            title: g.title,
+            iconPng: g.iconPng,
+            items: (g.panels || []).map((id) => byId.get(id)).filter(Boolean),
+        }))
+        .filter((g) => g.items.length);
+
+    const entry = (p) => ({
         label: p.title,
         // Drawn by the page and rasterised in its preload — nativeImage cannot
         // read SVG, and this side has no renderer to do it in. Absent where
@@ -447,7 +463,22 @@ function layoutSubmenu(snapshot, win) {
                 },
             })),
         ],
-    }));
+    });
+
+    const byTitle = (a, b) => String(a.title).localeCompare(String(b.title));
+    if (!groups.length) return [...panels].sort(byTitle).map(entry);
+
+    // A group of one is its panel, without a submenu to open first: the
+    // Multipad is its own group precisely because it is the one nothing should
+    // be put in front of.
+    return groups.map((g) => (g.items.length === 1
+        ? entry(g.items[0])
+        : {
+            label: g.title,
+            // The group's own icon, the one a phone shows on its tab bar.
+            ...(g.iconPng ? { icon: menuIcon(g.iconPng) } : {}),
+            submenu: [...g.items].sort(byTitle).map(entry),
+        }));
 }
 
 let panelSeq = 0;

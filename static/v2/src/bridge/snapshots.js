@@ -179,6 +179,15 @@ export function layoutSnapshot(src) {
             unhideable: !!p.unhideable,
         })),
         docks: (layout.docks || []).map((d) => ({ id: d.id, collapsed: !!d.collapsed })),
+        // The same grouping a phone's tab bar uses, in its order, so a client
+        // building a menu can arrange fifty panels the way the app does.
+        // Every panel appears in exactly one group.
+        groups: (layout.groups || []).map((g) => ({
+            id: g.id,
+            title: g.title,
+            icon: g.icon || '',
+            panels: [...(g.panels || [])],
+        })),
     };
 }
 

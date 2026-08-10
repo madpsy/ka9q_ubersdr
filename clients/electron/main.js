@@ -17,6 +17,7 @@ const { InstanceProxy } = require('./proxy');
 const { InstanceStore } = require('./store');
 const { SharedPrefs } = require('./prefs');
 const { FlrigLink } = require('./flrig');
+const { RigctlLink } = require('./rigctl');
 const discovery = require('./discovery');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
@@ -154,12 +155,12 @@ async function connectInstance(desc) {
         localOrigins.delete(proxy.localOrigin);
         proxy.stop();
         const gone = running.get(entry.id);
-        if (gone && gone.flrig) gone.flrig.stop();
+        if (gone && gone.radio) gone.radio.stop();
         running.delete(entry.id);
         notifyChooser();
     });
 
-    const rec = { proxy, win, links: null, layout: null, menu: null, flrig: null };
+    const rec = { proxy, win, links: null, layout: null, menu: null, radio: null };
     running.set(entry.id, rec);
     watchMenuFocus(rec);
     store.recordUse(entry.id);
@@ -617,43 +618,50 @@ function setupIpc() {
     // The picker page. Both are no-ops once the picker has closed, so a late
     // message from a window on its way out cannot answer a request that has
     // already been answered.
-    // --- flrig ---------------------------------------------------------------
+    // --- the radio link ------------------------------------------------------
     //
     // One link per receiver window, driven entirely by that window's preload:
     // the panel's settings arrive there over the page API, and the preload says
-    // start, stop, or set this. Everything here is the XML-RPC, which has to be
-    // in the main process because flrig sends no CORS headers and no page can
-    // reach it. See flrig.js.
-    ipcMain.on('flrig:start', (event, { host, port }) => {
+    // start, stop, or set this. Which protocol is a matter of which transport
+    // was chosen, and both have to be here rather than in the page — flrig
+    // sends no CORS headers, and rigctld is a raw socket. See flrig.js and
+    // rigctl.js.
+    //
+    // One at a time: the panel offers a single connection, so a second would be
+    // a link nothing is reading.
+    const LINKS = { flrig: FlrigLink, rigctld: RigctlLink };
+
+    ipcMain.on('radio:start', (event, { kind, host, port }) => {
         const rec = recordFor(event.sender);
-        if (!rec) return;
-        if (rec.flrig) rec.flrig.stop();
-        rec.flrig = new FlrigLink({
+        const Link = LINKS[kind];
+        if (!rec || !Link) return;
+        if (rec.radio) rec.radio.stop();
+        rec.radio = new Link({
             host: String(host || '127.0.0.1'),
-            port: Number(port) || 12345,
+            port,
             onState: (state) => {
-                if (!rec.win.isDestroyed()) rec.win.webContents.send('flrig:state', state);
+                if (!rec.win.isDestroyed()) rec.win.webContents.send('radio:state', state);
             },
         });
-        rec.flrig.start();
+        rec.radio.start();
     });
 
-    ipcMain.on('flrig:stop', (event) => {
+    ipcMain.on('radio:stop', (event) => {
         const rec = recordFor(event.sender);
-        if (rec && rec.flrig) {
-            rec.flrig.stop();
-            rec.flrig = null;
+        if (rec && rec.radio) {
+            rec.radio.stop();
+            rec.radio = null;
         }
     });
 
     // Pushing the receiver's dial onto the rig. Failures are swallowed: the
     // poll is what reports the link's health, and a rig that refused one write
     // says so on the next read rather than through two channels at once.
-    ipcMain.on('flrig:set', (event, { frequency, mode }) => {
+    ipcMain.on('radio:set', (event, { frequency, mode }) => {
         const rec = recordFor(event.sender);
-        if (!rec || !rec.flrig) return;
-        if (frequency != null) rec.flrig.setFrequency(frequency).catch(() => {});
-        if (mode) rec.flrig.setMode(mode).catch(() => {});
+        if (!rec || !rec.radio) return;
+        if (frequency != null) rec.radio.setFrequency(frequency).catch(() => {});
+        if (mode) rec.radio.setMode(mode).catch(() => {});
     });
 
     // The page telling us where its panels are, on connect and on every change.

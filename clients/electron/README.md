@@ -138,6 +138,12 @@ Same three sources as the other clients (`clients/tui`,
   command, added in API 1.1), which means a panel dragged about in the UI moves
   its menu entry with it and the two cannot disagree. The Layout panel itself
   is greyed out for hiding, because it is what brings the others back.
+- **rigctld**: the Radio Control panel gains a **rigctld** connection beside
+  Serial, with a host and port (4532 by default). Hamlib's own daemon, so it
+  drives every rig Hamlib supports — without the page's 14 MB of WebAssembly,
+  and without the cable having to be on this machine. Its protocol is a raw
+  TCP socket (`rigctl.js`), which no page can open at all, so like flrig it
+  lives in the main process.
 - **flrig**: the Radio Control panel gains an **FLRig** connection beside
   Serial, with its own host and port. flrig speaks XML-RPC and sends no CORS
   headers, so no page can reach it — the requests are made from the main
@@ -173,6 +179,7 @@ discovery.js  directory fetch, LAN enrichment, manual-address resolution
 store.js      saved instances (JSON in userData), stable local ports
 prefs.js      the shared-settings snapshot (JSON in userData)
 flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
+rigctl.js     rigctld over its TCP protocol, likewise
 preload.js    IPC surface for the chooser page
 receiver-preload.js  seeds/reports shared settings in receiver windows
 serial-preload.js    IPC surface for the serial picker page
@@ -195,9 +202,8 @@ stages the UI and then runs `electron-builder`, leaving distributables in
 
 - on **Linux**: `UberSDR-<version>.AppImage`, `UberSDR-<version>-win.zip`
   (unzip on Windows and run `UberSDR.exe`) and `UberSDR Setup <version>.exe`
-  (see below — needs Docker, and is skipped with a note without it). A proper NSIS installer can only
-  be cross-built with a wine that has 32-bit support; built on Windows itself
-  (`./build.sh --package` there) it comes out as `UberSDR Setup <version>.exe`.
+  (see below — built in Docker, and skipped with a note where Docker is
+  absent).
 - on **macOS**: a dmg. Mac packages can only be built on a Mac — for all
   three platforms from one push, run `./build.sh --package` in a CI matrix
   (ubuntu / macos / windows runners).
@@ -231,6 +237,23 @@ before it starts, since a silent download that size looks like a hung build.
 On Windows itself no container is involved: `./build.sh --package` builds NSIS
 natively.
 
+### Unsigned builds
+
 None of the binaries are code-signed; macOS Gatekeeper and Windows SmartScreen
-will warn accordingly until signing identities are configured in the
-`build` section of `package.json`.
+will warn accordingly until signing identities are configured in the `build`
+section of `package.json`.
+
+On macOS that warning is fatal rather than advisory, and it applies to a dmg
+**downloaded from the internet** — from a GitHub release, say. The browser marks
+the download with the quarantine attribute, and for an unsigned app Gatekeeper
+then refuses it as damaged rather than offering to open it anyway. Clearing the
+attribute after dragging the app to Applications is what lets it start:
+
+```sh
+xattr -cr "/Applications/UberSDR.app"
+```
+
+Once per install. A dmg built on the machine it runs on was never downloaded, so
+it carries no quarantine attribute and needs none of this — which is why the
+problem only shows up for the people you send a release to. It goes away
+entirely once the app is signed and notarised.

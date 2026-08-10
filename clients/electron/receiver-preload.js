@@ -77,51 +77,95 @@ function stop() {
     }
 }
 
-// --- flrig, as a Radio Control transport -------------------------------------
+// --- the Radio Control transports this client offers -------------------------
 //
-// What the panel renders for it, and what it is able to keep in step. The panel
-// knows nothing else about flrig: it draws these two fields, remembers what was
-// typed, and says whether the operator has asked to be connected. See
-// static/v2/src/controls/radioProviders.js.
-const FLRIG_PROVIDER = {
-    id: 'flrig',
-    label: 'FLRig',
-    fields: [
-        { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
-        { key: 'port', label: 'Port', type: 'number', default: 12345 },
-    ],
-    capabilities: ['frequency', 'mode', 'ptt'],
-};
+// What the panel renders for each, and what each can keep in step. The panel
+// knows nothing else about them: it draws the fields, remembers what was typed
+// against the id, and says which one is chosen and whether the operator has
+// asked to be connected. See static/v2/src/controls/radioProviders.js.
+//
+// Both are things a page cannot reach on its own — flrig answers XML-RPC with
+// no CORS headers, rigctld is a raw socket — which is the whole reason this
+// client has anything to offer here. The protocols live in the main process
+// (flrig.js, rigctl.js); this end only names them.
+const PROVIDERS = [
+    {
+        id: 'flrig',
+        label: 'FLRig',
+        fields: [
+            { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
+            { key: 'port', label: 'Port', type: 'number', default: 12345 },
+        ],
+        capabilities: ['frequency', 'mode', 'ptt'],
+    },
+    {
+        id: 'rigctld',
+        // Named for what somebody is running rather than for Hamlib, which is
+        // also what the page's Serial transport is built on — two entries both
+        // called Hamlib would be a menu you cannot choose from.
+        label: 'rigctld',
+        fields: [
+            { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
+            { key: 'port', label: 'Port', type: 'number', default: 4532 },
+        ],
+        capabilities: ['frequency', 'mode', 'ptt'],
+    },
+];
+const PROVIDER_IDS = PROVIDERS.map((p) => p.id);
 
 // The panel's settings as they last arrived, and the rig as flrig last reported
 // it. Both are needed on every event: a tune has to know which way the sync is
 // meant to run, and a poll has to know whether to push what it found.
 let rc = null;
 let rig = { frequency: null, mode: null, sdrMode: null, tx: false, connected: false };
+// The receiver's own dial, as last reported. Kept whichever way the sync runs,
+// because it is what a link coming up has to be brought into line with.
+let tuning = null;
 let bridge = null;
 let wanted = false;             // whether a link should be up for the current settings
-// Where that link should point, as a string to compare by value. null when none
-// is wanted; a change to it is what starts, moves or stops the link.
+let selected = null;            // the transport of ours the panel is showing, if any
+// What that link should be, as a string to compare by value — the transport and
+// where it points. null when none is wanted; a change to it is what starts,
+// moves or stops the link.
 let target = null;
 let lastSentToRig = { frequency: null, mode: null };
 let lastPushedToSdr = { frequency: null, mode: null };
 let ducked = false;
+// Transports found to have no PTT — plenty of Hamlib backends cannot read it.
+const droppedPtt = new Set();
+
+/**
+ * A transport as it should be offered *now*.
+ *
+ * Through one function because it is registered from two places — once per
+ * announce, and again the moment a rig turns out to lack PTT — and the announce
+ * is the more frequent of the two. Building the descriptor from the constant in
+ * that path put the capability straight back every time the page re-announced,
+ * so the switch it was meant to remove reappeared a second later.
+ */
+function descriptorFor(spec) {
+    if (!droppedPtt.has(spec.id)) return spec;
+    return { ...spec, capabilities: spec.capabilities.filter((c) => c !== 'ptt') };
+}
 
 // Rounded before comparing: flrig reports whole hertz and the receiver tunes in
 // whole hertz, but a rig whose last digit dithers would otherwise trade writes
 // with the receiver forever.
 const sameFreq = (a, b) => a != null && b != null && Math.abs(a - b) < 2;
 
+// Reported against whichever transport is selected: a status for one the panel
+// is not showing would be a readout nobody asked for.
 function report(patch) {
-    if (!bridge) return;
-    bridge.command('radio', { action: 'status', id: 'flrig', ...patch }).catch(() => {});
+    if (!bridge || !selected) return;
+    bridge.command('radio', { action: 'status', id: selected, ...patch }).catch(() => {});
 }
 
 /** Settings changed, or arrived for the first time. */
 function onRadioControl(next) {
     if (!next) return;
     rc = next;
-    const shouldRun = next.transport === 'flrig' && next.connect;
+    selected = PROVIDER_IDS.includes(next.transport) ? next.transport : null;
+    const shouldRun = !!selected && next.connect;
 
     // Keyed on where the link should point, not merely on whether one is
     // wanted. Watching the boolean alone meant a correction could not be
@@ -130,21 +174,24 @@ function onRadioControl(next) {
     // address that had just failed. The only way out was to select another
     // transport and come back, which is not a thing anyone should have to
     // discover.
+    const spec = PROVIDERS.find((p) => p.id === selected);
     const nextTarget = shouldRun ? JSON.stringify({
+        kind: selected,
         host: String(next.config.host || '127.0.0.1'),
-        port: Number(next.config.port) || 12345,
+        port: Number(next.config.port)
+            || spec.fields.find((f) => f.key === 'port').default,
     }) : null;
-    if (nextTarget === target) return;
+    if (nextTarget === target) { onSettingsOnly(); return; }
     const wasRunning = target !== null;
     target = nextTarget;
     wanted = shouldRun;
 
     // Moved rather than stopped: drop the old link before opening the new one,
     // or two pollers talk to two flrigs and the readout alternates.
-    if (wasRunning && shouldRun) ipcRenderer.send('flrig:stop');
+    if (wasRunning && shouldRun) ipcRenderer.send('radio:stop');
 
     if (!shouldRun) {
-        if (wasRunning) ipcRenderer.send('flrig:stop');
+        if (wasRunning) ipcRenderer.send('radio:stop');
         // Whatever the rig was doing stops being true the moment the link goes.
         rig = { frequency: null, mode: null, sdrMode: null, tx: false, connected: false };
         lastSentToRig = { frequency: null, mode: null };
@@ -154,7 +201,12 @@ function onRadioControl(next) {
         return;
     }
     report({ busy: true, error: null });
-    ipcRenderer.send('flrig:start', JSON.parse(target));
+    ipcRenderer.send('radio:start', JSON.parse(target));
+}
+
+/** Settings changed without the link needing to move — a direction flip, say. */
+function onSettingsOnly() {
+    syncToRig();
 }
 
 function command(name, args) {
@@ -162,28 +214,57 @@ function command(name, args) {
     return bridge.command(name, args).catch(() => null);
 }
 
-/** The receiver was tuned — push it to the rig if that is the way sync runs. */
+/** The receiver was tuned. Remembered whichever way the sync runs. */
 function onTuning(t) {
-    if (!wanted || !rig.connected || !t) return;
+    if (t) tuning = t;
+    syncToRig();
+}
+
+/**
+ * Bring the rig into line with the receiver, where that is the way sync runs.
+ *
+ * Called when the receiver moves, and also the moment a link comes up or the
+ * direction is changed to this one — which is the part that was missing. Waiting
+ * for the receiver to move next meant switching sync on did nothing at all: the
+ * rig sat wherever it had been until somebody happened to touch the dial, and
+ * a mode that was already right on the receiver was never sent, so the rig
+ * stayed in the wrong one indefinitely.
+ *
+ * The guards below are what keep it from being a loop rather than a sync: never
+ * send what was last sent, and never send what the rig is already on.
+ */
+function syncToRig() {
+    if (!wanted || !rig.connected || !tuning) return;
     if (!rc || rc.direction !== 'sdr-to-radio') return;
 
     const patch = {};
-    if (rc.syncFrequency && t.frequency && !sameFreq(t.frequency, lastSentToRig.frequency)
-        && !sameFreq(t.frequency, rig.frequency)) {
-        patch.frequency = t.frequency;
-        lastSentToRig.frequency = t.frequency;
+    if (rc.syncFrequency && tuning.frequency
+        && !sameFreq(tuning.frequency, lastSentToRig.frequency)
+        && !sameFreq(tuning.frequency, rig.frequency)) {
+        patch.frequency = tuning.frequency;
+        lastSentToRig.frequency = tuning.frequency;
     }
-    if (rc.syncMode && t.mode && t.mode !== lastSentToRig.mode && t.mode !== rig.sdrMode) {
-        patch.mode = t.mode;
-        lastSentToRig.mode = t.mode;
+    if (rc.syncMode && tuning.mode && tuning.mode !== lastSentToRig.mode
+        && tuning.mode !== rig.sdrMode) {
+        patch.mode = tuning.mode;
+        lastSentToRig.mode = tuning.mode;
     }
-    if (patch.frequency != null || patch.mode) ipcRenderer.send('flrig:set', patch);
+    if (patch.frequency != null || patch.mode) ipcRenderer.send('radio:set', patch);
 }
 
-function startFlrig(client) {
+function startRadio(client) {
     bridge = client;
 
-    ipcRenderer.on('flrig:state', (_event, state) => {
+    ipcRenderer.on('radio:state', (_event, state) => {
+        // A rig that turns out to have no PTT: offer the transport again
+        // without that capability, so the panel stops showing a mute-on-
+        // transmit switch that nothing will ever trip. Registering the same id
+        // replaces the descriptor and leaves its status alone.
+        if (state.pttAvailable === false && selected && !droppedPtt.has(selected)) {
+            droppedPtt.add(selected);
+            const spec = PROVIDERS.find((p) => p.id === selected);
+            if (spec) command('radio', { action: 'register', provider: descriptorFor(spec) });
+        }
         const wasConnected = rig.connected;
         rig = { ...rig, ...state };
         report({
@@ -202,6 +283,10 @@ function startFlrig(client) {
             ducked = !!state.tx;
             command('duck', { ducked });
         }
+
+        // The link has just come up, and the receiver leads: bring the rig to
+        // it rather than waiting for the next time somebody turns the dial.
+        if (!wasConnected && state.connected) syncToRig();
 
         if (!rc || rc.direction !== 'radio-to-sdr') return;
 
@@ -230,8 +315,11 @@ function startFlrig(client) {
     // The window is going away: drop the link rather than leaving it polling a
     // rig for a page that no longer exists.
     window.addEventListener('pagehide', () => {
-        ipcRenderer.send('flrig:stop');
-        if (bridge) bridge.command('radio', { action: 'unregister', id: 'flrig' }).catch(() => {});
+        ipcRenderer.send('radio:stop');
+        if (!bridge) return;
+        for (const id of PROVIDER_IDS) {
+            bridge.command('radio', { action: 'unregister', id }).catch(() => {});
+        }
     });
 }
 
@@ -358,10 +446,18 @@ function startLayoutBridge() {
         client.subscribe(['layout', 'radiocontrol', 'tuning'])
             .then((state) => {
                 push(state && state.layout);
+                // The reply carries a snapshot of each topic. Seeding the dial
+                // from it matters: the topic only emits on a *change*, so
+                // without this the receiver's current frequency and mode are
+                // unknown until somebody moves them — and a link coming up has
+                // nothing to bring the rig into line with.
+                if (state && state.tuning) tuning = state.tuning;
                 // Re-offered on every announce, because an announce means the
                 // page reset — after a reload the registry is empty and a
                 // transport that only registered once would have vanished.
-                client.command('radio', { action: 'register', provider: FLRIG_PROVIDER })
+                Promise.all(PROVIDERS.map((spec) => client.command(
+                    'radio', { action: 'register', provider: descriptorFor(spec) },
+                )))
                     .then(() => onRadioControl(state && state.radiocontrol))
                     .catch(() => { /* an older page, without transports */ });
             })
@@ -373,7 +469,7 @@ function startLayoutBridge() {
     client.on('tuning', onTuning);
     client.hello().catch(() => { /* not up yet — its announce will arrive */ });
 
-    startFlrig(client);
+    startRadio(client);
 
     // The menu asking for a change. Failures are reported back so the menu can
     // put its tick where the page actually is rather than where it asked to be.

@@ -30,6 +30,7 @@
       "store.js",
       "prefs.js",
       "flrig.js",
+      "rigctl.js",
       "preload.js",
       "receiver-preload.js",
       "serial-preload.js",

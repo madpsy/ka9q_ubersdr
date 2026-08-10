@@ -20,6 +20,7 @@ const { FlrigLink } = require('./flrig');
 const { RigctlLink } = require('./rigctl');
 const { TciServer } = require('./tciserver');
 const discovery = require('./discovery');
+const { browserUserAgent } = require('./useragent');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
 // Chromium's autoplay heuristics from ever muting a reconnect.
@@ -292,6 +293,21 @@ function chooseSerialPort(parent, portList) {
 
 function setupSession() {
     const ses = session.defaultSession;
+
+    // How receiver operators see this client in their listener lists. Set on
+    // the fallback rather than per window so every page carries it — the
+    // chooser, the receiver windows and the instance's own v1 popups — and set
+    // before the first window is created, which app.whenReady's ordering below
+    // is what guarantees.
+    //
+    // Set here rather than anywhere later because the server records the User-
+    // Agent against the session UUID at POST /connection, and both socket
+    // endpoints refuse a UUID with no recorded one (websocket.go:562,
+    // user_spectrum_websocket.go:197). They check that it exists rather than
+    // that it matches, so a late change would not lock anyone out — but the
+    // string a receiver operator sees should be this one from the first
+    // request, not Chromium's default for the first window and ours after.
+    app.userAgentFallback = browserUserAgent(app.userAgentFallback);
 
     // Web Serial (the FlexControl knob): Electron ships no picker UI, so
     // requestPort() would hang without these.

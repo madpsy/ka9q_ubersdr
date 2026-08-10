@@ -36,9 +36,6 @@ export class AudioConnection extends Emitter {
         // caller having to remember.
         this.format = 'opus';
         this.pcm = new PCMStreamDecoder();
-        // In-flight (or spent) attempt to fetch the inflater mid-stream; see
-        // _onPCMBinary. Cleared per connect so a later session may try again.
-        this._pcmLoad = null;
         this.closedByUser = false;
         this.attempts = 0;
         this.maxAttempts = 12;
@@ -67,24 +64,6 @@ export class AudioConnection extends Emitter {
         this.params = { ...params };
         // Whatever the last session announced does not describe this one.
         this.pcm.reset();
-        this._pcmLoad = null;
-
-        // The inflater has to be in hand before the first packet arrives, so it
-        // is fetched ahead of the socket. If it cannot be, fall back to Opus
-        // rather than opening a stream nothing can decode — and say so, so the
-        // panel stops claiming a format the operator is not getting.
-        if (this.format === 'pcm-zstd') {
-            try {
-                await this.pcm.load();
-            } catch (err) {
-                this.format = 'opus';
-                this.emit('error', {
-                    kind: 'format',
-                    message: 'Could not load the uncompressed audio decoder — using Opus.',
-                });
-                this.emit('format', 'opus');
-            }
-        }
 
         const check = await connectionCheck();
         if (!check.allowed) {
@@ -310,24 +289,6 @@ export class AudioConnection extends Emitter {
     // Lossless frames, decoded into the same planar floats the JSON fallback
     // produces so the player has one PCM entry point rather than two.
     _onPCMBinary(buffer) {
-        if (!this.pcm.ready) {
-            // Only reachable on the server-fallback path — a requested
-            // pcm-zstd waits for this before the socket opens. Drop what
-            // arrives meanwhile; it is a fraction of a second of audio.
-            //
-            // Held in a field rather than started per packet: packets arrive at
-            // 50 a second, and a load that fails would otherwise append a
-            // script element and log an error for every one of them.
-            if (!this._pcmLoad) {
-                this._pcmLoad = this.pcm.load().catch(() => {
-                    this.emit('error', {
-                        kind: 'format',
-                        message: 'This receiver sent uncompressed audio and the decoder could not be loaded.',
-                    });
-                });
-            }
-            return;
-        }
         const frame = this.pcm.decode(buffer);
         if (!frame) return;
         // Only a full header carries it, and every packet in the modes v2

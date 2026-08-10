@@ -296,12 +296,6 @@ export function RadioProvider({ children }) {
         offs.push(audioConn.on('pcm', ({ planes, sampleRate }) => {
             player.pushPCM(planes, sampleRate);
         }));
-        // The socket settling on a format other than the one asked for — the
-        // decoder would not load. Said out loud so the panel is not left
-        // showing a choice that did not happen.
-        offs.push(audioConn.on('format', (format) => {
-            setAudio((a) => (a.format === format ? a : { ...a, format }));
-        }));
         offs.push(audioConn.on('quality', ({ basebandPower, noiseDensity }) => {
             // Before anything else: the figure only counts as evidence when it
             // changes, and the packet handler is the only place it is seen raw.

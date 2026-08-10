@@ -21,16 +21,9 @@
 //
 // See pcm_binary.go, which writes all of this.
 
-import { loadScript } from '../lib/loadScript.js';
-
-// fzstd 0.1.1, UMD, decompression only:
-//   curl -fsSL -o static/fzstd.min.js https://unpkg.com/fzstd@0.1.1/umd/index.js
-//
-// Loaded on demand rather than from index.html. It is 8 KB, which is nothing
-// next to the bundle, but nobody listening on Opus — everybody, by default —
-// needs a zstd decoder at all, and this keeps the default path exactly as it
-// was. Same reasoning as v1's jszip and the recorder worklet.
-const FZSTD_URL = '/fzstd.min.js';
+// The inflater is bundled rather than fetched at runtime — see vendor/README.md
+// for why a separate file could not work here. It costs about 8 KB of v2.js.
+import { decompress } from '../../vendor/fzstd.js';
 
 const MAGIC_FULL = 0x5043;      // "PC"
 const MAGIC_MINIMAL = 0x504D;   // "PM"
@@ -63,42 +56,10 @@ function quality(value) {
 
 export class PCMStreamDecoder {
     constructor() {
-        this.lib = null;
-        this.loading = null;
         // Carried between packets for the minimal-header case. Zero means
         // nothing has announced them yet.
         this.sampleRate = 0;
         this.channels = 1;
-    }
-
-    get ready() {
-        return !!this.lib;
-    }
-
-    // Fetches the inflater. Awaited before the socket opens when this format
-    // was asked for; started mid-stream when a server falls back to it on its
-    // own, where packets are dropped until it resolves rather than the stream
-    // failing outright.
-    load() {
-        if (this.lib) return Promise.resolve(this.lib);
-        if (!this.loading) {
-            this.loading = loadScript(FZSTD_URL).then(
-                () => {
-                    const lib = window.fzstd;
-                    if (!lib || typeof lib.decompress !== 'function') {
-                        this.loading = null;
-                        throw new Error('fzstd loaded but exported no decompressor');
-                    }
-                    this.lib = lib;
-                    return lib;
-                },
-                (err) => {
-                    this.loading = null;
-                    throw err;
-                },
-            );
-        }
-        return this.loading;
     }
 
     // A fresh session announces its own metadata, and keeping the old values
@@ -113,10 +74,9 @@ export class PCMStreamDecoder {
     // a truncated packet, an unknown magic, or samples arriving before any
     // header has said what rate they are.
     decode(buffer) {
-        if (!this.lib) return null;
         let raw;
         try {
-            raw = this.lib.decompress(new Uint8Array(buffer));
+            raw = decompress(new Uint8Array(buffer));
         } catch (err) {
             return null;
         }

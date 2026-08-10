@@ -11,7 +11,10 @@ const https = require('https');
 const mdns = require('./mdns');
 
 const DIRECTORY_URL = 'https://instances.ubersdr.org/api/instances';
-const USER_AGENT = 'UberSDR Desktop Client (electron)';
+// Was a fixed string with no version in it. Shared with the browser user agent
+// now so the directory and a receiver's listener list name this client the same
+// way, and so a bug report that quotes either one says which build it came from.
+const { API_USER_AGENT: USER_AGENT } = require('./useragent');
 
 // Node's fetch cannot be told to accept a self-signed certificate, and LAN
 // receivers often have exactly that, so requests go through http/https.request.

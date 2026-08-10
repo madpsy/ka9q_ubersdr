@@ -296,6 +296,11 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         }
 
         // ── Content script: tab is navigating away ────────────────────────────
+        case 'ubersdr:radiocontrol': {
+            applyRadioControl(tabId, msg.rc);
+            return;
+        }
+
         case 'ubersdr:deregister': {
             const tabId = sender.tab ? sender.tab.id : null;
             if (!tabId) break;
@@ -698,6 +703,23 @@ function broadcastToPopup(msg) {
 // Broadcast a registry update that always includes the current selectedTabId.
 function broadcastRegistry() {
     broadcastToPopup({ type: 'registry:updated', tabs: registrySnapshot(), selectedTabId });
+    syncRadioOffers();
+}
+
+// Which tab is offered the FLRig transport, kept in step with which tab is
+// selected. Driven from here because every path that changes the selection —
+// the popup, a browser tab becoming active, flrig switching VFO, a tab closing
+// — ends in a broadcastRegistry(), and hooking each of them separately is how
+// one gets missed.
+let _radioOfferedTo = null;
+function syncRadioOffers() {
+    if (_radioOfferedTo === selectedTabId) return;
+    const previous = _radioOfferedTo;
+    _radioOfferedTo = selectedTabId;
+    // Withdrawn first: for a moment otherwise two panels both offer a link
+    // only one of them can have.
+    if (previous != null && registry.has(previous)) offerRadioTo(previous, false);
+    if (selectedTabId != null && registry.has(selectedTabId)) offerRadioTo(selectedTabId, true);
 }
 
 // ── flrig XML-RPC ──────────────────────────────────────────────────────────────
@@ -915,6 +937,79 @@ async function flushSdrToFlrig() {
 }
 
 // Poll flrig — always runs when connected (for display + optional rig-to-sdr push)
+// ── the Radio Control panel's FLRig transport ─────────────────────────────────
+//
+// The panel offers flrig beside Serial because this extension can reach it and
+// a page cannot. What the operator types there is the setting — there is one
+// flrig and one selected tab, so the alternative was two places to set a host
+// and a rule about which wins. The popup keeps showing the same values because
+// they are the same values: the panel writes through to storage below.
+
+/** Offer or withdraw the transport in a tab. */
+function offerRadioTo(tabId, offer) {
+    if (tabId == null) return;
+    browser.tabs.sendMessage(tabId, { type: 'cmd:radio_offer', offer: !!offer }).catch(() => {});
+}
+
+/** What flrig is doing, for the panel's readout in the selected tab. */
+function pushRadioStatus(status) {
+    if (selectedTabId == null || !registry.has(selectedTabId)) return;
+    browser.tabs.sendMessage(selectedTabId, { type: 'cmd:radio_status', status }).catch(() => {});
+}
+
+/**
+ * The panel changed something. Applied here and persisted, so the popup and the
+ * panel are two views of one setting rather than two settings.
+ *
+ * Only from the selected tab: another tab's panel is describing a link it does
+ * not have.
+ */
+async function applyRadioControl(tabId, rc) {
+    if (!rc || tabId !== selectedTabId) return;
+    if (rc.transport !== 'flrig') {
+        // Switched to Serial, or to somebody else's transport. Ours stops.
+        if (flrigEnabled) {
+            flrigEnabled = false;
+            stopFlrigPoll();
+            flrigConnected = false;
+            await browser.storage.local.set({ flrigEnabled: false });
+            broadcastToPopup({ type: 'flrig:status', connected: false, message: 'Disabled' });
+            pushRadioStatus({ connected: false, busy: false, error: null });
+        }
+        return;
+    }
+
+    const host = String((rc.config && rc.config.host) || '127.0.0.1');
+    const port = Number((rc.config && rc.config.port) || 12345);
+    const direction = rc.direction === 'radio-to-sdr' ? 'rig-to-sdr' : 'sdr-to-rig';
+    const moved = host !== flrigHost || port !== flrigPort;
+
+    flrigHost = host;
+    flrigPort = port;
+    flrigDirection = direction;
+    pttMuteEnabled = rc.muteOnTx !== false;
+    await browser.storage.local.set({
+        flrigHost: host, flrigPort: port, flrigDirection: direction, pttMuteEnabled,
+    });
+    // The popup is open often enough that a stale host in it would be noticed.
+    broadcastToPopup({ type: 'flrig:settings', host, port, direction, pttMuteEnabled });
+
+    if (rc.connect && (!flrigEnabled || !flrigConnected || moved)) {
+        if (moved && flrigConnected) { stopFlrigPoll(); flrigConnected = false; }
+        flrigEnabled = true;
+        await browser.storage.local.set({ flrigEnabled: true });
+        pushRadioStatus({ busy: true, error: null });
+        await flrigConnect();
+    } else if (!rc.connect && flrigEnabled) {
+        flrigEnabled = false;
+        stopFlrigPoll();
+        flrigConnected = false;
+        await browser.storage.local.set({ flrigEnabled: false });
+        broadcastToPopup({ type: 'flrig:status', connected: false, message: 'Disabled' });
+        pushRadioStatus({ connected: false, busy: false, error: null });
+    }
+}
+
 async function pollFlrigToSdr() {
     try {
         // Check if flrig has switched VFO (user pressed A/B on the radio).
@@ -1005,6 +1100,10 @@ async function pollFlrigToSdr() {
 
         // Always broadcast raw flrig values to the popup for display.
         broadcastToPopup({ type: 'flrig:state', freq, mode: modeRaw, vfo: flrigActiveVfo, ptt: pttNow });
+        pushRadioStatus({
+            connected: true, busy: false, error: null,
+            frequency: freq, mode: modeRaw, tx: pttNow,
+        });
 
         // Only push to SDR if direction allows it.
         if (flrigDirection === 'rig-to-sdr') {
@@ -1065,10 +1164,12 @@ async function flrigConnect() {
         // Read the current VFO from flrig on connect
         try { flrigActiveVfo = await flrigGetAB(); } catch (_) { flrigActiveVfo = 'A'; }
         broadcastToPopup({ type: 'flrig:status', connected: true, message: 'Connected' });
+        pushRadioStatus({ connected: true, busy: false, error: null });
         startFlrigPoll();
     } catch (err) {
         flrigConnected = false;
         broadcastToPopup({ type: 'flrig:status', connected: false, message: `Unreachable: ${err.message}` });
+        pushRadioStatus({ connected: false, busy: false, error: `flrig unreachable: ${err.message}` });
     }
 }
 
@@ -1094,6 +1195,7 @@ function startFlrigPoll() {
             flrigConnected = false;
             stopFlrigPoll();
             broadcastToPopup({ type: 'flrig:status', connected: false, message: 'Lost connection' });
+            pushRadioStatus({ connected: false, busy: false, error: 'flrig: lost connection' });
             return;
         }
         if (_flrigPollStopped) return;

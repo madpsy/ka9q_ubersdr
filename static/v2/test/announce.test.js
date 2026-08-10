@@ -115,9 +115,57 @@ t('a "default" Microsoft voice is the last Microsoft resort', () => {
     assert.strictEqual(pickVoice(win).name, 'Microsoft Zira - English (United States)');
 });
 
-t('nothing usable means no voice rather than a bad one', () => {
-    assert.strictEqual(pickVoice([voice('Daniel', 'en-GB'), voice('Alex', 'en-US')]), null);
+t('no English voice at all means no voice', () => {
     assert.strictEqual(pickVoice([]), null);
+    assert.strictEqual(pickVoice([voice('Google Deutsch', 'de-DE')]), null);
+});
+
+// The desktop client has neither Google's bundled voices nor Windows's, so on
+// Linux the system's are all there are. Refusing them left the announcements
+// and the callsign readout permanently silent there, which reads as broken
+// rather than as plain.
+t('where nothing is branded, the system voices are offered', () => {
+    const linux = [
+        voice('English (Great Britain) espeak-ng', 'en-GB'),
+        voice('English (America) espeak-ng', 'en-US'),
+        voice('Deutsch espeak-ng', 'de'),
+    ];
+    assert.deepStrictEqual(
+        usableVoices(linux).map((v) => v.name),
+        ['English (Great Britain) espeak-ng', 'English (America) espeak-ng'],
+    );
+    // v1's preference for British English survives into the fallback.
+    assert.strictEqual(pickVoice(linux).name, 'English (Great Britain) espeak-ng');
+});
+
+t('one branded voice is still enough to refuse the rest', () => {
+    const mixed = [
+        voice('English (Great Britain) espeak-ng', 'en-GB'),
+        voice('Google US English', 'en-US'),
+    ];
+    assert.deepStrictEqual(usableVoices(mixed).map((v) => v.name), ['Google US English']);
+});
+
+// espeak-ng publishes every accent again once per modified voice, which is
+// hundreds of entries for a handful of distinct voices.
+t('espeak-ng variants are dropped from the fallback', () => {
+    const espeak = [
+        voice('English (Great Britain) espeak-ng', 'en-GB'),
+        voice('English (Great Britain)+Adam espeak-ng', 'en-GB'),
+        voice('English (Great Britain)+Alex espeak-ng', 'en-GB'),
+    ];
+    assert.deepStrictEqual(
+        usableVoices(espeak).map((v) => v.name),
+        ['English (Great Britain) espeak-ng'],
+    );
+});
+
+// listVoices() runs the list through both, and speak() re-filters what it is
+// given: a filter that changed the answer on a second pass would drop voices
+// somewhere between the picker and the utterance.
+t('filtering an already-filtered list changes nothing', () => {
+    const linux = [voice('English (Great Britain) espeak-ng', 'en-GB'), voice('x+y espeak-ng', 'en-US')];
+    assert.deepStrictEqual(usableVoices(usableVoices(linux)), usableVoices(linux));
 });
 
 // --- the browser gate --------------------------------------------------------

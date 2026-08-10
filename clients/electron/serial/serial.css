@@ -1,0 +1,54 @@
+/* The serial picker's list. Everything else — palette, header, .row, .empty,
+   button.ghost — comes from chooser.css, which this page loads first. */
+
+/* The window is fixed-size and modal, so the list is the only thing that
+   scrolls; the header and the footer stay put. `main` already scrolls in
+   chooser.css, and this keeps it from growing the window instead. */
+.serial main { min-height: 0; }
+
+/* A row here is a control, not a row with controls in it: the whole thing is
+   the button, because there is exactly one thing to do with a port. */
+.port {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+.port:hover { background: var(--panel-hover); border-color: var(--accent-dim); }
+/* Focus is how this page is driven from the keyboard, so it has to be as
+   legible as hover — the arrow keys move focus and Enter presses it. */
+.port:focus-visible,
+.port:focus {
+    outline: none;
+    background: var(--panel-hover);
+    border-color: var(--accent);
+}
+
+.port .name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.port .meta {
+    color: var(--dim);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--border);
+}
+#hint { color: var(--dim); font-size: 12px; margin-right: auto; }

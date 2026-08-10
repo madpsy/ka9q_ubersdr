@@ -17,6 +17,7 @@ import React, { useEffect, useState } from '../react.js';
 import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
 import { serialAvailable } from '../controls/radiosync.js';
 import { getSync } from '../controls/sources.js';
+import { listProviders, onProviders } from '../controls/radioProviders.js';
 import { MessageLog, useControlState, useMessages } from '../controls/panel.jsx';
 
 const DIRECTIONS = [
@@ -28,11 +29,38 @@ const DIRECTIONS = [
 // hold the top rate reliably.
 const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 
+// The rig readout, whichever transport produced it. One shape from two sources:
+// the serial link reports through the sync singleton, a provider through the
+// `radio` command, and the panel should look the same either way.
+function RigReadout({ frequency, mode, tx, connected }) {
+    const freqText = frequency ? `${(frequency / 1e6).toFixed(6)}` : '--.------';
+    return (
+        <div className="rc-rig">
+            <div className="rc-rig__freq">{freqText}<span className="rc-rig__unit">MHz</span></div>
+            <div className="rc-rig__row">
+                <span className="rc-rig__mode">{mode || '---'}</span>
+                <span className={`rc-rig__tx${tx ? ' is-tx' : ''}`}>
+                    {connected ? (tx ? 'TX' : 'RX') : '--'}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 // `minimal` keeps the one thing here worth watching on its own: the rig's
 // frequency, mode and TX state. See the registry's `minimal`.
 export default function RadioControlPanel({ minimal }) {
     const [cfg, update] = useControlState();
     const [messages, pushMessage, clearMessages] = useMessages();
+
+    // Transports something outside the page offers — an extension, the desktop
+    // client. Registered over the page API; see controls/radioProviders.js.
+    const [providers, setProviders] = useState(listProviders);
+    useEffect(() => onProviders(setProviders), []);
+
+    const setSync = (patch) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, ...patch } }));
+    const transport = cfg.radiosync.transport || 'serial';
+    const provider = providers.find((p) => p.id === transport) || null;
 
     // Also a singleton: an open CAT link and a loaded 14 MB module must both
     // survive this panel being dragged to another dock.
@@ -42,7 +70,10 @@ export default function RadioControlPanel({ minimal }) {
     const [status, setStatus] = useState(() => sync.snapshot());
 
     useEffect(() => {
-        if (!serialAvailable()) return undefined;
+        // Only the serial transport needs Hamlib, and only when it is the one
+        // selected: a provider user should not be made to fetch 14 MB of
+        // WebAssembly for a transport they are not using.
+        if (!serialAvailable() || transport !== 'serial') return undefined;
         const offs = [
             sync.on('rigs', () => setRigs(sync.byManufacturer())),
             sync.on('loading', ({ loading: l }) => setLoading(l)),
@@ -54,31 +85,101 @@ export default function RadioControlPanel({ minimal }) {
         // so remounting costs nothing.
         sync.ensureLoaded().catch(() => { /* reported through 'message' */ });
         return () => offs.forEach((off) => off());
-    }, [sync, pushMessage]);
+    }, [sync, pushMessage, transport]);
 
-    if (!serialAvailable()) {
+    // Serial where the page can host it, plus whatever registered itself. One
+    // button when there is only Serial, so a browser with nothing else attached
+    // looks exactly as it did before any of this existed.
+    const transports = [
+        ...(serialAvailable() ? [{ value: 'serial', label: 'Serial', title: 'A rig on a serial cable, over Hamlib' }] : []),
+        ...providers.map((p) => ({ value: p.id, label: p.label, title: `Provided by ${p.label}` })),
+    ];
+
+    if (!transports.length) {
         return (
             <div className="stack">
-                <div className="note note--warn">This browser has no Web Serial API. Chrome or Edge is needed.</div>
+                <div className="note note--warn">
+                    This browser has no Web Serial API, and nothing has offered another way to
+                    reach a radio. Chrome or Edge can drive a rig on a serial cable; the desktop
+                    client and the browser extension can also reach flrig.
+                </div>
             </div>
         );
     }
 
-    const { rig } = status;
-    const freqText = rig.frequency
-        ? `${(rig.frequency / 1e6).toFixed(6)}`
-        : '--.------';
+    // A transport that was selected and has since gone away — the extension was
+    // disabled, the desktop client closed the page. Saying so beats silently
+    // pretending Serial was what they chose.
+    const missing = transport !== 'serial' && !provider;
+
+    const rig = provider ? provider.status : status.rig;
+    const connected = provider ? !!provider.status.connected : status.connected;
+    const busy = provider ? !!provider.status.busy : status.busy;
 
     const readout = (
-        <div className="rc-rig">
-            <div className="rc-rig__freq">{freqText}<span className="rc-rig__unit">MHz</span></div>
-            <div className="rc-rig__row">
-                <span className="rc-rig__mode">{rig.mode || '---'}</span>
-                <span className={`rc-rig__tx${rig.tx ? ' is-tx' : ''}`}>
-                    {status.connected ? (rig.tx ? 'TX' : 'RX') : '--'}
-                </span>
-            </div>
-        </div>
+        <RigReadout
+            frequency={rig.frequency}
+            mode={rig.mode}
+            tx={rig.tx}
+            connected={connected}
+        />
+    );
+
+    const picker = transports.length > 1 && (
+        <Field label="Connection">
+            <Segmented
+                options={transports}
+                value={transport}
+                onChange={(v) => setSync({ transport: v, connect: false })}
+                size="sm"
+            />
+        </Field>
+    );
+
+    // Everything below the transport's own controls is the same question
+    // whichever one is in use: which way does the sync run, and what follows
+    // what. Shared so the two branches cannot drift into different wording.
+    const syncControls = (
+        <>
+            <div className="divider" />
+
+            <Field label="Direction">
+                <Segmented
+                    options={DIRECTIONS}
+                    value={cfg.radiosync.direction}
+                    onChange={(v) => setSync({ direction: v })}
+                    size="sm"
+                />
+            </Field>
+
+            <Switch
+                checked={cfg.radiosync.syncFrequency}
+                onChange={(v) => setSync({ syncFrequency: v })}
+                label="Sync frequency"
+                title="Keep the rig and the receiver on the same frequency"
+            />
+
+            <Switch
+                checked={cfg.radiosync.syncMode}
+                onChange={(v) => setSync({ syncMode: v })}
+                label="Sync mode"
+                title="Keep the rig and the receiver in the same mode"
+            />
+
+            {!cfg.radiosync.syncFrequency && !cfg.radiosync.syncMode && (
+                <div className="note note--tight">
+                    Nothing is being synced — the readout above still follows the radio.
+                </div>
+            )}
+
+            {(!provider || provider.capabilities.includes('ptt')) && (
+                <Switch
+                    checked={cfg.radiosync.muteOnTx}
+                    onChange={(v) => setSync({ muteOnTx: v })}
+                    label="Mute while the radio transmits"
+                />
+            )}
+        </>
     );
 
     // Just the rig readout: no rig or baud selection, no direction, no log. The
@@ -89,7 +190,110 @@ export default function RadioControlPanel({ minimal }) {
         return (
             <div className="stack">
                 {readout}
-                {loading && <div className="note note--tight">Loading Hamlib…</div>}
+                {loading && transport === 'serial' && <div className="note note--tight">Loading Hamlib…</div>}
+            </div>
+        );
+    }
+
+    if (missing) {
+        return (
+            <div className="stack">
+                {readout}
+                {picker}
+                <div className="note note--warn">
+                    “{transport}” is not available any more — whatever was providing it has gone.
+                    Choose another connection above.
+                </div>
+            </div>
+        );
+    }
+
+    // A transport somebody else is hosting. The panel knows nothing about it
+    // beyond the fields it asked for: it renders those, remembers what was
+    // typed, and says whether it wants to be connected. Everything after that
+    // — the protocol, the polling, the syncing — happens wherever the provider
+    // lives, and comes back as status.
+    if (provider) {
+        // What was asked for, as against what happened: the two differ while a
+        // connection is being refused, and the controls below follow the ask.
+        const wantsConnect = !!cfg.radiosync.connect;
+        const values = (cfg.radiosync.providers || {})[provider.id] || {};
+        const valueOf = (f) => (values[f.key] === undefined ? f.default : values[f.key]);
+        const setField = (f, raw) => setSync({
+            providers: {
+                ...(cfg.radiosync.providers || {}),
+                [provider.id]: { ...values, [f.key]: f.type === 'number' ? Number(raw) : raw },
+            },
+        });
+
+        return (
+            <div className="stack">
+                {readout}
+                {picker}
+
+                {provider.fields.map((f) => (
+                    <Field key={f.key} label={f.label}>
+                        <input
+                            className="input"
+                            type={f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : 'text')}
+                            value={valueOf(f)}
+                            placeholder={f.placeholder || undefined}
+                            /* Locked only by a *live* link, like the rig and
+                               baud pickers: changing an address under one would
+                               describe somewhere the link is not. While a
+                               connection is merely being attempted the address
+                               is exactly what wants correcting, so it stays
+                               editable and the transport picks the change up. */
+                            disabled={connected}
+                            onChange={(e) => setField(f, e.target.value)}
+                        />
+                    </Field>
+                ))}
+
+                {/* The button follows what was *asked for*, not only what
+                    happened. A refused connection leaves the request standing —
+                    the transport keeps trying, and the address can be corrected
+                    above while it does — so offering "Connect" there would be
+                    offering something already true, and pressing it would
+                    change nothing. "Stop trying" is the honest other end of it. */}
+                <div className="chip-row chip-row--split">
+                    {wantsConnect ? (
+                        <Button variant="ghost" size="sm" onClick={() => setSync({ connect: false })}>
+                            {connected ? 'Disconnect' : 'Stop trying'}
+                        </Button>
+                    ) : (
+                        <Button variant="primary" size="sm" onClick={() => setSync({ connect: true })}>
+                            Connect
+                        </Button>
+                    )}
+                    {/* Beside the button it governs, at the far end, because it
+                        is about the next time the page opens rather than about
+                        now — and pressing Connect is still what happens now. */}
+                    <Switch
+                        checked={!!cfg.radiosync.autoConnect}
+                        onChange={(v) => setSync({ autoConnect: v })}
+                        label="Auto-connect"
+                        title="Connect to this radio on its own whenever the page opens"
+                    />
+                </div>
+
+                {provider.status.error && (
+                    <div className="note note--warn">
+                        {provider.status.error}
+                        {/* Said once, here, rather than left for somebody to
+                            wonder about: the fields above are editable and a
+                            correction is picked up without pressing anything. */}
+                        {wantsConnect && ' — still trying; correct the settings above and it will pick them up.'}
+                    </div>
+                )}
+
+                {wantsConnect && !connected && !provider.status.error && (
+                    <div className="note note--tight">Connecting…</div>
+                )}
+
+                {syncControls}
+
+                <MessageLog messages={messages} onClear={clearMessages} />
             </div>
         );
     }
@@ -97,6 +301,7 @@ export default function RadioControlPanel({ minimal }) {
     return (
         <div className="stack">
             {readout}
+            {picker}
 
             {loading && <div className="note note--tight">Loading Hamlib — 14 MB of WebAssembly, fetched once per session.</div>}
 
@@ -105,7 +310,7 @@ export default function RadioControlPanel({ minimal }) {
                     className="select"
                     value={cfg.radiosync.rig}
                     disabled={status.connected || loading || !rigs.length}
-                    onChange={(e) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, rig: e.target.value } }))}
+                    onChange={(e) => setSync({ rig: e.target.value })}
                 >
                     <option value="">{rigs.length ? 'Choose a radio…' : 'Loading rig list…'}</option>
                     {rigs.map(([mfg, models]) => (
@@ -121,7 +326,7 @@ export default function RadioControlPanel({ minimal }) {
                     className="select"
                     value={cfg.radiosync.baud}
                     disabled={status.connected}
-                    onChange={(e) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, baud: Number(e.target.value) } }))}
+                    onChange={(e) => setSync({ baud: Number(e.target.value) })}
                 >
                     {BAUD_RATES.map((b) => (
                         <option key={b} value={b}>{b === 0 ? 'Rig default' : b}</option>
@@ -146,42 +351,7 @@ export default function RadioControlPanel({ minimal }) {
                 )}
             </div>
 
-            <div className="divider" />
-
-            <Field label="Direction">
-                <Segmented
-                    options={DIRECTIONS}
-                    value={cfg.radiosync.direction}
-                    onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, direction: v } }))}
-                    size="sm"
-                />
-            </Field>
-
-            <Switch
-                checked={cfg.radiosync.syncFrequency}
-                onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, syncFrequency: v } }))}
-                label="Sync frequency"
-                title="Keep the rig and the receiver on the same frequency"
-            />
-
-            <Switch
-                checked={cfg.radiosync.syncMode}
-                onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, syncMode: v } }))}
-                label="Sync mode"
-                title="Keep the rig and the receiver in the same mode"
-            />
-
-            {!cfg.radiosync.syncFrequency && !cfg.radiosync.syncMode && (
-                <div className="note note--tight">
-                    Nothing is being synced — the readout above still follows the radio.
-                </div>
-            )}
-
-            <Switch
-                checked={cfg.radiosync.muteOnTx}
-                onChange={(v) => update((prev) => ({ ...prev, radiosync: { ...prev.radiosync, muteOnTx: v } }))}
-                label="Mute while the radio transmits"
-            />
+            {syncControls}
 
             <div className="note note--tight">
                 A rig sitting in a data mode (PKTUSB, RTTY) is shown but not pushed either way —

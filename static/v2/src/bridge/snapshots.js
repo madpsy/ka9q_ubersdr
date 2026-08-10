@@ -152,8 +152,59 @@ export function functionsSnapshot(src) {
     }));
 }
 
+/**
+ * Where every panel is, and whether it is shown.
+ *
+ * The whole registry rather than only what is on screen: a client offering to
+ * bring a panel back has to be able to name one that is currently hidden, which
+ * is the case the desktop client's Layout menu exists for.
+ *
+ * `title` travels with the id because the ids are internal — a menu built from
+ * this should read "Space weather", not "spaceweather" — and `unhideable`
+ * because the Layout panel is the one that brings the others back, so a client
+ * offering to hide it would be offering a dead end.
+ */
+export function layoutSnapshot(src) {
+    const layout = src.layout;
+    if (!layout) return { panels: [], docks: [] };
+    return {
+        panels: (layout.panels || []).map((p) => ({
+            id: p.id,
+            title: p.title,
+            placement: p.placement,
+            hidden: !!p.hidden,
+            unhideable: !!p.unhideable,
+        })),
+        docks: (layout.docks || []).map((d) => ({ id: d.id, collapsed: !!d.collapsed })),
+    };
+}
+
+/**
+ * What the Radio Control panel is asking a transport to do.
+ *
+ * A provider reads this to know whether it is the one selected, what the
+ * operator typed into its fields, and which way the sync is meant to run. Only
+ * the selected transport's settings travel: a provider has no business reading
+ * the address somebody typed for a different one.
+ */
+export function radioControlSnapshot(src) {
+    const rs = (src.controlSettings && src.controlSettings.radiosync) || {};
+    const transport = rs.transport || 'serial';
+    return {
+        transport,
+        connect: !!rs.connect,
+        direction: rs.direction || 'sdr-to-radio',
+        syncFrequency: rs.syncFrequency !== false,
+        syncMode: rs.syncMode !== false,
+        muteOnTx: rs.muteOnTx !== false,
+        config: (transport !== 'serial' && rs.providers && rs.providers[transport]) || {},
+    };
+}
+
 export const SNAPSHOTS = {
     tuning: tuningSnapshot,
+    layout: layoutSnapshot,
+    radiocontrol: radioControlSnapshot,
     audio: audioSnapshot,
     signal: signalSnapshot,
     spectrum: spectrumSnapshot,

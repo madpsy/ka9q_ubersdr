@@ -85,14 +85,34 @@ export function announcement({ frequency, mode }) {
 
 // --- voices -----------------------------------------------------------------
 
-// Only Google's and Microsoft's English voices. v1 refuses everything else and
-// says why, having found the rest unintelligible for reading numbers aloud.
+// Google's and Microsoft's English voices where there are any, and the
+// system's English voices where there are not.
+//
+// v1 took only the first group, having found the rest unintelligible for
+// reading numbers aloud, and where a Google or Microsoft voice exists that is
+// still exactly what this returns — a browser that has them is unaffected by
+// the fallback below.
+//
+// But "the rest" is not always worse than nothing, and under Electron it is
+// all there is: those voices come from Chrome's own bundled TTS component and
+// from Windows, and the desktop client has neither. Its voices are the
+// system's, which on Linux means speech-dispatcher's — so the original rule
+// left the announcements and the callsign readout permanently silent there
+// rather than merely plainer. Silence is indistinguishable from the feature
+// being broken, which is the failure this file avoids everywhere else.
+//
+// The variants are dropped with them: espeak-ng publishes every accent again
+// once per modified voice ("English (Great Britain)+Adam"), which is 800-odd
+// entries for eight distinct voices and a picker nobody can use.
 export function usableVoices(voices) {
-    return (voices || []).filter((v) => {
-        if (!v.lang || !v.lang.toLowerCase().startsWith('en')) return false;
+    const english = (voices || []).filter(
+        (v) => v.lang && v.lang.toLowerCase().startsWith('en'),
+    );
+    const branded = english.filter((v) => {
         const n = v.name.toLowerCase();
         return n.includes('google') || n.includes('microsoft');
     });
+    return branded.length ? branded : english.filter((v) => !v.name.includes('+'));
 }
 
 /**
@@ -113,6 +133,12 @@ export function pickVoice(voices) {
         || usable.find((v) => is(v, 'microsoft', 'online'))
         || usable.find((v) => is(v, 'microsoft') && !is(v, 'default'))
         || usable.find((v) => is(v, 'google'))
+        // Nothing branded, so this is the system's own — keep v1's preference
+        // for British English over American, which is what the chain above
+        // reaches for first when it has the choice. Only ever reached on the
+        // fallback list; a branded list has matched by now.
+        || usable.find((v) => (v.lang || '').toLowerCase() === 'en-gb')
+        || usable.find((v) => (v.lang || '').toLowerCase().startsWith('en-gb'))
         || usable[0];
 }
 

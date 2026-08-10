@@ -189,6 +189,32 @@ overlay's CSS class as `audioStarted`.
 The title is derived from the tuning, so do not watch the document title —
 subscribe to `tuning` and compose your own label from `receiver` + `tuning`.
 
+### `layout` *(since 1.1)*
+```jsonc
+{ "panels": [{ "id": "spaceweather", "title": "Space weather",
+               "placement": "right", "hidden": false, "unhideable": false }],
+  "docks":  [{ "id": "left", "collapsed": false }] }
+```
+Every registered panel, not only the ones on screen — a client offering to bring
+a panel back has to be able to name one that is currently hidden. `placement` is
+one of `left`, `right`, `bottom`, `float`. `title` is there because the ids are
+internal: show the title, address the id.
+
+`unhideable` marks the Layout panel, which is what unhides the others; the
+`panel` command refuses to hide it, so do not offer it.
+
+### `radiocontrol` *(since 1.2)*
+```jsonc
+{ "transport": "flrig", "connect": true,
+  "direction": "sdr-to-radio", "syncFrequency": true, "syncMode": true,
+  "muteOnTx": true, "config": { "host": "127.0.0.1", "port": 12345 } }
+```
+What the Radio Control panel is asking a transport to do. `transport` is
+`serial` (the page's own Web Serial + Hamlib link) or the id of a provider you
+registered; `config` carries the values typed into **that** transport's fields
+and nothing else. Watch this topic, act when `transport` is yours and `connect`
+is true, and stop when it is not.
+
 ### `modes` (static)
 ```jsonc
 [{ "id": "usb", "label": "USB", "group": "voice",
@@ -229,6 +255,8 @@ One rule governs bad input:
 | `tune` | `{frequency}` \| `{delta}` \| `{step?, dir}`, plus optional `mode`, `bandwidthLow`+`bandwidthHigh`, `ensureVisible` | tuning |
 | `mode` | `{mode}` — passband becomes the mode default | tuning |
 | `passband` | `{low, high}` — checked against the mode in force | tuning |
+| `panel` *(1.1)* | `{id, hidden?}` and/or `{id, placement?}` | layout |
+| `radio` *(1.2)* | `{action: 'register', provider}` \| `{action: 'unregister', id}` \| `{action: 'status', id, …}` | the provider, or its status |
 | `volume` | `{volume}` \| `{delta}` — 0..1 | `{volume, muted}` |
 | `mute` | `{muted}` (absolute) \| `{toggle:true}` | `{muted}` |
 | `duck` | `{ducked}` — silence that is **not** the user's mute | `{ducked}` |
@@ -271,6 +299,52 @@ Get the list from `get {topic:"functions"}`. Anything added to that catalogue
 later — including the rotator and antenna functions, which keep the operator's
 password on the page side — becomes reachable with **no protocol change**. The
 curated commands are the contract; this is the extension point.
+
+### Providing a radio-control transport *(since 1.2)*
+
+A page can drive a transceiver over Web Serial, and that is all it can do: it
+cannot open a socket to flrig or rigctld, and their servers send no CORS headers
+even if it could. An extension or a desktop shell has neither limit, so it can
+offer one — the Radio Control panel lists it beside **Serial**.
+
+Register a description, not code. The panel renders the fields, remembers what
+was typed against your id, and publishes the result on `radiocontrol`:
+
+```js
+await client.command('radio', { action: 'register', provider: {
+    id: 'flrig',
+    label: 'FLRig',
+    fields: [
+        { key: 'host', label: 'Host', type: 'text',   default: '127.0.0.1' },
+        { key: 'port', label: 'Port', type: 'number', default: 12345 },
+    ],
+    capabilities: ['frequency', 'mode', 'ptt'],
+} });
+```
+
+`type` is `text`, `number` or `password`; anything else renders as text. Up to
+eight fields. `capabilities` says what you can keep in step — leave `ptt` out and
+the panel stops offering "mute while the radio transmits", rather than showing a
+switch that does nothing.
+
+Then report what the rig is doing, as often as you learn it:
+
+```js
+client.command('radio', { action: 'status', id: 'flrig',
+    connected: true, frequency: 14074000, mode: 'USB', tx: false, error: null });
+```
+
+Status merges, so a poll that only learned a frequency need only send that. Set
+`error` to say why a connection failed; the panel shows it and clears it when
+you send `null`.
+
+**Re-register on every `announce`.** A reload empties the page's registry, and a
+transport that registered once would silently vanish. Unregister on the way out
+(`{action: 'unregister', id}`) so a stale option does not linger.
+
+Doing the actual syncing is yours: subscribe to `tuning` and push the dial to
+the rig, or read the rig and `tune` the receiver — and use `duck`, not `mute`,
+for transmit muting, so the operator's own mute is left alone.
 
 ## 8. Errors
 
@@ -347,6 +421,21 @@ client.hello().catch(() => { /* not an UberSDR page — stop here */ });
 
 No MAIN-world script, no `window.radioAPI`, no polling probe, and the same file
 works in Chrome and Firefox.
+
+**If your client starts before the page does** — a content script at
+`document_start`, or an Electron preload — do not gate on the reply to `hello`.
+At that point there is nothing mounted to answer, so `hello` times out against a
+page that is merely still loading, and a client that subscribes only in its
+`.then()` never subscribes at all. Subscribe from `announce` instead, which the
+host sends when it mounts and whenever the descriptor changes:
+
+```js
+client.on('announce', () => client.subscribe(['tuning']));
+client.hello().catch(() => { /* may simply not be up yet; the announce will come */ });
+```
+
+That is the same handler that already has to exist for a reload — an announce
+means *reset and re-subscribe* — so this costs nothing and removes the race.
 
 ## 11. Versioning rules
 

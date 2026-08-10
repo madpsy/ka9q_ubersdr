@@ -27,13 +27,28 @@ t('the two event names are the published ones', () => {
     assert.strictEqual(EVENT_TO_PAGE, 'ubersdr.to-page');
     assert.strictEqual(EVENT_FROM_PAGE, 'ubersdr.from-page');
     assert.strictEqual(PROTOCOL, 1);
-    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 0 });
+    // 1.1 added the `layout` topic and the `panel` command; 1.2 the
+    // `radiocontrol` topic and the `radio` command. The envelope did not change
+    // either time, so PROTOCOL stays 1 and a 1.0 client keeps working — which
+    // is what the major number is for and why only the minor moved.
+    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 2 });
 });
 
 t('the topic lists are what a client is promised', () => {
-    assert.deepStrictEqual(LIVE_TOPICS, ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page']);
+    assert.deepStrictEqual(
+        LIVE_TOPICS,
+        ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page', 'layout', 'radiocontrol'],
+    );
     assert.deepStrictEqual(STATIC_TOPICS, ['modes', 'bands', 'functions']);
     assert.deepStrictEqual(TOPICS, [...LIVE_TOPICS, ...STATIC_TOPICS]);
+});
+
+// The point of the list above is that things are only ever added to it. A topic
+// that moved or disappeared would break a released client silently, so the 1.0
+// set is pinned separately from the current one.
+t('every topic 1.0 promised is still there, unmoved', () => {
+    const v1 = ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page'];
+    assert.deepStrictEqual(LIVE_TOPICS.slice(0, v1.length), v1);
 });
 
 t('decode never throws, whatever arrives on the channel', () => {

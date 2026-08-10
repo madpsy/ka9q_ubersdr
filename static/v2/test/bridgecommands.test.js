@@ -9,7 +9,7 @@ const assert = require('assert');
 const { COMMANDS, COMMAND_NAMES, runCommand } = require('./.build/bridgecommands.cjs');
 const { ERR } = require('./.build/bridgeprotocol.cjs');
 const {
-    SNAPSHOTS, audioSnapshot, describePage, sessionSnapshot, signalSnapshot,
+    SNAPSHOTS, audioSnapshot, describePage, layoutSnapshot, sessionSnapshot, signalSnapshot,
     snapshotFor, spectrumSnapshot, tuningSnapshot,
 } = require('./.build/bridgesnapshots.cjs');
 const { LIVE_TOPICS, STATIC_TOPICS } = require('./.build/bridgeprotocol.cjs');
@@ -89,7 +89,18 @@ const refuses = (code, fn) => {
 
 t('the command set is the published one', () => {
     assert.deepStrictEqual(COMMAND_NAMES,
-        ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power']);
+        ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power',
+            'panel',    // 1.1
+            'radio']);  // 1.2
+});
+
+// Commands are only ever added, and only at the end. A client tests for one by
+// looking in `capabilities`, so a name that vanished or changed meaning would
+// break it silently — the version number is not what it checks.
+t('every command 1.0 published is still there', () => {
+    for (const name of ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power']) {
+        assert.ok(COMMAND_NAMES.includes(name), `${name} went missing`);
+    }
 });
 
 t('an unknown command names the ones that exist', () => {
@@ -423,6 +434,99 @@ t('a descriptor from a page that has not heard from the server yet is still vali
     const d = describePage({ api: { major: 1, minor: 0 } });
     assert.strictEqual(d.receiver.id, null);
     assert.strictEqual(d.app, 'ubersdr');
+});
+
+
+// --- panel / layout ----------------------------------------------------------
+//
+// The desktop client's native Layout menu is built from these two. A menu is a
+// picture of state somebody else owns, so what matters is that it can name a
+// panel it cannot see, and that a refusal is loud rather than a no-op leaving a
+// tick that never clears.
+
+// A stand-in for the facade BridgeHost builds over the layout context.
+function fakeLayout(over = {}) {
+    const calls = [];
+    const panels = over.panels || [
+        { id: 'receiver', title: 'Receiver', placement: 'left', hidden: false, unhideable: false },
+        { id: 'spaceweather', title: 'Space weather', placement: 'right', hidden: true, unhideable: false },
+        { id: 'layout', title: 'Layout', placement: 'left', hidden: false, unhideable: true },
+    ];
+    return {
+        calls,
+        panels,
+        placements: ['left', 'right', 'bottom', 'float'],
+        docks: [{ id: 'left', collapsed: false }],
+        setHidden: (id, hidden) => calls.push(['setHidden', id, hidden]),
+        move: (id, placement) => calls.push(['move', id, placement]),
+        snapshot: () => ({ panels, docks: [{ id: 'left', collapsed: false }] }),
+    };
+}
+
+t('panel hides and shows by id', () => {
+    const layout = fakeLayout();
+    runCommand('panel', { id: 'spaceweather', hidden: false }, { layout });
+    assert.deepStrictEqual(layout.calls, [['setHidden', 'spaceweather', false]]);
+});
+
+t('panel moves to any placement the layout offers', () => {
+    for (const placement of ['left', 'right', 'bottom', 'float']) {
+        const layout = fakeLayout();
+        runCommand('panel', { id: 'receiver', placement }, { layout });
+        assert.deepStrictEqual(layout.calls, [['move', 'receiver', placement]]);
+    }
+});
+
+t('moving and hiding together moves first, so the panel ends hidden', () => {
+    // movePanel un-hides on the way past, so the other order would silently
+    // ignore hidden:true.
+    const layout = fakeLayout();
+    runCommand('panel', { id: 'receiver', placement: 'bottom', hidden: true }, { layout });
+    assert.deepStrictEqual(layout.calls, [['move', 'receiver', 'bottom'], ['setHidden', 'receiver', true]]);
+});
+
+t('an unknown panel or placement is refused, and says what there is', () => {
+    const layout = fakeLayout();
+    assert.throws(() => runCommand('panel', { id: 'nope', hidden: true }, { layout }),
+        (e) => e.code === ERR.BAD_ARGS && /receiver/.test(e.message));
+    assert.throws(() => runCommand('panel', { id: 'receiver', placement: 'middle' }, { layout }),
+        (e) => e.code === ERR.BAD_ARGS && /float/.test(e.message));
+    assert.deepStrictEqual(layout.calls, [], 'nothing was moved on the way to refusing');
+});
+
+t('naming a panel and asking for nothing is an error, not a no-op', () => {
+    const layout = fakeLayout();
+    assert.throws(() => runCommand('panel', { id: 'receiver' }, { layout }),
+        (e) => e.code === ERR.BAD_ARGS);
+});
+
+t('the panel that unhides the others refuses to be hidden', () => {
+    const layout = fakeLayout();
+    assert.throws(() => runCommand('panel', { id: 'layout', hidden: true }, { layout }),
+        (e) => e.code === ERR.UNSUPPORTED);
+    // Moving it is fine — it is hiding that would strand somebody.
+    runCommand('panel', { id: 'layout', placement: 'right' }, { layout });
+    assert.deepStrictEqual(layout.calls, [['move', 'layout', 'right']]);
+});
+
+t('a page with no layout says so rather than throwing a type error', () => {
+    assert.throws(() => runCommand('panel', { id: 'receiver', hidden: true }, {}),
+        (e) => e.code === ERR.UNSUPPORTED);
+});
+
+t('the layout snapshot carries hidden panels too, with titles to show', () => {
+    const snap = layoutSnapshot({ layout: fakeLayout().snapshot() });
+    assert.deepStrictEqual(snap.panels.map((p) => p.id), ['receiver', 'spaceweather', 'layout']);
+    const sw = snap.panels.find((p) => p.id === 'spaceweather');
+    assert.strictEqual(sw.hidden, true, 'a hidden panel must still be nameable');
+    assert.strictEqual(sw.title, 'Space weather');
+    assert.strictEqual(sw.placement, 'right');
+    assert.strictEqual(snap.panels.find((p) => p.id === 'layout').unhideable, true);
+});
+
+t('a page with no layout snapshots as empty rather than null', () => {
+    assert.deepStrictEqual(layoutSnapshot({}), { panels: [], docks: [] });
+    assert.deepStrictEqual(snapshotFor('layout', {}), { panels: [], docks: [] });
 });
 
 console.log(`\n${pass} ok`);

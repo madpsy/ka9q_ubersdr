@@ -37,7 +37,10 @@
 // rots; the capability list is there so it never has to happen.
 
 export const PROTOCOL = 1;
-export const API_VERSION = { major: 1, minor: 0 };
+// 1.1 adds the `layout` topic and the `panel` command; 1.2 the `radiocontrol`
+// topic and the `radio` command. All additive, so a 1.0 client is unaffected.
+// Capabilities remain the way to test for them.
+export const API_VERSION = { major: 1, minor: 2 };
 
 export const EVENT_TO_PAGE = 'ubersdr.to-page';
 export const EVENT_FROM_PAGE = 'ubersdr.from-page';
@@ -63,7 +66,9 @@ export const CLIENT_TYPES = [
 ];
 
 // Topics that change while you watch, and can be subscribed to.
-export const LIVE_TOPICS = ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page'];
+export const LIVE_TOPICS = [
+    'tuning', 'audio', 'signal', 'spectrum', 'session', 'page', 'layout', 'radiocontrol',
+];
 
 // Reference data: fetched with `get`, never pushed, because it only changes
 // when the page reloads. Keeping it out of `announce` keeps that message small

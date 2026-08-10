@@ -14,6 +14,24 @@ const el = (tag, className, text) => {
 };
 
 let builtinAvailable = false;
+let sortBy = 'used';
+
+// How the saved list is ordered.
+//
+// By use, because the question this page answers is "where do I listen", and
+// the answer is a receiver somebody keeps coming back to rather than whichever
+// one they happened to open last — one evening spent trying receivers from the
+// directory would otherwise bury a daily driver under a dozen one-offs.
+//
+// Recency is the tie-break, not the rule: it is what separates entries that are
+// level (including every entry saved before counting existed, which start at
+// zero together), and it keeps the order stable rather than arbitrary. Somebody
+// who does want the old behaviour has the picker beside the heading.
+const SORTS = {
+    used: (a, b) => (b.useCount || 0) - (a.useCount || 0)
+        || (b.lastUsed || '').localeCompare(a.lastUsed || ''),
+    recent: (a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''),
+};
 
 // ---- row rendering ---------------------------------------------------------
 
@@ -32,6 +50,11 @@ function describe(row) {
     }
     if (row.snr > 0) parts.push(`SNR ${row.snr} dB`);
     if (row.version) parts.push(`v${row.version}`);
+    // Saved receivers only; LAN and directory rows have no count to show.
+    // Silent at zero rather than reading "0 visits", which would be a claim
+    // about a receiver saved before counting existed — those have been visited
+    // an unknown number of times, not none.
+    if (row.useCount > 0) parts.push(`${row.useCount} ${row.useCount === 1 ? 'visit' : 'visits'}`);
     return { primary, secondary: parts.join(' · ') };
 }
 
@@ -77,7 +100,7 @@ async function refreshSaved() {
     const list = document.getElementById('saved-list');
     const empty = document.getElementById('saved-empty');
     const entries = await api.saved();
-    entries.sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
+    entries.sort(SORTS[sortBy] || SORTS.used);
     list.replaceChildren();
     empty.hidden = entries.length > 0;
 
@@ -207,6 +230,11 @@ document.getElementById('add-form').addEventListener('submit', (event) => {
     addManual();
 });
 document.getElementById('lan-scan').addEventListener('click', scanLan);
+document.getElementById('saved-sort').addEventListener('change', async (event) => {
+    sortBy = await api.setSort(event.target.value);
+    event.target.value = sortBy;
+    refreshSaved();
+});
 document.getElementById('shared-prefs-box').addEventListener('change', async (event) => {
     // The main process answers with what it actually set, so the box can never
     // show a state the store doesn't hold.
@@ -220,6 +248,8 @@ api.onChanged(refreshSaved);
     const info = await api.appInfo();
     builtinAvailable = info.builtinAvailable;
     document.getElementById('shared-prefs-box').checked = await api.sharedPrefs();
+    sortBy = await api.sort();
+    document.getElementById('saved-sort').value = sortBy;
     document.getElementById('footer').textContent = builtinAvailable
         ? `bundled v2 UI: ${info.buildInfo || 'staged'} · electron ${info.electron}`
         : 'no bundled UI staged (run build.sh) — receivers open with the UI they serve · electron ' + info.electron;

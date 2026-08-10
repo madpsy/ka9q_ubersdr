@@ -50,6 +50,37 @@
     let descriptor = null;              // the page's last announce
     let registered = false;
 
+    // ── flrig, as a Radio Control transport (page API 1.2) ────────────────────
+    //
+    // The extension can reach flrig and the page cannot: XML-RPC with no CORS
+    // headers is unreachable from any origin, which is why the Radio Control
+    // panel offers Serial and nothing else on its own. Registering this puts
+    // FLRig beside Serial, with the host and port as fields the panel renders —
+    // so the connection is set up where the rest of the receiver is set up,
+    // rather than in a popup that has to be found first.
+    //
+    // Only in the tab the extension is actually syncing. There is one flrig and
+    // one selected tab, so offering it in every open receiver would be offering
+    // a link three tabs cannot have. The background says which tab that is.
+    const FLRIG_PROVIDER = {
+        id: 'flrig',
+        label: 'FLRig',
+        fields: [
+            { key: 'host', label: 'Host', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
+            { key: 'port', label: 'Port', type: 'number', default: 12345 },
+        ],
+        capabilities: ['frequency', 'mode', 'ptt'],
+    };
+    let offering = false;               // is this the tab the extension syncs?
+    let radioControl = null;            // the panel's last `radiocontrol` state
+
+    function offerFlrig(on) {
+        if (!registered) return;
+        send('command', on
+            ? { name: 'radio', args: { action: 'register', provider: FLRIG_PROVIDER } }
+            : { name: 'radio', args: { action: 'unregister', id: 'flrig' } });
+    }
+
     // ── the page API ──────────────────────────────────────────────────────────
 
     function send(type, fields) {
@@ -151,6 +182,14 @@
 
         send('subscribe', { topics: ['tuning', 'audio', 'session'] });
         send('subscribe', { topics: ['signal'], minIntervalMs: SIGNAL_MS });
+        // Only where the page is new enough to have it. An older page refuses
+        // the topic, which costs one warning and nothing else.
+        if (msg.api.minor >= 2) {
+            send('subscribe', { topics: ['radiocontrol'] });
+            // An announce means the page reset, so a registration made before
+            // it is gone. Offer again if this is still the tab being synced.
+            if (offering) offerFlrig(true);
+        }
 
         // One line, once, on a page that turned out to be a receiver.
         //
@@ -170,6 +209,15 @@
                 descriptor.session = Object.assign({}, descriptor.session, msg.patch);
                 tell({ type: 'ubersdr:audio_started', running: !!msg.patch.running });
             }
+            return;
+        }
+        // The panel's own settings for a transport we provide: which one is
+        // selected, what was typed into its fields, and whether the operator
+        // has asked to be connected. Patches merge, so the background is sent
+        // what it has rather than a fragment.
+        if (msg.topic === 'radiocontrol') {
+            radioControl = Object.assign({}, radioControl, msg.patch || {});
+            tell({ type: 'ubersdr:radiocontrol', rc: radioControl });
             return;
         }
         const state = flatten(msg.topic, msg.patch || {});
@@ -197,6 +245,10 @@
         for (const topic of Object.keys(value)) {
             state = Object.assign(state, flatten(topic, value[topic] || {}));
         }
+        if (value.radiocontrol) {
+            radioControl = Object.assign({}, radioControl, value.radiocontrol);
+            tell({ type: 'ubersdr:radiocontrol', rc: radioControl });
+        }
         if (descriptor && value.session && 'running' in value.session) {
             descriptor.session = Object.assign({}, descriptor.session, value.session);
         }
@@ -206,6 +258,7 @@
     function onClosing(addressedToUs) {
         registered = false;
         descriptor = null;
+        radioControl = null;
         tell({ type: 'ubersdr:deregister' });
         // Addressed to us means we were let go to make room for another client
         // — the page is still there and still willing, so introduce ourselves
@@ -280,6 +333,26 @@
                 // the first time a message is missed. This is the operator's
                 // own mute — the thing the popup's button shows.
                 send('command', { name: 'mute', args: { muted: !!msg.muted } });
+                break;
+
+            // This tab has become, or stopped being, the one the extension
+            // syncs. The provider follows it: an option that cannot connect is
+            // worse than no option.
+            case 'cmd:radio_offer':
+                if (!!msg.offer === offering) break;
+                offering = !!msg.offer;
+                offerFlrig(offering);
+                break;
+
+            // What flrig is doing, for the panel's readout. Merged by the page,
+            // so a poll that only learned a frequency need only send that.
+            case 'cmd:radio_status':
+                if (offering) {
+                    send('command', {
+                        name: 'radio',
+                        args: Object.assign({ action: 'status', id: 'flrig' }, msg.status || {}),
+                    });
+                }
                 break;
 
             case 'cmd:set_duck':

@@ -131,6 +131,9 @@ function makePage(over = {}) {
         title: document.title,
         dspSchemas: null,
         hardware: null,
+        // What the Radio Control panel is set to, which is what a registered
+        // transport reads to know whether it is the selected one.
+        controlSettings: over.controlSettings || null,
     });
 
     let clock = 0;

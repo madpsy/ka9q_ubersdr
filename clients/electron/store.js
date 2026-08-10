@@ -19,11 +19,15 @@ const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 class InstanceStore {
     constructor(dir) {
         this.file = path.join(dir, 'instances.json');
-        this.data = { nextPort: FIRST_PORT, instances: [] };
+        this.data = { nextPort: FIRST_PORT, sort: 'used', instances: [] };
         try {
             const loaded = JSON.parse(fs.readFileSync(this.file, 'utf8'));
             if (loaded && Array.isArray(loaded.instances)) {
-                this.data = { nextPort: loaded.nextPort || FIRST_PORT, instances: loaded.instances };
+                this.data = {
+                    nextPort: loaded.nextPort || FIRST_PORT,
+                    sort: loaded.sort === 'recent' ? 'recent' : 'used',
+                    instances: loaded.instances,
+                };
             }
         } catch { /* first run */ }
     }
@@ -77,6 +81,36 @@ class InstanceStore {
         entry.lastUsed = new Date().toISOString();
         this.persist();
         return entry;
+    }
+
+    /**
+     * One successful connection. Called once a window has actually opened, so
+     * a receiver that refused the probe is not counted as used — the list is
+     * meant to answer "where do I listen", and a address that never answers is
+     * the opposite of that.
+     *
+     * Entries saved before counting existed have no `useCount`; they start at
+     * zero and the order falls back to recency until they are used again,
+     * which is where the list already was. Seeding them to 1 would be a
+     * guess, and a wrong one for the receiver somebody has opened daily.
+     */
+    recordUse(id) {
+        const entry = this.get(id);
+        if (!entry) return null;
+        entry.useCount = (entry.useCount || 0) + 1;
+        entry.lastUsed = new Date().toISOString();
+        this.persist();
+        return entry;
+    }
+
+    get sort() {
+        return this.data.sort;
+    }
+
+    setSort(value) {
+        this.data.sort = value === 'recent' ? 'recent' : 'used';
+        this.persist();
+        return this.data.sort;
     }
 
     update(id, patch) {

@@ -46,10 +46,26 @@ Build the `.zip` with `make build`, then upload it via the [Chrome Web Store dev
 - **Frequency control** — type a frequency in kHz or use ±step buttons (100 Hz → 10 kHz)
 - **Mode control** — USB, LSB, CWU, CWL, AM, SAM, FM, NFM
 - **Bandwidth control** — set low and high edges independently
-- **flrig sync** — optional bidirectional frequency/mode sync with flrig via XML-RPC
+- **flrig sync** — optional bidirectional frequency/mode sync with flrig via XML-RPC, configurable from the receiver's own Radio Control panel as well as the popup
 - **PTT mute** — silences the receiver while the rig is transmitting, without touching the mute you set
 - **VFO A/B** — assign each UberSDR tab to a VFO; switching VFOs in flrig auto-selects the matching tab
 - **Profiles** — save and restore sets of UberSDR instances with their frequencies and modes
+
+---
+
+### flrig in the Radio Control panel
+
+The extension registers **FLRig** as a connection in the receiver's own *Radio
+Control* panel, beside *Serial*, with the host and port as fields there. A page
+cannot reach flrig itself — XML-RPC with no CORS headers is unreachable from any
+origin — so the extension offers the transport over the v2 page API (`radio`
+command, `radiocontrol` topic, API 1.2) and does the talking.
+
+The panel and the popup are two views of one setting, not two settings: what is
+typed in the panel is applied and saved, and the popup shows the same values.
+The transport is only offered in the tab the extension is currently syncing —
+there is one flrig and one selected tab, so offering it in every open receiver
+would be offering a link the others cannot have.
 
 ---
 

@@ -198,6 +198,10 @@ esbuild ../src/lib/bookmarkGroups.js --bundle --format=cjs --platform=node \
     --outfile=.build/bookmarkgroups.cjs --log-level=warning
 esbuild ../src/lib/announce.js --bundle --format=cjs --platform=node \
     --outfile=.build/announce.cjs --log-level=warning
+esbuild ../src/lib/pagesMenu.js --bundle --format=cjs --platform=node \
+    --outfile=.build/pagesmenu.cjs --log-level=warning
+esbuild ../src/controls/radioProviders.js --bundle --format=cjs --platform=node \
+    --outfile=.build/radioproviders.cjs --log-level=warning
 esbuild ../src/lib/shortcuts.js --bundle --format=cjs --platform=node \
     --outfile=.build/shortcuts.cjs --log-level=warning
 esbuild ../src/lib/backup.js --bundle --format=cjs --platform=node \
@@ -389,3 +393,5 @@ node notifications.test.js
 node hardwarenotices.test.js
 node spectrumtrace.test.js
 node hookorder.test.js
+node pagesmenu.test.js
+node radioproviders.test.js

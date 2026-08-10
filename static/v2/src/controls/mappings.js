@@ -38,6 +38,22 @@ export const DEFAULT_STATE = {
     radiosync: {
         rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
         syncFrequency: true, syncMode: true,
+        // Which transport the panel is using. 'serial' is the one the page can
+        // host itself (Web Serial + Hamlib); anything else is the id of a
+        // provider registered from outside — see controls/radioProviders.js.
+        transport: 'serial',
+        // Whether the operator has asked to be connected. Only meaningful for a
+        // provider: the serial link is opened by a button press, because
+        // requestPort() needs a user gesture and cannot be resumed on load.
+        connect: false,
+        // Per-provider field values, keyed by provider id, so switching
+        // transports and back does not lose what was typed.
+        providers: {},
+        // Whether to connect on its own when the page opens. Off by default: a
+        // receiver that reaches for a rig nobody asked it to touch is a
+        // surprise, and the serial transport cannot do it at all — opening a
+        // port needs a user gesture the browser will not accept on load.
+        autoConnect: false,
     },
 };
 
@@ -100,6 +116,11 @@ export function loadState() {
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
     };
+    // The connect intent is not a preference; it is what is being asked for
+    // right now, and on a fresh page that is exactly the auto-connect setting.
+    // Persisting it as it was would make every reload reopen a link somebody
+    // had closed, and would connect on startup with the toggle switched off.
+    state.radiosync.connect = !!state.radiosync.autoConnect;
     // Until the split there was one `source` covering all three, Radio Sync
     // included. A saved 'radiosync' therefore names no surface at all: the sync
     // panel now stands on its own and needs no flag, so it simply drops.

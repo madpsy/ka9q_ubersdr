@@ -72,6 +72,22 @@ Create simple PNG icons (a radio tower or antenna symbol works well). Without th
 
 ---
 
+### flrig in the Radio Control panel
+
+The extension registers **FLRig** as a connection in the receiver's own *Radio
+Control* panel, beside *Serial*, with the host and port as fields there. A page
+cannot reach flrig itself — XML-RPC with no CORS headers is unreachable from any
+origin — so the extension offers the transport over the v2 page API (`radio`
+command, `radiocontrol` topic, API 1.2) and does the talking.
+
+The panel and the popup are two views of one setting, not two settings: what is
+typed in the panel is applied and saved, and the popup shows the same values.
+The transport is only offered in the tab the extension is currently syncing —
+there is one flrig and one selected tab, so offering it in every open receiver
+would be offering a link the others cannot have.
+
+---
+
 ## Tests
 
 ```bash

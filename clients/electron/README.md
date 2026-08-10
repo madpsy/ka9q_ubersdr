@@ -16,7 +16,15 @@ websocket URLs built from `location.host`, root-absolute assets served by the
 instance. This client does not fork or patch any of it. Instead:
 
 - `build.sh` runs the stock `static/v2/build.sh` and stages its artifacts
-  (`index.html`, `dist/`, `fonts/`, `vendor/`) into `ui/v2/`, untouched.
+  (`index.html`, `dist/`, `fonts/`, `vendor/`) into `ui/v2/`, untouched. It
+  also bundles one shared source module, `src/lib/pagesMenu.js`, to
+  `ui/pagesMenu.cjs` — the main process needs the same pages-menu pruning the
+  UI does to build its native Links menu, and a second copy of that logic
+  would be free to drift. The same step bundles `src/bridge/client.js` into
+  `receiver-preload.js` (as `ui/receiver-preload.js`): the Layout menu talks to
+  the page over the documented page API rather than a private channel, and a
+  sandboxed preload cannot `require` a file at run time, so the client has to
+  be bundled in rather than loaded beside it.
 - Each connected instance gets a reverse proxy on `127.0.0.1:<port>`
   (`proxy.js`) that serves those staged files for `/v2/*` and forwards
   everything else — `/api/*`, the audio/spectrum/dxcluster websockets, the SSE
@@ -71,6 +79,16 @@ Turning sharing off stops the bridging and nothing else: the per-origin stores
 are never emptied, so every receiver is independent again with whatever it had
 last — which makes the toggle safe to try both ways.
 
+### Ordering the saved list
+
+Saved receivers are ordered by how often they have been opened, most visited
+first, with the most recent breaking ties. A connection counts only once a
+window has actually opened, so a receiver that refused the probe is not counted
+as visited. Entries saved before counting existed start at zero and therefore
+keep their old recency order until they are used again. The picker beside the
+heading switches the list back to plain most-recent-first, and the choice is
+remembered.
+
 ## Discovery
 
 Same three sources as the other clients (`clients/tui`,
@@ -89,7 +107,55 @@ Same three sources as the other clients (`clients/tui`,
 ## Desktop integration
 
 - **Web Serial** (FlexControl): Electron has no built-in port picker, so the
-  main process answers `select-serial-port` with a native dialog.
+  main process answers `select-serial-port` with its own modal window
+  (`serial/`) — a scrollable list showing each port's name, device path and
+  USB IDs, which stays live as devices are plugged and unplugged. It was a
+  native message box with one button per port, but a message box lays its
+  buttons out in a single horizontal row that cannot scroll, so every extra
+  port made the dialog wider. Every port is offered, including when only one
+  is attached: auto-selecting it saved a click at the cost of handing a serial
+  device to remote page content without anyone naming it.
+- **Web MIDI** (MIDI control surfaces): granted through the permission
+  handler. Note that the permission to allow is `midiSysex`, not `midi` —
+  Chromium requests the sysex permission even for
+  `requestMIDIAccess({ sysex: false })`, which is how the UI asks. Allowing
+  only `midi` leaves MIDI silently dead: the promise rejects with
+  `NotAllowedError` and no controller ever appears.
+- **Links menu**: each receiver window carries a native **Links** menu with
+  that receiver's published pages — the same tree the UI hangs off its logo,
+  from `/api/pages-menu` pruned by `depends_on` against `/api/description`.
+  The pruning is not reimplemented here: `static/v2/src/lib/pagesMenu.js` is
+  the one copy, and `build.sh` bundles it to `ui/pagesMenu.cjs` for the main
+  process, so the two menus cannot list different pages for the same
+  receiver. Per window, because two connected instances publish different
+  pages; on macOS, where there is one menu bar for the application, it follows
+  the focused window instead. Choosing an entry asks the receiver's own page
+  to open it, so the v1 pages that talk to `window.opener` still get one.
+- **Layout menu**: each receiver window also carries a native **Layout** menu —
+  every registered panel, shown or hidden, with its position (left, right,
+  bottom, floating). The state belongs to the page, so nothing is mirrored
+  here: the menu is a client of the v2 page API (`layout` topic, `panel`
+  command, added in API 1.1), which means a panel dragged about in the UI moves
+  its menu entry with it and the two cannot disagree. The Layout panel itself
+  is greyed out for hiding, because it is what brings the others back.
+- **flrig**: the Radio Control panel gains an **FLRig** connection beside
+  Serial, with its own host and port. flrig speaks XML-RPC and sends no CORS
+  headers, so no page can reach it — the requests are made from the main
+  process (`flrig.js`), and the preload registers the transport with the panel
+  over the page API (`radio` command, `radiocontrol` topic, API 1.2) and runs
+  the sync in whichever direction the panel is set to. Transmit muting uses
+  `duck`, so it never touches the mute the operator set themselves.
+
+  The panel is what makes this general: anything hosting a v2 page can register
+  a transport and have its fields appear there. Serial remains the one the page
+  hosts by itself.
+
+  **Auto-connect** (off by default) sits beside the Connect button and decides
+  whether the link is opened when the page opens. Off, a reload leaves the radio
+  alone — the connect request is what is being asked for now, not a preference,
+  so it is not resumed. A refused connection keeps trying and the address stays
+  editable while it does, so correcting a wrong port is picked up in place
+  rather than needing the transport switched away and back.
 - **Popups**: the legacy v1 windows (callsign lookup, map, CW graph) open as
   child windows; external links open in the system browser.
 - **Media keys** work through the UI's existing `mediaSession` support;
@@ -106,9 +172,12 @@ mdns.js       dependency-free mDNS-SD browser for _ubersdr._tcp
 discovery.js  directory fetch, LAN enrichment, manual-address resolution
 store.js      saved instances (JSON in userData), stable local ports
 prefs.js      the shared-settings snapshot (JSON in userData)
+flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 preload.js    IPC surface for the chooser page
 receiver-preload.js  seeds/reports shared settings in receiver windows
+serial-preload.js    IPC surface for the serial picker page
 chooser/      the chooser window (plain HTML/CSS/JS, no framework)
+serial/       the Web Serial port picker window
 ui/           staged v2 build artifacts (generated, git-ignored)
 ```
 

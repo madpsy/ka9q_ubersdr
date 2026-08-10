@@ -187,4 +187,6 @@ async function resolveTarget(input, { insecureTLS = false } = {}) {
     throw new Error(`no UberSDR instance answered at "${text}" (${lastErr ? lastErr.code || lastErr.message : 'unknown'})`);
 }
 
-module.exports = { fetchDirectory, discoverLan, resolveTarget, probe, isCertError };
+// getJson is exported for main.js's Links menu, which reads /api/pages-menu
+// and /api/description straight from the instance a window is connected to.
+module.exports = { fetchDirectory, discoverLan, resolveTarget, probe, isCertError, getJson };

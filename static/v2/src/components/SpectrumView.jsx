@@ -44,6 +44,8 @@ import {
 } from '../lib/spectrumPeaks.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
+import { providerStatus, onProviders } from '../controls/radioProviders.js';
+import { controlState, onControlState } from '../controls/mappings.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
 import { announceSettings, onAnnounceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { bridgeAttached, onBridgeAttached } from '../bridge/settings.js';
@@ -405,9 +407,45 @@ function useSurface(get, read) {
 
 const readConnected = (s) => !!s.connected;
 const readMidi = (s) => (s.connected ? (s.deviceName || 'MIDI') : '');
-// Connected, and transmitting or not — two states in one primitive so the tag
-// can turn red on TX without re-rendering for the frequency readout.
-const readRig = (s) => (s.connected ? (s.rig && s.rig.tx ? 'tx' : 'on') : '');
+
+// Whether a radio is connected, and whether it is transmitting — whichever
+// transport it came in on.
+//
+// Two states in one primitive so the tag can turn red on TX without
+// re-rendering for the frequency readout, which matters here: this strip lives
+// in the component that owns the draw loop.
+//
+// Not tied to the serial link any more. A rig reached through flrig from the
+// desktop client or an extension is exactly as connected as one on a cable, and
+// a badge that reported only the one the page happens to host itself would be
+// silent for half the people using it — see controls/radioProviders.js.
+const rigTag = (s) => (s && s.connected ? (s.tx ? 'tx' : 'on') : '');
+
+function useRadioTag() {
+    const [value, setValue] = useState('');
+    useEffect(() => {
+        const sync = getSync();
+        const read = () => {
+            const transport = (controlState().radiosync || {}).transport || 'serial';
+            // The serial link keeps the rig's readout in a nested object; a
+            // provider reports the same fields flat. One shape out either way.
+            if (transport === 'serial') {
+                return rigTag(sync.connected ? { connected: true, tx: !!(sync.rig && sync.rig.tx) } : null);
+            }
+            return rigTag(providerStatus(transport));
+        };
+        setValue(read());
+        const offs = [
+            sync.on('state', () => setValue(read())),
+            // A provider's status changes, and the choice of transport changes.
+            // Both move this badge, and neither goes through the other.
+            onProviders(() => setValue(read())),
+            onControlState(() => setValue(read())),
+        ];
+        return () => offs.forEach((off) => off());
+    }, []);
+    return value;
+}
 
 function ControlTags() {
     const [announce, setAnnounce] = useState(announceSettings);
@@ -416,7 +454,7 @@ function ControlTags() {
     useEffect(() => onBridgeAttached(setAttached), []);
     const flex = useSurface(getFlex, readConnected);
     const midi = useSurface(getMidi, readMidi);
-    const rig = useSurface(getSync, readRig);
+    const rig = useRadioTag();
     const media = useMediaSession();
 
     // Metadata-only sessions still count: the OS is showing the card and its
@@ -440,10 +478,10 @@ function ControlTags() {
                 <span
                     className={`tag tag--${rig === 'tx' ? 'bad' : 'accent'}`}
                     title={rig === 'tx'
-                        ? 'Radio sync — the rig is transmitting'
-                        : 'Radio sync — the rig and this receiver are following each other'}
+                        ? 'Radio control — the rig is transmitting'
+                        : 'Radio control — the rig and this receiver are following each other'}
                 >
-                    RIG{rig === 'tx' ? ' TX' : ''}
+                    RADIO{rig === 'tx' ? ' TX' : ''}
                 </span>
             )}
             {mediaOn && (

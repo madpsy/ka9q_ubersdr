@@ -7,6 +7,11 @@
 
 const assert = require('assert');
 const { makePage } = require('./harness.js');
+// The same module instance the page's own command layer writes to — see
+// test/run.sh, which bundles the commands and this registry together.
+const {
+    listProviders, providerStatus, resetProviders,
+} = require('./.build/bridgecommands.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -37,7 +42,7 @@ t('a page that is not an UberSDR is left entirely alone', () => {
 t('finding a receiver says so once, and only once', () => {
     const p = makePage();
     assert.strictEqual(p.logs.length, 1, p.logs.join('|'));
-    assert.match(p.logs[0], /attached to M9PSY — Test RX \(API 1\.0\)/);
+    assert.match(p.logs[0], /attached to M9PSY — Test RX \(API 1\.\d+\)/);
 
     // Not again on every patch that follows.
     p.advance(1000);
@@ -326,6 +331,110 @@ t('junk on the channel is ignored', () => {
     p.window.dispatchEvent(new p.CE('ubersdr.from-page', { detail: JSON.stringify({ v: 99, from: 'page', type: 'announce' }) }));
     p.window.dispatchEvent(new p.CE('ubersdr.from-page', { detail: JSON.stringify({ v: 1, from: 'client', type: 'announce' }) }));
     assert.deepStrictEqual(p.toBackground, []);
+});
+
+
+// ── the FLRig transport ───────────────────────────────────────────────────────
+//
+// The extension can reach flrig and the page cannot, so it offers the transport
+// and the Radio Control panel renders it. These run against the page's real
+// registry, so what is asserted is what the page accepted rather than what the
+// content script believed it sent.
+
+t('the transport is offered only when this is the tab being synced', () => {
+    resetProviders();
+    const p = makePage();
+    assert.deepStrictEqual(listProviders(), [], 'nothing offered before the background says so');
+
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    const [prov] = listProviders();
+    assert.strictEqual(prov.id, 'flrig');
+    assert.strictEqual(prov.label, 'FLRig');
+    // The host and port the panel will render, so the connection is configured
+    // where the receiver is configured.
+    assert.deepStrictEqual(prov.fields.map((f) => f.key), ['host', 'port']);
+    assert.strictEqual(prov.fields[0].default, '127.0.0.1');
+    assert.strictEqual(prov.fields[1].default, 12345);
+
+    p.fromBackground({ type: 'cmd:radio_offer', offer: false });
+    assert.deepStrictEqual(listProviders(), [], 'withdrawn when another tab takes over');
+});
+
+t('offering twice does not re-register, and withdrawing twice is harmless', () => {
+    resetProviders();
+    const p = makePage();
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    assert.strictEqual(listProviders().length, 1);
+    p.fromBackground({ type: 'cmd:radio_offer', offer: false });
+    p.fromBackground({ type: 'cmd:radio_offer', offer: false });
+    assert.deepStrictEqual(listProviders(), []);
+});
+
+t('a page that reloads is offered the transport again', () => {
+    // An announce means the page reset: its registry is empty, and a transport
+    // that registered once would have quietly vanished from the panel.
+    resetProviders();
+    const p = makePage();
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    assert.strictEqual(listProviders().length, 1);
+
+    resetProviders();                       // as a reload would
+    p.host.announce();
+    assert.strictEqual(listProviders().length, 1, 're-offered on announce');
+});
+
+t('what flrig is doing reaches the panel, and merges', () => {
+    resetProviders();
+    const p = makePage();
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    p.fromBackground({ type: 'cmd:radio_status', status: { connected: true, mode: 'USB', tx: false } });
+    p.fromBackground({ type: 'cmd:radio_status', status: { frequency: 14074000 } });
+    const s = providerStatus('flrig');
+    assert.strictEqual(s.connected, true);
+    assert.strictEqual(s.frequency, 14074000, 'a poll that only learned a frequency keeps the rest');
+    assert.strictEqual(s.mode, 'USB');
+});
+
+t('status from a tab that is not offering is not sent at all', () => {
+    resetProviders();
+    const p = makePage();
+    p.fromBackground({ type: 'cmd:radio_status', status: { connected: true } });
+    assert.deepStrictEqual(listProviders(), []);
+});
+
+t('the panel\'s settings reach the background', () => {
+    resetProviders();
+    const p = makePage({ controlSettings: { radiosync: {
+        transport: 'flrig', connect: true, direction: 'radio-to-sdr',
+        providers: { flrig: { host: '10.0.0.9', port: 12399 } },
+    } } });
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+
+    const sent = p.sent('ubersdr:radiocontrol');
+    assert.ok(sent.length, 'the subscribe reply carries the panel settings');
+    const rc = sent[sent.length - 1].rc;
+    assert.strictEqual(rc.transport, 'flrig');
+    assert.strictEqual(rc.connect, true);
+    // The host and port typed into the panel are what the background connects
+    // to — one setting, not two.
+    assert.deepStrictEqual(rc.config, { host: '10.0.0.9', port: 12399 });
+    assert.strictEqual(rc.direction, 'radio-to-sdr');
+});
+
+t('a later change to the panel is forwarded too', () => {
+    resetProviders();
+    const p = makePage();
+    p.fromBackground({ type: 'cmd:radio_offer', offer: true });
+    const before = p.sent('ubersdr:radiocontrol').length;
+    p.publish('radiocontrol', {
+        transport: 'flrig', connect: true, direction: 'sdr-to-radio',
+        syncFrequency: true, syncMode: true, muteOnTx: true,
+        config: { host: '127.0.0.1', port: 12345 },
+    });
+    const after = p.sent('ubersdr:radiocontrol');
+    assert.ok(after.length > before, 'a patch on the topic is relayed');
+    assert.strictEqual(after[after.length - 1].rc.direction, 'sdr-to-radio');
 });
 
 console.log(`\n${pass} ok`);

@@ -41,9 +41,8 @@ export default function AnnouncementsPanel({ minimal }) {
             <div className="stack">
                 <div className="note note--warn">
                     Announcements need Chrome or Edge. They read the frequency and mode
-                    aloud using Google's and Microsoft's English voices; the voices other
-                    browsers fall back to make a poor job of spoken numbers, so this is
-                    switched off rather than offered.
+                    aloud, and the voices other browsers ship make a poor job of spoken
+                    numbers, so this is switched off rather than offered.
                 </div>
             </div>
         );
@@ -66,8 +65,9 @@ export default function AnnouncementsPanel({ minimal }) {
 
             {noVoices && (
                 <div className="note note--warn">
-                    No Google or Microsoft English voice is installed, so there is
-                    nothing to speak with.
+                    No English voice is installed, so there is nothing to speak with.
+                    On Linux the desktop client uses the system's voices — install
+                    <code> speech-dispatcher</code> and <code>speech-dispatcher-espeak-ng</code>.
                 </div>
             )}
 
@@ -107,7 +107,8 @@ export default function AnnouncementsPanel({ minimal }) {
                             {/* The automatic choice is the top of the same
                                 preference order v1 used — Google UK English
                                 Female, then Microsoft's online voices, which
-                                are the neural ones. */}
+                                are the neural ones, then British English among
+                                whatever the system itself provides. */}
                             <option value="">
                                 Automatic{active ? ` — ${active.name}` : ''}
                             </option>

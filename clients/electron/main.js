@@ -9,18 +9,55 @@
 // static/v2/build.sh, staged untouched into ui/ — runs against any instance
 // while believing it is same-origin with it.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const { InstanceProxy } = require('./proxy');
 const { InstanceStore } = require('./store');
 const { SharedPrefs } = require('./prefs');
+const { FlrigLink } = require('./flrig');
 const discovery = require('./discovery');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
 // Chromium's autoplay heuristics from ever muting a reconnect.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+// Speech, for the announcements and the callsign readout.
+//
+// On Linux, Chromium reaches text-to-speech through speech-dispatcher, and it
+// only opens that connection when asked: without this switch `speechSynthesis`
+// is present but enumerates no voices at all and every `speak()` fails with
+// `synthesis-failed`, which the UI can only report as "no voices". Chrome
+// carries its own bundled Google voices and so does not need it; Electron
+// ships none, making the system's the only ones there are.
+//
+// Nothing to install here, but the host must have speech-dispatcher and a
+// module for it (`speech-dispatcher`, `speech-dispatcher-espeak-ng` on Debian
+// and Ubuntu). Where it is missing this changes nothing rather than failing.
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('enable-speech-dispatcher');
+}
+
+// The window icon.
+//
+// Only Linux needs this: Windows takes the icon from the resource compiled into
+// the exe and macOS from the bundle, but an X11/Wayland window carries its own
+// (_NET_WM_ICON), and without one every window and taskbar entry falls back to
+// Chromium's default. The .desktop entry alone is not enough — it only applies
+// once the app has been installed *and* the window's app_id matches its
+// StartupWMClass, which leaves an AppImage run straight from the download
+// folder with no icon at all. Passing it here covers both cases and is ignored
+// where it is not needed.
+const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
+
+// The receiver preload, bundled by build.sh so that the page API's client
+// library travels with it — a sandboxed preload cannot require a file at run
+// time. The unbundled source is the fallback for a working tree whose UI has
+// never been built: shared settings still work there, the Layout menu does not.
+const RECEIVER_PRELOAD = ['ui/receiver-preload.js', 'receiver-preload.js']
+    .map((rel) => path.join(__dirname, rel))
+    .find((file) => fs.existsSync(file));
 
 const UI_DIR = path.join(__dirname, 'ui', 'v2');
 const builtinAvailable = fs.existsSync(path.join(UI_DIR, 'dist', 'v2.js'));
@@ -52,6 +89,7 @@ function showChooser() {
         height: 780,
         backgroundColor: '#0b0e14',
         title: 'UberSDR — receivers',
+        icon: APP_ICON,
         webPreferences: { preload: path.join(__dirname, 'preload.js') },
     });
     chooserWin.loadFile(path.join(__dirname, 'chooser', 'index.html'));
@@ -106,21 +144,29 @@ async function connectInstance(desc) {
         height: 950,
         backgroundColor: '#0b0e14',
         title: entry.label,
-        // Only the shared-settings bridge; it exposes nothing to the page.
-        webPreferences: { preload: path.join(__dirname, 'receiver-preload.js') },
+        icon: APP_ICON,
+        // Shared settings and the Layout menu's end of the page API. It
+        // exposes nothing to the page.
+        webPreferences: { preload: RECEIVER_PRELOAD },
     });
     win.loadURL(proxy.localOrigin + '/v2/');
     win.on('closed', () => {
         localOrigins.delete(proxy.localOrigin);
         proxy.stop();
+        const gone = running.get(entry.id);
+        if (gone && gone.flrig) gone.flrig.stop();
         running.delete(entry.id);
         notifyChooser();
     });
 
-    running.set(entry.id, { proxy, win });
-    entry.lastUsed = new Date().toISOString();
-    store.persist();
+    const rec = { proxy, win, links: null, layout: null, menu: null, flrig: null };
+    running.set(entry.id, rec);
+    watchMenuFocus(rec);
+    store.recordUse(entry.id);
     notifyChooser();
+    // Not awaited: the receiver is usable the moment its window is up, and the
+    // menu is two HTTP round trips behind it.
+    attachLinksMenu(running.get(entry.id), entry);
     return entry.id;
 }
 
@@ -147,6 +193,95 @@ app.on('web-contents-created', (_event, contents) => {
     });
 });
 
+// ---- the serial port picker ------------------------------------------------
+//
+// Electron has no port chooser of its own and no list-selection dialog, so this
+// was a message box with one button per port. A message box puts its buttons in
+// the dialog's action area, which is a single horizontal row: every port made
+// the dialog wider, nothing could scroll, and Linux port names are long enough
+// that three of them ran off the screen. An action area is for "Save / Don't
+// Save / Cancel", not for a list of unknown length.
+//
+// So the list gets a window, built from the same plain HTML/CSS as the chooser.
+// It also shows what a button label could not — the device path and the
+// vendor/product IDs beneath each name — and stays live while it is open.
+
+/** The open picker, or null. @type {{win: BrowserWindow, ports: object[], finish: (id: string) => void} | null} */
+let serialPicker = null;
+
+// Only the fields the page needs, and only strings: the port objects come from
+// Chromium's device layer, and nothing but this is worth handing to a renderer.
+function describePort(port) {
+    return {
+        portId: String(port.portId || ''),
+        portName: String(port.portName || ''),
+        displayName: String(port.displayName || ''),
+        vendorId: String(port.vendorId || ''),
+        productId: String(port.productId || ''),
+        serialNumber: String(port.serialNumber || ''),
+    };
+}
+
+function serialPortsChanged(kind, port) {
+    if (!serialPicker) return;
+    const row = describePort(port);
+    const rest = serialPicker.ports.filter((p) => p.portId !== row.portId);
+    serialPicker.ports = kind === 'add' ? [...rest, row] : rest;
+    if (!serialPicker.win.isDestroyed()) {
+        serialPicker.win.webContents.send('serial:ports', serialPicker.ports);
+    }
+}
+
+/**
+ * Asks which port, and resolves with its id — or with '' for "none of them",
+ * which is what `select-serial-port`'s callback wants for a refusal.
+ *
+ * Every port is offered, including when there is only one. Picking the single
+ * attached device automatically saved a click at the cost of the page being
+ * handed a serial device without anybody naming it, and the page is content
+ * served by whichever instance was connected to.
+ */
+function chooseSerialPort(parent, portList) {
+    // One at a time: a second request while a picker is open is refused rather
+    // than stacking modal windows on top of each other.
+    if (serialPicker) return Promise.resolve('');
+
+    return new Promise((resolve) => {
+        const win = new BrowserWindow({
+            width: 460,
+            height: 440,
+            parent: parent || undefined,
+            modal: !!parent,
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            backgroundColor: '#0b0e14',
+            title: 'Select serial port',
+            icon: APP_ICON,
+            webPreferences: { preload: path.join(__dirname, 'serial-preload.js') },
+        });
+        win.setMenuBarVisibility(false);
+
+        let settled = false;
+        const finish = (portId) => {
+            if (settled) return;
+            settled = true;
+            serialPicker = null;
+            // Answer first, close second: the callback is what releases the
+            // page's pending requestPort(), and it must run even if closing
+            // the window throws.
+            resolve(typeof portId === 'string' ? portId : '');
+            if (!win.isDestroyed()) win.close();
+        };
+
+        serialPicker = { win, ports: portList.map(describePort), finish };
+        // Closed by the window controls, or by the parent going away: either
+        // way the page is told nothing was chosen rather than left hanging.
+        win.on('closed', () => finish(''));
+        win.loadFile(path.join(__dirname, 'serial', 'index.html'));
+    });
+}
+
 function setupSession() {
     const ses = session.defaultSession;
 
@@ -154,24 +289,30 @@ function setupSession() {
     // requestPort() would hang without these.
     ses.on('select-serial-port', (event, portList, webContents, callback) => {
         event.preventDefault();
-        if (portList.length === 0) return callback('');
-        if (portList.length === 1) return callback(portList[0].portId);
-        const win = BrowserWindow.fromWebContents(webContents);
-        const names = portList.map((p) => p.displayName || p.portName || p.portId);
-        dialog.showMessageBox(win, {
-            type: 'question',
-            title: 'Select serial port',
-            message: 'Which serial port should the page use?',
-            buttons: [...names, 'Cancel'],
-            cancelId: names.length,
-        }).then(({ response }) => {
-            callback(response < portList.length ? portList[response].portId : '');
-        });
+        chooseSerialPort(BrowserWindow.fromWebContents(webContents), portList)
+            .then(callback);
     });
+    // The list can change while the picker is open — this is a knob somebody
+    // plugs in, and often the reason it was not in the list is that they had
+    // not plugged it in yet. Both events carry the port that changed; the
+    // authoritative list is the one we keep, so it is patched rather than
+    // re-enumerated.
+    ses.on('serial-port-added', (_event, port) => serialPortsChanged('add', port));
+    ses.on('serial-port-removed', (_event, port) => serialPortsChanged('remove', port));
     ses.setDevicePermissionHandler((details) => details.deviceType === 'serial');
 
+    // Anything not listed is refused. A browser prompts; there is nobody to
+    // prompt here, so the list is the answer.
+    //
+    // `midiSysex` is what Web MIDI asks for — including from
+    // requestMIDIAccess({ sysex: false }), which is how controls/webmidi.js
+    // calls it. Chromium requests the sysex permission either way, so listing
+    // only `midi` leaves MIDI control quietly broken: the promise rejects with
+    // NotAllowedError and a MIDI controller simply never appears. Both are
+    // here because the pair is one feature, and which one is consulted is
+    // Chromium's business rather than ours.
     const allowed = new Set([
-        'serial', 'notifications', 'fullscreen', 'media',
+        'serial', 'midi', 'midiSysex', 'notifications', 'fullscreen', 'media',
         'clipboard-sanitized-write', 'pointerLock',
     ]);
     ses.setPermissionRequestHandler((_wc, permission, callback) => {
@@ -179,8 +320,124 @@ function setupSession() {
     });
 }
 
-function setupMenu() {
-    const template = [
+// The pages menu, pruned by the same code the UI's logo menu uses. Staged by
+// build.sh; absent when the UI has never been built, in which case receivers
+// simply get no Links menu rather than the app failing to start.
+let pagesMenu = null;
+try {
+    // eslint-disable-next-line global-require
+    pagesMenu = require('./ui/pagesMenu.cjs');
+} catch { /* no staged UI */ }
+
+/**
+ * The receiver's published pages as a native submenu, or null where it has
+ * none — an empty "Links" menu says less than no menu at all.
+ *
+ * The groups nest arbitrarily deep, exactly as they do in the logo menu, and
+ * a native submenu nests as readily.
+ */
+function linksSubmenu(groups, win) {
+    const items = (node) => [
+        ...node.links.map((item) => ({
+            label: item.label,
+            toolTip: item.tooltip || undefined,
+            click: () => openReceiverLink(win, item),
+        })),
+        ...node.subgroups.map((sg) => ({ label: sg.name, submenu: items(sg) })),
+    ];
+    const menu = groups.map((g) => ({ label: g.name, submenu: items(g) }));
+    return menu.length ? menu : null;
+}
+
+/**
+ * Opens one of those links the way clicking it in the UI would.
+ *
+ * Through the receiver's own window rather than straight from here, because
+ * these are v1 pages and several of them talk to whoever opened them — the
+ * callsign lookup exchanges postMessages with its opener, the map reads the
+ * channel list off it (see the v2 compat bridge). A window opened from the
+ * main process would have no opener and those pages would load and then
+ * quietly do nothing. Handing the same `window.open` call to the page gives
+ * them one, and routes the result through the window-open handler that
+ * already decides local-popup versus system browser.
+ */
+function openReceiverLink(win, item) {
+    if (win.isDestroyed()) return;
+    const url = JSON.stringify(item.url);
+    const js = item.external
+        ? `window.open(${url}, '_blank', 'noopener,noreferrer')`
+        // v1's geometry, centred on the display the page is on.
+        : `(() => {
+               const w = 1200, h = 800;
+               const left = Math.round((screen.width - w) / 2);
+               const top = Math.round((screen.height - h) / 2);
+               window.open(${url}, '_blank',
+                   'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top
+                   + ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no');
+           })()`;
+    win.webContents.executeJavaScript(js).catch(() => { /* window went away */ });
+}
+
+// --- the Layout menu --------------------------------------------------------
+//
+// The panels a receiver window is showing, and where. The state belongs to the
+// page, which publishes it over the v2 page API (`layout` topic) and takes
+// `panel` commands back — see receiver-preload.js. Nothing is mirrored here:
+// every tick is drawn from the last snapshot the page sent, so a panel dragged
+// about in the UI moves the menu with it rather than the two disagreeing.
+
+const PLACEMENT_LABELS = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Floating' };
+
+/**
+ * One submenu per panel: shown or not, and where.
+ *
+ * Flat, alphabetical, and every registered panel — including the hidden ones,
+ * which is the point. A menu that listed only what was on screen could not
+ * bring anything back, and that is what somebody opens it for.
+ */
+function layoutSubmenu(snapshot, win) {
+    const panels = [...(snapshot.panels || [])]
+        .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+    if (!panels.length) return null;
+
+    return panels.map((p) => ({
+        label: p.title,
+        submenu: [
+            {
+                label: 'Shown',
+                type: 'checkbox',
+                checked: !p.hidden,
+                // The Layout panel is what brings the others back, so the page
+                // refuses to hide it. Greyed rather than absent: a missing
+                // entry on one row of an otherwise uniform menu reads as a bug.
+                enabled: !p.unhideable,
+                click: () => sendPanelCommand(win, { id: p.id, hidden: !p.hidden }),
+            },
+            { type: 'separator' },
+            ...Object.entries(PLACEMENT_LABELS).map(([placement, label]) => ({
+                label,
+                type: 'radio',
+                checked: p.placement === placement,
+                click: () => {
+                    // Radio items fire on the way in as well as on a real
+                    // choice, so re-selecting where it already is would send a
+                    // command per rebuild.
+                    if (p.placement === placement) return;
+                    sendPanelCommand(win, { id: p.id, placement });
+                },
+            })),
+        ],
+    }));
+}
+
+let panelSeq = 0;
+function sendPanelCommand(win, args) {
+    if (win.isDestroyed()) return;
+    win.webContents.send('layout:panel', { id: ++panelSeq, args });
+}
+
+function menuTemplate({ links = null, layout = null } = {}) {
+    return [
         ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
         {
             label: 'Receivers',
@@ -190,11 +447,107 @@ function setupMenu() {
                 process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
             ],
         },
-        { role: 'editMenu' },
+        ...(layout ? [{ label: 'Layout', submenu: layout }] : []),
+        ...(links ? [{ label: 'Links', submenu: links }] : []),
+        // Edit, on macOS only.
+        //
+        // Nothing in this app is a document, so the menu is Cut/Copy/Paste over
+        // whatever text field happens to be focused — a frequency box, a
+        // callsign, an address in the chooser. Windows and Linux hand those
+        // keystrokes to the focused field themselves, so the menu is three
+        // items nobody opens.
+        //
+        // macOS does not: the standard editing shortcuts are dispatched through
+        // the menu bar, and an app without an Edit menu is an app where Cmd+C
+        // and Cmd+V quietly do nothing. So it stays there, where it is also the
+        // convention.
+        ...(process.platform === 'darwin' ? [{ role: 'editMenu' }] : []),
         { role: 'viewMenu' },
         { role: 'windowMenu' },
     ];
-    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function setupMenu() {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate()));
+}
+
+/**
+ * Rebuilds a receiver window's menu bar from whatever it currently has.
+ *
+ * Both menus are rebuilt together because a menu bar is replaced whole: Links
+ * arrives once, the layout arrives again every time somebody moves a panel, and
+ * keeping the two on one record means the later one cannot drop the earlier.
+ *
+ * Windows and Linux hang a menu bar off each window, which is what per-receiver
+ * menus want — two connected instances have different panels open and publish
+ * different pages. macOS has one bar for the application, so there it follows
+ * the focused window instead.
+ */
+function refreshWindowMenu(rec) {
+    const { win } = rec;
+    if (win.isDestroyed()) return;
+    if (!rec.links && !rec.layout) return;
+
+    const menu = Menu.buildFromTemplate(menuTemplate({
+        links: rec.links,
+        layout: rec.layout ? layoutSubmenu(rec.layout, win) : null,
+    }));
+    if (process.platform !== 'darwin') {
+        win.setMenu(menu);
+        return;
+    }
+    rec.menu = menu;
+    if (win.isFocused()) Menu.setApplicationMenu(menu);
+}
+
+/**
+ * Gives a receiver window its own menu bar, with that receiver's pages in it.
+ *
+ * Per window because the pages are per receiver: two instances connected at
+ * once publish different ones, and a single global Links menu would be
+ * whichever happened to load last. Windows and Linux hang a menu bar off each
+ * window, which is exactly that. macOS has one menu bar for the application,
+ * so there the menu follows the focused window instead.
+ */
+async function attachLinksMenu(rec, entry) {
+    if (!pagesMenu) return;
+    let links = null;
+    try {
+        const [data, info] = await Promise.all([
+            discovery.getJson(entry, '/api/pages-menu'),
+            discovery.getJson(entry, '/api/description'),
+        ]);
+        links = linksSubmenu(pagesMenu.buildGroups(data, info), rec.win);
+    } catch {
+        // A receiver that publishes no menu, or is too old to have the
+        // endpoint. Not worth a dialog: the pages are ordinary URLs and the
+        // UI's own logo menu reports it in place.
+        return;
+    }
+    if (!links || rec.win.isDestroyed()) return;
+    rec.links = links;
+    refreshWindowMenu(rec);
+}
+
+// macOS shares one menu bar between every window, so it has to follow the
+// focus. Registered once per window rather than per menu rebuild, or the
+// listeners would pile up every time a panel moved.
+function watchMenuFocus(rec) {
+    if (process.platform !== 'darwin') return;
+    rec.win.on('focus', () => {
+        if (rec.menu) Menu.setApplicationMenu(rec.menu);
+    });
+    // Back to the plain menu when this window is not the one being looked at,
+    // or a closed receiver would leave its panels on the bar.
+    rec.win.on('blur', () => Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate())));
+}
+
+/** The record for a window, by its webContents — how an IPC message finds it. */
+function recordFor(contents) {
+    for (const rec of running.values()) {
+        if (!rec.win.isDestroyed() && rec.win.webContents.id === contents.id) return rec;
+    }
+    return null;
 }
 
 function setupIpc() {
@@ -209,6 +562,72 @@ function setupIpc() {
         ...entry,
         running: running.has(entry.id),
     })));
+
+    // The picker page. Both are no-ops once the picker has closed, so a late
+    // message from a window on its way out cannot answer a request that has
+    // already been answered.
+    // --- flrig ---------------------------------------------------------------
+    //
+    // One link per receiver window, driven entirely by that window's preload:
+    // the panel's settings arrive there over the page API, and the preload says
+    // start, stop, or set this. Everything here is the XML-RPC, which has to be
+    // in the main process because flrig sends no CORS headers and no page can
+    // reach it. See flrig.js.
+    ipcMain.on('flrig:start', (event, { host, port }) => {
+        const rec = recordFor(event.sender);
+        if (!rec) return;
+        if (rec.flrig) rec.flrig.stop();
+        rec.flrig = new FlrigLink({
+            host: String(host || '127.0.0.1'),
+            port: Number(port) || 12345,
+            onState: (state) => {
+                if (!rec.win.isDestroyed()) rec.win.webContents.send('flrig:state', state);
+            },
+        });
+        rec.flrig.start();
+    });
+
+    ipcMain.on('flrig:stop', (event) => {
+        const rec = recordFor(event.sender);
+        if (rec && rec.flrig) {
+            rec.flrig.stop();
+            rec.flrig = null;
+        }
+    });
+
+    // Pushing the receiver's dial onto the rig. Failures are swallowed: the
+    // poll is what reports the link's health, and a rig that refused one write
+    // says so on the next read rather than through two channels at once.
+    ipcMain.on('flrig:set', (event, { frequency, mode }) => {
+        const rec = recordFor(event.sender);
+        if (!rec || !rec.flrig) return;
+        if (frequency != null) rec.flrig.setFrequency(frequency).catch(() => {});
+        if (mode) rec.flrig.setMode(mode).catch(() => {});
+    });
+
+    // The page telling us where its panels are, on connect and on every change.
+    // Rebuilding the whole bar per message is fine: arranging panels is a
+    // deliberate act, not a stream.
+    ipcMain.on('layout:changed', (event, layout) => {
+        const rec = recordFor(event.sender);
+        if (!rec || !layout || !Array.isArray(layout.panels)) return;
+        rec.layout = layout;
+        refreshWindowMenu(rec);
+    });
+    // A refused command — hiding the Layout panel, say. The page publishes the
+    // unchanged layout anyway, so the menu corrects itself; this is only worth
+    // a line in the log for anyone wondering why a click did nothing.
+    ipcMain.on('layout:done', (_e, res) => {
+        if (res && !res.ok) console.warn('[ubersdr] layout command refused:', res.error);
+    });
+
+    ipcMain.handle('serial:ports', () => (serialPicker ? serialPicker.ports : []));
+    ipcMain.on('serial:choose', (_e, portId) => {
+        if (serialPicker) serialPicker.finish(portId);
+    });
+
+    ipcMain.handle('instances:sort', () => store.sort);
+    ipcMain.handle('instances:set-sort', (_e, value) => store.setSort(value));
 
     ipcMain.handle('instances:directory', () => discovery.fetchDirectory());
     ipcMain.handle('instances:lan', () => discovery.discoverLan());

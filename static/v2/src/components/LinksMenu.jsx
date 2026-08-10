@@ -9,63 +9,12 @@
 // downloads in a plain tab. The dynamic add-ons group is appended last.
 
 import React, { ReactDOM, useCallback, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
+// The pruning is shared with the desktop client's native Links menu — see
+// lib/pagesMenu.js. Two menus over the same receiver must not disagree.
+import { buildGroups } from '../lib/pagesMenu.js';
 
 const POPUP_W = 1200;
 const POPUP_H = 800;
-
-// v1's isEnabled(), against the /api/description payload.
-function isEnabled(key, info) {
-    if (!key) return true;
-    if (!info) return false;
-    if (key.startsWith('addons:')) {
-        const name = key.slice('addons:'.length);
-        return Array.isArray(info.addons) && info.addons.includes(name);
-    }
-    const val = info[key];
-    if (!val) return false;
-    if (Array.isArray(val)) return val.length > 0;
-    if (typeof val === 'object' && 'enabled' in val) return !!val.enabled;
-    return true;
-}
-
-function fileToLink(file) {
-    const external = /^https?:\/\//.test(file.path);
-    return {
-        url: external ? file.path : '/' + file.path.replace(/^\//, ''),
-        label: file.name,
-        tooltip: file.description || '',
-        // Downloads get a plain tab too — a popup window would be a poor place
-        // to land a file save.
-        external: external || file.download === true,
-    };
-}
-
-// Prune the fetched tree down to what this receiver actually has.
-function buildGroups(data, info) {
-    const mapNodes = (list) => (list || []).map((sg) => ({
-        name: sg.name,
-        links: (sg.files || []).filter((f) => isEnabled(f.depends_on, info)).map(fileToLink),
-        subgroups: mapNodes(sg.subgroups),
-    })).filter((sg) => sg.links.length || sg.subgroups.length);
-
-    const groups = (data.groups || [])
-        .filter((g) => isEnabled(g.depends_on, info))
-        .map((g) => ({
-            name: g.group,
-            links: (g.files || []).filter((f) => isEnabled(f.depends_on, info)).map(fileToLink),
-            subgroups: mapNodes(g.subgroups),
-        }))
-        .filter((g) => g.links.length || g.subgroups.length);
-
-    if (info && Array.isArray(info.addons) && info.addons.length) {
-        groups.push({
-            name: '🔌 Add-ons',
-            links: info.addons.map((name) => ({ url: `/addon/${name}/`, label: name.toUpperCase(), tooltip: '' })),
-            subgroups: [],
-        });
-    }
-    return groups;
-}
 
 function openPopup(url) {
     const left = Math.round((screen.width - POPUP_W) / 2);

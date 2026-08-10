@@ -27,6 +27,7 @@
 // the button that does the same thing.
 
 import { BridgeError, ERR } from './protocol.js';
+import { registerProvider, setProviderStatus, unregisterProvider } from '../controls/radioProviders.js';
 import {
     MAX_FREQ, MIN_FREQ, MODES, MODE_BY_ID, SQUELCH_MAX, SQUELCH_MIN,
     bandwidthLimits, squelchEnabled,
@@ -330,6 +331,86 @@ export const COMMANDS = {
         }
         ctx.actions.powerOff();
         return { running: false };
+    },
+
+    /**
+     * panel — show, hide or move one panel.
+     *
+     *   { id, hidden }      show or hide it
+     *   { id, placement }   move it to a dock, or set it floating
+     *
+     * Either or both, and at least one: a call naming a panel and asking for
+     * nothing is a client with a bug, and answering it with the current state
+     * would hide that.
+     *
+     * Both take the same path the Layout panel's own controls do, so there is
+     * no second way to arrange a page — the rule the rest of this file keeps.
+     * Moving a hidden panel shows it, because `movePanel` does; asking for
+     * somewhere it already is still returns the layout rather than failing,
+     * since a client setting a position it cannot see has nothing to correct.
+     */
+    panel(args, ctx) {
+        const layout = ctx.layout;
+        if (!layout) throw new BridgeError(ERR.UNSUPPORTED, 'this page has no layout');
+
+        const id = typeof args.id === 'string' ? args.id : '';
+        const known = layout.panels.find((p) => p.id === id);
+        if (!known) {
+            throw new BridgeError(ERR.BAD_ARGS,
+                `no panel "${id}" — one of ${layout.panels.map((p) => p.id).join(', ')}`);
+        }
+
+        const hidden = bool(args, 'hidden');
+        const placement = args.placement === undefined ? null : String(args.placement);
+        if (hidden === null && placement === null) {
+            throw new BridgeError(ERR.BAD_ARGS, 'give hidden, placement, or both');
+        }
+        if (placement !== null && !layout.placements.includes(placement)) {
+            throw new BridgeError(ERR.BAD_ARGS,
+                `no placement "${placement}" — one of ${layout.placements.join(', ')}`);
+        }
+        // The Layout panel is what brings the others back, so the UI refuses to
+        // hide it. Silently ignoring that here would leave a client's menu
+        // showing a tick that never clears.
+        if (hidden === true && known.unhideable) {
+            throw new BridgeError(ERR.UNSUPPORTED,
+                `"${id}" cannot be hidden — it is what unhides the others`);
+        }
+
+        if (placement !== null) layout.move(id, placement);
+        if (hidden !== null) layout.setHidden(id, hidden);
+        return layout.snapshot();
+    },
+
+    /**
+     * radio — offer a radio-control transport, or say what it is doing.
+     *
+     *   { action: 'register', provider: {...} }   offer it
+     *   { action: 'unregister', id }              withdraw it
+     *   { action: 'status', id, ... }             connected / frequency / mode / tx / error
+     *
+     * A page cannot open a socket to flrig or rigctld and their servers send no
+     * CORS headers, so Serial is the only transport the page can host by
+     * itself. Whatever is hosting the page — an extension, the desktop shell —
+     * can reach them, so it registers what it has and the Radio Control panel
+     * offers it beside Serial. See controls/radioProviders.js.
+     *
+     * Registering the same id again replaces it, which is what a client
+     * re-announcing after a page reload does.
+     */
+    radio(args, ctx) {
+        const action = String(args.action || '');
+        try {
+            if (action === 'register') return registerProvider(args.provider);
+            if (action === 'unregister') {
+                unregisterProvider(args.id);
+                return { id: String(args.id || ''), registered: false };
+            }
+            if (action === 'status') return setProviderStatus(args.id, args);
+        } catch (err) {
+            throw new BridgeError(ERR.BAD_ARGS, err.message);
+        }
+        throw new BridgeError(ERR.BAD_ARGS, 'action must be register, unregister or status');
     },
 };
 

@@ -17,6 +17,8 @@
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
+import { DOCKS, PLACEMENTS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
+import { PANELS } from '../panels/registry.jsx';
 import { useControlContext, useHardware } from '../controls/panel.jsx';
 import { runFunction } from '../controls/functions.js';
 import { getSessionId } from '../radio/session.js';
@@ -28,6 +30,7 @@ import { createClient } from './client.js';
 import { COMMAND_NAMES, runCommand } from './commands.js';
 import { describePage, snapshotFor } from './snapshots.js';
 import { bridgeSettings, onBridgeSettings, setBridgeAttached } from './settings.js';
+import { controlState, onControlState } from '../controls/mappings.js';
 
 // The meters are a mutable ref written by the audio path rather than React
 // state — see RadioContext — so the signal topic is sampled rather than
@@ -35,21 +38,59 @@ import { bridgeSettings, onBridgeSettings, setBridgeAttached } from './settings.
 // way out; the same timer drives the host's flush of anything held back.
 const SAMPLE_MS = 50;
 
+// The layout, as the flat thing the bridge talks in.
+//
+// The context is a dozen callbacks over a nested structure; a client wants a
+// list of panels and two verbs. Built here rather than in snapshots.js because
+// it is the one place that may touch React state, and kept to plain data so the
+// snapshot and the `panel` command are testable without a layout at all.
+//
+// The registry is the source of the list, not the layout: a panel that is
+// hidden still has to be nameable, or nothing could ask for it back.
+function layoutFacade(layout) {
+    const panels = () => PANELS.map((p) => ({
+        id: p.id,
+        title: p.title,
+        placement: layout.placementOf(p.id),
+        hidden: !!(layout.layout.sections[p.id] || {}).hidden,
+        unhideable: p.id === UNHIDEABLE,
+    }));
+    return {
+        placements: PLACEMENTS,
+        get panels() { return panels(); },
+        get docks() {
+            return DOCKS.map((d) => ({ id: d, collapsed: !!layout.layout.docks[d].collapsed }));
+        },
+        setHidden: (id, hidden) => layout.setSectionHidden(id, hidden),
+        // movePanel takes 'float' as a placement like the three docks, and on
+        // the way it un-hides the panel and opens the dock it landed in — the
+        // same thing a drag in the Layout panel does. Index omitted: "put it
+        // over there" is the whole of what a menu can say, and that appends.
+        move: (id, placement) => layout.movePanel(id, placement),
+        snapshot() { return { panels: panels(), docks: this.docks }; },
+    };
+}
+
 export default function BridgeHost() {
     const radio = useRadio();
     const display = useDisplay();
+    const layout = useLayout();
     const hw = useHardware();
     const ctx = useControlContext(display.tuneStep || 500);
     const [settings, setSettings] = useState(bridgeSettings);
     const [vfo, setVfo] = useState(() => getVfos().active);
+    // The Radio Control panel's own settings, which a registered transport reads
+    // to know whether it is the selected one and what it was configured with.
+    const [controls, setControls] = useState(controlState);
 
     useEffect(() => onBridgeSettings(setSettings), []);
     useEffect(() => onVfosChanged((s) => setVfo(s.active)), []);
+    useEffect(() => onControlState(setControls), []);
 
     // Read by the host on every message, so it always sees the current
     // receiver without the host being rebuilt (which would drop every client).
     const live = useRef(null);
-    live.current = { radio, ctx, hw, vfo, settings };
+    live.current = { radio, ctx, hw, vfo, settings, controls, layout: layoutFacade(layout) };
 
     const capabilities = useMemo(() => [
         ...COMMAND_NAMES,
@@ -73,7 +114,10 @@ export default function BridgeHost() {
             commands: COMMAND_NAMES,
         }),
         snapshot: (topic) => snapshotFor(topic, sources(live.current)),
-        command: (name, args) => runCommand(name, args, live.current.ctx),
+        // The layout rides alongside the control context rather than inside it:
+        // useControlContext is the surface the MIDI, FlexControl and keyboard
+        // panels share, and none of them arranges the page.
+        command: (name, args) => runCommand(name, args, { ...live.current.ctx, layout: live.current.layout }),
         // Dispatched, not "done": the catalogue's functions are fire-and-forget
         // because a knob has no reply path, so a rotator function on a receiver
         // with no stored password logs to the SDR Control panel and returns
@@ -140,6 +184,16 @@ export default function BridgeHost() {
 
     // The title is derived from the tuning (see App's PageTitle), so this fires
     // with it rather than needing a MutationObserver of its own.
+    // Arranging the page is a deliberate act, so this fires rarely — but it has
+    // to fire, or a client's menu keeps showing where a panel used to be.
+    useEffect(() => { host.publish('layout', snapshotFor('layout', sources(live.current))); },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [host, layout.layout]);
+
+    useEffect(() => { host.publish('radiocontrol', snapshotFor('radiocontrol', sources(live.current))); },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [host, controls]);
+
     useEffect(() => { host.publish('page', snapshotFor('page', sources(live.current))); },
         [host, tuning, serverInfo]);
 
@@ -168,8 +222,11 @@ export default function BridgeHost() {
 // added later needs a line there and nothing here.
 function sources(l) {
     const { radio: r, hw, vfo } = l;
+    const layout = l.layout ? l.layout.snapshot() : null;
     const m = r.meters ? r.meters.current : null;
     return {
+        layout,
+        controlSettings: l.controls,
         tuning: r.tuning,
         audio: r.audio,
         squelch: r.squelch,

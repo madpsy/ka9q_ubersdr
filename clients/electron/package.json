@@ -6,6 +6,8 @@
   "author": "MadPsy",
   "license": "SEE LICENSE IN ../../LICENSE.TXT",
   "main": "main.js",
+  "//desktopName": "Read by Electron itself (app.setDesktopName) and by electron-builder, which writes it as StartupWMClass. They must agree or the desktop environment cannot match a running window to the .desktop entry, and the taskbar shows a generic icon. Electron's fallback is `${app.name}.desktop` = ubersdr-desktop.desktop, so that is the name to pin.",
+  "desktopName": "ubersdr-desktop.desktop",
   "scripts": {
     "start": "electron ."
   },
@@ -27,14 +29,19 @@
       "discovery.js",
       "store.js",
       "prefs.js",
+      "flrig.js",
       "preload.js",
       "receiver-preload.js",
+      "serial-preload.js",
       "chooser/**",
-      "ui/**"
+      "serial/**",
+      "ui/**",
+      "assets/icon.png"
     ],
     "linux": {
       "target": "AppImage",
-      "category": "HamRadio"
+      "category": "HamRadio",
+      "syncDesktopName": true
     },
     "win": {
       "target": "nsis"

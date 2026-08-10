@@ -23,13 +23,36 @@ const V1_KEYS = {
     midi: { mappings: 'ubersdr_midi_mappings', step: 'ubersdr_midi_step_hz', device: 'ubersdr_midi_device' },
 };
 
-// The mapped surfaces, which are mutually exclusive. Radio Sync is not among
-// them: it is a panel of its own now, and may run alongside either of these.
+// The surfaces this page can open by itself, which are mutually exclusive: two
+// things mapped to frequency would fight each other. Radio Sync is not among
+// them — it is a panel of its own now, and may run alongside either.
+//
+// Not the whole list any more. A surface may also be registered from outside
+// (controls/surfaces.js), and its id goes in the same setting, so anything
+// validating this must ask the registry rather than only this array.
 export const SURFACES = ['off', 'flexcontrol', 'midi'];
+
+/**
+ * Whether a chosen surface is one this page opens itself, and so has mappings,
+ * a learn mode and a piece of hardware behind it.
+ *
+ * Here rather than spelled out at the call site, because "not off" is the
+ * obvious test and the wrong one: an externally provided surface is also not
+ * off, and it has no `state[id]` at all — reading `state[id].mappings` for one
+ * is not a degraded panel but a crash on mount, which is exactly what picking
+ * TCI did the first time. Anything about to touch a surface's own settings
+ * should ask this first.
+ */
+export function isMappedSurface(id) {
+    return id === 'flexcontrol' || id === 'midi';
+}
 
 export const DEFAULT_STATE = {
     surface: 'off',
     stepHz: 1000,
+    // Per-surface field values for the ones registered from outside, keyed by
+    // id, so switching away and back does not lose what was typed.
+    surfaces: {},
     // `autoConnect` is off until asked for. Hardware that binds itself on page
     // load is how a knob left against the desk starts retuning a receiver
     // nobody is watching, so the operator turns it on per surface.
@@ -115,6 +138,7 @@ export function loadState() {
         flexcontrol: { ...DEFAULT_STATE.flexcontrol, ...((saved && saved.flexcontrol) || {}) },
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
+        surfaces: { ...((saved && saved.surfaces) || {}) },
     };
     // The connect intent is not a preference; it is what is being asked for
     // right now, and on a fresh page that is exactly the auto-connect setting.
@@ -128,7 +152,10 @@ export function loadState() {
         state.surface = saved.source === 'radiosync' ? 'off' : saved.source;
     }
     delete state.source;
-    if (!SURFACES.includes(state.surface)) state.surface = 'off';
+    // Only a shape check: an id that is not one of the built-ins may be a
+    // surface something else registers, which has not happened yet at load.
+    // The panel says so if nothing claims it — see SDRControlPanel.
+    if (typeof state.surface !== 'string' || !state.surface) state.surface = 'off';
     const out = saved ? state : adoptV1(state);
     out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
     return out;

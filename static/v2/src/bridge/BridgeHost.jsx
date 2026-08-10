@@ -33,6 +33,7 @@ import { COMMAND_NAMES, runCommand } from './commands.js';
 import { describePage, snapshotFor } from './snapshots.js';
 import { bridgeSettings, onBridgeSettings, setBridgeAttached } from './settings.js';
 import { controlState, onControlState, updateControlState } from '../controls/mappings.js';
+import { EVENT_AUDIO_PORT } from '../controls/surfaces.js';
 
 // The meters are a mutable ref written by the audio path rather than React
 // state — see RadioContext — so the signal topic is sampled rather than
@@ -109,6 +110,57 @@ const groupIconCache = new Map();
 function groupIconMarkup(group) {
     if (!groupIconCache.has(group.id)) groupIconCache.set(group.id, svgMarkup(group.icon));
     return groupIconCache.get(group.id);
+}
+
+/**
+ * Hands a client one end of a MessageChannel, and feeds the decoded audio into
+ * the other.
+ *
+ * The port travels by `window.postMessage` rather than on the API's own
+ * channel, because a CustomEvent's `detail` cannot transfer anything — it is
+ * structured-cloned, and a MessagePort is not cloneable. The message is tagged
+ * so the client knows it is the answer to what it asked for.
+ *
+ * Frames go out as one interleaved Float32Array per callback, transferred
+ * rather than copied. Taken ahead of volume, mute and ducking on purpose: see
+ * radio/audio-player.js.
+ */
+let audioTap = null;
+function openAudioPort(player, id) {
+    if (audioTap) { audioTap(); audioTap = null; }
+    if (!id) return { streaming: false };
+    if (!player || typeof player.onAudio !== 'function') {
+        return { streaming: false, reason: 'no audio to hand out yet' };
+    }
+
+    const channel = new MessageChannel();
+    audioTap = player.onAudio((planes, frames, sampleRate) => {
+        // Interleaved, because that is what everything downstream of here
+        // expects — TCI's frames are L,R,L,R — and mono is sent as two equal
+        // channels rather than as half a stereo frame.
+        const channels = planes.length;
+        const out = new Float32Array(frames * 2);
+        const left = planes[0];
+        const right = channels > 1 ? planes[1] : planes[0];
+        for (let i = 0; i < frames; i++) {
+            out[i * 2] = left[i];
+            out[i * 2 + 1] = right[i];
+        }
+        // Sent without a transfer list, deliberately.
+        //
+        // Transferring the buffer is the obvious thing — it is freshly
+        // allocated here and nothing reads it afterwards — but the receiver may
+        // not be in this process. The desktop client hands its end of this
+        // channel to Electron's main process, whose deserialiser turns a
+        // *transferred* ArrayBuffer into null while an ordinary cloned one
+        // arrives intact. So the buffer is copied, at a few kilobytes every
+        // 37 ms, which is a price worth paying for a port that works wherever
+        // it ends up.
+        channel.port1.postMessage({ sampleRate, frames, pcm: out.buffer });
+    });
+
+    window.postMessage({ [EVENT_AUDIO_PORT]: id }, window.location.origin, [channel.port2]);
+    return { streaming: true, id };
 }
 
 function layoutFacade(layout) {
@@ -211,6 +263,9 @@ export default function BridgeHost() {
             ...live.current.ctx,
             layout: live.current.layout,
             setRadioControl,
+            // The player is the receiver's, not this module's — see
+            // RadioContext, which owns it for the life of the page.
+            openAudioPort: (id) => openAudioPort(live.current.radio.player, id),
         }),
         // Dispatched, not "done": the catalogue's functions are fire-and-forget
         // because a knob has no reply path, so a rotator function on a receiver
@@ -285,6 +340,10 @@ export default function BridgeHost() {
         [host, layout.layout]);
 
     useEffect(() => { host.publish('radiocontrol', snapshotFor('radiocontrol', sources(live.current))); },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [host, controls]);
+
+    useEffect(() => { host.publish('sdrcontrol', snapshotFor('sdrcontrol', sources(live.current))); },
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [host, controls]);
 

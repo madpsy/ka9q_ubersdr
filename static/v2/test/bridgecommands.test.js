@@ -90,8 +90,10 @@ const refuses = (code, fn) => {
 t('the command set is the published one', () => {
     assert.deepStrictEqual(COMMAND_NAMES,
         ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power',
-            'panel',    // 1.1
-            'radio']);  // 1.2
+            'panel',      // 1.1
+            'radio',      // 1.2
+            'surface',    // 1.4 — a control surface something else provides
+            'audio']);    // 1.4 — the receiver's sound, handed over as a port
 });
 
 // Commands are only ever added, and only at the end. A client tests for one by

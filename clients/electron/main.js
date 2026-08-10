@@ -18,6 +18,7 @@ const { InstanceStore } = require('./store');
 const { SharedPrefs } = require('./prefs');
 const { FlrigLink } = require('./flrig');
 const { RigctlLink } = require('./rigctl');
+const { TciServer } = require('./tciserver');
 const discovery = require('./discovery');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
@@ -156,11 +157,17 @@ async function connectInstance(desc) {
         proxy.stop();
         const gone = running.get(entry.id);
         if (gone && gone.radio) gone.radio.stop();
+        // A listening socket outlives the window that asked for it unless it is
+        // closed here, and the next window on the same port then cannot start.
+        if (gone && gone.surface) gone.surface.stop();
         running.delete(entry.id);
         notifyChooser();
     });
 
-    const rec = { proxy, win, links: null, layout: null, menu: null, radio: null };
+    const rec = {
+        proxy, win, links: null, layout: null, menu: null, radio: null,
+        surface: null, audioPort: null,
+    };
     running.set(entry.id, rec);
     watchMenuFocus(rec);
     store.recordUse(entry.id);
@@ -662,6 +669,85 @@ function setupIpc() {
         if (!rec || !rec.radio) return;
         if (frequency != null) rec.radio.setFrequency(frequency).catch(() => {});
         if (mode) rec.radio.setMode(mode).catch(() => {});
+    });
+
+    // --- the control surface -------------------------------------------------
+    //
+    // The other direction from the radio link above: there, this client drives
+    // somebody's rig; here it *is* the rig, and JTDX or a logger connects to it.
+    // The page's SDR Control panel chooses it and supplies the settings, which
+    // arrive through the same preload — see receiver-preload.js and
+    // static/v2/src/controls/surfaces.js.
+    //
+    // Only TCI so far, and it has to be here rather than in the page for the
+    // same reason as rigctld: a page cannot listen on a socket.
+    const SURFACES = { tci: TciServer };
+
+    function surfaceStatus(rec, status) {
+        if (!rec.win.isDestroyed()) rec.win.webContents.send('surface:status', status);
+    }
+
+    ipcMain.on('surface:start', (event, { id, config, name }) => {
+        const rec = recordFor(event.sender);
+        const Surface = SURFACES[id];
+        if (!rec || !Surface) return;
+        if (rec.surface) rec.surface.stop();
+        rec.surface = new Surface({
+            host: String((config && config.host) || '127.0.0.1'),
+            port: config && config.port,
+            // The receiver's own name, so a client's device list says which
+            // one it is talking to rather than which program.
+            deviceName: name || 'UberSDR',
+            onControl: (patch) => {
+                if (!rec.win.isDestroyed()) rec.win.webContents.send('surface:control', patch);
+            },
+            onStatus: (status) => surfaceStatus(rec, status),
+        });
+        rec.surface.start();
+    });
+
+    ipcMain.on('surface:stop', (event) => {
+        const rec = recordFor(event.sender);
+        if (!rec || !rec.surface) return;
+        rec.surface.stop();
+        rec.surface = null;
+        if (rec.audioPort) { rec.audioPort.close(); rec.audioPort = null; }
+    });
+
+    // The page has re-announced, so its registry of surfaces is a new one and
+    // whatever this told the old one is gone. Said again rather than assumed.
+    ipcMain.on('surface:report', (event) => {
+        const rec = recordFor(event.sender);
+        if (rec && rec.surface) surfaceStatus(rec, rec.surface.status());
+    });
+
+    // The receiver moved. Forwarded rather than filtered: the server itself
+    // decides what is a change worth telling clients about.
+    ipcMain.on('surface:update', (event, patch) => {
+        const rec = recordFor(event.sender);
+        if (rec && rec.surface) rec.surface.update(patch || {});
+    });
+
+    // Audio, as a port rather than as messages.
+    //
+    // The page opens a MessageChannel and hands one end to its preload (see the
+    // `audio` command in the page API); the preload passes that same port
+    // straight here. So the samples travel page → main with nothing in between
+    // copying them, and the preload is not woken 25 times a second to relay
+    // buffers it has no interest in.
+    ipcMain.on('surface:audio-port', (event) => {
+        const rec = recordFor(event.sender);
+        const port = event.ports[0];
+        if (!port) return;
+        if (!rec) { port.close(); return; }
+        if (rec.audioPort) rec.audioPort.close();
+        rec.audioPort = port;
+        port.on('message', (msg) => {
+            const data = msg.data || {};
+            if (!rec.surface || !data.pcm) return;
+            rec.surface.pushAudio(new Float32Array(data.pcm), data.frames, data.sampleRate);
+        });
+        port.start();
     });
 
     // The page telling us where its panels are, on connect and on every change.

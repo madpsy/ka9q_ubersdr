@@ -61,31 +61,6 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
     cp "$V2/index.html" ui/v2/
     cp -r "$V2/dist" "$V2/fonts" "$V2/vendor" ui/v2/
 
-    # The pages-menu pruning, as CommonJS for the main process: the native
-    # Links menu and the UI's own logo menu list the same receiver's pages, so
-    # they share the one implementation rather than each keeping a copy that
-    # can drift. Same trick the v2 test harness uses to run src modules under
-    # plain node.
-    esbuild "$V2/src/lib/pagesMenu.js" --bundle --format=cjs --platform=node \
-        --log-level=warning --outfile=ui/pagesMenu.cjs
-
-    # The page API's own client library, for the receiver preload: the Layout
-    # menu is a bridge client like any browser extension, and hand-rolling the
-    # protocol in the preload would be a second implementation of a wire format
-    # whose tests are its specification.
-    esbuild "$V2/src/bridge/client.js" --bundle --format=cjs --platform=node \
-        --log-level=warning --outfile=ui/bridgeClient.cjs
-
-    # ...and then the receiver preload with that client bundled into it.
-    #
-    # A preload is sandboxed (Electron's default, and worth keeping for a window
-    # showing an instance's own pages), and a sandboxed preload's `require` only
-    # answers for `electron` — a path to a file of ours fails with "module not
-    # found" at runtime. Bundling resolves it at build time instead, which keeps
-    # the sandbox rather than trading it for a require.
-    esbuild receiver-preload.js --bundle --format=cjs --platform=node \
-        --external:electron --log-level=warning --outfile=ui/receiver-preload.js
-
     # Shown in the chooser footer, so a stale bundle is visible at a glance.
     {
         printf '%s' "$(git -C "$V2" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -94,6 +69,39 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
 
     echo "staged v2 UI into ui/v2/ ($(cat ui/BUILD_INFO))"
 fi
+
+# The main process's and the preload's own bundles.
+#
+# Outside --skip-ui on purpose. These are seconds rather than the minute the v2
+# bundle takes, and they are this client's own source rather than the staged
+# UI — so skipping them means running yesterday's preload against today's edit,
+# which looks exactly like a change that did not work. It has cost three
+# debugging sessions; the seconds are cheaper.
+mkdir -p ui
+
+# The pages-menu pruning, as CommonJS for the main process: the native Links
+# menu and the UI's own logo menu list the same receiver's pages, so they share
+# the one implementation rather than each keeping a copy that can drift. Same
+# trick the v2 test harness uses to run src modules under plain node.
+esbuild "$V2/src/lib/pagesMenu.js" --bundle --format=cjs --platform=node \
+    --log-level=warning --outfile=ui/pagesMenu.cjs
+
+# The page API's own client library, for the receiver preload: the Layout menu
+# is a bridge client like any browser extension, and hand-rolling the protocol
+# in the preload would be a second implementation of a wire format whose tests
+# are its specification.
+esbuild "$V2/src/bridge/client.js" --bundle --format=cjs --platform=node \
+    --log-level=warning --outfile=ui/bridgeClient.cjs
+
+# ...and then the receiver preload with that client bundled into it.
+#
+# A preload is sandboxed (Electron's default, and worth keeping for a window
+# showing an instance's own pages), and a sandboxed preload's `require` only
+# answers for `electron` — a path to a file of ours fails with "module not
+# found" at runtime. Bundling resolves it at build time instead, which keeps the
+# sandbox rather than trading it for a require.
+esbuild receiver-preload.js --bundle --format=cjs --platform=node \
+    --external:electron --log-level=warning --outfile=ui/receiver-preload.js
 
 if [[ ! -d node_modules ]]; then
     command -v npm >/dev/null 2>&1 || { echo "npm not found — install Node.js to run the desktop client" >&2; exit 1; }

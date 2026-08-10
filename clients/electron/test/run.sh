@@ -6,3 +6,5 @@ set -euo pipefail
 cd "$(dirname "$0")"
 command -v node >/dev/null || { echo "node not found" >&2; exit 1; }
 node tci.test.js
+node tciserver.test.js
+node wsserver.test.js

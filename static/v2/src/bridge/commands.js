@@ -30,6 +30,7 @@ import { BridgeError, ERR } from './protocol.js';
 import {
     normaliseConfigure, registerProvider, setProviderStatus, unregisterProvider,
 } from '../controls/radioProviders.js';
+import { registerSurface, setSurfaceStatus, unregisterSurface } from '../controls/surfaces.js';
 import {
     MAX_FREQ, MIN_FREQ, MODES, MODE_BY_ID, SQUELCH_MAX, SQUELCH_MIN,
     bandwidthLimits, squelchEnabled,
@@ -421,6 +422,63 @@ export const COMMANDS = {
         }
         throw new BridgeError(ERR.BAD_ARGS,
             'action must be register, unregister, status or configure');
+    },
+
+    /**
+     * surface — offer this page as something, or say what that is doing.
+     *
+     *   { action: 'register', surface: {...} }   offer it
+     *   { action: 'unregister', id }             withdraw it
+     *   { action: 'status', id, ... }            running / clients / error
+     *
+     * The mirror of `radio`, for the other direction: `radio` is a transport
+     * this page drives a rig through, and this is a way something else drives
+     * *this receiver* — the desktop client standing up a TCI server for JTDX,
+     * say. Both are things a page cannot be on its own.
+     *
+     * A surface asking for `audio: true` is saying it needs the receiver's
+     * sound as well as its controls; see the `audio` command for how it gets
+     * it, which is not through this channel.
+     */
+    surface(args, ctx) {
+        const action = String(args.action || '');
+        try {
+            if (action === 'register') return registerSurface(args.surface);
+            if (action === 'unregister') {
+                unregisterSurface(args.id);
+                return { id: String(args.id || ''), registered: false };
+            }
+            if (action === 'status') return setSurfaceStatus(args.id, args);
+        } catch (err) {
+            throw new BridgeError(ERR.BAD_ARGS, err.message);
+        }
+        throw new BridgeError(ERR.BAD_ARGS, 'action must be register, unregister or status');
+    },
+
+    /**
+     * audio — the receiver's sound, as a port rather than as messages.
+     *
+     * Everything else here is control: a few bytes, rarely, as JSON on a
+     * CustomEvent. Audio is 48 kHz of float32 and would be half a megabyte a
+     * second of base64 through JSON.parse, which is not a channel — it is a
+     * way of making a channel unusable. So this command does not carry audio.
+     * It asks the page to open a MessageChannel and hand one end over, and the
+     * samples travel on that as `{ sampleRate, frames, pcm }` — a structured
+     * clone of a few kilobytes rather than anything parsed.
+     *
+     * The stream is taken before volume, mute and ducking (see
+     * radio/audio-player.js): a client feeding a decoder is not listening to
+     * this room, and must keep receiving while the operator has the speakers
+     * silenced.
+     */
+    audio(args, ctx) {
+        if (!ctx.openAudioPort) {
+            throw new BridgeError(ERR.UNSUPPORTED, 'this page cannot hand out audio');
+        }
+        const action = String(args.action || 'start');
+        if (action === 'stop') return ctx.openAudioPort(null);
+        if (action !== 'start') throw new BridgeError(ERR.BAD_ARGS, 'action must be start or stop');
+        return ctx.openAudioPort(String(args.id || ''));
     },
 };
 

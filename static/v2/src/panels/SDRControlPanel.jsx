@@ -24,6 +24,8 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Empty, Field, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
+import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
+import { SURFACES, isMappedSurface } from '../controls/mappings.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
 import {
@@ -70,6 +72,32 @@ export default function SDRControlPanel({ minimal }) {
 
     const surface = cfg.surface;
 
+    // Surfaces something else is hosting — the desktop client offering itself
+    // as a TCI radio, say. Registered over the page API; see
+    // controls/surfaces.js. They join the same picker as the two this page can
+    // open itself, and are exclusive with them for the same reason those are
+    // exclusive with each other: two things mapped to frequency fight.
+    const [external, setExternal] = useState(listSurfaces);
+    useEffect(() => onSurfaces(setExternal), []);
+    const provided = external.find((e) => e.id === surface) || null;
+    // Chosen, and then whatever was providing it went away.
+    const orphaned = surface !== 'off' && !SURFACES.includes(surface) && !provided;
+    // One of the two this page opens itself, and so the only kind with
+    // mappings, a learn mode and a hardware connection behind it.
+    const mapped = isMappedSurface(surface);
+
+    const options = [
+        ...SURFACE_OPTIONS,
+        ...external.map((e) => ({ value: e.id, label: e.label, title: e.description || undefined })),
+    ];
+
+    const setField = (f, value) => update({
+        surfaces: {
+            ...(cfg.surfaces || {}),
+            [surface]: { ...((cfg.surfaces || {})[surface]), [f.key]: value },
+        },
+    });
+
     return (
         <div className="stack">
             {/* Above the surfaces because it is not one of them: the three
@@ -81,13 +109,56 @@ export default function SDRControlPanel({ minimal }) {
             {!minimal && (
                 <Field label="Surface">
                     <Segmented
-                        options={SURFACE_OPTIONS}
+                        options={options}
                         value={surface}
                         onChange={(v) => update({ surface: v })}
                         size="sm"
                         minItemWidth={84}
                     />
                 </Field>
+            )}
+
+            {orphaned && (
+                <div className="note note--warn">
+                    “{surface}” is not available any more — whatever was providing it has gone.
+                    Choose another surface above.
+                </div>
+            )}
+
+            {provided && (
+                <>
+                    {provided.description && (
+                        <div className="note note--tight">{provided.description}</div>
+                    )}
+                    {provided.fields.map((f) => (
+                        <Field key={f.key} label={f.label}>
+                            <input
+                                className="input"
+                                type={f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : 'text')}
+                                value={((cfg.surfaces || {})[surface] || {})[f.key] ?? f.default}
+                                placeholder={f.placeholder || undefined}
+                                onChange={(e) => setField(f, f.type === 'number' ? Number(e.target.value) : e.target.value)}
+                            />
+                        </Field>
+                    ))}
+                    <div className="note note--tight">
+                        {provided.status.error
+                            ? provided.status.error
+                            : (provided.status.running
+                                // The detail is where it can be reached — a
+                                // server the operator has to point other
+                                // software at is not much use until they know
+                                // the address it settled on.
+                                ? `${provided.status.detail || 'Running'} · ${provided.status.clients || 0} client${provided.status.clients === 1 ? '' : 's'} connected`
+                                : 'Not running')}
+                    </div>
+                    {provided.audio && (
+                        <div className="note note--tight">
+                            This surface is sent the receiver&rsquo;s audio, ahead of the volume and
+                            mute controls — muting the speakers does not silence it.
+                        </div>
+                    )}
+                </>
             )}
 
             {/* Minimal has no picker, so it says so rather than leaving the
@@ -104,7 +175,18 @@ export default function SDRControlPanel({ minimal }) {
                 </div>
             )}
 
-            {surface !== 'off' && (
+            {/* Only the two this page hosts itself.
+                SurfaceControl is the learn-and-map editor for a knob or a MIDI
+                box: it reads `cfg[id].mappings` and drives `getSurface(id)`,
+                neither of which exists for a surface somebody else is hosting.
+                Rendering it for one is not a degraded panel, it is a crash on
+                mount — which is what `surface !== 'off'` alone did the moment
+                TCI was picked.
+
+                Keyed on the built-in list rather than on `!provided`, so a
+                surface whose provider has gone away is orphaned rather than
+                mistaken for a mapped one. See isMappedSurface. */}
+            {mapped && (
                 <SurfaceControl
                     key={surface}
                     id={surface}
@@ -117,7 +199,7 @@ export default function SDRControlPanel({ minimal }) {
                 />
             )}
 
-            {surface !== 'off' && !minimal && <MessageLog messages={messages} onClear={clearMessages} />}
+            {mapped && !minimal && <MessageLog messages={messages} onClear={clearMessages} />}
         </div>
     );
 }

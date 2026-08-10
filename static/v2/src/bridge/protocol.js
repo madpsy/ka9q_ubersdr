@@ -40,7 +40,7 @@ export const PROTOCOL = 1;
 // 1.1 adds the `layout` topic and the `panel` command; 1.2 the `radiocontrol`
 // topic and the `radio` command. All additive, so a 1.0 client is unaffected.
 // Capabilities remain the way to test for them.
-export const API_VERSION = { major: 1, minor: 3 };
+export const API_VERSION = { major: 1, minor: 4 };
 
 export const EVENT_TO_PAGE = 'ubersdr.to-page';
 export const EVENT_FROM_PAGE = 'ubersdr.from-page';
@@ -68,6 +68,7 @@ export const CLIENT_TYPES = [
 // Topics that change while you watch, and can be subscribed to.
 export const LIVE_TOPICS = [
     'tuning', 'audio', 'signal', 'spectrum', 'session', 'page', 'layout', 'radiocontrol',
+    'sdrcontrol',
 ];
 
 // Reference data: fetched with `get`, never pushed, because it only changes

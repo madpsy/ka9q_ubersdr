@@ -77,6 +77,11 @@ export class AudioPlayer extends Emitter {
         this.recordTap = null;      // unity node the recorder hangs off
         this.duck = null;           // output gate, for decoders that play their own audio
         this.ducked = false;
+
+        // Listeners on the decoded audio, ahead of every gain stage — see
+        // _schedule. A Set because more than one thing may want it, and each is
+        // handed the same frame rather than the graph being split.
+        this.taps = new Set();
         this.sinkId = '';           // chosen output device; '' is the system default
         this.anchorWanted = false;  // Media Session needs a media element playing
         this.element = null;        // the hidden <audio> those two share
@@ -146,6 +151,26 @@ export class AudioPlayer extends Emitter {
 
     // Silences the receiver's own audio without touching the user's mute. See
     // the duck node in _createContext.
+    /**
+     * Listen to the decoded audio, before volume, mute and ducking.
+     *
+     * `fn(planes, frames, sampleRate)` — `planes` is one Float32Array per
+     * channel, valid only for the duration of the call, so a listener that
+     * keeps it must copy. Returns a function that stops the listening.
+     */
+    onAudio(fn) {
+        this.taps.add(fn);
+        return () => this.taps.delete(fn);
+    }
+
+    _tap(planes, frames, sampleRate) {
+        for (const fn of Array.from(this.taps)) {
+            // One listener throwing must not cost the others their audio, nor
+            // interrupt playback — this runs on the decode path.
+            try { fn(planes, frames, sampleRate); } catch (e) { /* not ours to fix */ }
+        }
+    }
+
     setDucked(ducked) {
         this.ducked = !!ducked;
         if (!this.duck || !this.ctx) return;
@@ -607,6 +632,17 @@ export class AudioPlayer extends Emitter {
     }
 
     _schedule(planes, frames, sampleRate) {
+        // Anything listening for the raw audio gets it here, before the graph
+        // below and therefore before volume, mute and ducking.
+        //
+        // That is the point rather than an oversight: a client taking this
+        // stream is not listening to the speakers — it is a TCI client feeding
+        // a decoder, or a recorder — and it must go on receiving audio while
+        // the operator has the receiver muted, turned down, or ducked by a
+        // transmitting rig. Muting the speakers is about this room; the stream
+        // is about somebody else's software.
+        if (this.taps.size) this._tap(planes, frames, sampleRate);
+
         const ctx = this.ctx;
         if (!ctx || ctx.state === 'closed') return;
 

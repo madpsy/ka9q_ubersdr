@@ -173,6 +173,24 @@ Same three sources as the other clients (`clients/tui`,
   so it is not resumed. A refused connection keeps trying and the address stays
   editable while it does, so correcting a wrong port is picked up in place
   rather than needing the transport switched away and back.
+- **TCI server**: the SDR Control panel gains a **TCI** surface — the other
+  direction from the transports above. Instead of this client following a
+  radio, it *becomes* one: a TCI server on port 60001 (not TCI's usual 40001,
+  so the client and the server can both be in use at once) that JTDX, WSJT-X or
+  a logger connects to. It answers the handshake, reports and accepts the dial
+  and the mode, and streams the receiver's audio as TCI float32 frames,
+  resampled to the 48 kHz those clients expect. `wsserver.js` is a WebSocket
+  server in about as little as RFC 6455 allows, because Node has none and this
+  client has no runtime dependencies; `tciserver.js` is the protocol on top.
+
+  It listens on 127.0.0.1 unless told otherwise, since it hands out audio and
+  lets whoever connects retune the receiver.
+
+  The audio never passes through the volume and mute controls: it is tapped
+  ahead of them (the `audio` command, API 1.4), so muting the speakers does not
+  silence a decoder. The page opens a `MessageChannel` and the preload passes
+  that port straight to the main process, so the samples reach the socket
+  without this window relaying them.
 - **Popups**: the legacy v1 windows (callsign lookup, map, CW graph) open as
   child windows; external links open in the system browser.
 - **Media keys** work through the UI's existing `mediaSession` support;
@@ -193,6 +211,9 @@ flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 rigctl.js     rigctld over its TCP protocol, likewise
 tci.js        the TCI protocol over a WebSocket — browser code, bundled into
               receiver-preload.js and run in the window
+wsserver.js   a WebSocket server, RFC 6455, for the TCI server to listen on
+tciserver.js  this receiver offered *as* a TCI radio: handshake, commands,
+              audio frames, and the 48 kHz resampling they arrive at
 test/         node tests for the protocol handling (./test/run.sh)
 preload.js    IPC surface for the chooser page
 receiver-preload.js  seeds/reports shared settings in receiver windows

@@ -258,6 +258,9 @@ function command(name, args) {
 function onTuning(t) {
     if (t) tuning = t;
     syncToRig();
+    // Told to whatever is connected to us as well: a TCI client keeps its own
+    // dial, and a receiver that moved without saying so leaves it wrong.
+    pushToSurface();
 }
 
 /**
@@ -366,10 +369,140 @@ function startRadio(client) {
     // rig for a page that no longer exists.
     window.addEventListener('pagehide', () => {
         stopLink();
+        stopSurface();
         if (!bridge) return;
         for (const id of PROVIDER_IDS) {
             bridge.command('radio', { action: 'unregister', id }).catch(() => {});
         }
+        bridge.command('surface', { action: 'unregister', id: SURFACE.id }).catch(() => {});
+    });
+}
+
+// --- the control surface this client offers ----------------------------------
+//
+// The mirror of the transports above. Those are rigs this receiver follows;
+// this is this receiver offered *as* a rig — a TCI server that JTDX, WSJT-X or
+// a logger connects to, retunes, and takes audio from.
+//
+// SDR Control shows it beside FlexControl and MIDI, which are USB devices a
+// page can open by itself. A listening socket is not, which is why this is
+// registered from here rather than built into the page. The protocol is in
+// tciserver.js, in the main process, since that is where a socket can be.
+const SURFACE = {
+    id: 'tci',
+    label: 'TCI',
+    description: 'Offers this receiver over TCI — point JTDX, WSJT-X or a logger at it.',
+    fields: [
+        // Loopback by default. This hands out the receiver's audio and lets
+        // whoever connects retune it; 0.0.0.0 opens that to the network, and
+        // should be a decision rather than a default.
+        { key: 'host', label: 'Listen on', type: 'text', default: '127.0.0.1', placeholder: '127.0.0.1' },
+        // Not TCI's usual 40001. That is the port a *radio* listens on, and
+        // this client can be a TCI client at the same time as it is a TCI
+        // server — Radio Control pointed at a real rig on 40001 while SDR
+        // Control offers this receiver to a logger. Sharing the number would
+        // mean the two fighting over it the first time somebody used both.
+        { key: 'port', label: 'Port', type: 'number', default: 60001 },
+    ],
+    // Asks for the receiver's sound as well as its controls.
+    audio: true,
+};
+
+// The key the page tags a handed-over audio port with. The string is
+// static/v2/src/controls/surfaces.js's `EVENT_AUDIO_PORT`; it cannot be
+// imported here, because that is an ES module in the page's bundle and this is
+// a CommonJS preload.
+const EVENT_AUDIO_PORT = 'ubersdr.audio-port';
+
+let sc = null;              // the panel's settings for this surface
+let surfaceTarget = null;   // where the server should be listening, or null
+let audioOpen = false;      // whether the page is currently tapping audio for us
+
+/** SDR Control's settings changed, or arrived for the first time. */
+function onSdrControl(next) {
+    if (!next) return;
+    sc = next;
+    const shouldRun = next.surface === SURFACE.id && next.running;
+    const config = next.config || {};
+    // Keyed on where it should listen, for the same reason the radio link is:
+    // a port that was refused has to be correctable by editing it, and
+    // watching only "should it run" makes that a no-op.
+    const target = shouldRun ? JSON.stringify({
+        host: String(config.host || '127.0.0.1'),
+        port: Number(config.port) || 60001,
+    }) : null;
+    if (target === surfaceTarget) return;
+    surfaceTarget = target;
+
+    if (!shouldRun) { stopSurface(); return; }
+    const info = bridge && bridge.describe();
+    ipcRenderer.send('surface:start', {
+        id: SURFACE.id,
+        config: JSON.parse(target),
+        name: (info && info.receiver && info.receiver.name) || 'UberSDR',
+    });
+    // Whatever the receiver is doing now, so a client connecting before the
+    // next time somebody turns the dial is still told the truth.
+    pushToSurface();
+}
+
+function stopSurface() {
+    surfaceTarget = null;
+    setAudio(false);
+    ipcRenderer.send('surface:stop');
+}
+
+/** The receiver's dial, onto the surface. */
+function pushToSurface() {
+    if (!surfaceTarget || !tuning) return;
+    ipcRenderer.send('surface:update', { frequency: tuning.frequency, mode: tuning.mode });
+}
+
+/**
+ * Open or close the page's audio tap.
+ *
+ * Only while a client is actually streaming. The tap interleaves every block
+ * the receiver plays, and doing that for a server nobody has connected to is
+ * work the receiver pays for and no one hears.
+ */
+function setAudio(on) {
+    if (on === audioOpen) return;
+    audioOpen = on;
+    if (!bridge) return;
+    bridge.command('audio', on ? { action: 'start', id: SURFACE.id } : { action: 'stop' })
+        .catch(() => { audioOpen = false; });
+}
+
+function startSurface(client) {
+    // The port itself, handed over by the page. Passed straight to the main
+    // process rather than read here: the samples are for the TCI server, and
+    // relaying them through this window would be a copy per block for nothing.
+    window.addEventListener('message', (event) => {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data[EVENT_AUDIO_PORT] !== SURFACE.id) return;
+        const port = event.ports && event.ports[0];
+        if (port) ipcRenderer.postMessage('surface:audio-port', null, [port]);
+    });
+
+    // A client retuning us. The same `tune` the radio link uses when the rig
+    // leads, and for the same reason both go through the page: it owns the
+    // receiver, and nothing here should be second-guessing what it can do.
+    ipcRenderer.on('surface:control', (_event, patch) => {
+        if (patch && (patch.frequency != null || patch.mode)) command('tune', patch);
+    });
+
+    ipcRenderer.on('surface:status', (_event, status) => {
+        if (!status) return;
+        setAudio(!!status.streaming && !!status.running);
+        client.command('surface', {
+            action: 'status',
+            id: SURFACE.id,
+            running: !!status.running,
+            clients: status.clients,
+            detail: status.detail,
+            error: status.error,
+        }).catch(() => {});
     });
 }
 
@@ -493,7 +626,7 @@ function startLayoutBridge() {
     // already up before this ran. Its rejection is not interesting: the
     // announce is the answer, and it may simply arrive later.
     const resubscribe = () => {
-        client.subscribe(['layout', 'radiocontrol', 'tuning'])
+        client.subscribe(['layout', 'radiocontrol', 'sdrcontrol', 'tuning'])
             .then((state) => {
                 push(state && state.layout);
                 // The reply carries a snapshot of each topic. Seeding the dial
@@ -510,16 +643,37 @@ function startLayoutBridge() {
                 )))
                     .then(() => onRadioControl(state && state.radiocontrol))
                     .catch(() => { /* an older page, without transports */ });
+                // Offered on every announce for the same reason: the page's
+                // registry is empty after a reload.
+                //
+                // What is deliberately *not* done here is restarting the
+                // server. An announce is not only a reload — it is also the
+                // descriptor changing, which happens when the receiver's audio
+                // starts, and tearing the socket down for that drops every
+                // connected client mid-stream. So the settings are simply
+                // re-applied, and `onSdrControl` no-ops when nothing moved. A
+                // real reload runs this preload afresh, with nothing to keep.
+                client.command('surface', { action: 'register', surface: SURFACE })
+                    .then(() => {
+                        onSdrControl(state && state.sdrcontrol);
+                        // The registry the status was reported into is a new
+                        // one, so a server that is already running has to say
+                        // what it is doing again or the panel shows nothing.
+                        ipcRenderer.send('surface:report');
+                    })
+                    .catch(() => { /* an older page, without surfaces */ });
             })
             .catch(() => { /* the next announce will bring us back */ });
     };
     client.on('announce', resubscribe);
     client.on('layout', push);
     client.on('radiocontrol', onRadioControl);
+    client.on('sdrcontrol', onSdrControl);
     client.on('tuning', onTuning);
     client.hello().catch(() => { /* not up yet — its announce will arrive */ });
 
     startRadio(client);
+    startSurface(client);
 
     // The menu asking for a change. Failures are reported back so the menu can
     // put its tick where the page actually is rather than where it asked to be.

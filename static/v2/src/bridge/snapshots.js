@@ -213,10 +213,32 @@ export function radioControlSnapshot(src) {
     };
 }
 
+/**
+ * What the SDR Control panel is asking of a surface something else provides.
+ *
+ * The mirror of `radiocontrol`: which surface is chosen, what was typed into
+ * its fields, and whether it should be running. Only the chosen one's settings
+ * travel — a surface has no business reading what was typed for another.
+ */
+export function sdrControlSnapshot(src) {
+    const cfg = src.controlSettings || {};
+    const surface = cfg.surface || 'off';
+    const external = surface !== 'off' && surface !== 'flexcontrol' && surface !== 'midi';
+    return {
+        surface,
+        // Whether this page is asking that surface to run. The built-in ones
+        // are opened by a button press here, so this only means anything for a
+        // surface somebody else is hosting.
+        running: external,
+        config: (external && cfg.surfaces && cfg.surfaces[surface]) || {},
+    };
+}
+
 export const SNAPSHOTS = {
     tuning: tuningSnapshot,
     layout: layoutSnapshot,
     radiocontrol: radioControlSnapshot,
+    sdrcontrol: sdrControlSnapshot,
     audio: audioSnapshot,
     signal: signalSnapshot,
     spectrum: spectrumSnapshot,

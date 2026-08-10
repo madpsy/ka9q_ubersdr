@@ -256,6 +256,8 @@ One rule governs bad input:
 | `mode` | `{mode}` — passband becomes the mode default | tuning |
 | `passband` | `{low, high}` — checked against the mode in force | tuning |
 | `panel` *(1.1)* | `{id, hidden?}` and/or `{id, placement?}` | layout |
+| `surface` *(1.4)* | `{action: 'register', surface}` \| `{action: 'unregister', id}` \| `{action: 'status', id, …}` | the surface, or its status |
+| `audio` *(1.4)* | `{action: 'start', id}` \| `{action: 'stop'}` | `{streaming}` — and a MessagePort, see below |
 | `radio` *(1.2)* | `{action: 'register', provider}` \| `{action: 'unregister', id}` \| `{action: 'status', id, …}` \| `{action: 'configure', id, …}` *(1.3)* | the provider, its status, or the settings |
 | `volume` | `{volume}` \| `{delta}` — 0..1 | `{volume, muted}` |
 | `mute` | `{muted}` (absolute) \| `{toggle:true}` | `{muted}` |
@@ -367,6 +369,72 @@ transport that registered once would silently vanish. Unregister on the way out
 Doing the actual syncing is yours: subscribe to `tuning` and push the dial to
 the rig, or read the rig and `tune` the receiver — and use `duck`, not `mute`,
 for transmit muting, so the operator's own mute is left alone.
+
+### Being a control surface *(since 1.4)*
+
+`radio` is a transport this page drives a rig through. `surface` is the other
+direction: a way something else drives *this* receiver — a desktop client
+standing up a TCI server so JTDX connects to it and retunes you. Both are things
+a page cannot be on its own, and both are registered as a description rather
+than as code:
+
+```js
+await client.command('surface', { action: 'register', surface: {
+    id: 'tci',
+    label: 'TCI',
+    description: 'Be a TCI radio for JTDX and friends.',
+    audio: true,                                   // it needs the sound too
+    fields: [{ key: 'port', label: 'Port', type: 'number', default: 40001 }],
+} });
+```
+
+It then appears in the SDR Control panel beside FlexControl and MIDI, and what
+the operator chooses arrives on the `sdrcontrol` topic. Report what yours is
+doing with `{action: 'status', id, running, clients, error}`.
+
+Surfaces are **mutually exclusive**, as the built-in two already are: more than
+one thing mapped to frequency fight each other.
+
+### Audio *(since 1.4)*
+
+Everything else here is control — a few bytes, rarely, as JSON on a CustomEvent.
+Audio is 48 kHz of float32, which through that channel would be half a megabyte
+a second of base64 through `JSON.parse`. So `audio` does not carry audio. It
+asks the page to open a `MessageChannel` and hand one end over:
+
+```js
+window.addEventListener('message', (e) => {
+    if (!e.data || !e.data['ubersdr.audio-port']) return;
+    const port = e.ports[0];
+    port.onmessage = ({ data }) => {
+        // data.pcm    ArrayBuffer, float32 interleaved L,R,L,R
+        // data.frames sample pairs
+        // data.sampleRate
+    };
+    port.start();
+});
+await client.command('audio', { action: 'start', id: 'tci' });
+```
+
+`{action: 'stop'}` ends it, as does asking for a new one — there is a single
+stream.
+
+Buffers are cloned rather than transferred, deliberately: the far end of the
+port may be in another process. Electron's main process, for one, deserialises a
+*transferred* `ArrayBuffer` as `null` while an ordinary cloned one arrives
+intact — so the port works wherever it is passed on to, at the cost of a copy of
+a few kilobytes every 37 ms.
+
+Two things to know about what comes out of it:
+
+**It is taken ahead of volume, mute and ducking.** A client feeding a decoder is
+not listening to this room, and must keep receiving while the operator has the
+speakers silenced or a transmitting rig has ducked them. Muting the receiver
+does not mute this.
+
+**The sample rate is the receiver's, not 48 kHz.** It follows the mode — 12000
+for SSB, for instance — and is on every message, so read it rather than assume.
+A client that needs a fixed rate has to resample.
 
 ## 8. Errors
 

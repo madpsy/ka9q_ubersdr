@@ -32,6 +32,8 @@
       "flrig.js",
       "rigctl.js",
       "tci.js",
+      "tciserver.js",
+      "wsserver.js",
       "preload.js",
       "receiver-preload.js",
       "serial-preload.js",

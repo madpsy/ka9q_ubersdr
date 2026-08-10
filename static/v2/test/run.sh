@@ -202,6 +202,8 @@ esbuild ../src/lib/pagesMenu.js --bundle --format=cjs --platform=node \
     --outfile=.build/pagesmenu.cjs --log-level=warning
 esbuild ../src/controls/radioProviders.js --bundle --format=cjs --platform=node \
     --outfile=.build/radioproviders.cjs --log-level=warning
+esbuild ../src/controls/surfaces.js --bundle --format=cjs --platform=node \
+    --outfile=.build/surfaces.cjs --log-level=warning
 esbuild ../src/lib/svgMarkup.js --bundle --format=cjs --platform=node \
     --outfile=.build/svgmarkup.cjs --log-level=warning
 esbuild ../src/lib/shortcuts.js --bundle --format=cjs --platform=node \
@@ -397,4 +399,5 @@ node spectrumtrace.test.js
 node hookorder.test.js
 node pagesmenu.test.js
 node radioproviders.test.js
+node surfaces.test.js
 node svgmarkup.test.js

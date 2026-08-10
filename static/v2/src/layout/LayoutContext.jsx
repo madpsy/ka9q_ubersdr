@@ -24,13 +24,24 @@ const VERSION = 1;
 // So: a revision the migrations below key off, applied once and then recorded.
 // Each one must be conservative enough that it cannot undo an arrangement
 // somebody made — see migrateRev.
-const REV = 1;
+export const REV = 2;
 
 export const DOCKS = ['left', 'right', 'bottom'];
 // A panel is in exactly one place: one of the docks, or floating free.
 export const PLACEMENTS = [...DOCKS, 'float'];
 
 const FLOAT_DEFAULT = { w: 320, h: 320 };
+
+// Float heights that were a default once and are too small for what the panel
+// shows now — the multipad's was measured without the squelch that its minimal
+// view includes, so the one control there that is adjusted while listening was
+// the one clipped.
+//
+// Keyed by panel, and matched exactly: a float still sitting at one of these
+// was never resized by hand, so correcting it cannot undo an arrangement
+// anybody made. A float at any other height was, and is left alone — which is
+// the rule every migration here has to satisfy.
+const OUTGROWN_FLOAT_HEIGHTS = { multipad: [188] };
 // The Layout panel: the one panel that cannot be hidden, because it is the one that
 // brings the others back. Named here rather than tested for inline so the reason has
 // somewhere to live and the id appears once.
@@ -347,6 +358,18 @@ function migrateRev(base, stored, phone, touch) {
             base.docks[dock].panels = base.docks[dock].panels.filter((id) => id !== p.id);
         }
         base.sections[p.id] = { ...base.sections[p.id], ...firstRun(p, phone, touch) };
+    }
+
+    // rev 2: a float already seeded at a height that has since been outgrown.
+    // Nothing to do for one seeded just above — it is already the new size.
+    for (const p of PANELS) {
+        const spec = (p.touch || {}).float;
+        const outgrown = OUTGROWN_FLOAT_HEIGHTS[p.id];
+        const float = base.floats[p.id];
+        if (!spec || !outgrown || !float) continue;
+        if (float.h < spec.h && outgrown.includes(Math.round(float.h))) {
+            base.floats = { ...base.floats, [p.id]: { ...float, h: spec.h } };
+        }
     }
     return base;
 }

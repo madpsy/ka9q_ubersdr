@@ -7,7 +7,7 @@
 // migration must only ever add what this machine has never had an opinion about.
 
 const assert = require('assert');
-const { DOCKS, PANEL_BY_ID, defaultLayout, insertNear, reconcile } = require('./.build/layout.cjs');
+const { DOCKS, PANEL_BY_ID, REV, defaultLayout, insertNear, reconcile } = require('./.build/layout.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -50,13 +50,20 @@ t('a touchscreen desktop gets it floating, minimal, in the bottom left', () => {
     assert.ok(!inAnyDock(l, PAD), 'must not also be listed in a dock');
 });
 
-t('the seeded window is big enough for both barrels', () => {
+t('the seeded window is big enough for both barrels and the squelch', () => {
     // The height the registry asks for has to clear the window chrome plus the
     // frequency readout, both barrels and the gaps between them — the whole
     // point of the size being declared rather than left at the default.
+    //
+    // And the squelch, which this sum used to leave out. That omission is why
+    // the seeded height was 25 px short of its own minimal view for as long as
+    // it was: the panel showed a control the test never accounted for, so
+    // nothing here objected. Measured in the running panel — a floating
+    // Multipad at 188 reported scrollHeight 180 against clientHeight 155.
     const g = defaultLayout(TOUCH).floats[PAD];
     const CHROME = 31 + 10;             // title bar, and the body's bottom padding
-    const CONTENT = 4 + (38 + 5 + 48) + 8 + 38;   // .pad, freq head + wheel, gap, zoom
+    const CONTENT = 4 + (38 + 5 + 48) + 8 + 38   // .pad, freq head + wheel, gap, zoom
+        + 25;                           // the squelch row, and the gap above it
     assert.ok(g.h >= CHROME + CONTENT, `${g.h} < ${CHROME + CONTENT}`);
 
     // Width is the head row, which is the widest thing here: a ten-digit
@@ -98,7 +105,7 @@ t('a layout stored before this gets the Multipad on a touchscreen desktop', () =
     assert.strictEqual(l.sections[PAD].hidden, false);
     assert.strictEqual(l.sections[PAD].minimal, true);
     assert.ok(!inAnyDock(l, PAD));
-    assert.strictEqual(l.rev, 1, 'and is recorded, so it happens once');
+    assert.strictEqual(l.rev, REV, 'and is recorded, so it happens once');
 });
 
 t('it does not happen twice', () => {
@@ -119,6 +126,38 @@ t('a Multipad somebody had already gone and found is left alone', () => {
     const l = reconcile(stored, TOUCH);
     assert.strictEqual(l.floats[PAD], undefined, 'not moved out of its dock');
     assert.ok(inAnyDock(l, PAD));
+});
+
+// The height it was seeded with never had room for the squelch, which is part
+// of what its minimal view shows. Correcting that is only safe where nobody has
+// sized the thing themselves.
+t('a Multipad still at the height it was given grows enough for the squelch', () => {
+    const stored = storedOld();
+    stored.rev = 1;
+    stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: 188, min: false } };
+    stored.floatOrder = [PAD];
+    const l = reconcile(stored, TOUCH);
+    assert.strictEqual(l.floats[PAD].h, PANEL_BY_ID[PAD].touch.float.h);
+    assert.strictEqual(l.floats[PAD].w, 390, 'and nothing else about it moves');
+    assert.strictEqual(l.floats[PAD].x, 40);
+});
+
+t('a Multipad somebody has resized keeps the height they chose', () => {
+    // 188 means "never touched"; any other height is an opinion, and growing it
+    // would be undoing an arrangement — the rule every migration here follows.
+    const stored = storedOld();
+    stored.rev = 1;
+    stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: 150, min: false } };
+    stored.floatOrder = [PAD];
+    assert.strictEqual(reconcile(stored, TOUCH).floats[PAD].h, 150);
+});
+
+t('a Multipad already tall enough is not shrunk to the default', () => {
+    const stored = storedOld();
+    stored.rev = 1;
+    stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: 400, min: false } };
+    stored.floatOrder = [PAD];
+    assert.strictEqual(reconcile(stored, TOUCH).floats[PAD].h, 400);
 });
 
 t('a Multipad already floating keeps the geometry it was given', () => {

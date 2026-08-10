@@ -137,9 +137,12 @@ export const PANELS = [
             hidden: false,
             minimal: true,
             // Wide enough for the head row whole: a ten-digit readout at 27 px
-            // plus the step and mode pickers beside it. The height is the two
-            // barrels and that row, with nothing to scroll.
-            float: { w: 390, h: 188, anchor: 'bottom-left' },
+            // plus the step and mode pickers beside it. The height is that row,
+            // the two barrels *and the squelch*, with nothing to scroll — the
+            // squelch is part of the minimal view (see above) and the 188 this
+            // used to be was measured without it, so the one control here that
+            // is adjusted while listening was the one cut off.
+            float: { w: 390, h: 213, anchor: 'bottom-left' },
         },
         Component: MultipadPanel,
     },

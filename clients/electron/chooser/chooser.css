@@ -38,7 +38,7 @@ header {
 
 #add-form { display: flex; gap: 8px; margin-left: auto; flex: 1; max-width: 520px; }
 
-input[type="text"] {
+input[type="text"], input[type="password"] {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -47,7 +47,7 @@ input[type="text"] {
     font-size: 13px;
     outline: none;
 }
-input[type="text"]:focus { border-color: var(--accent-dim); }
+input[type="text"]:focus, input[type="password"]:focus { border-color: var(--accent-dim); }
 #add-input { flex: 1; }
 
 button {
@@ -171,6 +171,53 @@ select {
 }
 
 .empty { color: var(--dim); padding: 8px 2px; font-size: 13px; }
+
+/* --- the password key ---------------------------------------------------- */
+
+/* Square around the icon rather than the text buttons' wider padding, and it
+   keeps the accent colour when a password is set — the one state on these rows
+   that is worth reading without hovering anything. */
+.key-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+}
+.key-btn.set { color: var(--accent); border-color: var(--accent-dim); }
+.key-btn.set:hover { color: var(--accent); }
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(4, 6, 11, 0.62);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal {
+    width: min(420px, calc(100vw - 36px));
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.modal h3 { font-size: 15px; font-weight: 600; }
+.modal p { color: var(--dim); font-size: 12px; }
+/* Which receiver this is about, said once and plainly: the dialog is opened
+   from a row that scrolls away behind it. */
+.modal .modal-target { color: var(--text); font-size: 13px; font-weight: 600; }
+.modal-note { color: var(--danger); font-size: 12px; }
+.modal-note[hidden] { display: none; }
+
+.modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+/* Clear sits away from Save and Cancel: it is the destructive one, and it should
+   not be the button next to the one everybody reaches for. */
+.modal-spacer { flex: 1; }
 
 footer {
     padding: 8px 18px;

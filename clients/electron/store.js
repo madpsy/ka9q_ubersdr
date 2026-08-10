@@ -13,11 +13,21 @@ const crypto = require('crypto');
 
 const FIRST_PORT = 17820;
 
-// Fields the chooser is allowed to change after creation.
+// Fields the chooser is allowed to change after creation. The password is not
+// among them: it goes through setPassword, so a stray patch cannot drop a
+// plaintext secret into the file by a field name alone.
 const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 
 class InstanceStore {
-    constructor(dir) {
+    /**
+     * @param {string} dir        userData directory
+     * @param {object} [keychain] Electron's safeStorage, or anything with the
+     *                            same three methods. Optional so this module
+     *                            stays requirable — and testable — outside
+     *                            Electron.
+     */
+    constructor(dir, keychain) {
+        this.keychain = keychain || null;
         this.file = path.join(dir, 'instances.json');
         this.data = { nextPort: FIRST_PORT, sort: 'used', instances: [] };
         try {
@@ -41,6 +51,73 @@ class InstanceStore {
 
     list() {
         return this.data.instances;
+    }
+
+    /**
+     * The list as the chooser may see it: everything except the password.
+     *
+     * The renderer is told only whether one is set, which is all the key icon
+     * needs. A password that never crosses into the page cannot be read out of
+     * it, and the chooser has no use for the value it typed in five minutes ago.
+     */
+    listForUI() {
+        return this.data.instances.map(({ password, ...rest }) => ({
+            ...rest,
+            hasPassword: !!password,
+        }));
+    }
+
+    // --- the optional per-instance password ---------------------------------
+    //
+    // v2's bypass password (see static/v2/src/radio/session.js): typed into the
+    // start overlay in a browser, where sessionStorage forgets it when the tab
+    // closes. A desktop client is a different proposition — it is the operator's
+    // own machine and the whole point of the saved list is not typing things
+    // twice — so here it is kept, and kept in the OS keychain where there is one.
+    //
+    // Stored as a tagged string so a file written on a machine with a keychain
+    // is still readable on one without: `enc:` cannot be opened without the key
+    // and reads as no password rather than as garbage, `plain:` always can.
+
+    _seal(password) {
+        if (!password) return null;
+        try {
+            if (this.keychain && this.keychain.isEncryptionAvailable()) {
+                return 'enc:' + this.keychain.encryptString(password).toString('base64');
+            }
+        } catch { /* a keyring that was there at install time and is not now */ }
+        // No keychain — a headless Linux box with no libsecret, most often.
+        // Refusing to store it would make the feature simply not work there,
+        // which is worse than a file the user must already be able to read: it
+        // sits in their own userData directory, beside everything else.
+        return 'plain:' + password;
+    }
+
+    _open(stored) {
+        if (typeof stored !== 'string') return '';
+        if (stored.startsWith('plain:')) return stored.slice(6);
+        if (stored.startsWith('enc:')) {
+            try {
+                return this.keychain.decryptString(Buffer.from(stored.slice(4), 'base64'));
+            } catch { return ''; }
+        }
+        return '';
+    }
+
+    /** Set it, or clear it with an empty string. */
+    setPassword(id, password) {
+        const entry = this.get(id);
+        if (!entry) return null;
+        const sealed = this._seal(String(password == null ? '' : password));
+        if (sealed) entry.password = sealed;
+        else delete entry.password;
+        this.persist();
+        return entry;
+    }
+
+    passwordFor(id) {
+        const entry = this.get(id);
+        return entry ? this._open(entry.password) : '';
     }
 
     get(id) {
@@ -75,6 +152,9 @@ class InstanceStore {
             this.data.instances.push(entry);
         }
         if (desc.insecureTLS) entry.insecureTLS = true;
+        // A password typed against a receiver that was not saved yet — one from
+        // the LAN scan or the directory. It is saved at the moment the entry is.
+        if (desc.password) entry.password = this._seal(String(desc.password));
         for (const key of ['callsign', 'location', 'version']) {
             if (desc[key]) entry[key] = desc[key];
         }

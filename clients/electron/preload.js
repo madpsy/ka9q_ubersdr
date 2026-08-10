@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('ubersdr', {
     resolve: (input, opts) => ipcRenderer.invoke('instances:resolve', input, opts),
     connect: (desc) => ipcRenderer.invoke('instances:connect', desc),
     update: (id, patch) => ipcRenderer.invoke('instances:update', id, patch),
+    // Goes one way only: the chooser can set or clear a password and is told
+    // whether one is set, but never gets a stored one back.
+    setPassword: (target, password) => ipcRenderer.invoke('instances:set-password', target, password),
     disconnect: (id) => ipcRenderer.invoke('instances:disconnect', id),
     remove: (id) => ipcRenderer.invoke('instances:remove', id),
     sort: () => ipcRenderer.invoke('instances:sort'),

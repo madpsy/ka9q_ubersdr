@@ -60,8 +60,7 @@ one arrangement of the interface, on every receiver.
 
 With it on, a snapshot of the `ubersdr.v2.*` keys is kept in userData
 (`shared-prefs.json`), each receiver window is seeded from it before the page
-boots (`receiver-preload.js`, which exposes nothing to the page), and changes
-made in any window are written back. The first receiver opened supplies the
+boots (`receiver-preload.js`), and changes made in any window are written back. The first receiver opened supplies the
 initial snapshot; windows already open pick up later changes when reloaded.
 
 Two things are deliberately never shared:
@@ -88,6 +87,32 @@ as visited. Entries saved before counting existed start at zero and therefore
 keep their old recency order until they are used again. The picker beside the
 heading switches the list back to plain most-recent-first, and the choice is
 remembered.
+
+### The password key
+
+Some receivers have a bypass password — one the operator hands out to get past
+a full house or a ban. In a browser it is typed into v2's start overlay and
+forgotten when the tab closes; here the saved list exists so that things are not
+typed twice, so the key icon on every row in the chooser saves one per receiver.
+It is offered in all three places a receiver can come from — the address box,
+the LAN scan and the directory — and lights up where one is set.
+
+Set one against a receiver that has not been saved yet and it is kept until the
+connect that creates the entry. Change or clear one for a receiver that is open
+and its window reloads, which is also how a wrong one gets a second try.
+
+Where the platform has a keychain the password is encrypted with it
+(`safeStorage`: DPAPI, Keychain, libsecret/kwallet) and `instances.json` holds
+only ciphertext; where there is none — a headless Linux box without libsecret —
+it is stored plainly in the same userData directory as everything else, because
+the alternative is a feature that silently does not work there. A file written
+on a machine with a keychain and opened on one without reads as no password
+rather than as garbage.
+
+The value never crosses into the chooser page: the renderer is told only whether
+one is set. Receiver windows get it at preload, which puts it in `sessionStorage`
+under the key v2 already reads (`ubersdr.v2.password`, see
+`static/v2/src/radio/session.js`) rather than handing it to the page.
 
 ## Discovery
 
@@ -205,7 +230,9 @@ main.js       app lifecycle, windows, IPC, serial/permission handlers
 proxy.js      per-instance localhost reverse proxy (HTTP + websocket upgrade)
 mdns.js       dependency-free mDNS-SD browser for _ubersdr._tcp
 discovery.js  directory fetch, LAN enrichment, manual-address resolution
-store.js      saved instances (JSON in userData), stable local ports
+store.js      saved instances (JSON in userData), stable local ports, and
+              the optional per-instance password (keychain-sealed where there
+              is a keychain)
 prefs.js      the shared-settings snapshot (JSON in userData)
 flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 rigctl.js     rigctld over its TCP protocol, likewise
@@ -214,9 +241,11 @@ tci.js        the TCI protocol over a WebSocket — browser code, bundled into
 wsserver.js   a WebSocket server, RFC 6455, for the TCI server to listen on
 tciserver.js  this receiver offered *as* a TCI radio: handshake, commands,
               audio frames, and the 48 kHz resampling they arrive at
-test/         node tests for the protocol handling (./test/run.sh)
+test/         node tests for the protocol handling, the store and the
+              chooser page (./test/run.sh)
 preload.js    IPC surface for the chooser page
-receiver-preload.js  seeds/reports shared settings in receiver windows
+receiver-preload.js  seeds/reports shared settings, seeds the saved password,
+                     and tells the page the receiver's real address
 serial-preload.js    IPC surface for the serial picker page
 chooser/      the chooser window (plain HTML/CSS/JS, no framework)
 serial/       the Web Serial port picker window

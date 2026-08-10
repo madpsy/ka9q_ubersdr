@@ -9,7 +9,9 @@
 // static/v2/build.sh, staged untouched into ui/ — runs against any instance
 // while believing it is same-origin with it.
 
-const { app, BrowserWindow, Menu, ipcMain, nativeImage, shell, session } = require('electron');
+const {
+    app, BrowserWindow, Menu, ipcMain, nativeImage, safeStorage, shell, session,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -166,13 +168,13 @@ async function connectInstance(desc) {
     });
 
     const rec = {
-        proxy, win, links: null, layout: null, menu: null, radio: null,
+        id: entry.id, proxy, win, links: null, layout: null, menu: null, radio: null,
         surface: null, audioPort: null,
     };
     running.set(entry.id, rec);
     // Loaded only once the record is in place: the preload asks the main process
-    // which receiver this window is on (share:upstream-origin), and it asks
-    // before the page's first script runs.
+    // which receiver this window is on (window:context), and it asks before the
+    // page's first script runs.
     win.loadURL(proxy.localOrigin + '/v2/');
     watchMenuFocus(rec);
     store.recordUse(entry.id);
@@ -638,7 +640,7 @@ function setupIpc() {
         electron: process.versions.electron,
     }));
 
-    ipcMain.handle('instances:saved', () => store.list().map((entry) => ({
+    ipcMain.handle('instances:saved', () => store.listForUI().map((entry) => ({
         ...entry,
         running: running.has(entry.id),
     })));
@@ -795,8 +797,16 @@ function setupIpc() {
     ipcMain.handle('instances:sort', () => store.sort);
     ipcMain.handle('instances:set-sort', (_e, value) => store.setSort(value));
 
-    ipcMain.handle('instances:directory', () => discovery.fetchDirectory());
-    ipcMain.handle('instances:lan', () => discovery.discoverLan());
+    // A receiver found on the LAN or in the directory may already be saved, in
+    // which case its key icon should show what is set rather than an empty lock
+    // on a receiver that has a password.
+    const withSaved = (rows) => rows.map((row) => {
+        const saved = store.find(row.host, row.port, row.tls);
+        return saved ? { ...row, hasPassword: !!saved.password } : row;
+    });
+
+    ipcMain.handle('instances:directory', async () => withSaved(await discovery.fetchDirectory()));
+    ipcMain.handle('instances:lan', async () => withSaved(await discovery.discoverLan()));
     ipcMain.handle('instances:resolve', async (_e, input, opts) => {
         try {
             return { ok: true, row: await discovery.resolveTarget(input, opts) };
@@ -826,17 +836,46 @@ function setupIpc() {
         return entry;
     });
 
-    // Where this receiver actually lives, for the share button.
+    // What a receiver window needs to know about being one.
     //
-    // The window's own origin is the loopback proxy, so a link built from it
-    // opens nothing on anybody else's computer. This is the address this client
-    // is connected to, which is what a link should carry — a LAN address where
-    // the receiver is on the LAN, because that is where it is being shared.
-    // Synchronous for the same reason as the seed below: it is read at preload,
-    // before the page exists to be told about it later.
-    ipcMain.on('share:upstream-origin', (event) => {
+    // `upstreamOrigin` is for the share button: the window's own origin is the
+    // loopback proxy, so a link built from it opens nothing on anybody else's
+    // computer. This is the address this client is connected to, which is what a
+    // link should carry — a LAN address where the receiver is on the LAN,
+    // because that is where it is being shared.
+    //
+    // `password` is the instance's saved bypass password, if it has one. It goes
+    // to the preload, which puts it where the page already looks for one; it is
+    // never handed to the page as a value.
+    //
+    // Synchronous for the same reason as the seed below: both are read at
+    // preload, before the page exists to be told about them later.
+    ipcMain.on('window:context', (event) => {
         const rec = recordFor(event.sender);
-        event.returnValue = rec ? rec.proxy.upstreamOrigin : null;
+        event.returnValue = rec ? {
+            upstreamOrigin: rec.proxy.upstreamOrigin,
+            password: store.passwordFor(rec.id),
+        } : null;
+    });
+
+    // The key icon in the chooser. The target is a saved instance by id, or a
+    // receiver from the LAN scan or directory by address — which may already be
+    // saved under a different label, and if it is, this is its password.
+    // `saved: false` means there is nothing to attach it to yet, and the chooser
+    // keeps it until the connect that creates the entry.
+    ipcMain.handle('instances:set-password', (_e, target, password) => {
+        const found = target && target.id
+            ? store.get(target.id)
+            : (target ? store.find(target.host, target.port, !!target.tls) : null);
+        if (!found) return { ok: true, saved: false, hasPassword: !!password };
+        const entry = store.setPassword(found.id, password);
+        // A password is read once, at load. A window already open has to be sent
+        // round again for a change to mean anything — and going round is also
+        // how a wrong one gets a second try.
+        const active = running.get(found.id);
+        if (active) active.win.webContents.reload();
+        notifyChooser();
+        return { ok: true, saved: true, hasPassword: !!(entry && entry.password) };
     });
 
     // Shared settings. The seed is synchronous because the receiver preload
@@ -886,7 +925,10 @@ function setupIpc() {
 }
 
 app.whenReady().then(() => {
-    store = new InstanceStore(app.getPath('userData'));
+    // safeStorage rather than the file: an instance password is the operator's,
+    // and on every platform with a keychain it belongs in it. Read lazily by the
+    // store, because on Linux it is only answerable once the app is ready.
+    store = new InstanceStore(app.getPath('userData'), safeStorage);
     prefs = new SharedPrefs(app.getPath('userData'));
     setupSession();
     setupMenu();

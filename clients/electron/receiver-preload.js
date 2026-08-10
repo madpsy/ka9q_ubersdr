@@ -687,20 +687,39 @@ function startLayoutBridge() {
 if (location.pathname.startsWith('/v2')) {
     startLayoutBridge();
 
-    // The one thing the page is told about running here rather than in a
-    // browser: this window's origin is the local proxy, so the share button's
-    // `location.origin` is no address of the receiver at all. This is — the one
-    // this client dialled, LAN address or public hostname, whichever the
-    // operator of *this* copy actually connects to. See lib/share.js.
+    const context = ipcRenderer.sendSync('window:context') || {};
+
+    // The one thing the page is *told*: this window's origin is the local proxy,
+    // so the share button's `location.origin` is no address of the receiver at
+    // all. This is — the one this client dialled, LAN address or public
+    // hostname, whichever the operator of this copy actually connects to. See
+    // lib/share.js.
     //
     // Read-only, one string, and nothing that can act on the main process — a
     // receiver serves its operator's own pages, and this window is the one place
     // that must not become a way for a page to reach the desktop.
     try {
         contextBridge.exposeInMainWorld('ubersdrDesktop', {
-            upstreamOrigin: ipcRenderer.sendSync('share:upstream-origin') || null,
+            upstreamOrigin: context.upstreamOrigin || null,
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
+
+    // The saved bypass password, put where the page already looks for one
+    // (static/v2/src/radio/session.js reads `ubersdr.v2.password` from session
+    // storage) rather than handed over as a value. The same seeding trick the
+    // shared settings below use, and for the same reason: this runs before the
+    // page's first script, so what the overlay finds on load is what the chooser
+    // was told, and nothing has to know it came from here.
+    //
+    // Session storage, not local, exactly as in a browser: the window is where
+    // it lives, the store is where it is kept. A password removed in the chooser
+    // is then gone from the next load rather than surviving in the page.
+    //
+    // Not written through when empty — an operator who typed one into the
+    // overlay for this sitting should keep it for the reload.
+    if (context.password) {
+        try { sessionStorage.setItem('ubersdr.v2.password', context.password); } catch { /* private mode */ }
+    }
 
     const seed = ipcRenderer.sendSync('prefs:seed');
     if (seed && seed.enabled) {

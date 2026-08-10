@@ -10,7 +10,9 @@
 import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Button, Field, Icon, Segmented } from '../components/ui.jsx';
-import { MAX_RECORDING_MS, formatElapsed, getRecorder, wavSupported } from '../lib/recorder.js';
+import {
+    MAX_RECORDING_MS, formatElapsed, getRecorder, playbackDuration, wavSupported,
+} from '../lib/recorder.js';
 
 const FORMATS = [
     { value: 'webm', label: 'Opus', title: 'WebM/Opus — compressed, much smaller files' },
@@ -42,6 +44,16 @@ export default function RecorderPanel({ minimal }) {
     // the OS media keys or the element ending on its own is reflected here.
     const audioRef = useRef(null);
     const [playing, setPlaying] = useState(false);
+    // Where playback has reached, in seconds, and how long the recording is.
+    //
+    // The length is asked of the element and only falls back to the recorder's
+    // own wall-clock figure when the element will not say: MediaRecorder writes
+    // WebM with no duration in the header, so `el.duration` on an Opus
+    // recording is Infinity until it has been seeked. That is exactly the case
+    // a progress bar cannot survive, and elapsedMs is authoritative anyway —
+    // it is the same number the clock has been showing all along.
+    const [playPos, setPlayPos] = useState(0);
+    const [playDur, setPlayDur] = useState(0);
 
     const recording = rec.state === 'recording';
 
@@ -73,6 +85,8 @@ export default function RecorderPanel({ minimal }) {
         el.pause();
         el.removeAttribute('src');
         el.load();
+        setPlayPos(0);
+        setPlayDur(0);
     }, [held]);
 
     const wavOk = wavSupported();
@@ -140,6 +154,17 @@ export default function RecorderPanel({ minimal }) {
         }
     };
 
+    // Back to the start and silent. Pause on its own leaves the playhead where
+    // it stopped, which is right for pausing and wrong for being finished with
+    // it — without this there is no way back to the beginning.
+    const stopPlayback = () => {
+        const el = audioRef.current;
+        if (!el) return;
+        el.pause();                 // 'pause' unducks and clears the flag
+        try { el.currentTime = 0; } catch (e) { /* nothing loaded */ }
+        setPlayPos(0);
+    };
+
     const download = async () => {
         setError('');
         setBusyDownload(true);
@@ -158,32 +183,52 @@ export default function RecorderPanel({ minimal }) {
         rec.clear();
     };
 
-    const status = recording ? 'recording' : rec.hasData ? 'ready' : 'idle';
-    const statusLabel = { recording: 'RECORDING', ready: 'READY', idle: 'STOPPED' }[status];
+    const durationMs = playbackDuration(playDur, rec.elapsedMs);
+
+    // Playback owns the clock and the bar whenever it is running or parked
+    // part-way through. Both would otherwise sit frozen at the recording's
+    // length while audio was plainly playing, which is what made the bar look
+    // broken rather than merely idle.
+    const scrubbing = playing || playPos > 0;
+
+    const status = recording ? 'recording' : playing ? 'playing' : rec.hasData ? 'ready' : 'idle';
+    const statusLabel = {
+        recording: 'RECORDING', playing: 'PLAYING', ready: 'READY', idle: 'STOPPED',
+    }[status];
 
     return (
         <div className="stack">
             <div className="rec-status">
-                <span className={`badge badge--${status === 'recording' ? 'rec' : status === 'ready' ? 'open' : 'idle'}`}>
+                <span className={`badge badge--${status === 'recording' ? 'rec' : status === 'idle' ? 'idle' : 'open'}`}>
                     {statusLabel}
                 </span>
                 <span className="rec-status__hint">
                     {recording
                         ? `${formatElapsed(MAX_RECORDING_MS - rec.elapsedMs)} left`
-                        : rec.hasData
-                            ? `${rec.format === 'wav' ? 'WAV' : 'Opus'} · ${rec.signal.length} signal samples`
-                            : `${formatElapsed(MAX_RECORDING_MS)} maximum`}
+                        : scrubbing
+                            ? `of ${formatElapsed(durationMs)}`
+                            : rec.hasData
+                                ? `${rec.format === 'wav' ? 'WAV' : 'Opus'} · ${rec.signal.length} signal samples`
+                                : `${formatElapsed(MAX_RECORDING_MS)} maximum`}
                 </span>
             </div>
 
-            <div className={`rec-time${recording ? ' is-live' : ''}`}>{formatElapsed(rec.elapsedMs)}</div>
+            <div className={`rec-time${recording ? ' is-live' : ''}`}>
+                {formatElapsed(scrubbing ? playPos * 1000 : rec.elapsedMs)}
+            </div>
 
-            {/* Everything is held in memory until download, so the cap is not a
-                detail to discover on the way past — the bar makes it visible. */}
+            {/* Two jobs, and which one it is doing is whether audio is playing.
+                While recording it is the memory cap — everything is held until
+                download, so that is not a detail to discover on the way past.
+                While playing back it is the position in the recording, which is
+                the only thing the bar can usefully mean once the recording has
+                stopped growing. */}
             <Bar
-                value={Math.min(rec.elapsedMs, MAX_RECORDING_MS)}
-                max={MAX_RECORDING_MS}
-                color={recording ? 'var(--bad)' : undefined}
+                value={scrubbing
+                    ? Math.min(playPos * 1000, durationMs)
+                    : Math.min(rec.elapsedMs, MAX_RECORDING_MS)}
+                max={scrubbing ? Math.max(durationMs, 1) : MAX_RECORDING_MS}
+                color={recording ? 'var(--bad)' : scrubbing ? 'var(--accent)' : undefined}
             />
 
             {!minimal && (
@@ -222,15 +267,28 @@ export default function RecorderPanel({ minimal }) {
                 reason, and only here at all once there is something to play —
                 the row below keeps its two columns either way. */}
             {rec.hasData && !recording && (
-                <Button
-                    icon={playing ? <Icon.Pause /> : <Icon.Play />}
-                    title={playing
-                        ? 'Pause playback'
-                        : 'Play the recording back — the receiver is silenced while it plays'}
-                    onClick={play}
-                >
-                    {playing ? 'Pause' : 'Play recording'}
-                </Button>
+                <div className="rec-actions">
+                    <Button
+                        icon={playing ? <Icon.Pause /> : <Icon.Play />}
+                        title={playing
+                            ? 'Pause, keeping your place'
+                            : 'Play the recording back — the receiver is silenced while it plays'}
+                        onClick={play}
+                    >
+                        {playing ? 'Pause' : 'Play'}
+                    </Button>
+                    {/* Disabled when playback is already at the start and not
+                        running: there is nothing for it to do, and a live Stop
+                        beside a paused-at-zero Play suggests otherwise. */}
+                    <Button
+                        icon={<Icon.Stop />}
+                        disabled={!scrubbing}
+                        title="Stop playback and go back to the start"
+                        onClick={stopPlayback}
+                    >
+                        Stop
+                    </Button>
+                </div>
             )}
 
             {/* Hidden: the buttons above are the transport, and a second set of
@@ -241,7 +299,16 @@ export default function RecorderPanel({ minimal }) {
                 style={{ display: 'none' }}
                 onPlay={() => { setPlaying(true); player.setDucked(true); }}
                 onPause={() => { setPlaying(false); player.setDucked(false); }}
-                onEnded={() => { setPlaying(false); player.setDucked(false); }}
+                onEnded={() => {
+                    setPlaying(false);
+                    player.setDucked(false);
+                    // Back to the start, so the bar reads as "ready to play"
+                    // rather than sitting full with nothing running.
+                    setPlayPos(0);
+                }}
+                onTimeUpdate={(e) => setPlayPos(e.target.currentTime)}
+                onLoadedMetadata={(e) => setPlayDur(e.target.duration)}
+                onDurationChange={(e) => setPlayDur(e.target.duration)}
                 onError={() => {
                     setPlaying(false);
                     player.setDucked(false);

@@ -522,6 +522,25 @@ export function encodeWav(frames, sampleRate, channels) {
 }
 
 // mm:ss, the clock the panel shows.
+/**
+ * How long a held recording runs for, in ms, for a progress bar to divide by.
+ *
+ * `elDuration` is the <audio> element's own `duration` and is preferred when it
+ * is usable: it is the file's length rather than the wall clock's. It often is
+ * not usable. MediaRecorder writes WebM with no duration in the header, so an
+ * Opus recording reports `Infinity` until the element has been seeked — feed
+ * that to a bar and every position divides to zero width. It can also be NaN
+ * before metadata has loaded, and 0 for an empty source.
+ *
+ * `elapsedMs` is the recorder's own wall-clock length and is always a number,
+ * which is what makes it the fallback rather than a guess.
+ */
+export function playbackDuration(elDuration, elapsedMs) {
+    const fromElement = Number(elDuration) * 1000;
+    if (Number.isFinite(fromElement) && fromElement > 0) return fromElement;
+    return Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
+}
+
 export function formatElapsed(ms) {
     const total = Math.floor(Math.max(0, ms) / 1000);
     return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;

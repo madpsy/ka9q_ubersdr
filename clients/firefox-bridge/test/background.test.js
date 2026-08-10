@@ -133,6 +133,67 @@ t('the selected tab is offered the transport, and told what the rig is doing', a
     assert.ok(bg.sentTo(7, 'cmd:radio_status').length, 'and hears back about the link');
 });
 
+t('the popup is told when the panel changes something', async () => {
+    // Otherwise the two disagree the moment either is touched: the link moves,
+    // and the popup goes on showing the address and direction it was opened
+    // with. This message is the popup catching up — it is worth a test because
+    // a broadcast nothing listens to fails silently, which is how it shipped.
+    const bg = await withTab({ flrigPort: LIVE_PORT });
+    await bg.say(7, { type: 'ubersdr:radiocontrol', rc: rc({ direction: 'radio-to-sdr' }) });
+    await bg.settle();
+
+    const settings = bg.toPopup.filter((m) => m.type === 'flrig:settings');
+    assert.ok(settings.length, 'the popup hears about it at all');
+    const last = settings[settings.length - 1];
+    assert.strictEqual(last.direction, 'rig-to-sdr');
+    assert.strictEqual(last.host, '127.0.0.1');
+    assert.strictEqual(last.port, LIVE_PORT);
+    // The popup's own switch follows these two, not the address.
+    assert.strictEqual(last.enabled, true);
+    assert.strictEqual(typeof last.connected, 'boolean');
+});
+
+t('and when the panel disconnects', async () => {
+    const bg = await withTab({ flrigPort: LIVE_PORT });
+    await bg.say(7, { type: 'ubersdr:radiocontrol', rc: rc() });
+    await bg.settle();
+    await bg.say(7, { type: 'ubersdr:radiocontrol', rc: rc({ connect: false }) });
+    await bg.settle();
+
+    const last = bg.toPopup.filter((m) => m.type === 'flrig:settings').pop();
+    assert.strictEqual(last.enabled, false, 'the popup switch follows the panel');
+});
+
+t('the panel is told when the popup changes the settings', async () => {
+    // The other direction: these settings have lived in this popup far longer
+    // than the panel has existed, and whichever is touched both should agree.
+    const bg = await withTab({ flrigPort: LIVE_PORT });
+    await bg.say(7, {
+        type: 'popup:set_flrig',
+        enabled: true, host: '10.0.0.9', port: 4532, direction: 'rig-to-sdr',
+    });
+    await bg.settle();
+
+    const sent = bg.sentTo(7, 'cmd:radio_configure');
+    assert.ok(sent.length, 'the panel hears about it');
+    const patch = sent[sent.length - 1].patch;
+    assert.deepStrictEqual(patch.config, { host: '10.0.0.9', port: 4532 });
+    // In the panel's vocabulary, not this side's.
+    assert.strictEqual(patch.direction, 'radio-to-sdr');
+    assert.strictEqual(patch.connect, true);
+    // Enabling flrig here is choosing it, so the panel should be showing it.
+    assert.strictEqual(patch.select, true);
+});
+
+t('switching flrig off in the popup does not seize the panel\'s choice', async () => {
+    const bg = await withTab({ flrigPort: LIVE_PORT });
+    await bg.say(7, { type: 'popup:set_flrig', enabled: false, host: '127.0.0.1', port: LIVE_PORT });
+    await bg.settle();
+    const patch = bg.sentTo(7, 'cmd:radio_configure').pop().patch;
+    assert.strictEqual(patch.connect, false);
+    assert.strictEqual(patch.select, undefined, 'disabling is not a choice of transport');
+});
+
 (async () => {
     for (const [name, fn] of tests) {
         try { await fn(); console.log('ok    ' + name); pass++; }

@@ -30,7 +30,7 @@ import { createClient } from './client.js';
 import { COMMAND_NAMES, runCommand } from './commands.js';
 import { describePage, snapshotFor } from './snapshots.js';
 import { bridgeSettings, onBridgeSettings, setBridgeAttached } from './settings.js';
-import { controlState, onControlState } from '../controls/mappings.js';
+import { controlState, onControlState, updateControlState } from '../controls/mappings.js';
 
 // The meters are a mutable ref written by the audio path rather than React
 // state — see RadioContext — so the signal topic is sampled rather than
@@ -47,6 +47,44 @@ const SAMPLE_MS = 50;
 //
 // The registry is the source of the list, not the layout: a panel that is
 // hidden still has to be nameable, or nothing could ask for it back.
+/**
+ * A transport writing back what its own settings are.
+ *
+ * The panel is the place these are edited, but not the only place they exist —
+ * the browser extension has had an flrig host and port in its popup for far
+ * longer. Whichever one is touched, both should show the same thing.
+ *
+ * Written through the same store the panel writes to, so there is one copy and
+ * the panel re-renders from it. Values that have not changed are written all
+ * the same and cost nothing: the topic upstream diffs by value, so an identical
+ * write puts nothing on the wire and cannot echo back to the client that sent
+ * it.
+ */
+function setRadioControl(id, patch) {
+    const next = updateControlState((prev) => {
+        const rs = prev.radiosync;
+        const { config, select, ...rest } = patch;
+        return {
+            ...prev,
+            radiosync: {
+                ...rs,
+                ...rest,
+                ...(select ? { transport: id } : {}),
+                ...(config
+                    ? { providers: { ...(rs.providers || {}), [id]: { ...((rs.providers || {})[id]), ...config } } }
+                    : {}),
+            },
+        };
+    });
+    const rs = next.radiosync;
+    return {
+        transport: rs.transport,
+        connect: !!rs.connect,
+        direction: rs.direction,
+        config: (rs.providers || {})[id] || {},
+    };
+}
+
 function layoutFacade(layout) {
     const panels = () => PANELS.map((p) => ({
         id: p.id,
@@ -117,7 +155,11 @@ export default function BridgeHost() {
         // The layout rides alongside the control context rather than inside it:
         // useControlContext is the surface the MIDI, FlexControl and keyboard
         // panels share, and none of them arranges the page.
-        command: (name, args) => runCommand(name, args, { ...live.current.ctx, layout: live.current.layout }),
+        command: (name, args) => runCommand(name, args, {
+            ...live.current.ctx,
+            layout: live.current.layout,
+            setRadioControl,
+        }),
         // Dispatched, not "done": the catalogue's functions are fire-and-forget
         // because a knob has no reply path, so a rotator function on a receiver
         // with no stored password logs to the SDR Control panel and returns

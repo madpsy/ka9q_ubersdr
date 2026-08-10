@@ -29,6 +29,45 @@ const DIRECTIONS = [
 // hold the top rate reliably.
 const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 
+// One of a transport's own settings — an address, a port, a password.
+//
+// Committed when the edit is finished rather than on every keystroke. The value
+// is what the transport connects to, and a provider that reconnects when it
+// changes — both of the ones that exist do — would otherwise tear the link down
+// and rebuild it once per character on the way to typing a port number.
+//
+// Never locked, not even while connected. Changing the address of a live link
+// is exactly how somebody moves it, and both providers treat a new address as
+// "go there instead"; disabling the field meant the only way to correct a port
+// was to disconnect first, which is not something the panel ever said.
+function ConfigField({ field, value, onCommit }) {
+    const [draft, setDraft] = useState(() => String(value));
+    // Follow the setting when it changes from anywhere else — another window
+    // sharing these settings, or the transport being switched.
+    useEffect(() => { setDraft(String(value)); }, [value]);
+
+    const commit = () => {
+        const next = field.type === 'number' ? Number(draft) : draft;
+        if (field.type === 'number' && !Number.isFinite(next)) { setDraft(String(value)); return; }
+        if (next !== value) onCommit(next);
+    };
+
+    return (
+        <input
+            className="input"
+            type={field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text')}
+            value={draft}
+            placeholder={field.placeholder || undefined}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') { commit(); e.currentTarget.blur(); }
+                if (e.key === 'Escape') { setDraft(String(value)); e.currentTarget.blur(); }
+            }}
+        />
+    );
+}
+
 // The rig readout, whichever transport produced it. One shape from two sources:
 // the serial link reports through the sync singleton, a provider through the
 // `radio` command, and the panel should look the same either way.
@@ -227,10 +266,10 @@ export default function RadioControlPanel({ minimal }) {
         const wantsConnect = !!cfg.radiosync.connect;
         const values = (cfg.radiosync.providers || {})[provider.id] || {};
         const valueOf = (f) => (values[f.key] === undefined ? f.default : values[f.key]);
-        const setField = (f, raw) => setSync({
+        const setField = (f, value) => setSync({
             providers: {
                 ...(cfg.radiosync.providers || {}),
-                [provider.id]: { ...values, [f.key]: f.type === 'number' ? Number(raw) : raw },
+                [provider.id]: { ...values, [f.key]: value },
             },
         });
 
@@ -241,29 +280,14 @@ export default function RadioControlPanel({ minimal }) {
 
                 {provider.fields.map((f) => (
                     <Field key={f.key} label={f.label}>
-                        <input
-                            className="input"
-                            type={f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : 'text')}
+                        <ConfigField
+                            field={f}
                             value={valueOf(f)}
-                            placeholder={f.placeholder || undefined}
-                            /* Locked only by a *live* link, like the rig and
-                               baud pickers: changing an address under one would
-                               describe somewhere the link is not. While a
-                               connection is merely being attempted the address
-                               is exactly what wants correcting, so it stays
-                               editable and the transport picks the change up. */
-                            disabled={connected}
-                            onChange={(e) => setField(f, e.target.value)}
+                            onCommit={(v) => setField(f, v)}
                         />
                     </Field>
                 ))}
 
-                {/* The button follows what was *asked for*, not only what
-                    happened. A refused connection leaves the request standing —
-                    the transport keeps trying, and the address can be corrected
-                    above while it does — so offering "Connect" there would be
-                    offering something already true, and pressing it would
-                    change nothing. "Stop trying" is the honest other end of it. */}
                 <div className="chip-row chip-row--split">
                     {wantsConnect ? (
                         <Button variant="ghost" size="sm" onClick={() => setSync({ connect: false })}>

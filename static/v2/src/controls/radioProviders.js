@@ -120,6 +120,48 @@ export function setProviderStatus(id, next) {
     return merged;
 }
 
+/**
+ * A provider correcting the panel: what its own settings actually are.
+ *
+ * The panel is where a transport is configured, but it is not the only place —
+ * the browser extension has had an flrig host and port in its popup since long
+ * before this existed, and two views of one setting have to agree whichever one
+ * was touched. So a provider may write back what it now holds.
+ *
+ * Only its own fields, and only the sync settings that mean something to it: a
+ * transport has no business choosing what some other transport connects to.
+ * `select` is separate and explicit, because switching the panel to this
+ * transport is a different act from telling it an address — one is answering a
+ * question the operator asked, the other is taking the choice off them.
+ */
+export function normaliseConfigure(id, raw) {
+    const provider = providers.get(String(id || ''));
+    if (!provider) throw new Error(`no provider "${id}"`);
+    const out = {};
+    if (raw.config && typeof raw.config === 'object' && !Array.isArray(raw.config)) {
+        const known = new Set(provider.fields.map((f) => f.key));
+        const config = {};
+        for (const [key, value] of Object.entries(raw.config)) {
+            // Anything the provider did not declare is dropped rather than
+            // stored: the panel cannot render a field it was never told about,
+            // so keeping it would be keeping something nobody can see or edit.
+            if (!known.has(key)) continue;
+            if (typeof value === 'string' || typeof value === 'number') config[key] = value;
+        }
+        if (Object.keys(config).length) out.config = config;
+    }
+    if (typeof raw.connect === 'boolean') out.connect = raw.connect;
+    if (raw.direction === 'sdr-to-radio' || raw.direction === 'radio-to-sdr') {
+        out.direction = raw.direction;
+    }
+    for (const key of ['syncFrequency', 'syncMode', 'muteOnTx']) {
+        if (typeof raw[key] === 'boolean') out[key] = raw[key];
+    }
+    if (raw.select === true) out.select = true;
+    if (!Object.keys(out).length) throw new Error('nothing to configure');
+    return out;
+}
+
 export function onProviders(fn) {
     listeners.add(fn);
     return () => listeners.delete(fn);

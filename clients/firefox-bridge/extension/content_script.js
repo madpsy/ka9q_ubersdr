@@ -344,6 +344,18 @@
                 offerFlrig(offering);
                 break;
 
+            // The extension's own settings changed — in the popup, most
+            // likely — so the panel is told, and the two agree whichever one
+            // was touched. Only ever sent from the tab being synced.
+            case 'cmd:radio_configure':
+                if (offering) {
+                    send('command', {
+                        name: 'radio',
+                        args: Object.assign({ action: 'configure', id: 'flrig' }, msg.patch || {}),
+                    });
+                }
+                break;
+
             // What flrig is doing, for the panel's readout. Merged by the page,
             // so a poll that only learned a frequency need only send that.
             case 'cmd:radio_status':

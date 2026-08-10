@@ -555,6 +555,8 @@ function handleMessage(msg, sender) {
                 // Re-connect if just enabled.
                 flrigConnect();
             }
+            // The panel is the other view of these settings; it follows.
+            pushRadioConfig();
             break;
         }
 
@@ -979,6 +981,31 @@ function offerRadioTo(tabId, offer) {
     chrome.tabs.sendMessage(tabId, { type: 'cmd:radio_offer', offer: !!offer }).catch(() => {});
 }
 
+/**
+ * Our settings, for the panel in the selected tab.
+ *
+ * Sent when they changed *here* — the popup — so the panel follows. Never in
+ * response to the panel changing them, which would be telling it what it just
+ * told us; the page drops an identical write anyway, but a loop that only
+ * terminates by luck is not one worth having.
+ */
+function pushRadioConfig() {
+    if (selectedTabId == null || !registry.has(selectedTabId)) return;
+    chrome.tabs.sendMessage(selectedTabId, {
+        type: 'cmd:radio_configure',
+        patch: {
+            config: { host: flrigHost, port: flrigPort },
+            connect: !!flrigEnabled,
+            // The panel's vocabulary, not ours.
+            direction: flrigDirection === 'rig-to-sdr' ? 'radio-to-sdr' : 'sdr-to-radio',
+            muteOnTx: !!pttMuteEnabled,
+            // Enabling flrig from the popup is choosing it, so the panel should
+            // be showing it. Switching it off leaves the choice alone.
+            ...(flrigEnabled ? { select: true } : {}),
+        },
+    }).catch(() => {});
+}
+
 /** What flrig is doing, for the panel's readout in the selected tab. */
 function pushRadioStatus(status) {
     if (selectedTabId == null || !registry.has(selectedTabId)) return;
@@ -1019,8 +1046,13 @@ async function applyRadioControl(tabId, rc) {
     await chrome.storage.local.set({
         flrigHost: host, flrigPort: port, flrigDirection: direction, pttMuteEnabled,
     });
-    // The popup is open often enough that a stale host in it would be noticed.
-    broadcastToPopup({ type: 'flrig:settings', host, port, direction, pttMuteEnabled });
+    const tellPopup = () => broadcastToPopup({
+        type: 'flrig:settings',
+        host, port, direction, pttMuteEnabled,
+        enabled: flrigEnabled, connected: flrigConnected,
+    });
+    // Once now, so an address or a direction lands immediately...
+    tellPopup();
 
     if (rc.connect && (!flrigEnabled || !flrigConnected || moved)) {
         if (moved && flrigConnected) { stopFlrigPoll(); flrigConnected = false; }
@@ -1028,6 +1060,9 @@ async function applyRadioControl(tabId, rc) {
         await chrome.storage.local.set({ flrigEnabled: true });
         pushRadioStatus({ busy: true, error: null });
         await flrigConnect();
+        // ...and again once it has settled, because the popup's own switch and
+        // status line follow `enabled` and `connected`, not the address.
+        tellPopup();
     } else if (!rc.connect && flrigEnabled) {
         flrigEnabled = false;
         stopFlrigPoll();
@@ -1035,6 +1070,7 @@ async function applyRadioControl(tabId, rc) {
         await chrome.storage.local.set({ flrigEnabled: false });
         broadcastToPopup({ type: 'flrig:status', connected: false, message: 'Disabled' });
         pushRadioStatus({ connected: false, busy: false, error: null });
+        tellPopup();
     }
 }
 

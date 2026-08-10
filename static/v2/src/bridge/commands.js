@@ -27,7 +27,9 @@
 // the button that does the same thing.
 
 import { BridgeError, ERR } from './protocol.js';
-import { registerProvider, setProviderStatus, unregisterProvider } from '../controls/radioProviders.js';
+import {
+    normaliseConfigure, registerProvider, setProviderStatus, unregisterProvider,
+} from '../controls/radioProviders.js';
 import {
     MAX_FREQ, MIN_FREQ, MODES, MODE_BY_ID, SQUELCH_MAX, SQUELCH_MIN,
     bandwidthLimits, squelchEnabled,
@@ -388,6 +390,7 @@ export const COMMANDS = {
      *   { action: 'register', provider: {...} }   offer it
      *   { action: 'unregister', id }              withdraw it
      *   { action: 'status', id, ... }             connected / frequency / mode / tx / error
+     *   { action: 'configure', id, ... }          its settings changed elsewhere
      *
      * A page cannot open a socket to flrig or rigctld and their servers send no
      * CORS headers, so Serial is the only transport the page can host by
@@ -407,10 +410,17 @@ export const COMMANDS = {
                 return { id: String(args.id || ''), registered: false };
             }
             if (action === 'status') return setProviderStatus(args.id, args);
+            if (action === 'configure') {
+                if (!ctx.setRadioControl) {
+                    throw new BridgeError(ERR.UNSUPPORTED, 'this page cannot be configured');
+                }
+                return ctx.setRadioControl(String(args.id || ''), normaliseConfigure(args.id, args));
+            }
         } catch (err) {
             throw new BridgeError(ERR.BAD_ARGS, err.message);
         }
-        throw new BridgeError(ERR.BAD_ARGS, 'action must be register, unregister or status');
+        throw new BridgeError(ERR.BAD_ARGS,
+            'action must be register, unregister, status or configure');
     },
 };
 

@@ -28,10 +28,11 @@ t('the two event names are the published ones', () => {
     assert.strictEqual(EVENT_FROM_PAGE, 'ubersdr.from-page');
     assert.strictEqual(PROTOCOL, 1);
     // 1.1 added the `layout` topic and the `panel` command; 1.2 the
-    // `radiocontrol` topic and the `radio` command. The envelope did not change
-    // either time, so PROTOCOL stays 1 and a 1.0 client keeps working — which
-    // is what the major number is for and why only the minor moved.
-    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 2 });
+    // `radiocontrol` topic and the `radio` command; 1.3 its `configure` action.
+    // The envelope never changed, so PROTOCOL stays 1 and a 1.0 client keeps
+    // working — which is what the major number is for, and why only the minor
+    // has ever moved.
+    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 3 });
 });
 
 t('the topic lists are what a client is promised', () => {

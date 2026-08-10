@@ -8,8 +8,8 @@
 
 const assert = require('assert');
 const {
-    FIELD_TYPES, getProvider, listProviders, normaliseProvider, onProviders, providerStatus,
-    registerProvider, resetProviders, setProviderStatus, unregisterProvider,
+    FIELD_TYPES, getProvider, listProviders, normaliseConfigure, normaliseProvider, onProviders,
+    providerStatus, registerProvider, resetProviders, setProviderStatus, unregisterProvider,
 } = require('./.build/radioproviders.cjs');
 
 let pass = 0;
@@ -156,6 +156,66 @@ t('a listener that throws does not stop the others', () => {
     onProviders(() => seen.push('ok'));
     registerProvider(flrig());
     assert.deepStrictEqual(seen, ['ok']);
+});
+
+// --- configure ---------------------------------------------------------------
+//
+// A transport writing back what its own settings are, so the panel and whatever
+// else edits them (the extension's popup) agree whichever was touched.
+
+t('a provider may write back its own fields', () => {
+    registerProvider(flrig());
+    assert.deepStrictEqual(
+        normaliseConfigure('flrig', { config: { host: '10.0.0.9', port: 12399 } }),
+        { config: { host: '10.0.0.9', port: 12399 } },
+    );
+});
+
+t('fields it never declared are dropped', () => {
+    // The panel can only render what it was told about, so storing the rest
+    // would be storing something nobody can see or change.
+    registerProvider(flrig());
+    assert.deepStrictEqual(
+        normaliseConfigure('flrig', { config: { host: 'x', secret: 'y' } }),
+        { config: { host: 'x' } },
+    );
+});
+
+t('the sync settings it shares are allowed, and nothing else', () => {
+    registerProvider(flrig());
+    const out = normaliseConfigure('flrig', {
+        connect: true, direction: 'radio-to-sdr', muteOnTx: false,
+        syncFrequency: true, syncMode: false,
+        transport: 'somebody-else', rig: 'FT-991A',
+    });
+    assert.deepStrictEqual(out, {
+        connect: true, direction: 'radio-to-sdr', muteOnTx: false,
+        syncFrequency: true, syncMode: false,
+    });
+});
+
+t('a nonsense direction is ignored rather than stored', () => {
+    registerProvider(flrig());
+    assert.throws(() => normaliseConfigure('flrig', { direction: 'sideways' }), /nothing to configure/);
+});
+
+t('choosing the transport is separate and explicit', () => {
+    // Telling the panel an address is answering a question; switching it to
+    // this transport is taking the choice off the operator.
+    registerProvider(flrig());
+    assert.strictEqual(normaliseConfigure('flrig', { connect: true }).select, undefined);
+    assert.strictEqual(normaliseConfigure('flrig', { connect: true, select: true }).select, true);
+    assert.strictEqual(normaliseConfigure('flrig', { connect: true, select: 'yes' }).select, undefined);
+});
+
+t('a provider nobody registered cannot configure anything', () => {
+    assert.throws(() => normaliseConfigure('ghost', { connect: true }), /no provider/);
+});
+
+t('an empty configure is an error, not a silent no-op', () => {
+    registerProvider(flrig());
+    assert.throws(() => normaliseConfigure('flrig', {}), /nothing to configure/);
+    assert.throws(() => normaliseConfigure('flrig', { config: {} }), /nothing to configure/);
 });
 
 console.log(`\n${pass} passed`);

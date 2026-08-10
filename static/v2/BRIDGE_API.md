@@ -256,7 +256,7 @@ One rule governs bad input:
 | `mode` | `{mode}` — passband becomes the mode default | tuning |
 | `passband` | `{low, high}` — checked against the mode in force | tuning |
 | `panel` *(1.1)* | `{id, hidden?}` and/or `{id, placement?}` | layout |
-| `radio` *(1.2)* | `{action: 'register', provider}` \| `{action: 'unregister', id}` \| `{action: 'status', id, …}` | the provider, or its status |
+| `radio` *(1.2)* | `{action: 'register', provider}` \| `{action: 'unregister', id}` \| `{action: 'status', id, …}` \| `{action: 'configure', id, …}` *(1.3)* | the provider, its status, or the settings |
 | `volume` | `{volume}` \| `{delta}` — 0..1 | `{volume, muted}` |
 | `mute` | `{muted}` (absolute) \| `{toggle:true}` | `{muted}` |
 | `duck` | `{ducked}` — silence that is **not** the user's mute | `{ducked}` |
@@ -337,6 +337,28 @@ client.command('radio', { action: 'status', id: 'flrig',
 Status merges, so a poll that only learned a frequency need only send that. Set
 `error` to say why a connection failed; the panel shows it and clears it when
 you send `null`.
+
+If your transport is also configurable somewhere else — an extension popup, a
+desktop preferences window — write the settings back when they change there, so
+the panel and your own UI do not disagree about the address they are using:
+
+```js
+client.command('radio', { action: 'configure', id: 'flrig',
+    config: { host: '10.0.0.9', port: 12399 },   // only fields you declared
+    direction: 'radio-to-sdr', connect: true,
+    select: true });                             // also make it the chosen transport
+```
+
+`config` accepts only the field keys you registered; anything else is dropped,
+since the panel cannot show a field it was never told about. `connect`,
+`direction`, `syncFrequency`, `syncMode` and `muteOnTx` are the shared settings
+you may set. `select` is separate and explicit on purpose: telling the panel an
+address answers a question the operator asked, while switching the panel to your
+transport takes the choice off them — so it only happens when you say so.
+
+Do **not** send this in response to a `radiocontrol` patch. That would be
+telling the page what it just told you; the page drops an identical write, but a
+loop that terminates only by luck is not one worth having.
 
 **Re-register on every `announce`.** A reload empties the page's registry, and a
 transport that registered once would silently vanish. Unregister on the way out

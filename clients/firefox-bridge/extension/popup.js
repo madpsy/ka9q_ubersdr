@@ -944,6 +944,22 @@ browser.runtime.onMessage.addListener((msg) => {
             renderState(currentState);
             break;
 
+        // The Radio Control panel changed something. The background has already
+        // applied it — this is the popup catching up, so the two are two views
+        // of one setting rather than two settings that disagree the moment
+        // either is touched.
+        case 'flrig:settings':
+            if (msg.host !== undefined) inputFlrigHost.value = msg.host;
+            if (msg.port !== undefined) inputFlrigPort.value = msg.port;
+            if (msg.direction !== undefined) selectFlrigDir.value = msg.direction;
+            if (msg.pttMuteEnabled !== undefined) setPttMuteButtonState(msg.pttMuteEnabled);
+            if (msg.enabled !== undefined) {
+                flrigEnabledCb.checked = msg.enabled;
+                setSyncButtonState(msg.enabled);
+                updateFlrigUI(msg.enabled, msg.connected);
+            }
+            break;
+
         case 'flrig:status':
             updateFlrigUI(flrigEnabledCb.checked, msg.connected);
             if (msg.message) {

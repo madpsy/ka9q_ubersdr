@@ -23,14 +23,13 @@
 // should not cost a click.
 
 import React from '../react.js';
-import { Button, Icon, Menu, MenuItem } from './ui.jsx';
+import { Button, Menu, MenuItem } from './ui.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { UI_THEMES, matchUiTheme, themeSwatch, uiColorsFrom } from '../lib/uiColors.js';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 
 export default function ColoursMenu() {
     const d = useDisplay();
-    const theme = d.theme === 'light' ? 'light' : 'dark';
     const mine = d.uiColors || {};
     const on = matchUiTheme(mine);
     const named = UI_THEMES.find((p) => p.id === on);
@@ -58,15 +57,18 @@ export default function ColoursMenu() {
                     title={`Colours — interface: ${named ? named.name : 'custom'}, spectrum: ${pal}`}
                     aria-label="Colours"
                     icon={(
+                        // The colour map in force, as itself. A button about colour
+                        // ought to be the colourful thing in the bar — the moon and
+                        // sun this replaced said which way the page was and nothing
+                        // about anything else, and a glyph of a palette would be a
+                        // drawing of a strip of colour standing in for a strip of
+                        // colour. The accent dot rides on it, so the interface half
+                        // of the menu is announced too.
                         <span className="colmenu__icon">
-                            {/* Still a moon or a sun, but as a readout rather than a
-                                toggle: it says which way the page is, which the accent
-                                dot beside it does not — an amber scheme and a paper one
-                                are both warm and only one of them is dark. */}
-                            {theme === 'dark' ? <Icon.Moon /> : <Icon.Sun />}
-                            {/* The accent in force. The base is only half the answer:
-                                on an amber or a green scheme a moon on its own says
-                                almost nothing about what is on screen. */}
+                            <span
+                                className="colmenu__strip"
+                                style={{ backgroundImage: paletteGradient(pal) }}
+                            />
                             <span className="colmenu__dot" />
                         </span>
                     )}

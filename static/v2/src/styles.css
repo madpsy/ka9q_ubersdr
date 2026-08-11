@@ -3833,10 +3833,20 @@ a.btn { text-decoration: none; }
 }
 .menu__sep { height: 1px; margin: 4px 2px; background: var(--border); }
 
-/* The top bar's colours button: the base as a glyph, the accent as a dot beside
-   it. Two facts in the space of one icon, because the base on its own stopped
-   being the whole answer when the colour schemes arrived. */
+/* The top bar's colours button: the waterfall's colour map as a strip, with the
+   interface accent as a dot on the corner of it. Two facts in the space of one
+   icon, one for each section of the menu it opens.
+   The strip takes an Icon's footprint — 16px wide, and unscaled like them, or it
+   would drift out of line with the buttons either side of it at any UI scale but
+   1 — and is the height that leaves the dot somewhere to sit. */
 .colmenu__icon { position: relative; display: grid; place-items: center; }
+.colmenu__strip {
+    display: block;
+    width: 16px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid var(--border-strong);
+}
 .colmenu__dot {
     position: absolute;
     right: -3px;

@@ -300,10 +300,62 @@ cp assets/icon.png monitor/vendor/logo.png \
 cp chooser/chooser.css monitor/chooser.css \
     || echo "warning: could not stage chooser.css — the monitor will be unstyled" >&2
 
+# Hamlib is the one staged library that is not in the repository.
+#
+# Everything else above is committed under static/ and is therefore present in a
+# fresh clone. static/hamlib/ is not: the root .gitignore excludes it because it
+# belongs to another project — build-js.sh downloads it from the ubersdr-hamlib
+# release rather than this repository carrying a 15 MB wasm blob that would land
+# in the history again on every update.
+#
+# Which left `git clone && cd clients/electron && ./build.sh` producing a client
+# whose rig sync could not load, for a reason nothing on that machine explained.
+# So it is fetched here too, from the same release, when it is not already
+# there. Same URL as build-js.sh deliberately: two copies of an address are a
+# thing to keep in step, but a second *source* of a binary would be worse — this
+# way the desktop client and the web UI can only ever ship the same Hamlib.
+#
+# Cached via static/hamlib/, so it is downloaded once per checkout rather than
+# once per build, and a later build-js.sh run finds it already present.
+HAMLIB_URL="https://github.com/madpsy/ubersdr-hamlib/releases/download/latest/dist.zip"
+
+fetch_hamlib() {
+    command -v curl >/dev/null 2>&1 || { echo "curl not found" >&2; return 1; }
+    command -v unzip >/dev/null 2>&1 || { echo "unzip not found" >&2; return 1; }
+    local tmp
+    tmp=$(mktemp -d) || return 1
+    # Into a temporary directory and moved into place only once it is whole: a
+    # download interrupted halfway would otherwise leave a static/hamlib that
+    # exists, fails the -f test below on the next run, and is never repaired.
+    if curl -fsSL "$HAMLIB_URL" -o "$tmp/dist.zip" && unzip -q "$tmp/dist.zip" -d "$tmp/out" \
+        && [[ -f "$tmp/out/hamlib.wasm" ]]; then
+        rm -rf "$STATIC/hamlib"
+        mkdir -p "$STATIC/hamlib"
+        cp "$tmp/out/hamlib.js" "$tmp/out/hamlib-serial-bridge.js" "$tmp/out/hamlib.wasm" "$STATIC/hamlib/"
+        rm -rf "$tmp"
+        return 0
+    fi
+    rm -rf "$tmp"
+    return 1
+}
+
 mkdir -p monitor/hamlib
-cp "$STATIC/hamlib/hamlib.js" "$STATIC/hamlib/hamlib-serial-bridge.js" \
-   "$STATIC/hamlib/hamlib.wasm" monitor/hamlib/ \
-    || echo "warning: could not stage hamlib — the multi-monitor's rig sync will not load" >&2
+if [[ ! -f "$STATIC/hamlib/hamlib.wasm" ]]; then
+    echo "==> Fetching hamlib (not in the repository — see the root .gitignore)"
+    fetch_hamlib || true
+fi
+if [[ -f "$STATIC/hamlib/hamlib.wasm" ]]; then
+    cp "$STATIC/hamlib/hamlib.js" "$STATIC/hamlib/hamlib-serial-bridge.js" \
+       "$STATIC/hamlib/hamlib.wasm" monitor/hamlib/ \
+        || echo "warning: could not stage hamlib — the multi-monitor's rig sync will not load" >&2
+else
+    # Not fatal. Everything but the monitor's rig sync works without it, and a
+    # build that refused to finish over one optional feature would be worse than
+    # one that says which feature is missing.
+    echo "warning: hamlib could not be fetched — the multi-monitor's rig sync" >&2
+    echo "         will not load in this build. Everything else is unaffected." >&2
+    echo "         Source: $HAMLIB_URL" >&2
+fi
 
 # The main process's and the preload's own bundles.
 #

@@ -22,6 +22,7 @@ const { FlrigLink } = require('./flrig');
 const { RigctlLink } = require('./rigctl');
 const { TciServer } = require('./tciserver');
 const discovery = require('./discovery');
+const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
@@ -74,6 +75,12 @@ let store;
 /** @type {SharedPrefs} */
 let prefs;
 let chooserWin = null;
+// `{ version, url }` once a newer build has been found, null until then and if
+// there is none. Module-level rather than passed into menuTemplate, because the
+// menu bar is rebuilt from several places — every panel move rebuilds a
+// receiver window's — and a parameter would have to be remembered at each of
+// them. Read where it is used instead, so no rebuild can drop it.
+let update = null;
 const running = new Map();      // instance id -> { proxy, win }
 const localOrigins = new Set(); // origins our proxies currently serve
 
@@ -552,11 +559,64 @@ function menuTemplate({ links = null, layout = null } = {}) {
         ...(process.platform === 'darwin' ? [{ role: 'editMenu' }] : []),
         { role: 'viewMenu' },
         { role: 'windowMenu' },
+        ...(update ? [updateMenu()] : []),
     ];
+}
+
+/**
+ * The update alert, last on the bar.
+ *
+ * Last is as far right as a native menu bar goes: items pack from the left in
+ * template order, and none of the three platforms offers an alignment. macOS's
+ * true far right is the status area, which is a Tray icon rather than a menu —
+ * permanent chrome for something that happens twice a year, and invisible on a
+ * stock GNOME.
+ *
+ * There at all only when there is something to fetch, so the bar is unchanged
+ * in the ordinary case and its appearing is itself the alert.
+ *
+ * A submenu of one rather than a clickable top-level item, because a top-level
+ * item's click never fires on macOS — the item has to open something. The one
+ * thing it opens is the download, in the ordinary browser: the builds are
+ * unsigned (see the README on Gatekeeper) and nothing here is wired to replace
+ * a running binary, so this reports and hands over rather than installing.
+ */
+function updateMenu() {
+    return {
+        label: `Update available (v${update.version})`,
+        submenu: [{
+            label: `Download UberSDR ${update.version}`,
+            click: () => shell.openExternal(update.url),
+        }],
+    };
 }
 
 function setupMenu() {
     Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate()));
+}
+
+/**
+ * Asks whether there is a newer build, once, at startup.
+ *
+ * Silent either way but for the menu: a failed check is not news, and a dialog
+ * about one would be worse than the silence. Nothing is retried — a client left
+ * open for a week can wait until it is next started, and a timer polling GitHub
+ * from every running copy is not worth the alert being a day earlier.
+ *
+ * Skipped when running from a working tree, or `npm start` would nag about a
+ * release the tree is very likely already ahead of.
+ */
+async function checkForUpdate() {
+    if (!app.isPackaged) return;
+    try {
+        update = await updates.checkForUpdate(app.getVersion());
+    } catch {
+        return;
+    }
+    if (!update) return;
+    // Every bar that is already built, since this lands well after they were.
+    setupMenu();
+    for (const rec of running.values()) refreshWindowMenu(rec);
 }
 
 /**
@@ -574,7 +634,9 @@ function setupMenu() {
 function refreshWindowMenu(rec) {
     const { win } = rec;
     if (win.isDestroyed()) return;
-    if (!rec.links && !rec.layout) return;
+    // `update` counts: a window that has neither Links nor a Layout yet still
+    // has an alert to carry once one has been found.
+    if (!rec.links && !rec.layout && !update) return;
 
     const menu = Menu.buildFromTemplate(menuTemplate({
         links: rec.links,
@@ -965,6 +1027,9 @@ app.whenReady().then(() => {
     setupMenu();
     setupIpc();
     showChooser();
+    // Not awaited: the chooser opens now, and the menu gains an item later if
+    // there is one to gain.
+    checkForUpdate();
 });
 
 app.on('activate', () => showChooser());

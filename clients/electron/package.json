@@ -28,6 +28,7 @@
       "proxy.js",
       "mdns.js",
       "discovery.js",
+      "updates.js",
       "store.js",
       "prefs.js",
       "flrig.js",

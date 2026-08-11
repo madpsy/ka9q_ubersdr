@@ -9112,6 +9112,36 @@ a.btn { text-decoration: none; }
    drawn above it in the same container, an unclipped slide runs over it. */
 .spectrum__wf-heat { position: absolute; left: 0; right: 0; overflow: hidden; }
 
+/* ── Debug: layer promotions off ──────────────────────────────────────────────
+ *
+ * The Display panel's debug section, which is hidden until it is asked for and
+ * writes these attributes only while it is on — see DisplayContext.
+ *
+ * `will-change: transform` is not a hint, it is a commitment: the element gets a
+ * GPU texture of its own for as long as the rule applies, and every frame the
+ * page produces re-blends it over the same screen pixels whether or not anything
+ * about it changed. On a large canvas that is a standing cost with no drawing in
+ * it at all, which is the thing these switches exist to weigh. `auto` is the
+ * property's own default, so this puts each element back to being painted with
+ * the page.
+ *
+ * Ordinary specificity does the overriding — an attribute plus a class beats the
+ * bare class — so no `!important`, and the rules can sit here rather than having
+ * to be the last thing in the file. */
+[data-dbg-wf-layer="off"] .spectrum__wf-pane { will-change: auto; }
+
+/* The marks stay drawn — the canvas is still there and still painted, it is
+   simply not on screen to be composited. Which is the point: it separates the
+   cost of that layer from the cost of drawing three lines onto it. */
+[data-dbg-wf-marks="off"] .spectrum__wf-marks { display: none; }
+
+/* The three promotions that are not the waterfall's, together: whether they are
+   worth what they cost is one question, and answering it a third at a time would
+   mean three readings that each look like noise. */
+[data-dbg-ui-layers="off"] .topbar,
+[data-dbg-ui-layers="off"] .barrel__strip,
+[data-dbg-ui-layers="off"] .bsp__wf { will-change: auto; }
+
 /* ── Selection on a touchscreen ───────────────────────────────────────────────
  *
  * A tap that moves a pixel or two is a drag as far as the browser is concerned,

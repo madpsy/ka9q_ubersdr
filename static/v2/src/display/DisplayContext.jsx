@@ -266,6 +266,49 @@ export const DEFAULTS = {
     // without the other is a normal preference, not an edge case.
     hapticButtons: true,
     hapticSpectrum: true,
+    // ── Debug ───────────────────────────────────────────────────────────────
+    //
+    // A bisect kit for "the page is using a lot of GPU", which on this display is
+    // a question about *compositing* rather than about drawing: measured here,
+    // stopping every canvas draw in the app saved five points of fifty-three,
+    // while removing the waterfall from the DOM saved twenty-three. Drawing is
+    // not the bill — the number of large layers the compositor re-blends on every
+    // frame it produces is.
+    //
+    // Each switch below therefore removes one *suspect* while leaving the picture
+    // otherwise running, so the operator's own GPU readout answers the question
+    // rather than a theory about it. They are settings and not a build flag
+    // because the machines this matters on are other people's.
+    //
+    // `debug` off means every one of them is inert, whatever it is stored as: the
+    // panel section is hidden and nothing reads them. So a switch left flipped
+    // cannot follow somebody around after they have stopped looking.
+    debug: false,
+    // The waterfall canvas's `will-change: transform`, which commits it to a GPU
+    // texture of its own for the life of the page whether or not it ever
+    // animates — and, because the marks canvas sits directly on top of it, gets
+    // that one promoted by overlap too. Two full-width layers, re-blended every
+    // frame. The first thing to try.
+    dbgWfLayer: true,
+    // The other three promotions: the top bar, the frequency barrel's strip and
+    // the band panel's waterfall.
+    dbgUiLayers: true,
+    // The marks canvas alone — the dial and passband lines over the waterfall.
+    // Left drawing, just not composited, which separates "that layer costs" from
+    // "drawing those lines costs".
+    dbgWfMarks: true,
+    // Frames a second the spectrum loop is allowed to run at, 0 for the display's
+    // own rate. Armed from a timer rather than gated inside the animation frame:
+    // a loop that re-arms every frame and returns early keeps the tab in a
+    // continuously-animating state, which is the thing being measured, so gating
+    // inside it would prove nothing. See the loop in SpectrumView.
+    dbgMaxFps: 0,
+    // Multiplier on the canvas backing stores, i.e. how many device pixels the
+    // spectrum is rendered at. Cuts texture memory and upload bandwidth
+    // quadratically; should *not* move a cost that is per-composited-frame,
+    // since the layers still cover the same screen pixels. Which is exactly what
+    // makes it worth having here — it tells the two apart.
+    dbgRenderScale: 1,
     // Overrides for the dial line and the passband edges, *per palette*:
     //
     //     { classic: { dial: '#ff2ec4', edge: '#5cff8f' }, … }
@@ -411,6 +454,26 @@ export function DisplayProvider({ children }) {
         // did. See themeColors.
         invalidateThemeColors();
     }, [state.uiColors, state.theme]);
+
+    // The debug switches that are answered in CSS, as attributes on the root.
+    //
+    // Attributes rather than props threaded down to the elements: two of the
+    // three targets are not this file's to reach — the top bar and the band
+    // panel — and a promotion is a stylesheet decision in the first place, so the
+    // override belongs beside the rule it overrides.
+    //
+    // Only ever *removes* a promotion, and only while `debug` is on: with it off
+    // every attribute goes, whatever the individual switches are stored as.
+    useEffect(() => {
+        const el = document.documentElement;
+        const flag = (name, off) => {
+            if (state.debug && off) el.dataset[name] = 'off';
+            else delete el.dataset[name];
+        };
+        flag('dbgWfLayer', state.dbgWfLayer === false);
+        flag('dbgUiLayers', state.dbgUiLayers === false);
+        flag('dbgWfMarks', state.dbgWfMarks === false);
+    }, [state.debug, state.dbgWfLayer, state.dbgUiLayers, state.dbgWfMarks]);
 
     // Exposed as a custom property rather than an inline style so every
     // floating window picks it up without re-rendering — the same approach v1

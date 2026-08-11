@@ -1069,9 +1069,16 @@ export default function SpectrumView() {
             : 0;
     const heatH = wfH - dssH - midH;
 
+    // Debug only, and 1 — i.e. nothing — unless the section is open and has been
+    // set. Clamped here rather than trusted from storage, since a stored 0 would
+    // size every canvas to a single pixel and leave no way back but the console.
+    const renderScale = display.debug
+        ? clamp(Number(display.dbgRenderScale) || 1, 0.25, 1)
+        : 1;
+
     // Size the backing stores for device pixels and rebuild the waterfall ring.
     useEffect(() => {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const dpr = Math.min(2, window.devicePixelRatio || 1) * renderScale;
         const g = gfx.current;
         g.dpr = dpr;
 
@@ -1182,7 +1189,7 @@ export default function SpectrumView() {
             if (!keep) g.ringSpan = 0;
         }
         g.dirty = true;
-    }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, midH, wfScaleH]);
+    }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, midH, wfScaleH, renderScale]);
 
     // ---- data -----------------------------------------------------------
 
@@ -1217,10 +1224,35 @@ export default function SpectrumView() {
     useEffect(() => {
         if (paused) return undefined;
         let raf = 0;
+        let timer = 0;
         let lastRow = 0;
 
+        // Debug only: how long to wait between frames, 0 for the display's rate.
+        const capMs = display.debug && display.dbgMaxFps > 0
+            ? 1000 / display.dbgMaxFps
+            : 0;
+
+        // Capped, the next frame is asked for by a timer and only *then* by the
+        // animation frame — which is the whole difference between this and an
+        // early return inside the callback.
+        //
+        // An early return would still leave a frame request outstanding at all
+        // times, so the browser would still be driving its frame pipeline at the
+        // display's rate and the cost described above would be unchanged; all it
+        // would save is the drawing, which is measurably not what this display
+        // spends its time on. With no outstanding request between ticks there is
+        // nothing to drive.
+        //
+        // Still an animation frame at the end of the wait, rather than drawing
+        // straight from the timer: that is what keeps the paint on a vsync
+        // boundary, and what still stops the loop dead in a hidden tab.
+        const arm = () => {
+            if (capMs > 0) timer = setTimeout(() => { raf = requestAnimationFrame(loop); }, capMs);
+            else raf = requestAnimationFrame(loop);
+        };
+
         const loop = () => {
-            raf = requestAnimationFrame(loop);
+            arm();
             const g = gfx.current;
             g.ticks++;              // before the early return: an idle frame is still a frame
             const d = dispRef.current;
@@ -1298,9 +1330,10 @@ export default function SpectrumView() {
             g.dirty = false;
         };
 
-        raf = requestAnimationFrame(loop);
+        arm();
         return () => {
             cancelAnimationFrame(raf);
+            clearTimeout(timer);
             // A held `fill: forwards` animation outlives the loop that started
             // it, and would leave the canvas parked a row out of place for
             // whatever draws next.
@@ -1310,7 +1343,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH, dssH, heatH, paused]);
+    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, display.dbgMaxFps]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {

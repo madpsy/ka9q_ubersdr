@@ -650,6 +650,8 @@ export default function DisplayPanel() {
                 the battery are worth more than a waterfall nobody is watching.
             </div>
 
+            <RenderDebug />
+
             <div className="row-end">
                 <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={d.reset}>Reset display</Button>
             </div>
@@ -775,6 +777,134 @@ function UiColors() {
                 {row('station', 'Receiver info', 'The receiver\'s name and location over the spectrum. Unset it follows the operator\'s own colour, or the text colour where that reads on a waterfall')}
             </div>
             </Field>
+        </>
+    );
+}
+
+// Frames a second the spectrum loop may run at. Nothing above 60: the point of
+// a cap is to be under the display's rate, and on a 60 Hz panel every larger
+// number is the same number.
+const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
+
+// How many device pixels the canvases are rendered at, as a fraction.
+const SCALE_CHOICES = [1, 0.75, 0.5, 0.35];
+
+/**
+ * The bisect kit for "this page is using a lot of GPU".
+ *
+ * Hidden behind its own switch, and everything under it inert while that switch
+ * is off — see the note in DisplayContext's DEFAULTS. It is here rather than in
+ * a build flag or the console because the machines where this matters are other
+ * people's, and the measurement that settles it is the operator watching their
+ * own GPU figure while one thing at a time is taken away.
+ *
+ * The order is the order worth trying them in: the two waterfall layers first,
+ * since removing the waterfall from the DOM entirely is what produced the
+ * largest reading, and the frame rate last, since stopping every draw in the
+ * app produced one of the smallest. Each switch leaves the display otherwise
+ * running, so what changes is one suspect and not the workload.
+ */
+function RenderDebug() {
+    const d = useDisplay();
+    if (!d.debug) {
+        return (
+            <>
+                <div className="section-label"><span>Debug</span></div>
+                <Field label="Rendering tools" inline>
+                    <Switch
+                        checked={false}
+                        onChange={() => d.set({ debug: true })}
+                        title="Switches for weighing what the display costs the GPU. Nothing here changes what is received or decoded — only how it is put on screen"
+                    />
+                </Field>
+            </>
+        );
+    }
+
+    return (
+        <>
+            <div className="section-label">
+                <span>Debug</span>
+                <span className="section-label__note">rendering cost</span>
+            </div>
+            <Field label="Rendering tools" inline>
+                <Switch
+                    checked
+                    onChange={() => d.set({ debug: false })}
+                    title="Hide these and put every one of them back, whatever it is set to"
+                />
+            </Field>
+            <div className="note note--tight">
+                Take one thing away at a time and watch the GPU figure. Nothing here
+                touches the receiver — only how the display is put on screen — and
+                turning the section off restores all of it.
+            </div>
+
+            {/* First, because it is two layers rather than one: the marks canvas
+                sits on top of this one and is promoted along with it. */}
+            <Field label="Waterfall layer" inline>
+                <Switch
+                    checked={d.dbgWfLayer !== false}
+                    onChange={(v) => d.set({ dbgWfLayer: v })}
+                    title="Off: the waterfall canvas stops being kept as a GPU texture of its own. It still draws exactly as before — but it is painted with the page instead of being re-blended over it on every frame, and the marks canvas above it loses its own layer too. Costs a little smoothness in the row slide"
+                />
+            </Field>
+            <Field label="Waterfall marks" inline>
+                <Switch
+                    checked={d.dbgWfMarks !== false}
+                    onChange={(v) => d.set({ dbgWfMarks: v })}
+                    title="Off: the dial and passband lines over the waterfall are hidden. They are still drawn — this takes away the layer, not the work — which is what tells the two apart"
+                />
+            </Field>
+            <Field label="Top bar and pad layers" inline>
+                <Switch
+                    checked={d.dbgUiLayers !== false}
+                    onChange={(v) => d.set({ dbgUiLayers: v })}
+                    title="Off: the top bar, the frequency barrel and the band panel's waterfall stop being kept as textures of their own. These were promoted to stop a live meter repainting the whole window, so this one can go either way — that is why it is worth measuring"
+                />
+            </Field>
+
+            <Field label="Render scale" hint={d.dbgRenderScale === 1 ? undefined : 'softer'}>
+                <select
+                    className="select"
+                    value={String(d.dbgRenderScale || 1)}
+                    onChange={(e) => d.set({ dbgRenderScale: Number(e.target.value) })}
+                >
+                    {SCALE_CHOICES.map((s) => (
+                        <option key={s} value={String(s)}>
+                            {s === 1 ? 'Full (sharp)' : `${Math.round(s * 100)} %`}
+                        </option>
+                    ))}
+                </select>
+            </Field>
+            <div className="note note--tight">
+                How many device pixels the spectrum is drawn at. This is the control
+                that tells the two kinds of cost apart: it cuts texture memory and
+                upload sharply, but a layer at half scale still covers the same
+                screen, so it should barely move a bill that is per-composited-frame.
+                If it does move it, the cost is the drawing after all.
+            </div>
+
+            <Field label="Frame rate" hint={d.dbgMaxFps > 0 ? `${d.dbgMaxFps}/s` : undefined}>
+                <select
+                    className="select"
+                    value={String(d.dbgMaxFps || 0)}
+                    onChange={(e) => d.set({ dbgMaxFps: Number(e.target.value) })}
+                >
+                    {FPS_CHOICES.map((f) => (
+                        <option key={f} value={String(f)}>
+                            {f === 0 ? 'Display rate' : `${f} a second`}
+                        </option>
+                    ))}
+                </select>
+            </Field>
+            <div className="note note--tight">
+                Caps the spectrum's draw loop, and between ticks asks the browser for
+                no frame at all — so a capped display is not merely drawing less, it
+                has stopped asking to be animated. The stats overlay's FPS line reads
+                the same loop, so it shows whether the cap is in force. Below about 15
+                the waterfall starts dropping rows.
+            </div>
         </>
     );
 }

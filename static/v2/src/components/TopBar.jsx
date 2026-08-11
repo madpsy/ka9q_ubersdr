@@ -6,8 +6,7 @@ import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import ShareMenu from './ShareMenu.jsx';
 import { clockHint, nextClockMode, saveClockMode, savedClockMode } from '../lib/topClock.js';
-import ThemeMenu from './ThemeMenu.jsx';
-import PaletteMenu from './PaletteMenu.jsx';
+import ColoursMenu from './ColoursMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
@@ -761,26 +760,15 @@ export default function TopBar({ compact }) {
             )}
 
             {/* On a phone too, now that Listen is an icon and has the width to spare.
-                It earns it: dark or light is the setting somebody changes because of the
-                room they are in, which on a handset changes several times a day — a
-                train, a shack, outside at night — and it is two taps away in the Display
-                panel instead of one here.
+                It earns it: which colours are right is decided by the room somebody is
+                in, which on a handset changes several times a day — a train, a shack,
+                outside at night — and it is two taps away in the Display panel instead
+                of one here.
 
-                A menu rather than the toggle this was: dark or light is still one of the
-                questions, but the colour schemes are the other, and a button cannot
-                cycle nine of anything. */}
-            <ThemeMenu />
-
-            {/* Beside it, because the two are the same question asked of two
-                surfaces: that one is how the interface is coloured, this is how
-                the spectrum and the waterfall are. Neither is worth opening a
-                panel for, and having found one somebody looking for the other
-                should not have to go anywhere else.
-
-                On a phone as well, for the reason the theme menu is: a colour
-                map that works in a dark shack can be unreadable outside, and a
-                handset is the receiver that gets carried into both. */}
-            <PaletteMenu />
+                One button for both surfaces, the interface and the spectrum: they are
+                the same question, and two buttons side by side would have had to explain
+                the difference between them. See ColoursMenu. */}
+            <ColoursMenu />
 
             {!compact && (
                 <div className="topbar__docks">

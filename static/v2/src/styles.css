@@ -3833,11 +3833,11 @@ a.btn { text-decoration: none; }
 }
 .menu__sep { height: 1px; margin: 4px 2px; background: var(--border); }
 
-/* The top bar's theme button: the base as a glyph, the accent as a dot beside
+/* The top bar's colours button: the base as a glyph, the accent as a dot beside
    it. Two facts in the space of one icon, because the base on its own stopped
    being the whole answer when the colour schemes arrived. */
-.thememenu__icon { position: relative; display: grid; place-items: center; }
-.thememenu__dot {
+.colmenu__icon { position: relative; display: grid; place-items: center; }
+.colmenu__dot {
     position: absolute;
     right: -3px;
     bottom: -2px;
@@ -3850,7 +3850,7 @@ a.btn { text-decoration: none; }
 /* Each scheme in its own three colours, at the size of a menu icon — page,
    accent, text. The same swatch the Display panel's grid uses (.uitheme__sw),
    smaller. */
-.thememenu__swatch {
+.colmenu__swatch {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3860,28 +3860,16 @@ a.btn { text-decoration: none; }
     border-radius: 3px;
     border: 1px solid var(--border-strong);
 }
-.thememenu__swatch > i { width: 4px; height: 8px; border-radius: 1px; }
+.colmenu__swatch > i { width: 4px; height: 8px; border-radius: 1px; }
 
-/* The top bar's palette button and its menu — see PaletteMenu.
-   The trigger is a strip of the map in force rather than a glyph, so it takes the
-   footprint of one: 16px, the width every Icon is drawn at, and unscaled like
-   them, or it would drift out of line with the buttons either side of it at any
-   UI scale but 1. The rows below use the theme menu's swatch size, since they sit
-   in the same slot as its three-colour one. */
-.palmenu__icon {
-    display: block;
-    width: 16px;
-    height: 11px;
-    border-radius: 2px;
-    border: 1px solid var(--border-strong);
-}
-.palmenu__swatch {
-    display: block;
-    width: 20px;
-    height: 14px;
-    border-radius: 3px;
-    border: 1px solid var(--border-strong);
-}
+/* The palette grid in the menu's second section: the Display panel's own grid
+   (.palette-grid), at the width the menu already has.
+   No side padding, so the tiles line up with the edges the scheme rows above the
+   separator highlight to — .menu__item is full width and only its text is inset,
+   and a strip of colour has no text to inset. Shorter than in the panel, where
+   the grid is one of a dozen controls rather than the tail of a menu. */
+.colmenu__pals { padding: 2px 0 3px; }
+.colmenu__pals .palette { height: 22px; }
 
 /* =========================================================================
    Display + layout panels

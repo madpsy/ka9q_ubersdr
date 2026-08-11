@@ -305,7 +305,8 @@ t('a scheme can carry a receiver-info colour, and matching accounts for it', () 
 // --- the presets ------------------------------------------------------------
 
 t('every scheme says which page it is for, so choosing one answers dark or light', () => {
-    // The top bar's menu is a list of schemes and nothing else — see ThemeMenu — which
+    // The top bar's menu offers the schemes with no base picker beside them — see
+    // ColoursMenu, whose other section is the waterfall palette, not the page — which
     // only works if every entry carries a base. A scheme that left the page alone would
     // be a scheme that looked different depending on what was chosen before it.
     for (const preset of UI_THEMES) {

@@ -497,6 +497,11 @@ let homePath = null;          // the great circle to whichever row is selected
 // changes — first load, a filter typed, a receiver appearing or going away — and
 // not otherwise, so a view somebody has panned to survives the minute's refresh.
 let fittedTo = '';
+// A fit asked for but not yet possible: { ends, signature }. See fitView.
+let pendingFit = null;
+// The rows the map is showing, so opening the tab can draw them without the
+// list being rebuilt underneath the scroll position.
+let shownRows = [];
 
 /** A stable identity for a directory row, for markers and selection. */
 const keyOf = (row) => row.uuid || `${row.host}:${row.port}`;
@@ -555,8 +560,37 @@ async function ensureMap() {
         });
     }
     const m = await mapReady;
-    if (m) m.invalidateSize();
+    if (m) {
+        m.invalidateSize();
+        // The container may only now have acquired a size — see fitView.
+        fitView(m);
+    }
     return m;
+}
+
+/**
+ * Fit the view to the pins, once the map is in a position to measure them.
+ *
+ * A Leaflet map in a hidden panel measures its container as nothing, and fitting
+ * to nothing is not a no-op: getBoundsZoom subtracts the padding from a zero
+ * size, divides by a negative, and takes the log of it, so the zoom comes back
+ * NaN and the map lands somewhere arbitrary. It then stays there, because as far
+ * as the code was concerned the fit had happened.
+ *
+ * So the fit is held until the container has a size, and retried on the way into
+ * the tab. Nothing else about drawing needs the map to be visible; this is the
+ * one measurement that does.
+ */
+function fitView(m) {
+    if (!pendingFit) return;
+    const size = m.getSize();
+    if (!size.x || !size.y) return;
+    m.fitBounds(window.L.latLngBounds(pendingFit.ends), {
+        padding: [30, 30],
+        maxZoom: FIT_MAX_ZOOM,
+    });
+    fittedTo = pendingFit.signature;
+    pendingFit = null;
 }
 
 function pinIcon(L, row) {
@@ -631,6 +665,13 @@ function spread(rows) {
 }
 
 async function drawMarkers(rows) {
+    shownRows = rows;
+    // The directory list loads whichever tab the page opened on, so that the map
+    // tab is instant when it is reached. Drawing it is a different matter: with
+    // the panel hidden there is nothing to draw on, and building a map to find
+    // that out fetches 150 KB for a tab nobody has opened. showTab draws when it
+    // opens one.
+    if (!mapReady && activeTab !== 'dir') return;
     const m = await ensureMap();
     if (!m) return;
     const L = window.L;
@@ -684,12 +725,17 @@ async function drawMarkers(rows) {
     // set of pins changes — the first load, a filter typed, a receiver appearing
     // or dropping out — and left alone otherwise, so a view somebody has panned
     // or zoomed to survives the next refresh.
+    // At least one receiver, not merely something to fit: the map is drawn once
+    // as the tab opens and again when the directory answers, and the first of
+    // those has only the home pin to work with. Fitting to that would zoom to
+    // the operator's own town for a moment and then jump out — one view change
+    // where there should be none. Until there are receivers the map stays on the
+    // world it opened with, which is also the honest picture of a directory that
+    // is empty or did not load.
     const ends = home ? [...points, [home.lat, home.lon]] : points;
     const signature = ends.map((p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(' ');
-    if (ends.length && signature !== fittedTo) {
-        fittedTo = signature;
-        m.fitBounds(L.latLngBounds(ends), { padding: [30, 30], maxZoom: FIT_MAX_ZOOM });
-    }
+    if (points.length && signature !== fittedTo) pendingFit = { ends, signature };
+    fitView(m);
 }
 
 /**
@@ -1086,7 +1132,12 @@ function showTab(name, { persist = true } = {}) {
     // trip, and neither is worth doing for somebody who came here to click the
     // receiver they always use.
     if (activeTab === 'lan' && !lanScanned) scanLan();
-    if (activeTab === 'dir') ensureMap().catch(() => { /* already said so on the page */ });
+    // Building it, drawing whatever the list is already showing, and fitting the
+    // view now that the panel has a size to measure — all of which drawMarkers
+    // does, and none of which can happen while the tab is shut.
+    if (activeTab === 'dir') {
+        drawMarkers(shownRows).catch(() => { /* already said so on the page */ });
+    }
     if (persist) api.setChooser({ tab: activeTab });
 }
 
@@ -1184,8 +1235,8 @@ api.onChanged(refreshSaved);
     sortBy = await api.sort();
     byId('saved-sort').value = sortBy;
     byId('footer').textContent = builtinAvailable
-        ? `bundled v2 UI: ${info.buildInfo || 'staged'} · electron ${info.electron}`
-        : 'no bundled UI staged (run build.sh) — receivers open with the UI they serve · electron ' + info.electron;
+        ? `bundled v2 UI: ${info.buildInfo || 'staged'}`
+        : 'no bundled UI staged (run build.sh) — receivers open with the UI they serve';
 
     const state = await api.chooser();
     const savedCount = await refreshSaved();

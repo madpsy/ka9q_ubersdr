@@ -102,6 +102,14 @@ loaded on demand when the tab is first opened, so a run that never opens it
 never reads 150 KB off disk, and a checkout that has not been through
 `build.sh` still lists every receiver — it just says it cannot draw them.
 
+The directory *list* loads whichever tab the page opened on, so the map tab is
+instant when it is reached; the map itself waits, and so does its fit. A Leaflet
+map in a hidden panel measures its container as nothing, and fitting to nothing
+is not a no-op — `getBoundsZoom` subtracts the padding from a zero size, divides
+by a negative and takes its log, so the zoom comes back `NaN` and the map lands
+somewhere arbitrary and stays there. The fit is therefore held until the panel
+has a size and retried on the way in.
+
 It is the web UI's map, not merely the same library: the tiles take the same
 dark filter `StartMap` and `CallsignMap` take (copied verbatim from
 `static/v2/src/styles.css`, which took it from v1), the pins are its ringed dots

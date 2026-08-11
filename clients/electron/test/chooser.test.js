@@ -159,7 +159,7 @@ function makeDocument(ids) {
  * getLatLng answers with an object, not the array it was given, and reading it as
  * an array is the kind of wrong that only shows up on a real map.
  */
-function fakeLeaflet(log) {
+function fakeLeaflet(log, doc) {
     const layers = new Set();
     return {
         layers,
@@ -170,6 +170,9 @@ function fakeLeaflet(log) {
                 setView(ll, z) { log.push(['setView', ll, z]); this._zoom = z; return this; },
                 fitBounds(b, o) { log.push(['fitBounds', b.pts, o]); return this; },
                 getZoom() { return this._zoom; },
+                // A map in a hidden panel measures its container as nothing, and
+                // Leaflet's own fitBounds arithmetic returns NaN for that.
+                getSize() { return doc.getElementById('panel-dir').hidden ? { x: 0, y: 0 } : { x: 600, y: 400 }; },
                 invalidateSize() {},
                 removeLayer(l) { layers.delete(l); },
             };
@@ -221,7 +224,7 @@ function load(api, { ids, leaflet } = {}) {
         setInterval: () => 0,
     };
     if (leaflet) {
-        ctx.window.L = fakeLeaflet(log);
+        ctx.window.L = fakeLeaflet(log, document);
         // Synchronous, so the whole build stays in microtasks and one turn of
         // the macrotask queue still drains the page's startup.
         document.head = { appendChild: (node) => { if (node.onload) node.onload(); return node; } };
@@ -809,6 +812,47 @@ ta('hovering a pin says what it is, without buttons it cannot reach', async () =
     // Both at once would be the same card drawn twice, one over the other.
     pin.fire('popupopen');
     assert.ok(drawn(ctx, 'closeTooltip').length, 'the tooltip stayed under the popup');
+});
+
+ta('a tab nobody has opened does not fetch Leaflet', async () => {
+    // The directory list loads whichever tab the page opened on, so the map tab
+    // is instant when it is reached — but drawing it while the panel is shut
+    // costs 150 KB for a tab that may never be opened, and there is nothing to
+    // draw on either way.
+    const ctx = load(dirApi({ saved: async () => [{ ...SAVED }] }), { leaflet: true });
+    await settled();
+    assert.strictEqual(tabOpen(ctx), 'saved');
+    assert.strictEqual(drawn(ctx, 'map').length, 0, 'a map was built for a shut tab');
+    assert.ok(callsigns(ctx).length, 'though the list behind it is ready');
+
+    ctx.document.getElementById('tab-dir').click();
+    await settled();
+    assert.strictEqual(drawn(ctx, 'map').length, 1, 'and built when the tab is opened');
+});
+
+ta('a map built behind a shut tab is fitted when the tab is opened', async () => {
+    // The bug this guards: a hidden panel measures as zero, and Leaflet's
+    // getBoundsZoom subtracts the padding from that, divides by a negative and
+    // takes its log — so the zoom comes back NaN and the map lands somewhere
+    // arbitrary. Worse, it stayed there, because the fit had "happened".
+    const ctx = load(dirApi({
+        saved: async () => [{ ...SAVED }],
+        chooser: async () => ({ tab: 'saved' }),
+        home: async () => HERE,
+    }), { leaflet: true });
+    await settled();
+
+    // Force the map into existence while its panel is shut, as an earlier
+    // startup did by drawing the directory regardless of the tab.
+    await ctx.ensureMap();
+    await settled();
+    assert.strictEqual(drawn(ctx, 'fitBounds').length, 0, 'fitted against a container of no size');
+
+    ctx.document.getElementById('tab-dir').click();
+    await settled();
+    const fits = drawn(ctx, 'fitBounds');
+    assert.strictEqual(fits.length, 1, 'never fitted once the panel had a size');
+    assert.strictEqual(fits[0][1].length, 4, 'and to every pin, plus you');
 });
 
 ta('hovering a row raises its pin, and lets go of it', async () => {

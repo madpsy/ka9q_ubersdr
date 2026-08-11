@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the hardened runtime, which Developer ID signing requires and
+  electron-builder turns on by default for mac builds.
+
+  This lives in assets/ rather than the build/ every tutorial names, because
+  `directories.buildResources` in package.json is "assets" — electron-builder
+  looks for entitlements.mac.plist inside whatever that is set to, and a file in
+  the wrong place is not an error, it is a silently unsigned-as-expected build
+  that fails much later.
+
+  Without the first four, a hardened Electron app does not start: V8 compiles
+  code at run time, which is exactly what the hardened runtime exists to stop.
+  They are the set electron-builder's own fallback template carries, plus
+  allow-dyld-environment-variables, which Electron's documentation lists and
+  that template does not.
+
+  The last one is this app's own. static/v2/src/lib/audioSinks.js asks for the
+  microphone — not to record, but because a browser will not tell a page the
+  *names* of its audio output devices until it has been granted an input device
+  once. Under the hardened runtime that call needs the entitlement here, and
+  macOS separately needs a reason to show the operator, which is the
+  NSMicrophoneUsageDescription in package.json's mac.extendInfo. Missing either
+  one and the request is denied rather than prompted.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The same entitlements, for the helper bundles inside the app.
+
+  Electron is several processes, each its own signed binary: the renderer that
+  runs the page, the GPU helper, the utility process Chromium captures audio in.
+  There is no inheritance to rely on outside the App Sandbox — every binary is
+  signed with the entitlements it is given, so a helper missing allow-jit is a
+  window that dies on load while the app around it looks fine.
+
+  Present at all because the file beside this one is. Without an
+  entitlements.mac.inherit.plist here electron-builder falls back to its own
+  template for the helpers, which does not carry the microphone entitlement —
+  and the microphone is used from a helper, not from the main process.
+
+  Kept identical to entitlements.mac.plist on purpose: two lists that were meant
+  to match are two lists that will not.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

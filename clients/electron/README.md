@@ -421,21 +421,102 @@ natively.
 
 ### Unsigned builds
 
-None of the binaries are code-signed; macOS Gatekeeper and Windows SmartScreen
-will warn accordingly until signing identities are configured in the `build`
-section of `package.json`.
+The Windows installer is not signed; SmartScreen warns accordingly until an
+Authenticode certificate is configured. That warning is advisory — it can be
+clicked through.
 
-On macOS that warning is fatal rather than advisory, and it applies to a dmg
-**downloaded from the internet** — from a GitHub release, say. The browser marks
-the download with the quarantine attribute, and for an unsigned app Gatekeeper
-then refuses it as damaged rather than offering to open it anyway. Clearing the
-attribute after dragging the app to Applications is what lets it start:
+On macOS it is fatal rather than advisory, and it applies to a dmg **downloaded
+from the internet** — from a GitHub release, say. The browser marks the download
+with the quarantine attribute, and for an unsigned app Gatekeeper refuses it as
+damaged rather than offering to open it anyway. A dmg built on the machine it
+runs on was never downloaded, so it carries no quarantine attribute and works
+perfectly — which is why the problem only ever shows up for the people you send
+a release to, and never during testing.
+
+Clearing the attribute after dragging the app to Applications is what lets an
+unsigned build start, once per install:
 
 ```sh
 xattr -cr "/Applications/UberSDR.app"
 ```
 
-Once per install. A dmg built on the machine it runs on was never downloaded, so
-it carries no quarantine attribute and needs none of this — which is why the
-problem only shows up for the people you send a release to. It goes away
-entirely once the app is signed and notarised.
+Asking that of everybody who downloads it is not a plan, so:
+
+### Signing the macOS build
+
+Everything is configured; what is missing is the credentials, which are
+deliberately not in the repository. Signing runs only on a Mac — `codesign` is
+macOS-only — so this is `./build.sh --package` on a Mac, with an Apple Developer
+account.
+
+Two separate things have to happen, and **signing alone is not enough**: since
+Catalina, Gatekeeper rejects a downloaded app that is not also *notarised* by
+Apple. electron-builder does both, plus stapling the ticket into the dmg, as
+soon as it finds the credentials in the environment.
+
+You need a **Developer ID Application** certificate — not "Mac App
+Distribution", which is App Store only and will not satisfy Gatekeeper for a
+direct download — and an **App Store Connect API key** (Users and Access →
+Integrations → Keys) for notarisation.
+
+```sh
+# The certificate. Or import the .p12 into the keychain and set neither:
+# electron-builder finds a Developer ID identity there on its own.
+export CSC_LINK=~/certs/developer-id.p12
+export CSC_KEY_PASSWORD='…'
+
+# Notarisation. An Apple ID with APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID
+# also works, but @electron/notarize recommends the API key.
+export APPLE_API_KEY=~/private_keys/AuthKey_XXXXXXXXXX.p8
+export APPLE_API_KEY_ID=XXXXXXXXXX
+export APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+./build.sh --package
+```
+
+`build.sh` prints what it found before it starts, because notarisation adds
+several minutes of uploading and waiting and discovering afterwards that there
+were no credentials is discovering it too late:
+
+```
+  macOS signing
+    certificate    CSC_LINK
+    notarisation   App Store Connect API key
+```
+
+Nothing is enforced — an unsigned build is what every test build is, and the
+report says plainly that the dmg will be refused on anyone else's Mac.
+
+Then check it on a Mac that has never seen the file, downloading it from the
+release rather than copying it across, since quarantine is what triggers any of
+this:
+
+```sh
+spctl -a -vvv -t install "/Volumes/UberSDR/UberSDR.app"   # → source=Notarized Developer ID
+xcrun stapler validate dist/UberSDR-arm64.dmg
+```
+
+#### What is already set up
+
+`hardenedRuntime` and `notarize` are electron-builder's defaults for mac, so
+there is nothing to switch on. The parts that needed doing:
+
+- **`assets/entitlements.mac.plist`** and its `.inherit.` sibling. The hardened
+  runtime forbids exactly what V8 does — compiling code at run time — so without
+  `allow-jit` and friends the app does not start at all. They live in `assets/`
+  because that is this project's `directories.buildResources`; the `build/` that
+  every tutorial names is simply a different project's setting, and a file in
+  the wrong place is not an error, just a build that fails much later.
+- **The microphone entitlement**, in both files, plus
+  `NSMicrophoneUsageDescription` in `mac.extendInfo`. The app asks for the
+  microphone — not to record, but because a browser will not reveal the *names*
+  of audio output devices until an input device has been granted once (see
+  `static/v2/src/lib/audioSinks.js`). Under the hardened runtime that needs the
+  entitlement, and macOS needs a reason to show the operator. Missing either and
+  the request is denied rather than prompted. It is in the inherit file too
+  because Chromium captures audio from a helper process, not the main one.
+
+The dmg is arm64 only, and signing does not change that — an Intel Mac still
+cannot run it, which is why the update check sends `darwin/x64` to the releases
+page instead of a direct download. `electron-builder --mac --universal` builds
+one file for both, at roughly double the size.

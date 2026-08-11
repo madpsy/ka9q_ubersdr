@@ -104,6 +104,56 @@ RELEASE_ASSETS=(
     dist/UberSDR-x64.dmg
 )
 
+# What the dmg about to be built will and will not be, said before it is built.
+#
+# A signed-and-notarised dmg and an unsigned one are the same file to look at,
+# and the difference only shows on somebody else's Mac: Gatekeeper refuses a
+# *downloaded* app that is not notarised, and a dmg built on the machine it runs
+# on was never downloaded, so it carries no quarantine attribute and works
+# perfectly for the person who built it. That is the trap this exists for — the
+# build that looked fine and is refused as damaged by everybody who gets it.
+#
+# Reported, never enforced. Building without a certificate is a legitimate thing
+# to do — it is what every test build is — so this says what will happen rather
+# than refusing to do it.
+mac_signing_report() {
+    local identity='' notary=''
+
+    # The certificate. Either handed over as a file, named outright, or already
+    # in the keychain, which is where it lands after Xcode imports a .p12 and is
+    # how electron-builder finds it with nothing set at all.
+    if [[ -n "${CSC_LINK:-}" ]]; then
+        identity="CSC_LINK"
+    elif [[ -n "${CSC_NAME:-}" ]]; then
+        identity="CSC_NAME=${CSC_NAME}"
+    elif security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application'; then
+        identity="keychain: $(security find-identity -v -p codesigning 2>/dev/null \
+            | grep -m1 'Developer ID Application' | sed 's/.*"\(.*\)".*/\1/')"
+    fi
+
+    # The three credential sets @electron/notarize accepts, in the order its own
+    # documentation recommends them.
+    if [[ -n "${APPLE_API_KEY:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER:-}" ]]; then
+        notary="App Store Connect API key"
+    elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+        notary="Apple ID and app-specific password"
+    elif [[ -n "${APPLE_KEYCHAIN:-}" && -n "${APPLE_KEYCHAIN_PROFILE:-}" ]]; then
+        notary="keychain profile ${APPLE_KEYCHAIN_PROFILE}"
+    fi
+
+    echo
+    echo "  macOS signing"
+    echo "    certificate    ${identity:-none found — the app will be unsigned}"
+    echo "    notarisation   ${notary:-no credentials — the dmg will not be notarised}"
+    if [[ -z "$identity" || -z "$notary" ]]; then
+        echo
+        echo "    This dmg will work on this Mac and be refused on anyone else's:"
+        echo "    Gatekeeper rejects a downloaded app that is not signed AND"
+        echo "    notarised. Fine for a test build. See README.md, 'Signing'."
+    fi
+    echo
+}
+
 # Uploads the artefacts to the rolling release, replacing what is there.
 #
 # Everything that could stop it is checked and reported rather than left to gh's
@@ -273,7 +323,12 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # under `set -e` a false test would end the script.
             Linux)  ./node_modules/.bin/electron-builder --linux AppImage --win zip --x64
                     if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
-            Darwin) ./node_modules/.bin/electron-builder --mac ;;
+            # Said before the build rather than after: notarisation adds
+            # several minutes of uploading and waiting to it, and finding out
+            # then that there were no credentials to notarise with is finding
+            # out too late to do anything but start again.
+            Darwin) mac_signing_report
+                    ./node_modules/.bin/electron-builder --mac ;;
             # Already on Windows: NSIS builds natively, and Docker would be a
             # detour through a Linux VM to reach the toolchain already present.
             *)      ./node_modules/.bin/electron-builder --win nsis

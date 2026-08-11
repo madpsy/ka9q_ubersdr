@@ -90,8 +90,14 @@ function showChooser() {
         return;
     }
     chooserWin = new BrowserWindow({
-        width: 980,
-        height: 780,
+        // Wide enough for the directory's two columns: the list has a natural
+        // width, and what is left over is the map. Below about 900 the two stack
+        // instead (see chooser.css), which works but is not what it should open
+        // as on a desktop.
+        width: 1140,
+        height: 800,
+        minWidth: 620,
+        minHeight: 480,
         backgroundColor: '#0b0e14',
         title: 'UberSDR — receivers',
         icon: APP_ICON,
@@ -796,6 +802,31 @@ function setupIpc() {
 
     ipcMain.handle('instances:sort', () => store.sort);
     ipcMain.handle('instances:set-sort', (_e, value) => store.setSort(value));
+
+    ipcMain.handle('chooser:state', () => store.chooser);
+    ipcMain.handle('chooser:set-state', (_e, patch) => store.setChooser(patch));
+
+    // --- where the operator is ----------------------------------------------
+    //
+    // The map's second pin and the directory's distance column. A position the
+    // operator typed in always wins; otherwise it is GeoIP on the address the
+    // directory is fetched from, which is the only automatic answer available —
+    // see discovery.fetchGeoIP.
+    //
+    // Looked up once per run and then remembered, including the failure: it is
+    // a property of this machine's connection, it does not change under a
+    // running app, and a directory refresh every minute should not be a GeoIP
+    // request every minute. `undefined` is "not asked yet", `null` is "asked,
+    // and it could not say" — which is why this is not initialised to null.
+    let geoip;
+    ipcMain.handle('geo:home', async () => {
+        const manual = store.chooser.home;
+        if (manual) return { ...manual, source: 'manual' };
+        if (geoip === undefined) {
+            try { geoip = await discovery.fetchGeoIP(); } catch { geoip = null; }
+        }
+        return geoip;
+    });
 
     // A receiver found on the LAN or in the directory may already be saved, in
     // which case its key icon should show what is set rather than an empty lock

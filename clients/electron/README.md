@@ -78,6 +78,81 @@ Turning sharing off stops the bridging and nothing else: the per-origin stores
 are never emptied, so every receiver is independent again with whatever it had
 last — which makes the toggle safe to try both ways.
 
+## The chooser
+
+Three tabs, because the three lists answer different questions and only one of
+them is ever the question at hand:
+
+- **Saved** — receivers already connected to, ordered as below.
+- **Local network** — an mDNS browse of `_ubersdr._tcp`, run the first time the
+  tab is opened rather than at startup.
+- **Public directory** — everything `instances.ubersdr.org` knows about, as a
+  list beside a map.
+
+The page opens on Saved when there is anything in it and on the directory when
+there is not; whichever tab was open last takes precedence over both.
+
+### The directory map
+
+The directory tab draws its receivers on OpenStreetMap tiles with the day/night
+terminator over them, using the same Leaflet the web UI's own maps use —
+`build.sh` copies `static/leaflet.js`, `static/leaflet.css` and
+`static/L.Terminator.js` into `chooser/vendor/` (generated, git-ignored). It is
+loaded on demand when the tab is first opened, so a run that never opens it
+never reads 150 KB off disk, and a checkout that has not been through
+`build.sh` still lists every receiver — it just says it cannot draw them.
+
+It is the web UI's map, not merely the same library: the tiles take the same
+dark filter `StartMap` and `CallsignMap` take (copied verbatim from
+`static/v2/src/styles.css`, which took it from v1), the pins are its ringed dots
+with a glow, and selecting a receiver draws the dashed great circle the start
+overlay draws between you and the receiver — which is what the distance in the
+row looks like.
+
+The colours are the list's rather than v2's, and deliberately. v2's maps colour
+by identity — red is the station being looked at, green is you — because they
+draw two pins that are never the same kind of thing. This one draws forty-five
+of one kind, so the colour has to carry what varies between them: green for a
+receiver that is answering and red for one that is not, matching the dot on
+every row, with you in blue because the other two are spoken for. A pin that
+read "online" beside a row that read "offline" would be worse than a map in the
+wrong palette.
+
+The view is fitted to every pin and to you, and refitted whenever that set
+changes — a filter typed, a receiver appearing or dropping out — but not on the
+idle refresh, so a view that has been panned or zoomed to stays put.
+
+The list and the map are two views of one set, and hovering either half raises
+the same card: over a pin, or over the row that names it. Clicking goes further —
+a pin opens that card with Connect and the password key on it and selects the
+row; a row centres the map and opens the pin. The hover card stops at the facts
+because a tooltip goes as the pointer leaves it, which would make a button on it
+unreachable, and hovering never moves the map: a pointer crossing the list on its
+way somewhere else should not drag the view through half the world.
+
+The list itself follows the web directory's minimal view: online dot, flag,
+callsign, average FT8 SNR, free slots, name with a sun or moon, place and
+distance, and a badge for every band currently at fair or better. Conditions
+older than half an hour are not drawn at all — an instance that stopped
+reporting an hour ago is not a receiver hearing 40 dB on 20 m, it is a receiver
+nobody has heard from. Offline receivers are listed but sort last in every
+order.
+
+### Where you are
+
+The map's second pin, and what the distance column measures from. Electron has
+no usable `navigator.geolocation` — Chromium's provider wants a Google API key
+a self-built app does not have — so the automatic answer is GeoIP on the address
+the directory was fetched from (`instances.ubersdr.org/api/myip`), and
+**Set my location…** takes a Maidenhead locator or a latitude and longitude for
+when that is wrong or missing. It is missing more often than it sounds: behind a
+VPN, a tunnel or any proxy that presents a private address, the lookup answers
+with an IP it cannot place and the chooser says so rather than guessing. A typed
+position is kept in `instances.json`,
+is used on this machine only, and is never sent anywhere: distances are computed
+here from the coordinates the directory already publishes, rather than by
+telling the directory where to measure from.
+
 ### Ordering the saved list
 
 Saved receivers are ordered by how often they have been opened, most visited
@@ -229,10 +304,11 @@ Same three sources as the other clients (`clients/tui`,
 main.js       app lifecycle, windows, IPC, serial/permission handlers
 proxy.js      per-instance localhost reverse proxy (HTTP + websocket upgrade)
 mdns.js       dependency-free mDNS-SD browser for _ubersdr._tcp
-discovery.js  directory fetch, LAN enrichment, manual-address resolution
-store.js      saved instances (JSON in userData), stable local ports, and
-              the optional per-instance password (keychain-sealed where there
-              is a keychain)
+discovery.js  directory fetch, GeoIP, LAN enrichment, manual-address resolution
+store.js      saved instances (JSON in userData), stable local ports, the
+              optional per-instance password (keychain-sealed where there is a
+              keychain), and the chooser's own state (open tab, directory sort,
+              typed-in location)
 prefs.js      the shared-settings snapshot (JSON in userData)
 flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 rigctl.js     rigctld over its TCP protocol, likewise
@@ -247,7 +323,8 @@ preload.js    IPC surface for the chooser page
 receiver-preload.js  seeds/reports shared settings, seeds the saved password,
                      and tells the page the receiver's real address
 serial-preload.js    IPC surface for the serial picker page
-chooser/      the chooser window (plain HTML/CSS/JS, no framework)
+chooser/      the chooser window (plain HTML/CSS/JS, no framework);
+              chooser/vendor/ holds the staged Leaflet (generated, git-ignored)
 serial/       the Web Serial port picker window
 ui/           staged v2 build artifacts (generated, git-ignored)
 ```
@@ -271,6 +348,20 @@ stages the UI and then runs `electron-builder`, leaving distributables in
 - on **macOS**: a dmg. Mac packages can only be built on a Mac — for all
   three platforms from one push, run `./build.sh --package` in a CI matrix
   (ubuntu / macos / windows runners).
+
+### Just the AppImage
+
+```sh
+./build.sh --linux
+```
+
+The Linux artefact and nothing else. On Linux, `--package` also builds the
+Windows zip — a second Electron download the first time — and then a Windows
+installer in a 4.7 GB container, none of which is wanted when what is being
+tested is the Linux build. It refuses to run on a non-Linux host rather than
+failing deep in a toolchain that is not there, and it cannot be combined with
+`--win-installer`, which asks for the opposite. `--skip-ui` composes with it as
+usual.
 
 ### The Windows installer
 

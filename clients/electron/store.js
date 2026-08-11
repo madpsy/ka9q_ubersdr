@@ -18,6 +18,41 @@ const FIRST_PORT = 17820;
 // plaintext secret into the file by a field name alone.
 const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 
+// --- the chooser's own state ------------------------------------------------
+//
+// Not about any one receiver, so it does not belong on an entry: which of the
+// three tabs was open, how the public directory was last sorted, and where the
+// operator has said they are. The last is the one worth persisting most — it is
+// typed in by hand, it is what the map centres on and the distance column is
+// measured from, and re-entering coordinates every launch is not a feature.
+
+const TABS = new Set(['saved', 'lan', 'dir']);
+const DIR_SORTS = new Set(['distance', 'listeners', 'snr', 'name']);
+
+/**
+ * A home position, or null. Read back out of a file anybody can edit, so the
+ * coordinates are range-checked rather than trusted: a longitude of 400 does
+ * not throw anywhere, it just puts the map somewhere that does not exist.
+ */
+function sanitiseHome(home) {
+    if (!home || typeof home !== 'object') return null;
+    const lat = Number(home.lat);
+    const lon = Number(home.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon, label: typeof home.label === 'string' ? home.label.slice(0, 80) : '' };
+}
+
+function sanitiseChooser(chooser) {
+    const raw = chooser && typeof chooser === 'object' ? chooser : {};
+    const out = {};
+    if (TABS.has(raw.tab)) out.tab = raw.tab;
+    if (DIR_SORTS.has(raw.dirSort)) out.dirSort = raw.dirSort;
+    const home = sanitiseHome(raw.home);
+    if (home) out.home = home;
+    return out;
+}
+
 class InstanceStore {
     /**
      * @param {string} dir        userData directory
@@ -29,13 +64,14 @@ class InstanceStore {
     constructor(dir, keychain) {
         this.keychain = keychain || null;
         this.file = path.join(dir, 'instances.json');
-        this.data = { nextPort: FIRST_PORT, sort: 'used', instances: [] };
+        this.data = { nextPort: FIRST_PORT, sort: 'used', chooser: {}, instances: [] };
         try {
             const loaded = JSON.parse(fs.readFileSync(this.file, 'utf8'));
             if (loaded && Array.isArray(loaded.instances)) {
                 this.data = {
                     nextPort: loaded.nextPort || FIRST_PORT,
                     sort: loaded.sort === 'recent' ? 'recent' : 'used',
+                    chooser: sanitiseChooser(loaded.chooser),
                     instances: loaded.instances,
                 };
             }
@@ -191,6 +227,28 @@ class InstanceStore {
         this.data.sort = value === 'recent' ? 'recent' : 'used';
         this.persist();
         return this.data.sort;
+    }
+
+    /** The chooser's state, as the page may see it. Never null. */
+    get chooser() {
+        return { ...this.data.chooser };
+    }
+
+    /**
+     * Merge a patch in. Unknown keys are dropped and bad values fall out in
+     * sanitiseChooser, so a page that sends nonsense cannot make the next
+     * launch open on a tab that does not exist.
+     *
+     * `home: null` clears the manual position — which is a real request ("go
+     * back to using my IP address"), not a no-op, so it is distinguished from
+     * a patch that simply does not mention home.
+     */
+    setChooser(patch) {
+        const next = { ...this.data.chooser, ...(patch && typeof patch === 'object' ? patch : {}) };
+        if (patch && 'home' in patch && !patch.home) delete next.home;
+        this.data.chooser = sanitiseChooser(next);
+        this.persist();
+        return this.chooser;
     }
 
     update(id, patch) {

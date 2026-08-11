@@ -15,6 +15,12 @@
 #                            on macOS   → dmg
 #                            on Windows → NSIS installer
 #                          (macOS packages can only be built on a Mac)
+#   ./build.sh --linux     package the AppImage and nothing else. The Windows
+#                          half of a Linux --package is most of its wall clock —
+#                          a second Electron download the first time, then the
+#                          zip, then a 4.7 GB container for the installer — and
+#                          none of it is wanted when the thing being tested is
+#                          the Linux build.
 #   ./build.sh --win-installer
 #                          the Windows installer on its own terms: builds it
 #                          wherever it can, and fails rather than skipping if it
@@ -24,21 +30,33 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-V2=../../static/v2
+STATIC=../../static
+V2="$STATIC/v2"
 
 SKIP_UI=0
 PACKAGE=0
 WIN_INSTALLER=0
+LINUX_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --skip-ui) SKIP_UI=1 ;;
         --package) PACKAGE=1 ;;
+        --linux) LINUX_ONLY=1; PACKAGE=1 ;;
         # 2 rather than 1: asked for outright, so a missing Docker is an
         # error here and merely a skipped step when --package implies it.
         --win-installer) WIN_INSTALLER=2; PACKAGE=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
+
+# Said now rather than after the minute the UI takes: one of these asks for
+# nothing but Linux and the other for a Windows installer above all, and
+# silently honouring whichever was written last is how somebody waits out a
+# build for an artefact they did not get.
+if [[ "$LINUX_ONLY" -eq 1 ]] && [[ "$WIN_INSTALLER" -ne 0 ]]; then
+    echo "--linux and --win-installer ask for opposite things" >&2
+    exit 2
+fi
 
 # The Windows installer is built in electron-builder's own image.
 #
@@ -69,6 +87,22 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
 
     echo "staged v2 UI into ui/v2/ ($(cat ui/BUILD_INFO))"
 fi
+
+# The chooser's map.
+#
+# Leaflet and the day/night terminator, copied from the files the server already
+# serves for v1 rather than vendored a second time — the web UI's own maps load
+# exactly these, so the desktop directory draws what a browser draws. Staged
+# rather than committed for the same reason ui/ is: they are somebody else's
+# libraries and they live in static/.
+#
+# Outside --skip-ui, because it is a copy of three files and a checkout that
+# skipped the UI build still deserves a map. Its absence is not fatal — the
+# chooser lists every receiver and says why there is no map — so this does not
+# fail the build if static/ has moved.
+mkdir -p chooser/vendor
+cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" chooser/vendor/ \
+    || echo "warning: could not stage leaflet — the chooser's map will be unavailable" >&2
 
 # The main process's and the preload's own bundles.
 #
@@ -109,20 +143,33 @@ if [[ ! -d node_modules ]]; then
 fi
 
 if [[ "$PACKAGE" -eq 1 ]]; then
-    case "$(uname -s)" in
-        # This branch already cross-builds for Windows — the zip is a Windows
-        # artefact — so the installer belongs with it rather than behind a flag
-        # somebody has to know about.
-        # An `[[ ]] && x` here would be the last command of the branch, and
-        # under `set -e` a false test would end the script.
-        Linux)  ./node_modules/.bin/electron-builder --linux AppImage --win zip --x64
-                if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
-        Darwin) ./node_modules/.bin/electron-builder --mac ;;
-        # Already on Windows: NSIS builds natively, and Docker would be a
-        # detour through a Linux VM to reach the toolchain already present.
-        *)      ./node_modules/.bin/electron-builder --win nsis
-                WIN_INSTALLER=0 ;;
-    esac
+    if [[ "$LINUX_ONLY" -eq 1 ]]; then
+        # An AppImage is a Linux binary with a Linux runtime concatenated onto
+        # it, and electron-builder assembles it with the host's own tools. Asked
+        # for anywhere else this fails somewhere deep in a toolchain that is not
+        # there, so it is refused here where the reason still fits on a line.
+        if [[ "$(uname -s)" != Linux ]]; then
+            echo "--linux builds the AppImage, which needs a Linux host (this is $(uname -s))" >&2
+            exit 1
+        fi
+        ./node_modules/.bin/electron-builder --linux AppImage --x64
+        # WIN_INSTALLER stays 0, so the Windows half below is skipped entirely.
+    else
+        case "$(uname -s)" in
+            # This branch already cross-builds for Windows — the zip is a
+            # Windows artefact — so the installer belongs with it rather than
+            # behind a flag somebody has to know about.
+            # An `[[ ]] && x` here would be the last command of the branch, and
+            # under `set -e` a false test would end the script.
+            Linux)  ./node_modules/.bin/electron-builder --linux AppImage --win zip --x64
+                    if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
+            Darwin) ./node_modules/.bin/electron-builder --mac ;;
+            # Already on Windows: NSIS builds natively, and Docker would be a
+            # detour through a Linux VM to reach the toolchain already present.
+            *)      ./node_modules/.bin/electron-builder --win nsis
+                    WIN_INSTALLER=0 ;;
+        esac
+    fi
 
     if [[ "$WIN_INSTALLER" -ne 0 ]] && ! command -v docker >/dev/null 2>&1; then
         if [[ "$WIN_INSTALLER" -eq 2 ]]; then
@@ -194,6 +241,8 @@ else
     echo "  ./build.sh --package    installable builds in dist/ — the AppImage,"
     echo "                          the Windows zip and the Windows installer."
     echo "                          This is usually the one you want."
+    echo
+    echo "  ./build.sh --linux      just the AppImage, skipping the Windows half."
     echo
     echo "  npm start               run it from here without packaging."
 fi

@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld('ubersdr', {
     remove: (id) => ipcRenderer.invoke('instances:remove', id),
     sort: () => ipcRenderer.invoke('instances:sort'),
     setSort: (value) => ipcRenderer.invoke('instances:set-sort', value),
+    // Which tab was open, how the directory was sorted, and a home position the
+    // operator typed in — remembered across launches.
+    chooser: () => ipcRenderer.invoke('chooser:state'),
+    setChooser: (patch) => ipcRenderer.invoke('chooser:set-state', patch),
+    // Where to draw "you", and what the distance column measures from: the
+    // typed-in position if there is one, else GeoIP. Null when neither answers.
+    home: () => ipcRenderer.invoke('geo:home'),
     sharedPrefs: () => ipcRenderer.invoke('prefs:shared'),
     setSharedPrefs: (on) => ipcRenderer.invoke('prefs:set-shared', !!on),
     onChanged: (cb) => {

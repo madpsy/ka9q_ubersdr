@@ -10,7 +10,14 @@ const http = require('http');
 const https = require('https');
 const mdns = require('./mdns');
 
-const DIRECTORY_URL = 'https://instances.ubersdr.org/api/instances';
+const DIRECTORY_HOST = 'https://instances.ubersdr.org';
+// conditions=true adds the per-band FT8 SNRs the chooser draws as badges, and
+// the average it can sort on. Nothing about this machine is sent: the directory
+// will also compute distances given lat/lon, but that would mean telling it
+// where the operator is to find out how far away a receiver is, and the same
+// answer falls out of the coordinates it already returns.
+const DIRECTORY_URL = `${DIRECTORY_HOST}/api/instances?conditions=true`;
+const MYIP_URL = `${DIRECTORY_HOST}/api/myip`;
 // Was a fixed string with no version in it. Shared with the browser user agent
 // now so the directory and a receiver's listener list name this client the same
 // way, and so a bug report that quotes either one says which build it came from.
@@ -82,6 +89,11 @@ async function probe(target) {
     });
 }
 
+// A coordinate, or null. Deliberately not `Number(v)`: `Number(null)` is 0, a
+// perfectly finite number that would drop a pin in the Gulf of Guinea for every
+// instance whose position the directory does not know.
+const coord = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
 /** The public directory, most usable receivers first (free slots, then SNR). */
 async function fetchDirectory() {
     const res = await fetch(DIRECTORY_URL, {
@@ -95,6 +107,11 @@ async function fetchDirectory() {
     const rows = instances
         .filter((inst) => inst.host)
         .map((inst) => ({
+            // The directory's own UUID, and not `id` — that name belongs to the
+            // saved store, and main.js reads `desc.id` as "an instance already
+            // saved under this id" when it connects. A directory row carrying
+            // one would be looked up in a store it is not in.
+            uuid: inst.id || '',
             name: inst.name || inst.callsign || `${inst.host}:${inst.port}`,
             callsign: inst.callsign || '',
             location: inst.location || inst.country_name || '',
@@ -106,6 +123,19 @@ async function fetchDirectory() {
             port: inst.port || (inst.tls ? 443 : 80),
             tls: !!inst.tls,
             source: 'directory',
+
+            // What the map and the richer directory list draw. All optional:
+            // an instance with no position is listed and simply not pinned.
+            lat: coord(inst.latitude),
+            lon: coord(inst.longitude),
+            grid: inst.maidenhead || '',
+            countryCode: (inst.country_code || '').toLowerCase(),
+            countryName: inst.country_name || '',
+            online: inst.is_online !== false,
+            daylight: !!inst.is_daylight,
+            bandConditions: inst.band_conditions || null,
+            conditionsAt: inst.conditions_updated_at || '',
+            avgBandSnr: typeof inst.avg_band_snr === 'number' ? inst.avg_band_snr : null,
         }));
 
     rows.sort((a, b) => {
@@ -115,6 +145,39 @@ async function fetchDirectory() {
         return b.snr - a.snr;
     });
     return rows;
+}
+
+/**
+ * Roughly where this machine is, by GeoIP from the directory host.
+ *
+ * The map wants a "you are here" to fit alongside the receivers, and the list
+ * wants it to sort by distance. Electron has no usable navigator.geolocation —
+ * Chromium's provider needs a Google API key that a self-built app does not
+ * have — so the address the directory was just fetched from is the one thing
+ * available without asking the operator to type coordinates.
+ *
+ * Returns null rather than throwing when the lookup answers without a position:
+ * a country-only result, or a machine on a LAN behind something the database
+ * has never seen. The chooser draws the map without a home pin either way.
+ */
+async function fetchGeoIP() {
+    const res = await fetch(MYIP_URL, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`geoip returned HTTP ${res.status}`);
+    const body = await res.json();
+    const lat = coord(body.latitude);
+    const lon = coord(body.longitude);
+    if (lat == null || lon == null) return null;
+    return {
+        lat,
+        lon,
+        city: body.city || '',
+        country: body.country || '',
+        countryCode: (body.country_code || '').toLowerCase(),
+        source: 'geoip',
+    };
 }
 
 /**
@@ -192,4 +255,6 @@ async function resolveTarget(input, { insecureTLS = false } = {}) {
 
 // getJson is exported for main.js's Links menu, which reads /api/pages-menu
 // and /api/description straight from the instance a window is connected to.
-module.exports = { fetchDirectory, discoverLan, resolveTarget, probe, isCertError, getJson };
+module.exports = {
+    fetchDirectory, fetchGeoIP, discoverLan, resolveTarget, probe, isCertError, getJson,
+};

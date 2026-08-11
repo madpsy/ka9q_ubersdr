@@ -2,3 +2,5 @@ node_modules/
 package-lock.json
 ui/
 dist/
+# Leaflet, staged from static/ by build.sh for the chooser's directory map.
+chooser/vendor/

@@ -163,6 +163,59 @@ t('a password for a receiver that is not there is not an error', () => {
     assert.strictEqual(store.passwordFor('no-such-id'), '');
 });
 
+// --- the chooser's own state --------------------------------------------------------
+
+t('the chooser state is patched, not replaced', () => {
+    const store = new InstanceStore(tmp());
+    store.setChooser({ tab: 'dir' });
+    store.setChooser({ dirSort: 'distance' });
+    assert.deepStrictEqual(store.chooser, { tab: 'dir', dirSort: 'distance' });
+});
+
+t('a home position survives the store being reopened', () => {
+    // It is typed in by hand, and it is what every distance in the directory is
+    // measured from — re-entering it every launch is not a feature.
+    const dir = tmp();
+    new InstanceStore(dir).setChooser({ home: { lat: 51.5, lon: -0.12, label: 'IO91WM' } });
+    assert.deepStrictEqual(new InstanceStore(dir).chooser.home, {
+        lat: 51.5, lon: -0.12, label: 'IO91WM',
+    });
+});
+
+t('clearing the home position is a request, not a missing field', () => {
+    // "Go back to using my IP address" — which a patch that simply does not
+    // mention home must not do, since that is every other patch.
+    const store = new InstanceStore(tmp());
+    store.setChooser({ home: { lat: 51.5, lon: -0.12 }, tab: 'dir' });
+    store.setChooser({ dirSort: 'name' });
+    assert.ok(store.chooser.home, 'an unrelated patch leaves it alone');
+    store.setChooser({ home: null });
+    assert.strictEqual(store.chooser.home, undefined);
+    assert.strictEqual(store.chooser.tab, 'dir', 'and takes nothing else with it');
+});
+
+t('nonsense from the page, or from the file, is dropped', () => {
+    // The file is the operator's own and editable; a longitude of 400 throws
+    // nowhere, it just puts the map somewhere that does not exist.
+    const store = new InstanceStore(tmp());
+    store.setChooser({ tab: 'nope', dirSort: 'sideways', colour: 'red' });
+    assert.deepStrictEqual(store.chooser, {});
+    store.setChooser({ home: { lat: 51.5, lon: 400 } });
+    assert.strictEqual(store.chooser.home, undefined);
+    store.setChooser({ home: { lat: 'north', lon: 0 } });
+    assert.strictEqual(store.chooser.home, undefined);
+});
+
+t('a store written before any of this existed still opens', () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, 'instances.json'), JSON.stringify({
+        nextPort: 17825, sort: 'recent', instances: [],
+    }));
+    const store = new InstanceStore(dir);
+    assert.deepStrictEqual(store.chooser, {});
+    assert.strictEqual(store.sort, 'recent');
+});
+
 for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
 
 console.log(`\n${pass} passed`);

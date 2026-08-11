@@ -96,8 +96,9 @@ there is not; whichever tab was open last takes precedence over both.
 
 The directory tab draws its receivers on OpenStreetMap tiles with the day/night
 terminator over them, using the same Leaflet the web UI's own maps use —
-`build.sh` copies `static/leaflet.js`, `static/leaflet.css` and
-`static/L.Terminator.js` into `chooser/vendor/` (generated, git-ignored). It is
+`build.sh` copies `static/leaflet.js`, `static/leaflet.css`,
+`static/L.Terminator.js` and `static/fonts/twemoji-flags.woff2` into
+`chooser/vendor/` (generated, git-ignored). It is
 loaded on demand when the tab is first opened, so a run that never opens it
 never reads 150 KB off disk, and a checkout that has not been through
 `build.sh` still lists every receiver — it just says it cannot draw them.
@@ -145,6 +146,24 @@ older than half an hour are not drawn at all — an instance that stopped
 reporting an hour ago is not a receiver hearing 40 dB on 20 m, it is a receiver
 nobody has heard from. Offline receivers are listed but sort last in every
 order.
+
+### Flags
+
+Every directory row carries its country's flag, built from a pair of regional
+indicators — which every platform but Windows renders as a flag, and Windows
+renders as two letters in boxes, because Segoe UI Emoji ships no national flags.
+So the chooser declares the same flags-only Twemoji subset v2 does, from the same
+file, with the same `unicode-range` (the 500 KB is only read when a flag is
+actually on screen) and the same metric overrides (the font's own ascent is
+13.6 em, which applied to `line-height: normal` lays out rows hundreds of pixels
+tall).
+
+This is also why `loadAsset` *prepends* Leaflet's stylesheet rather than
+appending it. `chooser.css` overrides `leaflet.css` at equal specificity — the
+popup colours, the zoom buttons, and the `font-family` on `.leaflet-container`
+that everything drawn inside the map inherits, the flag face included — and equal
+specificity is settled by document order. A sheet appended after the page's own
+silently wins all of it.
 
 ### Where you are
 

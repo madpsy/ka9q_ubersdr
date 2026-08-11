@@ -2,6 +2,42 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Flag emoji, because Windows has none.
+ *
+ * countryFlag() builds a flag from a pair of regional indicators — what every
+ * other platform renders as a flag and what Windows renders as two letters in
+ * boxes, since Segoe UI Emoji ships no national flags and Chromium there has
+ * nothing to draw. This is the same flags-only Twemoji subset v1 and v2 use,
+ * from the same file, staged into vendor/ by build.sh.
+ *
+ * Three things about this declaration are load-bearing, and are v2's reasoning
+ * rather than mine (see static/v2/src/styles.css):
+ *
+ *  - `unicode-range` limits it to the regional indicator block, so the 500 KB is
+ *    read only when a flag is actually on screen and the face is never consulted
+ *    for ordinary text. The saved and LAN tabs never touch it.
+ *  - The metric overrides are not cosmetic. The font's own ascent is 13.6 em,
+ *    and a browser that applies that to `line-height: normal` lays out rows a
+ *    couple of hundred pixels tall. 100% / 20% / 0% is an ordinary Latin face's
+ *    proportions.
+ *  - It is not first in the stack. Chromium has understood ascent-override since
+ *    88 and this page runs nowhere else, so the trap v2 documents cannot spring
+ *    here — but a stack that would survive a renderer without the overrides
+ *    costs nothing to write, and being second loses nothing: font matching is
+ *    per character, and system-ui has no glyph in this range to win with.
+ */
+@font-face {
+    font-family: 'Twemoji Flags';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('vendor/twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+
 :root {
     --bg: #0b0e14;
     --panel: #121826;
@@ -15,6 +51,11 @@
     --ok: #4caf7a;
     /* The directory's band-condition scale, shared with the web directory so a
        badge means the same thing in both. */
+    /* 'Twemoji Flags' sits behind the system faces and ahead of anything that
+       could draw a flag differently, so every platform shows the same one — see
+       the @font-face above. */
+    --font: system-ui, -apple-system, 'Twemoji Flags', "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, 'Twemoji Flags', Menlo, Consolas, monospace;
     --poor: #ef4444;
     --fair: #ff9800;
     --good: #fbbf24;
@@ -25,7 +66,7 @@ html, body {
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 14px/1.45 var(--font);
 }
 
 body { display: flex; flex-direction: column; }
@@ -394,7 +435,12 @@ select {
 .map-foot .section-status { margin-right: auto; }
 .map-foot button { padding: 4px 10px; font-size: 12px; }
 
-/* Leaflet's own chrome, in this page's colours rather than its default white. */
+/* Leaflet's own chrome, in this page's colours rather than its default white.
+   These match leaflet.css selector for selector at equal specificity, so they
+   only win because loadAsset puts that sheet ahead of this one — see the note
+   there. `font: inherit` is the load-bearing one: leaflet.css sets a font-family
+   on the container, and without this the popups and tooltips inside the map
+   would never reach the stack the flag face lives in. */
 .leaflet-container { background: #0e1420; font: inherit; }
 .leaflet-bar a,
 .leaflet-bar a:hover {
@@ -483,7 +529,7 @@ select {
     border-radius: 4px;
     background: var(--panel);
     color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--mono);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.02em;

@@ -472,13 +472,27 @@ const PICK_ZOOM = 7;
 // where it is than a view of the country it is in.
 const FIT_MAX_ZOOM = 8;
 
+/**
+ * Append a script, or prepend a stylesheet.
+ *
+ * The direction matters for the sheet. Leaflet's own CSS styles its popups white
+ * with dark text, its zoom buttons white, and — the one that reaches furthest —
+ * sets a font-family on `.leaflet-container`, which is where the flag face would
+ * otherwise be inherited from. chooser.css overrides all three at equal
+ * specificity, and equal specificity is settled by document order, so a sheet
+ * appended to the head after ours quietly wins every one of them.
+ *
+ * Prepending puts the library first, which is where a library belongs: the page's
+ * own sheet is the one that should have the last word about the page.
+ */
 function loadAsset(tag, attrs) {
     return new Promise((resolve, reject) => {
         const node = document.createElement(tag);
         node.onload = () => resolve();
         node.onerror = () => reject(new Error(`failed to load ${attrs.src || attrs.href}`));
         for (const [key, value] of Object.entries(attrs)) node[key] = value;
-        document.head.appendChild(node);
+        if (tag === 'link') document.head.prepend(node);
+        else document.head.appendChild(node);
     });
 }
 

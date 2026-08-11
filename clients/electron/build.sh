@@ -88,21 +88,27 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
     echo "staged v2 UI into ui/v2/ ($(cat ui/BUILD_INFO))"
 fi
 
-# The chooser's map.
+# The chooser's map, and its flags.
 #
-# Leaflet and the day/night terminator, copied from the files the server already
-# serves for v1 rather than vendored a second time — the web UI's own maps load
-# exactly these, so the desktop directory draws what a browser draws. Staged
-# rather than committed for the same reason ui/ is: they are somebody else's
-# libraries and they live in static/.
+# Leaflet, the day/night terminator and the flags-only Twemoji subset, copied
+# from the files the server already serves for v1 rather than vendored a second
+# time — the web UI loads exactly these, so the desktop directory draws what a
+# browser draws. Staged rather than committed for the same reason ui/ is: they
+# are somebody else's libraries and they live in static/.
 #
-# Outside --skip-ui, because it is a copy of three files and a checkout that
-# skipped the UI build still deserves a map. Its absence is not fatal — the
+# The font is not decoration. A directory row's country is a pair of regional
+# indicators, which every platform but Windows renders as a flag and Windows
+# renders as two letters in boxes: Segoe UI Emoji ships no national flags, so
+# Chromium there has nothing to draw. See the @font-face in chooser.css.
+#
+# Outside --skip-ui, because it is a copy of four files and a checkout that
+# skipped the UI build still deserves a map. Their absence is not fatal — the
 # chooser lists every receiver and says why there is no map — so this does not
 # fail the build if static/ has moved.
 mkdir -p chooser/vendor
-cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" chooser/vendor/ \
-    || echo "warning: could not stage leaflet — the chooser's map will be unavailable" >&2
+cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
+   "$STATIC/fonts/twemoji-flags.woff2" chooser/vendor/ \
+    || echo "warning: could not stage leaflet/flags — the chooser's map will be unavailable" >&2
 
 # The main process's and the preload's own bundles.
 #

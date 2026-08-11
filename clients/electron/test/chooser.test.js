@@ -226,8 +226,15 @@ function load(api, { ids, leaflet } = {}) {
     if (leaflet) {
         ctx.window.L = fakeLeaflet(log, document);
         // Synchronous, so the whole build stays in microtasks and one turn of
-        // the macrotask queue still drains the page's startup.
-        document.head = { appendChild: (node) => { if (node.onload) node.onload(); return node; } };
+        // the macrotask queue still drains the page's startup. Both directions
+        // are recorded: a stylesheet has to go in ahead of the page's own or
+        // Leaflet's colours and fonts win on document order.
+        const head = [];
+        document.head = {
+            order: head,
+            appendChild: (node) => { head.push(node); if (node.onload) node.onload(); return node; },
+            prepend: (node) => { head.unshift(node); if (node.onload) node.onload(); return node; },
+        };
     }
     ctx.globalThis = ctx;
     ctx.log = log;
@@ -812,6 +819,21 @@ ta('hovering a pin says what it is, without buttons it cannot reach', async () =
     // Both at once would be the same card drawn twice, one over the other.
     pin.fire('popupopen');
     assert.ok(drawn(ctx, 'closeTooltip').length, 'the tooltip stayed under the popup');
+});
+
+ta("Leaflet's stylesheet goes in ahead of the page's own", async () => {
+    // Not a nicety. chooser.css overrides leaflet.css at equal specificity — the
+    // popup colours, the zoom buttons, and the font-family on .leaflet-container
+    // that everything inside the map inherits, flag face included. Equal
+    // specificity is settled by document order, so a sheet appended after ours
+    // silently wins all of it: white popups, and flags back to letters in boxes
+    // on Windows.
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [first] = ctx.document.head.order;
+    assert.ok(first, 'nothing was loaded');
+    assert.strictEqual(first.rel, 'stylesheet', 'the stylesheet is not first');
+    assert.match(first.href, /leaflet\.css$/);
 });
 
 ta('a tab nobody has opened does not fetch Leaflet', async () => {

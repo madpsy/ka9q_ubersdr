@@ -44,6 +44,7 @@ import {
 } from '../lib/spectrumPeaks.js';
 import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
+import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
 import { providerStatus, onProviders } from '../controls/radioProviders.js';
 import { controlState, onControlState } from '../controls/mappings.js';
 import { useMediaSession } from '../radio/media/MediaSessionContext.jsx';
@@ -437,6 +438,46 @@ function useSurface(get, read) {
 const readConnected = (s) => !!s.connected;
 const readMidi = (s) => (s.connected ? (s.deviceName || 'MIDI') : '');
 
+// Surfaces something else is hosting — the desktop client's TCI server, so that
+// JTDX or a logger connects to *it* and retunes this receiver.
+//
+// Not in controls/sources.js with the other two because the page does not own
+// them: a listening socket is not something a page can be, so they are
+// registered over the page API and their state lives in controls/surfaces.js.
+// Badged for the same reason FLEX and MIDI are, and with rather more cause —
+// what is driving the receiver here is another program entirely, quite possibly
+// on another machine.
+//
+// Only while running. A surface that is registered but switched off is a choice
+// in the picker, not something acting on this receiver, and an error is the
+// panel's to explain rather than a badge's.
+function useProvidedSurfaces() {
+    const [all, setAll] = useState(listSurfaces);
+    useEffect(() => onSurfaces(setAll), []);
+    return all.filter((s) => s.status && s.status.running);
+}
+
+// The badge text. A descriptor's label is a human name of up to forty
+// characters and this is a badge, so the first word of it — which is what such
+// a name leads with. "TCI" survives whole; "TCI server (desktop)" becomes TCI.
+const surfaceBadge = (s) => String(s.label || s.id).trim().split(/\s+/)[0].toUpperCase().slice(0, 10);
+
+// What it is, in its own words, and then who is on it. The client count is here
+// rather than in a second badge colour: running and running-with-a-client are
+// both "something else can retune you", and a badge that changed shade for the
+// difference would be asking to be interpreted.
+function surfaceTitle(s) {
+    const clients = (s.status && s.status.clients) || 0;
+    return [
+        s.description || `${s.label} is running`,
+        clients === 0
+            ? 'Nothing is connected to it yet'
+            : (clients === 1
+                ? 'One program is connected and can retune this receiver'
+                : `${clients} programs are connected and can retune this receiver`),
+    ].join('\n');
+}
+
 // Whether a radio is connected, and whether it is transmitting — whichever
 // transport it came in on.
 //
@@ -483,6 +524,7 @@ function ControlTags() {
     useEffect(() => onBridgeAttached(setAttached), []);
     const flex = useSurface(getFlex, readConnected);
     const midi = useSurface(getMidi, readMidi);
+    const provided = useProvidedSurfaces();
     const rig = useRadioTag();
     const media = useMediaSession();
 
@@ -503,6 +545,15 @@ function ControlTags() {
                     MIDI
                 </span>
             )}
+            {/* Beside FLEX and MIDI rather than further along, because it is
+                one of them as far as the operator is concerned: the same
+                picker in SDR Control, mutually exclusive with those two for
+                the same reason they are with each other. */}
+            {provided.map((s) => (
+                <span key={s.id} className="tag tag--accent" title={surfaceTitle(s)}>
+                    {surfaceBadge(s)}
+                </span>
+            ))}
             {rig && (
                 <span
                     className={`tag tag--${rig === 'tx' ? 'bad' : 'accent'}`}
@@ -562,8 +613,8 @@ function ControlTags() {
                 <span
                     className="tag tag--accent"
                     title={attached === 1
-                        ? 'One program outside this page is attached to the receiver'
-                        : `${attached} programs outside this page are attached to the receiver`}
+                        ? 'One program is attached to the receiver'
+                        : `${attached} programs are attached to the receiver`}
                 >
                     API
                 </span>

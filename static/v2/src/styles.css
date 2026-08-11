@@ -5835,6 +5835,17 @@ a.btn { text-decoration: none; }
    Radio control
    ========================================================================= */
 
+/* The two store links under the browser-bridge switch. Wraps, unlike `row-end`:
+   this panel is often a 320px dock and the label plus two buttons is more than
+   that at a large UI scale — they drop under the label rather than squeezing
+   the buttons to an ellipsis. */
+.bridge-get { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.bridge-get__label {
+    margin-right: auto;
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
 .rc-conn { display: flex; align-items: center; gap: 7px; }
 .rc-conn__state { font-size: calc(11.5px * var(--ui-scale)); color: var(--text-dim); }
 

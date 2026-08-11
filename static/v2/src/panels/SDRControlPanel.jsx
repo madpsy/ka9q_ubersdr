@@ -52,6 +52,14 @@ const SURFACE_OPTIONS = [
     { value: 'midi', label: 'MIDI' },
 ];
 
+// Where the bridge extension itself comes from. The switch below only says the
+// page will answer one; somebody who has not installed it yet is looking at a
+// switch for something they do not have, and the two stores are the answer.
+const BRIDGE_ADDONS = [
+    { label: 'Firefox', href: 'https://addons.mozilla.org/en-GB/firefox/addon/ubersdr-bridge/' },
+    { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/ubersdr-bridge/lpljgdehjhiojmpibmonpgjlmjfbkpae' },
+];
+
 // Mapping rows shown before "show more". A dock panel never scrolls itself —
 // the dock is the only scroller — so a fader bank with forty controls learned
 // would otherwise make this panel a couple of thousand pixels tall and push
@@ -238,7 +246,29 @@ function BridgeSwitch({ minimal }) {
             {!minimal && (
                 <div className="note note--tight">
                     Lets a browser extension or userscript on this page read and drive this
-                    receiver. Nothing on another site can reach it, and no password is shared.
+                    receiver.
+                </div>
+            )}
+            {/* Shown whether the switch is on or off: off is exactly when
+                somebody is deciding whether the extension is worth having, and
+                a link that appeared only once they had already said yes would
+                arrive after the question it answers. */}
+            {!minimal && (
+                <div className="bridge-get">
+                    <span className="bridge-get__label">Get the extension</span>
+                    {BRIDGE_ADDONS.map((a) => (
+                        <a
+                            key={a.label}
+                            className="btn btn--ghost btn--sm"
+                            href={a.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`UberSDR Bridge for ${a.label} — opens the store in a new tab`}
+                        >
+                            {a.label}
+                            <Icon.External size={13} />
+                        </a>
+                    ))}
                 </div>
             )}
             <div className="divider" />

@@ -232,6 +232,45 @@ if [[ "$PACKAGE" -eq 1 ]]; then
     fi
     echo "distributables in dist/:"
     ls -1sh dist/ | grep -v -- '-unpacked\|builder-\|^total'
+
+    # The version, said at the end rather than the start: the files above are
+    # about to be uploaded, and that is the moment it matters. Said at all
+    # because nothing else will — the build is happy to produce a fourth
+    # identical v0.1.0, and the first sign that the version never moved is
+    # nobody being told there was a release.
+    #
+    # Two files carry it and they have to move together. package.json's is what
+    # an installed client reports itself as; latest.json's is what a running
+    # client compares that against (see updates.js). Bump only latest.json and
+    # everybody is offered a version that, once installed, still says it is out
+    # of date — an alert that never clears. Bump only package.json and nobody
+    # hears about the release at all.
+    version=$(node -p "require('./package.json').version" 2>/dev/null || echo '?')
+    published=$(node -p "require('./latest.json').version" 2>/dev/null || echo '?')
+    echo
+    echo "  this build is v$version, and latest.json advertises v$published"
+    echo
+    if [[ "$version" == "$published" ]]; then
+        echo "  For a REAL new release: upload the files above to the 'latest'"
+        echo "  release on GitHub, then bump BOTH to the new version —"
+    else
+        echo "  Those disagree. Before publishing, settle on one version and put"
+        echo "  it in BOTH —"
+    fi
+    echo "      clients/electron/package.json   version"
+    echo "      clients/electron/latest.json    version"
+    echo
+    echo "  Clients read latest.json on start and offer the download when it is"
+    echo "  ahead of their own. Leave them alone for a test build."
+    echo
+    # Only with a terminal to press a key on. A CI or container run has none and
+    # would wait here for ever, which is a build that looks like it hung.
+    # `|| true` because EOF makes read exit non-zero, and set -e would take that
+    # for a failed build.
+    if [[ -t 0 ]]; then
+        read -n 1 -s -r -p "  press any key to continue … " || true
+        echo
+    fi
 fi
 
 if [[ "$PACKAGE" -eq 1 ]]; then

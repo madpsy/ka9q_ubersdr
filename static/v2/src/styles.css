@@ -3862,6 +3862,27 @@ a.btn { text-decoration: none; }
 }
 .thememenu__swatch > i { width: 4px; height: 8px; border-radius: 1px; }
 
+/* The top bar's palette button and its menu — see PaletteMenu.
+   The trigger is a strip of the map in force rather than a glyph, so it takes the
+   footprint of one: 16px, the width every Icon is drawn at, and unscaled like
+   them, or it would drift out of line with the buttons either side of it at any
+   UI scale but 1. The rows below use the theme menu's swatch size, since they sit
+   in the same slot as its three-colour one. */
+.palmenu__icon {
+    display: block;
+    width: 16px;
+    height: 11px;
+    border-radius: 2px;
+    border: 1px solid var(--border-strong);
+}
+.palmenu__swatch {
+    display: block;
+    width: 20px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border-strong);
+}
+
 /* =========================================================================
    Display + layout panels
    ========================================================================= */

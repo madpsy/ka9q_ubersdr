@@ -7,6 +7,7 @@ import LinksMenu from './LinksMenu.jsx';
 import ShareMenu from './ShareMenu.jsx';
 import { clockHint, nextClockMode, saveClockMode, savedClockMode } from '../lib/topClock.js';
 import ThemeMenu from './ThemeMenu.jsx';
+import PaletteMenu from './PaletteMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
@@ -769,6 +770,17 @@ export default function TopBar({ compact }) {
                 questions, but the colour schemes are the other, and a button cannot
                 cycle nine of anything. */}
             <ThemeMenu />
+
+            {/* Beside it, because the two are the same question asked of two
+                surfaces: that one is how the interface is coloured, this is how
+                the spectrum and the waterfall are. Neither is worth opening a
+                panel for, and having found one somebody looking for the other
+                should not have to go anywhere else.
+
+                On a phone as well, for the reason the theme menu is: a colour
+                map that works in a dark shack can be unreadable outside, and a
+                handset is the receiver that gets carried into both. */}
+            <PaletteMenu />
 
             {!compact && (
                 <div className="topbar__docks">

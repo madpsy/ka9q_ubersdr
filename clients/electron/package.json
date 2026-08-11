@@ -8,6 +8,7 @@
   "main": "main.js",
   "//desktopName": "Read by Electron itself (app.setDesktopName) and by electron-builder, which writes it as StartupWMClass. They must agree or the desktop environment cannot match a running window to the .desktop entry, and the taskbar shows a generic icon. Electron's fallback is `${app.name}.desktop` = ubersdr-desktop.desktop, so that is the name to pin.",
   "desktopName": "ubersdr-desktop.desktop",
+  "//artifactName": "The three per-target artifactName settings in build.appImage/nsis/dmg drop the version from the filenames, because the client's download links are constants. Every release hangs off the rolling `latest` tag, so the URL a running client opens (updates.js) is fixed — electron-builder's default ${productName}-${version}.${ext} would move the file on every bump and 404 every client already in the field. They are set per target rather than on build.win, because a Linux --package builds the Windows zip too and a name under build.win would apply to both, calling the zip 'Setup'. (Out here with the note below because electron-builder validates the `build` object and rejects keys it does not know.)",
   "//buildFiles": "build.files is an allowlist, not a filter: anything not named there is left out of app.asar. A new top-level module therefore works under `npm start` and throws 'Cannot find module' only once packaged — so add it to build.files in the same commit that creates it. (This note lives out here because electron-builder validates the `build` object against a schema and rejects keys it does not know.)",
   "scripts": {
     "start": "electron ."
@@ -55,6 +56,15 @@
     },
     "mac": {
       "target": "dmg"
+    },
+    "appImage": {
+      "artifactName": "${productName}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "${productName}.Setup.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}-${arch}.${ext}"
     }
   }
 }

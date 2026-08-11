@@ -26,6 +26,11 @@
 #                          wherever it can, and fails rather than skipping if it
 #                          cannot. `--package` on Linux does it too, but skips
 #                          it with a note when Docker is absent.
+#   ./build.sh --publish   package, then upload the artefacts to the `latest`
+#                          release on GitHub with the gh CLI, replacing the ones
+#                          already there. Asks first, and only from a terminal:
+#                          this is the download every client in the field is
+#                          pointed at. Implies --package.
 
 set -euo pipefail
 
@@ -37,10 +42,23 @@ SKIP_UI=0
 PACKAGE=0
 WIN_INSTALLER=0
 LINUX_ONLY=0
+PUBLISH=0
+
+# The release everything is uploaded to and every client downloads from. A
+# rolling tag: publishing moves it, and the asset names are constants (see the
+# artifactName settings in package.json), so the URLs in updates.js never change.
+#
+# Named here rather than left to gh's guess from `origin`, so a clone with a
+# fork as its remote cannot quietly publish this project's downloads somewhere
+# else — or, worse, somewhere else's downloads here.
+REPO=madpsy/ka9q_ubersdr
+TAG=latest
+
 for arg in "$@"; do
     case "$arg" in
         --skip-ui) SKIP_UI=1 ;;
         --package) PACKAGE=1 ;;
+        --publish) PUBLISH=1; PACKAGE=1 ;;
         --linux) LINUX_ONLY=1; PACKAGE=1 ;;
         # 2 rather than 1: asked for outright, so a missing Docker is an
         # error here and merely a skipped step when --package implies it.
@@ -70,6 +88,92 @@ fi
 # tested against. The caches are mounted because without them every run
 # re-downloads the Windows Electron binaries.
 WIN_IMAGE=electronuserland/builder:wine
+
+# The artefacts a client actually downloads, by the fixed names package.json
+# pins them to. The Windows zip is deliberately not here: nothing links to it,
+# and its name carries the version, so uploading it would leave a new copy on
+# the release every time rather than replacing the last.
+#
+# Not every one of these exists after any given build — a dmg needs a Mac, and
+# --linux skips the Windows half — so publishing uploads what is there and says
+# what is not.
+RELEASE_ASSETS=(
+    dist/UberSDR.AppImage
+    dist/UberSDR.Setup.exe
+    dist/UberSDR-arm64.dmg
+    dist/UberSDR-x64.dmg
+)
+
+# Uploads the artefacts to the rolling release, replacing what is there.
+#
+# Everything that could stop it is checked and reported rather than left to gh's
+# own error: this runs at the end of a build somebody has waited several minutes
+# for, and "gh: command not found" scrolling past among electron-builder's
+# output is a release that quietly did not happen.
+#
+# Never without being asked. The tag is what every installed client downloads
+# from, --clobber replaces the files behind it, and there is no undo — so a
+# terminal and a typed yes are the price, and a run with neither declines rather
+# than assuming.
+publish_release() {
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "not published: gh not found — install the GitHub CLI, or upload dist/ by hand." >&2
+        return
+    fi
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "not published: gh is not logged in — run 'gh auth login'." >&2
+        return
+    fi
+    if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+        echo "not published: there is no '$TAG' release on $REPO to upload to." >&2
+        echo "  create it once with: gh release create $TAG --repo $REPO --title latest --notes ''" >&2
+        return
+    fi
+
+    local found=() missing=()
+    local asset
+    for asset in "${RELEASE_ASSETS[@]}"; do
+        if [[ -f "$asset" ]]; then found+=("$asset"); else missing+=("$asset"); fi
+    done
+    if [[ "${#found[@]}" -eq 0 ]]; then
+        echo "not published: none of the release artefacts are in dist/." >&2
+        return
+    fi
+
+    echo
+    echo "  Upload to https://github.com/$REPO/releases/tag/$TAG, replacing what is there:"
+    for asset in "${found[@]}"; do
+        echo "      $(basename "$asset")   $(du -h "$asset" | cut -f1)"
+    done
+    if [[ "${#missing[@]}" -gt 0 ]]; then
+        echo
+        echo "  Not built here, so left alone on the release:"
+        for asset in "${missing[@]}"; do echo "      $(basename "$asset")"; done
+    fi
+    echo
+
+    # A terminal, or nothing happens. An unattended run publishing to the tag
+    # every client downloads from is precisely what should not be possible by
+    # accident.
+    if [[ ! -t 0 ]]; then
+        echo "not published: --publish asks before uploading and there is no terminal to ask on." >&2
+        return
+    fi
+    local reply=''
+    read -r -p "  type 'yes' to upload: " reply || true
+    if [[ "$reply" != "yes" ]]; then
+        echo "  not published."
+        return
+    fi
+
+    # --clobber because the names never change: without it the second release
+    # is refused for every asset that already exists.
+    if gh release upload "$TAG" "${found[@]}" --clobber --repo "$REPO"; then
+        echo "  uploaded to https://github.com/$REPO/releases/tag/$TAG"
+    else
+        echo "not published: the upload failed — dist/ is intact, try again." >&2
+    fi
+}
 
 if [[ "$SKIP_UI" -eq 0 ]]; then
     "$V2/build.sh"
@@ -221,9 +325,14 @@ if [[ "$PACKAGE" -eq 1 ]]; then
 
         # Trust the artefact, not the exit code — see WIN_IMAGE above. The app
         # is over 100 MB, so an installer smaller than 50 MB has not got it.
-        setup=$(ls -1 dist/*Setup*.exe 2>/dev/null | head -1 || true)
-        if [[ -z "$setup" ]] || [[ $(stat -c%s "$setup") -lt 50000000 ]]; then
-            echo "the Windows installer did not build properly — ${setup:-no .exe produced}" >&2
+        #
+        # The exact name rather than a *Setup*.exe glob: the installer is pinned
+        # to one filename now (package.json's nsis.artifactName), and a glob
+        # picks up an older versioned build left in dist/ — checking the size of
+        # last month's installer and passing.
+        setup=dist/UberSDR.Setup.exe
+        if [[ ! -f "$setup" ]] || [[ $(stat -c%s "$setup") -lt 50000000 ]]; then
+            echo "the Windows installer did not build properly — $setup" >&2
             exit 1
         fi
         # The payload is embedded in the .exe by now; leaving it beside the
@@ -233,43 +342,76 @@ if [[ "$PACKAGE" -eq 1 ]]; then
     echo "distributables in dist/:"
     ls -1sh dist/ | grep -v -- '-unpacked\|builder-\|^total'
 
-    # The version, said at the end rather than the start: the files above are
-    # about to be uploaded, and that is the moment it matters. Said at all
-    # because nothing else will — the build is happy to produce a fourth
-    # identical v0.1.0, and the first sign that the version never moved is
-    # nobody being told there was a release.
+    # Where this build sits in a release, said at the end because that is where
+    # it is acted on. Said at all because nothing else will — the build is happy
+    # to produce a fourth identical v0.1.0, and the first sign that the version
+    # never moved is nobody being told there was a release.
     #
-    # Two files carry it and they have to move together. package.json's is what
-    # an installed client reports itself as; latest.json's is what a running
-    # client compares that against (see updates.js). Bump only latest.json and
-    # everybody is offered a version that, once installed, still says it is out
-    # of date — an alert that never clears. Bump only package.json and nobody
-    # hears about the release at all.
+    # Two files carry it. package.json's is what an installed client reports
+    # itself as; latest.json's is what a running client compares that against
+    # (see updates.js). They move at different times on purpose:
+    #
+    #   bump package.json → build → upload → bump latest.json
+    #
+    # in that order, because latest.json is the announcement. Bumped early it
+    # points everybody at a build that is not uploaded yet; bumped late it
+    # merely means nobody has heard about a release that is sitting there
+    # ready — which is a wait, not a broken download.
     version=$(node -p "require('./package.json').version" 2>/dev/null || echo '?')
     published=$(node -p "require('./latest.json').version" 2>/dev/null || echo '?')
+
+    # Through updates.js's own comparator rather than bash's `>`, which collates
+    # rather than counts: `[[ 0.10.0 > 0.9.0 ]]` is false, and the release that
+    # discovers it is the one after 0.9. Reusing the client's function also
+    # means this and the client can never disagree about which is newer.
+    newer() {
+        node -e "process.stdout.write(require('./updates.js').isNewer(process.argv[1], process.argv[2]) ? '1' : '0')" \
+            "$1" "$2" 2>/dev/null || echo 0
+    }
+    build_ahead=$(newer "$version" "$published")
+    advertised_ahead=$(newer "$published" "$version")
+
     echo
     echo "  this build is v$version, and latest.json advertises v$published"
     echo
     if [[ "$version" == "$published" ]]; then
-        echo "  For a REAL new release: upload the files above to the 'latest'"
-        echo "  release on GitHub, then bump BOTH to the new version —"
+        # Nothing to announce: an upload now replaces the files behind a version
+        # everybody already believes they have.
+        echo "  Already advertised. For a new release, bump the version in"
+        echo "      clients/electron/package.json"
+        echo "  and build again — then upload, and set latest.json to match."
+    elif [[ "$build_ahead" == 1 ]]; then
+        echo "  Ready to publish. Upload the files above to the '$TAG' release,"
+        echo "  then announce them by setting"
+        echo "      clients/electron/latest.json    version: \"$version\""
+        echo "  Clients check it on start and offer the download."
+    elif [[ "$advertised_ahead" == 1 ]]; then
+        # latest.json ahead of the build: everybody is being pointed at a
+        # version that does not exist here. Worth saying loudly.
+        echo "  latest.json is AHEAD of this build — clients are being offered a"
+        echo "  v$published that this tree does not produce. Fix one or the other"
+        echo "  before uploading anything."
     else
-        echo "  Those disagree. Before publishing, settle on one version and put"
-        echo "  it in BOTH —"
+        # Neither is newer and they are not equal, so at least one is not a
+        # version at all — a hand-edit, or a file that failed to parse.
+        echo "  Cannot compare v$version with v$published. Check that both are"
+        echo "  plain version numbers before publishing."
     fi
-    echo "      clients/electron/package.json   version"
-    echo "      clients/electron/latest.json    version"
     echo
-    echo "  Clients read latest.json on start and offer the download when it is"
-    echo "  ahead of their own. Leave them alone for a test build."
-    echo
-    # Only with a terminal to press a key on. A CI or container run has none and
-    # would wait here for ever, which is a build that looks like it hung.
-    # `|| true` because EOF makes read exit non-zero, and set -e would take that
-    # for a failed build.
-    if [[ -t 0 ]]; then
-        read -n 1 -s -r -p "  press any key to continue … " || true
+
+    if [[ "$PUBLISH" -eq 1 ]]; then
+        publish_release
+    else
+        echo "  ./build.sh --publish does the upload for you (asks first)."
         echo
+        # Only with a terminal to press a key on. A CI or container run has none
+        # and would wait here for ever, which is a build that looks like it hung.
+        # `|| true` because EOF makes read exit non-zero, and set -e would take
+        # that for a failed build.
+        if [[ -t 0 ]]; then
+            read -n 1 -s -r -p "  press any key to continue … " || true
+            echo
+        fi
     fi
 fi
 

@@ -689,18 +689,35 @@ if (location.pathname.startsWith('/v2')) {
 
     const context = ipcRenderer.sendSync('window:context') || {};
 
-    // The one thing the page is *told*: this window's origin is the local proxy,
-    // so the share button's `location.origin` is no address of the receiver at
-    // all. This is — the one this client dialled, LAN address or public
-    // hostname, whichever the operator of this copy actually connects to. See
-    // lib/share.js.
+    // What the page is *told* about its host.
     //
-    // Read-only, one string, and nothing that can act on the main process — a
-    // receiver serves its operator's own pages, and this window is the one place
-    // that must not become a way for a page to reach the desktop.
+    // `upstreamOrigin`: this window's origin is the local proxy, so the share
+    // button's `location.origin` is no address of the receiver at all. This is —
+    // the one this client dialled, LAN address or public hostname, whichever the
+    // operator of this copy actually connects to. See lib/share.js.
+    //
+    // `autoStart`: the start overlay exists because a browser suspends an
+    // AudioContext that was not created from a user gesture. This client runs
+    // with that requirement switched off (main.js sets autoplay-policy), so
+    // there is nothing for the press to satisfy — and somebody who picked this
+    // receiver in the chooser has already said what the button asks. See
+    // components/StartOverlay.jsx, which starts itself when it sees this.
+    //
+    // A host flag rather than a seeded storage key, which is how the password
+    // below travels. The password is a value the page would otherwise have
+    // prompted for, so seeding where the page already looks is exactly right.
+    // This is a statement about the browser the page is running in, and only
+    // the host can make it: in an ordinary browser the gesture rule still
+    // applies, and a page that could switch this on for itself would start into
+    // silence.
+    //
+    // Read-only, and nothing that can act on the main process — a receiver
+    // serves its operator's own pages, and this window is the one place that
+    // must not become a way for a page to reach the desktop.
     try {
         contextBridge.exposeInMainWorld('ubersdrDesktop', {
             upstreamOrigin: context.upstreamOrigin || null,
+            autoStart: true,
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 

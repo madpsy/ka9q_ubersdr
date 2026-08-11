@@ -264,6 +264,47 @@ cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
    "$STATIC/fonts/twemoji-flags.woff2" chooser/vendor/ \
     || echo "warning: could not stage leaflet/flags — the chooser's map will be unavailable" >&2
 
+# The multi-monitor's libraries, staged the same way and for the same reason:
+# they are somebody else's, they live in static/, and a second committed copy is
+# a second thing to keep current. Every one of these is byte-identical to the
+# copy the collector page loads — checked when the page was brought over — so
+# staging from here is not a substitution, it is the same file by a shorter
+# path. See monitor/README.md.
+#
+# Leaflet and the terminator are staged twice, once per page, rather than shared
+# from one directory: the two pages are independent and a vendor directory that
+# served both would make either one's removal a decision about the other.
+#
+# Hamlib is a directory because hamlib-control.js loads it as one — `hamlib` is
+# a relative base in that file, and hamlib.js is imported as a module beside the
+# wasm it fetches.
+mkdir -p monitor/vendor
+cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
+   "$STATIC/chart.umd.min.js" "$STATIC/opus-decoder.min.js" \
+   "$STATIC/fonts/twemoji-flags.woff2" monitor/vendor/ \
+    || echo "warning: could not stage the multi-monitor's libraries from $STATIC" >&2
+# The page's heading image. Upstream this is the collector's own logo, which is
+# not ours to ship; the app icon is the same mark and is already here.
+cp assets/icon.png monitor/vendor/logo.png \
+    || echo "warning: could not stage the multi-monitor's logo" >&2
+
+# The chooser's stylesheet, which the monitor page loads before its own — the
+# palette, the reset, `body`, the flag @font-face and the scrollbars all live
+# there, so the two windows cannot drift apart. The same arrangement
+# serial/serial.css relies on.
+#
+# Beside index.html rather than in vendor/, because chooser.css asks for
+# url('vendor/twemoji-flags.woff2') and that has to resolve the same way from
+# both pages. Copied rather than symlinked: a symlink into another directory
+# does not survive being packed into app.asar.
+cp chooser/chooser.css monitor/chooser.css \
+    || echo "warning: could not stage chooser.css — the monitor will be unstyled" >&2
+
+mkdir -p monitor/hamlib
+cp "$STATIC/hamlib/hamlib.js" "$STATIC/hamlib/hamlib-serial-bridge.js" \
+   "$STATIC/hamlib/hamlib.wasm" monitor/hamlib/ \
+    || echo "warning: could not stage hamlib — the multi-monitor's rig sync will not load" >&2
+
 # The main process's and the preload's own bundles.
 #
 # Outside --skip-ui on purpose. These are seconds rather than the minute the v2

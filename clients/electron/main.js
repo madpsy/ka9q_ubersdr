@@ -10,12 +10,13 @@
 // while believing it is same-origin with it.
 
 const {
-    app, BrowserWindow, Menu, ipcMain, nativeImage, safeStorage, shell, session,
+    app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell, session,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const { InstanceProxy } = require('./proxy');
+const { MonitorServer } = require('./monitorserver');
 const { InstanceStore } = require('./store');
 const { SharedPrefs } = require('./prefs');
 const { FlrigLink } = require('./flrig');
@@ -112,6 +113,64 @@ function showChooser() {
     });
     chooserWin.loadFile(path.join(__dirname, 'chooser', 'index.html'));
     chooserWin.on('closed', () => { chooserWin = null; });
+}
+
+// The multi-monitor: one window, and the local origin it is served from.
+//
+// One because it is a comparison — several of them monitoring overlapping sets
+// of receivers would be several claims on the same audio, and the question it
+// answers ("which of these is hearing it best") has one answer at a time.
+//
+// The server is started with the window and left running while it is open. It
+// serves a directory of the app's own files on 127.0.0.1 and nothing else; see
+// monitorserver.js for why the page cannot simply be loadFile'd like the
+// chooser.
+let monitorWin = null;
+let monitorServer = null;
+
+async function showMonitor() {
+    if (monitorWin && !monitorWin.isDestroyed()) {
+        monitorWin.show();
+        monitorWin.focus();
+        return;
+    }
+
+    if (!monitorServer) monitorServer = new MonitorServer(path.join(__dirname, 'monitor'));
+    let origin;
+    try {
+        origin = await monitorServer.start();
+    } catch (err) {
+        // Nothing to fall back to — the page needs a real origin — so say so
+        // rather than opening a window that cannot load.
+        dialog.showErrorBox('Multi-Monitor',
+            `Could not start the local server for the monitor page.\n\n${err.message}`);
+        monitorServer = null;
+        return;
+    }
+
+    monitorWin = new BrowserWindow({
+        // Wider than the chooser: the monitor grid is cards side by side, and
+        // the selection phase before it is a grid too.
+        width: 1280,
+        height: 860,
+        minWidth: 720,
+        minHeight: 520,
+        backgroundColor: '#0b0e14',
+        title: 'UberSDR — multi-monitor',
+        icon: APP_ICON,
+        // No preload. This page is the collector's, brought across whole, and
+        // it asks nothing of the desktop — it talks to instances directly over
+        // their own public URLs. Nothing to expose is the smallest surface
+        // there is.
+        webPreferences: {},
+    });
+    monitorWin.loadURL(origin + '/');
+    monitorWin.on('closed', () => {
+        monitorWin = null;
+        // The port goes with the window. Left listening it would be a server
+        // for a page nobody has open, and the next launch would bind another.
+        if (monitorServer) { monitorServer.stop(); monitorServer = null; }
+    });
 }
 
 function notifyChooser() {
@@ -538,6 +597,9 @@ function menuTemplate({ links = null, layout = null } = {}) {
             label: 'Receivers',
             submenu: [
                 { label: 'Show Chooser', accelerator: 'CmdOrCtrl+I', click: () => showChooser() },
+                // Beside the chooser because it is the other way in: one picks
+                // a receiver to listen to, the other picks several to compare.
+                { label: 'Multi-Monitor', accelerator: 'CmdOrCtrl+M', click: () => showMonitor() },
                 { type: 'separator' },
                 process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
             ],

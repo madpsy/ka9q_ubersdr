@@ -28,6 +28,7 @@
     "files": [
       "main.js",
       "proxy.js",
+      "monitorserver.js",
       "mdns.js",
       "discovery.js",
       "updates.js",
@@ -43,6 +44,7 @@
       "receiver-preload.js",
       "serial-preload.js",
       "chooser/**",
+      "monitor/**",
       "serial/**",
       "ui/**",
       "assets/icon.png"

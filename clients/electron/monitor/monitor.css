@@ -1,0 +1,2699 @@
+/* The multi-monitor's own styling.
+ *
+ * chooser.css is loaded first and provides everything shared: the palette, the
+ * reset, `body`, the Twemoji flag @font-face and the scrollbars. This file is
+ * the collector page's own 211 classes, with its look replaced by that palette.
+ *
+ * Derived from the <style> block that was inline in index.html rather than
+ * written from scratch, deliberately. The geometry works — a monitor grid, a
+ * modal, a frequency slider, all of it laid out and tested — and rewriting it
+ * would have meant re-solving problems that were already solved in order to
+ * change colours. So the layout is upstream's and the surface is ours:
+ *
+ *   - the blue gradient and the translucent white panels it was built on became
+ *     `--bg`, `--panel` and `--panel-hover`, which are opaque, so the
+ *     backdrop-filter blurs and the drop shadows behind headings went with them
+ *   - every literal colour became a token; there are none left in this file
+ *   - the font stacks became `--font` and `--mono`, which is what makes flags
+ *     render here the way they do in the chooser (see the @font-face there —
+ *     the stacks carry 'Twemoji Flags', and Windows has no flag glyphs of its
+ *     own)
+ *
+ * Where a class needed more than a colour swap it is below, under "Fitting the
+ * chooser", rather than edited in place — so what was upstream's stays legible
+ * as upstream's.
+ */
+
+.container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.35);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .status-bar {
+            text-align: center;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background: var(--panel);
+        }
+
+        .status-bar.loading { background: var(--accent-dim); }
+        .status-bar.error   { background: var(--danger); }
+        .status-bar.success { background: var(--ok); }
+
+        /* Nav links — matches index.html */
+        .nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--panel);
+            color: var(--text);
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.95em;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            margin: 0 5px;
+        }
+
+        .nav-link:hover {
+            background: var(--panel-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Two-column layout: frequency controls + map */
+        .freq-map-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+            align-items: start;
+        }
+
+        .freq-map-layout .panel {
+            margin-bottom: 0;
+        }
+
+        #instanceMap {
+            width: 100%;
+            height: 340px;
+            border-radius: 10px;
+            z-index: 0;
+        }
+
+        @media (max-width: 800px) {
+            .freq-map-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Panel / card containers — matches index.html .filters-container / .map-container */
+        .panel {
+            background: var(--panel);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+            margin-bottom: 30px;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--panel-hover);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .panel-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+
+        .panel-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Frequency Slider — mirrors index.html .frequency-slider-container */
+        .frequency-display {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .mode-indicator {
+            padding: 6px 12px;
+            background: var(--accent-dim);
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.9em;
+            user-select: none;
+            transition: background 0.15s;
+        }
+
+        .mode-indicator:hover {
+            background: var(--accent-dim);
+        }
+
+        .mode-indicator.overridden {
+            background: var(--accent-dim);
+            box-shadow: 0 0 0 2px var(--accent-dim);
+        }
+
+        .freq-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: var(--panel-hover);
+            outline: none;
+            -webkit-appearance: none;
+            margin: 15px 0;
+            cursor: pointer;
+        }
+
+        .freq-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        }
+
+        .freq-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        }
+
+        .freq-markers {
+            position: relative;
+            font-size: 0.85em;
+            opacity: 0.8;
+            margin-top: -10px;
+            height: 20px;
+        }
+
+        .freq-markers span {
+            position: absolute;
+            transform: translateX(-50%);
+        }
+
+        .freq-input-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .freq-step-row {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+
+        .freq-step-btn {
+            padding: 6px 10px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 0.78em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .freq-step-btn:hover {
+            background: var(--panel-hover);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        .freq-step-btn:active {
+            transform: scale(0.95);
+        }
+
+        .band-jump-btn {
+            padding: 4px 9px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 0.78em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.15s, box-shadow 0.15s;
+            white-space: nowrap;
+        }
+
+        .band-jump-btn:hover {
+            background: var(--panel-hover);
+        }
+
+        .band-jump-btn.active-band {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            box-shadow: 0 0 6px var(--accent-dim);
+        }
+
+        .modality-toggle {
+            display: flex;
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .modality-btn {
+            padding: 4px 10px;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .modality-btn:not(:last-child) {
+            border-right: 1px solid var(--panel-hover);
+        }
+
+        .modality-btn:hover {
+            background: var(--panel);
+            color: var(--text);
+        }
+
+        .modality-btn.active {
+            background: var(--accent-dim);
+            color: var(--text);
+            box-shadow: inset 0 0 6px var(--accent-dim);
+        }
+
+        .freq-input {
+            flex: 1;
+            min-width: 120px;
+            max-width: 200px;
+            padding: 10px 15px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .freq-input:focus {
+            outline: none;
+            background: var(--panel-hover);
+            border-color: var(--accent-dim);
+        }
+
+        .freq-input.invalid {
+            border-color: var(--danger);
+            border-width: 2px;
+            background: var(--danger);
+        }
+
+        .freq-unit {
+            font-size: 1.1em;
+            font-weight: bold;
+            opacity: 0.9;
+        }
+
+        .filter-hint {
+            font-size: 0.75em;
+            opacity: 0.7;
+            font-style: italic;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover { transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--text);
+        }
+        .btn-primary:hover { background: var(--accent-dim); }
+        .btn-primary:disabled {
+            background: var(--accent-dim);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: var(--text);
+        }
+        .btn-danger:hover { background: var(--danger); }
+
+        .btn-secondary {
+            background: var(--panel);
+            color: var(--text);
+        }
+        .btn-secondary:hover { background: var(--panel-hover); }
+        .select-sort-btn.active { background: var(--accent-dim); }
+        .select-sort-btn.active:hover { background: var(--accent-dim); }
+
+        .btn-success {
+            background: var(--ok);
+            color: var(--text);
+        }
+        .btn-success:hover { background: var(--ok); }
+
+        /* ── PHASE VISIBILITY ── */
+        #phase-select  { display: block; }
+        #phase-monitor { display: none; }
+
+        /* ── SELECTION PHASE ── */
+        .select-filter-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .filter-input {
+            padding: 8px 12px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.9em;
+            transition: all 0.2s;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            background: var(--panel-hover);
+            border-color: var(--accent-dim);
+        }
+
+        .filter-input::placeholder {
+            color: var(--dim);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            font-size: 0.9em;
+        }
+
+        .checkbox-label:hover {
+            background: var(--panel);
+        }
+
+        .filter-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+
+        .select-count {
+            font-size: 0.95em;
+            opacity: 0.85;
+            margin-right: 5px;
+        }
+
+        /* Compact selection grid */
+        .select-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 10px;
+        }
+
+        .select-card {
+            background: var(--panel);
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            position: relative;
+        }
+
+        .select-card:hover {
+            background: var(--panel);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Highlight applied when hovering the corresponding map marker */
+        .select-card.map-hover {
+            background: var(--panel);
+            transform: translateY(-2px);
+            box-shadow: 0 0 0 3px var(--accent-dim), 0 6px 20px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Audio preview button — bottom-right corner of select card */
+        .select-preview-btn {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1;
+            padding: 3px 5px;
+            cursor: pointer;
+            transition: background 0.15s, box-shadow 0.15s;
+            z-index: 1;
+        }
+
+        .select-preview-btn:hover {
+            background: var(--panel-hover);
+        }
+
+        .select-preview-btn.active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            box-shadow: 0 0 6px var(--accent-dim);
+        }
+
+        .select-card.selected {
+            border-color: var(--accent);
+            background: var(--accent-dim);
+        }
+
+        .select-card.offline {
+            opacity: 0.5;
+        }
+
+        .select-card.maxed {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .select-card.full {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .status-badge.full-badge {
+            background: var(--danger);
+            color: var(--text);
+        }
+
+        .select-card-check {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid var(--border);
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .select-card.selected .select-card-check {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .select-card-callsign {
+            font-size: 1.05em;
+            font-weight: bold;
+            margin-bottom: 3px;
+            padding-right: 26px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .select-card-name {
+            font-size: 0.78em;
+            opacity: 0.72;
+            margin-bottom: 7px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .select-card-meta {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        /* Status badges — matches index.html .status-badge */
+        .status-badge {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.7em;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .status-badge.online  { background: var(--excellent); color: var(--text); }
+        .status-badge.offline { background: var(--danger); color: var(--text); }
+        .status-badge.feature { background: var(--accent); color: var(--text); }
+        .status-badge.slots   { background: var(--accent); color: var(--text); }
+        .status-badge.no-audio { background: var(--dim); color: var(--text); }
+
+        /* Band condition dots */
+        .band-dots {
+            display: flex;
+            gap: 3px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .band-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+        }
+
+        .band-dot.poor      { background: var(--danger); }
+        .band-dot.fair      { background: var(--fair); }
+        .band-dot.good      { background: var(--good); }
+        .band-dot.excellent { background: var(--excellent); }
+        .band-dot.unknown   { background: var(--dim); }
+
+        /* Preview SNR meter — same height as band-dots row (9px) */
+        .preview-snr-track {
+            width: calc(100% - 36px); /* leave room for the absolute-positioned speaker button */
+            height: 9px;
+            background: var(--panel);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .preview-snr-fill {
+            height: 100%;
+            width: 0%;
+            border-radius: 4px;
+            transition: width 0.1s ease, background-color 0.3s ease;
+            background: var(--dim);
+        }
+
+        /* ── MONITOR PHASE ── */
+        .monitor-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .monitor-info {
+            font-size: 0.9em;
+            opacity: 0.85;
+        }
+
+        .monitor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 16px;
+        }
+
+        /* Signal meter tile */
+        .meter-tile {
+            background: var(--panel);
+            border: 2px solid var(--panel);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .meter-tile:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        .meter-tile.conn-error {
+            border-color: var(--danger);
+            background: var(--danger);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.7; }
+        }
+
+        @keyframes pulse-ring {
+            0%   { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(2);   opacity: 0; }
+        }
+
+        .user-location-marker { background: transparent; border: none; }
+
+        .meter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            min-width: 0;
+        }
+
+        .meter-callsign {
+            font-size: 1.15em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .meter-status-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 2px;
+        }
+
+        .session-countdown {
+            font-size: 0.72em;
+            font-weight: bold;
+            opacity: 0.8;
+            margin-right: 6px;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .session-countdown.countdown-warning {
+            color: var(--danger);
+            opacity: 1;
+        }
+
+        .conn-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .conn-dot.connecting { background: var(--good); animation: pulse 1s ease-in-out infinite; }
+        .conn-dot.live       { background: var(--excellent); }
+        .conn-dot.error      { background: var(--danger); }
+        .conn-dot.idle       { background: var(--dim); }
+
+        /* Toast notifications */
+        #toastContainer {
+            position: fixed;
+            bottom: 70px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            background: var(--panel);
+            border: 1px solid var(--danger);
+            border-radius: 10px;
+            padding: 10px 16px;
+            color: var(--text);
+            font-size: 0.85em;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.25s, transform 0.25s;
+            pointer-events: auto;
+            max-width: 320px;
+        }
+        .toast.toast-show { opacity: 1; transform: translateY(0); }
+        .toast.toast-warn { border-color: var(--good); }
+        .toast.toast-info { border-color: var(--accent-dim); }
+
+        /* Relay listener badge — bottom-right corner */
+        .relay-listener-badge {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--panel);
+            border: 1px solid var(--accent-dim);
+            border-radius: 20px;
+            padding: 7px 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.88em;
+            color: var(--text);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            z-index: 1500;
+            transition: opacity 0.3s;
+            user-select: none;
+        }
+        .relay-listener-badge .relay-listener-icon  { font-size: 1em; }
+        .relay-listener-badge .relay-listener-label { opacity: 0.65; font-size: 0.85em; }
+
+        .conn-label {
+            font-size: 0.75em;
+            opacity: 0.75;
+        }
+
+        /* Signal bar — matches index.html band-badge style colours */
+        .signal-bar-wrap {
+            margin: 10px 0 6px;
+        }
+
+        .signal-bar-track {
+            width: 100%;
+            height: 16px;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .signal-bar-fill {
+            height: 100%;
+            width: 0%;
+            border-radius: 8px;
+            background: linear-gradient(90deg, var(--excellent) 0%, var(--ok) 100%);
+            transition: width 0.15s ease, background 0.3s ease;
+        }
+
+        .signal-bar-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.68em;
+            opacity: 0.55;
+            margin-top: 2px;
+            padding: 0 2px;
+        }
+
+        .signal-values {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85em;
+            margin-top: 6px;
+        }
+
+        .signal-dbfs {
+            font-weight: bold;
+            font-size: 1.05em;
+        }
+
+        .signal-snr {
+            opacity: 0.8;
+        }
+
+        /* Channel assignment button group */
+        .ch-btn-group {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .ch-btn {
+            flex: 1;
+            padding: 7px 0;
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            font-size: 0.82em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--panel);
+            color: var(--text);
+        }
+
+        .ch-btn:hover:not(:disabled) {
+            background: var(--panel-hover);
+            color: var(--text);
+        }
+
+        .ch-btn:disabled {
+            background: var(--panel);
+            color: var(--dim);
+            cursor: not-allowed;
+            border-color: var(--panel);
+        }
+
+        /* Left button active */
+        .ch-btn[data-ch="left"].active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        /* Both/centre button active */
+        .ch-btn[data-ch="both"].active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        /* Right button active */
+        .ch-btn[data-ch="right"].active {
+            background: var(--ok);
+            border-color: var(--ok);
+            color: var(--text);
+        }
+
+        /* Channel assignment badge (top of tile) */
+        .channel-badge {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.68em;
+            font-weight: bold;
+            padding: 2px 12px;
+            border-radius: 10px;
+            white-space: nowrap;
+            display: none;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .ch-left-badge {
+            display: block;
+            background: var(--accent);
+            color: var(--text);
+        }
+
+        .ch-right-badge {
+            display: block;
+            background: var(--ok);
+            color: var(--text);
+        }
+
+        .ch-both-badge {
+            display: block;
+            background: var(--accent);
+            color: var(--text);
+        }
+
+        /* Tile border colours for channel assignment */
+        .meter-tile.ch-left {
+            border-color: var(--accent);
+            background: var(--accent-dim);
+            box-shadow: 0 0 20px var(--accent-dim);
+        }
+
+        .meter-tile.ch-right {
+            border-color: var(--ok);
+            background: var(--ok);
+            box-shadow: 0 0 20px var(--ok);
+        }
+
+        .meter-tile.ch-both {
+            border-color: var(--accent);
+            background: var(--accent-dim);
+            box-shadow: 0 0 20px var(--accent-dim);
+        }
+
+        .meter-connect-link {
+            display: block;
+            text-align: center;
+            margin-top: 7px;
+            font-size: 0.75em;
+            color: var(--dim);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .meter-connect-link:hover {
+            color: var(--text);
+        }
+
+        /* Open SDR badge in select cards — overrides block meter-connect-link style */
+        .open-sdr-badge {
+            display: inline-block !important;
+            text-align: left !important;
+            margin-top: 0 !important;
+            font-size: 0.7em !important;
+            color: var(--text) !important;
+            background: var(--accent);
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .open-sdr-badge:hover {
+            background: var(--accent-dim);
+            color: var(--text) !important;
+        }
+
+        /* Empty state */
+        .no-instances {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2em;
+            opacity: 0.8;
+        }
+
+        /* Footer */
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid var(--panel-hover);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: var(--ok);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: var(--ok);
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8em; }
+            .select-grid  { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+            .monitor-grid { grid-template-columns: 1fr; }
+        }
+
+        /* ── Smart Listen modal freq/mode row ── */
+        .snr-modal-freq-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding: 10px 14px;
+            background: var(--panel);
+            border-radius: 8px;
+            border: 1px solid var(--panel);
+        }
+
+        .snr-modal-freq-label {
+            font-size: 0.78em;
+            opacity: 0.65;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .snr-modal-freq-display {
+            font-size: 1.05em;
+            font-weight: bold;
+            color: var(--accent);
+            white-space: nowrap;
+            min-width: 110px;
+        }
+
+        .snr-modal-freq-input {
+            width: 120px;
+            padding: 5px 10px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .snr-modal-freq-input:focus {
+            outline: none;
+            border-color: var(--accent-dim);
+            background: var(--panel);
+        }
+
+        .snr-modal-freq-input.invalid {
+            border-color: var(--danger);
+            background: var(--danger);
+        }
+
+        .snr-modal-mode-btn {
+            padding: 4px 10px;
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 0.82em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+
+        .snr-modal-mode-btn:hover {
+            background: var(--accent-dim);
+        }
+
+        .snr-modal-mode-btn.overridden {
+            background: var(--accent-dim);
+            border-color: var(--accent-dim);
+        }
+
+        .snr-modal-modality-toggle {
+            display: flex;
+            border: 1px solid var(--panel-hover);
+            border-radius: 5px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .snr-modal-modality-btn {
+            padding: 4px 9px;
+            background: transparent;
+            border: none;
+            color: var(--dim);
+            font-size: 0.78em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .snr-modal-modality-btn:not(:last-child) {
+            border-right: 1px solid var(--panel-hover);
+        }
+
+        .snr-modal-modality-btn:hover {
+            background: var(--panel);
+            color: var(--text);
+        }
+
+        .snr-modal-modality-btn.active {
+            background: var(--accent-dim);
+            color: var(--text);
+        }
+
+        .snr-modal-nudge-group {
+            display: flex;
+            gap: 3px;
+            flex-wrap: wrap;
+        }
+
+        .snr-modal-nudge-btn {
+            padding: 4px 7px;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 4px;
+            color: var(--text);
+            font-size: 0.72em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.12s;
+            white-space: nowrap;
+        }
+
+        .snr-modal-nudge-btn:hover {
+            background: var(--panel-hover);
+            color: var(--text);
+        }
+
+        .snr-modal-nudge-btn:active {
+            transform: scale(0.94);
+        }
+
+        .snr-modal-band-row {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .snr-modal-band-btn {
+            padding: 3px 7px;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 4px;
+            color: var(--text);
+            font-size: 0.72em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.12s, box-shadow 0.12s;
+            white-space: nowrap;
+        }
+
+        .snr-modal-band-btn:hover {
+            background: var(--panel);
+        }
+
+        .snr-modal-band-btn.active-band {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            box-shadow: 0 0 5px var(--accent-dim);
+        }
+
+        /* ── Smart Listen button pulse ── */
+        @keyframes smart-listen-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 transparent; }
+            50%       { box-shadow: 0 0 8px 3px var(--ok); }
+        }
+
+        #snrHistoryBtn {
+            animation: smart-listen-pulse 2.4s ease-in-out infinite;
+        }
+
+        /* ── SNR History Modal ── */
+        .snr-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .snr-modal-overlay.open {
+            display: flex;
+        }
+
+        .snr-modal {
+            background: var(--bg);
+            border: 1px solid var(--panel-hover);
+            border-radius: 14px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+            padding: 24px;
+            width: min(900px, 95vw);
+            max-height: 92vh;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            position: relative;
+        }
+
+        /* ── Audio unlock overlay (inside Smart Listen modal) ── */
+        .audio-unlock-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--panel);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            cursor: pointer;
+        }
+
+        .audio-unlock-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .audio-unlock-icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: var(--ok);
+            border: 3px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            color: var(--text);
+            box-shadow: 0 0 24px var(--ok);
+            transition: transform 0.15s, background 0.15s;
+        }
+
+        .audio-unlock-overlay:hover .audio-unlock-icon {
+            transform: scale(1.08);
+            background: var(--ok);
+        }
+
+        .audio-unlock-text {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: var(--text);
+            letter-spacing: 0.04em;
+        }
+
+        .snr-modal-header {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .snr-modal-header h2 {
+            margin: 0;
+            font-size: 1.3em;
+        }
+
+        .snr-modal-close {
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 1.1em;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .snr-modal-close:hover {
+            background: var(--panel-hover);
+        }
+
+        .snr-modal-chart-wrap {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            height: 380px;
+        }
+
+        /* ── Best-time stacked bar graphs ── */
+        .best-time-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .best-time-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .best-time-label {
+            font-size: 0.75em;
+            opacity: 0.75;
+            font-weight: bold;
+            letter-spacing: 0.03em;
+        }
+
+        .best-time-track {
+            width: 100%;
+            height: 18px;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 9px;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .best-time-segment {
+            height: 100%;
+            transition: width 0.3s ease;
+            position: relative;
+            min-width: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* border-radius applied inline by JS based on first/last visible segment */
+        }
+
+        .best-time-seg-label {
+            font-size: 0.65em;
+            font-weight: bold;
+            color: var(--text);
+            white-space: nowrap;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+            line-height: 1;
+        }
+
+        /* Custom audio output device dropdown */
+        .audio-output-wrap {
+            position: relative;
+            display: none; /* shown by JS when monitoring starts */
+            min-width: 80px;
+            max-width: 180px;
+            font-size: 0.8em;
+            user-select: none;
+        }
+
+        .audio-output-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            padding: 4px 8px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+        }
+
+        .audio-output-btn:hover {
+            background: var(--panel-hover);
+            border-color: var(--border);
+        }
+
+        .audio-output-btn .chevron {
+            flex-shrink: 0;
+            opacity: 0.7;
+            font-size: 0.75em;
+            transition: transform 0.15s;
+        }
+
+        .audio-output-wrap.open .chevron {
+            transform: rotate(180deg);
+        }
+
+        .audio-output-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .audio-output-list {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            min-width: 100%;
+            max-width: 260px;
+            background: var(--panel-hover);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            z-index: 1000;
+            overflow: hidden;
+        }
+
+        .audio-output-wrap.open .audio-output-list {
+            display: block;
+        }
+
+        .audio-output-item {
+            padding: 7px 12px;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 0.95em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.1s;
+        }
+
+        .audio-output-item:hover {
+            background: var(--panel);
+        }
+
+        .audio-output-item.selected {
+            background: var(--accent-dim);
+            font-weight: bold;
+        }
+
+        /* Fix white-on-white dropdown options on Windows — use OS default colours */
+        #playBestHoldSelect option {
+            background: initial;
+            color: initial;
+        }
+
+        /* ── Sessions dropdown + button ── */
+        .sessions-wrap {
+            position: relative;
+            display: inline-block;
+        }
+
+        .sessions-load-btn {
+            padding: 8px 12px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.9em;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sessions-load-btn:hover {
+            background: var(--panel-hover);
+        }
+
+        .sessions-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            min-width: 220px;
+            max-width: 320px;
+            background: var(--panel-hover);
+            border: 1px solid var(--panel-hover);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            z-index: 500;
+            overflow: hidden;
+        }
+
+        .sessions-wrap.open .sessions-dropdown {
+            display: block;
+        }
+
+        .sessions-dropdown-item {
+            padding: 9px 14px;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 0.88em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            transition: background 0.1s;
+            border-bottom: 1px solid var(--panel);
+        }
+
+        .sessions-dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .sessions-dropdown-item:hover {
+            background: var(--panel);
+        }
+
+        .sessions-dropdown-item .sess-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sessions-dropdown-item .sess-meta {
+            font-size: 0.78em;
+            opacity: 0.6;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .sessions-dropdown-empty {
+            padding: 14px;
+            text-align: center;
+            font-size: 0.85em;
+            opacity: 0.6;
+        }
+
+        .sessions-dropdown-footer {
+            padding: 8px 10px;
+            border-top: 1px solid var(--panel);
+            display: flex;
+            justify-content: center;
+        }
+
+        /* ── Resume session overlay ── */
+        .resume-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2200;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .resume-overlay.open {
+            display: flex;
+        }
+
+        .resume-modal {
+            background: var(--bg);
+            border: 1px solid var(--panel-hover);
+            border-radius: 14px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+            padding: 32px 36px;
+            width: min(480px, 92vw);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            text-align: center;
+        }
+
+        .resume-modal-icon {
+            font-size: 2.4em;
+            line-height: 1;
+        }
+
+        .resume-modal-title {
+            font-size: 1.15em;
+            font-weight: 700;
+            color: var(--text);
+            margin: 0;
+        }
+
+        .resume-modal-desc {
+            font-size: 0.9em;
+            color: var(--text);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .resume-modal-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+        }
+
+        /* ── Sessions manage modal ── */
+        .sess-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sess-modal-overlay.open {
+            display: flex;
+        }
+
+        .sess-modal {
+            background: var(--bg);
+            border: 1px solid var(--panel-hover);
+            border-radius: 14px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+            padding: 24px;
+            width: min(560px, 95vw);
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow: hidden;
+        }
+
+        .sess-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .sess-modal-header h2 {
+            margin: 0;
+            font-size: 1.25em;
+        }
+
+        .sess-modal-close {
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 1.1em;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .sess-modal-close:hover {
+            background: var(--panel-hover);
+        }
+
+        .sess-save-row {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .sess-name-input {
+            flex: 1;
+            padding: 9px 12px;
+            background: var(--panel);
+            border: 1px solid var(--panel-hover);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.9em;
+            transition: border-color 0.15s;
+        }
+
+        .sess-name-input::placeholder {
+            color: var(--dim);
+        }
+
+        .sess-name-input:focus {
+            outline: none;
+            border-color: var(--accent-dim);
+        }
+
+        .sess-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-height: 0;
+        }
+
+        .sess-list-empty {
+            text-align: center;
+            padding: 30px;
+            opacity: 0.6;
+            font-size: 0.9em;
+        }
+
+        .sess-item {
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 8px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sess-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sess-item-name {
+            font-weight: bold;
+            font-size: 0.95em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .sess-item-meta {
+            font-size: 0.75em;
+            opacity: 0.65;
+            margin-top: 2px;
+        }
+
+        .sess-item-actions {
+            display: flex;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .sess-item-btn {
+            padding: 4px 9px;
+            border-radius: 5px;
+            border: 1px solid var(--panel-hover);
+            background: var(--panel);
+            color: var(--text);
+            font-size: 0.78em;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+
+        .sess-item-btn:hover {
+            background: var(--panel-hover);
+        }
+
+        .sess-item-btn.danger:hover {
+            background: var(--danger);
+            border-color: var(--danger);
+        }
+
+        .sess-modal-footer {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        /* ── Follower join splash ── */
+        .follower-join-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: var(--panel);
+            z-index: 2500;
+            align-items: center;
+            justify-content: center;
+        }
+        .follower-join-overlay.open { display: flex; }
+        .follower-join-box {
+            background: var(--panel);
+            border: 1px solid var(--accent-dim);
+            border-radius: 16px;
+            padding: 36px 40px;
+            text-align: center;
+            max-width: 420px;
+            width: 90vw;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+        }
+        .follower-join-icon { font-size: 2.2em; margin-bottom: 12px; }
+        .follower-join-title {
+            font-size: 1.15em;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 6px;
+        }
+        .follower-join-name {
+            font-size: 1.05em;
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 16px;
+            word-break: break-all;
+        }
+        .follower-join-details {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .follower-join-detail {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+        }
+        .follower-join-detail-label {
+            font-size: 0.72em;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .follower-join-detail-value {
+            font-size: 1em;
+            color: var(--text);
+            font-weight: 600;
+        }
+        .follower-join-desc {
+            font-size: 0.82em;
+            color: var(--dim);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .follower-join-btn {
+            background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+            border: none;
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 1.05em;
+            font-weight: 600;
+            padding: 13px 32px;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.15s;
+            margin-bottom: 10px;
+        }
+        .follower-join-btn:hover { opacity: 0.88; }
+        .follower-join-exit {
+            font-size: 0.8em;
+            color: var(--dim);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px;
+        }
+        .follower-join-exit:hover { color: var(--text); }
+
+        /* ── My Shares list ── */
+        .my-share-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px solid var(--panel);
+        }
+        .my-share-item:last-child { border-bottom: none; }
+        .my-share-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+        .my-share-name {
+            font-size: 0.88em;
+            color: var(--text);
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .my-share-freq {
+            font-size: 0.78em;
+            color: var(--dim);
+        }
+        .my-share-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        /* ── Share session button (toolbar + SNR modal) ── */
+        .share-session-btn {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            border-radius: 7px;
+            padding: 6px 14px;
+            font-size: 0.88em;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+            white-space: nowrap;
+        }
+        .share-session-btn:hover {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+        }
+        /* Hide share buttons when in follower mode */
+        body.follower-locked .share-session-btn { display: none !important; }
+
+        .share-session-btn.active {
+            background: var(--ok);
+            border-color: var(--ok);
+            color: var(--ok);
+        }
+        .share-session-btn .share-live-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--ok);
+            margin-left: 5px;
+            vertical-align: middle;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* ── Share modal overlay ── */
+        .share-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2300;
+            align-items: center;
+            justify-content: center;
+        }
+        .share-modal-overlay.open {
+            display: flex;
+        }
+        .share-modal {
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 12px;
+            padding: 0;
+            width: 480px;
+            max-width: 95vw;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+            display: flex;
+            flex-direction: column;
+        }
+        .share-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 22px 14px;
+            border-bottom: 1px solid var(--panel);
+        }
+        .share-modal-header h2 {
+            margin: 0;
+            font-size: 1.05em;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .share-modal-close {
+            background: none;
+            border: none;
+            color: var(--dim);
+            font-size: 1.1em;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: color 0.15s;
+        }
+        .share-modal-close:hover { color: var(--text); }
+        .share-modal-body {
+            padding: 20px 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .share-modal-label {
+            font-size: 0.82em;
+            color: var(--dim);
+            margin-bottom: 4px;
+        }
+        .share-name-input {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 7px;
+            color: var(--text);
+            font-size: 0.95em;
+            padding: 8px 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .share-name-input:focus { border-color: var(--accent); }
+        .share-name-input.invalid { border-color: var(--danger); }
+        .share-name-hint {
+            font-size: 0.78em;
+            color: var(--dim);
+            margin-top: 3px;
+        }
+        .share-name-hint.error { color: var(--danger); }
+        .share-url-box {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .share-url-input {
+            flex: 1;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 7px;
+            color: var(--accent);
+            font-size: 0.85em;
+            padding: 8px 12px;
+            outline: none;
+            cursor: text;
+            font-family: var(--mono);
+        }
+        .share-copy-btn {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            border-radius: 7px;
+            padding: 8px 14px;
+            font-size: 0.85em;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+        .share-copy-btn:hover { background: var(--accent-dim); }
+        .share-live-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.83em;
+            color: var(--ok);
+        }
+        .share-live-status .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--ok);
+            flex-shrink: 0;
+            animation: pulse 1.5s infinite;
+        }
+        .share-modal-footer {
+            padding: 14px 22px 18px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            border-top: 1px solid var(--panel);
+        }
+        .share-desc {
+            font-size: 0.83em;
+            color: var(--dim);
+            line-height: 1.5;
+        }
+
+        /* ── Rig control (Hamlib over Web Serial) ── */
+        .rig-control-btn {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            border-radius: 7px;
+            padding: 6px 14px;
+            font-size: 0.88em;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+            white-space: nowrap;
+        }
+        .rig-control-btn:hover {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+        }
+        .rig-control-btn.active {
+            background: var(--ok);
+            border-color: var(--ok);
+            color: var(--ok);
+        }
+
+        .rig-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2300;
+            align-items: center;
+            justify-content: center;
+        }
+        .rig-modal-overlay.open { display: flex; }
+        .rig-modal {
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 12px;
+            width: 540px;
+            max-width: 95vw;
+            max-height: 92vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+            display: flex;
+            flex-direction: column;
+        }
+        .rig-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 22px 14px;
+            border-bottom: 1px solid var(--panel);
+        }
+        .rig-modal-header h2 {
+            margin: 0;
+            font-size: 1.05em;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .rig-modal-body {
+            padding: 18px 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .rig-modal-footer {
+            padding: 14px 22px 18px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            border-top: 1px solid var(--panel);
+        }
+        .rig-label {
+            font-size: 0.82em;
+            color: var(--dim);
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .rig-input, .rig-select {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            border-radius: 7px;
+            color: var(--text);
+            font-size: 0.9em;
+            padding: 8px 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .rig-input:focus, .rig-select:focus { border-color: var(--accent); }
+        .rig-select:disabled { opacity: 0.55; cursor: not-allowed; }
+        .rig-select option, .rig-select optgroup { background: var(--panel); }
+        .rig-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        /* Radio picker: type-to-filter list on top of a hidden <select> */
+        .rig-combobox { position: relative; }
+        .rig-combobox-input { padding-right: 34px; }
+        .rig-combobox-input:disabled { opacity: 0.6; cursor: not-allowed; }
+        .rig-combobox-clear {
+            position: absolute;
+            top: 50%;
+            right: 6px;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            line-height: 1;
+            padding: 0;
+            background: transparent;
+            border: none;
+            color: var(--dim);
+            font-size: 1.3em;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .rig-combobox-clear:hover {
+            color: var(--text);
+            background: var(--panel);
+        }
+        .rig-combobox-list {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            max-height: 260px;
+            overflow-y: auto;
+            background: var(--panel);
+            border: 1px solid var(--accent-dim);
+            border-radius: 7px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+            z-index: 50;
+        }
+        .rig-combobox-group {
+            position: sticky;
+            top: 0;
+            padding: 5px 10px;
+            background: var(--bg);
+            color: var(--accent);
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .rig-combobox-option {
+            padding: 7px 10px;
+            color: var(--text);
+            font-size: 0.88em;
+            cursor: pointer;
+        }
+        .rig-combobox-option:hover,
+        .rig-combobox-option.is-active {
+            background: var(--accent-dim);
+            color: var(--text);
+        }
+        .rig-combobox-empty {
+            padding: 10px;
+            color: var(--dim);
+            font-size: 0.85em;
+            font-style: italic;
+        }
+        .rig-dir-group { display: flex; gap: 8px; }
+        .rig-dir-btn {
+            flex: 1;
+            background: var(--panel);
+            border: 1px solid var(--panel);
+            color: var(--text);
+            border-radius: 7px;
+            padding: 9px 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .rig-dir-btn:hover:not(:disabled) { background: var(--panel); }
+        .rig-dir-btn.active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--text);
+            font-weight: 600;
+        }
+        .rig-dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Rig state readout — shows what the radio itself reports */
+        .rig-display {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--panel);
+            border-radius: 9px;
+            padding: 12px 16px;
+        }
+        .rig-display-main { flex: 1; }
+        .rig-display-freq {
+            font-family: var(--mono);
+            font-size: 1.5em;
+            font-weight: 700;
+            color: var(--ok);
+            letter-spacing: 1px;
+        }
+        .rig-display-unit {
+            font-size: 0.7em;
+            color: var(--dim);
+            margin-left: 4px;
+        }
+        .rig-display-mode {
+            font-family: var(--mono);
+            font-size: 0.95em;
+            font-weight: 700;
+            color: var(--accent);
+            min-width: 52px;
+            text-align: center;
+        }
+        .rig-display-state {
+            font-family: var(--mono);
+            font-size: 0.95em;
+            font-weight: 700;
+            border-radius: 5px;
+            padding: 3px 9px;
+            color: var(--dim);
+            border: 1px solid var(--panel);
+        }
+        .rig-display-state.rx { color: var(--ok); border-color: var(--ok); }
+        .rig-display-state.tx {
+            color: var(--text);
+            background: var(--danger);
+            border-color: var(--danger);
+        }
+        .rig-status {
+            font-size: 0.83em;
+            line-height: 1.4;
+            color: var(--dim);
+        }
+        .rig-status-idle  { color: var(--dim); }
+        .rig-status-ok    { color: var(--ok); }
+        .rig-status-error { color: var(--danger); }
+        .rig-status-info  { color: var(--accent); }
+        .rig-log {
+            max-height: 150px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--panel);
+            border-radius: 7px;
+            padding: 8px 10px;
+            font-family: var(--mono);
+            font-size: 0.74em;
+            line-height: 1.45;
+            color: var(--text);
+        }
+        .rig-log-info    { color: var(--text); }
+        .rig-log-success { color: var(--ok); }
+        .rig-log-warning { color: var(--good); }
+        .rig-log-error   { color: var(--danger); }
+        .rig-note {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            border-radius: 7px;
+            padding: 9px 12px;
+            font-size: 0.82em;
+            color: var(--accent);
+            line-height: 1.5;
+        }
+        .rig-error-box {
+            background: var(--danger);
+            border: 1px solid var(--danger);
+            border-radius: 7px;
+            padding: 10px 12px;
+            font-size: 0.83em;
+            color: var(--danger);
+            line-height: 1.5;
+        }
+        .rig-desc {
+            font-size: 0.8em;
+            color: var(--dim);
+            line-height: 1.5;
+        }
+
+        /* ── Follower banner ── */
+        .follower-banner {
+            background: linear-gradient(135deg, var(--ok), var(--accent-dim));
+            border: 1px solid var(--ok);
+            border-radius: 9px;
+            padding: 10px 16px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .follower-banner.visible { display: flex; }
+        .follower-banner-icon { font-size: 1.1em; }
+        .follower-banner-text {
+            flex: 1;
+            font-size: 0.88em;
+            color: var(--ok);
+        }
+        .follower-banner-name {
+            font-weight: 600;
+            color: var(--ok);
+        }
+        .follower-banner-freq {
+            font-size: 0.82em;
+            color: var(--dim);
+            margin-left: 6px;
+        }
+        .follower-exit-btn {
+            background: var(--danger);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .follower-exit-btn:hover { background: var(--danger); }
+        .follower-copy-btn {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .follower-copy-btn:hover { background: var(--accent-dim); }
+
+        /* ── Follower locked controls ── */
+        body.follower-locked .freq-slider,
+        body.follower-locked .freq-input,
+        body.follower-locked .freq-step-btn,
+        body.follower-locked .band-jump-btn,
+        body.follower-locked .modality-btn,
+        body.follower-locked .mode-indicator,
+        body.follower-locked .select-card,
+        body.follower-locked #startMonitorBtn,
+        body.follower-locked #refreshBtn,
+        body.follower-locked .snr-modal-freq-input,
+        body.follower-locked .snr-modal-nudge-btn,
+        body.follower-locked .snr-modal-mode-btn,
+        body.follower-locked .snr-modal-modality-btn,
+        body.follower-locked .snr-modal-band-btn {
+            pointer-events: none;
+            opacity: 0.45;
+        }
+
+        /* ── Session-ended overlay ── */
+        .share-ended-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 2400;
+            align-items: center;
+            justify-content: center;
+        }
+        .share-ended-overlay.open { display: flex; }
+        .share-ended-box {
+            background: var(--panel);
+            border: 1px solid var(--danger);
+            border-radius: 12px;
+            padding: 32px 36px;
+            text-align: center;
+            max-width: 360px;
+        }
+        .share-ended-box h2 { margin: 0 0 10px; font-size: 1.1em; color: var(--danger); }
+        .share-ended-box p { margin: 0 0 20px; font-size: 0.88em; color: var(--dim); }
+
+/* =========================================================================
+   Fitting the chooser
+   ========================================================================= */
+
+/* The dark tiles, by the same means every other UberSDR map uses: OSM serves
+   one set of tiles and they are a light map, so the filter is what makes them
+   sit in a dark interface rather than a second tile source being fetched.
+   The same declaration as chooser.css's `.map .leaflet-tile`, which took it
+   from v2, which took it from v1 — a recipe rather than a calculation, and a
+   map that looked nearly like the others would be worse than one that looked
+   nothing like them. */
+#instanceMap .leaflet-tile {
+    filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+/* Leaflet's own chrome is built for a light map. Left alone it is a white
+   zoom control and a white popup on a dark page — the same mismatch the tiles
+   had. */
+#instanceMap {
+    border: 1px solid var(--border);
+    background: #0e1420;
+    isolation: isolate;
+}
+#instanceMap .leaflet-control-zoom a {
+    background: var(--panel);
+    border-color: var(--border);
+    color: var(--text);
+}
+#instanceMap .leaflet-control-zoom a:hover { background: var(--panel-hover); }
+#instanceMap .leaflet-popup-content-wrapper,
+#instanceMap .leaflet-popup-tip {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+#instanceMap .leaflet-container { font: inherit; }
+
+/* The page's heading was 2.5em centred with a drop shadow over the gradient.
+   The chooser's header is a line of text at the top of a window, and this is a
+   window in the same application. */
+h1 {
+    font-size: 1.35em;
+    font-weight: 650;
+    text-align: left;
+    margin-bottom: 2px;
+}
+.subtitle {
+    text-align: left;
+    font-size: 0.86em;
+    color: var(--dim);
+    margin-bottom: 16px;
+    opacity: 1;
+}
+body { padding: 14px 18px 18px; }
+.container { max-width: none; }
+
+/* Flags.
+
+   countryFlag() in multi_monitor.js now builds them from regional indicator
+   pairs, as chooser.js does, instead of fetching an SVG per country from a
+   /flags/ directory that only the collector has. That means there is nothing to
+   style but the size: the face comes from `--font` on `body` in chooser.css,
+   inherited, and naming it again here would be a second place for it to drift.
+   Matches `.drow .flag` there. */
+.flag { font-size: 13px; }
+
+/* Leaflet's tooltips, which is what this map uses where the chooser uses
+   popups. Same reasoning as the zoom control above — the library's own styling
+   is a white box for a light map. */
+#instanceMap .leaflet-tooltip {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: none;
+}
+#instanceMap .leaflet-tooltip-top::before { border-top-color: var(--border); }
+#instanceMap .leaflet-tooltip-bottom::before { border-bottom-color: var(--border); }
+#instanceMap .leaflet-tooltip-left::before { border-left-color: var(--border); }
+#instanceMap .leaflet-tooltip-right::before { border-right-color: var(--border); }
+
+/* -------------------------------------------------------------------------
+   Edges and selection
+
+   Two things the palette swap could not fix on its own, because they were not
+   colour choices — they were the absence of one.
+
+   Upstream, a card sits on a translucent white panel over a blue gradient, and
+   that is enough to see its shape: the background does the work an edge would.
+   On an opaque dark ground it is not. The cards had `border: 2px solid
+   transparent` and a hover that changed nothing but a shadow, so they read as
+   floating text rather than as objects.
+
+   And selection filled the whole card with `--accent-dim`. Over a gradient that
+   is a tint; over `--panel` it is a slab of mid-blue with the row's own text
+   still on top of it — which is where "garish" and "hard to read" meet.
+
+   So both follow `.drow` in chooser.css, which is the same control in the same
+   application: an edge always, `--panel-hover` on hover, and selection said
+   with the border rather than a wash.
+   ------------------------------------------------------------------------- */
+
+.select-card, .meter-tile {
+    border: 1px solid var(--border);
+}
+.select-card:hover, .meter-tile:hover {
+    background: var(--panel-hover);
+    border-color: var(--accent-dim);
+}
+.select-card.selected {
+    border-color: var(--accent);
+    background: var(--panel-hover);
+}
+/* The tick keeps the accent as a fill, because it is 18px and the fill is what
+   makes it a tick rather than an outline. */
+.select-card.selected .select-card-check {
+    background: var(--accent);
+    color: var(--bg);
+}
+/* Hover while already selected must not read as deselected. */
+.select-card.selected:hover { border-color: var(--accent); }
+
+/* The same for the small segmented controls: an active segment is the accent,
+   but as a legible pairing rather than white-on-mid-blue. */
+.modality-btn.active,
+.snr-modal-modality-btn.active,
+.select-sort-btn.active,
+.select-sort-btn.active:hover,
+.rig-dir-btn.active,
+.ch-btn.active,
+.band-jump-btn.active-band,
+.snr-modal-band-btn.active-band,
+.audio-output-item.selected {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+/* Modals. Each is a panel on top of a panel, and without an edge of its own it
+   merges into the page behind it — the same problem the cards had, one layer
+   up. All five the page actually defines, rather than a guess at the naming:
+   the overlays are the scrims, these are the sheets. */
+.snr-modal, .share-modal, .rig-modal, .sess-modal, .resume-modal {
+    border: 1px solid var(--border);
+}
+
+/* -------------------------------------------------------------------------
+   Contrast
+
+   The palette swap moved backgrounds and text independently, and in a handful
+   of rules they landed on the same token — a danger-coloured button on a
+   danger-coloured ground, invisible. Others kept upstream's pairing of a pale
+   tint against a saturated fill, which stops working once the tint is opaque.
+
+   Rather than nudge each one, these follow the two conventions chooser.css
+   already sets, which solve the contrast as a side effect of matching:
+
+     buttons   `--accent-dim` at rest, `--accent` on hover, `--text` on top;
+               destructive ones transparent with a danger border and label
+     badges    never filled with a status colour. Coloured text on a
+               transparent ground with a tinted border — see `.badge.excellent`
+               there. A filled badge puts light text on mid-green and reads
+               worse the more it is meant to stand out.
+   ------------------------------------------------------------------------- */
+
+.btn-primary,
+.rig-control-btn.active,
+.share-session-btn.active {
+    background: var(--accent-dim);
+    border: 1px solid transparent;
+    color: var(--text);
+}
+.btn-primary:hover,
+.rig-control-btn.active:hover,
+.share-session-btn.active:hover { background: var(--accent); }
+
+.btn-success {
+    background: transparent;
+    border: 1px solid var(--ok);
+    color: var(--ok);
+}
+.btn-success:hover { background: var(--panel-hover); }
+
+.btn-danger, .follower-exit-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--danger);
+}
+.btn-danger:hover, .follower-exit-btn:hover { border-color: var(--danger); }
+
+/* Badges: the chooser's treatment, not a fill. */
+.status-badge {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--dim);
+}
+.status-badge.online     { color: var(--excellent); border-color: rgba(34, 197, 94, 0.35); }
+.status-badge.offline,
+.status-badge.full-badge { color: var(--danger);    border-color: rgba(208, 86, 86, 0.35); }
+.status-badge.slots,
+.status-badge.feature    { color: var(--accent);    border-color: rgba(76, 141, 255, 0.35); }
+.status-badge.no-audio   { color: var(--dim);       border-color: var(--border); }
+
+/* Channel badges say left/right/both at a glance and are the one place a fill
+   earns its keep — so the label goes dark against it rather than light. */
+.ch-left-badge, .ch-right-badge, .ch-both-badge { color: var(--bg); font-weight: 650; }
+
+/* Panels that were a pale label on a saturated tint. */
+.follower-copy-btn, .share-copy-btn, .rig-note, .rig-error-box {
+    color: var(--text);
+}
+.rig-error-box {
+    background: transparent;
+    border: 1px solid var(--danger);
+}
+.rig-display-state.tx { color: var(--bg); }
+
+/* The two toolbar buttons that kept upstream's pale-blue-on-blue at rest.
+   `--accent` text on `--accent-dim` is 2.09:1 — the same pairing that worked
+   over a gradient and does not over a solid. The chooser's `button` is
+   `--accent-dim` with `--text`, which is what these should have been. */
+.share-session-btn, .rig-control-btn {
+    background: var(--accent-dim);
+    border: 1px solid transparent;
+    color: var(--text);
+}
+.share-session-btn:hover, .rig-control-btn:hover {
+    background: var(--accent);
+    border-color: transparent;
+}
+
+/* Destructive buttons stay outlined on hover rather than filling. Their
+   upstream `:hover` still set a danger-coloured background, which the earlier
+   override left in place because it only touched the border — light text on
+   mid-red, 3.35:1. `button.danger:hover` in chooser.css keeps the ground and
+   brightens the edge. */
+.btn-danger:hover, .follower-exit-btn:hover, .sess-item-btn.danger:hover {
+    background: transparent;
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+/* The channel buttons carry a data attribute, so `.ch-btn.active` alone loses
+   to `.ch-btn[data-ch="right"].active` on specificity and the earlier rule
+   never applied to them. */
+.ch-btn[data-ch="left"].active,
+.ch-btn[data-ch="right"].active,
+.ch-btn[data-ch="both"].active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+/* The badge override above set `background: transparent` on `.status-badge`,
+   which loses to upstream's `.status-badge.online` — same colour text on same
+   colour fill, 1.0:1, invisible. The reset has to be at the specificity of the
+   rule it is undoing, not of the element. */
+.status-badge.online,
+.status-badge.offline,
+.status-badge.full-badge,
+.status-badge.slots,
+.status-badge.feature,
+.status-badge.no-audio {
+    background: transparent;
+}
+
+/* The one badge that stays filled, so it reads as a call to action rather than
+   a label — dark text on it, as the channel badges do. */
+.open-sdr-badge {
+    background: var(--accent-dim);
+    color: var(--text);
+    border: 1px solid var(--accent);
+}
+
+/* The status bar spans the page and carries a sentence. Dark text on the
+   status colour, which is the readable direction on all three. */
+.status-bar.success, .status-bar.error, .status-bar.loading { color: var(--bg); }
+.status-bar.loading { background: var(--accent); }
+
+/* A 72px play triangle on a green disc. Dark on the disc rather than light —
+   at 2em the shape carries, but light-on-green is the weaker of the two and
+   this is the one control on a blocking overlay. */
+.audio-unlock-icon { color: var(--bg); }

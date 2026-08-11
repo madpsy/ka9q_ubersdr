@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Monitor multiple UberSDR SDR receiver instances simultaneously with live audio, spectrum, and spot data.">
+    <title>UberSDR Multi-Monitor</title>
+    <!-- The only deviation from the upstream page in this file's markup: the
+         libraries are staged into vendor/ by build.sh rather than sitting flat
+         beside the source, because .gitignore excludes staged libraries by
+         directory and a flat layout is one forgotten line away from committing
+         a megabyte of somebody else's code. The five .js files this page loads
+         at the end of the body are ours and stay where they are.
+
+         fonts.css and all.min.css are gone rather than staged — see README.md;
+         between them they provide one icon and a @font-face the chooser
+         already declares. -->
+    <link rel="stylesheet" href="vendor/leaflet.css">
+    <script src="vendor/leaflet.js"></script>
+    <script src="vendor/L.Terminator.js"></script>
+    <script src="vendor/chart.umd.min.js"></script>
+    <script src="vendor/opus-decoder.min.js"></script>
+    <script src="minimal-radio.js"></script>
+    <!-- chooser.css first, then ours: the same arrangement serial/serial.css
+         uses, and for the same reason — the palette, the reset, `body`, the
+         Twemoji flag @font-face and the scrollbars are the client's, not this
+         page's. It is staged beside this file by build.sh so its own
+         url('vendor/twemoji-flags.woff2') resolves.
+
+         The 2,400-line <style> block that was here is now monitor.css. -->
+    <link rel="stylesheet" href="chooser.css">
+    <link rel="stylesheet" href="monitor.css">
+</head>
+<body>
+    <div class="container">
+        <h1><img src="vendor/logo.png" alt="UberSDR" style="height: 1em; vertical-align: middle; margin-right: 0.2em;"> Multi-Monitor</h1>
+        <div class="subtitle">Select multiple SDR instances and monitor their signal levels simultaneously</div>
+
+        <!-- The collector's nav bar was here: seven links to sibling pages on
+             that site, plus a "Instances" link back to its front page. None of
+             them exists in this client — this is a window, not a site, and the
+             way out of it is to close it. Removed rather than repointed at the
+             public collector, which would be a row of buttons that quietly
+             leave the application. -->
+
+        <div id="status" class="status-bar loading" style="display:none;">Loading instances…</div>
+
+        <!-- Follower banner — shown when viewing a shared session as a follower -->
+        <div class="follower-banner" id="followerBanner">
+            <span class="follower-banner-icon">👁</span>
+            <span class="follower-banner-text">
+                Following: <span class="follower-banner-name" id="followerBannerName"></span>
+                <span class="follower-banner-freq" id="followerBannerFreq"></span>
+            </span>
+            <button class="follower-copy-btn" onclick="copyFollowerShareLink()" title="Copy share link">🔗 Copy Link</button>
+            <button class="follower-exit-btn" onclick="exitFollowerMode()">Exit Follow Mode</button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════
+             FREQUENCY CONTROL + MAP (shared between both phases)
+        ══════════════════════════════════════════════════════════ -->
+        <div class="freq-map-layout">
+            <!-- Left column: optional monitor toolbar + frequency panel -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+            <div id="monitor-toolbar-panel" class="panel" style="display:none; padding-top: 15px; padding-bottom: 15px; margin-bottom: 0;">
+                <div class="monitor-toolbar">
+                    <button class="btn btn-secondary" onclick="confirmStopMonitoring()">← Back to Selection</button>
+                    <div style="flex:1;"></div>
+                    <button class="btn btn-secondary" id="snrHistoryBtn" onclick="openSnrHistoryModal()">🔊 Smart Listen</button>
+                    <button class="share-session-btn" id="shareSessionBtn" onclick="openShareModal()" title="Share this session with others">🔗 Share</button>
+                    <button class="btn btn-secondary" id="nrToggleBtn" onclick="toggleNR()" title="Spectral Noise Reduction — processes each channel independently">🎛️ NR: Off</button>
+                    <button class="rig-control-btn" id="rigControlBtn" onclick="openRigModal()" title="Sync frequency and mode with a real radio over CAT (Hamlib via Web Serial)">📻 Rig Sync</button>
+                    <button class="btn btn-danger" id="stopAllBtn" onclick="stopAllAudio()">🔇 Stop All Audio</button>
+                </div>
+            </div>
+            <div class="panel">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <!-- Custom audio output device dropdown (shown by JS when monitoring starts) -->
+                    <div class="audio-output-wrap" id="audio-output-wrap" title="Audio output device">
+                        <button class="audio-output-btn" id="audio-output-btn" type="button" onclick="toggleAudioOutputDropdown()">
+                            <span class="audio-output-label" id="audio-output-label">🔊 Default</span>
+                            <span class="chevron">▼</span>
+                        </button>
+                        <div class="audio-output-list" id="audio-output-list">
+                            <div class="audio-output-item selected" data-device-id="">🔊 Default</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-left: auto;">
+                        <div class="frequency-display" id="freqDisplay">14.100 MHz</div>
+                        <div class="mode-indicator" id="modeIndicator" title="Click to toggle sideband" style="cursor:pointer;">USB</div>
+                        <div class="modality-toggle">
+                            <button class="modality-btn active" id="modalityPhone" onclick="setModality('phone')" title="Phone (SSB)">Phone</button>
+                            <button class="modality-btn" id="modalityCW" onclick="setModality('cw')" title="CW (±200 Hz)">CW</button>
+                        </div>
+                    </div>
+                </div>
+                <input type="range" id="freqSlider" class="freq-slider" min="0.1" max="30" step="0.000001" value="14.100000">
+                <div class="freq-markers">
+                    <span style="left:0%">0</span>
+                    <span style="left:16.67%">5</span>
+                    <span style="left:33.33%">10</span>
+                    <span style="left:50%">15</span>
+                    <span style="left:66.67%">20</span>
+                    <span style="left:83.33%">25</span>
+                    <span style="left:100%">30</span>
+                </div>
+                <div class="freq-input-group">
+                    <input type="number" id="freqInput" class="freq-input" placeholder="14.100000" step="0.000001" min="0.1" max="30" value="14.100000">
+                    <span class="freq-unit">MHz</span>
+                </div>
+                <div class="freq-step-row">
+                    <button class="freq-step-btn" onclick="nudgeFreq(-1000)">−1k Hz</button>
+                    <button class="freq-step-btn" onclick="nudgeFreq(-500)">−500 Hz</button>
+                    <button class="freq-step-btn" onclick="nudgeFreq(-100)">−100 Hz</button>
+                    <button class="freq-step-btn" onclick="nudgeFreq(+100)">+100 Hz</button>
+                    <button class="freq-step-btn" onclick="nudgeFreq(+500)">+500 Hz</button>
+                    <button class="freq-step-btn" onclick="nudgeFreq(+1000)">+1k Hz</button>
+                </div>
+                <small class="filter-hint" style="display: block; margin-top: 10px;" id="modeHint">
+                    Phone: LSB &lt; 10 MHz, USB ≥ 10 MHz • Bandwidth: 2.7 kHz
+                </small>
+            </div><!-- end frequency panel -->
+            <div id="band-filter-panel" class="panel" style="padding: 14px 20px;">
+                <!-- Band jump buttons -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                    <button class="band-jump-btn" onclick="jumpToBand('160m')">160m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('80m')">80m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('60m')">60m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('40m')">40m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('30m')">30m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('20m')">20m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('17m')">17m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('15m')">15m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('12m')">12m</button>
+                    <button class="band-jump-btn" onclick="jumpToBand('10m')">10m</button>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <span id="bandFilterLabel" style="font-size:0.82em; opacity:0.7; white-space:nowrap;">Band quality:</span>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.82em;cursor:pointer;">
+                        <input type="radio" name="bandQuality" value="" checked> Any
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.82em;cursor:pointer;">
+                        <input type="radio" name="bandQuality" value="fair"> Fair+
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.82em;cursor:pointer;">
+                        <input type="radio" name="bandQuality" value="good"> Good+
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.82em;cursor:pointer;">
+                        <input type="radio" name="bandQuality" value="excellent"> Excellent
+                    </label>
+                </div>
+            </div><!-- end band filter panel -->
+            </div><!-- end left column wrapper -->
+
+            <div class="panel" style="padding: 12px;">
+                <div id="instanceMap"></div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════
+             PHASE 1 — INSTANCE SELECTION
+        ══════════════════════════════════════════════════════════ -->
+        <div id="phase-select">
+            <div class="panel">
+                <!-- Filters + toolbar on one row -->
+                <div class="select-filter-row">
+                    <input type="text" id="selectSearch" class="filter-input" placeholder="🔎 Search callsign or location…" style="flex: 1; min-width: 180px; max-width: 320px;">
+                    <span class="select-count" id="selectCount">0 selected</span>
+                    <button class="btn btn-secondary" onclick="clearSelection()">Clear</button>
+                    <button class="btn btn-primary" id="startMonitorBtn" disabled onclick="startMonitoring()">
+                        📡 Start Monitoring
+                    </button>
+                    <!-- Sessions quick-load dropdown -->
+                    <div class="sessions-wrap" id="sessionsWrap">
+                        <button class="sessions-load-btn" onclick="toggleSessionsDropdown()" title="Load a saved session">
+                            💾 Sessions <span style="font-size:0.75em; opacity:0.8;">▼</span>
+                        </button>
+                        <div class="sessions-dropdown" id="sessionsDropdown">
+                            <div class="sessions-dropdown-empty" id="sessionsDropdownEmpty">No saved sessions yet</div>
+                            <div id="sessionsDropdownList"></div>
+                            <div class="sessions-dropdown-footer">
+                                <button class="btn btn-secondary" style="font-size:0.8em; padding:5px 12px;" onclick="closeSessionsDropdown(); openSessionsModal();">⚙ Manage Sessions</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" id="refreshBtn" onclick="refreshInstances()" title="Refresh instance list" style="margin-left: auto;"><i class="fas fa-rotate-right"></i></button>
+                </div>
+                <!-- Sort bar -->
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+                    <span style="font-size:0.82em; opacity:0.7; white-space:nowrap;">Sort:</span>
+                    <button class="btn btn-secondary select-sort-btn active" data-sort="snr"
+                            style="padding:4px 12px; font-size:0.82em;"
+                            onclick="applySelectSort('snr')">📡 SNR</button>
+                    <button class="btn btn-secondary select-sort-btn" data-sort="listeners"
+                            style="padding:4px 12px; font-size:0.82em;"
+                            onclick="applySelectSort('listeners')">👥 Listeners</button>
+                    <button class="btn btn-secondary select-sort-btn" data-sort="callsign"
+                            style="padding:4px 12px; font-size:0.82em;"
+                            onclick="applySelectSort('callsign')">🔤 Callsign</button>
+                </div>
+
+                <div id="selectGrid" class="select-grid">
+                    <!-- Compact instance cards injected here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════
+             PHASE 2 — MONITOR VIEW
+        ══════════════════════════════════════════════════════════ -->
+        <div id="phase-monitor">
+            <div id="monitorGrid" class="monitor-grid">
+                <!-- Meter tiles injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SNR HISTORY MODAL
+    ══════════════════════════════════════════════════════════ -->
+    <div class="snr-modal-overlay" id="snrModalOverlay" onclick="snrModalOverlayClick(event)">
+        <div class="snr-modal">
+            <div class="snr-modal-header">
+                <!-- Row 1: title + close always together -->
+                <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px;">
+                    <h2 style="margin:0; font-size:1.3em; min-width:0;">🔊 <span id="snrModalFreqMode">14.100 MHz · USB</span></h2>
+                    <button class="snr-modal-close" onclick="closeSnrHistoryModal()" style="flex-shrink:0;">✕ Close</button>
+                </div>
+                <!-- Row 2: controls + share -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; width:100%;">
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85em; opacity:0.85; cursor:pointer; user-select:none;">
+                        <input type="checkbox" id="snrHighlightToggle" checked onchange="toggleSnrHighlight(this.checked)" style="accent-color:#3b82f6; width:15px; height:15px; cursor:pointer;">
+                        Highlight best
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85em; opacity:0.85; cursor:pointer; user-select:none;">
+                        <input type="checkbox" id="snrPlayBestToggle" checked onchange="togglePlayBest(this.checked)" style="accent-color:#10b981; width:15px; height:15px; cursor:pointer;">
+                        Play best
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85em; opacity:0.85; cursor:pointer; user-select:none;" title="Spectral Noise Reduction — processes each channel independently">
+                        <input type="checkbox" id="nrModalToggle" onchange="setNR(this.checked)" style="accent-color:#8b5cf6; width:15px; height:15px; cursor:pointer;">
+                        NR
+                    </label>
+                    <select id="playBestHoldSelect" onchange="setPlayBestHold(parseInt(this.value))"
+                            style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:5px;color:white;font-size:0.8em;padding:2px 6px;cursor:pointer;">
+                        <option value="10">1s</option>
+                        <option value="20" selected>2s</option>
+                        <option value="30">3s</option>
+                        <option value="40">4s</option>
+                        <option value="50">5s</option>
+                    </select>
+                    <button class="share-session-btn" id="snrModalShareBtn" onclick="openShareModal()" title="Share this session" style="margin-left:auto;">🔗 Share</button>
+                </div>
+            </div>
+            <!-- Frequency + mode controls inside the modal -->
+            <div class="snr-modal-freq-row">
+                <span class="snr-modal-freq-label">Freq:</span>
+                <span class="snr-modal-freq-display" id="snrModalFreqDisplay">14.100000 MHz</span>
+                <input type="number" id="snrModalFreqInput" class="snr-modal-freq-input"
+                       placeholder="14.100000" step="0.000001" min="0.1" max="30" value="14.100000"
+                       title="Enter frequency in MHz">
+                <span style="font-size:0.82em; opacity:0.7; flex-shrink:0;">MHz</span>
+                <button class="snr-modal-mode-btn" id="snrModalModeBtn"
+                        onclick="cycleMode()" title="Click to toggle sideband">USB</button>
+                <div class="snr-modal-modality-toggle">
+                    <button class="snr-modal-modality-btn active" id="snrModalModalityPhone"
+                            onclick="setModality('phone')" title="Phone (SSB)">Phone</button>
+                    <button class="snr-modal-modality-btn" id="snrModalModalityCW"
+                            onclick="setModality('cw')" title="CW (±200 Hz)">CW</button>
+                </div>
+                <div class="snr-modal-nudge-group">
+                    <button class="snr-modal-nudge-btn" onclick="nudgeFreq(-1000)">−1k</button>
+                    <button class="snr-modal-nudge-btn" onclick="nudgeFreq(-100)">−100</button>
+                    <button class="snr-modal-nudge-btn" onclick="nudgeFreq(+100)">+100</button>
+                    <button class="snr-modal-nudge-btn" onclick="nudgeFreq(+1000)">+1k</button>
+                </div>
+                <div class="snr-modal-band-row">
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('160m')">160m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('80m')">80m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('40m')">40m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('20m')">20m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('17m')">17m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('15m')">15m</button>
+                    <button class="snr-modal-band-btn" onclick="jumpToBand('10m')">10m</button>
+                </div>
+            </div>
+
+            <div class="snr-modal-chart-wrap">
+                <canvas id="snrHistoryChart"></canvas>
+            </div>
+            <!-- Best-time stacked bar graph -->
+            <div class="best-time-bars" id="bestTimeBars">
+                <div class="best-time-track" id="playBestBar"></div>
+            </div>
+            <!-- Audio unlock overlay — shown when AudioContext is suspended (autoplay policy) -->
+            <div class="audio-unlock-overlay" id="audioUnlockOverlay" style="display:none;"
+                 onclick="unlockAudio()">
+                <div class="audio-unlock-box">
+                    <div class="audio-unlock-icon">▶</div>
+                    <div class="audio-unlock-text">Press to start audio</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         RIG CONTROL MODAL
+         Hamlib (WebAssembly) over the Web Serial API. The ~14 MB
+         bundle in static/hamlib/ is fetched only when this modal is
+         opened — see hamlib-control.js's ensureHamlibLoaded().
+    ══════════════════════════════════════════════════════════ -->
+    <div class="rig-modal-overlay" id="rigModalOverlay" onclick="rigModalOverlayClick(event)">
+        <div class="rig-modal">
+            <div class="rig-modal-header">
+                <h2>📻 Rig Sync</h2>
+                <button class="share-modal-close" onclick="closeRigModal()">✕</button>
+            </div>
+
+            <div class="rig-modal-body">
+                <!-- Always visible; hidden by openRigModal() only when the red box
+                     below has already said the same thing more bluntly. -->
+                <div class="rig-note" id="rigBrowserNote">
+                    <strong>🌐 Chrome or Edge required.</strong>
+                    Serial port control needs the Web Serial API, which Firefox and Safari
+                    don't implement.
+                </div>
+
+                <div class="rig-error-box" id="rigSerialError" style="display:none;">
+                    <strong>Web Serial API not available</strong><br>
+                    This browser can't open a serial port, so Rig Sync is unavailable here.
+                    Use Chrome, Edge or Opera (89+).
+                </div>
+
+                <div>
+                    <div class="rig-label">
+                        <span>Radio</span>
+                        <span id="rigFilterCount"></span>
+                    </div>
+                    <!-- Type-to-filter combobox over a hidden <select> that stays the
+                         single source of truth (it carries each rig's serial settings),
+                         same pattern as UberSDR's radio-sync extension. -->
+                    <div class="rig-combobox" id="rigCombobox">
+                        <input type="text" id="rigModelInput" class="rig-input rig-combobox-input"
+                               placeholder="Loading radios…" autocomplete="off" disabled
+                               role="combobox" aria-expanded="false" aria-autocomplete="list"
+                               aria-controls="rigModelListbox">
+                        <button type="button" id="rigModelClear" class="rig-combobox-clear"
+                                tabindex="-1" aria-label="Clear radio selection"
+                                style="display:none;">&times;</button>
+                        <div class="rig-combobox-list" id="rigModelListbox" role="listbox"
+                             style="display:none;"></div>
+                    </div>
+                    <select id="rigModelSelect" onchange="rigModelChanged()"
+                            style="display:none;" aria-hidden="true" tabindex="-1"></select>
+                </div>
+
+                <div class="rig-row">
+                    <div style="width:140px; flex-shrink:0;">
+                        <div class="rig-label"><span>Baud rate</span></div>
+                        <select id="rigBaudSelect" class="rig-select" onchange="rigBaudChanged()"></select>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:7px; font-size:0.85em;
+                                  cursor:pointer; user-select:none; padding-bottom:9px;">
+                        <input type="checkbox" id="rigMuteOnTx" checked
+                               onchange="rigMuteOnTxChanged(this.checked)"
+                               style="accent-color:#a855f7; width:15px; height:15px; cursor:pointer;">
+                        Mute SDR audio while the radio transmits
+                    </label>
+                </div>
+
+                <div>
+                    <div class="rig-label"><span>Sync direction</span></div>
+                    <div class="rig-dir-group">
+                        <button class="rig-dir-btn" id="rigDirSdrToRig"
+                                onclick="rigSetDirection('sdr-to-rig')"
+                                title="The SDRs tune the radio">SDR → Rig</button>
+                        <button class="rig-dir-btn" id="rigDirRigToSdr"
+                                onclick="rigSetDirection('rig-to-sdr')"
+                                title="The radio tunes the SDRs">Rig → SDR</button>
+                    </div>
+                </div>
+
+                <!-- What the radio itself reports -->
+                <div class="rig-display">
+                    <div class="rig-display-main">
+                        <span class="rig-display-freq" id="rigFreqDisplay">--.------</span>
+                        <span class="rig-display-unit">MHz</span>
+                    </div>
+                    <div class="rig-display-mode" id="rigModeDisplay">---</div>
+                    <div class="rig-display-state" id="rigStateDisplay">--</div>
+                </div>
+
+                <div class="rig-status rig-status-idle" id="rigStatus">Not connected</div>
+
+                <p class="rig-desc">
+                    Talks to the radio's CAT/CI-V port over the Web Serial API using Hamlib's own
+                    rig backends — no server or native install involved. Sync covers USB, LSB, CW
+                    and CWR; other radio modes are shown but left alone, since the SDRs only tune
+                    those four.
+                </p>
+
+                <details>
+                    <summary style="cursor:pointer; font-size:0.83em; color:rgba(255,255,255,0.55);">
+                        📋 Message log
+                    </summary>
+                    <div class="rig-log" id="rigLog" style="margin-top:8px;"></div>
+                </details>
+            </div>
+
+            <div class="rig-modal-footer">
+                <button class="btn btn-secondary" onclick="closeRigModal()">Close</button>
+                <button class="btn btn-primary" id="rigConnectBtn" onclick="rigConnect()" disabled>Select a radio first</button>
+                <button class="btn btn-danger" id="rigDisconnectBtn" onclick="rigDisconnect()" style="display:none;">Disconnect</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SESSIONS MANAGE MODAL
+    ══════════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════
+         SHARE MODAL
+    ══════════════════════════════════════════════════════════ -->
+    <div class="share-modal-overlay" id="shareModalOverlay" onclick="shareModalOverlayClick(event)">
+        <div class="share-modal">
+            <div class="share-modal-header">
+                <h2 id="shareModalTitle">🔗 Share This Session</h2>
+                <button class="share-modal-close" onclick="closeShareModal()">✕</button>
+            </div>
+
+            <!-- State 1: not yet sharing -->
+            <div id="shareState1">
+                <div class="share-modal-body">
+                    <div>
+                        <div class="share-modal-label">Session name</div>
+                        <input type="text" id="shareNameInput" class="share-name-input"
+                               maxlength="50" placeholder="e.g. 14225 USB 09:30 UTC"
+                               oninput="validateShareName()" autocomplete="off">
+                        <div class="share-name-hint" id="shareNameHint">Letters, numbers, spaces, periods, hyphens, colons and underscores (max 50)</div>
+                    </div>
+                    <p class="share-desc">
+                        Shares your current frequency and mode with the instances you're monitoring.
+                        Followers receive your signal data and audio directly — they don't connect to the SDR instances themselves.
+                        Anyone with the link can follow live. Instances are fixed when you share.
+                    </p>
+                </div>
+                <div class="share-modal-footer">
+                    <button class="btn btn-secondary" onclick="closeShareModal()">Cancel</button>
+                    <button class="btn btn-primary" id="shareCreateBtn" onclick="createSharedSession()" disabled>🔗 Create Share Link</button>
+                </div>
+                <!-- My Shares — hidden until populated by JS -->
+                <div id="mySharesSection" style="display:none; border-top:1px solid rgba(255,255,255,0.08); padding:14px 22px 16px;">
+                    <div class="share-modal-label" style="margin-bottom:8px;">Your active shares</div>
+                    <div id="mySharesList"></div>
+                </div>
+            </div>
+
+            <!-- State 2: sharing active -->
+            <div id="shareState2" style="display:none;">
+                <div class="share-modal-body">
+                    <div>
+                        <div class="share-modal-label">Share this link with others</div>
+                        <div class="share-url-box">
+                            <input type="text" id="shareUrlInput" class="share-url-input" readonly
+                                   onclick="this.select()" title="Click to select">
+                            <button class="share-copy-btn" id="shareCopyBtn" onclick="copyShareLink()">📋 Copy</button>
+                        </div>
+                    </div>
+                    <div class="share-live-status">
+                        <span class="dot"></span>
+                        <span>Live — followers track your frequency and mode in real-time</span>
+                    </div>
+                </div>
+                <div class="share-modal-footer">
+                    <button class="btn btn-danger" onclick="stopSharing()">🛑 Stop Sharing</button>
+                    <button class="btn btn-secondary" onclick="closeShareModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         FOLLOWER JOIN SPLASH (shown on page load for ?share= URLs)
+    ══════════════════════════════════════════════════════════ -->
+    <div class="follower-join-overlay" id="followerJoinOverlay">
+        <div class="follower-join-box">
+            <div class="follower-join-icon">📡</div>
+            <div class="follower-join-title">You've been invited to follow</div>
+            <div class="follower-join-name" id="followerJoinName"></div>
+            <div class="follower-join-details">
+                <div class="follower-join-detail">
+                    <span class="follower-join-detail-label">Frequency</span>
+                    <span class="follower-join-detail-value" id="followerJoinFreq">—</span>
+                </div>
+                <div class="follower-join-detail">
+                    <span class="follower-join-detail-label">Mode</span>
+                    <span class="follower-join-detail-value" id="followerJoinMode">—</span>
+                </div>
+                <div class="follower-join-detail">
+                    <span class="follower-join-detail-label">Instances</span>
+                    <span class="follower-join-detail-value" id="followerJoinCount">—</span>
+                </div>
+            </div>
+            <p class="follower-join-desc">
+                Your frequency and mode will follow the owner's tuning in real-time.
+                Audio controls remain yours to adjust.
+            </p>
+            <button class="follower-join-btn" onclick="followerJoinStart()">▶ Start Listening</button>
+            <button class="follower-join-exit" onclick="followerJoinCancel()">Cancel — go to normal view</button>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SESSION ENDED OVERLAY (follower mode)
+    ══════════════════════════════════════════════════════════ -->
+    <div class="share-ended-overlay" id="shareEndedOverlay">
+        <div class="share-ended-box">
+            <h2>📡 Session Ended</h2>
+            <p>The owner has stopped sharing this session.</p>
+            <button class="btn btn-secondary" onclick="exitFollowerMode()">Exit Follow Mode</button>
+        </div>
+    </div>
+
+    <div class="resume-overlay" id="resumeBanner">
+        <div class="resume-modal">
+            <div class="resume-modal-icon" id="resumeBannerIcon">📡</div>
+            <p class="resume-modal-title" id="resumeBannerTitle">Resume Previous Session?</p>
+            <p class="resume-modal-desc" id="resumeBannerText"></p>
+            <div class="resume-modal-actions">
+                <button class="btn btn-primary" id="resumeBannerConfirmBtn" style="padding:8px 22px;" onclick="resumeSession()">▶ Start Monitoring</button>
+                <button class="btn btn-secondary" id="resumeBannerCancelBtn" style="padding:8px 16px;" onclick="dismissResumeBanner()">✕ Dismiss</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         Sessions manage modal
+    ══════════════════════════════════════════════════════════ -->
+    <div class="sess-modal-overlay" id="sessModalOverlay" onclick="sessModalOverlayClick(event)">
+        <div class="sess-modal">
+            <div class="sess-modal-header">
+                <h2>💾 Sessions</h2>
+                <button class="sess-modal-close" onclick="closeSessionsModal()">✕ Close</button>
+            </div>
+
+            <!-- Save current state as a new session -->
+            <div class="sess-save-row">
+                <input type="text" id="sessNameInput" class="sess-name-input" placeholder="Session name (e.g. 40m EU Morning)…" maxlength="60">
+                <button class="btn btn-success" onclick="saveCurrentSession()" style="white-space:nowrap;">💾 Save Current</button>
+            </div>
+
+            <!-- Saved sessions list -->
+            <div class="sess-list" id="sessListContainer">
+                <div class="sess-list-empty" id="sessListEmpty">No saved sessions yet. Set up your frequency and instances, then save above.</div>
+            </div>
+
+            <!-- Footer: import / export -->
+            <div class="sess-modal-footer">
+                <button class="btn btn-secondary" onclick="exportSessions()" style="font-size:0.85em;">⬇ Export JSON</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('sessImportFile').click()" style="font-size:0.85em;">⬆ Import JSON</button>
+                <input type="file" id="sessImportFile" accept=".json,application/json" style="display:none;" onchange="importSessions(this)">
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>UberSDR Multi-Monitor • <a href="https://ubersdr.org" target="_blank">UberSDR</a></p>
+    </footer>
+
+    <!-- The browser-extension install buttons were wired up here, sniffing the
+         user agent to offer the Firefox add-on or the Chrome extension. Both
+         are meaningless in this client, which has the bridge built in — and
+         worse than meaningless: useragent.js keeps Chrome's token in the UA, so
+         the Chrome branch matched and the button appeared with a broken image
+         where chrome.png would have been. The two anchors it drove are gone
+         with it. -->
+    <script src="websdr-nr.js"></script>
+    <script src="multi_monitor.js"></script>
+    <script src="shared_session.js"></script>
+    <!-- Rig Control UI. The Hamlib WASM bundle itself is only fetched when the
+         user opens the Rig modal — this file just wires the panel up. -->
+    <script src="hamlib-control.js"></script>
+
+    <!-- Relay listener count badge (shown when relay is active) -->
+    <div id="relayListenerBadge" class="relay-listener-badge" style="display:none;">
+        <span class="relay-listener-icon">👥</span>
+        <span id="relayListenerCount">0</span>
+        <span class="relay-listener-label">listening</span>
+    </div>
+
+    <!-- Toast notification container -->
+    <div id="toastContainer"></div>
+</body>
+</html>

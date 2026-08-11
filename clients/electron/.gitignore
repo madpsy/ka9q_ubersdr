@@ -4,3 +4,12 @@ ui/
 dist/
 # Leaflet, staged from static/ by build.sh for the chooser's directory map.
 chooser/vendor/
+# The multi-monitor's libraries and the Hamlib wasm, staged the same way. The
+# wasm alone is 14 MB, and every one of these is already in static/ — see
+# monitor/README.md.
+monitor/vendor/
+monitor/hamlib/
+# chooser.css, staged beside the monitor page so it loads the same palette and
+# the same flag @font-face as the window that opened it. The original is in
+# chooser/; this is a copy build.sh refreshes.
+monitor/chooser.css

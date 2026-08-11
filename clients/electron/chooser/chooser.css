@@ -60,6 +60,12 @@
     --fair: #ff9800;
     --good: #fbbf24;
     --excellent: #22c55e;
+    /* Only the scrollbars use these two, and they are named and valued as the
+       v2 UI names and values them — a receiver window and the window that
+       opened it are the same application, and a scrollbar is one of the few
+       things on screen at once in both. */
+    --border-strong: #2f3b4e;
+    --text-faint: #5c6779;
 }
 
 html, body {
@@ -70,6 +76,30 @@ html, body {
 }
 
 body { display: flex; flex-direction: column; }
+
+/* The scrollbars, copied from static/v2/src/styles.css rather than invented
+   here, so the saved list and a receiver's panels scroll identically.
+   Chromium's default is a wide light-grey bar with arrow buttons, which on a
+   dark window is the one piece of chrome that looks like it belongs to another
+   program.
+
+   The transparent border with background-clip is what makes the thumb a narrow
+   rounded pill inside a wider track rather than a bar filling it: the border is
+   padding the background is clipped out of. Repeated on :hover because
+   background-clip does not survive the shorthand-free background-color change
+   on its own.
+
+   Applies to the serial port picker too — that page loads this file before its
+   own. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 99px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-faint); background-clip: padding-box; }
 
 header {
     display: flex;

@@ -30,6 +30,19 @@ import StartMap from './StartMap.jsx';
 const LISTENER_STATS = '/session_stats.html';
 const DIRECTORY = 'https://instances.ubersdr.org/';
 
+// Whether the host says audio may start without a press.
+//
+// Only the desktop client sets it, and only because it can: the overlay exists
+// for the browser rule that an AudioContext not created from a user gesture is
+// suspended, and that client runs with the rule switched off. A page cannot
+// decide this for itself — in an ordinary browser it would start into silence —
+// so it is read from the host and never from anything the page can write.
+//
+// See clients/electron/receiver-preload.js, which exposes it.
+const hostAutoStart = () => {
+    try { return !!(window.ubersdrDesktop && window.ubersdrDesktop.autoStart); } catch (e) { return false; }
+};
+
 export default function StartOverlay() {
     const { running, serverInfo, actions } = useRadio();
     const [check, setCheck] = useState(null);      // null until /connection answers
@@ -40,6 +53,15 @@ export default function StartOverlay() {
     const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'password' | null
     const buttonRef = useRef(null);
     const mobile = useMediaQuery(MOBILE_QUERY);
+
+    // Up here rather than beside the button it belongs to, because the effect
+    // below is a second caller and hooks run before this component's early
+    // return. One definition either way: the press and the desktop client's
+    // automatic start are the same act and must stay so.
+    const start = () => {
+        setStarted(true);
+        actions.powerOn();
+    };
 
     // Asked once on load, and again only when a password is submitted. The
     // endpoint is rate limited per IP, and the answer does not change on its
@@ -59,6 +81,21 @@ export default function StartOverlay() {
         if (el) el.focus();
     }, [check]);
 
+    // The desktop client starts on its own.
+    //
+    // Waits for /connection rather than starting on mount: a full or barred
+    // receiver keeps its reason and its password box instead of being driven
+    // into a refusal. By then the client has already seeded any saved bypass
+    // password, so a receiver that would have said no has usually said yes —
+    // which is what makes "with or without a password" one path rather than two.
+    //
+    // Once. `started` latches and this component returns null from then on, so
+    // powering off deliberately does not bounce you straight back in.
+    useEffect(() => {
+        if (started || !check || !check.allowed || !hostAutoStart()) return;
+        start();
+    }, [check, started]);
+
     if (running || started) return null;
 
     const rx = (serverInfo && serverInfo.receiver) || {};
@@ -73,11 +110,6 @@ export default function StartOverlay() {
     const vibesdr = () => {
         if (mobile) { window.location.href = vibesdrUri(publicUuid); return; }
         setDialog('vibesdr');
-    };
-
-    const start = () => {
-        setStarted(true);
-        actions.powerOn();
     };
 
     const submitPassword = async (e) => {

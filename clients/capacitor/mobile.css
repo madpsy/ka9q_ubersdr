@@ -95,17 +95,22 @@ footer {
 
 /* Room. The chrome above the first row is what a phone has least of. */
 @media (max-width: 560px) {
+    /* A row, as on the desktop. It was a column when the address form lived up
+       here and needed a line of its own; the form is the Custom tab now, so
+       the header is the brand and nothing else. */
     header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 8px;
+        gap: 10px;
         padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
                  10px calc(12px + env(safe-area-inset-left));
     }
 
+    /* Only the gap is this sheet's business. `align-items` is not: chooser.css
+       centres the row because there is a picture in it, and an image aligned on
+       a text baseline sits on it by its bottom edge — the mark rides high and
+       the title reads as dropped. This block used to restate `baseline` from
+       before the mark existed, which quietly won by being both later and more
+       specific. */
     header .brand {
-        display: flex;
-        align-items: baseline;
         gap: 8px;
     }
 
@@ -113,15 +118,10 @@ footer {
         font-size: 1.1rem;
     }
 
-    /* Two words that cost a line each on a phone, and say what the three tabs
-       below them already say. */
-    header .tagline {
-        display: none;
-    }
-
+    /* The Custom tab's address box, which has a whole panel to itself here
+       rather than the desktop's capped column. */
     #add-form {
-        display: flex;
-        gap: 6px;
+        max-width: none;
     }
 
     #add-input {
@@ -130,17 +130,11 @@ footer {
     }
 
     /*
-     * The tab strip wraps, and the checkbox is what wraps.
+     * Four tabs across a phone.
      *
-     * Three tabs and a setting do not fit across a phone. Scrolling the strip
-     * was the first answer and is the wrong one twice over: the setting ends up
-     * off the right-hand edge where nobody finds it, and it is the one thing
-     * here that is not a destination — a strip you can scroll past the end of
-     * reads as more tabs.
-     *
-     * So the tabs keep one line to themselves, tightened until they fit, and
-     * the setting takes the line below. `flex-basis: 100%` only wraps if the
-     * container may wrap, which is why this is not `nowrap` with an overflow.
+     * They wrap rather than scroll: a strip you can scroll past the end of
+     * reads as more tabs than there are, and hides whichever one is last. Two
+     * lines of four is honest about how many there are.
      */
     nav.tabs {
         flex-wrap: wrap;
@@ -152,16 +146,6 @@ footer {
         flex: 0 1 auto;
         padding-left: 8px;
         padding-right: 8px;
-    }
-
-    nav.tabs .option {
-        order: 99;
-        flex: 1 0 100%;
-        /* chooser.css pushes it to the right of the tabs with an auto margin,
-           which on its own line would strand it against the edge. */
-        margin-left: 0;
-        margin-bottom: 0;
-        padding: 2px 0 8px;
     }
 
     main {

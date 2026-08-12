@@ -90,6 +90,8 @@ dependencies {
     // own bridge the same way), but as `implementation`, so it is not on this
     // module's compile classpath without being asked for here.
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    // MediaSessionCompat and the MediaStyle notification, for PlaybackService.
+    implementation "androidx.media:media:1.7.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

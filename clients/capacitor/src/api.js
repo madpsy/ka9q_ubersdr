@@ -207,9 +207,6 @@ export const api = {
     chooser: () => store.chooser(),
     setChooser: (patch) => store.setChooser(patch),
 
-    sharedPrefs: () => store.sharedPrefs(),
-    setSharedPrefs: (on) => store.setSharedPrefs(on),
-
     /**
      * Where the operator is: what the map centres on and the distance column is
      * measured from. A position typed in always wins; otherwise GeoIP.

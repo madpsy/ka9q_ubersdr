@@ -54,14 +54,19 @@ Switching modes takes effect immediately (the window reloads).
 
 Because each instance's local port is its own origin, every receiver would
 otherwise keep its own v2 settings in its own localStorage. That isolation is a
-property of how the proxy works rather than something anybody asked for, so the
-chooser's **"Share settings between receivers"** option is **on by default**:
-one arrangement of the interface, on every receiver.
+property of how the proxy works rather than something anybody asked for, so
+settings are shared: one arrangement of the interface, on every receiver.
 
-With it on, a snapshot of the `ubersdr.v2.*` keys is kept in userData
+A snapshot of the `ubersdr.v2.*` keys is kept in userData
 (`shared-prefs.json`), each receiver window is seeded from it before the page
-boots (`receiver-preload.js`), and changes made in any window are written back. The first receiver opened supplies the
-initial snapshot; windows already open pick up later changes when reloaded.
+boots (`receiver-preload.js`), and changes made in any window are written back.
+The first receiver opened supplies the initial snapshot; windows already open
+pick up later changes when reloaded.
+
+This was a checkbox in the chooser, defaulting to on. It is not any more: how
+the interface is arranged is a property of the client rather than of any one
+receiver, so there was one sensible answer and a control offering the other.
+What is *not* shared is where the real judgement lives, and that is unchanged:
 
 Two things are deliberately never shared:
 
@@ -74,20 +79,22 @@ Two things are deliberately never shared:
 The session password is in `sessionStorage`, not `localStorage`, so it is never
 part of the snapshot.
 
-Turning sharing off stops the bridging and nothing else: the per-origin stores
-are never emptied, so every receiver is independent again with whatever it had
-last — which makes the toggle safe to try both ways.
-
 ## The chooser
 
-Three tabs, because the three lists answer different questions and only one of
-them is ever the question at hand:
+Four tabs, because they answer different questions and only one of them is ever
+the question at hand:
 
 - **Saved** — receivers already connected to, ordered as below.
 - **Local network** — an mDNS browse of `_ubersdr._tcp`, run the first time the
   tab is opened rather than at startup.
 - **Public directory** — everything `instances.ubersdr.org` knows about, as a
   list beside a map.
+- **Custom** — an address typed in by hand.
+
+The address box was in the header, above all three lists, which said "type an
+address" to everyone who opened the app and mostly meant "not this": the lists
+answer the question far more often than the box does. It is a fourth place a
+receiver can come from, so it is a fourth tab.
 
 The page opens on Saved when there is anything in it and on the directory when
 there is not; whichever tab was open last takes precedence over both.

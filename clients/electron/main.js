@@ -1036,35 +1036,10 @@ function setupIpc() {
     // Shared settings. The seed is synchronous because the receiver preload
     // has to apply it before the page's own scripts read localStorage.
     ipcMain.on('prefs:seed', (event) => {
-        event.returnValue = { enabled: prefs.enabled, prefs: prefs.snapshot() };
+        event.returnValue = { prefs: prefs.snapshot() };
     });
     ipcMain.on('prefs:push', (_e, map) => {
-        if (prefs.enabled) prefs.update(map);
-    });
-    ipcMain.handle('prefs:shared', () => prefs.enabled);
-    ipcMain.handle('prefs:set-shared', (_e, on) => {
-        prefs.setEnabled(on);
-        // Switching it on makes the most recently connected receiver the
-        // template: with one window open — the common case — that is the
-        // window being looked at, and "share settings" means "like this".
-        let primaryId = null;
-        if (on) {
-            let best = '';
-            for (const id of running.keys()) {
-                const used = (store.get(id) || {}).lastUsed || '';
-                if (used >= best) {
-                    best = used;
-                    primaryId = id;
-                }
-            }
-        }
-        for (const [id, active] of running.entries()) {
-            active.win.webContents.send('prefs:mode', {
-                enabled: prefs.enabled,
-                primary: id === primaryId,
-            });
-        }
-        return prefs.enabled;
+        prefs.update(map);
     });
 
     ipcMain.handle('instances:disconnect', (_e, id) => {

@@ -72,13 +72,6 @@ function start(pushNow) {
     timer = setInterval(push, POLL_MS);
 }
 
-function stop() {
-    if (timer) {
-        clearInterval(timer);
-        timer = null;
-    }
-}
-
 // --- the Radio Control transports this client offers -------------------------
 //
 // What the panel renders for each, and what each can keep in step. The panel
@@ -739,7 +732,7 @@ if (location.pathname.startsWith('/v2')) {
     }
 
     const seed = ipcRenderer.sendSync('prefs:seed');
-    if (seed && seed.enabled) {
+    if (seed) {
         if (seed.prefs) {
             // Overwrite, don't clear: a key this receiver has and the snapshot
             // lacks is a feature the template receiver never used, not a
@@ -753,14 +746,9 @@ if (location.pathname.startsWith('/v2')) {
                 }
             } catch { /* quota — the page still boots on its own settings */ }
         }
-        // No snapshot yet (sharing enabled with no receiver open): the first
-        // window in becomes the template, not the first window somebody
-        // happens to change a setting in.
+        // No snapshot yet (nothing has ever been opened): the first window in
+        // becomes the template, not the first window somebody happens to change
+        // a setting in.
         start(!seed.prefs);
     }
-    // Flipped from the chooser while this window is open.
-    ipcRenderer.on('prefs:mode', (_event, mode) => {
-        if (mode && mode.enabled) start(!!mode.primary);
-        else stop();
-    });
 }

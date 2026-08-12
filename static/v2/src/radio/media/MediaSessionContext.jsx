@@ -12,6 +12,8 @@ import { useDisplay } from '../../display/DisplayContext.jsx';
 import { getSessionId } from '../session.js';
 import { subscribeSpots } from '../../lib/spotStore.js';
 import { subscribeVoiceActivity } from '../../lib/voiceActivity.js';
+import { subscribeConfirmedVoice } from '../../lib/voiceConfirmed.js';
+import { voiceSkimmerAvailable } from '../../lib/voiceSkimmer.js';
 import { NAV_TYPES, callsignOf, collectMarkers, findMarkers } from '../../lib/markerNav.js';
 import { markerTarget } from '../../lib/bookmarkTune.js';
 import { MediaSessionController } from './controller.js';
@@ -152,6 +154,30 @@ export function MediaSessionProvider({ children }) {
         });
     }, [enabled, hasVoice]);
 
+    // The skimmer's confirmed callsigns: the other half of 'voice', and the half
+    // that carries a name. Voice activity says the detector heard speech in the
+    // last ninety seconds; this says a station identified itself and the addon
+    // believed it — so unlike a bare detection it *is* a callsign, and
+    // collectMarkers gives it `call` accordingly, which is what earns it a
+    // lookup, an operator's name on the album line and their photo as artwork.
+    //
+    // Gated on the addon rather than on the noise-floor detector, because a
+    // receiver can have either without the other — the same gate
+    // lib/useMarkerNav.js uses.
+    //
+    // Its absence here was a real bug: every other consumer of collectMarkers
+    // passes `confirmed` and this one did not, so a dial parked on a confirmed
+    // sighting had no marker as far as the media session was concerned. The
+    // Callsign panel showed the operator and the lock screen showed the bare
+    // frequency, which looked like the lookup failing rather than the marker
+    // never existing.
+    const hasConfirmed = voiceSkimmerAvailable(serverInfo);
+
+    useEffect(() => {
+        if (!enabled || !running || !hasConfirmed) return undefined;
+        return subscribeConfirmedVoice((list) => setConfirmed(list || []));
+    }, [enabled, running, hasConfirmed]);
+
     // Marker under the dial, plus its neighbours for ⏮/⏭.
     const markers = useMemo(() => {
         if (!enabled) return { current: null, prev: null, next: null };
@@ -159,6 +185,7 @@ export function MediaSessionProvider({ children }) {
             dx: dxSpots,
             cw: cwSpots,
             voice,
+            confirmed,
             bookmarks: catalog.bookmarks || [],
             local: catalog.local || [],
         });

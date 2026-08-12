@@ -13,16 +13,28 @@
 <body>
     <header>
         <div class="brand">
+            <!-- The mark, and the way to the project. Staged beside this file
+                 by build.sh (generated, git-ignored) rather than committed a
+                 second time — clients/electron/assets/icon.png is the one copy.
+
+                 An ordinary link: both hosts send an external URL to the
+                 system browser rather than loading it here — Electron through
+                 setWindowOpenHandler and will-navigate (main.js), Android
+                 through Capacitor's launchIntent — so neither needs telling
+                 that a chooser window is not a browser. -->
+            <a class="mark" href="https://ubersdr.org" target="_blank" rel="noopener"
+               title="ubersdr.org">
+                <img src="icon.png" alt="UberSDR" width="26" height="26">
+            </a>
             <h1>UberSDR</h1>
             <span class="tagline">choose a receiver</span>
         </div>
-        <form id="add-form" autocomplete="off">
-            <input id="add-input" type="text" spellcheck="false"
-                   placeholder="host, host:port or https://receiver.example.org">
-            <button type="submit" id="add-btn">Connect</button>
-        </form>
     </header>
 
+    <!-- Every panel's Connect reports here, not only the Custom tab's, so it
+         stays outside all of them: a receiver that refuses from the Saved list
+         must be able to say so without the reason being inside a tab that is
+         shut. -->
     <div id="add-status" class="status" hidden></div>
 
     <nav class="tabs" role="tablist" aria-label="Where to find a receiver">
@@ -35,11 +47,9 @@
         <button id="tab-dir" class="tab" role="tab" aria-controls="panel-dir" aria-selected="false">
             Public directory<span id="tab-dir-count" class="tab-count"></span>
         </button>
-        <label class="option" id="shared-prefs"
-               title="On by default: every receiver opens with the same theme, layout, panels and shortcuts, and a change made in one carries over to receivers opened after it. Windows already open pick changes up when reloaded. Frequency, filter, squelch and volume always stay with each receiver. Turn this off to give every receiver settings of its own — nothing is discarded either way.">
-            <input type="checkbox" id="shared-prefs-box" checked>
-            <span>Share settings between receivers</span>
-        </label>
+        <button id="tab-custom" class="tab" role="tab" aria-controls="panel-custom" aria-selected="false">
+            Custom<span id="tab-custom-count" class="tab-count"></span>
+        </button>
     </nav>
 
     <main>
@@ -64,14 +74,37 @@
             <div id="lan-list" class="list"></div>
         </section>
 
+        <!-- An address typed in by hand: the fourth place a receiver can come
+             from, and a tab like the other three rather than a form above them
+             all. It was in the header, which said "type an address" to everyone
+             who opened the app and mostly meant "not this" — the three lists
+             answer the question far more often than the box does. -->
+        <section id="panel-custom" class="panel" role="tabpanel" aria-labelledby="tab-custom" hidden>
+            <div class="section-head">
+                <h2>Connect by address</h2>
+            </div>
+            <form id="add-form" autocomplete="off">
+                <input id="add-input" type="text" spellcheck="false"
+                       placeholder="host, host:port or https://receiver.example.org">
+                <button type="submit" id="add-btn">Connect</button>
+            </form>
+            <p class="empty">
+                A hostname on its own is tried over HTTPS, then plain HTTP on
+                port 80 and 8080. A receiver that answers is saved, and appears
+                under Saved from then on.
+            </p>
+        </section>
+
         <section id="panel-dir" class="panel" role="tabpanel" aria-labelledby="tab-dir" hidden>
             <div class="dir-layout">
                 <div class="dir-column">
                     <div class="dir-toolbar">
                         <input id="dir-filter" type="text" spellcheck="false" autocomplete="off"
                                placeholder="Filter by callsign, name or place…">
+                        <!-- No "Sort" label: four chips in a row, one of them
+                             always lit, is already a sort control, and the word
+                             cost a chip's worth of width on a phone. -->
                         <div class="sort-row">
-                            <span class="sort-label">Sort</span>
                             <button id="dir-sort-distance" class="chip" data-sort="distance">Distance</button>
                             <button id="dir-sort-listeners" class="chip" data-sort="listeners">Free slots</button>
                             <button id="dir-sort-snr" class="chip" data-sort="snr">Conditions</button>

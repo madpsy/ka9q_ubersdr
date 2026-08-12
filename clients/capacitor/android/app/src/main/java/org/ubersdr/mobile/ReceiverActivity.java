@@ -3,9 +3,11 @@ package org.ubersdr.mobile;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
@@ -33,10 +35,17 @@ import java.util.Set;
  * is a preload, and the Android equivalent of a preload is a document-start
  * script. The chooser keeps the bridge; the receiver gets the script.
  *
- * <p>What that script does is the small half of
- * clients/electron/receiver-preload.js — the receiver's real address, for the
- * share button, and the saved bypass password. Shared settings, the page-API
- * bridge and the media session are the rest of that file and are not here yet.
+ * <p>What that script does is most of what
+ * clients/electron/receiver-preload.js does: the receiver's real address for
+ * the share button, the saved bypass password, the page API client, and the
+ * host flags that tell v2 what kind of place it is running in. What it does not
+ * do yet is bridge shared settings between receivers.
+ *
+ * <p>This Activity is also the middle of three conversations, which is most of
+ * what is below: the page reports what it is playing (PlaybackService turns it
+ * into the notification and the lock screen), the page raises notifications
+ * (Notices puts them in the shade), and both send things back — a transport
+ * button, a tapped notification, an answered permission.
  */
 public class ReceiverActivity extends Activity {
 
@@ -49,6 +58,7 @@ public class ReceiverActivity extends Activity {
     static final String EXTRA_UPSTREAM = "upstream";
     static final String EXTRA_INSECURE = "insecure";
     static final String EXTRA_PRODUCT = "product";
+    static final String EXTRA_NOTICE_TAG = "noticeTag";
 
     // The one open receiver, so the chooser's Disconnect can end it. Weak
     // because the system may destroy the Activity without this app's help, and
@@ -59,6 +69,9 @@ public class ReceiverActivity extends Activity {
     private WebView web;
     private String instanceId;
     private boolean insecureTLS;
+    private String label = "UberSDR";
+    private boolean playing;
+    private androidx.webkit.JavaScriptReplyProxy reply;
 
     /** Ends the open receiver, if there is one. */
     static void finishCurrent() {
@@ -79,7 +92,8 @@ public class ReceiverActivity extends Activity {
         String upstream = intent.getStringExtra(EXTRA_UPSTREAM);
         String product = intent.getStringExtra(EXTRA_PRODUCT);
         insecureTLS = intent.getBooleanExtra(EXTRA_INSECURE, false);
-        setTitle(intent.getStringExtra(EXTRA_LABEL));
+        if (intent.getStringExtra(EXTRA_LABEL) != null) label = intent.getStringExtra(EXTRA_LABEL);
+        setTitle(label);
 
         web = new WebView(this);
         web.setLayoutParams(new ViewGroup.LayoutParams(
@@ -104,7 +118,8 @@ public class ReceiverActivity extends Activity {
         Set<String> rules = Collections.singleton(origin);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(
-                    web, seedScript(upstream, new Secrets(this).get(instanceId)), rules);
+                    web, seedScript(upstream, new Secrets(this).get(instanceId), notificationState()),
+                    rules);
 
             // The page API client (src/receiver.js, bundled by build.sh), and
             // the channel it answers on. Both are optional in the sense that
@@ -114,12 +129,12 @@ public class ReceiverActivity extends Activity {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
                 WebViewCompat.addWebMessageListener(web, "ubersdrHost", rules,
                         (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
-                            if (isMainFrame && "stopped".equals(message.getData())) {
-                                // Back to the chooser. Not finishAndRemoveTask:
-                                // the chooser is the task, and this Activity is
-                                // on top of it.
-                                runOnUiThread(this::finish);
-                            }
+                            if (!isMainFrame) return;
+                            // Kept so the lock screen can talk back. It is the
+                            // page's end of the same channel, so it stays valid
+                            // for as long as the page does.
+                            reply = replyProxy;
+                            runOnUiThread(() -> onPageMessage(message.getData()));
                         });
                 String bridge = readAsset("public/receiver-bridge.js");
                 if (bridge != null) WebViewCompat.addDocumentStartJavaScript(web, bridge, rules);
@@ -153,12 +168,170 @@ public class ReceiverActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage message) {
-                Log.d(TAG, "page: " + message.message() + " (" + message.sourceId() + ":" + message.lineNumber() + ")");
+                String text = message.message();
+                // The page's own diagnostics go out at WARN, everything else at
+                // DEBUG. Not a preference: Chromium logs page-load metrics from
+                // this process several times a second, and logcat's chatty
+                // filter drops the lower level first — so anything logged at
+                // DEBUG here is gone before it can be read.
+                if (text != null && text.startsWith("[ubersdr")) Log.w(TAG, text);
+                else Log.d(TAG, "page: " + text + " (" + message.sourceId() + ":" + message.lineNumber() + ")");
                 return true;
             }
         });
 
         web.loadUrl(url);
+    }
+
+    /**
+     * The one runtime permission this app asks for.
+     *
+     * <p>Two callers, and both are the operator having just asked for something
+     * that needs it: audio starting (where the notification becomes the only
+     * handle on it) and the page requesting permission from its Notifications
+     * panel. Never on launch — a permission dialog over the chooser is a dialog
+     * in front of somebody who has not said they want anything yet.
+     */
+    private void askForNotifications() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        requestPermissions(new String[]{ android.Manifest.permission.POST_NOTIFICATIONS }, 1);
+    }
+
+    /**
+     * What the page reports about itself (src/receiver.js).
+     *
+     * <p>`running` is what makes this more than a browser tab: it starts the
+     * foreground service, which is the only thing that keeps the process — and
+     * so the audio — alive once the screen locks, and it holds the screen awake
+     * while the receiver is on top. FLAG_KEEP_SCREEN_ON only defers the idle
+     * timeout and only while this window is in front, so pressing the power
+     * button still locks the phone; the service is what carries on from there.
+     */
+    private void onPageMessage(String data) {
+        String type;
+        String text;
+        JSONObject message;
+        try {
+            message = new JSONObject(data);
+            type = message.optString("type");
+            text = message.optString("text", "");
+        } catch (org.json.JSONException e) {
+            Log.w(TAG, "unparseable message from the page: " + data);
+            return;
+        }
+
+        switch (type) {
+            case "metadata":
+                // Straight from the page's own media session: v2 composed all
+                // of it (receiver, dial, callsign, bookmark) and this only
+                // carries it to the notification.
+                if (playing) {
+                    // The dial is the media session's `artist` — v2's own
+                    // choice of field, kept rather than renamed on the way
+                    // through (metadata.js says why each line is which).
+                    PlaybackService.update(this, orDefault(message.optString("title"), label),
+                            message.optString("artist", ""), message.optString("album", ""),
+                            strings(message.optJSONArray("actions")));
+                }
+                break;
+            case "artwork":
+                if (playing) PlaybackService.artwork(this, decodeDataUrl(message.optString("src")));
+                break;
+            case "notice":
+                Notices.show(this, message.optString("tag", "ubersdr"),
+                        orDefault(message.optString("title"), label),
+                        message.optString("body", ""),
+                        message.optBoolean("ongoing", false),
+                        message.optBoolean("silent", false));
+                break;
+            case "notice-close":
+                Notices.close(this, message.optString("tag", ""));
+                break;
+            case "notice-permission":
+                // The page asked, which means the operator pressed something
+                // that asks — v2 only requests from a gesture. The answer goes
+                // back the way every other host message does.
+                askForNotifications();
+                break;
+            case "running":
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                if (playing) {
+                    PlaybackService.update(this, label, text);
+                } else {
+                    playing = true;
+                    // Asked here rather than when the receiver opens: this is
+                    // the moment the notification starts being the only way to
+                    // stop audio playing with the screen off, and it follows
+                    // the operator having pressed Connect. Refused, everything
+                    // still works — the service runs and the audio plays — but
+                    // the receiver can then only be stopped from the app.
+                    askForNotifications();
+                    PlaybackService.start(this, label, text);
+                }
+                break;
+            case "tuning":
+                if (playing) PlaybackService.update(this, label, text);
+                break;
+            case "stopped":
+                stopPlayback();
+                // Back to the chooser. Not finishAndRemoveTask: the chooser is
+                // the task, and this Activity is on top of it.
+                finish();
+                break;
+            default:
+                Log.w(TAG, "unknown message from the page: " + type);
+        }
+    }
+
+    /**
+     * Run one of the page's media-session handlers.
+     *
+     * <p>Called from the notification's buttons and from the lock screen, both
+     * of which arrive on the service's thread — hence the post. The name is v2's
+     * own (`nexttrack`, `pause`, …), so the button does in here exactly what the
+     * same button does in a browser.
+     */
+    static void sendAction(String name) {
+        ReceiverActivity activity = current.get();
+        if (activity == null || name == null) return;
+        activity.runOnUiThread(() -> {
+            if (activity.reply != null) activity.reply.postMessage("action:" + name);
+        });
+    }
+
+    private static String orDefault(String value, String fallback) {
+        return value == null || value.isEmpty() ? fallback : value;
+    }
+
+    private static String[] strings(org.json.JSONArray array) {
+        if (array == null) return new String[0];
+        String[] out = new String[array.length()];
+        for (int i = 0; i < out.length; i++) out[i] = array.optString(i);
+        return out;
+    }
+
+    /** The artwork the page fetched, as a bitmap. Null if it did not arrive whole. */
+    private static android.graphics.Bitmap decodeDataUrl(String dataUrl) {
+        if (dataUrl == null) return null;
+        int comma = dataUrl.indexOf(',');
+        if (comma < 0) return null;
+        try {
+            byte[] bytes = android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT);
+            return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "artwork could not be decoded");
+            return null;
+        }
+    }
+
+    private void stopPlayback() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (playing) {
+            playing = false;
+            PlaybackService.stop(this);
+        }
     }
 
     /** A staged asset as text, or null if it was not built. */
@@ -200,15 +373,40 @@ public class ReceiverActivity extends Activity {
      * by then the password below has been seeded, which is what makes "with or
      * without a password" one path rather than two. See StartOverlay.jsx.
      *
+     * <p>`mediaSession` says this host shows the media controls itself, which
+     * changes two answers v2 would otherwise work out from the browser: the
+     * feature is on by default (as it is on Apple, and for the same reason —
+     * this is a phone and the lock screen is the point), and the anchor is
+     * 'none'. Without it, detection sees Android and picks the 'stream' anchor,
+     * which moves audio off the WebSocket and takes the scope, the recorder and
+     * the client-side filters with it — a trade made to raise a widget this app
+     * raises for itself. See static/v2/src/radio/media/support.js.
+     *
      * <p>The password goes where the page already looks for one — sessionStorage
      * under `ubersdr.v2.password`, see static/v2/src/radio/session.js — rather
      * than being handed to the page as a value.
      */
-    private static String seedScript(String upstreamOrigin, String password) {
+    /**
+     * Whether Android will show a notification the page raises.
+     *
+     * <p>Told to the page so its Notifications panel can say what is true —
+     * "granted" needs no prompt, "default" offers one, and there is no third
+     * state to guess at. Below 13 there is no runtime permission and the answer
+     * is always yes.
+     */
+    private String notificationState() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return "granted";
+        return checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED ? "granted" : "default";
+    }
+
+    private static String seedScript(String upstreamOrigin, String password, String notifications) {
         StringBuilder sb = new StringBuilder();
         sb.append("(function(){try{window.ubersdrDesktop={upstreamOrigin:")
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
-          .append(",autoStart:true};}catch(e){}");
+          .append(",autoStart:true,mediaSession:true,notifications:")
+          .append(JSONObject.quote(notifications))
+          .append("};}catch(e){}");
         if (password != null && !password.isEmpty()) {
             sb.append("try{sessionStorage.setItem('ubersdr.v2.password',")
               .append(JSONObject.quote(password))
@@ -230,6 +428,32 @@ public class ReceiverActivity extends Activity {
         return base.contains(product) ? base : base + " " + product;
     }
 
+    /**
+     * A notification the operator tapped.
+     *
+     * <p>The Activity is singleTask, so this arrives here rather than starting
+     * a second one. The tag goes back to the page, which fires whatever it hung
+     * off that notification's `onclick` — the same thing clicking it does in a
+     * browser.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String tag = intent == null ? null : intent.getStringExtra(EXTRA_NOTICE_TAG);
+        if (tag != null && reply != null) reply.postMessage("notice-click:" + tag);
+    }
+
+    /** The answer to the notification-permission prompt, back to the page. */
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code != 1 || reply == null) return;
+        boolean granted = results.length > 0
+                && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        reply.postMessage("notice-permission:" + (granted ? "granted" : "denied"));
+    }
+
     @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
@@ -238,6 +462,11 @@ public class ReceiverActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        // However this Activity ends — the back gesture, the chooser's
+        // Disconnect, the system reclaiming it — the notification goes with it.
+        // A foreground service outliving the page that was feeding it would be
+        // a receiver playing with nothing behind it.
+        stopPlayback();
         if (web != null) {
             web.loadUrl("about:blank");
             web.destroy();

@@ -102,7 +102,10 @@ library.
 | `Mdns.java` | `_ubersdr._tcp` on the local network |
 | `Secrets.java` | the bypass password, sealed with a key in the Android keystore |
 | `LocalProxy.java` | the receiver's loopback proxy |
-| `ReceiverActivity.java` | the receiver's WebView and its document-start script |
+| `ReceiverActivity.java` | the receiver's WebView, its document-start script, and the middle of every conversation with the page |
+| `PlaybackService.java` | the foreground service, the notification and the lock-screen session |
+| `Notices.java` | the page's own notifications, in the shade |
+| `SystemBars.java` | keeping the page out from under the status and navigation bars |
 
 Everything else stayed in JavaScript. The store, the row shapes, the sort, the
 candidate ladder a bare hostname expands to — none of that needs the platform,
@@ -164,6 +167,74 @@ barred receiver still shows its reason and its password box — and by then the
 saved password has been seeded, which is what makes "with or without a password"
 one path rather than two.
 
+## Playing with the screen off
+
+A WebView stops when the phone sleeps: the Activity stops being visible, the
+process becomes cacheable, and Android freezes it — audio, spectrum and session
+with it. `PlaybackService` is a foreground service of type `mediaPlayback`,
+which is what says otherwise, and `FLAG_KEEP_SCREEN_ON` while a receiver is
+running keeps the display from timing out under a waterfall you are watching
+(the power button still locks the phone; the service carries on from there).
+
+### The lock screen is v2's, not this client's
+
+None of what the notification says is composed here. v2 already builds a media
+session — the receiver as the title, frequency/mode/callsign as the artist, the
+bookmark or spot with its callsign lookup as the album, the operator's photo as
+the artwork — and installs handlers mapping next/previous to a tuning step or a
+bookmark hop, and play/pause to mute.
+
+In Chrome all of that reaches the OS by itself. A WebView is where it stops:
+Chromium's media-notification integration is part of the *browser*, not the
+engine, so `navigator.mediaSession` and `MediaMetadata` are simply absent.
+`src/receiver.js` provides them, forwards what the page assigns, and sends the
+lock screen's buttons back into the page's own handlers. The only control this
+client adds is **Stop**, which leaves the receiver — with the screen off, the
+notification is the only handle on the app.
+
+Two answers v2 works out from the browser are wrong for this host, so the host
+says so with `window.ubersdrDesktop.mediaSession` (see
+`static/v2/src/radio/media/support.js`):
+
+- **on by default**, as it is on Apple and for the same reason: it is a phone
+  and the lock screen is the point.
+- **the `none` anchor.** Detection sees Android and picks `stream`, which moves
+  audio off the WebSocket to the server's HTTP path — silencing the scope, the
+  recorder and the client-side filters — purely so Chrome will raise a widget.
+  This app raises its own, so that trade buys nothing here.
+
+A third default moves with the same flag, in `lib/operatorPhoto.js`: the
+operator's photo is off by default everywhere else, because a lookup's photo is
+its largest fetch for the least it says and the map is a better use of a dock
+column. A lock screen has no column and no map — the artwork slot is there
+whatever happens, and the choice is the operator's face or the same receiver
+logo every time — so where that slot exists the photo earns its fetch. The
+toggle in the Callsign panel still wins, in both directions, and switching it
+off sticks.
+
+Nothing changes for any other device: absent the flag, every platform reaches
+exactly the answer it did before, which `test/mediasession.test.js` and
+`test/operatorphoto.test.js` both pin.
+
+### Notifications
+
+v2 raises browser notifications for what is worth knowing while you are not
+looking — your callsign in the chat, voice activity, the rotator finishing, the
+recorder out of disk. Android's WebView has no Notification API, so v2's feature
+check said no and every one of them fell back to an in-page toast: a
+notification you can only see if you are already looking at the page, on the
+device most likely to be in a pocket.
+
+`src/receiver.js` provides `window.Notification` and `Notices.java` puts what
+the page raises into the shade, on its own channel. Tapping one opens the
+receiver and fires the page's `onclick`, the page's tag replaces rather than
+stacks, and `requestPermission()` is Android's runtime prompt. This needed no
+change to v2 at all — its check is a plain feature test, and it simply starts
+answering yes.
+
+`POST_NOTIFICATIONS` is asked for at the two moments it is needed: when audio
+starts, and when the page asks. Never at launch.
+
 ## What the phone gets that the desktop does not
 
 - **The layout.** `static/v2` already has a phone layout — `LayoutContext.jsx`
@@ -180,21 +251,19 @@ room above the first row, and 24 px of icon is not a thumb target.
 
 Named rather than left to be discovered:
 
-- **The foreground service and the media session.** Android's WebView does not
-  surface the page's `navigator.mediaSession` as a notification the way Chrome
-  does, so a receiver playing in the background needs a foreground service, a
-  `MediaSessionCompat` fed from the page API, and audio focus. Note for whoever
-  does it: do not call `WebView.onPause()`/`pauseTimers()` — the audio gate runs
-  on a 20 ms `setInterval` (`GATE_TICK_MS` in `static/v2/src/radio/audio-player.js`)
-  and Chromium throttles hidden-page timers to about once a minute.
-- **Shared settings.** The chooser's toggle is stored and honoured by nothing:
-  the desktop client bridges `ubersdr.v2.*` between receiver origins from its
-  preload (`receiver-preload.js`), and the document-start script here does not
-  yet.
-- **More of the page API.** The bridge is there and subscribed to `session`
-  (see "Leaving a receiver"); what it does not do yet is feed the media session
-  above. There is no Links menu and no Layout menu, and neither is wanted: a
-  phone has no menu bar, and the Layout menu's job is done by the phone layout.
+- **Shared settings.** The desktop client bridges the `ubersdr.v2.*` keys
+  between receiver origins from its preload (`receiver-preload.js`) so that one
+  arrangement of the interface applies to every receiver. The document-start
+  script here does not do that yet, so each receiver keeps its own — which is
+  less visible on a phone, where one receiver is open at a time, but it is the
+  same gap.
+- **Menus.** No Links menu and no Layout menu, and neither is wanted: a phone
+  has no menu bar, and the Layout menu's job is done by the phone layout.
+- **A caution for anyone touching the WebView lifecycle.** Do not call
+  `WebView.onPause()` or `pauseTimers()`. The audio gate runs on a 20 ms
+  `setInterval` (`GATE_TICK_MS` in `static/v2/src/radio/audio-player.js`) and
+  Chromium throttles hidden-page timers to about once a minute, which makes the
+  squelch behave strangely in the background even while audio keeps flowing.
 - **Popups.** The v1 windows (callsign lookup, map, CW graph) open with
   `window.open`, which this WebView does not handle yet.
 - **Upstream connection pooling.** `LocalProxy` opens a connection per request
@@ -265,7 +334,9 @@ src/native.js the plugin handle
 src/main.js   the entry point: assigns window.ubersdr before chooser.js runs
 src/receiver.js
               what runs inside a receiver page, bundled with the v2 page API's
-              client library — the Android answer to a preload
+              client library — the Android answer to a preload. Also provides
+              the media session and Notification APIs the WebView lacks.
+mobile.css    the chooser's phone pass, loaded after chooser.css
 www/          staged: the chooser, Leaflet, app.js and the v2 bundle (generated)
 android/      the Capacitor project, plus the plugin above
 ```

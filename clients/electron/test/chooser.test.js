@@ -257,8 +257,6 @@ function fakeApi(overrides = {}) {
         chooser: async () => ({}),
         setChooser: async (patch) => { calls.push(['setChooser', patch]); return patch; },
         home: async () => null,
-        sharedPrefs: async () => true,
-        setSharedPrefs: async (v) => v,
         resolve: async () => ({ ok: false, error: 'not used here' }),
         connect: async (desc) => { calls.push(['connect', desc]); return { ok: true }; },
         update: async () => {},
@@ -297,7 +295,7 @@ t('and so does every element it reaches for by a built-up id', () => {
     // The tabs and the sort chips are addressed as `tab-${name}` and friends,
     // which the scan above cannot see. They are the ones most likely to be
     // half-renamed, because renaming one means renaming four.
-    for (const tab of ['saved', 'lan', 'dir']) {
+    for (const tab of ['saved', 'lan', 'dir', 'custom']) {
         for (const id of [`tab-${tab}`, `tab-${tab}-count`, `panel-${tab}`]) {
             assert.ok(DECLARED.has(id), `#${id} is not in index.html`);
         }

@@ -48,6 +48,42 @@ const okBody = () => Promise.resolve({ ok: true, status: 200, blob: () => Promis
 
 // --- the setting -------------------------------------------------------------
 
+// A host that shows media controls of its own, as clients/capacitor declares it.
+function installHost(on) {
+    if (on) globalThis.window = { ubersdrDesktop: { mediaSession: true } };
+    else delete globalThis.window;
+}
+
+t('a host with media controls has photos on by default', () => {
+    // There the artwork slot exists whatever happens, and the choice is the
+    // operator's face or the same receiver logo every time — so the fetch is
+    // worth it where it is not worth a dock column.
+    install();
+    installHost(true);
+    assert.strictEqual(photoShown(), true);
+    installHost(false);
+});
+
+t('and the operator can still switch them off there, and it sticks', () => {
+    install();
+    installHost(true);
+    setPhotoShown(false);
+    assert.strictEqual(photoShown(), false, 'an explicit off beats the default');
+    setPhotoShown(true);
+    assert.strictEqual(photoShown(), true);
+    installHost(false);
+});
+
+t('no such host, no change: an absent key is still off', () => {
+    // The whole constraint on moving this default.
+    install();
+    installHost(false);
+    assert.strictEqual(photoShown(), false);
+    globalThis.window = {};
+    assert.strictEqual(photoShown(), false);
+    delete globalThis.window;
+});
+
 t('photos are off until turned on', () => {
     // The largest thing a lookup fetches for the least it says, so it is asked
     // for rather than given. Only an explicit 'on' counts — an absent key is

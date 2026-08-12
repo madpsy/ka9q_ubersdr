@@ -117,13 +117,22 @@ export default function MediaSessionPanel({ minimal }) {
 
             {!minimal && (
                 <>
-                    <Field
-                        label="Anchor"
-                        hint={anchor === 'auto' ? `auto → ${status.anchor}` : 'forced'}
-                    >
-                        <Segmented options={ANCHOR_OPTIONS} value={anchor} onChange={setAnchor} size="sm" />
-                    </Field>
-                    <div className="note note--tight">{ANCHOR_NOTE[status.anchor]}</div>
+                    {/* Not offered where the host draws the controls itself:
+                        every anchor but 'none' exists to persuade a browser to
+                        raise a widget, and there is no browser here to persuade
+                        — so the others would not be choices, they would be ways
+                        to silence the metadata. See resolveAnchor. */}
+                    {!support.host && (
+                        <>
+                            <Field
+                                label="Anchor"
+                                hint={anchor === 'auto' ? `auto → ${status.anchor}` : 'forced'}
+                            >
+                                <Segmented options={ANCHOR_OPTIONS} value={anchor} onChange={setAnchor} size="sm" />
+                            </Field>
+                            <div className="note note--tight">{ANCHOR_NOTE[status.anchor]}</div>
+                        </>
+                    )}
 
                     {/* The one thing that tells "the browser ignored us" apart
                         from "we never set anything". */}

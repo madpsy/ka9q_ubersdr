@@ -34,12 +34,33 @@ const listeners = new Set();
 // The map took its place as the thing shown by default, because where a station
 // is is a fact about the contact; what its operator looks like is not.
 //
-// `=== 'on'`, so an absent key is off. Anyone who had photos on before this has
-// the key written out — setPhotoShown is the only thing that writes it, and only
-// on a click — so a deliberate choice survives and only the default moves.
+// Anyone who has answered has the key written out — setPhotoShown is the only
+// thing that writes it, and only on a click — so a deliberate choice survives in
+// both directions and only the default moves.
+//
+// The default moves in one place: a host that shows media controls of its own
+// (clients/capacitor, which declares
+// `window.ubersdrDesktop.mediaSession` — see radio/media/support.js). Everything
+// above weighs a photo against a dock column, where the map is the better use of
+// the space. On a lock screen there is no column and no map: the artwork slot is
+// there whatever happens, and the choice is the operator's face or the same
+// receiver logo every time. So where that slot exists, the photo is worth its
+// fetch, and the panel's toggle still turns it off for anyone who disagrees.
+function defaultShown() {
+    try {
+        return !!(typeof window !== 'undefined' && window.ubersdrDesktop
+            && window.ubersdrDesktop.mediaSession);
+    } catch (e) {
+        return false;
+    }
+}
+
 export function photoShown() {
     try {
-        return localStorage.getItem(KEY) === 'on';
+        const saved = localStorage.getItem(KEY);
+        if (saved === 'on') return true;
+        if (saved === 'off') return false;
+        return defaultShown();
     } catch (e) {
         return false;
     }

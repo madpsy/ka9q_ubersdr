@@ -53,6 +53,9 @@ ARTIFACT=dist/UberSDR.apk
 V2=../../static/v2
 STATIC=../../static
 CHOOSER=../electron/chooser
+# The desktop client's icon, which is the app's: the launcher icon and the mark
+# in the chooser's header are both generated from it.
+ICON_SRC=../electron/assets/icon.png
 
 SKIP_UI=0
 APK=0
@@ -282,6 +285,15 @@ cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
    "$STATIC/fonts/twemoji-flags.woff2" www/vendor/ \
     || echo "warning: could not stage leaflet/flags — the chooser's map will be unavailable" >&2
 
+# The mark in the chooser's header, beside the page that asks for it. Same
+# source as the launcher icon below, and downscaled for the same reason: the
+# slot is 26 px and the file is 1024 square.
+if command -v convert >/dev/null 2>&1; then
+    convert "$ICON_SRC" -resize 64x64 www/icon.png || cp "$ICON_SRC" www/icon.png
+else
+    cp "$ICON_SRC" www/icon.png
+fi
+
 # ---- the launcher icon ------------------------------------------------------
 
 # The desktop client's icon, at the sizes Android wants, generated rather than
@@ -302,7 +314,6 @@ cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
 #                          thirds and centred, and the background is the app's
 #                          own dark (values/ic_launcher_background.xml) rather
 #                          than the white Capacitor generates.
-ICON_SRC=../electron/assets/icon.png
 if [[ -f "$ICON_SRC" ]] && command -v convert >/dev/null 2>&1; then
     # density:launcher px:adaptive canvas px
     for spec in mdpi:48:108 hdpi:72:162 xhdpi:96:216 xxhdpi:144:324 xxxhdpi:192:432; do

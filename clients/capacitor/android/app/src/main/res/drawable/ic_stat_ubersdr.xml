@@ -1,0 +1,35 @@
+<!--
+  The status-bar icon.
+
+  Its own drawing rather than the launcher icon scaled down: Android tints a
+  notification's small icon to a flat silhouette, so anything with colour or
+  detail arrives as a white blob. This is the same mark reduced to what survives
+  that — a mast with two arcs — drawn at the 24 dp the status bar uses.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+
+    <!-- The mast, and its feet. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11,9h2l3,12h-2.2l-0.6,-2.6h-2.4L10.2,21H8L11,9zM11.2,16.4h1.6L12,12.9L11.2,16.4z" />
+
+    <!-- Two arcs each side: transmitting, at the size where a third would
+         close up into a smudge. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.8,2.2 A1,1 0 0,0 6.4,3.6 A6,6 0 0,0 6.4,10.4 A1,1 0 0,0 7.8,9 A4,4 0 0,1 7.8,3.6 A1,1 0 0,0 7.8,2.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16.2,2.2 A1,1 0 0,1 17.6,3.6 A6,6 0 0,1 17.6,10.4 A1,1 0 0,1 16.2,9 A4,4 0 0,0 16.2,3.6 A1,1 0 0,1 16.2,2.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M9.9,4.9 A1,1 0 0,0 8.5,6.3 A2,2 0 0,1 8.5,7.7 A1,1 0 0,0 9.9,9.1 A3,3 0 0,0 9.9,4.9z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14.1,4.9 A1,1 0 0,1 15.5,6.3 A2,2 0 0,0 15.5,7.7 A1,1 0 0,1 14.1,9.1 A3,3 0 0,1 14.1,4.9z" />
+</vector>

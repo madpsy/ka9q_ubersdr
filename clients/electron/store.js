@@ -26,7 +26,7 @@ const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 // typed in by hand, it is what the map centres on and the distance column is
 // measured from, and re-entering coordinates every launch is not a feature.
 
-const TABS = new Set(['saved', 'lan', 'dir']);
+const TABS = new Set(['saved', 'lan', 'dir', 'custom']);
 const DIR_SORTS = new Set(['distance', 'listeners', 'snr', 'name']);
 
 /**

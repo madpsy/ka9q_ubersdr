@@ -1137,7 +1137,7 @@ function askHome() {
 
 // ---- tabs ------------------------------------------------------------------
 
-const TABS = ['saved', 'lan', 'dir'];
+const TABS = ['saved', 'lan', 'dir', 'custom'];
 let activeTab = 'dir';
 
 function setCount(tab, n) {
@@ -1164,6 +1164,11 @@ function showTab(name, { persist = true } = {}) {
     if (activeTab === 'dir') {
         drawMarkers(shownRows).catch(() => { /* already said so on the page */ });
     }
+    // The tab is one field with one control on it, and somebody who opened it
+    // came to type. Not focused on the way *out* of it, which is why this is
+    // here rather than in the click handler: showTab also runs at startup, for
+    // the tab that was open last.
+    if (activeTab === 'custom') byId('add-input').focus();
     if (persist) api.setChooser({ tab: activeTab });
 }
 
@@ -1237,11 +1242,6 @@ byId('saved-sort').addEventListener('change', async (event) => {
     event.target.value = sortBy;
     refreshSaved();
 });
-byId('shared-prefs-box').addEventListener('change', async (event) => {
-    // The main process answers with what it actually set, so the box can never
-    // show a state the store doesn't hold.
-    event.target.checked = await api.setSharedPrefs(event.target.checked);
-});
 byId('dir-refresh').addEventListener('click', loadDirectory);
 byId('dir-filter').addEventListener('input', renderDirectory);
 byId('home-set').addEventListener('click', askHome);
@@ -1258,7 +1258,6 @@ api.onChanged(refreshSaved);
     const info = await api.appInfo();
     builtinAvailable = info.builtinAvailable;
     uiChoice = info.uiChoice !== false;
-    byId('shared-prefs-box').checked = await api.sharedPrefs();
     sortBy = await api.sort();
     byId('saved-sort').value = sortBy;
     byId('footer').textContent = builtinAvailable

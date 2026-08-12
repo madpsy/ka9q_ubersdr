@@ -41,6 +41,20 @@
             android:launchMode="singleTask"
             android:exported="false" />
 
+        <!--
+          What keeps a receiver playing once the screen locks. Without it the
+          process is cacheable the moment the Activity stops being visible, and
+          a frozen process is silence.
+
+          The type is mediaPlayback because that is what it is doing, and from
+          Android 14 the platform checks: a service of this type must have an
+          active MediaSession, which PlaybackService creates.
+        -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -55,4 +69,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Playing on with the screen off, and the notification that says so.
+         POST_NOTIFICATIONS is a runtime permission from Android 13: refused, the
+         service still runs and the audio still plays, but the operator gets no
+         notification to stop it from — so ReceiverActivity asks. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

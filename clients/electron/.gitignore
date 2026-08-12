@@ -4,6 +4,9 @@ ui/
 dist/
 # Leaflet, staged from static/ by build.sh for the chooser's directory map.
 chooser/vendor/
+
+# The mark in the chooser's header, staged from assets/icon.png by build.sh.
+chooser/icon.png
 # The multi-monitor's libraries and the Hamlib wasm, staged the same way. The
 # wasm alone is 14 MB, and every one of these is already in static/ — see
 # monitor/README.md.

@@ -291,6 +291,22 @@ cp "$STATIC/leaflet.js" "$STATIC/leaflet.css" "$STATIC/L.Terminator.js" \
    "$STATIC/fonts/twemoji-flags.woff2" chooser/vendor/ \
     || echo "warning: could not stage leaflet/flags — the chooser's map will be unavailable" >&2
 
+# The mark beside the chooser's title, which is also the link to the project.
+# Staged rather than committed for the same reason everything else here is:
+# assets/icon.png is the one copy of it.
+#
+# Downscaled where ImageMagick is about, because the source is 1024 square and
+# the slot is 26 — half a megabyte to decode for something the size of a
+# favicon. Where it is not, the full-size file is copied and the browser scales
+# it: a heavier page load, not a missing picture, and this build has never
+# needed ImageMagick.
+if command -v convert >/dev/null 2>&1; then
+    convert assets/icon.png -resize 64x64 chooser/icon.png \
+        || cp assets/icon.png chooser/icon.png
+else
+    cp assets/icon.png chooser/icon.png
+fi
+
 # The multi-monitor's libraries, staged the same way and for the same reason:
 # they are somebody else's, they live in static/, and a second committed copy is
 # a second thing to keep current. Every one of these is byte-identical to the

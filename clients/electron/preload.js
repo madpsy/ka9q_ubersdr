@@ -27,8 +27,6 @@ contextBridge.exposeInMainWorld('ubersdr', {
     // Where to draw "you", and what the distance column measures from: the
     // typed-in position if there is one, else GeoIP. Null when neither answers.
     home: () => ipcRenderer.invoke('geo:home'),
-    sharedPrefs: () => ipcRenderer.invoke('prefs:shared'),
-    setSharedPrefs: (on) => ipcRenderer.invoke('prefs:set-shared', !!on),
     onChanged: (cb) => {
         ipcRenderer.on('instances:changed', () => cb());
     },

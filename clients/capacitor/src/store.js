@@ -30,7 +30,7 @@ const FIRST_PORT = 17820;
 // Fields the chooser is allowed to change after creation.
 const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 
-const TABS = new Set(['saved', 'lan', 'dir']);
+const TABS = new Set(['saved', 'lan', 'dir', 'custom']);
 const DIR_SORTS = new Set(['distance', 'listeners', 'snr', 'name']);
 
 /**
@@ -58,7 +58,7 @@ function sanitiseChooser(chooser) {
     return out;
 }
 
-const EMPTY = () => ({ nextPort: FIRST_PORT, sort: 'used', chooser: {}, sharedPrefs: true, instances: [] });
+const EMPTY = () => ({ nextPort: FIRST_PORT, sort: 'used', chooser: {}, instances: [] });
 
 export class InstanceStore {
     constructor() {
@@ -78,9 +78,6 @@ export class InstanceStore {
                     nextPort: loaded.nextPort || FIRST_PORT,
                     sort: loaded.sort === 'recent' ? 'recent' : 'used',
                     chooser: sanitiseChooser(loaded.chooser),
-                    // On by default, as on the desktop: one arrangement of the
-                    // interface, on every receiver.
-                    sharedPrefs: loaded.sharedPrefs !== false,
                     instances: loaded.instances,
                 };
             }
@@ -204,18 +201,6 @@ export class InstanceStore {
         this.data.chooser = sanitiseChooser(next);
         await this.persist();
         return { ...this.data.chooser };
-    }
-
-    async sharedPrefs() {
-        await this.ready;
-        return this.data.sharedPrefs !== false;
-    }
-
-    async setSharedPrefs(on) {
-        await this.ready;
-        this.data.sharedPrefs = !!on;
-        await this.persist();
-        return this.data.sharedPrefs;
     }
 
     async update(id, patch) {

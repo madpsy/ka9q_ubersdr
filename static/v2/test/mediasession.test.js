@@ -47,6 +47,55 @@ t('Android Chrome needs the URL stream, not the bridge', () => {
     assert.strictEqual(s.androidChrome, true);
 });
 
+t('a host that draws the controls forces the metadata anchor, whatever is saved', () => {
+    // The bug this exists for: a saved 'auto' resolved through detection, and
+    // anything that answered 'stream' silenced the feature entirely — that
+    // anchor pushes no metadata until an <audio> element reports itself stably
+    // playing, and in a WebView there is no such element and never will be. An
+    // override left behind by somebody trying to make it work did the same.
+    const hosted = detectSupport(CHROME_ANDROID, {
+        hasMediaSession: true, hasContextSink: true, hostMedia: true,
+    });
+    for (const override of ['auto', 'stream', 'bridge', 'none', undefined]) {
+        assert.strictEqual(resolveAnchor(hosted, override), 'none', `override ${override}`);
+    }
+});
+
+t('and an override is still obeyed everywhere else', () => {
+    const browser = detectSupport(CHROME_ANDROID, { hasMediaSession: true, hasContextSink: true });
+    assert.strictEqual(resolveAnchor(browser, 'auto'), 'stream');
+    assert.strictEqual(resolveAnchor(browser, 'none'), 'none');
+    assert.strictEqual(resolveAnchor(browser, 'bridge'), 'bridge');
+    assert.strictEqual(resolveAnchor(browser, undefined), 'stream');
+});
+
+t('a host that shows the controls itself takes no anchor and is on by default', () => {
+    // clients/capacitor renders the notification and the lock screen from a
+    // native session fed by whatever this page sets, so there is no browser to
+    // talk into raising a widget. That removes the one objection to defaulting
+    // Android on: the 'stream' anchor it would otherwise need, which silences
+    // the scope, the recorder and the filters.
+    const s = detectSupport(CHROME_ANDROID, {
+        hasMediaSession: true, hasContextSink: true, hostMedia: true,
+    });
+    assert.strictEqual(s.anchor, 'none');
+    assert.strictEqual(s.defaultEnabled, true);
+});
+
+t('and the host flag changes nothing for a browser that did not set it', () => {
+    // The whole point: every device that is not that host reaches exactly the
+    // answers it reached before the flag existed.
+    for (const [ua, sink, anchor, on] of [
+        [CHROME_DESKTOP, true, 'none', false],
+        [CHROME_ANDROID, true, 'stream', false],
+        [CHROME_IOS, false, 'bridge', true],
+    ]) {
+        const s = detectSupport(ua, { hasMediaSession: true, hasContextSink: sink, hostMedia: false });
+        assert.strictEqual(s.anchor, anchor);
+        assert.strictEqual(s.defaultEnabled, on);
+    }
+});
+
 t('a handset is not on by default unless it is an Apple one', () => {
     // Android needs the 'stream' anchor, which moves the audio off the WebSocket
     // and silences the scope, the recorder and the client-side filters while it

@@ -33,14 +33,52 @@ export const ANCHORS = ['auto', 'none', 'bridge', 'stream'];
 // anywhere and changes between releases, so it can be overridden — see
 // resolveAnchor and the Media controls panel. Worth having permanently: the
 // alternative to a setting is editing this file every time a browser moves.
+//
+// The one case that is not a guess is a host that draws the controls itself
+// (`support.host`): there, 'none' is not the best answer but the only coherent
+// one, and neither detection nor an override may say otherwise. Every anchor
+// above it exists to talk a *browser* into raising a widget by giving it a
+// media element to hang one on — there is no browser here to talk into it, so
+// the others do not fail loudly, they fail silently. `stream` in particular
+// waits for an <audio> element to report itself stably playing before it will
+// push any metadata at all (controller.js, rule 2), which in a WebView never
+// happens: the lock screen keeps the frequency it was opened with and nothing
+// else ever reaches it.
+//
+// So this is forced rather than defaulted. A saved 'auto' from before the host
+// existed, or a 'stream' left behind by somebody trying to make it work, would
+// otherwise be enough to silence the whole feature.
 export function resolveAnchor(support, override) {
+    if (support && support.host) return 'none';
     return override && override !== 'auto' && ANCHORS.includes(override)
         ? override
         : support.anchor;
 }
 
+/**
+ * Whether the host — rather than the browser — puts these controls on screen.
+ *
+ * The Android client (clients/capacitor) has no browser chrome to raise a media
+ * widget, so it builds a native one out of whatever this page sets: it provides
+ * `navigator.mediaSession`, watches what is assigned to it, and turns that into
+ * a notification and a lock-screen session. See clients/capacitor/src/receiver.js.
+ *
+ * Declared by the host, never sniffed. A page cannot tell from the inside
+ * whether anything is listening to a media session, and a wrong guess either
+ * way is a feature silently missing or an anchor costing something for nothing.
+ */
+function hostMediaControls() {
+    try {
+        return !!(typeof window !== 'undefined' && window.ubersdrDesktop
+            && window.ubersdrDesktop.mediaSession);
+    } catch (e) {
+        return false;
+    }
+}
+
 // Split out so a test can drive it with any user agent.
 export function detectSupport(ua = navigator.userAgent, env = {}) {
+    const host = env.hostMedia !== undefined ? env.hostMedia : hostMediaControls();
     const available = env.hasMediaSession !== undefined
         ? env.hasMediaSession
         : (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
@@ -87,13 +125,22 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
     // recorder and the audio filters go quiet while it runs. The panel says so
     // wherever this anchor is the live one, and anyone who would rather keep
     // those can force 'none' from the same control.
+    // A host that shows the controls itself needs no anchor at all: every
+    // anchor above 'none' exists to talk a *browser* into raising a widget, and
+    // there is no browser here to talk into it. Decided before the platform,
+    // because on the one platform this happens on the platform's answer is the
+    // expensive one.
     let anchor = 'none';
-    if (blink) anchor = androidChrome || windows ? 'stream' : 'none';
+    if (host) anchor = 'none';
+    else if (blink) anchor = androidChrome || windows ? 'stream' : 'none';
     else if (apple || !contextSink) anchor = 'bridge';
 
     return {
         available,
         anchor,
+        // Whether the controls are the host's rather than the browser's, which
+        // resolveAnchor needs and the panel reads to explain itself.
+        host,
         apple,
         blink,
         windows,
@@ -112,7 +159,11 @@ export function detectSupport(ua = navigator.userAgent, env = {}) {
         // somebody who asked for lock-screen control and a poor one to make on
         // their behalf — and it is a trade Apple does not have to make, because
         // the bridge anchor costs nothing.
-        defaultEnabled: available && apple,
+        //
+        // A host that renders the controls itself is the Android case with that
+        // objection removed: it is a phone, it takes the 'none' anchor, and so
+        // it costs nothing either.
+        defaultEnabled: available && (apple || host),
     };
 }
 

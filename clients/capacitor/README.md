@@ -6,9 +6,26 @@ loopback proxy, so the app is a client rather than a wrapper around somebody's
 website.
 
 ```sh
-./build.sh --apk       # build the UI, stage it, assemble a debug APK
-./build.sh --install   # ...and adb-install it
+./build.sh --apk                     # build the UI, stage it, assemble a debug APK
+./build.sh --install                 # ...and install it on the attached device
+./build.sh --install=192.168.1.50    # ...on a phone over Wi-Fi
+./build.sh --release                 # a release APK instead (signed — see below)
 ```
+
+Two kinds of APK, and the difference matters more than "debug" usually implies:
+a debug build is signed with the local debug key, is `debuggable`, and its
+WebViews answer `chrome://inspect`; a release build is signed with your own key
+and is none of those things. **Android will not install one over the other** —
+it identifies an app by its signature — so switching kinds means uninstalling
+first, which erases that install's saved receivers, shared settings and saved
+passwords. `--install` says so rather than leaving you with adb's
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+`--install=<address>` takes an IP (port 5555 unless you give one) or a serial
+from `adb devices`, and connects first if it is an address. Wi-Fi is worth
+preferring: over USB the phone re-enumerates every time the screen locks, and
+each new device node needs its udev permissions again. Enable it once over a
+cable with `adb tcpip 5555`.
 
 Needs a **JDK 21** (Capacitor's Android module compiles at 21 — a JRE 21 is not
 enough), the Android SDK, and `esbuild`. Android Studio is not required;

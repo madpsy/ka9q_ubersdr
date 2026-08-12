@@ -1774,7 +1774,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
     white-space: nowrap;
     transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--text-faint); }
+/* Hover, only where there is a pointer to hover with.
+ *
+ * A touch tap leaves :hover latched on the thing tapped until something else is
+ * tapped — the finger never "leaves". On a toggle that reads as the control not
+ * having taken effect: the button keeps its hover background and the operator
+ * taps elsewhere to find out whether it worked. Guarding the hover rules means
+ * a touchscreen never enters the state at all, and a mouse is unaffected.
+ */
+@media (hover: hover) {
+    .btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--text-faint); }
+}
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -1783,14 +1793,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-color: var(--accent);
     color: var(--accent-ink);
 }
-.btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+@media (hover: hover) {
+    .btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+}
 
 .btn--danger { background: var(--bad); border-color: var(--bad); color: #150406; }
-.btn--danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--bad); }
+@media (hover: hover) {
+    .btn--danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--bad); }
+}
 
 .btn--ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
-.btn--ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); border-color: transparent; }
-.btn--ghost.is-active { color: var(--accent); background: var(--accent-soft); }
+@media (hover: hover) {
+    .btn--ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); border-color: transparent; }
+}
+/* Stated for the hovered case too, and not only for touch: the hover rule above
+ * carries one more pseudo-class than a bare `.btn--ghost.is-active`, so it won
+ * on specificity and a hovered toggle rendered as an inactive one. With a mouse
+ * that shows as an active button going grey under the pointer; with a finger,
+ * where the hover then latches, it reads as the toggle having done nothing. */
+.btn--ghost.is-active,
+.btn--ghost.is-active:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
 
 .btn--sm { padding: 5px 9px; font-size: calc(11.5px * var(--ui-scale)); }
 /* A link wearing the button's clothes — the VibeSDR deep link is an anchor so
@@ -2110,9 +2132,15 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
     transition: all var(--dur) var(--ease);
 }
-.chip--button:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+@media (hover: hover) {
+    .chip--button:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+}
 .chip--button:disabled { opacity: 0.45; cursor: not-allowed; }
-.chip--button.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+/* Same specificity inversion as the ghost button above: .chip--button:hover
+ * :not(:disabled) outranks a two-class .is-active, so a hovered active chip took
+ * the hover's text and border colour over its own. */
+.chip--button.is-active,
+.chip--button.is-active:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 /* Band keys — the Quick bands panel.
  *

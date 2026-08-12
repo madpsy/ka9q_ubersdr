@@ -72,6 +72,7 @@ public class ReceiverActivity extends Activity {
     private String label = "UberSDR";
     private boolean playing;
     private androidx.webkit.JavaScriptReplyProxy reply;
+    private Prefs prefs;
 
     /** Ends the open receiver, if there is one. */
     static void finishCurrent() {
@@ -84,6 +85,8 @@ public class ReceiverActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         current = new java.lang.ref.WeakReference<>(this);
+
+        prefs = new Prefs(this);
 
         Intent intent = getIntent();
         instanceId = intent.getStringExtra(EXTRA_ID);
@@ -121,7 +124,8 @@ public class ReceiverActivity extends Activity {
         Set<String> rules = Collections.singleton(origin);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(
-                    web, seedScript(upstream, new Secrets(this).get(instanceId), notificationState()),
+                    web, seedScript(upstream, new Secrets(this).get(instanceId), notificationState(),
+                            prefs.snapshot()),
                     rules);
 
             // The page API client (src/receiver.js, bundled by build.sh), and
@@ -241,6 +245,9 @@ public class ReceiverActivity extends Activity {
                 break;
             case "artwork":
                 if (playing) PlaybackService.artwork(this, decodeDataUrl(message.optString("src")));
+                break;
+            case "prefs":
+                prefs.update(message.optJSONObject("map"));
                 break;
             case "notice":
                 Notices.show(this, message.optString("tag", "ubersdr"),
@@ -403,7 +410,8 @@ public class ReceiverActivity extends Activity {
                 == android.content.pm.PackageManager.PERMISSION_GRANTED ? "granted" : "default";
     }
 
-    private static String seedScript(String upstreamOrigin, String password, String notifications) {
+    private static String seedScript(String upstreamOrigin, String password, String notifications,
+                                     String sharedPrefs) {
         StringBuilder sb = new StringBuilder();
         sb.append("(function(){try{window.ubersdrDesktop={upstreamOrigin:")
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
@@ -415,6 +423,18 @@ public class ReceiverActivity extends Activity {
               .append(JSONObject.quote(password))
               .append(");}catch(e){}");
         }
+        // The shared settings, applied before the page's first script reads
+        // localStorage — which is the whole reason this runs at document start.
+        //
+        // Overwrite, don't clear: a key this receiver has and the snapshot lacks
+        // is a feature the template receiver never used, not a difference in how
+        // the shared ones are set. `prefsSeeded` tells src/receiver.js whether
+        // there was a snapshot at all, because the first receiver ever opened is
+        // the one that supplies it.
+        sb.append("try{var s=").append(sharedPrefs == null ? "null" : sharedPrefs).append(";")
+          .append("window.ubersdrDesktop.prefsSeeded=!!s;")
+          .append("if(s){for(var k in s){try{localStorage.setItem(k,s[k]);}catch(e){}}}")
+          .append("}catch(e){}");
         sb.append("})();");
         return sb.toString();
     }

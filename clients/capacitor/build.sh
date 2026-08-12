@@ -25,7 +25,13 @@
 #   ./build.sh --apk        the above, then assemble a debug APK
 #   ./build.sh --release    assemble a release APK instead (signed if the
 #                           credentials are in the environment — see below)
-#   ./build.sh --install    assemble the debug APK and adb-install it
+#   ./build.sh --install    assemble the debug APK and adb-install it on the one
+#                           attached device
+#   ./build.sh --install=192.168.1.50
+#                           ...on a phone over Wi-Fi: connects to it first
+#                           (port 5555 unless one is given) and installs there.
+#                           A serial from `adb devices` works in the same place.
+#                           Combine with --release to install that instead.
 #   ./build.sh --publish    release-build, then upload it to the `latest`
 #                           release on GitHub with the gh CLI, replacing what is
 #                           there. Asks first, and only from a terminal.
@@ -61,6 +67,7 @@ SKIP_UI=0
 APK=0
 RELEASE=0
 INSTALL=0
+DEVICE=""
 CLEAN=0
 PUBLISH=0
 
@@ -70,6 +77,7 @@ for arg in "$@"; do
         --apk) APK=1 ;;
         --release) APK=1; RELEASE=1 ;;
         --install) APK=1; INSTALL=1 ;;
+        --install=*) APK=1; INSTALL=1; DEVICE="${arg#--install=}" ;;
         --publish) APK=1; RELEASE=1; PUBLISH=1 ;;
         --clean) CLEAN=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -487,12 +495,56 @@ echo "built $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1)) from $OUT"
 if [[ "$INSTALL" -eq 1 ]]; then
     ADB="$ANDROID_HOME/platform-tools/adb"
     command -v adb >/dev/null 2>&1 && ADB=adb
-    if ! "$ADB" get-state >/dev/null 2>&1; then
-        echo "not installed: no device or emulator is attached (adb devices)." >&2
+
+    # Where to install. Empty means "the one device attached", which is what adb
+    # does on its own and what fails as soon as there are two.
+    TARGET=()
+    if [[ -n "$DEVICE" ]]; then
+        # An address is something to connect to first; anything else is taken as
+        # a serial adb already knows. Wi-Fi is worth the special case because it
+        # is how a phone is usually reached here — a USB cable re-enumerates the
+        # device every time the screen locks, and each re-enumeration is a new
+        # node that needs its permissions again.
+        if [[ "$DEVICE" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
+            [[ "$DEVICE" == *:* ]] || DEVICE="$DEVICE:5555"
+            echo "connecting to $DEVICE…"
+            if ! "$ADB" connect "$DEVICE" | grep -qE "connected to"; then
+                echo "not installed: could not reach $DEVICE." >&2
+                echo "  The phone needs wireless debugging on, and its first" >&2
+                echo "  connection has to be made over USB with: adb tcpip 5555" >&2
+                exit 1
+            fi
+        fi
+        TARGET=(-s "$DEVICE")
+    fi
+
+    if ! "$ADB" "${TARGET[@]}" get-state >/dev/null 2>&1; then
+        echo "not installed: no device is attached, or more than one is and none was named." >&2
+        echo >&2
+        "$ADB" devices | sed 's/^/  /' >&2
+        echo "  Name one with --install=<ip> or --install=<serial>." >&2
         exit 1
     fi
-    "$ADB" install -r "$ARTIFACT"
-    echo "installed on $("$ADB" shell getprop ro.product.model | tr -d '\r')"
+
+    # Not `install -r` alone, because the failure it hides is the one that
+    # actually happens: a release APK will not replace a debug one, or vice
+    # versa, since Android identifies an app by its signature. There is no way
+    # round it but to uninstall, which takes the saved receivers, the shared
+    # settings and any saved passwords with it — so this says so rather than
+    # doing it.
+    if ! "$ADB" "${TARGET[@]}" install -r "$ARTIFACT" 2>&1 | tee /dev/stderr | grep -q "^Success"; then
+        echo >&2
+        echo "  If that says INSTALL_FAILED_UPDATE_INCOMPATIBLE, the APK on the" >&2
+        echo "  device was signed with a different key — a debug build where this" >&2
+        echo "  is a release one, most likely. Installing this one means:" >&2
+        echo >&2
+        echo "      adb ${TARGET[*]} uninstall org.ubersdr.mobile" >&2
+        echo >&2
+        echo "  which erases that app's saved receivers, shared settings and" >&2
+        echo "  saved passwords. Build the other kind instead to keep them." >&2
+        exit 1
+    fi
+    echo "installed on $("$ADB" "${TARGET[@]}" shell getprop ro.product.model | tr -d '\r')"
 fi
 
 if [[ "$PUBLISH" -eq 1 ]]; then

@@ -20,6 +20,7 @@
 // exactly what that API exists to replace.
 
 import { createClient } from '../../../static/v2/src/bridge/client.js';
+import { SECRETS } from '../../../static/v2/src/lib/backup.js';
 
 // The channel ReceiverActivity opens with addWebMessageListener. Absent on a
 // system WebView too old for it, in which case the receiver simply stays open
@@ -30,6 +31,72 @@ function tellHost(message) {
     const channel = host();
     if (!channel) return;
     try { channel.postMessage(JSON.stringify(message)); } catch (e) { /* the Activity is going */ }
+}
+
+// ---- shared settings --------------------------------------------------------
+//
+// Each instance has its own loopback port, so its own origin, so its own
+// localStorage — without this every receiver would open at the defaults. One
+// arrangement of the interface, on every receiver, exactly as the desktop
+// client does it (clients/electron/receiver-preload.js) and with no switch,
+// because there was one sensible answer and a control offering the other.
+//
+// The seeding half already happened: ReceiverActivity writes the snapshot into
+// this origin's localStorage from the document-start script, before the page's
+// first script can read it. This half is the other direction — what changes
+// here is reported back so the next receiver opened inherits it.
+//
+// What is never shared is the judgement, and it is the desktop client's list
+// plus one addition: v2's own SECRETS (lib/backup.js), which is that file's
+// answer to the same question for the settings backup. Importing it rather than
+// restating it means a credential that moves — the rotator or antenna-switch
+// password gaining a `ubersdr.v2.` key, say — is excluded from both features by
+// the one edit. Today they are outside the prefix and could not travel anyway;
+// the point is that this holds when that stops being true.
+
+const PREFIX = 'ubersdr.v2.';
+const SKIP_PREFIX = 'ubersdr.v2.news.cache.';
+const SKIP_EXACT = new Set(['ubersdr.v2.radio', ...SECRETS]);
+
+// Settings change at human speed; this is a copy of a few kilobytes.
+const POLL_MS = 2000;
+
+function sharedKey(key) {
+    return !!key && key.startsWith(PREFIX) && !key.startsWith(SKIP_PREFIX) && !SKIP_EXACT.has(key);
+}
+
+function readShared() {
+    const map = {};
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!sharedKey(key)) continue;
+            map[key] = localStorage.getItem(key);
+        }
+    } catch (e) { /* private mode */ }
+    return map;
+}
+
+let lastPushed = null;
+
+function pushShared() {
+    const map = readShared();
+    const serialised = JSON.stringify(map);
+    if (serialised === lastPushed) return;
+    lastPushed = serialised;
+    tellHost({ type: 'prefs', map });
+}
+
+function watchShared() {
+    // No snapshot yet — nothing has ever been opened — so this receiver becomes
+    // the template rather than the first one somebody happens to change a
+    // setting in. Otherwise the baseline is what is here now, and only later
+    // changes are reported.
+    let seeded = false;
+    try { seeded = !!(window.ubersdrDesktop && window.ubersdrDesktop.prefsSeeded); } catch (e) { /* none */ }
+    if (seeded) lastPushed = JSON.stringify(readShared());
+    else pushShared();
+    setInterval(pushShared, POLL_MS);
 }
 
 // ---- what the lock screen says ----------------------------------------------
@@ -379,3 +446,4 @@ if (channel) {
 polyfillMediaSession();
 observeMediaSession();
 polyfillNotifications();
+watchShared();

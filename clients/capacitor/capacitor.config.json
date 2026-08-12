@@ -1,0 +1,10 @@
+{
+  "appId": "org.ubersdr.mobile",
+  "appName": "UberSDR",
+  "webDir": "www",
+  "android": {
+    "buildOptions": {},
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {}
+}

@@ -2029,8 +2029,11 @@ class ChatUI {
         // Create a unique ID for this message to prevent duplicates
         const messageId = `${username}-${timestamp}-${message.substring(0, 50)}`;
         
-        // Check if this message already exists in the container
-        if (container.querySelector(`[data-message-id="${messageId}"]`)) {
+        // Check if this message already exists in the container.
+        // CSS.escape: the id carries message text, and a quote in it makes an
+        // invalid selector — querySelector then throws and the message never
+        // renders at all.
+        if (container.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)) {
             console.log('[ChatUI] Skipping duplicate message:', messageId);
             return;
         }
@@ -2138,7 +2141,14 @@ class ChatUI {
     linkifyUrls(text) {
         // Match URLs starting with http:// or https://
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">$1</a>');
+        return text.replace(urlRegex, (url) => {
+            // The text arrives HTML-escaped, so quotes are already entities —
+            // this is the second lock on the same door: whatever goes in the
+            // href cannot carry a raw quote out of the attribute, however this
+            // is called. The link label keeps the text as matched.
+            const href = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">${url}</a>`;
+        });
     }
 
     /**
@@ -2958,11 +2968,16 @@ class ChatUI {
 
     /**
      * Escape HTML to prevent XSS
+     *
+     * Escapes quotes as well as & < >. The old textContent/innerHTML trick did
+     * not: quotes came through untouched, and everything escaped here goes into
+     * an HTML attribute somewhere below (href, title, onclick), so a quote in
+     * the text could close the attribute and add its own event handler.
      */
     escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        return String(text === null || text === undefined ? '' : text)
+            .replace(/[&<>"']/g, (c) => ENTITIES[c]);
     }
 }
 

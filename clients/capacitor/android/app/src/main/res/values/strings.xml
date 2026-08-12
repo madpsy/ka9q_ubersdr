@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">UberSDR</string>
+    <string name="title_activity_main">UberSDR</string>
+    <string name="package_name">org.ubersdr.mobile</string>
+    <string name="custom_url_scheme">org.ubersdr.mobile</string>
+</resources>

@@ -1,0 +1,214 @@
+/*
+ * The chooser, on a phone.
+ *
+ * clients/electron/chooser/chooser.css is the chooser's stylesheet and stays
+ * the chooser's stylesheet: this sheet is loaded after it and says only what a
+ * 430 px screen needs said differently. Nothing here restyles the page — the
+ * palette, the rows, the cards and the map are all the desktop client's, and a
+ * receiver looks the same in both.
+ *
+ * It has one breakpoint of its own to build on: `@media (max-width: 900px)`,
+ * which stacks the directory's list and map. That is a narrow desktop window.
+ * Below it there are three problems it does not address, and they are what this
+ * file is for:
+ *
+ *   1. There is no hover. The directory's cards are raised by a pointer moving
+ *      over a row or a pin, which on a touchscreen never happens — so the tap
+ *      target has to be the row itself, and the card has to be reachable.
+ *   2. There is no room. A header, a form, three tabs, a toolbar and a sort row
+ *      is most of a phone screen before the first receiver.
+ *   3. There is no mouse. Rows carrying four controls each were sized for a
+ *      cursor, and 24 px of icon is not a thumb target.
+ *
+ * The map is deliberately left where the 900 px breakpoint puts it — below the
+ * list rather than beside it — and is not given a toggle yet. That is a design
+ * question (a phone probably wants the map as a mode, not a section) and this
+ * is the sheet it will be answered in.
+ */
+
+/*
+ * Letting the columns shrink.
+ *
+ * The single most visible difference between this screen and a desktop window,
+ * and it is one line of flexbox. `main` is a flex row, each panel is `flex: 1`,
+ * and a flex item's automatic minimum size is its *min-content* width — so a
+ * panel refuses to be narrower than the widest thing it contains that cannot
+ * wrap. On a desktop nothing notices, because that width fits. At 412 px the
+ * directory panel measures 706, `main`'s `overflow: hidden` clips the excess,
+ * and the right-hand third of every row — the Connect button, the key, the
+ * badges — is simply not on the screen. Nothing scrolls to reveal it, because
+ * the document itself is not overflowing: the panel is.
+ *
+ * `min-width: 0` on the chain lets them shrink to their container. What was
+ * forcing the width is the sort row, which is a nowrap flex line of five
+ * controls, so it is allowed to wrap as well — otherwise it is the one thing
+ * still clipped after everything else fits.
+ */
+main > .panel,
+.dir-layout,
+.dir-column,
+.dir-list,
+.dir-map-column {
+    min-width: 0;
+}
+
+.sort-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+}
+
+/* Same reasoning one level down: a row's top line is a nowrap flex line, and a
+   long receiver name should take a second line rather than the width. */
+.drow-top {
+    flex-wrap: wrap;
+}
+
+/*
+ * The display cutout.
+ *
+ * Only the cutout: the status and navigation bars are handled natively, in
+ * SystemBars.java, because a WebView never reports those to `env()` — see the
+ * comment there for why the two are split. What is left for CSS is the notch,
+ * which in landscape sits beside the bars rather than under them, and which the
+ * page does hear about. build.sh stages this page with `viewport-fit=cover`,
+ * without which env() answers zero regardless.
+ */
+header {
+    padding-top: calc(14px + env(safe-area-inset-top));
+    padding-left: calc(18px + env(safe-area-inset-left));
+    padding-right: calc(18px + env(safe-area-inset-right));
+}
+
+nav.tabs {
+    padding-left: calc(18px + env(safe-area-inset-left));
+    padding-right: calc(18px + env(safe-area-inset-right));
+}
+
+main {
+    padding-left: calc(18px + env(safe-area-inset-left));
+    padding-right: calc(18px + env(safe-area-inset-right));
+}
+
+footer {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+}
+
+/* Room. The chrome above the first row is what a phone has least of. */
+@media (max-width: 560px) {
+    header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+                 10px calc(12px + env(safe-area-inset-left));
+    }
+
+    header .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+    }
+
+    header h1 {
+        font-size: 1.1rem;
+    }
+
+    /* Two words that cost a line each on a phone, and say what the three tabs
+       below them already say. */
+    header .tagline {
+        display: none;
+    }
+
+    #add-form {
+        display: flex;
+        gap: 6px;
+    }
+
+    #add-input {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    /*
+     * The tab strip wraps, and the checkbox is what wraps.
+     *
+     * Three tabs and a setting do not fit across a phone. Scrolling the strip
+     * was the first answer and is the wrong one twice over: the setting ends up
+     * off the right-hand edge where nobody finds it, and it is the one thing
+     * here that is not a destination — a strip you can scroll past the end of
+     * reads as more tabs.
+     *
+     * So the tabs keep one line to themselves, tightened until they fit, and
+     * the setting takes the line below. `flex-basis: 100%` only wraps if the
+     * container may wrap, which is why this is not `nowrap` with an overflow.
+     */
+    nav.tabs {
+        flex-wrap: wrap;
+        gap: 0 2px;
+        padding-top: 8px;
+    }
+
+    nav.tabs .tab {
+        flex: 0 1 auto;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    nav.tabs .option {
+        order: 99;
+        flex: 1 0 100%;
+        /* chooser.css pushes it to the right of the tabs with an auto margin,
+           which on its own line would strand it against the edge. */
+        margin-left: 0;
+        margin-bottom: 0;
+        padding: 2px 0 8px;
+    }
+
+    main {
+        padding: 0 calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left));
+    }
+}
+
+/* Thumbs. Every control in a row, on every screen this app runs on. */
+@media (pointer: coarse) {
+    .list .actions button,
+    .list .actions select {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .list .row {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    /* The key is an icon in a button sized to it. The glyph stays; the button
+       grows around it. */
+    .list .actions .key-btn {
+        padding: 10px;
+    }
+
+    /* The directory's sort chips are a row of small targets that is also the
+       thing most often tapped. */
+    .dir-toolbar .chip {
+        min-height: 40px;
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+}
+
+/*
+ * Hover, which does not exist here.
+ *
+ * The directory's card is raised on pointerover and dismissed on pointerout. On
+ * a touchscreen a tap fires both, so the card appears and vanishes; a tap on a
+ * row already selects it and opens its pin, which is the behaviour that
+ * survives. This keeps the card out of the way rather than trying to make a
+ * pointer-shaped interaction work with a finger — the row is the target, and
+ * everything the card offers is on the row.
+ */
+@media (hover: none) {
+    .leaflet-tooltip.pin-tip {
+        display: none !important;
+    }
+}

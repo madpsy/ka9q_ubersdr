@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP, permitted.
+
+  Not a relaxation of a default that suited this app: a receiver on the local
+  network is plain http, on port 80 or 8080, and so is the loopback proxy every
+  receiver window loads from. With the platform default (cleartext refused for
+  targetSdk 28 and up) the Local network tab would find receivers it could not
+  open, and the bundled UI would not load at all.
+
+  Public receivers are reached over TLS and are verified normally — the trust
+  decision for a self-signed certificate is per receiver and explicit, and lives
+  in Http.java and LocalProxy.java rather than here. This file says which
+  transports are allowed, not which certificates are.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -23,6 +23,15 @@ const el = (tag, className, text) => {
 const byId = (id) => document.getElementById(id);
 
 let builtinAvailable = false;
+// Whether the host offers a choice of frontend at all.
+//
+// The desktop client does: its bundle and an instance's server can drift apart,
+// and both are equally reachable from a desktop, so which to run is a real
+// question per receiver. A host that ships one UI and only ever runs that one
+// says so here (clients/capacitor), and the picker is not drawn — a disabled
+// control on every row would be answering a question nobody can ask. Absent
+// means yes, so a host that says nothing behaves as it always has.
+let uiChoice = true;
 let sortBy = 'used';
 
 // How the saved list is ordered.
@@ -386,18 +395,21 @@ async function refreshSaved() {
     setCount('saved', entries.length);
 
     for (const entry of entries) {
-        const uiSelect = el('select');
-        for (const [value, label] of [['builtin', 'built-in UI'], ['remote', "instance's UI"]]) {
-            const opt = el('option', null, label);
-            opt.value = value;
-            uiSelect.appendChild(opt);
+        let uiSelect = null;
+        if (uiChoice) {
+            uiSelect = el('select');
+            for (const [value, label] of [['builtin', 'built-in UI'], ['remote', "instance's UI"]]) {
+                const opt = el('option', null, label);
+                opt.value = value;
+                uiSelect.appendChild(opt);
+            }
+            uiSelect.value = entry.ui === 'remote' || !builtinAvailable ? 'remote' : 'builtin';
+            uiSelect.disabled = !builtinAvailable;
+            uiSelect.title = builtinAvailable
+                ? 'Which frontend to run: the bundle shipped with this app, or the one the instance serves'
+                : 'No bundled UI staged — run build.sh to enable the built-in option';
+            uiSelect.addEventListener('change', () => api.update(entry.id, { ui: uiSelect.value }));
         }
-        uiSelect.value = entry.ui === 'remote' || !builtinAvailable ? 'remote' : 'builtin';
-        uiSelect.disabled = !builtinAvailable;
-        uiSelect.title = builtinAvailable
-            ? 'Which frontend to run: the bundle shipped with this app, or the one the instance serves'
-            : 'No bundled UI staged — run build.sh to enable the built-in option';
-        uiSelect.addEventListener('change', () => api.update(entry.id, { ui: uiSelect.value }));
 
         const remove = el('button', 'danger', 'Remove');
         remove.addEventListener('click', async () => {
@@ -412,7 +424,7 @@ async function refreshSaved() {
                 uiSelect,
                 connectButton({ id: entry.id, running: entry.running }, status),
                 remove,
-            ]),
+            ].filter(Boolean)),
         );
     }
     return entries.length;
@@ -1245,6 +1257,7 @@ api.onChanged(refreshSaved);
 (async () => {
     const info = await api.appInfo();
     builtinAvailable = info.builtinAvailable;
+    uiChoice = info.uiChoice !== false;
     byId('shared-prefs-box').checked = await api.sharedPrefs();
     sortBy = await api.sort();
     byId('saved-sort').value = sortBy;

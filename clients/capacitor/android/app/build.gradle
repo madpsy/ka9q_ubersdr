@@ -1,0 +1,109 @@
+apply plugin: 'com.android.application'
+
+// The version, from package.json — one place, as in clients/electron, where the
+// same file names the app to the directory and to a receiver's session list.
+// versionCode is derived from it because Android needs an integer that only
+// ever goes up: 0.1.0 is 100, 0.2.13 is 213, 1.0.0 is 10000.
+def pkg = new groovy.json.JsonSlurper().parse(file('../../package.json'))
+def semver = (pkg.version =~ /^(\d+)\.(\d+)\.(\d+)/)
+if (!semver.find()) throw new GradleException("package.json version is not a semver: ${pkg.version}")
+def appVersionName = pkg.version
+def appVersionCode = semver.group(1).toInteger() * 10000 +
+                     semver.group(2).toInteger() * 100 +
+                     semver.group(3).toInteger()
+
+android {
+    namespace "org.ubersdr.mobile"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "org.ubersdr.mobile"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // Release signing, from the environment.
+    //
+    // Deliberately not in the repository, and deliberately not optional in
+    // practice: an unsigned release APK is not a build with a warning on it
+    // like an unsigned dmg, it is a file Android refuses to install at all. So
+    // the config exists only when the credentials do, and build.sh reports
+    // which it found before it starts and refuses to publish what nobody could
+    // install.
+    //
+    //   export UBERSDR_KEYSTORE=~/keys/ubersdr-release.jks
+    //   export UBERSDR_KEYSTORE_PASSWORD='…'
+    //   export UBERSDR_KEY_ALIAS=ubersdr
+    //   export UBERSDR_KEY_PASSWORD='…'     # defaults to the keystore password
+    //
+    // Make one once with:
+    //   keytool -genkeypair -v -keystore ubersdr-release.jks -alias ubersdr \
+    //           -keyalg RSA -keysize 4096 -validity 10000
+    //
+    // Keep it. Android identifies an app by its signature, so an APK signed
+    // with a different key than the one already installed cannot be installed
+    // over it — it has to be uninstalled first, taking its saved receivers with
+    // it. Losing this file means everybody in the field reinstalling by hand.
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("UBERSDR_KEYSTORE")
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv("UBERSDR_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("UBERSDR_KEY_ALIAS") ?: "ubersdr"
+                keyPassword System.getenv("UBERSDR_KEY_PASSWORD")
+                        ?: System.getenv("UBERSDR_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv("UBERSDR_KEYSTORE")) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // ReceiverActivity's document-start script — the Android equivalent of the
+    // desktop client's preload. Capacitor depends on this too (it injects its
+    // own bridge the same way), but as `implementation`, so it is not on this
+    // module's compile classpath without being asked for here.
+    implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

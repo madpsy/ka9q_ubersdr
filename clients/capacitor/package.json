@@ -1,0 +1,22 @@
+{
+  "name": "ubersdr-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UberSDR Android client — the chooser and the v2 web UI in a Capacitor shell",
+  "author": "MadPsy",
+  "license": "SEE LICENSE IN ../../LICENSE.TXT",
+  "//chooser": "The chooser page is not a copy: build.sh stages clients/electron/chooser/ into www/. Its one seam is `const api = window.ubersdr` (chooser.js), which src/api.js provides here over Capacitor plugins instead of over Electron IPC. Anything that changes the chooser changes both clients at once, which is the point.",
+  "//deps": "Runtime dependencies are Capacitor itself and Preferences. Everything else the desktop client gets from Node — HTTP with per-receiver certificate trust, mDNS, the keystore — is the local plugin in android/app/src/main/java/org/ubersdr/mobile/, because those need the platform rather than a package.",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

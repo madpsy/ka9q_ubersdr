@@ -120,6 +120,11 @@ func (cm *ChatManager) seedMessagesFromDB() {
 		return
 	}
 	seeded := cm.chatLogger.LoadRecentMessages(cm.maxMessages, 7, nil)
+	// Rows written before URL sanitisation existed may still carry an
+	// attribute-breaking URL, so clean them on the way into the replay buffer.
+	for i := range seeded {
+		seeded[i].Message = sanitizeMessageURLs(seeded[i].Message)
+	}
 	if len(seeded) > 0 {
 		cm.messageBufferMu.Lock()
 		cm.messageBuffer = append(cm.messageBuffer, seeded...)
@@ -1064,6 +1069,14 @@ func (cm *ChatManager) InjectKeepAlive(sessionID string) {
 // and is used by the notification manager to suppress echo back to that channel.
 // sessionID is the stable relay session ID used to refresh the user's presence.
 func (cm *ChatManager) InjectMessage(username, text, source, sessionID string) {
+	// Relayed text is untrusted like any other message: strip control characters,
+	// neutralise attribute-breaking characters inside URLs and apply the same
+	// length cap web clients are held to.
+	text = sanitizeMessage(text)
+	if text == "" {
+		return
+	}
+
 	now := time.Now().UTC()
 	chatMsg := ChatMessage{
 		Username:  username,
@@ -1560,6 +1573,41 @@ func sanitizeUsername(username string) string {
 	return cleaned
 }
 
+// chatURLSpanRe matches the spans that clients turn into links: an http/https
+// scheme followed by everything up to the next whitespace. Deliberately kept in
+// step with linkifyUrls() in static/chat-ui.js so the server neutralises exactly
+// what the client is going to drop inside an href attribute.
+var chatURLSpanRe = regexp.MustCompile(`(?i)https?://[^\s]+`)
+
+// chatURLUnsafeReplacer percent-encodes the characters that would let a URL
+// break out of the href attribute a client builds around it. Percent escapes are
+// valid inside a URL, so nothing is lost and the link still resolves.
+var chatURLUnsafeReplacer = strings.NewReplacer(
+	`"`, "%22",
+	`'`, "%27",
+	"`", "%60",
+	`<`, "%3C",
+	`>`, "%3E",
+	`\`, "%5C",
+)
+
+// sanitizeMessageURLs makes every URL-looking span in a message safe to embed in
+// an HTML attribute.
+//
+// Clients linkify `https?://\S+` into `<a href="...">`, and HTML-escaping alone
+// does not help: the usual textContent/innerHTML escape leaves quotes intact, so
+// a message such as `https://x/" onmouseover="alert(1)` closes the href and hangs
+// an event handler off the anchor — stored XSS against everyone in the channel.
+// Encoding the quotes (plus backtick, angle brackets and backslash) here means no
+// message leaving the server can carry that primitive, regardless of how careful
+// any individual client is.
+func sanitizeMessageURLs(message string) string {
+	if !strings.Contains(strings.ToLower(message), "http") {
+		return message
+	}
+	return chatURLSpanRe.ReplaceAllStringFunc(message, chatURLUnsafeReplacer.Replace)
+}
+
 // sanitizeMessage removes control characters and ensures safe encoding
 func sanitizeMessage(message string) string {
 	cleaned := ""
@@ -1571,7 +1619,9 @@ func sanitizeMessage(message string) string {
 			cleaned += string(r)
 		}
 	}
-	return trimString(cleaned, 250)
+	// Neutralise attribute-breaking characters inside URLs before truncating, so
+	// the length cap still applies to what actually goes out.
+	return trimString(sanitizeMessageURLs(cleaned), 250)
 }
 
 // preventAllCaps converts all-caps messages to sentence case

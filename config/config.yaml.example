@@ -527,6 +527,7 @@ server:
   # This HTML will be inserted into the <head> section of index.html
   # Supports Google Analytics, Google Ads, meta tags, and other tracking scripts
   # Leave empty (or comment out) to disable custom HTML injection
+  # Injected into both interfaces: the classic one at / and v2 at /v2/
   #
   # Example usage:
   # custom_head_html: |
@@ -553,6 +554,8 @@ server:
   # or any script that calls document.getElementById / document.body.appendChild.
   # Scripts placed here run after the full page DOM is available.
   # Leave empty (or comment out) to disable.
+  # Injected into both interfaces. In v2 it lands outside #root, so React never
+  # overwrites it — but anything targeting v1's own elements will find nothing there.
   #
   # Example usage:
   # custom_body_html: |

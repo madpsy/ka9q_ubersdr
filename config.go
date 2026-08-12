@@ -380,8 +380,8 @@ type ServerConfig struct {
 	SessionActivityLogIntervalSec   int                  `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
 	SessionActivityLogRetentionDays int                  `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
 	SessionsGeoJSONEnabled          bool                 `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
-	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
-	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in index.html (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
+	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of both index.html and v2's shell (for analytics, ads, meta tags, etc.)
+	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in both index.html and v2's shell (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
 	CPUTempThresholdC               float64              `yaml:"cpu_temp_threshold_c"`                // CPU temperature (°C) above which the cpu_temperature health probe fires (default: 80)
@@ -894,6 +894,15 @@ type UIConfig struct {
 	StationIdColor            string            `yaml:"station_id_color"                json:"station_id_color"`
 	Theme                     map[string]string `yaml:"theme"                           json:"theme"`
 	AllowedPostMessageOrigins []string          `yaml:"allowed_postmessage_origins"     json:"allowed_postmessage_origins"`
+	// V2Interface makes / and /index.html redirect to the v2 interface at /v2/.
+	// Server-wide, applied before any of v1's page assets are sent. Visiting
+	// /?v1 bypasses the redirect, which is how v1 stays reachable once this is on.
+	//
+	// The default for a new installation is true and comes from ui.yaml.example,
+	// not from this zero value: an existing receiver whose ui.yaml predates the
+	// key must keep the interface it already had rather than move its users on
+	// upgrade. docker/entrypoint.sh pins the key to false for those.
+	V2Interface bool `yaml:"v2_interface" json:"v2_interface"`
 }
 
 // LoadConfig loads configuration from a YAML file

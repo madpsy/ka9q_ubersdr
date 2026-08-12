@@ -5,13 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#0b0e14">
-    <title>UberSDR</title>
+
+    <!-- Everything below down to the manifest is rendered per-receiver by
+         handleV2IndexPage / buildV2PageMeta, from the callsign, name, location
+         and coordinates in config.yaml. Crawlers and link unfurlers see the
+         receiver rather than a generic UberSDR page — and both are the only
+         readers that matter here, since App.jsx overwrites document.title with
+         the tuned frequency as soon as the app starts. -->
+    <title>{{.Meta.Title}}</title>
+    <meta name="description" content="{{.Meta.Description}}">
+    <link rel="canonical" href="{{.Meta.CanonicalURL}}">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{.Meta.ShortName}}">
+    <meta property="og:title" content="{{.Meta.Title}}">
+    <meta property="og:description" content="{{.Meta.Description}}">
+    <meta property="og:url" content="{{.Meta.CanonicalURL}}">
+    <meta property="og:image" content="{{.Meta.ImageURL}}">
+
+    <!-- summary, not summary_large_image: the only artwork every install is
+         guaranteed to have is the square app icon. -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="{{.Meta.Title}}">
+    <meta name="twitter:description" content="{{.Meta.Description}}">
+    <meta name="twitter:image" content="{{.Meta.ImageURL}}">
+
+    <script type="application/ld+json">{{.Meta.JSONLD}}</script>
+
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{.Meta.ShortName}}">
+
     <link rel="icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
     <!-- The installed app's manifest, served from Go so its name carries the
          receiver's callsign — see handleManifest. Its start_url points here, so
          installing from either interface opens this one. -->
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="dist/v2.css">
+    {{.CustomHeadHTML}}
 </head>
 <body>
     <div id="root"></div>
@@ -38,5 +73,11 @@
             });
         }
     </script>
+
+    <!-- server.custom_body_html, the same value v1 is given. Placed outside
+         #root so React never owns it: everything React renders lives inside
+         that div and is replaced wholesale on re-render. Widgets are not
+         injected here — those are v1-only. -->
+    {{.CustomBodyHTML}}
 </body>
 </html>

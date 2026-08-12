@@ -89,7 +89,13 @@ self.addEventListener('fetch', (event) => {
         // Network failed — serve from cache if available
         caches.match(event.request).then(
           (cached) =>
-            cached ||
+            // A redirected response cannot be returned for a navigation: the
+            // browser rejects it and shows its own network error page, and that
+            // rejection happens inside respondWith where the catch below can't
+            // reach it. '/' is pre-cached and redirects to /v2/ whenever the v2
+            // interface is enabled, so this case is reachable — fall through to
+            // the offline message instead.
+            (cached && !cached.redirected ? cached : null) ||
             new Response('<h1>UberSDR</h1><p>You are offline. Please reconnect to use UberSDR.</p>', {
               headers: { 'Content-Type': 'text/html' },
             })

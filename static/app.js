@@ -3607,29 +3607,12 @@ async function fetchSiteDescription() {
                     }
                 }
 
-                // Show download client button if instance is registered on instances.ubersdr.org
-                if (data.receiver && data.receiver.callsign) {
-                    const callsign = data.receiver.callsign;
-                    // Check if this instance is registered
-                    fetch(`https://instances.ubersdr.org/api/callsign/${encodeURIComponent(callsign)}`)
-                        .then(response => {
-                            if (response.ok) {
-                                // Instance is registered, show the download button (desktop only)
-                                const downloadClientBtn = document.getElementById('download-client-button');
-                                if (downloadClientBtn && !_isMobile) {
-                                    downloadClientBtn.style.display = 'block';
-                                    console.log('[Download Client] Button shown for registered instance:', callsign);
-                                } else if (downloadClientBtn && _isMobile) {
-                                    console.log('[Download Client] Mobile device detected - button hidden');
-                                }
-                            } else {
-                                console.log('[Download Client] Instance not registered, button hidden');
-                            }
-                        })
-                        .catch(error => {
-                            console.error('[Download Client] Error checking instance registration:', error);
-                        });
-                }
+                // The start overlay's Download Client button is gone, replaced by
+                // the invitation to try v2. The registration check that used to
+                // reveal it went here — a cross-origin request to
+                // instances.ubersdr.org on every page load — and is dropped with
+                // it. The modal itself is still reachable via
+                // openDownloadClientModal().
 
                 // Show live map button if digital decodes are enabled
                 if (data.digital_decodes === true) {

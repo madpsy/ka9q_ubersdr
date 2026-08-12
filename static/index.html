@@ -240,11 +240,10 @@
                 <p id="password-error-message" style="color: #dc3545; margin-top: 10px; font-size: 14px; display: none;"></p>
             </div>
             <div class="overlay-buttons-container">
-                <button id="download-client-button" class="download-client-button blue-button" style="display: none;" onclick="openDownloadClientModal()">
-                    <span>Download Client</span>
-                </button>
-                <button id="listener-map-button" class="listener-map-button orange-button" onclick="window.open('/session_stats.html', '_blank')">
-                    <span>Listener Map</span>
+                <!-- Same tab, not a new one: this is a different front end for the
+                     same receiver, not an auxiliary page. -->
+                <button id="try-v2-button" class="try-v2-button" onclick="window.location.href='/v2/'">
+                    <span>✨ Click to try V2 interface</span>
                 </button>
             </div>
             <div class="overlay-buttons-container" style="margin-top: 10px;">

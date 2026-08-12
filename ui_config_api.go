@@ -169,6 +169,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"station_id_color":            stationIdColor,
 		"theme":                       effectiveTheme,
 		"allowed_postmessage_origins": allowedPMOrigins,
+		"v2_interface":                config.UI.V2Interface,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}
@@ -272,6 +273,20 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// v2_interface has its own auto-saving toggle, so a client that predates it
+	// (or simply doesn't render it) must not switch the interface off just by
+	// saving the rest of the form. Absent from the body means "leave as is".
+	if !uiBodyHasKey(body, "v2_interface") {
+		parsed.UI.V2Interface = config.UI.V2Interface
+		if uiMap, ok := body["ui"].(map[string]interface{}); ok {
+			uiMap["v2_interface"] = parsed.UI.V2Interface
+			// Re-marshal so the value we keep in memory is also the one on disk.
+			if reYAML, err := yaml.Marshal(body); err == nil {
+				yamlData = reYAML
+			}
+		}
+	}
+
 	// Validate select settings: default must be present in available list
 	if err := validateUISelectSetting("signal_meter_mode", parsed.UI.SignalMeterMode); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -370,6 +385,103 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		"message": "UI configuration saved. New visitors will see these defaults immediately.",
 	}); err != nil {
 		log.Printf("Error encoding UI config save response: %v", err)
+	}
+}
+
+// uiBodyHasKey reports whether the decoded PUT body carries ui.<key> at all,
+// which is what distinguishes "set it to false" from "didn't mention it".
+func uiBodyHasKey(body map[string]interface{}, key string) bool {
+	uiMap, ok := body["ui"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, present := uiMap[key]
+	return present
+}
+
+// handleAdminPutV2Interface flips ui.v2_interface on its own.
+//
+// The admin toggle saves the moment it is clicked, so it deliberately does not
+// go through PUT /admin/ui-config: that endpoint rewrites the whole UIConfig
+// from the request body, and auto-saving through it would commit every other
+// half-edited field sitting in the form. This one rewrites a single key of
+// ui.yaml and leaves the rest of the file exactly as it found it.
+//
+// PUT /admin/ui-config-v2
+// Body: {"enabled": true}
+func handleAdminPutV2Interface(w http.ResponseWriter, r *http.Request, configDir string, config *Config) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	uiPath := "ui.yaml"
+	if configDir != "" && configDir != "." {
+		uiPath = configDir + "/ui.yaml"
+	}
+
+	// Start from what is on disk so nothing else in the file is disturbed.
+	// When there is no ui.yaml yet, fall back to the in-memory defaults so the
+	// toggle still persists rather than writing a file with one key in it.
+	raw := map[string]interface{}{}
+	if data, err := os.ReadFile(uiPath); err == nil {
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			http.Error(w, "Failed to parse ui.yaml: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else if !os.IsNotExist(err) {
+		http.Error(w, "Failed to read ui.yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	} else {
+		defaults, err := yaml.Marshal(map[string]interface{}{"ui": config.UI})
+		if err != nil {
+			http.Error(w, "Failed to marshal UI defaults: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := yaml.Unmarshal(defaults, &raw); err != nil {
+			http.Error(w, "Failed to parse UI defaults: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	uiMap, ok := raw["ui"].(map[string]interface{})
+	if !ok {
+		uiMap = map[string]interface{}{}
+	}
+	uiMap["v2_interface"] = body.Enabled
+	raw["ui"] = uiMap
+
+	yamlData, err := yaml.Marshal(raw)
+	if err != nil {
+		http.Error(w, "Failed to marshal config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(uiPath, yamlData, 0644); err != nil {
+		http.Error(w, "Failed to write ui.yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// In-memory update: the redirect in handleIndexPage reads this, so the
+	// change takes effect on the very next page load with no restart.
+	config.UI.V2Interface = body.Enabled
+
+	log.Printf("UI config updated: v2_interface=%v", body.Enabled)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	message := "v2 interface disabled — visitors now land on the classic interface."
+	if body.Enabled {
+		message = "v2 interface enabled — visitors are now redirected to /v2/."
+	}
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"enabled": body.Enabled,
+		"message": message,
+	}); err != nil {
+		log.Printf("Error encoding v2 interface save response: %v", err)
 	}
 }
 

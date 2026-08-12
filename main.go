@@ -57,6 +57,9 @@ var globalConfig *Config
 // Global index template for custom HTML injection
 var indexTemplate *template.Template
 
+// Same, for the v2 shell served at /v2/
+var v2IndexTemplate *template.Template
+
 // Global QRZ lookup service (nil when lookup_services.enabled is false)
 var globalQRZService *QRZService
 
@@ -2959,6 +2962,7 @@ func main() {
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
 	http.HandleFunc("/admin/ui-config", adminHandler.AuthMiddleware(adminHandler.HandleUIConfig))
+	http.HandleFunc("/admin/ui-config-v2", adminHandler.AuthMiddleware(adminHandler.HandleV2Interface))
 	http.HandleFunc("/admin/ui-config-export", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigExport))
 	http.HandleFunc("/admin/ui-config-import", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigImport))
 	http.HandleFunc("/admin/spectrum-bg-image", adminHandler.AuthMiddleware(adminHandler.HandleSpectrumBgImage))
@@ -3180,6 +3184,13 @@ func main() {
 	}
 	log.Printf("Parsed index.html template successfully")
 
+	// Same for the v2 shell, which takes the same custom head/body HTML.
+	v2IndexTemplate, parseErr = template.ParseFiles("static/v2/index.html")
+	if parseErr != nil {
+		log.Fatalf("Failed to parse v2 index.html template: %v", parseErr)
+	}
+	log.Printf("Parsed v2 index.html template successfully")
+
 	// HTTP Ogg/Opus audio stream for Android Chrome lock-screen media widget.
 	// Only activates when media session is enabled (opt-in) and a binary WebSocket
 	// audio session already exists for the given user_session_id.
@@ -3207,6 +3218,13 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			handleIndexPage(w, r, config, widgetManager)
+			return
+		}
+		// The v2 shell is templated too, for the same custom head/body HTML.
+		// Everything else under /v2/ (dist, vendor, fonts) falls through to the
+		// file server below. A bare /v2 is redirected here by it first.
+		if r.URL.Path == "/v2/" || r.URL.Path == "/v2/index.html" {
+			handleV2IndexPage(w, r, config)
 			return
 		}
 		// Serve PWA manifest dynamically so the app name includes the callsign
@@ -3819,7 +3837,25 @@ func parseExcludeWidgets(r *http.Request, enabledSet map[string]bool) map[string
 // handleIndexPage serves the index.html template with custom HTML injection.
 // Accepts an optional ?exclude_widgets=uuid1,uuid2,... query parameter that
 // suppresses specific server-enabled widgets from being injected into the page.
+//
+// When ui.v2_interface is set, this redirects to /v2/ instead — before any of
+// v1's markup is written, so the browser never fetches the page it is about to
+// leave. ?v1 opts out for that navigation, which is how v1 stays reachable.
 func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm *WidgetManager) {
+	if config.UI.V2Interface && !r.URL.Query().Has("v1") {
+		// Carry the query string across: v2 reads share links from it (see
+		// lib/share.js). The fragment needs no handling — browsers reapply it.
+		target := "/v2/"
+		if q := r.URL.RawQuery; q != "" {
+			target += "?" + q
+		}
+		// The flag is a live admin toggle, so this redirect must never be
+		// remembered by a cache once it is switched back off.
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, target, http.StatusFound)
+		return
+	}
+
 	// Build the set of currently-enabled widget IDs for O(1) lookup.
 	enabledSet := make(map[string]bool, len(config.Server.EnabledWidgets))
 	for _, id := range config.Server.EnabledWidgets {
@@ -3858,6 +3894,39 @@ func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm 
 		errStr := err.Error()
 		if !strings.Contains(errStr, "broken pipe") && !strings.Contains(errStr, "connection reset by peer") {
 			log.Printf("Error executing index template: %v", err)
+		}
+		return
+	}
+}
+
+// handleV2IndexPage serves the v2 shell at /v2/ with per-receiver page metadata
+// (see buildV2PageMeta) and the same custom head/body HTML that v1 gets, so an
+// operator's analytics snippet or banner keeps working across both interfaces
+// without being entered twice.
+//
+// Widgets are deliberately not injected: they are written against v1's DOM and
+// its global JS objects, and v2 shares neither.
+//
+// Both fields are read from the live config pointer on every request, so the
+// admin config tab's hot-update (see HandleConfig) applies with no restart.
+func handleV2IndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
+	data := struct {
+		Meta           V2PageMeta
+		CustomHeadHTML template.HTML
+		CustomBodyHTML template.HTML
+	}{
+		Meta:           buildV2PageMeta(config, r),
+		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
+		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := v2IndexTemplate.Execute(w, data); err != nil {
+		// Ignore client-side disconnects (broken pipe, connection reset) — these are normal
+		// and not indicative of a server-side problem.
+		errStr := err.Error()
+		if !strings.Contains(errStr, "broken pipe") && !strings.Contains(errStr, "connection reset by peer") {
+			log.Printf("Error executing v2 index template: %v", err)
 		}
 		return
 	}

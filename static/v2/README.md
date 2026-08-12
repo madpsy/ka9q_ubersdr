@@ -1,9 +1,22 @@
 # UberSDR v2 frontend
 
 A React rewrite of the receiver UI, served at **`/v2/`**. It runs alongside the
-existing frontend at `/` — nothing here touches v1, and no Go changes were
-needed: `static/` is served by `http.FileServer`, so `static/v2/index.html`
-answers `/v2/` on its own.
+existing frontend at `/` — nothing here touches v1.
+
+Everything under `static/` is served by `http.FileServer`, so the bundle, fonts
+and vendored React answer for themselves. `index.html` is the exception: it is a
+Go template rendered by `handleV2IndexPage`. It fills in `{{.CustomHeadHTML}}`
+and `{{.CustomBodyHTML}}` from `server.custom_head_html` / `custom_body_html` —
+the same two values v1 is given; widgets are v1-only and are not injected here —
+and a `{{.Meta.*}}` block of per-receiver page metadata built by `v2_meta.go`
+from the callsign, name, location and coordinates in `config.yaml`: title,
+description, canonical, Open Graph, Twitter card and schema.org JSON-LD. Unlike
+v1, whose `<head>` is the same hardcoded text on every install, what a crawler
+or a link unfurler gets here names *this* receiver. Editing this file means
+keeping those actions valid.
+
+When `ui.v2_interface` is set, `/` redirects here and the classic UI stays
+reachable at `/?v1`.
 
 ## Build
 

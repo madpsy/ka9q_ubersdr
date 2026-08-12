@@ -149,6 +149,17 @@ initialize_configs() {
         echo "Initializing ui.yaml from example..."
         cp /etc/ka9q_ubersdr/ui.yaml.example /app/config/ui.yaml
     else
+        # ui.v2_interface is true in the example so a new installation lands on
+        # the v2 interface. For an existing receiver the merge below would push
+        # that default in and move its users to a different front end on a
+        # routine upgrade, so pin the key to false first whenever the operator
+        # has never set it. The admin UI toggle turns it on when they choose to.
+        if command -v yq > /dev/null 2>&1; then
+            if [ "$(yq eval '.ui | has("v2_interface")' /app/config/ui.yaml 2>/dev/null)" != "true" ]; then
+                echo "Existing ui.yaml has no v2_interface — keeping the classic interface (toggle it in Admin → UI)"
+                yq eval -i '.ui.v2_interface = false' /app/config/ui.yaml || true
+            fi
+        fi
         # Merge: example provides new options, user config preserves chosen defaults
         merge_config_keys "/app/config/ui.yaml" "/etc/ka9q_ubersdr/ui.yaml.example" "ui.yaml"
     fi

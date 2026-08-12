@@ -230,7 +230,34 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
 
     rm -rf ui
     mkdir -p ui/v2
-    cp "$V2/index.html" ui/v2/
+
+    # static/v2/index.html is a Go template on the server: handleV2IndexPage
+    # fills in the page metadata and the operator's custom head/body HTML. The
+    # desktop client serves this file straight off disk (proxy.js serveStatic),
+    # so nothing renders it here — copied verbatim, the {{...}} actions reach
+    # the window as literal text.
+    #
+    # Resolved to desktop values instead: a plain title, and the rest dropped.
+    # Search metadata describes a public URL this window does not have, and an
+    # operator's injected HTML is the instance's business — in remote-UI mode
+    # the proxy fetches /v2/ from the server, which renders both properly.
+    sed -e 's|<title>{{\.Meta\.Title}}</title>|<title>UberSDR</title>|' \
+        -e '/{{/d' \
+        "$V2/index.html" > ui/v2/index.html
+
+    # Fail loudly rather than shipping a window with {{.Meta.Title}} in its
+    # title bar: a new action added inline (not on its own line) would survive
+    # the delete above, and a reworded <title> would be dropped by it.
+    if grep -q '{{' ui/v2/index.html; then
+        echo "error: unresolved Go template action left in staged index.html:" >&2
+        grep -n '{{' ui/v2/index.html >&2
+        exit 1
+    fi
+    if ! grep -q '<title>' ui/v2/index.html; then
+        echo "error: staged index.html has no <title> — did the title line change shape?" >&2
+        exit 1
+    fi
+
     cp -r "$V2/dist" "$V2/fonts" "$V2/vendor" ui/v2/
 
     # Shown in the chooser footer, so a stale bundle is visible at a glance.

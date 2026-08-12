@@ -4086,6 +4086,17 @@ func (ah *AdminHandler) HandleUIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleV2Interface handles PUT requests for the v2 interface toggle.
+// Separate from HandleUIConfig because the toggle auto-saves on click and must
+// not drag the rest of the (possibly half-edited) UI form to disk with it.
+func (ah *AdminHandler) HandleV2Interface(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	handleAdminPutV2Interface(w, r, ah.configDir, ah.config)
+}
+
 // assetsDir returns the path to the persistent assets directory within the config dir.
 func (ah *AdminHandler) assetsDir() string {
 	if ah.configDir == "" || ah.configDir == "." {

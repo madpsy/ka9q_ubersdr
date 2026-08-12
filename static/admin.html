@@ -533,6 +533,62 @@
             scroll-margin-top: 52px;
         }
 
+        /* Sliding on/off switch — used by the v2 interface toggle at the top of
+           the UI tab, which saves the moment it is moved. */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 58px;
+            height: 32px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .switch .slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: #bdc3c7;
+            border-radius: 32px;
+            transition: background 0.25s;
+        }
+
+        .switch .slider::before {
+            content: "";
+            position: absolute;
+            height: 24px;
+            width: 24px;
+            left: 4px;
+            bottom: 4px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            transition: transform 0.25s;
+        }
+
+        .switch input:checked + .slider {
+            background: #4caf50;
+        }
+
+        .switch input:checked + .slider::before {
+            transform: translateX(26px);
+        }
+
+        .switch input:focus-visible + .slider {
+            outline: 2px solid #667eea;
+            outline-offset: 2px;
+        }
+
+        .switch input:disabled + .slider {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -2155,6 +2211,64 @@
                 <!-- UI Defaults Tab -->
                 <div id="uiTab" class="tab-content">
                     <h2 style="color: #333; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🎨 Web UI Defaults</h2>
+
+                    <!-- v2 interface switch. Deliberately first and visually distinct:
+                         it decides which of the two front ends visitors get, so it is
+                         not a default like everything else below it. Saves on change. -->
+                    <div style="margin-bottom: 20px; padding: 18px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white; box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 260px;">
+                                <h3 style="margin: 0 0 6px 0; font-size: 18px; color: white;">🚀 Enable v2 Interface</h3>
+                                <p style="margin: 0; font-size: 13px; line-height: 1.6; color: rgba(255, 255, 255, 0.92);">
+                                    Send all visitors to the new interface at <code style="background: rgba(0,0,0,0.22); padding: 1px 5px; border-radius: 3px;">/v2/</code>.
+                                    The redirect happens on the server before any of the classic page is sent, so there is no flash of the old UI.
+                                    <br>
+                                    The classic interface stays reachable at <a href="/?v1" target="_blank" rel="noopener" style="color: #fff; text-decoration: underline;">/?v1</a> while this is on.
+                                </p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                                <span id="v2InterfaceStateLabel" style="font-weight: 600; font-size: 14px; min-width: 96px; text-align: right;">Disabled</span>
+                                <label class="switch" title="Redirect visitors to the v2 interface">
+                                    <!-- Starts disabled so the switch can't be moved
+                                         before its real state has been loaded. -->
+                                    <input type="checkbox" id="ui-v2-interface" disabled onchange="saveV2Interface(this)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <p style="margin: 12px 0 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.8);">
+                            💾 Saves immediately — no restart, and no need to press Save UI Defaults. Applies to the next page load; users already connected are unaffected.
+                        </p>
+                    </div>
+
+                    <!-- Shown only while v2 is the interface visitors get, because
+                         that is when the settings below stop describing what they
+                         see. Kept in step with what v2 actually reads from
+                         /api/ui-config — see static/v2/src/display/uiConfig.js. -->
+                    <div id="v2InterfaceNotice" class="alert alert-warning" style="display: none; margin-bottom: 20px;">
+                        <strong>⚠️ Most settings below do not reach the v2 interface yet.</strong>
+                        <p style="margin: 8px 0 0 0;">
+                            v2 currently honours these:
+                        </p>
+                        <ul style="margin: 6px 0 0 0; padding-left: 22px; line-height: 1.7;">
+                            <li><strong>Spectrum background image</strong> and its opacity</li>
+                            <li><strong>Station ID overlay</strong> and its colour</li>
+                            <li><strong>Band colour intensity</strong></li>
+                            <li><strong>Minimum dynamic range</strong> (auto-level min span)</li>
+                            <li><strong>Default audio buffer</strong></li>
+                        </ul>
+                        <p style="margin: 8px 0 0 0;">
+                            Everything else here — waterfall palette, contrast, smoothing, peak hold, line graph, GPU scroll,
+                            meter modes, VU style, theme colours, controls opacity, bandwidth indicator colour, mobile tuning
+                            mode, postMessage origins — applies to the classic interface only. <strong>Widgets and custom links
+                            are not injected into v2 either.</strong> Custom head/body HTML <em>is</em> injected into both.
+                        </p>
+                        <p style="margin: 8px 0 0 0; font-size: 13px;">
+                            Work in progress: v2 grows its own equivalents as they are built, so expect this list to shrink.
+                            Nothing below is lost in the meantime — it all still applies at <a href="/?v1" target="_blank" rel="noopener">/?v1</a>.
+                        </p>
+                    </div>
+
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         These settings control the default appearance for <strong>new visitors</strong> who have not yet set their own preferences.
                         Individual users can override any of these via the UI controls, and their personal preference is saved in their browser.
@@ -5496,7 +5610,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                         if (key === 'custom_head_html') {
                             const hint = document.createElement('small');
-                            hint.textContent = 'Click Save at the bottom - no restart required. For metadata and tracking only: Google Analytics gtag snippet, <meta> tags, <link rel="stylesheet">, Google Ads auto-ads script. The HTML will be injected into the <head> section of index.html. For visible content, banners, popups or DOM-dependent scripts use Custom Body HTML above.';
+                            hint.textContent = 'Click Save at the bottom - no restart required. For metadata and tracking only: Google Analytics gtag snippet, <meta> tags, <link rel="stylesheet">, Google Ads auto-ads script. The HTML will be injected into the <head> section of both interfaces — the classic one at / and v2 at /v2/. For visible content, banners, popups or DOM-dependent scripts use Custom Body HTML above.';
                             hint.style.display = 'block';
                             hint.style.marginTop = '5px';
                             hint.style.color = '#666';
@@ -5532,7 +5646,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                             field.appendChild(headWrapper);
                         } else if (key === 'custom_body_html') {
                             const hint = document.createElement('small');
-                            hint.textContent = 'Click Save at the bottom - no restart required. Injected just before </body>. Use this for visible banners, popups, DOM-dependent scripts, Google Ads display unit <div>s, or any HTML that needs the page DOM to exist first.';
+                            hint.textContent = 'Click Save at the bottom - no restart required. Injected just before </body> in both interfaces — the classic one at / and v2 at /v2/. Use this for visible banners, popups, DOM-dependent scripts, Google Ads display unit <div>s, or any HTML that needs the page DOM to exist first. In v2 it sits outside the React root, so anything written against the classic UI\'s own elements will not find them.';
                             hint.style.display = 'block';
                             hint.style.marginTop = '5px';
                             hint.style.color = '#666';
@@ -11046,6 +11160,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const data = await response.json();
                 const ui = data.ui || data; // handle both {ui: {...}} and flat response
 
+                // v2 interface switch — lives above the form and saves on change,
+                // so it is enabled only once we know its real state.
+                setV2InterfaceSwitch(Boolean(ui.v2_interface), true);
+
                 // Build signal_meter_mode select (values: dbfs, snr, dbfs-led, snr-led)
                 buildUISelect('ui-signal-meter-mode', ui.signal_meter_mode);
 
@@ -11504,6 +11622,62 @@ function resetStationIdColor() {
         }
 
         /**
+         * Reflect the v2 interface state in the switch and its label.
+         * enable=true also makes the switch operable (it starts disabled so it
+         * cannot be moved before the real state has been fetched).
+         */
+        function setV2InterfaceSwitch(enabled, enable) {
+            const el = document.getElementById('ui-v2-interface');
+            if (el) {
+                el.checked = enabled;
+                if (enable) el.disabled = false;
+            }
+            const label = document.getElementById('v2InterfaceStateLabel');
+            if (label) label.textContent = enabled ? 'Enabled' : 'Disabled';
+            // The caveat about what v2 ignores is only worth saying while v2 is
+            // what visitors actually get.
+            const notice = document.getElementById('v2InterfaceNotice');
+            if (notice) notice.style.display = enabled ? 'block' : 'none';
+        }
+
+        /**
+         * Save the v2 interface toggle immediately via PUT /admin/ui-config-v2.
+         *
+         * Deliberately not routed through saveUIConfig(): that sends the whole
+         * UIConfig, so auto-saving through it would also commit any unsaved edits
+         * elsewhere in this tab. This endpoint rewrites the single key.
+         * On failure the switch is put back where it was.
+         */
+        async function saveV2Interface(checkbox) {
+            const enabled = checkbox.checked;
+            checkbox.disabled = true;
+            setV2InterfaceSwitch(enabled, false);
+            try {
+                const response = await authenticatedFetch('/admin/ui-config-v2', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                if (!response) {
+                    setV2InterfaceSwitch(!enabled, true); // auth failed — revert
+                    return;
+                }
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Failed to save v2 interface setting');
+                }
+                const result = await response.json();
+                setV2InterfaceSwitch(enabled, true);
+                showAlert(result.message || (enabled
+                    ? 'v2 interface enabled.'
+                    : 'v2 interface disabled.'), 'success');
+            } catch (error) {
+                setV2InterfaceSwitch(!enabled, true); // revert to the saved state
+                showAlert('Error saving v2 interface setting: ' + error.message, 'error');
+            }
+        }
+
+        /**
          * Save UI configuration to /admin/ui-config (PUT).
          * Reads current values from the form and sends the full UIConfig structure.
          * The available[] arrays are re-read from the current select options so the
@@ -11624,6 +11798,12 @@ function resetStationIdColor() {
                             {value:'300', label:'300ms'},
                             {value:'500', label:'500ms (Most stable)'}
                         ]};
+                    })(),
+                    // Sent so a full save can't contradict the switch above. The
+                    // server also keeps the stored value when this key is absent.
+                    v2_interface: (() => {
+                        const el = document.getElementById('ui-v2-interface');
+                        return el ? el.checked : false;
                     })(),
                     theme: collectThemeColors(),
                     allowed_postmessage_origins: (() => {

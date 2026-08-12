@@ -10,6 +10,18 @@
 #   No Go code or HTML changes are required.
 
 ui:
+  # Serve the v2 interface to visitors.
+  # When true, / and /index.html redirect to /v2/ before any of the classic
+  # page is sent, so there is no flash of the old UI. Unlike everything else
+  # in this file this is not a per-user default — it applies to everyone.
+  # The classic interface stays reachable at /?v1 while this is enabled.
+  # Toggled live from the admin UI tab; no restart required.
+  #
+  # True here so a new installation starts on v2. Receivers that were installed
+  # before this key existed are left on the classic interface by the entrypoint
+  # rather than being moved on upgrade — see docker/entrypoint.sh.
+  v2_interface: true
+
   # Default signal bar meter mode for new visitors
   # The signal bar meter sits under the waterfall and shows signal strength
   # Users can click the meter to cycle through modes

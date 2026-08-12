@@ -8737,14 +8737,113 @@ a.btn { text-decoration: none; }
 .hf__stats i { font-style: normal; color: var(--text-faint); }
 .hf__stats span:last-child { margin-left: auto; }
 
-/* The modal: map, legend, table. */
-.hf__full { display: flex; flex-direction: column; gap: 6px; min-width: min(92vw, 920px); }
-.hf__full .hf__map {
+/* The modal: map and detail column side by side, then the table under both. */
+.hf__full { display: flex; flex-direction: column; gap: 6px; min-width: min(94vw, 1180px); }
+.hf__cols { display: flex; align-items: stretch; gap: 8px; }
+/* The map takes what is left; it is the thing being looked at, and the column beside it
+   is a fixed-width caption for whichever dot was clicked. */
+.hf__mapcol { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Narrow enough and the two stack, because a 240 px column beside a 300 px map is two
+   things too small to read rather than one of each. */
+@media (max-width: 900px) {
+    .hf__cols { flex-direction: column; }
+    .hf__card { width: 100%; max-height: none; }
+}
+
+/* The canvas and the things that sit over it: the readout, the ring under the pointer
+   and the zoom buttons. All positioned in per-cent of the canvas, so they stay where
+   they belong however CSS has scaled it. */
+.hf__stage { position: relative; }
+.hf__stage .hf__map {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--spec-bg);
-    cursor: crosshair;
+    cursor: grab;
+    touch-action: none;
 }
+.hf__stage .hf__map:active { cursor: grabbing; }
+
+/* Not a hit target: the pointer is on the dot underneath, and a ring drawn around it
+   must not be the thing that receives the click. */
+.hf__ring {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border: 1px solid var(--text);
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.hf__tip {
+    position: absolute;
+    z-index: 2;
+    transform: translate(12px, -50%);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-width: 220px;
+    padding: 4px 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    box-shadow: var(--shadow-2, 0 2px 10px rgba(0, 0, 0, 0.4));
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+    white-space: nowrap;
+    pointer-events: none;
+}
+/* Near the right-hand edge it flips rather than being clamped, so it stays attached to
+   the dot it is describing instead of drifting away from it. */
+.hf__tip.is-left { transform: translate(calc(-100% - 12px), -50%); }
+.hf__tip b { color: var(--text); font-size: calc(11px * var(--ui-scale)); }
+
+.hf__zoom {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.hf__zoom button {
+    width: calc(22px * var(--ui-scale));
+    height: calc(22px * var(--ui-scale));
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--text-dim);
+    font-size: calc(13px * var(--ui-scale));
+    line-height: 1;
+    cursor: pointer;
+}
+.hf__zoom button:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.hf__zoom button:disabled { opacity: 0.35; cursor: default; }
+
+/* The band legend, which is also the band filter. One control: the swatch says what the
+   colour means and pressing it takes that colour off the map. */
+.hf__bands { display: flex; flex-wrap: wrap; gap: 4px; }
+.hf__band {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.hf__band:hover { border-color: var(--accent); }
+.hf__band i { width: 7px; height: 7px; border-radius: 50%; }
+.hf__band em { font-style: normal; color: var(--text-faint); }
+/* Switched off: the swatch keeps its colour so the row is still readable as "this band",
+   and everything else goes flat. */
+.hf__band.is-off { opacity: 0.45; text-decoration: line-through; }
 
 /* A legend, because three shapes on a world map is exactly the point where one is
    needed and a fourth would be the point where it stops helping. */
@@ -8757,11 +8856,87 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 .hf__legend span { display: inline-flex; align-items: center; gap: 4px; }
-.hf__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.hf__dot.is-stale { background: var(--warn); opacity: 0.5; }
 .hf__sq { width: 5px; height: 5px; background: var(--good); }
 .hf__me { width: 8px; height: 1px; box-shadow: 0 0 0 0 var(--accent); background: var(--accent); }
 .hf__msgs { margin-left: auto; font-family: var(--mono); }
+
+/* The detail column. Fixed width, because it is a caption and the map should not
+   change size according to how much a lookup happened to know. */
+.hf__card {
+    flex: 0 0 auto;
+    width: calc(250px * var(--ui-scale));
+    /* Taller than the map beside it only when the lookup came back with everything, and
+       then it scrolls rather than stretching the modal past the window. */
+    max-height: 58vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+/* Before anything is selected: the column is still there, holding its width, saying what
+   would fill it. A column that appeared on the first click would move the map sideways
+   at the exact moment somebody was pointing at something on it. */
+.hf__card--empty {
+    justify-content: center;
+    color: var(--text-faint);
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.45;
+    text-align: center;
+}
+.hf__card-head { display: flex; align-items: center; gap: 6px; }
+.hf__card-call {
+    flex: 1;
+    font-family: var(--mono);
+    font-weight: 650;
+    font-size: calc(14px * var(--ui-scale));
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+.hf__card-close {
+    flex: none;
+    display: inline-flex;
+    padding: 2px;
+    border: 0;
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.hf__card-close:hover { color: var(--text); }
+.hf__card-sub {
+    margin-top: -4px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.hf__photo { display: block; text-decoration: none; }
+.hf__photo img {
+    display: block;
+    width: 100%;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+.hf__photo span {
+    display: block;
+    padding-top: 2px;
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.hf__photo:hover img { border-color: var(--accent); }
+
+/* The band colour in the table, so a row and a dot can be matched up without going via
+   the frequency column and doing the division in your head. */
+.hf__swatch {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
 
 .hf__table { max-height: 34vh; overflow-y: auto; }
 .hf__table table { width: 100%; border-collapse: collapse; font-size: calc(11px * var(--ui-scale)); }

@@ -215,5 +215,133 @@ t('altitude reads as a flight level up high and as feet down low', () => {
     assert.strictEqual(hf.altLabel(null), '');
 });
 
+// --- bands, which is what the map is coloured by --------------------------------------
+
+t('a frequency belongs to the megahertz allocation it sits in', () => {
+    assert.strictEqual(hf.bandOf(13276), 13);
+    assert.strictEqual(hf.bandOf(5652), 5);
+    assert.strictEqual(hf.bandOf(0), 0);
+});
+
+t('a band keeps its colour, whatever order the bands were first heard in', () => {
+    // The addon hands out colours in the order it first hears a band, which makes
+    // 13 MHz blue tonight and orange tomorrow. Here the band picks the colour.
+    assert.strictEqual(hf.bandColour(13), hf.bandColour(13));
+    assert.notStrictEqual(hf.bandColour(13), hf.bandColour(5));
+    // No frequency is not a band, and should not be given one of their colours.
+    assert.notStrictEqual(hf.bandColour(0), hf.bandColour(2));
+    // A band outside the known allocations still gets a colour rather than nothing.
+    assert.ok(hf.bandColour(29));
+});
+
+t('the legend is the bands actually on the map, low to high, with their counts', () => {
+    const list = hf.liveAircraft([
+        plane({ key: 'a', freq_khz: 13276 }),
+        plane({ key: 'b', freq_khz: 13312 }),
+        plane({ key: 'c', freq_khz: 5652 }),
+        plane({ key: 'd', freq_khz: 0 }),
+    ], NOW);
+    assert.deepStrictEqual(hf.bandCounts(list), [
+        { mhz: 0, count: 1 }, { mhz: 5, count: 1 }, { mhz: 13, count: 2 },
+    ]);
+    assert.deepStrictEqual(hf.bandCounts([]), []);
+});
+
+t('switching a band off takes exactly that band off the map', () => {
+    const list = hf.liveAircraft([
+        plane({ key: 'a', freq_khz: 13276 }),
+        plane({ key: 'b', freq_khz: 5652 }),
+    ], NOW);
+    assert.deepStrictEqual(hf.visibleAircraft(list, new Set([13])).map((a) => a.key), ['b']);
+    // No filter at all is the list itself, not a copy of it: this runs on every draw.
+    assert.strictEqual(hf.visibleAircraft(list, new Set()), list);
+    assert.strictEqual(hf.visibleAircraft(list, null), list);
+});
+
+// --- one aircraft, in detail ----------------------------------------------------------
+
+t('the hex to look an aircraft up by is the hex, or a key that is one', () => {
+    assert.strictEqual(hf.icaoHex({ icao: '4076F5', key: '4076f5' }), '4076F5');
+    // "ICAO hex if known, else registration" — so a key of six hex digits is one.
+    assert.strictEqual(hf.icaoHex({ icao: '', key: '4076f5' }), '4076F5');
+    // And a registration is not, however much it looks like a name for the aeroplane.
+    assert.strictEqual(hf.icaoHex({ icao: '', key: 'G-VWOO' }), '');
+    assert.strictEqual(hf.icaoHex(null), '');
+});
+
+t('the track drops the fixes that are not positions', () => {
+    const pts = hf.trackPoints([
+        { lat: 51.5, lon: -30.2, time: secs(NOW - 3600000) },
+        { lat: 0, lon: 0, time: secs(NOW) },        // the null island fix again
+        { lat: 52.1, lon: null, time: secs(NOW) },  // half a position is not one
+        { lat: 52.1, lon: -28.4, time: secs(NOW) },
+    ]);
+    assert.strictEqual(pts.length, 2);
+    // Milliseconds, like every other time in the panel — the addon deals in seconds.
+    assert.strictEqual(pts[0].at, NOW - 3600000);
+    assert.deepStrictEqual(hf.trackPoints(null), []);
+});
+
+t('a lookup that knew nothing is nothing, not a record of empty strings', () => {
+    assert.strictEqual(hf.enrichment(null), null);
+    assert.strictEqual(hf.enrichment({}), null);
+    assert.strictEqual(hf.enrichment({ operator: '   ' }), null);
+    const e = hf.enrichment({
+        operator: 'Virgin Atlantic',
+        icao_type: 'B789',
+        origin: { icao: 'EGLL', iata: 'LHR', name: 'London Heathrow' },
+        destination: { iata: 'JFK', city: 'New York', country: 'United States' },
+    });
+    assert.strictEqual(e.operator, 'Virgin Atlantic');
+    assert.strictEqual(e.icaoType, 'B789');
+    // An airport with no city and no country falls back to its name, rather than being
+    // reduced to a three-letter code somebody then has to look up separately.
+    assert.strictEqual(hf.airportLabel(e.from), 'LHR — London Heathrow');
+    assert.strictEqual(hf.airportLabel(e.to), 'JFK — New York, United States');
+    assert.strictEqual(hf.airportLabel(null), '');
+});
+
+t('the photo is the first one, at the size a column can hold', () => {
+    assert.strictEqual(hf.firstPhoto(null), null);
+    assert.strictEqual(hf.firstPhoto({ photos: [] }), null);
+    assert.strictEqual(hf.firstPhoto({ photos: [{ link: 'x' }] }), null);
+    const p = hf.firstPhoto({
+        photos: [
+            { thumbnail: { src: 'small.jpg' }, thumbnail_large: { src: 'large.jpg' },
+                link: 'https://planespotters/1', photographer: 'A N Other' },
+            { thumbnail_large: { src: 'second.jpg' } },
+        ],
+    });
+    assert.deepStrictEqual(p, {
+        src: 'large.jpg', link: 'https://planespotters/1', by: 'A N Other',
+    });
+});
+
+// --- where it is, from here -----------------------------------------------------------
+
+t('distance is the great circle, and needs both ends', () => {
+    // London to New York, near enough — the figure everyone knows.
+    const km = hf.greatCircleKm({ lat: 51.5, lon: -0.13 }, { lat: 40.71, lon: -74.0 });
+    assert.ok(km > 5540 && km < 5600, `got ${km}`);
+    assert.strictEqual(hf.greatCircleKm({ lat: 1, lon: 1 }, { lat: 1, lon: 1 }), 0);
+    assert.strictEqual(hf.greatCircleKm(null, { lat: 1, lon: 1 }), null);
+});
+
+t('a heading reads as degrees and as a point of the compass', () => {
+    assert.strictEqual(hf.headingLabel(0), '0° N');
+    assert.strictEqual(hf.headingLabel(271), '271° W');
+    assert.strictEqual(hf.headingLabel(359), '359° N');
+    // The addon can report a track past a full circle after a wrap; it is still a way.
+    assert.strictEqual(hf.headingLabel(-90), '270° W');
+    assert.strictEqual(hf.headingLabel(null), '');
+});
+
+t('kilometres lose their last digits once there are enough of them', () => {
+    assert.strictEqual(hf.kmLabel(1420.5), '1,421 km');
+    assert.strictEqual(hf.kmLabel(12500), '12.5k km');
+    assert.strictEqual(hf.kmLabel(0), '0 km');
+    assert.strictEqual(hf.kmLabel(null), '');
+});
+
 if (process.exitCode) console.log('\nHFDL tests FAILED');
 else console.log(`\nall ${pass} HFDL tests passed`);

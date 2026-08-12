@@ -40,6 +40,17 @@ export const aircraftUrl = (base = BASE) => `${base}/aircraft`;
 export const stationsUrl = (base = BASE) => `${base}/groundstations`;
 export const statsUrl = (base = BASE) => `${base}/stats`;
 
+// The three per-aircraft routes, asked for once each when one is clicked and never
+// otherwise: the track is up to 500 points, and the other two leave the receiver for an
+// API somewhere else. Keyed differently on purpose — the track is by the addon's own
+// aircraft key, the other two by ICAO hex, which is what the outside world indexes on.
+export const trackUrl = (key, base = BASE) =>
+    `${base}/aircraft/${encodeURIComponent(key)}/track`;
+export const enrichUrl = (icao, base = BASE) =>
+    `${base}/aircraft/${encodeURIComponent(icao)}/enrich`;
+export const photoUrl = (icao, base = BASE) =>
+    `${base}/aircraft/${encodeURIComponent(icao)}/photo`;
+
 // How often the positions are re-read, and how often while the modal is open. An
 // aircraft at 500 knots covers four miles in thirty seconds, which at the panel's map
 // scale is less than a pixel; the modal is bigger and being looked at, so it is worth
@@ -210,4 +221,175 @@ export function altLabel(ft) {
     if (ft == null || !Number.isFinite(ft)) return '';
     if (ft >= 18000) return `FL${Math.round(ft / 100)}`;
     return `${Math.round(ft / 100) * 100} ft`;
+}
+
+// ── Bands ───────────────────────────────────────────────────────────────────
+//
+// HFDL lives in about a dozen aeronautical allocations, and which one an aircraft is on
+// is the single most useful thing to colour a dot by: the band *is* the propagation. Two
+// aircraft on 21 MHz and 5 MHz at the same moment are two different paths, and on a map
+// coloured by band that reads at a glance, where a table of frequencies does not.
+
+/** The MHz allocation a frequency belongs to. 13276 kHz → 13. */
+export const bandOf = (khz) => (khz ? Math.floor(khz / 1000) : 0);
+
+// The allocations, low to high. The order is the palette index, so a band keeps its
+// colour between sessions and between receivers — the addon assigns colours in the order
+// it first hears a band, which makes 13 MHz blue on one night and orange on the next.
+export const HFDL_BANDS = [2, 3, 4, 5, 6, 8, 10, 11, 13, 15, 17, 21];
+
+// Twelve hues, distinguishable on both themes and away from the map's own furniture
+// (--good for a live station, --warn for a stale aircraft). Ordered so that neighbouring
+// bands — the ones most often on screen together — are not neighbouring hues.
+const BAND_COLOURS = [
+    '#8bd5ff', '#f0883e', '#7ee787', '#d2a8ff', '#ffd866', '#ff9ec7',
+    '#5ac8c8', '#c9d1d9', '#a5b4fc', '#f97583', '#9ae6b4', '#e5b567',
+];
+
+/** The colour for a band, by its MHz. Grey for an aircraft with no frequency. */
+export function bandColour(mhz) {
+    if (!mhz) return '#8b949e';
+    const i = HFDL_BANDS.indexOf(mhz);
+    return BAND_COLOURS[(i >= 0 ? i : mhz) % BAND_COLOURS.length];
+}
+
+/**
+ * The bands on the map right now, low to high, with how many aircraft are on each.
+ *
+ * This is the legend and the filter both: what is being heard tonight is not the list of
+ * allocations, it is the three or four of them that are open.
+ */
+export function bandCounts(aircraft) {
+    const by = new Map();
+    for (const a of aircraft || []) {
+        const b = bandOf(a.khz);
+        by.set(b, (by.get(b) || 0) + 1);
+    }
+    return [...by.entries()]
+        .map(([mhz, count]) => ({ mhz, count }))
+        .sort((x, y) => x.mhz - y.mhz);
+}
+
+/** The aircraft left after the legend's switched-off bands are taken out. */
+export function visibleAircraft(aircraft, off) {
+    if (!off || !off.size) return aircraft;
+    return (aircraft || []).filter((a) => !off.has(bandOf(a.khz)));
+}
+
+// ── One aircraft, in detail ─────────────────────────────────────────────────
+
+/**
+ * The ICAO hex to look an aircraft up by, or ''.
+ *
+ * The addon's `key` is "ICAO hex if known, else registration" — so a key that looks like
+ * six hex digits is one, and a key that does not is a registration and no use to a
+ * database indexed on the hex.
+ */
+export function icaoHex(a) {
+    if (!a) return '';
+    const hex = a.icao || (/^[0-9a-f]{6}$/i.test(a.key || '') ? a.key : '');
+    return hex ? String(hex).toUpperCase() : '';
+}
+
+/** The position history, oldest first, in the same units as the live records. */
+export function trackPoints(rows) {
+    const out = [];
+    for (const r of rows || []) {
+        if (!r || r.lat == null || r.lon == null) continue;
+        const lat = Number(r.lat);
+        const lon = Number(r.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) continue;
+        const t = Number(r.time);
+        out.push({ lat, lon, at: Number.isFinite(t) ? t * 1000 : 0 });
+    }
+    return out;
+}
+
+const str = (v) => String(v == null ? '' : v).trim();
+
+const airport = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const code = str(raw.iata) || str(raw.icao);
+    const place = [str(raw.city), str(raw.country)].filter(Boolean).join(', ') || str(raw.name);
+    if (!code && !place) return null;
+    return { code, place };
+};
+
+/**
+ * What the lookup knows about an aeroplane, or null if it knew nothing.
+ *
+ * Null rather than an object of empty strings: the panel shows a section only when there
+ * is something in it, and "the lookup failed" and "the lookup returned a record with no
+ * fields set" mean the same thing to somebody looking at the screen.
+ */
+export function enrichment(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const out = {
+        operator: str(raw.operator),
+        type: str(raw.type),
+        icaoType: str(raw.icao_type),
+        manufacturer: str(raw.manufacturer),
+        registration: str(raw.registration),
+        country: str(raw.country),
+        iataFlight: str(raw.iata_flight),
+        airline: str(raw.airline_iata),
+        from: airport(raw.origin),
+        to: airport(raw.destination),
+    };
+    return Object.values(out).some(Boolean) ? out : null;
+}
+
+/** "LHR — London, United Kingdom" for one end of a route. */
+export function airportLabel(ap) {
+    if (!ap) return '';
+    if (ap.code && ap.place) return `${ap.code} — ${ap.place}`;
+    return ap.code || ap.place;
+}
+
+/**
+ * The first Planespotters photo, in the size that fits a side panel.
+ *
+ * `thumbnail_large` is about 400 px wide, which is the column; the full-size original is
+ * a megabyte and a half and there is nowhere here to put it.
+ */
+export function firstPhoto(json) {
+    const list = json && Array.isArray(json.photos) ? json.photos : null;
+    const p = list && list.length ? list[0] : null;
+    if (!p) return null;
+    const src = (p.thumbnail_large && p.thumbnail_large.src)
+        || (p.thumbnail && p.thumbnail.src) || '';
+    if (!src) return null;
+    return { src, link: str(p.link), by: str(p.photographer) };
+}
+
+// ── Where it is, from here ──────────────────────────────────────────────────
+
+const R_KM = 6371;
+const rad = (d) => (d * Math.PI) / 180;
+
+/** Great-circle kilometres between two {lat, lon}, or null without both. */
+export function greatCircleKm(from, to) {
+    if (!from || !to) return null;
+    const dLat = rad(to.lat - from.lat);
+    const dLon = rad(to.lon - from.lon);
+    const s = Math.sin(dLat / 2) ** 2
+        + Math.cos(rad(from.lat)) * Math.cos(rad(to.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R_KM * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+
+/** "271° W" — the number for the instrument and the point for the eye. */
+export function headingLabel(deg) {
+    if (deg == null || !Number.isFinite(deg)) return '';
+    const d = ((deg % 360) + 360) % 360;
+    return `${Math.round(d)}° ${POINTS[Math.round(d / 22.5) % 16]}`;
+}
+
+/** Kilometres, at the precision the number deserves. */
+export function kmLabel(km) {
+    if (km == null || !Number.isFinite(km)) return '';
+    if (km >= 10000) return `${(km / 1000).toFixed(1)}k km`;
+    return `${Math.round(km).toLocaleString()} km`;
 }

@@ -76,6 +76,7 @@ export function MediaSessionProvider({ children }) {
     const [dxSpots, setDxSpots] = useState([]);
     const [cwSpots, setCwSpots] = useState([]);
     const [voice, setVoice] = useState([]);
+    const [confirmed, setConfirmed] = useState([]);
 
     // Everything the action handlers need, without re-installing them on every
     // render — the handlers are set once when the feature is enabled.
@@ -190,7 +191,7 @@ export function MediaSessionProvider({ children }) {
             local: catalog.local || [],
         });
         return findMarkers(all, tuning.frequency, tuning.mode, navTypes);
-    }, [enabled, dxSpots, cwSpots, voice, catalog.bookmarks, catalog.local,
+    }, [enabled, dxSpots, cwSpots, voice, confirmed, catalog.bookmarks, catalog.local,
         tuning.frequency, tuning.mode, navTypes]);
     live.current.markers = markers;
 

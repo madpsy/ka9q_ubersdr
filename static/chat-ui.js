@@ -2029,8 +2029,8 @@ class ChatUI {
         // Create a unique ID for this message to prevent duplicates
         const messageId = `${username}-${timestamp}-${message.substring(0, 50)}`;
         
-        // Check if this message already exists in the container
-        if (container.querySelector(`[data-message-id="${messageId}"]`)) {
+        // CSS.escape or a " in the message blows up querySelector
+        if (container.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)) {
             console.log('[ChatUI] Skipping duplicate message:', messageId);
             return;
         }
@@ -2138,7 +2138,17 @@ class ChatUI {
     linkifyUrls(text) {
         // Match URLs starting with http:// or https://
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">$1</a>');
+        return text.replace(urlRegex, (m) => {
+            // http/https only, and kill quotes or the url breaks out of href
+            try {
+                const u = new URL(m);
+                if (u.protocol !== 'http:' && u.protocol !== 'https:') return m;
+            } catch (e) {
+                return m;
+            }
+            const safe = m.replace(/"/g, '&quot;');
+            return `<a href="${safe}" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">${safe}</a>`;
+        });
     }
 
     /**
@@ -2960,9 +2970,11 @@ class ChatUI {
      * Escape HTML to prevent XSS
      */
     escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        // textContent doesn't escape " or ', so they leak into the href
+        // linkifyUrls builds. do it by hand.
+        return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
     }
 }
 

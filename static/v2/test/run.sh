@@ -254,6 +254,8 @@ esbuild ../src/lib/localBookmarks.js --bundle --format=cjs --platform=node \
     --outfile=.build/localbookmarks.cjs --log-level=warning
 esbuild ../src/lib/bookmarkTune.js --bundle --format=cjs --platform=node \
     --outfile=.build/bookmarktune.cjs --log-level=warning
+esbuild ../src/lib/panelDrag.js --bundle --format=cjs --platform=node \
+    --outfile=.build/paneldrag.cjs --log-level=warning
 esbuild ../src/lib/chatFollow.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatfollow.cjs --log-level=warning
 esbuild ../src/lib/sheetGesture.js --bundle --format=cjs --platform=node \
@@ -400,4 +402,5 @@ node hookorder.test.js
 node pagesmenu.test.js
 node radioproviders.test.js
 node surfaces.test.js
+node paneldrag.test.js
 node svgmarkup.test.js

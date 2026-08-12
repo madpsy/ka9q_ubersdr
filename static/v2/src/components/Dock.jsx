@@ -10,7 +10,7 @@ import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
-import { draggingPanel } from '../lib/panelDrag.js';
+import { draggingPanel, nearestPanelGap } from '../lib/panelDrag.js';
 
 // A panel's share of the bottom dock's width: what the operator dragged it to,
 // otherwise what the panel asks for, otherwise an equal share. Reading the
@@ -256,30 +256,12 @@ export default function Dock({ side }) {
     // Which section a pointer is nearest, and which side of it — for a drop that
     // landed in the dock but not on a panel. Measured from the DOM rather than
     // from the layout, because it is answering a question about pixels.
-    const nearestSection = useCallback((clientX, clientY) => {
-        const body = bodyEl.current;
-        if (!body) return null;
-        const vertical = side !== 'bottom';
-        const pos = vertical ? clientY : clientX;
-        // The panel being dragged is not one of the candidates: the gaps either
-        // side of where it already is are not places to put it, and offering
-        // them is what left the marker hidden while the pointer was over the
-        // panel in hand.
-        const moving = draggingPanel();
-        let best = null;
-        let bestDist = Infinity;
-        for (const el of body.querySelectorAll('[data-panel]')) {
-            if (el.dataset.panel === moving) continue;
-            const r = el.getBoundingClientRect();
-            const mid = vertical ? r.top + r.height / 2 : r.left + r.width / 2;
-            const d = Math.abs(pos - mid);
-            if (d < bestDist) {
-                bestDist = d;
-                best = { id: el.dataset.panel, edge: pos < mid ? 'before' : 'after' };
-            }
-        }
-        return best;
-    }, [side]);
+    // The gaps, and which one the pointer is nearest. Shared with the float
+    // drag, which drops into these same docks — see lib/panelDrag.js.
+    const nearestSection = useCallback(
+        (clientX, clientY) => nearestPanelGap(bodyEl.current, clientX, clientY, side, draggingPanel()),
+        [side],
+    );
 
     // Computed even while collapsed: the peek overlay is the same markup and
     // needs the same size, and the collapsed rail does not use it.
@@ -297,7 +279,15 @@ export default function Dock({ side }) {
     // dock left open stays open, a dock closed by hand stays closed, and a peek
     // is forgotten the moment the pointer leaves.
     const expanded = (extra) => (
-        <div className={`dock dock--${side}${extra.className || ''}`} style={style} {...extra.props}>
+        <div
+            className={`dock dock--${side}${extra.className || ''}`}
+            style={style}
+            /* Read by the float drag's hit test, which finds a dock body under
+               the pointer and has to know which dock it belongs to — see
+               dockBodyAt in lib/panelDrag.js. */
+            data-dock={side}
+            {...extra.props}
+        >
             {/* The whole header collapses the dock, the way a panel's header
                 opens and closes it. One button rather than a bar with a button
                 inside it, so there is no nested click target to disagree. */}

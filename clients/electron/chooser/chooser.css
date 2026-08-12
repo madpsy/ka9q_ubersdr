@@ -643,3 +643,19 @@ footer {
     color: var(--dim);
     font-size: 12px;
 }
+
+/* The press-and-hold details, on hosts that offer them (see rowDetails). A
+   plain two-column list: everything in it is a fact about one receiver, and a
+   table of two would be furniture around eight short lines. */
+.details { display: flex; flex-direction: column; gap: 6px; }
+.details__row { display: flex; gap: 10px; align-items: baseline; }
+.details__key {
+    flex: 0 0 92px;
+    color: var(--dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+/* The address is the long one and the reason the dialog exists, so it wraps
+   rather than being clipped or ellipsed. */
+.details__val { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }

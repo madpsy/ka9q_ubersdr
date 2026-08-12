@@ -5414,6 +5414,21 @@ a.btn { text-decoration: none; }
 
 /* ── Floating panels ──────────────────────────────────────────────────────── */
 
+/* The centre while a panel is being dragged over it: an outline saying that
+   letting go here makes it a floating window. Inset so it reads as a frame
+   around the spectrum rather than a border on the window, and drawn with a
+   shadow so it is visible over a bright waterfall as well as a dark one. */
+.shell__center.is-dropping::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border: 2px dashed var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+    pointer-events: none;
+    z-index: 9;
+}
+
 .floatlayer {
     position: absolute;
     inset: 0;

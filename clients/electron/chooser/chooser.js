@@ -32,6 +32,14 @@ let builtinAvailable = false;
 // control on every row would be answering a question nobody can ask. Absent
 // means yes, so a host that says nothing behaves as it always has.
 let uiChoice = true;
+// Whether a saved receiver's details are worth a press-and-hold.
+//
+// Off unless a host asks for it. On a desktop the row already carries what it
+// can and the rest is a right-click away in the window it opens; on a phone
+// there is no hover, no title attribute and no room on the row, so the address
+// a receiver is actually reached at — the one thing needed to check a saved
+// entry is the one you meant — has nowhere to be seen at all.
+let rowDetails = false;
 let sortBy = 'used';
 
 // How the saved list is ordered.
@@ -383,6 +391,105 @@ function parsePlace(text) {
     return { lat, lon, label: `${lat.toFixed(3)}, ${lon.toFixed(3)}` };
 }
 
+// ---- what we know about a saved receiver ------------------------------------
+
+/** The address this receiver is actually reached at. */
+function urlOf(row) {
+    const scheme = row.tls ? 'https' : 'http';
+    const bare = row.port === (row.tls ? 443 : 80);
+    const host = String(row.host || '').includes(':') ? `[${row.host}]` : row.host;
+    return `${scheme}://${host}${bare ? '' : `:${row.port}`}`;
+}
+
+function whenLabel(iso) {
+    if (!iso) return 'never';
+    const then = new Date(iso);
+    if (Number.isNaN(then.getTime())) return 'never';
+    const mins = Math.round((Date.now() - then.getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} h ago`;
+    return then.toLocaleDateString();
+}
+
+/**
+ * Everything the chooser holds about one saved receiver.
+ *
+ * Facts rather than controls: the row already has the buttons, and a dialog
+ * that could also disconnect or forget would be a second place to do both. The
+ * address is the point of it — a saved entry names itself by callsign and
+ * location, which is not enough to tell two receivers apart when somebody has
+ * added the same station twice by two different names.
+ */
+function showDetails(row) {
+    const rows = [
+        ['Address', urlOf(row)],
+        ['Callsign', row.callsign || '—'],
+        ['Location', row.location || '—'],
+        ['Version', row.version || '—'],
+        ['Password', row.hasPassword ? 'saved' : 'none'],
+        ['Certificate', row.insecureTLS ? 'self-signed, trusted here' : 'verified normally'],
+        ['Visits', String(row.useCount || 0)],
+        ['Last used', whenLabel(row.lastUsed)],
+        // The origin its settings live under, which is why the port is kept and
+        // not reassigned — see the store.
+        ['Local port', String(row.localPort || '—')],
+    ];
+
+    const list = el('div', 'details');
+    for (const [label, value] of rows) {
+        const line = el('div', 'details__row');
+        line.appendChild(el('span', 'details__key', label));
+        line.appendChild(el('span', 'details__val', value));
+        list.appendChild(line);
+    }
+
+    const modal = showModal([
+        el('h3', null, describe(row).primary),
+        list,
+    ]);
+
+    const actions = el('div', 'modal-actions');
+    actions.appendChild(el('div', 'modal-spacer'));
+    const close = el('button', null, 'Close');
+    close.addEventListener('click', closeModal);
+    actions.appendChild(close);
+    modal.appendChild(actions);
+}
+
+/**
+ * Press and hold, for a touchscreen with nowhere to put a tooltip.
+ *
+ * Cancelled by movement, because the list scrolls: a hold that survived a drag
+ * would open a dialog every time somebody flicked past a row. `contextmenu` is
+ * suppressed for the same press — Android raises its own text-selection menu at
+ * about the same moment, and two things answering one gesture is neither.
+ */
+function onHold(node, fn) {
+    let timer = null;
+    let from = null;
+    const stop = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        from = null;
+    };
+    node.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') return;
+        from = { x: event.clientX, y: event.clientY };
+        timer = setTimeout(() => { timer = null; fn(); }, 450);
+    });
+    node.addEventListener('pointermove', (event) => {
+        if (!from) return;
+        if (Math.abs(event.clientX - from.x) + Math.abs(event.clientY - from.y) > 10) stop();
+    });
+    node.addEventListener('pointerup', stop);
+    node.addEventListener('pointercancel', stop);
+    node.addEventListener('contextmenu', (event) => {
+        if (from || timer) event.preventDefault();
+    });
+}
+
 // ---- saved receivers -------------------------------------------------------
 
 async function refreshSaved() {
@@ -418,14 +525,14 @@ async function refreshSaved() {
         });
 
         const status = byId('add-status');
-        list.appendChild(
-            makeRow(entry, [
-                keyButton(entry),
-                uiSelect,
-                connectButton({ id: entry.id, running: entry.running }, status),
-                remove,
-            ].filter(Boolean)),
-        );
+        const rowEl = makeRow(entry, [
+            keyButton(entry),
+            uiSelect,
+            connectButton({ id: entry.id, running: entry.running }, status),
+            remove,
+        ].filter(Boolean));
+        if (rowDetails) onHold(rowEl, () => showDetails(entry));
+        list.appendChild(rowEl);
     }
     return entries.length;
 }
@@ -1258,6 +1365,7 @@ api.onChanged(refreshSaved);
     const info = await api.appInfo();
     builtinAvailable = info.builtinAvailable;
     uiChoice = info.uiChoice !== false;
+    rowDetails = info.rowDetails === true;
     sortBy = await api.sort();
     byId('saved-sort').value = sortBy;
     byId('footer').textContent = builtinAvailable

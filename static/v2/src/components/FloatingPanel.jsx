@@ -13,9 +13,10 @@
 // asked to be logged out of a cluster. Same treatment ExtensionWindow gives a
 // minimised extension, for the same reason.
 
-import React, { useRef } from '../react.js';
+import React, { useEffect, useRef } from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { useFloatDrag } from '../lib/useFloatDrag.js';
+import { dockBodyAt, nearestPanelGap } from '../lib/panelDrag.js';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
@@ -30,7 +31,8 @@ const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom doc
 
 export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     const {
-        sections, setFloat, setFloatMin, raiseFloat, movePanel, setSectionHidden, toggleSectionMinimal,
+        sections, setFloat, setFloatMin, raiseFloat, movePanel, movePanelNear,
+        setSectionHidden, toggleSectionMinimal,
     } = useLayout();
     // Same flag the docked section uses: a panel looks the same wherever it is.
     const minimal = !!panel.minimal && !!sections[panel.id]?.minimal;
@@ -54,6 +56,66 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
         onRaise: () => raiseFloat(panel.id),
     });
 
+    // Carrying a floating window back into a dock.
+    //
+    // The docks accept a *browser* drag — a panel's header in a dock is
+    // `draggable`, and the dock body answers dragover/drop (components/Dock.jsx).
+    // A floating window cannot join in: it is moved by a pointer capture, and
+    // making the same header `draggable` as well would start both gestures on
+    // one press, cost the live movement and leave the window behind a drag
+    // image. So the window keeps its own gesture and this watches where the
+    // pointer is while it runs.
+    //
+    // The highlight is written to the dock's element rather than through React:
+    // it changes at pointer rate, `is-dropping` is the class the dock already
+    // styles for exactly this, and re-rendering three docks per pointer move to
+    // set a class is the one cost worth avoiding here.
+    const moving = useRef(false);
+    const target = useRef(null);
+
+    const clearTarget = () => {
+        if (target.current) target.current.el.classList.remove('is-dropping');
+        target.current = null;
+    };
+
+    const startMove = (e) => {
+        moving.current = true;
+        onMoveDown(e);
+    };
+
+    const trackMove = (e) => {
+        onMove(e);
+        if (!moving.current) return;
+        // The pointer, not the window: the window stops at the edge of the
+        // floating layer (useFloatDrag keeps it on screen), so its own position
+        // never reaches a dock even when the hand carrying it does.
+        const found = dockBodyAt(e.clientX, e.clientY);
+        if ((found && found.el) === (target.current && target.current.el)) return;
+        clearTarget();
+        if (found) {
+            found.el.classList.add('is-dropping');
+            target.current = found;
+        }
+    };
+
+    const endMove = (e) => {
+        const found = target.current;
+        const wasMoving = moving.current;
+        moving.current = false;
+        clearTarget();
+        onEnd(e);
+        if (!wasMoving || !found) return;
+        // Where the marker would have been, by the same rule a drag between two
+        // docks follows.
+        const at = nearestPanelGap(found.el, e.clientX, e.clientY, found.side, panel.id);
+        if (at) movePanelNear(panel.id, found.side, at.id, at.edge);
+        else movePanel(panel.id, found.side, null);
+    };
+
+    // A gesture cut short — the pointer lost, the window unmounted — must not
+    // leave a dock lit up with nothing being dragged into it.
+    useEffect(() => clearTarget, []);
+
     return (
         <section
             className={`floatwin${minimised ? ' floatwin--min' : ''}`}
@@ -67,10 +129,10 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
             <header
                 className="floatwin__head"
                 ref={head}
-                onPointerDown={onMoveDown}
-                onPointerMove={onMove}
-                onPointerUp={onEnd}
-                onPointerCancel={onEnd}
+                onPointerDown={startMove}
+                onPointerMove={trackMove}
+                onPointerUp={endMove}
+                onPointerCancel={endMove}
                 onDoubleClick={() => movePanel(panel.id, panel.dock, null)}
             >
                 <span className="floatwin__icon">{panel.icon}</span>

@@ -141,6 +141,11 @@ export const api = {
         // comment on connect() for why the desktop client's choice does not
         // belong here.
         uiChoice: false,
+        // Press and hold a saved receiver for what is known about it. Asked for
+        // here and not on the desktop because a phone has nowhere else to put
+        // it: no hover, no tooltip, and a row too narrow to carry the address
+        // the receiver is actually reached at.
+        rowDetails: true,
         buildInfo: BUILD_INFO,
         version: pkg.version,
     }),

@@ -27,6 +27,46 @@
  */
 
 /*
+ * The press-and-hold belongs to the app, not to the browser.
+ *
+ * Holding a row is how a receiver's details are opened (rowDetails in
+ * chooser.js), and Android's default answer to the same gesture is to start
+ * selecting text — so the dialog opens with half a callsign highlighted behind
+ * it, and the selection handles stay after it closes.
+ *
+ * The dialog is included, which is not obvious: the row it was opened from is
+ * already unselectable, but the finger is still down when the dialog appears
+ * *under it*, and Android finishes the long press on whatever is there now —
+ * the heading, which is the callsign. Excluding the dialog to keep its address
+ * copyable therefore bought nothing and cost the highlight it was meant to
+ * avoid.
+ *
+ * `-webkit-touch-callout` is the other half of it on WebKit-derived engines —
+ * without it a long press on a link or an image raises the system's own menu
+ * over the dialog.
+ */
+.row, .drow, header, nav.tabs, .section-head, .dir-toolbar, .map-foot,
+.modal, .modal-backdrop {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* Except what somebody typed. A password field that cannot be selected cannot
+   be corrected without clearing it. */
+.modal input {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* The grey flash Android paints over whatever was tapped. It is drawn for the
+   whole row, including on the hold that opens the dialog, so it reads as a
+   selection of its own. The controls have their own pressed states. */
+.row, .drow, button, .tab, .chip {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/*
  * Letting the columns shrink.
  *
  * The single most visible difference between this screen and a desktop window,

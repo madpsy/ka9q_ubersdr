@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from './react.js';
 import { RadioProvider, useRadio } from './radio/RadioContext.jsx';
 import { DisplayProvider } from './display/DisplayContext.jsx';
-import { LayoutProvider } from './layout/LayoutContext.jsx';
+import { LayoutProvider, useLayout } from './layout/LayoutContext.jsx';
 import { MOBILE_QUERY, useMediaQuery } from './lib/useMediaQuery.js';
 import Dock from './components/Dock.jsx';
 import TopBar from './components/TopBar.jsx';
@@ -29,6 +29,65 @@ import BridgeHost from './bridge/BridgeHost.jsx';
 import { useDisplay } from './display/DisplayContext.jsx';
 import { subscribeSpots } from './lib/spotStore.js';
 
+/**
+ * The centre, which is also where a panel goes to become a floating window.
+ *
+ * The docks have taken a dragged panel from each other for a while — a header is
+ * `draggable` and every dock body answers the drop. This is the third
+ * destination, and the one people reach for first: pull a panel out onto the
+ * map and let go.
+ *
+ * The drop point is where the window lands, rather than the cascade `movePanel`
+ * seeds a first float with. Offset by a little so the title bar arrives under
+ * the cursor instead of the window's top-left corner sitting on it, which reads
+ * as the window having jumped down and right on release.
+ */
+function Centre() {
+    const { movePanel, setFloat } = useLayout();
+    const [over, setOver] = React.useState(false);
+
+    const carrying = (e) => e.dataTransfer.types.includes('text/ubersdr-panel');
+
+    return (
+        <main
+            className={`shell__center${over ? ' is-dropping' : ''}`}
+            onDragOver={(e) => {
+                if (!carrying(e)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setOver(true);
+            }}
+            onDragLeave={(e) => {
+                // dragleave fires crossing between children too, and clearing
+                // then flickers the outline off and on across the spectrum.
+                if (e.currentTarget.contains(e.relatedTarget)) return;
+                setOver(false);
+            }}
+            onDrop={(e) => {
+                setOver(false);
+                if (!carrying(e)) return;
+                e.preventDefault();
+                const id = e.dataTransfer.getData('text/ubersdr-panel');
+                if (!id) return;
+                const r = e.currentTarget.getBoundingClientRect();
+                movePanel(id, 'float', null);
+                setFloat(id, {
+                    x: Math.max(0, e.clientX - r.left - GRAB_X),
+                    y: Math.max(0, e.clientY - r.top - GRAB_Y),
+                });
+            }}
+        >
+            <SpectrumView />
+            <FloatingLayer />
+        </main>
+    );
+}
+
+// Where the cursor sits on the window it just dropped: a little in from the
+// left, and on the title bar rather than above it.
+const GRAB_X = 60;
+const GRAB_Y = 12;
+
 function DesktopShell() {
     return (
         <div className="shell">
@@ -36,10 +95,7 @@ function DesktopShell() {
             <div className="shell__main">
                 <Dock side="left" />
                 <div className="shell__column">
-                    <main className="shell__center">
-                        <SpectrumView />
-                        <FloatingLayer />
-                    </main>
+                    <Centre />
                     <Dock side="bottom" />
                 </div>
                 <Dock side="right" />

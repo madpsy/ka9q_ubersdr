@@ -188,6 +188,9 @@ const DEFAULTS = {
     // is worthless without permission, permission needs a prompt, and a receiver that asks
     // for desktop notifications before being told to is a receiver that gets its request
     // refused for the whole session. Choosing Desktop or Auto in the panel is what asks.
+    //
+    // That is an argument about browsers, and defaultStyle below is where it stops
+    // applying.
     style: 'toast',
     // Which sources are silenced, by id. A list of the *off* ones rather than the on
     // ones, so a source added later arrives switched on without a migration — the
@@ -195,6 +198,34 @@ const DEFAULTS = {
     // touched this panel.
     muted: [],
 };
+
+/**
+ * 'toast' in a browser, 'auto' where the host owns the notifications.
+ *
+ * The reason for the toast default is the permission prompt: in a browser it is
+ * one shot, spent the moment a page asks, and a receiver that spends it before
+ * being told to has spent it for the session. A host that presents this API
+ * itself has no such problem — clients/capacitor answers `Notification` from
+ * Android's own notification shade, and the permission behind it is the app's,
+ * asked for once when audio starts rather than by a page on load.
+ *
+ * And the case is the opposite one. A tab is on a screen somebody is looking at;
+ * a phone is in a pocket, which is the whole situation 'auto' exists for — it
+ * still shows a toast while the receiver is in front, and only reaches the
+ * shade when it is not.
+ *
+ * Declared by the host, never sniffed: `ubersdrDesktop.notifications` is the
+ * permission state it has already established (see ReceiverActivity), and its
+ * presence is the statement that these notifications go somewhere real.
+ */
+export function defaultStyle() {
+    try {
+        const host = typeof window !== 'undefined' ? window.ubersdrDesktop : null;
+        return host && typeof host.notifications === 'string' ? 'auto' : DEFAULTS.style;
+    } catch (e) {
+        return DEFAULTS.style;
+    }
+}
 
 function load() {
     try {
@@ -205,10 +236,10 @@ function load() {
             seconds: NOTICE_TIMES.includes(Number(saved.seconds))
                 ? Number(saved.seconds) : DEFAULTS.seconds,
             muted: Array.isArray(saved.muted) ? saved.muted.map(String) : [],
-            style: NOTICE_STYLES.some((x) => x.id === saved.style) ? saved.style : DEFAULTS.style,
+            style: NOTICE_STYLES.some((x) => x.id === saved.style) ? saved.style : defaultStyle(),
         };
     } catch (e) {
-        return { ...DEFAULTS };
+        return { ...DEFAULTS, style: defaultStyle() };
     }
 }
 

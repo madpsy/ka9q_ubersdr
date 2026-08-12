@@ -235,6 +235,31 @@ t('a subscriber that throws does not stop the others or the notification', () =>
     assert.strictEqual(heard, 1);
 });
 
+// --- which style a receiver starts on ------------------------------------------------
+//
+// 'toast' in a browser, for the permission prompt's sake: it is one shot, and a page that
+// spends it before being asked has spent it for the session. A host that answers the
+// Notification API itself has already established that permission on its own terms, and is
+// the case 'auto' was written for — a phone in a pocket rather than a tab on a screen.
+
+t('a browser starts on toasts', () => {
+    delete globalThis.window;
+    assert.strictEqual(n.defaultStyle(), 'toast');
+    globalThis.window = {};
+    assert.strictEqual(n.defaultStyle(), 'toast');
+    globalThis.window = { ubersdrDesktop: { upstreamOrigin: 'https://rx.example' } };
+    assert.strictEqual(n.defaultStyle(), 'toast', 'a host that says nothing about notifications');
+    delete globalThis.window;
+});
+
+t('a host that owns the notifications starts on auto', () => {
+    for (const state of ['granted', 'default', 'denied']) {
+        globalThis.window = { ubersdrDesktop: { notifications: state } };
+        assert.strictEqual(n.defaultStyle(), 'auto', state);
+    }
+    delete globalThis.window;
+});
+
 // --- toast or desktop ----------------------------------------------------------------
 //
 // A toast only exists while somebody is looking at the page, which is when it is least

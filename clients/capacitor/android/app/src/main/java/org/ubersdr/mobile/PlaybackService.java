@@ -110,8 +110,72 @@ public class PlaybackService extends Service {
     static void artwork(Context context, android.graphics.Bitmap bitmap) {
         Instance held = instance;
         if (held == null || held.service == null) return;
-        held.service.artwork = bitmap;
+        held.service.artwork = opaque(bitmap);
         held.service.publish();
+    }
+
+    /**
+     * Artwork with no transparency in it, filling its own frame.
+     *
+     * <p>Android draws whatever it is given onto a black card. An operator's
+     * photo is an opaque JPEG and looks right; the receiver's logo is a PNG of a
+     * rounded tile — transparent corners, and a margin of a few per cent all
+     * round — so it arrives as a picture with black down both sides and black in
+     * every corner. Nothing is wrong with the image; it is a launcher icon,
+     * drawn to sit on whatever is behind it, and a media card is not behind it.
+     *
+     * <p>So a transparent one is flattened: its opaque content is measured,
+     * scaled to cover the frame, and drawn over a background sampled from the
+     * artwork itself — the tile's own colour, whatever an instance's logo
+     * happens to be, rather than a constant that would be wrong for anybody
+     * else's. A bitmap with no alpha is returned untouched, which is the photo.
+     */
+    private static android.graphics.Bitmap opaque(android.graphics.Bitmap src) {
+        if (src == null || !src.hasAlpha()) return src;
+        final int w = src.getWidth();
+        final int h = src.getHeight();
+        if (w <= 0 || h <= 0) return src;
+
+        int[] pixels = new int[w * h];
+        src.getPixels(pixels, 0, w, 0, 0, w, h);
+
+        // The box the picture actually occupies. Anything below a token alpha is
+        // the margin rather than the mark — antialiased edges are not content.
+        int left = w, top = h, right = -1, bottom = -1;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if ((pixels[y * w + x] >>> 24) < 24) continue;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                if (y < top) top = y;
+                if (y > bottom) bottom = y;
+            }
+        }
+        if (right < left || bottom < top) return src;   // nothing opaque in it
+
+        // A colour from just inside the top edge of the content: for a tile with
+        // a mark on it that is the tile, which is what the corners should be.
+        int sample = pixels[(top + Math.max(1, (bottom - top) / 40)) * w + (left + right) / 2];
+        int bg = 0xFF000000 | (sample & 0x00FFFFFF);
+
+        android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
+                w, h, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(out);
+        canvas.drawColor(bg);
+
+        // Cover, not fit: the margin is cropped away rather than painted over,
+        // so the mark reaches the edges the way the photo does.
+        float boxW = right - left + 1;
+        float boxH = bottom - top + 1;
+        float scale = Math.max(w / boxW, h / boxH);
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.setScale(scale, scale);
+        m.preTranslate(-left, -top);
+        m.postTranslate((w - boxW * scale) / 2f, (h - boxH * scale) / 2f);
+        android.graphics.Paint paint = new android.graphics.Paint(
+                android.graphics.Paint.FILTER_BITMAP_FLAG | android.graphics.Paint.ANTI_ALIAS_FLAG);
+        canvas.drawBitmap(src, m, paint);
+        return out;
     }
 
     // A handle on the running service, so artwork — which arrives whenever the

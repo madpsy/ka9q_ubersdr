@@ -162,14 +162,19 @@
           "name": "🖥️ Desktop Client",
           "files": [
             {
-              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client.exe",
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.Setup.exe",
               "name": "⬇️ Windows Download",
-              "description": "Download the Desktop Client for Windows (amd64)."
+              "description": "Download the Desktop Client installer for Windows (amd64)."
             },
             {
-              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client",
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR-arm64.dmg",
+              "name": "⬇️ macOS Download",
+              "description": "Download the Desktop Client for macOS on Apple Silicon (arm64)."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.AppImage",
               "name": "⬇️ Linux Download",
-              "description": "Download the Desktop Client for Linux (amd64)."
+              "description": "Download the Desktop Client AppImage for Linux (amd64)."
             }
           ]
         },

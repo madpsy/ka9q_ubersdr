@@ -57,7 +57,17 @@ const LABEL_ZOOM = 3;
 
 // A drag this far or further was a drag. Anything less was somebody aiming at a dot with
 // a hand that is not made of stone, and should still select it.
+// How far a press may travel and still count as a tap rather than a drag, in
+// screen pixels. A mouse is held still; a finger is not, and one that rolls
+// three pixels while pressing has still pointed at something.
 const CLICK_SLOP = 4;
+const TOUCH_SLOP = 10;
+
+// How close a press has to land, in screen pixels. Both are radii: a mouse
+// pointer is a single pixel and can be aimed, a fingertip covers about nine
+// millimetres and cannot.
+const MOUSE_REACH = 12;
+const TOUCH_REACH = 22;
 
 const HOME = { lon: 0, lat: 0, z: 1 };
 
@@ -104,6 +114,22 @@ function WorldMap({
         const c = el.getContext('2d');
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, w, h);
+
+        // How much the canvas is squeezed to fit its column.
+        //
+        // Everything below is drawn in the canvas's own 900-wide coordinates
+        // and then scaled to whatever width it is shown at. On a desktop that
+        // is close to 1:1 and a 10 px label is 10 px. On a phone the same
+        // canvas is shown at about 400, so the label lands at four and a half —
+        // legible on the desktop it was written on, and a smear on the device
+        // where somebody is most likely to be reading callsigns off it.
+        //
+        // Text is therefore drawn larger by the same factor it is about to be
+        // shrunk by, so it arrives at the size it was designed to be. Never
+        // smaller than 1: a map shown *wider* than its coordinates should keep
+        // its proportions rather than growing spidery text.
+        const shown = el.getBoundingClientRect().width || w;
+        const textScale = Math.max(1, w / shown);
 
         const v = view.current;
         const css = getComputedStyle(document.documentElement);
@@ -255,14 +281,16 @@ function WorldMap({
         // Labels, and only in the big map: at 320 px they overlap into a smear, and the
         // modal has the table for the detail anyway.
         if (w > 500) {
-            c.font = '10px ui-monospace, monospace';
+            c.font = `${(10 * textScale).toFixed(1)}px ui-monospace, monospace`;
             c.textBaseline = 'bottom';
             c.textAlign = 'center';
             c.fillStyle = ink;
             for (const s of stations) {
                 if (!s.active) continue;
                 const [x, y] = project(s.lon, s.lat, v, w, h);
-                c.fillText(s.name.slice(0, 14), x, y - 4);
+                // The gap above the marker grows with the text, or a label
+                // drawn twice the size sits on top of its own dot.
+                c.fillText(s.name.slice(0, 14), x, y - 4 * textScale);
             }
             // And the aircraft too, once there is room for them. Zoomed out this would
             // be a hundred callsigns over each other; zoomed in it is the difference
@@ -275,7 +303,7 @@ function WorldMap({
                     const [x, y] = project(a.lon, a.lat, v, w, h);
                     if (x < -40 || x > w + 40 || y < -20 || y > h + 20) continue;
                     c.globalAlpha = isStale(a, now) ? 0.45 : 0.85;
-                    c.fillText(name, x, y - 6);
+                    c.fillText(name, x, y - 6 * textScale);
                 }
                 c.globalAlpha = 1;
             }
@@ -305,9 +333,13 @@ function WorldMap({
 
     // The nearest thing to a point, within a few pixels. Aircraft win ties against
     // stations because they are drawn on top and are what somebody is aiming at.
-    const nearest = (x, y) => {
+    // `reach` is in the canvas's own coordinates, which is not what a finger
+    // works in: the modal's canvas is 900 wide and shown at whatever the column
+    // allows — about 400 on a phone — so a radius of 12 there is five pixels on
+    // the glass. The caller scales it by however much the canvas is squeezed.
+    const nearest = (x, y, reach = MOUSE_REACH) => {
         let best = null;
-        let bestD = 12;
+        let bestD = reach;
         for (const hit of hits.current) {
             const d = Math.hypot(hit.x - x, hit.y - y);
             if (d < bestD || (hit.aircraft && d <= bestD)) { bestD = d; best = hit; }
@@ -315,26 +347,96 @@ function WorldMap({
         return best;
     };
 
-    // Pan. Pointer capture rather than window listeners, for the same reason the
-    // spectrum has it: a drag that leaves the canvas should keep panning.
+    // Pan and pinch. Pointer capture rather than window listeners, for the same
+    // reason the spectrum has it: a drag that leaves the canvas should keep
+    // panning.
+    //
+    // Every live pointer is tracked, not just the first. With one it is a drag;
+    // with two it is a pinch, which is the only way to zoom on a touchscreen —
+    // there is no wheel, and the +/- buttons are a poor substitute for the
+    // gesture every other map on the device answers to. Holding a single
+    // `drag` was also wrong before a pinch existed: a second finger overwrote
+    // its origin and the map jumped.
     const drag = useRef(null);
+    const pointers = useRef(new Map());
+    const pinch = useRef(null);
+    const pinched = useRef(false);
+
+    // The two-finger gesture, in client coordinates: how far apart and where
+    // between.
+    const gesture = () => {
+        const [a, b] = Array.from(pointers.current.values());
+        if (!a || !b) return null;
+        return {
+            dist: Math.hypot(a.x - b.x, a.y - b.y),
+            x: (a.x + b.x) / 2,
+            y: (a.y + b.y) / 2,
+        };
+    };
+
+    const panBy = (dx, dy) => {
+        const [lon, lat] = unproject(w / 2 - dx, h / 2 - dy, view.current, w, h);
+        view.current = clampView({ ...view.current, lon, lat }, w, h);
+    };
+
     const onDown = (e) => {
         if (!interactive) return;
-        drag.current = { x: e.clientX, y: e.clientY, moved: 0 };
+        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         e.currentTarget.setPointerCapture(e.pointerId);
+        if (pointers.current.size >= 2) {
+            // The drag is over: from here the two fingers move the map
+            // together, and a drag origin left behind would fight them.
+            drag.current = null;
+            pinch.current = gesture();
+            pinched.current = true;
+            return;
+        }
+        drag.current = { x: e.clientX, y: e.clientY, moved: 0, kind: e.pointerType };
     };
     const onMove = (e) => {
         if (!interactive) return;
+        if (pointers.current.has(e.pointerId)) {
+            pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+
+        if (pointers.current.size >= 2 && pinch.current) {
+            const now = gesture();
+            if (!now) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const scale = rect.width / w;
+            // The midpoint carries the pan, the separation carries the zoom.
+            // Panning first means the zoom anchors on where the fingers are
+            // now rather than where they were, so the map stays under them.
+            panBy((now.x - pinch.current.x) / scale, (now.y - pinch.current.y) / scale);
+            if (pinch.current.dist > 0 && now.dist > 0) {
+                zoomTo(
+                    view.current.z * (now.dist / pinch.current.dist),
+                    (now.x - rect.left) / scale,
+                    (now.y - rect.top) / scale,
+                );
+            } else {
+                setHover(null);
+                draw();
+            }
+            pinch.current = now;
+            return;
+        }
+
         if (drag.current) {
             const rect = e.currentTarget.getBoundingClientRect();
             const scale = rect.width / w;
             const dx = (e.clientX - drag.current.x) / scale;
             const dy = (e.clientY - drag.current.y) / scale;
-            drag.current.moved += Math.abs(dx) + Math.abs(dy);
+            // Accumulated on the glass, not in canvas units. Divided by the
+            // scale it was a tenth of the distance on a phone, so a tap that
+            // moved two pixels read as a four-hundred-mile pan and the press
+            // was never a click at all — which is why nothing could be
+            // selected by touch however carefully it was aimed.
+            drag.current.moved += Math.abs(e.clientX - drag.current.x)
+                + Math.abs(e.clientY - drag.current.y);
             drag.current.x = e.clientX;
             drag.current.y = e.clientY;
-            const [lon, lat] = unproject(w / 2 - dx, h / 2 - dy, view.current, w, h);
-            view.current = clampView({ ...view.current, lon, lat }, w, h);
+            panBy(dx, dy);
             setHover(null);
             draw();
             return;
@@ -355,12 +457,29 @@ function WorldMap({
         });
     };
     const onUp = (e) => {
-        if (!interactive || !drag.current) return;
-        const wasDrag = drag.current.moved > CLICK_SLOP;
+        if (!interactive) return;
+        pointers.current.delete(e.pointerId);
+        if (pointers.current.size < 2) pinch.current = null;
+        // Down to one finger after a pinch: that finger becomes the drag, from
+        // where it is now. Without the fresh origin the map leaps by however
+        // far it travelled during the pinch.
+        if (pointers.current.size === 1) {
+            const [only] = Array.from(pointers.current.values());
+            drag.current = { x: only.x, y: only.y, moved: 0 };
+            return;
+        }
+        const wasPinch = pinched.current;
+        if (pointers.current.size === 0) pinched.current = false;
+        if (!drag.current) return;
+        const touch = drag.current.kind && drag.current.kind !== 'mouse';
+        const wasDrag = drag.current.moved > (touch ? TOUCH_SLOP : CLICK_SLOP);
         drag.current = null;
-        if (wasDrag || !pick) return;
+        // A pinch is not a tap, however still the last finger was.
+        if (wasDrag || wasPinch || !pick) return;
         const [x, y] = at(e);
-        const hit = nearest(x, y);
+        const rect = e.currentTarget.getBoundingClientRect();
+        const squeeze = rect.width ? w / rect.width : 1;
+        const hit = nearest(x, y, (touch ? TOUCH_REACH : MOUSE_REACH) * squeeze);
         // A click on empty ocean clears the selection, which is the only way back from
         // one without hunting for a close button.
         pick(hit && hit.aircraft ? hit.aircraft : null);
@@ -412,11 +531,15 @@ function WorldMap({
     const canvasEl = (
         <canvas
             ref={canvas}
-            className="hf__map"
+            /* touch-action only on the interactive copy: the browser must not
+               claim the gesture there, and the panel's map is something you
+               scroll the dock past. */
+            className={interactive ? 'hf__map hf__map--live' : 'hf__map'}
             style={{ aspectRatio: `${w} / ${h}` }}
             onPointerDown={onDown}
             onPointerMove={onMove}
             onPointerUp={onUp}
+            onPointerCancel={onUp}
             onPointerLeave={() => setHover(null)}
         />
     );

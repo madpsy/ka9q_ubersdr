@@ -8750,6 +8750,11 @@ a.btn { text-decoration: none; }
 }
 .hf__open:hover { border-color: var(--accent); }
 .hf__map { display: block; width: 100%; height: auto; }
+/* The interactive copy owns every gesture over it. Without this the browser
+   takes the two-finger one as a page zoom and the one-finger one as a scroll,
+   so the pointer events for a pinch never arrive — the map cannot zoom on a
+   touchscreen at all, which is the only way it can zoom there. */
+.hf__map--live { touch-action: none; }
 
 .hf__stats {
     display: flex;

@@ -247,6 +247,90 @@ function polyfillMediaSession() {
  * on MediaSession.prototype, so it is wrapped on the instance, leaving the
  * prototype (and any other page) untouched.
  */
+// ---- announcements ----------------------------------------------------------
+//
+// v2 speaks the frequency, the mode and a looked-up callsign through the Web
+// Speech API (lib/announce.js, components/AnnounceWatch.jsx). Android's WebView
+// implements none of it, so `speechAvailable()` is false, the Announcements
+// panel reports the feature as unavailable and nothing is ever said.
+//
+// The desktop client has the same shape of problem for a different reason —
+// Electron ships no voices, so it switches on speech-dispatcher and borrows the
+// system's. This does the same thing with Android's: Speech.java wraps
+// TextToSpeech, and what is below is the API the page expects, so the panel,
+// the voice picker and the announcements work unchanged.
+//
+// Only the parts the page uses are here, which is the whole of what
+// announce.js, AnnounceWatch.jsx and the Whisper extension touch: getVoices,
+// speak, cancel, the `voiceschanged` event, and an utterance carrying a voice,
+// a rate and a volume.
+
+let voices = [];
+const voiceTarget = typeof EventTarget === 'function' ? new EventTarget() : null;
+
+function polyfillSpeech() {
+    if (typeof window === 'undefined' || window.speechSynthesis) return;
+
+    function Utterance(text) {
+        this.text = text == null ? '' : String(text);
+        this.voice = null;
+        this.lang = '';
+        this.rate = 1;
+        this.pitch = 1;
+        this.volume = 1;
+    }
+    window.SpeechSynthesisUtterance = Utterance;
+
+    const synth = {
+        // Empty until the engine reports itself ready, exactly as a browser
+        // behaves on first call — which is why the page listens for
+        // `voiceschanged` rather than reading this once.
+        getVoices: () => voices,
+        speak(utterance) {
+            if (!utterance) return;
+            tellHost({
+                type: 'speak',
+                text: utterance.text,
+                // The engine's own identifier, carried through the voice object
+                // the page picked out of getVoices. Matching on the readable
+                // name would break the moment two engines produced the same one.
+                voice: (utterance.voice && utterance.voice.id) || '',
+                rate: Number(utterance.rate) || 1,
+                volume: Number(utterance.volume) || 1,
+            });
+        },
+        cancel() { tellHost({ type: 'speak-cancel' }); },
+        pause() {},
+        resume() {},
+        speaking: false,
+        pending: false,
+        paused: false,
+        addEventListener: (name, fn) => voiceTarget && voiceTarget.addEventListener(name, fn),
+        removeEventListener: (name, fn) => voiceTarget && voiceTarget.removeEventListener(name, fn),
+        onvoiceschanged: null,
+    };
+    Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
+
+    // The engine may have been ready before this page loaded, in which case the
+    // host's own push has already been and gone.
+    tellHost({ type: 'voices' });
+}
+
+function onVoices(json) {
+    try {
+        const list = JSON.parse(json);
+        if (!Array.isArray(list)) return;
+        voices = list;
+    } catch (e) {
+        return;
+    }
+    const synth = window.speechSynthesis;
+    if (voiceTarget) voiceTarget.dispatchEvent(new Event('voiceschanged'));
+    if (synth && typeof synth.onvoiceschanged === 'function') {
+        try { synth.onvoiceschanged(); } catch (e) { /* the page's handler threw */ }
+    }
+}
+
 // ---- the notification shade -------------------------------------------------
 //
 // v2 raises browser notifications for what is worth knowing while you are not
@@ -329,6 +413,10 @@ function onHostMessage(data) {
         if (notice && typeof notice.onclick === 'function') {
             try { notice.onclick(); } catch (e) { /* the page said no */ }
         }
+        return;
+    }
+    if (data.startsWith('voices:')) {
+        onVoices(data.slice(7));
         return;
     }
     if (data.startsWith('notice-permission:')) {
@@ -446,4 +534,5 @@ if (channel) {
 polyfillMediaSession();
 observeMediaSession();
 polyfillNotifications();
+polyfillSpeech();
 watchShared();

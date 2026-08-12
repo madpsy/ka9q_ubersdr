@@ -73,6 +73,7 @@ public class ReceiverActivity extends Activity {
     private boolean playing;
     private androidx.webkit.JavaScriptReplyProxy reply;
     private Prefs prefs;
+    private Speech speech;
 
     /** Ends the open receiver, if there is one. */
     static void finishCurrent() {
@@ -87,6 +88,13 @@ public class ReceiverActivity extends Activity {
         current = new java.lang.ref.WeakReference<>(this);
 
         prefs = new Prefs(this);
+        // Started now because the engine takes a moment to come up, and the
+        // page asks for voices as soon as the Announcements panel is drawn.
+        // When it is ready the list is pushed, which is what fires the page's
+        // `voiceschanged` — the same event a browser uses to say the same thing.
+        speech = new Speech(this, (voicesJson) -> runOnUiThread(() -> {
+            if (reply != null) reply.postMessage("voices:" + voicesJson);
+        }));
 
         Intent intent = getIntent();
         instanceId = intent.getStringExtra(EXTRA_ID);
@@ -245,6 +253,18 @@ public class ReceiverActivity extends Activity {
                 break;
             case "artwork":
                 if (playing) PlaybackService.artwork(this, decodeDataUrl(message.optString("src")));
+                break;
+            case "speak":
+                speech.speak(message.optString("text", ""), message.optString("voice", ""),
+                        (float) message.optDouble("rate", 1), (float) message.optDouble("volume", 1));
+                break;
+            case "speak-cancel":
+                speech.stop();
+                break;
+            case "voices":
+                // The page asking again — it may have mounted after the engine
+                // was ready, in which case the push above has been and gone.
+                if (reply != null) reply.postMessage("voices:" + speech.voicesJson());
                 break;
             case "prefs":
                 prefs.update(message.optJSONObject("map"));
@@ -490,6 +510,10 @@ public class ReceiverActivity extends Activity {
         // A foreground service outliving the page that was feeding it would be
         // a receiver playing with nothing behind it.
         stopPlayback();
+        if (speech != null) {
+            speech.release();
+            speech = null;
+        }
         if (web != null) {
             web.loadUrl("about:blank");
             web.destroy();

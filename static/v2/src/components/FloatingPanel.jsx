@@ -72,10 +72,35 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     // set a class is the one cost worth avoiding here.
     const moving = useRef(false);
     const target = useRef(null);
+    const gap = useRef(null);
+
+    // The marker between two panels, drawn where the window would land.
+    //
+    // The same two classes the dock's own drag paints (components/Section.jsx
+    // sets them from `dropEdge`), on the same elements, so the two gestures
+    // promise the same thing in the same way — a drop that lands somewhere
+    // other than where the line was is the one failure this cannot have.
+    const clearGap = () => {
+        if (gap.current) gap.current.classList.remove('is-drop-before', 'is-drop-after');
+        gap.current = null;
+    };
+
+    const showGap = (body, side, clientX, clientY) => {
+        const at = nearestPanelGap(body, clientX, clientY, side, panel.id);
+        const el = at ? body.querySelector(`[data-panel="${at.id}"]`) : null;
+        if (el === gap.current && (!at || el.classList.contains(`is-drop-${at.edge}`))) return at;
+        clearGap();
+        if (el) {
+            el.classList.add(`is-drop-${at.edge}`);
+            gap.current = el;
+        }
+        return at;
+    };
 
     const clearTarget = () => {
         if (target.current) target.current.el.classList.remove('is-dropping');
         target.current = null;
+        clearGap();
     };
 
     const startMove = (e) => {
@@ -90,12 +115,17 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
         // floating layer (useFloatDrag keeps it on screen), so its own position
         // never reaches a dock even when the hand carrying it does.
         const found = dockBodyAt(e.clientX, e.clientY);
-        if ((found && found.el) === (target.current && target.current.el)) return;
-        clearTarget();
-        if (found) {
-            found.el.classList.add('is-dropping');
-            target.current = found;
+        if ((found && found.el) !== (target.current && target.current.el)) {
+            clearTarget();
+            if (found) {
+                found.el.classList.add('is-dropping');
+                target.current = found;
+            }
         }
+        // Within the dock the pointer is over, which gap. Recomputed on every
+        // move rather than only on entering the dock: the whole point is that
+        // sliding up and down the dock chooses where it goes.
+        if (found) showGap(found.el, found.side, e.clientX, e.clientY);
     };
 
     const endMove = (e) => {

@@ -112,7 +112,10 @@ public class ReceiverActivity extends Activity {
         // from coming up silent.
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUserAgentString(browserUserAgent(settings.getUserAgentString(), product));
-        WebView.setWebContentsDebuggingEnabled(true);
+        // Only where it is wanted. A release WebView left inspectable is a
+        // receiver anybody with adb can read the session out of, and the flag
+        // is process-global, so this decides it for the chooser too.
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
         // The preload's jobs, before the page's first script runs.
         Set<String> rules = Collections.singleton(origin);
@@ -168,14 +171,14 @@ public class ReceiverActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage message) {
-                String text = message.message();
-                // The page's own diagnostics go out at WARN, everything else at
-                // DEBUG. Not a preference: Chromium logs page-load metrics from
-                // this process several times a second, and logcat's chatty
-                // filter drops the lower level first — so anything logged at
-                // DEBUG here is gone before it can be read.
-                if (text != null && text.startsWith("[ubersdr")) Log.w(TAG, text);
-                else Log.d(TAG, "page: " + text + " (" + message.sourceId() + ":" + message.lineNumber() + ")");
+                // Mirrored only in a debug build. The page is chatty by design
+                // and none of it is this host's business — in a release APK it
+                // would be somebody's chat and callsign lookups in logcat, for
+                // no one's benefit.
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "page: " + message.message()
+                            + " (" + message.sourceId() + ":" + message.lineNumber() + ")");
+                }
                 return true;
             }
         });

@@ -63,6 +63,13 @@ android {
         }
     }
 
+    // BuildConfig.DEBUG, which decides whether the WebViews are inspectable and
+    // whether the page's console is mirrored into logcat. AGP 8 stops generating
+    // the class unless asked.
+    buildFeatures {
+        buildConfig true
+    }
+
     buildTypes {
         release {
             minifyEnabled false

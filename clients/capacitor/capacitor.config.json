@@ -4,7 +4,7 @@
   "webDir": "www",
   "android": {
     "buildOptions": {},
-    "webContentsDebuggingEnabled": true
+    "webContentsDebuggingEnabled": false
   },
   "plugins": {}
 }

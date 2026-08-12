@@ -18,6 +18,10 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(UberSdrPlugin.class);
         super.onCreate(savedInstanceState);
+        // capacitor.config.json turns this off so a release build is not
+        // inspectable; a debug build wants it. Process-global, so setting it
+        // here covers the chooser and the receiver alike.
+        android.webkit.WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         SystemBars.inset(findViewById(android.R.id.content));
     }
 }

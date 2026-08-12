@@ -140,12 +140,7 @@ function onMetadata(md) {
  * v2, and no second implementation of its metadata.
  */
 function polyfillMediaSession() {
-    if (typeof navigator === 'undefined') return;
-    if (navigator.mediaSession) {
-        console.log('[ubersdr-host] media session: the WebView has one');
-        return;
-    }
-    console.log('[ubersdr-host] media session: polyfilled for the host');
+    if (typeof navigator === 'undefined' || navigator.mediaSession) return;
 
     if (typeof window.MediaMetadata !== 'function') {
         window.MediaMetadata = function MediaMetadata(init) {

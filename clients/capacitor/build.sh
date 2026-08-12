@@ -338,12 +338,25 @@ if [[ -f "$ICON_SRC" ]] && command -v convert >/dev/null 2>&1; then
             "$dir/ic_launcher_foreground.png"
     done
 
-    # Capacitor's default is white, which puts a white plate behind a mark drawn
-    # for a dark one.
+    # The background layer, and the one thing about this that is not obvious.
+    #
+    # It is the *artwork's own tile colour*, not the app's dark background. The
+    # foreground above is the whole mark — a blue rounded tile with a black mast
+    # on it — so if the layer behind it is a different colour, the launcher's
+    # mask cuts a circle out of that colour and the blue tile sits inside it as a
+    # square with its corners clipped: the icon comes out as a polygon in a
+    # ring, and reads as a hexagon among a screen of circles.
+    #
+    # Matched, the tile's edge disappears into the background and what is left is
+    # the mast on a full circle of blue — which then survives any mask the
+    # launcher applies, round, squircle or otherwise.
+    #
+    # Re-sample it if the artwork changes:
+    #   convert assets/icon.png -format '%[pixel:p{120,512}]' info:
     cat > android/app/src/main/res/values/ic_launcher_background.xml <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0B0E14</color>
+    <color name="ic_launcher_background">#0097F5</color>
 </resources>
 XML
 

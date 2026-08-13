@@ -206,8 +206,10 @@ differs is only how the platform hands one over and where a failure is shown.
 
 Where the links come from: the **Open in App** button on v2's start overlay
 (`static/v2/src/lib/appLinks.js` builds the URI, `StartExtras.jsx` draws the
-dialog). On a phone it follows the link straight away; on a desktop it shows a
-QR code, which is how a receiver open in a browser gets onto this app.
+dialog). On a phone it follows the link straight away rather than opening a
+dialog, and that is this app's way in: a receiver open in the phone's browser
+hands itself over in one tap. The desktop dialog is for the desktop client and
+offers its download — there is no QR code in it.
 
 Testing one without a link to tap:
 

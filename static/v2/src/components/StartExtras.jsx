@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import { APP_DOWNLOADS, appDownload, detectDesktopOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
 // needs, so it stays out of the bundle and off the critical path — the same
@@ -51,21 +51,13 @@ function QrCode({ text, size = 200 }) {
 }
 
 /**
- * Hand this receiver to an app, on a device that may not be this one.
+ * "Copy link", and the second and a half it says it worked.
  *
- * Three ways out, because there are three situations and the dialog cannot tell
- * which one it is in: the QR for a phone that is not this machine, the link
- * itself for an app installed here, and the text for anywhere else it has to be
- * pasted. Following a scheme nobody has claimed is not an error on any
- * platform — the click simply does nothing — which is exactly why the URI is on
- * screen rather than only behind the button.
- *
- * On a phone the deep link is followed straight away and this is never opened:
- * a QR exists to get the URI onto a *different* device, and there it would be
- * scanned by the device already holding it. The caller decides that; this is
- * the desktop half.
+ * Shared by both dialogs below because the URI is the fallback in each: a custom
+ * scheme nobody has claimed does nothing at all when followed — no error, no
+ * dialog, nothing — so the link itself has to be on screen and takeable.
  */
-function AppLinkModal({ title, text, uri, action, note, onClose }) {
+function CopyLink({ uri }) {
     const [copied, setCopied] = useState(false);
 
     const copy = async () => {
@@ -78,56 +70,115 @@ function AppLinkModal({ title, text, uri, action, note, onClose }) {
         }
     };
 
+    return <Button size="sm" variant="ghost" onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>;
+}
+
+/**
+ * Hand this receiver to the VibeSDR app.
+ *
+ * On a phone the deep link is followed straight away — v1 skips its own dialog
+ * there, since the QR would only be scanned by the device already holding it.
+ * The caller does that; this is the desktop half, and the QR is the point of
+ * it: VibeSDR is a phone app, so the way out of a desktop browser is a camera.
+ */
+export function VibeSdrModal({ publicUuid, onClose }) {
+    const uri = vibesdrUri(publicUuid);
+
     return (
-        <Modal onClose={onClose} label={title}>
+        <Modal onClose={onClose} label="Open in VibeSDR">
             <div className="stack vibe">
-                <h2 className="vibe__title">{title}</h2>
-                <p className="vibe__text">{text}</p>
+                <h2 className="vibe__title">Open in VibeSDR</h2>
+                <p className="vibe__text">Scan this with a phone to open this receiver in VibeSDR.</p>
                 <QrCode text={uri} />
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
-                    <a className="btn btn--primary btn--sm" href={uri}>{action}</a>
-                    <Button size="sm" variant="ghost" onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
+                    <a className="btn btn--primary btn--sm" href={uri}>Open in VibeSDR</a>
+                    <CopyLink uri={uri} />
                 </div>
-                <p className="vibe__note">{note}</p>
+                <p className="vibe__note">VibeSDR beta · instances.ubersdr.org</p>
             </div>
         </Modal>
     );
 }
 
-/** Hand this receiver to the VibeSDR app. */
-export function VibeSdrModal({ publicUuid, onClose }) {
+/**
+ * One installer, with the platform's own mark on it.
+ *
+ * The icon is decorative and carries `alt=""` for that reason: the button says
+ * "Download for Windows" beside it, and a screen reader announcing "Windows
+ * Download for Windows" is worse than one that does not mention it. It is also
+ * the reason a missing image costs nothing — the label was always the label.
+ */
+function DownloadButton({ download, label }) {
     return (
-        <AppLinkModal
-            title="Open in VibeSDR"
-            text="Scan this with a phone to open this receiver in VibeSDR."
-            uri={vibesdrUri(publicUuid)}
-            action="Open in VibeSDR"
-            note="VibeSDR beta · instances.ubersdr.org"
-            onClose={onClose}
-        />
+        <a
+            className="btn btn--sm"
+            href={download.url}
+            title={`${download.label} — ${download.note}`}
+            target="_blank"
+            rel="noopener noreferrer"
+        >
+            <img className="vibe__os" src={download.icon} alt="" />
+            {label}
+        </a>
     );
 }
 
 /**
- * Hand this receiver to UberSDR's own apps.
+ * Hand this receiver to the UberSDR desktop client.
  *
- * The same dialog as VibeSDR's and a different audience: the desktop client
- * registers ubersdr:// with the operating system, so on a machine that has it
- * the button is the whole journey, and the Android client registers the same
- * scheme, so the QR is the whole journey for a phone. One link covers both
- * because the link names the receiver rather than an app — see lib/appLinks.js.
+ * Deliberately not VibeSDR's dialog with a different name on it, because the
+ * app it is offering is on *this* machine rather than in a pocket. So there is
+ * no QR: the two things somebody at a desktop can do are open the receiver in
+ * the client they have, or get the client they do not have, and those are the
+ * two buttons.
+ *
+ * Both are needed because neither can be told from the other. A browser cannot
+ * ask the operating system whether a scheme is claimed, and following an
+ * unclaimed one is silent — so an installed client and a missing one look
+ * identical from here, right up until nothing happens. The download beside it is
+ * what makes that recoverable without anyone having to guess what went wrong.
+ *
+ * The Android client answers the same link and does not need a QR here to get
+ * it: a phone browsing this receiver follows the link directly, without this
+ * dialog ever opening (see StartOverlay). The case a QR would have served —
+ * getting the URI from this screen onto a phone — is one the phone reaches for
+ * itself by opening the receiver.
  */
 export function UberSdrAppModal({ publicUuid, onClose }) {
+    const uri = ubersdrAppUri(publicUuid);
+    // Read once, when the dialog opens: it is a property of the machine, and
+    // nothing about it can change while this is on screen.
+    const [download] = useState(() => appDownload(detectDesktopOS()));
+
     return (
-        <AppLinkModal
-            title="Open in the UberSDR app"
-            text="Scan this with a phone, or open it on this computer if the desktop client is installed. Either way it connects to this receiver."
-            uri={ubersdrAppUri(publicUuid)}
-            action="Open in App"
-            note="Desktop and Android apps · instances.ubersdr.org"
-            onClose={onClose}
-        />
+        <Modal onClose={onClose} label="Open in the UberSDR app">
+            <div className="stack vibe">
+                <h2 className="vibe__title">Open in the UberSDR app</h2>
+                <p className="vibe__text">
+                    Opens this receiver in the UberSDR desktop client. If it is not
+                    installed yet, download it first.
+                </p>
+                <div className="vibe__row">
+                    <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
+                    {download ? (
+                        <DownloadButton download={download} label={`Download for ${download.label}`} />
+                    ) : (
+                        // Not a platform this recognises, so it says what it has
+                        // rather than choosing wrongly on somebody's behalf.
+                        APP_DOWNLOADS.map((d) => (
+                            <DownloadButton key={d.os} download={d} label={d.label} />
+                        ))
+                    )}
+                </div>
+                {download && <p className="vibe__note">{download.note}</p>}
+                <code className="vibe__uri">{uri}</code>
+                <div className="vibe__row">
+                    <CopyLink uri={uri} />
+                </div>
+                <p className="vibe__note">Desktop and Android apps · instances.ubersdr.org</p>
+            </div>
+        </Modal>
     );
 }
 

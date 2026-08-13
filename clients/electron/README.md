@@ -287,9 +287,14 @@ link would start a bare Electron with no app in it.
 
 Where the links come from: the **Open in App** button on v2's start overlay
 (`static/v2/src/lib/appLinks.js` builds the URI, `StartExtras.jsx` draws the
-dialog). On a desktop it offers the link itself, which is what this client
-answers; the QR beside it is for the Android one. The button is left out
-entirely when the page is already running inside either client.
+dialog). Its two buttons are "open" and "download for this platform", and the
+second is there because the first cannot be checked: a browser cannot ask the
+operating system whether a scheme is claimed, and following an unclaimed one is
+silent — so an installed client and a missing one look identical until nothing
+happens. The download links are this client's own release artefacts, which is
+why their file names are pinned (see the `artifactName` note in `package.json`).
+The button is left out entirely when the page is already running inside either
+client.
 
 A failure is a native dialog rather than something drawn in the chooser: the
 chooser page is shared with the Android client and a link is followed by the app

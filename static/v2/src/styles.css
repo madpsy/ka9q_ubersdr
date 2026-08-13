@@ -1477,6 +1477,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     text-align: left;
 }
 .vibe__row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+/* The platform marks on the download buttons. Sized in em so they follow the
+   button's text at any UI scale, and `width: auto` because the three are not
+   the same shape — Tux is taller than he is wide, the Windows flag is square. */
+.vibe__os { height: 1.25em; width: auto; flex: none; }
 .vibe__note { margin: 0; font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
 
 /* =========================================================================

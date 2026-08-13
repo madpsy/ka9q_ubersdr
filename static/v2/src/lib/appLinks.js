@@ -49,3 +49,76 @@ export function vibesdrUri(publicUuid) {
 export function ubersdrAppUri(publicUuid) {
     return connectUri('ubersdr', publicUuid);
 }
+
+// Where the desktop client comes from, per platform.
+//
+// The same three artefacts the project's own site offers, from the same rolling
+// `latest` release — the file names are fixed on purpose (see the artifactName
+// note in clients/electron/package.json) so a link written here does not 404 on
+// the next version bump.
+//
+// `note` is what the operator is actually getting, and is not decoration: the
+// Linux build is x86_64 only and the macOS build is Apple Silicon only, so a
+// button that said no more than "Download" would be offering an ARM Chromebook
+// an AppImage it cannot run.
+const RELEASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest';
+
+// The icons are the project site's own, at 64 px tall so a button can draw them
+// at any size a phone or a scaled UI asks for. Served by the instance from
+// static/images/os/ — a path this page can rely on, since it is the same server
+// the page itself came from.
+const ICONS = '/images/os';
+
+export const APP_DOWNLOADS = [
+    { os: 'windows', label: 'Windows', note: 'Installer (.exe)', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
+    { os: 'macos', label: 'macOS', note: 'Apple Silicon (.dmg)', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
+    { os: 'linux', label: 'Linux', note: 'AppImage, x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
+];
+
+/** The download for an os key from `detectDesktopOS`, or null. */
+export function appDownload(os) {
+    return APP_DOWNLOADS.find((d) => d.os === os) || null;
+}
+
+/**
+ * Which desktop this is, for choosing a download — or null when the honest
+ * answer is "not a desktop, or not one of the three".
+ *
+ * Null is a real answer and callers offer all three rather than guessing: a
+ * wrong guess here hands somebody an installer that does not run on their
+ * machine, which is worse than a short list.
+ *
+ * The awkward cases are all things that claim to be something else:
+ *
+ *   * Android says `Linux` — every Android UA does, and it must not be offered
+ *     an AppImage. Phones and tablets are ruled out first for that reason.
+ *   * iPadOS says `Macintosh`, deliberately, and has done since iOS 13. A Mac
+ *     with a touchscreen does not exist, so `maxTouchPoints` is what separates
+ *     them.
+ *   * ChromeOS says `CrOS` and is left as null: it can run an AppImage only
+ *     inside the Linux container, which is not what a Download button means.
+ *
+ * `nav` is a parameter so this can be tested against the strings real browsers
+ * send, which is the only way to know it is right.
+ */
+export function detectDesktopOS(nav) {
+    const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+    if (!n) return null;
+
+    // Client hints where they exist (Chromium): a stated platform rather than a
+    // string to be read as tea leaves. Everything else falls back to the UA.
+    const hints = n.userAgentData || null;
+    const ua = String(n.userAgent || '');
+    const text = `${(hints && hints.platform) || n.platform || ''} ${ua}`;
+
+    if (hints && hints.mobile) return null;
+    if (/Android|iPhone|iPod|iPad/i.test(text)) return null;
+    // iPadOS pretending to be a Mac.
+    if (/Mac/i.test(text) && Number(n.maxTouchPoints) > 1) return null;
+    if (/CrOS/i.test(text)) return null;
+
+    if (/Win/i.test(text)) return 'windows';
+    if (/Mac|Darwin/i.test(text)) return 'macos';
+    if (/Linux|X11|BSD/i.test(text)) return 'linux';
+    return null;
+}

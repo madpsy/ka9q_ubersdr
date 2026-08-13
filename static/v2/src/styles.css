@@ -1457,8 +1457,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .startmap__tip::before { display: none; }
 
-/* The VibeSDR / password dialogs the overlay opens. */
-.vibe { align-items: center; text-align: center; min-width: min(360px, 80vw); padding-right: 30px; }
+/* The VibeSDR / app-link / password dialogs the overlay opens. */
+
+/* Its own card, for the reason .confirm and .spotmap give above: the Modal is a
+   scrim and a close button, and content with no surface of its own floats over
+   the blur.
+ *
+ * These three are where that goes from untidy to unreadable, because of what is
+ * behind them. Every other dialog in the app opens over the running UI, which is
+ * mostly spectrum and dark panels; these open over the start overlay, which is a
+ * card of centred text — a callsign, a location, the operator's own description.
+ * Centred text over centred text, three quarters of a stop apart, is two things
+ * neither of which can be read.
+ *
+ * The right padding is wider than the left: the × sits at the top-right corner
+ * of whatever is inside the Modal, which is now this card, and a title long
+ * enough to reach it would otherwise run underneath it.
+ *
+ * Matched on both classes because every one of these is `class="stack vibe"`,
+ * and .stack — further down this sheet, so later in the cascade — sets a
+ * padding-top of its own that a single-class rule here would lose to. */
+.stack.vibe {
+    align-items: center;
+    text-align: center;
+    min-width: min(360px, 80vw);
+    max-width: min(90vw, 460px);
+    padding: 18px 34px 18px 22px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
 .vibe__title { margin: 0; font-size: calc(15px * var(--ui-scale)); }
 .vibe__text { margin: 0; font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 /* White plate whatever the theme: a camera reads the contrast, and an inverted

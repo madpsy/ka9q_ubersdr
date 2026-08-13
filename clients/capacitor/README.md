@@ -1,16 +1,29 @@
-# UberSDR Android client
+# UberSDR mobile client
 
-The chooser and the v2 web UI in a Capacitor shell. The UI is **bundled**: the
-v2 bundle ships inside the APK and is served to the receiver's WebView by a
-loopback proxy, so the app is a client rather than a wrapper around somebody's
-website.
+The chooser and the v2 web UI in a Capacitor shell, on **Android and iOS**. The
+UI is **bundled**: the v2 bundle ships inside the app and is served to the
+receiver's WebView by a loopback proxy, so this is a client rather than a
+wrapper around somebody's website.
+
+The two platforms share far more than they differ. All of the JavaScript —
+`src/api.js`, `store.js`, `discovery.js`, `deeplink.js`, `receiver.js`, the
+staged chooser page — is the same file on both, and neither knows which
+platform answered it. What differs is the platform half behind it: Java in
+`android/`, Swift in `ios/UberSdrPlugin/`, method for method.
 
 ```sh
 ./build.sh --apk                     # build the UI, stage it, assemble a debug APK
 ./build.sh --install                 # ...and install it on the attached device
 ./build.sh --install=192.168.1.50    # ...on a phone over Wi-Fi
-./build.sh --release                 # a release APK instead (signed — see below)
+./build.sh --release                 # a release APK and .aab (signed — see below)
+
+./build-mac.sh --check               # is the Mac able to build the iOS app at all?
+./build-mac.sh --test                # prove the whole iOS chain on a throwaway app
+./build-mac.sh --run --shot=x.png    # build, run in a simulator, screenshot it back
 ```
+
+`build.sh` is Android and runs anywhere. `build-mac.sh` is iOS and runs *here*,
+compiling over SSH on a Mac — see [The iOS half](#the-ios-half).
 
 Two kinds of APK, and the difference matters more than "debug" usually implies:
 a debug build is signed with the local debug key, is `debuggable`, and its
@@ -349,16 +362,144 @@ starts, and when the page asks. Never at launch.
 only what a 430 px screen needs said differently: there is no hover, there is no
 room above the first row, and 24 px of icon is not a thumb target.
 
+## The iOS half
+
+Everything above describes both platforms unless it names Android. This section
+is what is different, and why.
+
+`ios/UberSdrPlugin/` is this client's platform half in Swift, answering the same
+eight methods `src/native.js` documents, and doing the same jobs behind them:
+shared settings between receivers, the lock screen, notifications, spoken
+announcements, keeping the display awake. The mapping is close to one-to-one:
+
+| Android | iOS |
+|---|---|
+| `Http.java` | `Http.swift` — `URLSession` + per-receiver certificate trust |
+| `Secrets.java` | `Secrets.swift` — the Keychain |
+| `Mdns.java` | `Mdns.swift` — `NWBrowser` |
+| `LocalProxy.java` | `LocalProxy.swift` — `NWListener` |
+| `ReceiverActivity.java` | `ReceiverViewController.swift` |
+| `PlaybackService.java` | `PlaybackSession.swift` + `HostChannel.swift` |
+| `Notices.java`, `Speech.java` | `HostChannel.swift` |
+
+`Mdns` is the one rewrite rather than a port. The Android version sends its own
+DNS-SD query from an ephemeral port, which buys it freedom from `MulticastLock`
+and NsdManager; none of that transfers, because a raw multicast socket on iOS
+needs the `com.apple.developer.networking.multicast` entitlement, granted by
+written application to Apple. `NWBrowser` needs no entitlement at all — only
+honesty in `Info.plist` — so it is shorter *and* does more, since mDNSResponder
+resolves the addresses too.
+
+### Why the Swift lives in a pod
+
+Adding a `.swift` to an Xcode target means hand-editing `project.pbxproj`, three
+cross-referenced sections of it, with invented 24-hex object IDs. A pod globs
+its sources instead: a new file needs `pod install` and nothing else. That is
+what makes this client's Swift writable on a machine with no Xcode, which is the
+machine it is written on. `Main.storyboard` names `MainViewController` and its
+module, which is a two-attribute edit to XML rather than an Xcode session.
+
+### Three traps, none of which the compiler catches
+
+- **`registerPluginType` is a silent no-op.** Its first line is
+  `if autoRegisterPlugins { return }`, and auto-registration is on by default —
+  it is what registers the npm plugins. So the plugin appears to load and every
+  call answers *"UberSdr plugin is not implemented on ios"*.
+  `registerPluginInstance` has no such guard and composes with the generated
+  list instead of replacing it. See `MainViewController.swift`.
+- **A default port in the URL breaks name-based virtual hosts.** `URLSession`
+  derives the `Host` header from the URL, so an explicit `:443` sends
+  `Host: example.org:443`, which the directory answers with a 404. curl and
+  Java's `HttpURLConnection` both omit it, which is why the Android half never
+  met this. See `Http.swift`.
+- **`[weak self]` on a splice callback truncates the body.** Nothing holds a
+  `StreamReader` once the closure that created it returns, so the reader is
+  deallocated mid-transfer and the next receive callback finds nothing to
+  resume — silently, with no error and no EOF, leaving the page waiting on a
+  `Content-Length` that will never be satisfied. It scales with response size,
+  so small JSON worked and an 87 kB script did not, which is a confusing way to
+  be told. The strong capture *is* the intended lifetime: it breaks when the
+  last callback returns without re-arming. See `LocalProxy.swift`.
+
+The loopback origin is a secure context — verified on device rather than
+assumed, `window.isSecureContext === true` — so the page keeps `AudioWorklet`,
+`enumerateDevices` and the recorder exactly as it does on Android.
+
+### No chat, and why
+
+Apple's Guideline 1.2 requires an app carrying user-generated content to offer
+moderation, reporting and blocking for it. The chat belongs to whichever
+receiver you are on, and this client can provide none of that on somebody
+else's receiver — so the iOS host declares `chat: false` and v2 does not draw
+the panel (`panels/registry.jsx`, the same `requires` idiom the Doppler and
+NAVTEX panels use). Absent means yes, so the browser, the desktop client and
+Android are unchanged.
+
+### App Transport Security
+
+`NSAllowsArbitraryLoads`, with the justification written into `Info.plist`
+beside it: this app connects to receivers at addresses its operator types in or
+picks from a directory, many on home networks over plain HTTP or behind a
+self-signed certificate, and none of them can be enumerated in advance. That is
+the case App Review asks for. Certificate checking is not abandoned with it —
+`Http.swift` evaluates every chain and accepts a bad one only where the operator
+has said so for that one receiver, and the receiver's page is reached over
+loopback rather than over any of this.
+
+### Building from a machine that is not a Mac
+
+`build-mac.sh` compiles on a Mac over SSH and brings the result back. It exists
+because `cap add ios` and `cap sync ios` run perfectly well on Linux — an Xcode
+project is text and PNGs — and only two steps need macOS. Its header documents
+what the Mac needs; `--check` tests for all of it and says how to fix what is
+missing. Two traps worth knowing before you meet them:
+
+- **The iOS platform is a separate download from Xcode.**
+  `xcodebuild -showsdks` will list "iOS 26.5" while every build fails with
+  *"Supported platforms for the buildables in the current scheme is empty"*.
+  `--check` therefore asks `simctl list runtimes` rather than trusting the SDK
+  list. Fix: `xcodebuild -downloadPlatform iOS`.
+- **Installing Homebrew moves the active developer directory** to the Command
+  Line Tools, which breaks `xcodebuild` for everything on that machine. Every
+  command here works around it with `DEVELOPER_DIR`; the real fix needs
+  `sudo xcode-select -s /Applications/Xcode.app`.
+
+`--test` builds, runs and screenshots a throwaway Capacitor app, so "is the Mac
+still able to build?" is one command and never a guess.
+
+### Driving it without a finger
+
+`simctl` has no tap, and `simctl openurl` reaches the app only through
+SpringBoard's "Open in …?" alert, which nothing can answer headlessly. So a
+DEBUG-only launch environment variable takes the same URL a link would:
+
+```sh
+SIMCTL_CHILD_UBERSDR_OPEN='ubersdr://connect?uuid=…' \
+    xcrun simctl launch booted org.ubersdr.mobile
+```
+
+It is the same path a real link takes — `deeplink.js` cannot tell the difference
+— so what it exercises is the real one. A release build has no way to be told
+where to connect at launch.
+
 ## Not done yet
 
-Named rather than left to be discovered:
+Named rather than left to be discovered. Where a gap is on one platform only,
+it says so.
 
-- **Shared settings.** The desktop client bridges the `ubersdr.v2.*` keys
-  between receiver origins from its preload (`receiver-preload.js`) so that one
-  arrangement of the interface applies to every receiver. The document-start
-  script here does not do that yet, so each receiver keeps its own — which is
-  less visible on a phone, where one receiver is open at a time, but it is the
-  same gap.
+- **iOS: everything that needs a device.** Background audio is the one real
+  design risk left. iOS suspends a WKWebView's *content process* when the app
+  backgrounds, and v2 decodes audio in JavaScript off a WebSocket, so an audio
+  session alone may not be enough where Android's foreground service is. The way
+  out is v2's own `/audio/stream` (`media/httpStream.js`, `audio_http_stream.go`)
+  — a real media resource, which iOS keeps playing, and which the server routes
+  to *instead of* the WebSocket rather than in addition. A simulator cannot
+  answer this: it does not model process suspension. Bonjour discovery,
+  notification delivery and the lock-screen transport want a device for the same
+  reason.
+- **iOS: signing.** Simulator builds need none. A device build or an App Store
+  archive needs an Apple ID in Xcode, and Play-style key questions have an Apple
+  equivalent — see the bundle section below for the Android one.
 - **Menus.** No Links menu and no Layout menu, and neither is wanted: a phone
   has no menu bar, and the Layout menu's job is done by the phone layout.
 - **A caution for anyone touching the WebView lifecycle.** Do not call
@@ -367,18 +508,36 @@ Named rather than left to be discovered:
   Chromium throttles hidden-page timers to about once a minute, which makes the
   squelch behave strangely in the background even while audio keeps flowing.
 - **Popups.** The v1 windows (callsign lookup, map, CW graph) open with
-  `window.open`, which this WebView does not handle yet.
+  `window.open`. Android's WebView does not handle these yet; the iOS view loads
+  them in place, which is the smallest thing that works rather than the right
+  one.
 - **Upstream connection pooling.** `LocalProxy` opens a connection per request
-  and relays with `Connection: close`. The cost is a TLS handshake per request
-  against a remote instance on first load; the benefit is that the response body
-  needs no interpretation, so SSE and chunked encoding pass through as bytes.
+  and relays with `Connection: close`, on both platforms. The cost is a TLS
+  handshake per request against a remote instance on first load; the benefit is
+  that the response body needs no interpretation, so SSE and chunked encoding
+  pass through as bytes. The iOS version takes this further and has one path for
+  requests and websocket upgrades alike: after the head is rewritten, both are
+  bytes nobody interprets.
 
 ## Packaging and publishing
 
+This section is Android. iOS distribution is not set up: `build-mac.sh` builds
+for the simulator, and an archive for TestFlight or the App Store needs an Apple
+ID in Xcode and a signing identity, of which that Mac currently has none.
+
 ```sh
-./build.sh --release    # dist/UberSDR.apk
-./build.sh --publish    # ...and upload it to the `latest` GitHub release
+./build.sh --release    # dist/UberSDR.apk and dist/UberSDR.aab
+./build.sh --publish    # ...and upload the APK to the `latest` GitHub release
 ```
+
+Two artefacts, because the two places this goes take different ones. A release
+builds both every time rather than putting the bundle behind a flag: they share
+everything up to packaging, so the second costs a few seconds, and the day it
+would have been forgotten is the day of a Play upload.
+
+Only the APK is published. An `.aab` is not installable — it is a container
+Play's servers split into per-device APKs — so a release page offering one is
+offering a sideloader a file that cannot be opened.
 
 `--publish` follows the desktop client's: the rolling `latest` tag on
 `madpsy/ka9q_ubersdr`, one artefact under a fixed name (`UberSDR.apk`, so the
@@ -435,14 +594,42 @@ with a different key cannot be installed over one already on a device — it has
 to be uninstalled first, taking its saved receivers with it. Losing the file
 means everybody in the field reinstalling by hand.
 
-Sideloading is the distribution route for now. Play Store publishing would want
-an app bundle (`bundleRelease`) and Play App Signing instead, which is a
-different arrangement and not set up here.
+### The bundle, and the one decision it forces
+
+Play has not accepted an APK for a new app since 2021. What it wants is the
+`.aab`, which `--release` now produces; what it does with it is generate a
+per-device APK and **sign that itself**.
+
+That is the part worth deciding before the first upload rather than after. Under
+Play App Signing the keystore above becomes the *upload* key, and a separate app
+signing key signs what users actually install — so a Play install and the APK on
+the GitHub release would carry different signatures, and neither could update
+over the other. In this app that is not a cosmetic difference: replacing one
+with the other means uninstalling, which erases that install's saved receivers,
+shared settings and saved passwords.
+
+Uploading `ubersdr-release.jks` as the app signing key when the listing is first
+created is what keeps the two interchangeable. It is a one-time choice and
+cannot be changed afterwards.
+
+For this app the split delivery a bundle exists for buys close to nothing. There
+is no `lib/` — it is Java and a WebView, no NDK — so there is no ABI to split
+on, there are no translations, and the only per-density resources are the
+launcher icons. The weight is `classes.dex` and the staged `www/`, both of which
+every device gets either way. The bundle is a Play entry requirement here, not
+an optimisation.
+
+Sideloading remains the distribution route for everyone not coming through Play.
 
 ## Files
 
+Everything under `src/` is shared: the same file runs on both platforms.
+
 ```
-build.sh      builds v2, stages it and the chooser, syncs, assembles, publishes
+build.sh      Android: builds v2, stages it and the chooser, syncs, assembles,
+              publishes
+build-mac.sh  iOS: ships the tree to a Mac over SSH, pods, builds, runs in a
+              simulator and brings screenshots back. --check and --test first.
 capacitor.config.json
 mobile.css    the chooser's phone pass, loaded after chooser.css
 src/api.js    window.ubersdr — the surface clients/electron/preload.js defines
@@ -457,9 +644,32 @@ src/deeplink.js
 src/main.js   the entry point: assigns window.ubersdr before chooser.js runs
 src/receiver.js
               what runs inside a receiver page, bundled with the v2 page API's
-              client library — the Android answer to a preload. Also provides
-              the media session and Notification APIs the WebView lacks.
-mobile.css    the chooser's phone pass, loaded after chooser.css
+              client library — this client's answer to a preload, on both
+              platforms. Also provides the media session, Notification and
+              Web Speech APIs neither WebView has.
 www/          staged: the chooser, Leaflet, app.js and the v2 bundle (generated)
-android/      the Capacitor project, plus the plugin above
+android/      the Capacitor project, plus the Java plugin above
+ios/          the Xcode project (generated by `cap add ios`), and:
+ios/UberSdrPlugin/
+              this client's platform half in Swift, as a local pod so that a new
+              file is a `pod install` rather than a project.pbxproj edit:
+                Http.swift            one GET, and certificate classification
+                Secrets.swift         the bypass password, in the Keychain
+                Mdns.swift            _ubersdr._tcp over NWBrowser
+                LocalProxy.swift      the receiver's loopback proxy
+                ReceiverViewController.swift
+                                      the receiver's WebView and its preload
+                HostChannel.swift     the lock screen, notifications, speech and
+                                      the shared-settings snapshot
+                PlaybackSession.swift the audio session that survives the lock
+                MainViewController.swift
+                                      where the plugin is registered
+PRIVACY.html  the store privacy policy, written to serve both stores
+ubersdr-play-icon-512.png, ubersdr-appstore-icon-1024.png
+              the store listing icons: full-bleed and opaque, because both
+              stores round the corners themselves and Apple rejects an alpha
+              channel. Generated from clients/electron/assets/icon.png, which
+              stays the one source for the launcher icon too.
+screenshots/  tablet store screenshots, captured from emulators with
+              `adb exec-out screencap`
 ```

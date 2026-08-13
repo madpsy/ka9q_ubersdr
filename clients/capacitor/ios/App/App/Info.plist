@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+        <string>UberSDR</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+
+	<!-- ================================================================
+	     Everything below is this client's, not Capacitor's template.
+	     ================================================================ -->
+
+	<!-- ubersdr://connect?uuid=… — a receiver, named in a link, from anywhere
+	     the phone can follow one: a QR code beside a radio, a message, an
+	     instance's own page. The scheme alone is registered, as it is on
+	     Android, so what a link asks for is src/deeplink.js's to read and to
+	     refuse rather than something the OS silently hands elsewhere. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.ubersdr.mobile</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ubersdr</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Audio keeps playing with the screen off. The Android client says the
+	     same thing with a mediaPlayback foreground service. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+
+	<!-- Finding receivers on the operator's own network.
+	     NWBrowser needs both of these and no entitlement; a raw multicast
+	     socket, which is what Mdns.java uses on Android, would need the
+	     multicast entitlement Apple grants by application. See Mdns.swift. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>UberSDR looks for receivers on your own network so they appear in the Local network tab. Nothing is sent anywhere.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ubersdr._tcp</string>
+	</array>
+
+	<!-- App Transport Security.
+	     This app is a client for receivers run by other people, at addresses
+	     its operator types in or picks from a directory. Many are on home
+	     networks, on plain HTTP or behind a self-signed certificate, and none
+	     of them can be enumerated here — so ATS cannot be satisfied by naming
+	     exception domains, which is the justification App Review asks for.
+	     Certificate trust is not abandoned with it: Http.swift evaluates every
+	     chain and only accepts a bad one where the operator has said so for
+	     that one receiver (see insecureTLS), and the receiver's own page is
+	     reached over loopback rather than over any of this. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<!-- The microphone is never recorded from. iOS reveals the names of audio
+	     output devices only to an app that has asked, and v2's output picker
+	     is otherwise a list of "Device 1, Device 2". The desktop client says
+	     the same thing on macOS for the same reason — see
+	     clients/electron/package.json, NSMicrophoneUsageDescription. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>UberSDR asks for the microphone only so iOS will reveal the names of your audio output devices. Nothing is recorded and nothing is sent anywhere.</string>
+</dict>
+</plist>

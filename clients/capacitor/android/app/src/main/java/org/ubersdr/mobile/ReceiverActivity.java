@@ -215,6 +215,67 @@ public class ReceiverActivity extends Activity {
         });
 
         web.loadUrl(url);
+        tidyForScreenshot();
+    }
+
+    /**
+     * Tidy the page for a store screenshot, through the page's own controls.
+     *
+     * <p>Two things have to go before a receiver is photographed:
+     *
+     * <ul>
+     *   <li><b>The stats readout</b>, always. It prints the operator's public
+     *       IP over the waterfall, and a screenshot on a store listing is about
+     *       as public as a thing can get. Its own "Hide the stats" button is
+     *       clicked rather than the element being hidden, so what is captured
+     *       is a state the app can actually be in.
+     *   <li><b>The Multipad</b>, in landscape only. There the layout is the
+     *       docked one and the panel takes half the screen; collapsed, the
+     *       waterfall gets the room, which is what the screenshot is for. In
+     *       portrait it is the sheet the phone layout opens with and belongs
+     *       there.
+     * </ul>
+     *
+     * <p>Opt-in through a global setting rather than a build flag, so that one
+     * debug APK can be used both ways:
+     *
+     * <pre>adb shell settings put global ubersdr_shot 1</pre>
+     *
+     * <p>Debug builds only, and the iOS client has the same hook driven by its
+     * launch environment (ReceiverViewController.tidyForScreenshot) — the two
+     * screenshot passes are meant to produce the same pictures.
+     */
+    private void tidyForScreenshot() {
+        if (!BuildConfig.DEBUG) return;
+        if (!"1".equals(android.provider.Settings.Global.getString(
+                getContentResolver(), "ubersdr_shot"))) {
+            return;
+        }
+        final boolean landscape = getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+
+        final String js =
+                "(function(){"
+                + "try{var h=document.querySelector('[aria-label=\"Hide the stats\"]');"
+                + "if(h)h.click();}catch(e){}"
+                + "if(" + landscape + "){try{"
+                + "var t=document.querySelectorAll('.section__title');"
+                + "for(var i=0;i<t.length;i++){"
+                + "if(t[i].textContent.trim()!=='Multipad')continue;"
+                + "var head=t[i].closest('.section__toggle');"
+                + "var sec=t[i].closest('.section');"
+                + "if(head&&sec&&!sec.className.match(/is-collapsed|collapsed/))head.click();"
+                + "}}catch(e){}}"
+                + "})();";
+
+        // Late, and repeatedly: the panels are React and arrive when they
+        // arrive, and the stats readout only exists once the spectrum is
+        // running. Clicking something that is not there yet is silent.
+        for (int delay : new int[]{ 4000, 8000, 14000, 22000 }) {
+            web.postDelayed(() -> {
+                if (web != null) web.evaluateJavascript(js, null);
+            }, delay);
+        }
     }
 
     /**

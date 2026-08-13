@@ -24,7 +24,8 @@
 #   ./build.sh --skip-ui    skip the v2 build (keep what is staged)
 #   ./build.sh --apk        the above, then assemble a debug APK
 #   ./build.sh --release    assemble a release APK instead (signed if the
-#                           credentials are in the environment — see below)
+#                           credentials are in the environment — see below), and
+#                           the .aab beside it, which is what Play takes
 #   ./build.sh --install    assemble the debug APK and adb-install it on the one
 #                           attached device
 #   ./build.sh --install=192.168.1.50
@@ -36,6 +37,13 @@
 #                           release on GitHub with the gh CLI, replacing what is
 #                           there. Asks first, and only from a terminal.
 #                           Implies --release.
+#   ./build.sh --screenshots
+#                           build a debug APK, then capture the Play Store set
+#                           into screenshots/: a 7-inch and a 10-inch tablet,
+#                           each in both orientations, each showing the chooser
+#                           and a running receiver. Four per device, over the
+#                           same filenames every time. The iOS half has the
+#                           same option — see build-mac.sh --screenshots.
 #   ./build.sh --clean      remove www/ and the Gradle outputs first
 
 set -euo pipefail
@@ -56,6 +64,24 @@ TAG=latest
 # handed out; the version is inside the APK, where Android reads it.
 ARTIFACT=dist/UberSDR.apk
 
+# The app bundle, which every release also produces. Play has refused APK
+# uploads for new apps since 2021 and takes only this, so it is built alongside
+# rather than behind a flag somebody has to remember on the one day it matters.
+#
+# It is deliberately *not* published to GitHub. An .aab is not installable — it
+# is a container Play's servers split into per-device APKs — so putting one on a
+# release page is handing a sideloader a file that cannot be opened. Only
+# $ARTIFACT is uploaded; see publish_release.
+#
+# Worth knowing before the first Play upload: Play re-signs what it delivers.
+# The keystore below becomes the *upload* key and a separate app signing key
+# signs the installed APK, which means a Play install and this .apk have
+# different signatures and cannot replace one another — an in-place update
+# becomes an uninstall, taking the saved receivers with it. Uploading this
+# keystore as the app signing key when the listing is first created is what
+# keeps the two interchangeable, and it cannot be changed afterwards.
+BUNDLE=dist/UberSDR.aab
+
 V2=../../static/v2
 STATIC=../../static
 CHOOSER=../electron/chooser
@@ -64,6 +90,7 @@ CHOOSER=../electron/chooser
 ICON_SRC=../electron/assets/icon.png
 
 SKIP_UI=0
+SHOTS=0
 APK=0
 RELEASE=0
 INSTALL=0
@@ -80,6 +107,7 @@ for arg in "$@"; do
         --install=*) APK=1; INSTALL=1; DEVICE="${arg#--install=}" ;;
         --publish) APK=1; RELEASE=1; PUBLISH=1 ;;
         --clean) CLEAN=1 ;;
+        --screenshots) APK=1; SHOTS=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -250,6 +278,219 @@ if [[ ! -d node_modules ]]; then
 fi
 
 mkdir -p www
+
+# ---- the Play Store screenshot set ------------------------------------------
+#
+# Two tablet AVDs, two orientations, two screens each.
+#
+# Play asks for 7-inch and 10-inch tablet screenshots separately, and a phone
+# screenshot upscaled will not do: a tablet does not match MOBILE_QUERY in
+# LayoutContext.jsx, so it draws the docked layout rather than the phone one.
+# These AVDs exist to produce exactly that, and are written here if they are
+# missing so this works on a machine that has never run it.
+#
+# Every shot is a real run against a real receiver — the connected ones follow
+# an `ubersdr://` link the way a tapped one is followed — so what is captured is
+# the app working rather than a mock of it. The iOS half has the same option and
+# is meant to produce the same pictures; see build-mac.sh --screenshots.
+SHOT_DEVICES=(
+    "7in:UberSDR_Tablet_7:1200:1920:320"
+    "10in:UberSDR_Tablet_10:2560:1600:320"
+)
+SHOT_RECEIVER="${UBERSDR_SHOT_UUID:-4907ba0a-32e6-40bb-a4ca-47f823331728}"
+SHOT_DIR=screenshots
+
+# An AVD with the given geometry, if there is not one already.
+#
+# Written by hand rather than with avdmanager, which lives in cmdline-tools and
+# is not always installed: an AVD is two text files, and the emulator builds the
+# data partition itself on first boot.
+ensure_avd() {
+    local name="$1" w="$2" h="$3" density="$4"
+    local avd_home="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+    [[ -f "$avd_home/$name.ini" ]] && return 0
+
+    local image
+    image="$(ls -d "$ANDROID_HOME"/system-images/android-*/*/* 2>/dev/null | head -1)"
+    if [[ -z "$image" ]]; then
+        echo "no system image installed — cannot create $name." >&2
+        echo "  Install one with the SDK manager, or open Android Studio once." >&2
+        return 1
+    fi
+    local rel="${image#$ANDROID_HOME/}"
+    local api_dir tag_dir abi
+    abi="$(basename "$image")"
+    tag_dir="$(basename "$(dirname "$image")")"
+    api_dir="$(basename "$(dirname "$(dirname "$image")")")"
+
+    echo "  creating AVD $name (${w}x${h} @ ${density}dpi)"
+    mkdir -p "$avd_home/$name.avd"
+    cat > "$avd_home/$name.ini" <<EOF
+avd.ini.encoding=UTF-8
+path=$avd_home/$name.avd
+path.rel=avd/$name.avd
+target=$api_dir
+EOF
+    cat > "$avd_home/$name.avd/config.ini" <<EOF
+AvdId = $name
+PlayStore.enabled = false
+abi.type = $abi
+avd.ini.displayname = $name
+avd.ini.encoding = UTF-8
+disk.dataPartition.size = 6442450944
+hw.accelerometer = yes
+hw.audioInput = yes
+hw.battery = yes
+hw.camera.back = none
+hw.camera.front = none
+hw.cpu.arch = x86_64
+hw.cpu.ncore = 4
+hw.gpu.enabled = yes
+hw.gpu.mode = auto
+hw.keyboard = yes
+hw.lcd.density = $density
+hw.lcd.height = $h
+hw.lcd.width = $w
+hw.mainKeys = no
+hw.ramSize = 3072
+hw.sdCard = no
+image.sysdir.1 = $rel/
+skin.name = ${w}x${h}
+skin.path = ${w}x${h}
+snapshot.present = no
+tag.id = $tag_dir
+vm.heapSize = 512
+EOF
+}
+
+# A clean status bar: a fixed clock, a full battery, full wifi, nothing else.
+# The alternative is a listing dated by whatever the clock said, with somebody's
+# notification icons across the top of every picture.
+demo_status_bar() {
+    local serial="$1"
+    "$ADB" -s "$serial" shell settings put global sysui_demo_allowed 1 >/dev/null
+    local cmds=(
+        "command enter"
+        "command clock -e hhmm 1000"
+        "command battery -e level 100 -e plugged false"
+        "command network -e wifi show -e level 4"
+        "command network -e mobile hide"
+        "command notifications -e visible false"
+    )
+    local c
+    for c in "${cmds[@]}"; do
+        # shellcheck disable=SC2086
+        "$ADB" -s "$serial" shell am broadcast -a com.android.systemui.demo -e $c >/dev/null
+    done
+}
+
+take_screenshots() {
+    ADB="$ANDROID_HOME/platform-tools/adb"
+    command -v adb >/dev/null 2>&1 && ADB=adb
+    local emulator="$ANDROID_HOME/emulator/emulator"
+    mkdir -p "$SHOT_DIR"
+
+    local entry
+    for entry in "${SHOT_DEVICES[@]}"; do
+        local label avd w h density
+        IFS=: read -r label avd w h density <<< "$entry"
+        ensure_avd "$avd" "$w" "$h" "$density" || continue
+
+        echo
+        echo "  $avd"
+        # A fresh boot with -wipe-data: the chooser opens on the Saved tab the
+        # moment anything is saved, and these are meant to show the directory
+        # the app exists to offer.
+        nohup "$emulator" -avd "$avd" -no-snapshot -wipe-data -no-boot-anim \
+            > "/tmp/ubersdr-emu-$label.log" 2>&1 &
+
+        # Which serial it came up on, asked rather than assumed: a phone on
+        # Wi-Fi debugging is very often attached too, and installing a debug
+        # build over somebody's actual phone would be a rude surprise.
+        local serial=""
+        local _i
+        for _i in $(seq 1 90); do
+            serial="$("$ADB" devices | awk '/^emulator-/ {print $1}' | tail -1)"
+            [[ -n "$serial" ]] && break
+            sleep 2
+        done
+        if [[ -z "$serial" ]]; then
+            echo "  $avd never appeared in adb — see /tmp/ubersdr-emu-$label.log" >&2
+            continue
+        fi
+        until [[ "$("$ADB" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
+            sleep 3
+        done
+
+        demo_status_bar "$serial"
+        "$ADB" -s "$serial" install -r "$ARTIFACT" >/dev/null
+        # The tidy hook: hides the stats readout, which prints the operator's
+        # public IP over the waterfall, and collapses the Multipad in landscape.
+        # See ReceiverActivity.tidyForScreenshot.
+        "$ADB" -s "$serial" shell settings put global ubersdr_shot 1 >/dev/null
+        "$ADB" -s "$serial" shell settings put system accelerometer_rotation 0 >/dev/null
+        # Granted rather than prompted for. ReceiverActivity asks for
+        # POST_NOTIFICATIONS when audio starts, and the system dialog lands over
+        # the waterfall in every connected screenshot otherwise.
+        "$ADB" -s "$serial" shell pm grant org.ubersdr.mobile \
+            android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+
+        local orientation screen
+        for orientation in portrait landscape; do
+            # Rotation 0 is the AVD's natural orientation, which is portrait on
+            # the 7-inch and landscape on the 10-inch — so it is worked out from
+            # the geometry rather than assumed.
+            local rotation=0
+            if [[ "$w" -lt "$h" && "$orientation" == "landscape" ]] \
+               || [[ "$w" -gt "$h" && "$orientation" == "portrait" ]]; then
+                rotation=1
+            fi
+            # Both spellings, because neither is reliable alone on a current
+            # Android: `settings put user_rotation` is the old one and is
+            # ignored by newer window managers unless rotation is locked, and
+            # `cmd window set-user-rotation` is the one that actually turns the
+            # display. Setting only the first produced four portrait pictures
+            # and no error.
+            "$ADB" -s "$serial" shell settings put system user_rotation "$rotation" >/dev/null
+            "$ADB" -s "$serial" shell cmd window set-user-rotation lock "$rotation" >/dev/null 2>&1 || true
+            sleep 3
+
+            for screen in chooser connected; do
+                "$ADB" -s "$serial" shell am force-stop org.ubersdr.mobile >/dev/null
+                if [[ "$screen" == "chooser" ]]; then
+                    # Forget everything: a saved receiver opens the Saved tab.
+                    "$ADB" -s "$serial" shell pm clear org.ubersdr.mobile >/dev/null
+                    "$ADB" -s "$serial" shell settings put global ubersdr_shot 1 >/dev/null
+                    # pm clear revokes runtime permissions with everything else.
+                    "$ADB" -s "$serial" shell pm grant org.ubersdr.mobile \
+                        android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+                    "$ADB" -s "$serial" shell monkey -p org.ubersdr.mobile \
+                        -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+                    sleep 12
+                else
+                    "$ADB" -s "$serial" shell am start -a android.intent.action.VIEW \
+                        -d "ubersdr://connect?uuid=$SHOT_RECEIVER" >/dev/null
+                    # Two minutes, which is what it takes for the waterfall to
+                    # fill top to bottom. It is a long time to wait for a
+                    # picture and it is the picture: a half-drawn waterfall with
+                    # a band of empty black under it is what the screenshot is
+                    # not meant to show.
+                    sleep 120
+                fi
+
+                local file="$SHOT_DIR/android-$label-$orientation-$screen.png"
+                "$ADB" -s "$serial" exec-out screencap -p > "$file"
+                echo "    $file  ($(identify -format '%wx%h' "$file" 2>/dev/null || echo '?'))"
+            done
+        done
+
+        # Stopped rather than left running: an emulator left playing is a
+        # receiver still holding a slot on somebody's radio.
+        "$ADB" -s "$serial" shell am force-stop org.ubersdr.mobile >/dev/null
+        "$ADB" -s "$serial" emu kill >/dev/null 2>&1 || true
+        sleep 3
+    done
+}
 
 # ---- the v2 frontend --------------------------------------------------------
 
@@ -521,13 +762,20 @@ if ! JDK21="$(find_jdk21)"; then
 fi
 export JAVA_HOME="$JDK21"
 
+AAB_OUT=""
 if [[ "$RELEASE" -eq 1 ]]; then
     android_signing_report
-    (cd android && ./gradlew --console=plain assembleRelease)
+    # One invocation for both. The two tasks share everything up to packaging,
+    # so asking for them together costs a fraction of what a second gradle run
+    # would, and there is no release worth building only half of.
+    (cd android && ./gradlew --console=plain assembleRelease bundleRelease)
     # Gradle names it for what it is, and what it is depends on the signing
     # config being there.
     OUT=android/app/build/outputs/apk/release/app-release.apk
     [[ -f "$OUT" ]] || OUT=android/app/build/outputs/apk/release/app-release-unsigned.apk
+    # The bundle has no unsigned spelling of its name: signed or not, it is
+    # app-release.aab. Whether it is signed is the signing report's business.
+    AAB_OUT=android/app/build/outputs/bundle/release/app-release.aab
 else
     (cd android && ./gradlew --console=plain assembleDebug)
     OUT=android/app/build/outputs/apk/debug/app-debug.apk
@@ -545,6 +793,25 @@ cp "$OUT" "$ARTIFACT"
 
 echo
 echo "built $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1)) from $OUT"
+
+# The bundle, beside it and under the same fixed name. A missing one is reported
+# rather than fatal: the APK is built by then and is the artefact everything
+# else in this script acts on, so a Play format that did not appear should not
+# take an install or a publish down with it.
+if [[ -n "$AAB_OUT" ]]; then
+    if [[ -f "$AAB_OUT" ]]; then
+        cp "$AAB_OUT" "$BUNDLE"
+        echo "built $BUNDLE ($(du -h "$BUNDLE" | cut -f1)) — upload this one to Play, not the APK"
+    else
+        echo "warning: gradle reported success but no bundle is in $(dirname "$AAB_OUT")." >&2
+        echo "         The APK is fine; only the Play upload format is missing." >&2
+    fi
+fi
+
+if [[ "$SHOTS" -eq 1 ]]; then
+    take_screenshots
+    exit 0
+fi
 
 if [[ "$INSTALL" -eq 1 ]]; then
     ADB="$ANDROID_HOME/platform-tools/adb"

@@ -1,0 +1,595 @@
+#!/usr/bin/env bash
+# build-mac.sh — build the iOS client on a Mac over SSH, from a Linux box.
+#
+# The iOS half of this client is developed here and compiled there. That split
+# is not a compromise: `npx cap add ios` and `cap sync ios` run perfectly well
+# on Linux, because an Xcode project is text and PNGs — project.pbxproj,
+# Info.plist, AppDelegate.swift, the Podfile, the asset catalogs. The CLI skips
+# `pod install` and `xcodebuild` with warnings rather than failing. So
+# everything except the compiler can be authored on this machine, and the Mac
+# does the two things only it can do.
+#
+# What this makes possible, proven end to end before it was written: build,
+# install on a simulator, launch, and screenshot — without touching the Mac.
+# The App Store screenshots come back the same way the Play ones do from an
+# emulator (see the Android half's own capture recipe).
+#
+# Usage:
+#   ./build-mac.sh --check     preflight only: is the Mac able to build at all?
+#   ./build-mac.sh --test      preflight, then build a throwaway Capacitor app
+#                              on the Mac, run it in a simulator and screenshot
+#                              it. Proves the whole chain without needing this
+#                              client's ios/ platform to exist yet.
+#   ./build-mac.sh             ship ios/ and build it (once ios/ exists)
+#   ./build-mac.sh --run       ...and install and launch it on a simulator
+#   ./build-mac.sh --shot=FILE ...and bring a screenshot back here
+#   ./build-mac.sh --release   build for a device rather than the simulator
+#                              (needs signing — see Requirements)
+#   ./build-mac.sh --archive   archive and export dist/UberSDR.ipa, signed for
+#                              the App Store. Needs no attached device.
+#   ./build-mac.sh --screenshots
+#                              build, then capture the App Store set into
+#                              screenshots/: an iPhone and an iPad, each in both
+#                              orientations, each showing the chooser and a
+#                              running receiver. Four per device.
+#   ./build-mac.sh --keep      leave the remote directory behind afterwards
+#
+# Environment:
+#   MAC_HOST     ssh target                (default: macbook)
+#   MAC_DIR      remote build directory    (default: ~/ubersdr-ios)
+#   SIM_DEVICE   simulator to run in       (default: iPhone 17 Pro)
+#
+# ---------------------------------------------------------------------------
+# Requirements, and which of them you have to satisfy by hand
+# ---------------------------------------------------------------------------
+#
+# On this machine:
+#   * node and npm, for the Capacitor CLI. The Mac needs neither — see below.
+#   * ssh access to the Mac with key authentication and no passphrase prompt.
+#     Everything here runs with BatchMode=yes, so a password prompt is a
+#     failure rather than a question.
+#
+# On the Mac, and all of it is already in place:
+#   * Xcode, full install, not just the Command Line Tools.
+#   * The iOS platform *components*, which are a separate download from Xcode
+#     itself and the single most confusing thing about this setup:
+#     `xcodebuild -showsdks` will happily list "iOS 26.5" while every build
+#     fails with "Supported platforms for the buildables in the current scheme
+#     is empty". The fix is `xcodebuild -downloadPlatform iOS` — 8.5 GB, no
+#     sudo needed. --check tests for this properly, by asking simctl whether
+#     any runtime exists rather than trusting the SDK list.
+#   * CocoaPods, installed with `brew install cocoapods` so that it brings its
+#     own Ruby. Apple's system Ruby is 2.6 and too old for a current CocoaPods.
+#     Capacitor 7's @capacitor/ios ships no Package.swift, so there is no Swift
+#     Package Manager route around this.
+#   * No node, npm or Capacitor CLI. Deliberately: `cap sync` runs here, and
+#     what crosses is the finished tree. node_modules crosses with it, because
+#     the Podfile references ../../node_modules/@capacitor/ios by path.
+#
+# What needs your password, and so cannot be done from here:
+#   * `sudo xcode-select -s /Applications/Xcode.app`. Installing Homebrew left
+#     the active developer directory pointing at the Command Line Tools, which
+#     breaks xcodebuild for everything and everyone on that machine. Every
+#     command below works around it by exporting DEVELOPER_DIR, but the
+#     underlying setting is still wrong and worth fixing once.
+#   * Signing in to Xcode with an Apple ID. Simulator builds need no signing at
+#     all, which is why --test works with zero identities installed; a device
+#     build or an App Store archive needs one.
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+MAC_HOST="${MAC_HOST:-macbook}"
+MAC_DIR="${MAC_DIR:-ubersdr-ios}"
+SIM_DEVICE="${SIM_DEVICE:-iPhone 17 Pro}"
+# The Apple Developer team that signs a distribution build. Kept here rather
+# than only in project.pbxproj so that a fork with its own account changes one
+# line and does not have to hunt through an Xcode project to find the other.
+TEAM_ID="${UBERSDR_TEAM_ID:-B7CM4Z8JW8}"
+
+# The devices the store set is captured on, as "label:simulator name".
+#
+# An iPhone and an iPad because App Store Connect asks for both, and these two
+# sizes because their screenshots are the ones it accepts for every smaller
+# class of device.
+SHOT_DEVICES=(
+    "iphone:iPhone 17 Pro Max"
+    "ipad:iPad Pro 13-inch (M5)"
+)
+# Which receiver the "connected" screenshots show. A public UUID, followed
+# exactly as a link would be — see the DEBUG hook in UberSdrPlugin.
+SHOT_RECEIVER="${UBERSDR_SHOT_UUID:-4907ba0a-32e6-40bb-a4ca-47f823331728}"
+
+# The app, as capacitor.config.json names it. Read rather than repeated so that
+# a rename cannot leave this script launching something that is not there.
+APP_ID="$(node -p "require('./capacitor.config.json').appId" 2>/dev/null || echo org.ubersdr.mobile)"
+
+# Where Xcode really is. Exported into every remote command rather than fixed
+# once on the Mac, because fixing it once needs sudo and this does not. See
+# Requirements above.
+DEVELOPER_DIR_REMOTE=/Applications/Xcode.app/Contents/Developer
+# Homebrew's bin, for pod. Not on the PATH of a non-interactive ssh session.
+BREW_BIN=/opt/homebrew/bin
+
+CHECK=0
+TEST=0
+RUN=0
+RELEASE=0
+ARCHIVE=0
+SHOTS=0
+KEEP=0
+SHOT=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --check) CHECK=1 ;;
+        --test) TEST=1 ;;
+        --run) RUN=1 ;;
+        --release) RELEASE=1 ;;
+        --archive) ARCHIVE=1 ;;
+        --screenshots) SHOTS=1 ;;
+        --keep) KEEP=1 ;;
+        --shot=*) SHOT="${arg#--shot=}" ;;
+        *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Talking to the Mac
+# ---------------------------------------------------------------------------
+
+# One remote command, with the environment every remote command needs.
+#
+# BatchMode is what turns "ssh is not set up" from a hung prompt into an error,
+# which matters because this runs unattended as often as not. The X11 warning is
+# dropped because it is not one: the Mac offers forwarding, this has no display,
+# and the resulting line on stderr is noise in front of every single command.
+mac() {
+    ssh -o BatchMode=yes -o ConnectTimeout=15 "$MAC_HOST" \
+        "export PATH=$BREW_BIN:\$PATH; export DEVELOPER_DIR=$DEVELOPER_DIR_REMOTE; $*" \
+        2> >(grep -v "X11 forwarding request failed" >&2)
+}
+
+# Copy a directory tree there, replacing what was there before.
+#
+# tar over ssh rather than rsync: macOS 26 ships openrsync, whose flags differ
+# from the rsync on this box in ways that are not worth discovering at a
+# distance. node_modules goes too — the Podfile points into it — but the caches
+# and the Android half do not, and neither does anything Gradle built.
+ship() {
+    local src="$1" dest="$2"
+    echo "  shipping $src → $MAC_HOST:~/$dest"
+    tar czf - \
+        --exclude=./android \
+        --exclude=./dist \
+        --exclude=./screenshots \
+        --exclude=./.git \
+        --exclude=./node_modules/.cache \
+        -C "$src" . \
+    | ssh -o BatchMode=yes "$MAC_HOST" \
+        "rm -rf ~/$dest && mkdir -p ~/$dest && cd ~/$dest && tar xzf -" \
+        2> >(grep -v "X11 forwarding request failed" >&2)
+}
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+
+# Everything that has to be true before a build can work, each reported with
+# what to do about it. Written after a session spent discovering these one
+# compiler error at a time: the failures are all perfectly clear once you know
+# what they mean, and completely opaque before that.
+preflight() {
+    local ok=0
+
+    echo
+    echo "  Build environment on $MAC_HOST"
+    echo
+
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$MAC_HOST" true 2>/dev/null; then
+        echo "    ssh            cannot reach $MAC_HOST without a password."
+        echo "                   Set up key auth, or point MAC_HOST somewhere else."
+        return 1
+    fi
+    echo "    ssh            $(mac 'sw_vers -productName; sw_vers -productVersion; uname -m' | tr '\n' ' ')"
+
+    # Xcode itself. The Command Line Tools are not enough and say so in a way
+    # that sounds like Xcode is missing entirely.
+    local xcode
+    xcode="$(mac 'xcodebuild -version 2>&1 | head -1' || true)"
+    if [[ "$xcode" != Xcode* ]]; then
+        echo "    xcode          not usable: $xcode"
+        echo "                   Install Xcode from the App Store."
+        ok=1
+    else
+        echo "    xcode          $xcode"
+    fi
+
+    # The active developer directory, reported because it is the trap: this
+    # script works around it, everything else on that Mac does not.
+    local devdir
+    devdir="$(mac 'xcode-select -p' 2>/dev/null || true)"
+    if [[ "$devdir" != "$DEVELOPER_DIR_REMOTE" ]]; then
+        echo "    xcode-select   $devdir"
+        echo "                   Worked around here with DEVELOPER_DIR, but your own"
+        echo "                   Terminal will fail. Fix it with:"
+        echo "                     sudo xcode-select -s /Applications/Xcode.app"
+    fi
+
+    # The platform, asked about properly. -showsdks lies: it lists an SDK that
+    # cannot be built against until the components are downloaded.
+    local runtimes
+    runtimes="$(mac 'xcrun simctl list runtimes 2>/dev/null | grep -c "^iOS"' || echo 0)"
+    if [[ "${runtimes:-0}" -lt 1 ]]; then
+        echo "    ios platform   not installed — no simulator runtime"
+        echo "                   Every build fails with 'Supported platforms ... is empty'."
+        echo "                   Fix (8.5 GB, no sudo):  xcodebuild -downloadPlatform iOS"
+        ok=1
+    else
+        echo "    ios platform   $(mac 'xcrun simctl list runtimes 2>/dev/null | grep "^iOS" | head -1')"
+    fi
+
+    local pod
+    pod="$(mac 'pod --version 2>/dev/null' || true)"
+    if [[ -z "$pod" ]]; then
+        echo "    cocoapods      not installed"
+        echo "                   Fix:  brew install cocoapods"
+        echo "                   (brew's, not a gem — Apple's system Ruby is too old)"
+        ok=1
+    else
+        echo "    cocoapods      $pod"
+    fi
+
+    local sims
+    sims="$(mac "xcrun simctl list devices available 2>/dev/null | grep -c '$SIM_DEVICE'" || echo 0)"
+    if [[ "${sims:-0}" -lt 1 ]]; then
+        echo "    simulator      '$SIM_DEVICE' not available"
+        echo "                   Pick another with SIM_DEVICE=, or see: xcrun simctl list devices"
+        [[ "$RUN" -eq 1 || "$TEST" -eq 1 ]] && ok=1
+    else
+        echo "    simulator      $SIM_DEVICE"
+    fi
+
+    # Signing is reported, never required. A simulator build needs none, and
+    # saying "0 identities" without saying that is alarming for no reason.
+    local ids
+    ids="$(mac 'security find-identity -v -p codesigning 2>/dev/null | tail -1' || true)"
+    if [[ "$ids" == *"0 valid identities"* ]]; then
+        echo "    signing        none — simulator builds are fine, device builds are not"
+        echo "                   Sign in: Xcode → Settings → Accounts"
+        [[ "$RELEASE" -eq 1 ]] && ok=1
+    else
+        echo "    signing        ${ids# }"
+    fi
+
+    echo "    disk           $(mac 'df -h / | tail -1' | awk '{print $4" free"}')"
+    echo
+
+    return $ok
+}
+
+# ---------------------------------------------------------------------------
+# The environment test
+# ---------------------------------------------------------------------------
+
+# A throwaway Capacitor app, built and run on the Mac exactly as the real one
+# will be. It exists so that "does the Mac work?" can be answered without this
+# client's ios/ platform existing, and so that when the real build breaks later
+# there is a known-good comparison one command away.
+#
+# The page it ships says one word. That word appearing in a screenshot taken on
+# a simulator is the whole chain — CLI, transfer, pods, compiler, runtime,
+# WKWebView, capture — reporting success at once.
+run_test() {
+    local tmp; tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+
+    # Pinned to whatever major this client already uses, so the test cannot
+    # quietly pass against a Capacitor the real app does not have.
+    local major
+    major="$(node -p "require('./package.json').dependencies['@capacitor/core'].replace(/[^0-9.]/g,'').split('.')[0]")"
+
+    echo "  building a throwaway Capacitor $major app"
+    (
+        cd "$tmp"
+        cat > package.json <<EOF
+{ "name": "ubersdr-mac-selftest", "version": "0.0.0", "private": true }
+EOF
+        cp "$OLDPWD/capacitor.config.json" .
+        mkdir -p www
+        # viewport-fit and the safe-area inset are not decoration here: without
+        # them the one line this page exists to show sits under the Dynamic
+        # Island in the screenshot that is supposed to prove it rendered.
+        cat > www/index.html <<'HTML'
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<body style="font:600 40px/1.3 -apple-system,system-ui;margin:0;
+             padding:calc(env(safe-area-inset-top) + 3rem) 2rem 2rem">
+UberSDR<br>build OK
+</body>
+HTML
+        npm install --silent --no-audit --no-fund \
+            "@capacitor/cli@^$major" "@capacitor/core@^$major" "@capacitor/ios@^$major" >/dev/null
+        npx cap add ios >/dev/null 2>&1
+    )
+
+    ship "$tmp" "${MAC_DIR}-test"
+    build_remote "${MAC_DIR}-test" 1
+
+    if [[ -n "$SHOT" ]]; then
+        capture "${MAC_DIR}-test" "$SHOT"
+    else
+        capture "${MAC_DIR}-test" "/tmp/ubersdr-mac-selftest.png"
+    fi
+
+    [[ "$KEEP" -eq 1 ]] || mac "rm -rf ~/${MAC_DIR}-test" || true
+
+    echo
+    echo "  the build environment works: compiled, installed, launched and captured."
+}
+
+# ---------------------------------------------------------------------------
+# Build, run, capture
+# ---------------------------------------------------------------------------
+
+# pod install then xcodebuild, in the remote directory.
+#
+# CODE_SIGNING_ALLOWED=NO for the simulator because there is nothing to sign
+# for and asking would fail on a Mac with no identities — which is the state
+# this was written on.
+build_remote() {
+    local dir="$1" simulator="$2"
+    local dest sign
+    if [[ "$simulator" -eq 1 ]]; then
+        dest="generic/platform=iOS Simulator"
+        sign="CODE_SIGNING_ALLOWED=NO"
+    else
+        dest="generic/platform=iOS"
+        sign=""
+    fi
+
+    echo "  pod install"
+    mac "cd ~/$dir/ios/App && pod install 2>&1 | tail -3"
+
+    echo "  xcodebuild ($dest)"
+    if ! mac "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
+                -configuration Debug -destination '$dest' \
+                -derivedDataPath /tmp/dd-$dir build $sign 2>&1 | tail -40" \
+         | tee /tmp/ubersdr-xcodebuild.log | grep -q "BUILD SUCCEEDED"; then
+        echo >&2
+        echo "build failed. The last 40 lines are above and in /tmp/ubersdr-xcodebuild.log." >&2
+        exit 1
+    fi
+    echo "  BUILD SUCCEEDED"
+}
+
+# Archive and export an .ipa, which is what TestFlight and the App Store take.
+#
+# Signed with Apple Distribution and automatic provisioning, which is why this
+# needs no device: an App Store profile covers any device, where a *development*
+# profile can only be generated once the team has at least one registered — the
+# error for which reads "Your team has no devices", and is confusing precisely
+# when you do have certificates and expect it to work.
+archive_remote() {
+    local dir="$1"
+    local plist="/tmp/ubersdr-export.plist"
+
+    echo "  pod install"
+    mac "cd ~/$dir/ios/App && pod install 2>&1 | tail -3"
+
+    echo "  archiving (Apple Distribution, team $TEAM_ID)"
+    if ! mac "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
+                -configuration Release -destination 'generic/platform=iOS' \
+                -archivePath /tmp/UberSDR.xcarchive archive \
+                DEVELOPMENT_TEAM=$TEAM_ID -allowProvisioningUpdates 2>&1 | tail -30" \
+         | tee /tmp/ubersdr-archive.log | grep -q "ARCHIVE SUCCEEDED"; then
+        echo >&2
+        echo "archive failed — see /tmp/ubersdr-archive.log" >&2
+        exit 1
+    fi
+    echo "  ARCHIVE SUCCEEDED"
+
+    # The export options, written on the Mac rather than committed: the team is
+    # the one thing in here that is not the same for everybody.
+    mac "cat > $plist <<'PLIST'
+<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+    <key>method</key><string>app-store-connect</string>
+    <key>teamID</key><string>$TEAM_ID</string>
+    <key>uploadSymbols</key><true/>
+    <key>signingStyle</key><string>automatic</string>
+</dict>
+</plist>
+PLIST"
+
+    echo "  exporting the .ipa"
+    if ! mac "xcodebuild -exportArchive -archivePath /tmp/UberSDR.xcarchive \
+                -exportOptionsPlist $plist -exportPath /tmp/ubersdr-ipa \
+                -allowProvisioningUpdates 2>&1 | tail -20" \
+         | tee -a /tmp/ubersdr-archive.log | grep -q "EXPORT SUCCEEDED"; then
+        echo >&2
+        echo "export failed — see /tmp/ubersdr-archive.log" >&2
+        exit 1
+    fi
+
+    mkdir -p dist
+    ssh -o BatchMode=yes "$MAC_HOST" 'cat /tmp/ubersdr-ipa/App.ipa' > dist/UberSDR.ipa \
+        2> >(grep -v "X11 forwarding request failed" >&2)
+    echo "  built dist/UberSDR.ipa ($(du -h dist/UberSDR.ipa | cut -f1))"
+    echo
+    echo "  The archive is at $MAC_HOST:/tmp/UberSDR.xcarchive — open it in"
+    echo "  Xcode's Organizer to upload, or use xcrun altool/notarytool."
+}
+
+# The App Store set: two devices, two orientations, two screens each.
+#
+# Every shot is a real run of the real app against a real receiver — the
+# "connected" ones follow an `ubersdr://` link through the same path a tapped
+# one takes, so what is photographed is the app working rather than a mock of
+# it. The orientation comes from the launch environment because a simulator
+# cannot be rotated from a script; see DebugOrientation.swift.
+screenshots() {
+    local dir="$1"
+    local out="screenshots"
+    mkdir -p "$out"
+
+    local app="/tmp/dd-$dir/Build/Products/Debug-iphonesimulator/App.app"
+
+    for entry in "${SHOT_DEVICES[@]}"; do
+        local label="${entry%%:*}"
+        local device="${entry#*:}"
+
+        echo
+        echo "  $device"
+        # bootstatus boots it if it is not booted and returns when it is ready,
+        # which a fixed sleep can only guess at.
+        mac "xcrun simctl bootstatus '$device' -b >/dev/null 2>&1 || true"
+
+        for orientation in portrait landscape; do
+            for screen in chooser connected; do
+                local env_open=""
+                [[ "$screen" == "connected" ]] && \
+                    env_open="SIMCTL_CHILD_UBERSDR_OPEN='ubersdr://connect?uuid=$SHOT_RECEIVER'"
+
+                mac "xcrun simctl terminate '$device' $APP_ID >/dev/null 2>&1 || true"
+
+                # The chooser is photographed on a *fresh* install.
+                #
+                # Connecting saves the receiver, and a chooser with anything
+                # saved opens on the Saved tab — so without this every run
+                # after the first shows one row rather than the directory the
+                # app exists to offer. Uninstalling is how a simulator forgets:
+                # it takes the saved list, the location and the Keychain entry
+                # with it, which is exactly the state a new operator sees.
+                if [[ "$screen" == "chooser" ]]; then
+                    mac "xcrun simctl uninstall '$device' $APP_ID >/dev/null 2>&1 || true"
+                fi
+                mac "xcrun simctl install '$device' '$app'"
+                mac "$env_open SIMCTL_CHILD_UBERSDR_SHOT_MODE=1 \
+                     SIMCTL_CHILD_UBERSDR_ORIENTATION=$orientation \
+                     xcrun simctl launch '$device' $APP_ID >/dev/null"
+
+                # Two minutes for a receiver, which is what it takes for the
+                # waterfall to fill top to bottom. It is a long time to wait for
+                # a picture and it is the picture: a half-drawn waterfall with a
+                # band of empty black under it is what the screenshot is not
+                # meant to show.
+                sleep "$([[ "$screen" == "connected" ]] && echo 120 || echo 12)"
+
+                local file="$out/ios-$label-$orientation-$screen.png"
+                mac "xcrun simctl io '$device' screenshot /tmp/shot.png >/dev/null 2>&1"
+                ssh -o BatchMode=yes "$MAC_HOST" 'cat /tmp/shot.png' > "$file" \
+                    2> >(grep -v "X11 forwarding request failed" >&2)
+
+                # simctl photographs the device, not the interface. The app
+                # rotates (see DebugOrientation) but the framebuffer does not,
+                # so a landscape run comes back portrait-shaped with the whole
+                # UI on its side. The pixels are a real landscape layout — only
+                # the canvas is turned — so turning it back is a correction,
+                # not a fake.
+                if [[ "$orientation" == "landscape" ]]; then
+                    convert "$file" -rotate -90 "$file"
+                fi
+                echo "    $file  ($(identify -format '%wx%h' "$file" 2>/dev/null || echo '?'))"
+            done
+        done
+
+        # Left shut down rather than running: these boot one at a time, and a
+        # simulator left playing audio is a receiver still holding a slot.
+        mac "xcrun simctl terminate '$device' $APP_ID >/dev/null 2>&1 || true"
+        mac "xcrun simctl shutdown '$device' >/dev/null 2>&1 || true"
+    done
+}
+
+# Boot the simulator, install, launch, screenshot, and bring the PNG back.
+#
+# bootstatus rather than a sleep: it boots the device if it is not booted and
+# returns when it is actually ready, which a fixed sleep can only guess at.
+capture() {
+    local dir="$1" out="$2"
+    local app="/tmp/dd-$dir/Build/Products/Debug-iphonesimulator/App.app"
+
+    echo "  simulator: $SIM_DEVICE"
+    mac "xcrun simctl bootstatus '$SIM_DEVICE' -b >/dev/null 2>&1 || true"
+    mac "xcrun simctl install booted '$app'"
+    mac "xcrun simctl launch booted '$APP_ID'" >/dev/null
+    sleep 5
+    mac "xcrun simctl io booted screenshot /tmp/ubersdr-shot.png" >/dev/null 2>&1
+
+    mkdir -p "$(dirname "$out")"
+    ssh -o BatchMode=yes "$MAC_HOST" 'cat /tmp/ubersdr-shot.png' > "$out" \
+        2> >(grep -v "X11 forwarding request failed" >&2)
+    echo "  screenshot → $out ($(identify -format '%wx%h' "$out" 2>/dev/null || echo '?'))"
+}
+
+# ---------------------------------------------------------------------------
+
+if ! preflight; then
+    echo "the Mac cannot build yet — see above." >&2
+    exit 1
+fi
+
+if [[ "$CHECK" -eq 1 ]]; then
+    echo "  ready."
+    exit 0
+fi
+
+if [[ "$TEST" -eq 1 ]]; then
+    run_test
+    exit 0
+fi
+
+# The real build, which needs the platform this client does not have yet. Said
+# plainly rather than left to a confusing failure inside cap sync.
+if [[ ! -d ios ]]; then
+    echo "there is no ios/ platform here yet." >&2
+    echo >&2
+    echo "  Check the Mac instead with:  ./build-mac.sh --test" >&2
+    echo "  Create the platform with:    npx cap add ios" >&2
+    exit 1
+fi
+
+echo "  staging the web assets"
+npx cap sync ios
+
+# The version, from package.json, exactly as app/build.gradle takes it for
+# Android: one place names this app's version, and a release is a bump in one
+# file. Xcode's template hard-codes 1.0 (1), which would otherwise ship a
+# TestFlight build claiming to be version 1.0 forever.
+#
+# CFBundleShortVersionString is the human one (0.2.0). CFBundleVersion must only
+# ever increase within it, and Apple compares it per version string rather than
+# globally — the same integer scheme Android uses (0.2.0 → 200) satisfies that
+# and keeps the two platforms saying the same number.
+VERSION="$(node -p "require('./package.json').version")"
+BUILD_NUMBER="$(node -p "
+  const [a,b,c] = require('./package.json').version.split('.').map(Number);
+  a * 10000 + b * 100 + c;
+")"
+PBX=ios/App/App.xcodeproj/project.pbxproj
+sed -i "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $VERSION;/g; \
+        s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $BUILD_NUMBER;/g" "$PBX"
+echo "  version $VERSION ($BUILD_NUMBER)"
+
+ship . "$MAC_DIR"
+
+if [[ "$ARCHIVE" -eq 1 ]]; then
+    archive_remote "$MAC_DIR"
+    exit 0
+fi
+
+build_remote "$MAC_DIR" "$([[ "$RELEASE" -eq 1 ]] && echo 0 || echo 1)"
+
+if [[ "$SHOTS" -eq 1 ]]; then
+    screenshots "$MAC_DIR"
+    exit 0
+fi
+
+if [[ "$RUN" -eq 1 || -n "$SHOT" ]]; then
+    capture "$MAC_DIR" "${SHOT:-/tmp/ubersdr-ios.png}"
+fi
+
+[[ "$KEEP" -eq 1 ]] || echo "  (remote tree left at $MAC_HOST:~/$MAC_DIR)"

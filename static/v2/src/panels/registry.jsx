@@ -100,6 +100,24 @@ import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 
+/**
+ * Whether the host allows a chat panel at all.
+ *
+ * Declared by the host through `window.ubersdrDesktop.chat`, never sniffed, and
+ * read the same way as the other host answers (see radio/media/support.js and
+ * components/StartOverlay.jsx). Absent is yes: a page in a browser, the desktop
+ * client and the Android client all carry on exactly as before, and only a host
+ * that says `false` loses the panel.
+ */
+function chatAllowed() {
+    try {
+        return !(typeof window !== 'undefined' && window.ubersdrDesktop
+            && window.ubersdrDesktop.chat === false);
+    } catch (e) {
+        return true;
+    }
+}
+
 export const PANELS = [
     // First, and first is the point: on a phone this is the panel that opens
     // with the app, because it is the one that covers the whole of listening —
@@ -824,6 +842,15 @@ export const PANELS = [
         minimal: true,
         Component: ChatPanel,
         Badge: ChatBadge,
+        // A host may say there is to be no chat here, and one does.
+        //
+        // The chat belongs to whichever receiver you are on, and Apple's
+        // Guideline 1.2 requires an app carrying user-generated content to
+        // offer moderation, reporting and blocking for it — none of which this
+        // client can provide on somebody else's receiver. So the iOS client
+        // declares `chat: false` and the panel is not drawn. Absent means yes,
+        // so every other host — browser, desktop, Android — is unchanged.
+        requires: () => chatAllowed(),
     },
     // Off by default: a diagnostic, not something to occupy a slot in the dock
     // until someone goes looking for it in the layout manager.
